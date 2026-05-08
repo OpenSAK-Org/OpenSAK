@@ -614,6 +614,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Opravené souřadnice — {gc_code}",
     "corrected_dialog_hint":        "Zadejte vyřešené souřadnice ve formátu DMM, DMS nebo DD. Budou použity pro export do GPS a zobrazeny na mapě.",
     "corrected_dialog_input_label": "Souřadnice:",
+    "corrected_dialog_original":    "Původní souřadnice:",
+    "corrected_dialog_corrected":   "Opravené souřadnice:",
+    "corrected_dialog_copy_tooltip": "Kopírovat do schránky",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Vzdálenost & Azimut",

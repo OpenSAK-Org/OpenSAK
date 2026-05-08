@@ -828,6 +828,7 @@ class CacheTableView(QTableView):
         self.selectionModel().currentRowChanged.connect(self._on_row_changed)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        self.doubleClicked.connect(self._on_double_clicked)
         # Ensartet selection-farve på alle platforme (Windows bruger ellers grå)
         self.setStyleSheet("""
             QTableView {
@@ -845,6 +846,16 @@ class CacheTableView(QTableView):
                 self._model.setData(index, None)
                 return
         super().mousePressEvent(event)
+
+    def _on_double_clicked(self, index) -> None:
+        """Dobbeltklik på corrected-kolonnen åbner koordinatdialogen direkte."""
+        if not index.isValid():
+            return
+        col = self._model._columns[index.column()]
+        if col == "corrected":
+            cache = self._model.cache_at(index.row())
+            if cache:
+                self._edit_corrected(cache)
 
     def _apply_column_widths(self) -> None:
         self._applying_widths = True
@@ -1039,6 +1050,8 @@ class CacheTableView(QTableView):
         cur_lon = note.corrected_lon if (note and note.is_corrected) else None
         dlg = CorrectedCoordsDialog(
             gc_code=cache.gc_code,
+            orig_lat=cache.latitude,
+            orig_lon=cache.longitude,
             corrected_lat=cur_lat,
             corrected_lon=cur_lon,
             parent=self,

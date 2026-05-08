@@ -615,6 +615,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Gecorrigeerde coördinaten — {gc_code}",
     "corrected_dialog_hint":        "Voer de opgeloste coördinaten in DMM-, DMS- of DD-formaat in. Deze worden gebruikt voor GPS-export en weergegeven op de kaart.",
     "corrected_dialog_input_label": "Coördinaten:",
+    "corrected_dialog_original":    "Originele coördinaten:",
+    "corrected_dialog_corrected":   "Gecorrigeerde coördinaten:",
+    "corrected_dialog_copy_tooltip": "Kopiëren naar klembord",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Afstand & Richting",

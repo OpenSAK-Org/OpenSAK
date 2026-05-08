@@ -613,6 +613,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Coordonnées corrigées — {gc_code}",
     "corrected_dialog_hint":        "Saisir les coordonnées résolues au format DMM, DMS ou DD. Elles seront utilisées pour l'export GPS et affichées sur la carte.",
     "corrected_dialog_input_label": "Coordonnées :",
+    "corrected_dialog_original":    "Coordonnées d'origine :",
+    "corrected_dialog_corrected":   "Coordonnées corrigées :",
+    "corrected_dialog_copy_tooltip": "Copier dans le presse-papiers",
 
     # ── Distance & cap ────────────────────────────────────────────────────────
     "dist_title":                   "Distance & Cap",

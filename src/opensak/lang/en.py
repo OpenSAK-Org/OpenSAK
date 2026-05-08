@@ -613,6 +613,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Corrected coordinates — {gc_code}",
     "corrected_dialog_hint":        "Enter the solved coordinates in DMM, DMS or DD format. These will be used for GPS export and shown on the map.",
     "corrected_dialog_input_label": "Coordinates:",
+    "corrected_dialog_original":    "Original coordinates:",
+    "corrected_dialog_corrected":   "Corrected coordinates:",
+    "corrected_dialog_copy_tooltip": "Copy to clipboard",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Distance & Bearing",

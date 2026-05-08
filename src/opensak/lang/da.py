@@ -613,6 +613,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Korrigerede koordinater — {gc_code}",
     "corrected_dialog_hint":        "Indtast de løste koordinater i DMM, DMS eller DD format. De bruges ved GPS export og vises på kortet.",
     "corrected_dialog_input_label": "Koordinater:",
+    "corrected_dialog_original":    "Originale koordinater:",
+    "corrected_dialog_corrected":   "Korrigerede koordinater:",
+    "corrected_dialog_copy_tooltip": "Kopiér til udklipsholder",
 
     # ── Afstand & retning dialog ──────────────────────────────────────────────
     "dist_title":                   "Afstand & Retning",

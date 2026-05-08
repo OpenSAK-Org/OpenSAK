@@ -614,6 +614,9 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_heading":     "Coordenadas corrigidas — {gc_code}",
     "corrected_dialog_hint":        "Introduza as coordenadas resolvidas no formato DMM, DMS ou DD. Estas serão utilizadas para a exportação GPS e mostradas no mapa.",
     "corrected_dialog_input_label": "Coordenadas:",
+    "corrected_dialog_original":    "Coordenadas originais:",
+    "corrected_dialog_corrected":   "Coordenadas corrigidas:",
+    "corrected_dialog_copy_tooltip": "Copiar para a área de transferência",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Distância e Azimute",
