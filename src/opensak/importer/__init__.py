@@ -162,7 +162,8 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         _text(wpt_el, "gpx:name", NS) or
         _text(wpt_el, "gpx:n", NS)
     )
-    if not gc_code or not gc_code.startswith("GC"):
+    # Accept GC codes (standard caches) and LC codes (Adventure Lab / lab2gpx)
+    if not gc_code or not (gc_code.startswith("GC") or gc_code.startswith("LC")):
         return None
 
     # Cache type from <type>Geocache|Traditional Cache</type>
