@@ -334,6 +334,7 @@ class MapWidget(QWidget):
         super().__init__(parent)
         self._caches: list[Cache] = []
         self._ready = False
+        self._cleaned = False
         self._pending_caches = None
         self._pending_refresh = None
         self._pending_home = None
@@ -342,6 +343,24 @@ class MapWidget(QWidget):
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # Under test (OPENSAK_DISABLE_WEBENGINE) oprettes INGEN QtWebEngine —
+        # Chromium er ustabilt i headless CI og crasher (SIGTRAP). Kortet er ikke
+        # genstand for e2e-testene, så vi viser en placeholder. Alle kort-metoder
+        # no-op'er fordi _page er None og _ready forbliver False.
+        from opensak.gui._headless import webengine_disabled
+        if webengine_disabled():
+            from PySide6.QtWidgets import QLabel
+            self._profile = None
+            self._interceptor = None
+            self._page = None
+            self._view = None
+            self._channel = None
+            self._bridge = MapBridge()
+            self._bridge.cache_clicked.connect(self.cache_selected)
+            self._ready = False
+            layout.addWidget(QLabel("Map disabled (headless test mode)"))
+            return
 
         # Brug en isoleret off-the-record profil til kortet så TileInterceptor
         # ikke påvirker andre QWebEngineView instanser (fx beskrivelsespanelet).
@@ -417,6 +436,8 @@ class MapWidget(QWidget):
 
     def _run_js(self, js: str) -> None:
         """Kør JavaScript i kortvisningen."""
+        if self._page is None:
+            return  # headless/test mode — no WebEngine
         self._page.runJavaScript(js)
 
     def load_caches(self, caches: list[Cache]) -> None:
@@ -519,6 +540,8 @@ class MapWidget(QWidget):
     def reload_map(self, refresh_callback=None) -> None:
         """Genindlæs kort HTML med aktuelle koordinater."""
         self._pending_refresh = refresh_callback
+        if self._page is None:
+            return  # headless/test mode — no WebEngine
         # Genindlæs setHtml (koordinater hentes fra settings)
         import time
         from opensak.gui.settings import get_settings
@@ -536,9 +559,21 @@ class MapWidget(QWidget):
             self._run_js("panToHome()")
 
     def _cleanup_webengine(self) -> None:
-        """Slet QWebEnginePage før Qt rydder QWebEngineProfile op.
-        Kaldes via QApplication.aboutToQuit signalet — skal køre BEFORE
-        profilen destrueres for at undgå 'Expect troubles' advarsel."""
+        """Slet QWebEnginePage FØR QWebEngineProfile destrueres.
+
+        The map uses a parent-less off-the-record QWebEngineProfile + QWebEnginePage.
+        Without an explicit, ordered teardown they are released by Python GC in a
+        nondeterministic order; when the profile is collected before its page Qt
+        logs 'Release of profile requested but WebEnginePage still not deleted.
+        Expect troubles!' and leaks Chromium state. Across a long e2e run that
+        accumulation eventually crashes the render process (SIGTRAP).
+
+        Must therefore run on every window close — not only QApplication.aboutToQuit
+        — so each MapWidget tears its page down before its profile. Idempotent:
+        connected to both closeEvent (via MainWindow) and aboutToQuit."""
+        if self._cleaned or self._page is None:
+            return  # already cleaned, or headless/test mode — nothing to release
+        self._cleaned = True
         try:
             self._ready = False
             self._view.setPage(None)

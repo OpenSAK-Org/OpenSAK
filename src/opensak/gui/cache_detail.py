@@ -192,14 +192,21 @@ class CacheDetailPanel(QWidget):
         # _DescWebPage må IKKE have Qt-parent — vi rydder selv op i
         # _cleanup_webengine() der kaldes via QApplication.aboutToQuit.
         # Dette undgår Qt's 'Expect troubles' advarsel ved nedlukning.
-        self._desc_view = QWebEngineView()
-        self._desc_page = _DescWebPage()
-        self._desc_view.setPage(self._desc_page)
+        # Under test (OPENSAK_DISABLE_WEBENGINE) bruges en QTextBrowser i stedet,
+        # så ingen Chromium startes — setHtml()-API'et er identisk.
+        from opensak.gui._headless import webengine_disabled
+        if webengine_disabled():
+            self._desc_view = QTextBrowser()
+            self._desc_page = None
+        else:
+            self._desc_view = QWebEngineView()
+            self._desc_page = _DescWebPage()
+            self._desc_view.setPage(self._desc_page)
 
-        from PySide6.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app is not None:
-            app.aboutToQuit.connect(self._cleanup_webengine)
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                app.aboutToQuit.connect(self._cleanup_webengine)
         self._tabs.addTab(self._desc_view, tr("detail_tab_desc"))
 
         hint_widget = QWidget()
@@ -540,6 +547,8 @@ class CacheDetailPanel(QWidget):
         """Slet QWebEnginePage før Qt rydder defaultProfile op.
         Kaldes via QApplication.aboutToQuit signalet — skal køre BEFORE
         QWebEngineProfile destrueres for at undgå 'Expect troubles' advarsel."""
+        if self._desc_page is None:
+            return  # headless/test mode — QTextBrowser, intet at rydde op
         try:
             self._desc_view.setPage(None)
             self._desc_page.deleteLater()

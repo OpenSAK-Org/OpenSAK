@@ -765,6 +765,16 @@ class MainWindow(QMainWindow):
             if worker is not None and worker.isRunning():
                 worker.quit()
                 worker.wait(500)
+        # Tear down the map's WebEngine page before its profile while the event
+        # loop is still alive. The map's QWebEngineProfile/QWebEnginePage are
+        # parent-less; relying on aboutToQuit (which fires only at app exit) means
+        # each closed window leaks them, and Python GC may release the profile
+        # before the page — Qt's "Expect troubles!" warning — eventually crashing
+        # the Chromium render process across long e2e runs. Cleaning up here makes
+        # the teardown deterministic and per-window.
+        map_widget = getattr(self, "_map_widget", None)
+        if map_widget is not None:
+            map_widget._cleanup_webengine()
         super().closeEvent(event)
 
     # ── Cache list ────────────────────────────────────────────────────────────

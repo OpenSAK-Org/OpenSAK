@@ -2,6 +2,24 @@
 tests/conftest.py — Shared fixtures for OpenSAK tests.
 """
 
+import os
+
+# QtWebEngine starts a Chromium multi-process stack that is unstable under the
+# headless pytest / CI harness: across a long e2e run the render or GPU process
+# crashes with SIGTRAP (exit 133), killing the whole test process — regardless
+# of GPU flags or per-window cleanup. The map and the cache description panel
+# only render simple HTML in tests, so we swap in native Qt widgets and never
+# create Chromium at all. This removes the entire class of WebEngine crashes.
+# Must be set before any widget is constructed, hence at conftest import time.
+os.environ.setdefault("OPENSAK_DISABLE_WEBENGINE", "1")
+
+# Belt-and-suspenders: if any QtWebEngine view is still created (e.g. a future
+# code path), keep it off the GPU so it cannot crash the GPU thread either.
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--disable-gpu --disable-software-rasterizer --disable-gpu-compositing",
+)
+
 import pytest
 from opensak.db.database import init_db, make_session
 from opensak.db.models import Cache
