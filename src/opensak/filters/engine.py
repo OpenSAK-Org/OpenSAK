@@ -86,6 +86,9 @@ class CacheTypeFilter(BaseFilter):
     def __init__(self, types: list[str]):
         self.types = [t.strip() for t in types]
 
+    def apply_to_query(self, query):
+        return query.filter(Cache.cache_type.in_(self.types))
+
     def matches(self, cache: Cache) -> bool:
         return cache.cache_type in self.types
 
@@ -107,6 +110,9 @@ class ContainerFilter(BaseFilter):
     def __init__(self, sizes: list[str]):
         self.sizes = [s.strip() for s in sizes]
 
+    def apply_to_query(self, query):
+        return query.filter(Cache.container.in_(self.sizes))
+
     def matches(self, cache: Cache) -> bool:
         return cache.container in self.sizes
 
@@ -125,6 +131,14 @@ class DifficultyFilter(BaseFilter):
     def __init__(self, min_difficulty: float = 1.0, max_difficulty: float = 5.0):
         self.min_difficulty = min_difficulty
         self.max_difficulty = max_difficulty
+
+    def apply_to_query(self, query):
+        from sqlalchemy import or_
+        # Mirror matches(): unknown (NULL) difficulty passes by default.
+        return query.filter(or_(
+            Cache.difficulty.is_(None),
+            Cache.difficulty.between(self.min_difficulty, self.max_difficulty),
+        ))
 
     def matches(self, cache: Cache) -> bool:
         if cache.difficulty is None:
@@ -151,6 +165,14 @@ class TerrainFilter(BaseFilter):
         self.min_terrain = min_terrain
         self.max_terrain = max_terrain
 
+    def apply_to_query(self, query):
+        from sqlalchemy import or_
+        # Mirror matches(): unknown (NULL) terrain passes by default.
+        return query.filter(or_(
+            Cache.terrain.is_(None),
+            Cache.terrain.between(self.min_terrain, self.max_terrain),
+        ))
+
     def matches(self, cache: Cache) -> bool:
         if cache.terrain is None:
             return True
@@ -172,6 +194,9 @@ class FoundFilter(BaseFilter):
     """Keep only caches the user HAS found."""
     filter_type = "found"
 
+    def apply_to_query(self, query):
+        return query.filter(Cache.found.is_(True))
+
     def matches(self, cache: Cache) -> bool:
         return cache.found is True
 
@@ -183,6 +208,11 @@ class FoundFilter(BaseFilter):
 class NotFoundFilter(BaseFilter):
     """Keep only caches the user has NOT found."""
     filter_type = "not_found"
+
+    def apply_to_query(self, query):
+        from sqlalchemy import or_
+        # Mirror matches(): `not cache.found` treats NULL as not-found too.
+        return query.filter(or_(Cache.found.is_(False), Cache.found.is_(None)))
 
     def matches(self, cache: Cache) -> bool:
         return not cache.found
@@ -196,6 +226,10 @@ class AvailableFilter(BaseFilter):
     """Keep only caches that are currently available (not archived/disabled)."""
     filter_type = "available"
 
+    def apply_to_query(self, query):
+        from sqlalchemy import and_
+        return query.filter(and_(Cache.available.is_(True), Cache.archived.is_(False)))
+
     def matches(self, cache: Cache) -> bool:
         return cache.available is True and cache.archived is False
 
@@ -207,6 +241,9 @@ class AvailableFilter(BaseFilter):
 class ArchivedFilter(BaseFilter):
     """Keep only archived caches."""
     filter_type = "archived"
+
+    def apply_to_query(self, query):
+        return query.filter(Cache.archived.is_(True))
 
     def matches(self, cache: Cache) -> bool:
         return cache.archived is True
@@ -235,6 +272,19 @@ class AvailabilityFilter(BaseFilter):
         self.show_avail    = show_avail
         self.show_unavail  = show_unavail
         self.show_archived = show_archived
+
+    def apply_to_query(self, query):
+        from sqlalchemy import and_, false, or_
+        # Mirror matches(): archived rows obey show_archived; among non-archived,
+        # available rows obey show_avail and the rest obey show_unavail.
+        clauses = []
+        if self.show_archived:
+            clauses.append(Cache.archived.is_(True))
+        if self.show_avail:
+            clauses.append(and_(Cache.archived.is_(False), Cache.available.is_(True)))
+        if self.show_unavail:
+            clauses.append(and_(Cache.archived.is_(False), Cache.available.is_(False)))
+        return query.filter(or_(*clauses) if clauses else false())
 
     def matches(self, cache: Cache) -> bool:
         if cache.archived:
@@ -267,6 +317,12 @@ class CountryFilter(BaseFilter):
     def __init__(self, text: str):
         self.text = text.strip()
 
+    def apply_to_query(self, query):
+        if not self.text:
+            return None  # empty filter — let Python handle (matches() drops NULLs)
+        from sqlalchemy import func
+        return query.filter(func.lower(Cache.country).like(f"%{self.text.lower()}%"))
+
     def matches(self, cache: Cache) -> bool:
         if not cache.country:
             return False
@@ -290,6 +346,12 @@ class StateFilter(BaseFilter):
     def __init__(self, text: str):
         self.text = text.strip()
 
+    def apply_to_query(self, query):
+        if not self.text:
+            return None
+        from sqlalchemy import func
+        return query.filter(func.lower(Cache.state).like(f"%{self.text.lower()}%"))
+
     def matches(self, cache: Cache) -> bool:
         if not cache.state:
             return False
@@ -311,6 +373,12 @@ class CountyFilter(BaseFilter):
 
     def __init__(self, text: str):
         self.text = text.strip()
+
+    def apply_to_query(self, query):
+        if not self.text:
+            return None
+        from sqlalchemy import func
+        return query.filter(func.lower(Cache.county).like(f"%{self.text.lower()}%"))
 
     def matches(self, cache: Cache) -> bool:
         if not cache.county:
@@ -388,6 +456,12 @@ class PlacedByFilter(BaseFilter):
     def __init__(self, text: str):
         self.text = text.lower()
 
+    def apply_to_query(self, query):
+        if not self.text:
+            return None  # empty text matches all (incl. NULL) — keep in Python
+        from sqlalchemy import func
+        return query.filter(func.lower(Cache.placed_by).like(f"%{self.text}%"))
+
     def matches(self, cache: Cache) -> bool:
         return self.text in (cache.placed_by or "").lower()
 
@@ -405,6 +479,12 @@ class OwnerFilter(BaseFilter):
 
     def __init__(self, text: str):
         self.text = text.lower()
+
+    def apply_to_query(self, query):
+        if not self.text:
+            return None  # empty text matches all (incl. NULL) — keep in Python
+        from sqlalchemy import func
+        return query.filter(func.lower(Cache.owner_name).like(f"%{self.text}%"))
 
     def matches(self, cache: Cache) -> bool:
         return self.text in (cache.owner_name or "").lower()
@@ -522,6 +602,9 @@ class PremiumFilter(BaseFilter):
     """Keep only premium-member caches."""
     filter_type = "premium"
 
+    def apply_to_query(self, query):
+        return query.filter(Cache.premium_only.is_(True))
+
     def matches(self, cache: Cache) -> bool:
         return cache.premium_only is True
 
@@ -533,6 +616,9 @@ class PremiumFilter(BaseFilter):
 class NonPremiumFilter(BaseFilter):
     """Keep only non-premium caches."""
     filter_type = "non_premium"
+
+    def apply_to_query(self, query):
+        return query.filter(Cache.premium_only.is_(False))
 
     def matches(self, cache: Cache) -> bool:
         return cache.premium_only is False
@@ -943,6 +1029,30 @@ def _iter_filters(filterset: "FilterSet"):
             yield f
 
 
+def _sql_pushdown_candidates(filterset: "FilterSet"):
+    """Yield leaf filters that may be safely pushed into the SQL WHERE clause.
+
+    Pushing a filter adds an *AND* term to the query, so it is only sound when
+    every enclosing FilterSet is AND-mode. We descend through AND FilterSets and
+    yield their leaf filters; as soon as an OR FilterSet is reached we stop
+    descending into it — that whole subtree must be evaluated in Python by the
+    OR FilterSet's matches(), or we would incorrectly turn an OR into an AND.
+
+    Filters whose apply_to_query() returns None (no SQL form, or e.g. an empty
+    text filter) simply fall back to Python matches() — that is handled by the
+    caller, not here.
+    """
+    if filterset.mode != "AND":
+        return
+    for f in filterset._filters:
+        if isinstance(f, FilterSet):
+            if f.mode == "AND":
+                yield from _sql_pushdown_candidates(f)
+            # OR subtree: leave entirely to Python matches()
+        else:
+            yield f
+
+
 # ── Main apply function ───────────────────────────────────────────────────────
 
 def apply_filters(
@@ -1013,10 +1123,15 @@ def apply_filters(
     )
 
     # Push SQL-capable filters into the query before loading rows.
-    # This lets SQLite discard non-matching rows before any Python objects
-    # are constructed — critical for NameFilter / GcCodeFilter on large DBs.
+    # This lets SQLite discard non-matching rows before any Python objects are
+    # constructed — critical on large DBs. Only filters reachable through an
+    # all-AND path are pushed (see _sql_pushdown_candidates): pushing a filter
+    # AND-s it into the WHERE clause, which would be wrong inside an OR set.
+    # Anything left out (OR subtrees, relationship filters, apply_to_query()
+    # returning None) is still enforced by the Python matches() pass below, so
+    # the result is identical — SQL push-down is a pure performance shortcut.
     if filterset:
-        for _f in _iter_filters(filterset):
+        for _f in _sql_pushdown_candidates(filterset):
             updated = _f.apply_to_query(query)
             if updated is not None:
                 query = updated
