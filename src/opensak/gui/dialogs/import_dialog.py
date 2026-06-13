@@ -26,7 +26,11 @@ class ImportWorker(QThread):
     file_finished = Signal(int, object)  # (index, ImportResult)
     file_error    = Signal(int, str)     # (index, error message)
     progress      = Signal(int)          # cache count within current file
-    all_done      = Signal()
+    # Completion is reported via QThread.finished (emitted after run() returns
+    # and isRunning() is already false), NOT a custom signal emitted from inside
+    # run(). Emitting from run()'s tail let the dialog proceed — and tests tear
+    # the dialog down — while the QThread was still finishing, which aborts the
+    # process ("QThread: Destroyed while thread is still running", SIGABRT).
 
     def __init__(self, paths: list[Path], target_db_path: Path | None = None):
         super().__init__()
@@ -78,8 +82,8 @@ class ImportWorker(QThread):
             # Always restore the original active DB
             if switched and original_path is not None:
                 init_db(db_path=original_path)
-
-        self.all_done.emit()
+        # No explicit completion signal — QThread.finished fires automatically
+        # once this method returns, and the dialog reacts to that instead.
 
 
 class ImportDialog(QDialog):
@@ -264,7 +268,11 @@ class ImportDialog(QDialog):
         self._worker.file_finished.connect(self._on_file_finished)
         self._worker.file_error.connect(self._on_file_error)
         self._worker.progress.connect(self._on_progress)
-        self._worker.all_done.connect(self._on_all_done)
+        # React to QThread.finished (thread already stopped) rather than a signal
+        # emitted from inside run(). Connect _on_all_done before deleteLater so it
+        # runs first; both are queued, and by the time they run isRunning() is
+        # false, so deleting the worker can never abort the process.
+        self._worker.finished.connect(self._on_all_done)
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
