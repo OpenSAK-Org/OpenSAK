@@ -1,16 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_tools.py — Geocaching tool dialog scenario tests.
-
-All tool dialogs update their outputs live on input changes (no explicit
-"Calculate" button) — tests write to the input fields and check the outputs.
-
-Covers:
-- CoordConverterDialog: live round-trip through DMM → DD → DMM
-- ChecksumDialog: digit-sum label is populated from pre-filled coords
-- ProjectionDialog: bearing+distance spinboxes produce a result
-- MidpointDialog: two coordinate inputs produce a midpoint
-- DistanceBearingDialog: two points produce a distance label
-"""
+"""tests/e2e-tests/test_e2e_tools.py — tool dialog scenarios (outputs update live on input)."""
 
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch

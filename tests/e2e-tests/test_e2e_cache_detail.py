@@ -1,13 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_cache_detail.py — Cache detail panel scenario tests.
-
-Covers:
-- Selecting a cache in the table populates the detail panel (title, GC code, D/T)
-- The hint tab contains the raw encoded hint text
-- Clicking the decode button ROT13-decodes the hint; clicking again re-encodes it
-- Log search highlights matching text (content test via toPlainText)
-- Selecting a different cache updates the detail panel
-"""
+"""tests/e2e-tests/test_e2e_cache_detail.py — cache detail panel scenarios."""
 
 import pytest
 

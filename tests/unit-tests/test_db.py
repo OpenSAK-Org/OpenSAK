@@ -1,11 +1,4 @@
-"""
-tests/test_db.py — Stage 1: database model and session tests.
-
-Run with:
-    pytest
-or:
-    pytest -v tests/test_db.py
-"""
+"""tests/unit-tests/test_db.py — database model, session and CRUD tests."""
 
 import pytest
 from pathlib import Path

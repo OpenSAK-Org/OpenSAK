@@ -1,12 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_import.py — Import scenario tests.
-
-Covers:
-- GPX import populates the cache table
-- Importing the same GPX twice is idempotent (row count unchanged)
-- PQ ZIP import populates the cache table
-- ImportDialog background worker succeeds and updates the log
-"""
+"""tests/e2e-tests/test_e2e_import.py — import scenarios (GPX/ZIP + ImportDialog worker)."""
 
 import pytest
 

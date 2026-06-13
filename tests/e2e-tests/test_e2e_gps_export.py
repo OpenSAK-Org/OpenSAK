@@ -1,11 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_gps_export.py — GPS export scenario tests.
-
-Covers:
-- GpsExportDialog opens and shows the correct cache count label
-- Exporting to a file path (file mode) writes a valid GPX file on disk
-- The written GPX contains the GC codes of the exported caches
-"""
+"""tests/e2e-tests/test_e2e_gps_export.py — GPS export dialog scenarios."""
 
 import pytest
 

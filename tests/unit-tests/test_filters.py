@@ -1,9 +1,4 @@
-"""
-tests/test_filters.py — Stage 3: filter engine tests.
-
-Run with:
-    pytest -v tests/test_filters.py
-"""
+"""tests/unit-tests/test_filters.py — filter engine tests."""
 
 import json
 import pytest

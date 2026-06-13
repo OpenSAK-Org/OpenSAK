@@ -1,12 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_trip_planner.py — Trip planner dialog scenario tests.
-
-Covers:
-- TripPlannerDialog opens from the main window action (show(), not exec())
-- The dialog has both Radius and Route tabs
-- Radius mode: changing the radius spin updates the result label
-- Route mode: adding a coordinate point enables the route list
-"""
+"""tests/e2e-tests/test_e2e_trip_planner.py — trip planner dialog scenarios."""
 
 import pytest
 

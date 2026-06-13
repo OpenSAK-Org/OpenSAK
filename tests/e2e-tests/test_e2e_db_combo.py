@@ -1,12 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_db_combo.py — Database dropdown toolbar tests.
-
-Covers:
-- Combo is present and populated on startup
-- Active database is pre-selected in the combo
-- Selecting a different entry calls manager.switch_to and refreshes the combo
-- _on_database_switched (e.g. triggered by the dialog) also refreshes the combo
-"""
+"""tests/e2e-tests/test_e2e_db_combo.py — database dropdown toolbar scenarios."""
 
 import pytest
 

@@ -1,8 +1,4 @@
-"""
-tests/unit-tests/test_geocaching_api.py — network-mocked API tests.
-
-No real HTTP calls — urllib.request.urlopen is patched with unittest.mock.patch.
-"""
+"""tests/unit-tests/test_geocaching_api.py — network-mocked API tests (no real HTTP)."""
 
 import base64
 import json

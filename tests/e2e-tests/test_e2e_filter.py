@@ -1,18 +1,7 @@
-"""
-tests/e2e-tests/test_e2e_filter.py — Filter scenario tests.
+"""tests/e2e-tests/test_e2e_filter.py — filter scenarios over the 4 seeded caches.
 
-The seeded DB has 4 caches:
-  GC12345  — Traditional Cache, D=2.0 T=3.0, found=False, available=True
-  GC99999  — Unknown Cache,     D=4.0 T=2.5, found=False, available=True
-  GCAAA01  — Traditional Cache, D=2.0 T=3.0, found=False, available=True (variant)
-  GCAAA02  — Unknown Cache,     D=4.0 T=2.5, found=False, available=True (variant)
-
-Covers:
-- Quick-filter "Found" returns 0 rows (none are marked found)
-- Quick-filter "Not Found" returns all 4 rows
-- Name search narrows the table and clear restores it
-- GC-code search field filters to a single exact match
-- FilterDialog type filter reduces the visible set
+Seed: GC12345/GCAAA01 = Traditional D2.0/T3.0; GC99999/GCAAA02 = Unknown D4.0/T2.5;
+all not-found and available.
 """
 
 import pytest

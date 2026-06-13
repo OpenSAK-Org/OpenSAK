@@ -1,9 +1,4 @@
-"""
-tests/test_coords.py — Tests for src/opensak/coords.py
-
-Covers format_coords() and parse_coords() across all supported formats
-(DD, DMM, DMM°, DMS), hemisphere variants, boundary values, and malformed input.
-"""
+"""tests/unit-tests/test_coords.py — format_coords / parse_coords across all formats."""
 
 import pytest
 from opensak.coords import (

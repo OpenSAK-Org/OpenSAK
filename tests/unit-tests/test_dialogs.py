@@ -1,11 +1,4 @@
-"""
-tests/unit-tests/test_dialogs.py — pure-logic dialog tests.
-
-Covers CoordConverterDialog, ChecksumDialog, DistanceBearingDialog,
-MidpointDialog, and ProjectionDialog.  DB-backed dialogs are deferred.
-
-Requires pytest-qt; skipped automatically when unavailable.
-"""
+"""tests/unit-tests/test_dialogs.py — pure-logic dialog tests (requires pytest-qt)."""
 
 import pytest
 from unittest.mock import MagicMock, patch

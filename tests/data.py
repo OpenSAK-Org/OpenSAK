@@ -1,15 +1,10 @@
-"""
-tests/data.py — Shared test data for OpenSAK tests.
-
-Contains synthetic GPX/XML strings matching real Groundspeak/PQ format,
-and helpers to derive variants for multi-file and edge-case tests.
-"""
+"""tests/data.py — synthetic GPX/.loc test data and programmatic builders."""
 
 import zipfile
 from pathlib import Path
 
 
-# ── Synthetic GPX matching real Groundspeak/PQ format ────────────────────────
+# ── Hand-written GPX matching real Groundspeak/PQ format ─────────────────────
 
 SAMPLE_GPX = """\
 <?xml version="1.0" encoding="utf-8"?>
@@ -165,10 +160,7 @@ def make_zip(tmp_path: Path, name: str, files: dict[str, str | Path]) -> Path:
     return z
 
 
-# ── Programmatic GPX/.loc builders ───────────────────────────────────────────
-# The hand-written SAMPLE_* strings above are kept for realism (full Groundspeak
-# field coverage). For tests that only need a handful of caches with specific
-# ids/logs/coords, build them programmatically instead of pasting XML inline.
+# ── Programmatic builders (for tests needing specific ids/logs/coords) ───────
 
 def cache_wpt(
     gc_code: str,
@@ -188,12 +180,8 @@ def cache_wpt(
     logs: list[dict] | None = None,
     attributes: list[dict] | None = None,
 ) -> str:
-    """Return a single Groundspeak ``<wpt>`` cache block (string).
-
-    ``logs`` items accept keys: id, type, finder, finder_id, date, text.
-    ``attributes`` items accept keys: id, inc, name.
-    Wrap one or more blocks with :func:`build_gpx` to get a full document.
-    """
+    """One Groundspeak ``<wpt>`` block. logs keys: id/type/finder/finder_id/date/text;
+    attributes keys: id/inc/name. Wrap with build_gpx() for a full document."""
     name = name or gc_code
     log_xml = "".join(
         f'<groundspeak:log id="{lg.get("id", i + 1)}">'
@@ -243,10 +231,7 @@ def build_gpx(*wpt_blocks: str, creator: str = "Groundspeak Pocket Query") -> st
 
 
 def make_loc(waypoints: list[dict]) -> str:
-    """Build a minimal ``.loc`` XML string from a list of waypoint dicts.
-
-    Each dict accepts keys: gc_code, name (optional), lat, lon.
-    """
+    """Build a ``.loc`` document from waypoint dicts (keys: gc_code, name?, lat, lon)."""
     wpts = "".join(
         "\n  <waypoint>"
         f'\n    <name id="{wp["gc_code"]}">{wp.get("name", wp["gc_code"])}</name>'
@@ -258,13 +243,8 @@ def make_loc(waypoints: list[dict]) -> str:
 
 
 def seed_standard_caches(work_dir: Path) -> None:
-    """Import the standard sample cache set into the *active* database.
-
-    Requires :func:`opensak.db.database.init_db` to have already pointed the
-    engine at the target DB. Scratch GPX files are written under ``work_dir``.
-    Produces 4 caches — GC12345 (with a PK companion waypoint), GC99999, and the
-    GCAAA01/GCAAA02 variant — the exact set every e2e/monkey window relies on.
-    """
+    """Import the 4 standard sample caches (GC12345 +PK waypoint, GC99999, GCAAA01,
+    GCAAA02) into the active DB. init_db() must already point at the target DB."""
     from opensak.db.database import get_session
     from opensak.importer import import_gpx
 

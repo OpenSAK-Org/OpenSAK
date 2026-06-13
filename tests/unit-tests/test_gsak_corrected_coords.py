@@ -1,9 +1,4 @@
-"""
-tests/unit-tests/test_gsak_corrected_coords.py — Issue #129
-
-Verify that corrected coordinates stored by GSAK in <gsak:LatN> / <gsak:LongE>
-inside <gsak:wptExtension> are imported and stored in UserNote with is_corrected=True.
-"""
+"""tests/unit-tests/test_gsak_corrected_coords.py — GSAK corrected-coords import (issue #129)."""
 
 import textwrap
 from pathlib import Path

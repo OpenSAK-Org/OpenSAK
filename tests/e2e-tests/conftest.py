@@ -11,22 +11,11 @@ from tests.data import make_fake_manager, seed_standard_caches
 
 @pytest.fixture(autouse=True)
 def _quiet_startup(monkeypatch):
-    """Neutralise the delayed startup side-effects that make e2e runs flaky.
+    """Disable the delayed singleShot callbacks that fire mid-test.
 
-    ``MainWindow.__init__`` schedules three ``singleShot`` callbacks that fire
-    seconds later — long after a fast test has set up its own state, and during
-    the slow monkey test:
-
-      * ``_initial_load``          (+500 ms) re-refreshes the table, which can
-        clobber a filter the test just applied.
-      * ``_check_update_background`` (+5 s)  runs a network update check (also
-        stubbed offline in the top-level conftest).
-      * ``_check_setup_complete``   (+7 s)  pops a modal "welcome / finish
-        setup" dialog over the window under test.
-
-    The window fixtures below populate the table explicitly via
-    ``_refresh_cache_list()``, so neutralising all three makes every e2e window
-    fully deterministic with no pending timers.
+    _initial_load (re-refreshes and can clobber a test's filter),
+    _check_update_background (network) and _check_setup_complete (modal dialog).
+    Fixtures populate the table explicitly via _refresh_cache_list() instead.
     """
     from opensak.gui.mainwindow import MainWindow
 
@@ -36,10 +25,7 @@ def _quiet_startup(monkeypatch):
 
 
 def _make_window(qtbot, tmp_path, monkeypatch, *, name: str, seed: bool):
-    """Build a shown MainWindow on a throwaway DB, optionally pre-seeded.
-
-    Shared implementation behind :func:`seeded_window` and :func:`empty_window`.
-    """
+    """Build a shown MainWindow on a throwaway DB (shared by the window fixtures)."""
     import opensak.db.manager as mgr_module
     from opensak.db.database import init_db
     from opensak.lang import load_language

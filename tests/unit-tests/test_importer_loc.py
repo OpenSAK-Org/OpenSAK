@@ -1,9 +1,4 @@
-"""
-tests/test_importer_loc.py — Tests for import_loc() in src/opensak/importer/__init__.py
-
-Covers .loc file parsing, DB upsert, warnings, error paths, and the
-progress_cb callback in import_gpx().
-"""
+"""tests/unit-tests/test_importer_loc.py — import_loc() parsing + import_gpx progress_cb."""
 
 import pytest
 from pathlib import Path

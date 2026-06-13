@@ -1,12 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_db_manager.py — Database manager dialog scenario tests.
-
-Covers:
-- DatabaseManagerDialog opens and lists the active database
-- The active database name is shown in the list widget
-- Switching to the same database does not crash (no actual switch needed)
-- The info panel reflects the selected entry
-"""
+"""tests/e2e-tests/test_e2e_db_manager.py — database manager dialog scenarios."""
 
 import pytest
 

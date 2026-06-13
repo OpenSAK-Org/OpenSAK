@@ -1,10 +1,4 @@
-"""
-tests/unit-tests/test_geocoder.py — Unit tests for the reverse geocoder.
-
-reverse_geocoder and pycountry are injected into sys.modules so the tests
-work even when neither library is installed in the test environment.
-Nominatim tests mock urllib.request.urlopen so no real network calls are made.
-"""
+"""tests/unit-tests/test_geocoder.py — reverse geocoder (libs stubbed, no network)."""
 
 from __future__ import annotations
 

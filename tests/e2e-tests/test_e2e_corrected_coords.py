@@ -1,13 +1,4 @@
-"""
-tests/e2e-tests/test_e2e_corrected_coords.py — Corrected coordinates scenario tests.
-
-Covers:
-- CorrectedCoordsDialog parses DMM input and enables OK
-- Accepted dialog returns correct lat/lon via get_coords()
-- Saving corrected coords through the detail panel persists them to the DB
-- Clearing corrected coords removes them from the DB
-- Invalid input keeps OK disabled
-"""
+"""tests/e2e-tests/test_e2e_corrected_coords.py — corrected coordinates scenarios."""
 
 import pytest
 

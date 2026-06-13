@@ -1,9 +1,4 @@
-"""
-tests/test_importer.py — Stage 2: GPX importer tests.
-
-Run with:
-    pytest -v tests/test_importer.py
-"""
+"""tests/unit-tests/test_importer.py — GPX/ZIP importer tests."""
 
 import pytest
 from pathlib import Path

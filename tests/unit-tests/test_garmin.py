@@ -1,9 +1,4 @@
-"""
-tests/test_garmin.py — Tests for src/opensak/gps/garmin.py
-
-Covers GPX generation, file export, coordinate resolution, device detection
-helpers, and result dataclasses. No real GPS device required.
-"""
+"""tests/unit-tests/test_garmin.py — Garmin GPX generation/export (no device needed)."""
 
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone

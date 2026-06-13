@@ -1,9 +1,4 @@
-"""
-tests/test_found_updater.py — Tests for src/opensak/db/found_updater.py
-
-Covers get_found_gc_codes() and update_found_from_reference() using two
-isolated temp SQLite databases per test (reference + active).
-"""
+"""tests/unit-tests/test_found_updater.py — found-status sync from a reference DB."""
 
 import pytest
 from pathlib import Path
