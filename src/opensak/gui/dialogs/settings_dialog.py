@@ -705,10 +705,8 @@ class SettingsDialog(QDialog):
             get_settings().sync()
             self._reload_points_table()
             return
-        try:
-            from opensak.coords import parse_coords
-            parse_coords(text)  # valider
-        except Exception:
+        from opensak.coords import parse_coords
+        if parse_coords(text) is None:  # returns None on failure, never raises
             from opensak.gui.icon import OpenSAKMessageBox
             OpenSAKMessageBox.warning(self, tr("warning"), tr("settings_hp_coord_invalid"))
             return
@@ -831,12 +829,9 @@ class SettingsDialog(QDialog):
         if not home_text:
             s.gc_home_location = ""
         else:
-            try:
-                from opensak.coords import parse_coords
-                parse_coords(home_text)
+            from opensak.coords import parse_coords
+            if parse_coords(home_text) is not None:  # keep existing if invalid
                 s.gc_home_location = home_text
-            except Exception:
-                pass  # behold eksisterende hvis invalid
         s.use_miles         = self._miles_cb.isChecked()
         s.show_archived     = self._archived_cb.isChecked()
         s.show_found        = self._found_cb.isChecked()

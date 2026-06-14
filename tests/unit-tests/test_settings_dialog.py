@@ -219,6 +219,15 @@ class TestHomePoints:
         dlg._save_home_location()
         assert settings.gc_home_location == ""
 
+    def test_save_home_location_invalid_warns_and_keeps(self, dlg, settings, monkeypatch):
+        settings.gc_home_location = _VALID
+        warn = MagicMock()
+        monkeypatch.setattr("opensak.gui.icon.OpenSAKMessageBox.warning", warn)
+        dlg._gc_home_location.setText("garbage")
+        dlg._save_home_location()
+        warn.assert_called_once()
+        assert settings.gc_home_location == _VALID  # unchanged
+
 
 # ── theme ─────────────────────────────────────────────────────────────────────
 
@@ -302,3 +311,15 @@ class TestSave:
         assert settings.gc_username == "tester"
         assert settings.use_miles is True
         assert dlg.result() == QDialog.DialogCode.Accepted
+
+    def test_save_keeps_existing_home_when_invalid(self, dlg, settings):
+        settings.gc_home_location = _VALID
+        dlg._gc_home_location.setText("garbage")
+        dlg._save()
+        assert settings.gc_home_location == _VALID  # invalid ignored
+
+    def test_save_clears_home_when_empty(self, dlg, settings):
+        settings.gc_home_location = _VALID
+        dlg._gc_home_location.setText("")
+        dlg._save()
+        assert settings.gc_home_location == ""
