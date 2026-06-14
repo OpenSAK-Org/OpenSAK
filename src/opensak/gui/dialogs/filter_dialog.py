@@ -1218,10 +1218,9 @@ class FilterDialog(QDialog):
             else:
                 flat_filters.append(f)
 
-        if attr_mode_or_detected:
-            self._attr_mode_any.setChecked(True)
-        else:
-            self._attr_mode_all.setChecked(True)
+        # OR-mode = "any selected"; the UI only has the "all selected" checkbox,
+        # so unchecking it expresses ANY (avoids a crash on the missing widget).
+        self._attr_mode_all.setChecked(not attr_mode_or_detected)
 
         for f in flat_filters:
             ftype = getattr(f, "filter_type", None)

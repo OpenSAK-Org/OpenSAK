@@ -196,11 +196,6 @@ class AppSettings:
         except Exception:
             return None
 
-    def is_setup_complete(self) -> bool:
-        has_username = bool(self.gc_username.strip())
-        has_home = bool(self.gc_home_location.strip()) or bool(self.home_points)
-        return has_username and has_home
-
     # ── Theme / appearance ────────────────────────────────────────────────────
 
     @property
