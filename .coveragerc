@@ -1,0 +1,22 @@
+# Coverage configuration for OpenSAK (#225).
+#
+# Literal 100% is not a sensible target for a PySide6 desktop app: the
+# QApplication event loop, OS-native dialogs and the QtWebEngine paths
+# (disabled under test) are not meaningfully testable. This file excludes the
+# lines that legitimately cannot or should not be covered so the reported
+# number reflects real, testable code.
+
+[run]
+branch = false
+omit =
+    */tests/*
+
+[report]
+show_missing = true
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    raise NotImplementedError
+    @(abc\.)?abstractmethod
+    \.\.\.
