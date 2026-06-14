@@ -135,7 +135,9 @@ def test_old_schema_runs_every_migration(tmp_path):
                 "dnf_date", "favorite_points", "distance", "bearing"):
         assert col in cache_cols
     assert "is_corrected" in note_cols
-    # The waypoints rebuild (migration 2) recreates this backing index.
+    # The waypoints rebuild (migration 2) creates the named unique index
+    # (matching the model's constraint name) plus the cache_id index.
+    assert "uq_waypoint_cache_prefix_name" in idx_names
     assert "ix_waypoints_cache_id" in idx_names
     assert row == ("GPS Adventures Maze", "Micro")  # migration 5 + 7 normalisation
     assert version == SCHEMA_VERSION

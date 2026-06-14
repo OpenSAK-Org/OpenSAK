@@ -160,7 +160,10 @@ def _run_migrations(engine: Engine) -> None:
         idx_names = [r[0] for r in idx_rows]
 
         if "uq_waypoint_cache_prefix_name" not in idx_names:
-            # SQLite understøtter ikke DROP CONSTRAINT — vi recreater tabellen
+            # SQLite understøtter ikke DROP CONSTRAINT — vi recreater tabellen.
+            # Unik-constraint laves som et NAVNGIVET index (ikke inline UNIQUE,
+            # der ville få et auto-genereret sqlite_autoindex-navn) så gaten
+            # ovenfor faktisk genkender den og matcher modellens constraint-navn.
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text("""
                 CREATE TABLE waypoints_new (
@@ -172,8 +175,7 @@ def _run_migrations(engine: Engine) -> None:
                     description TEXT,
                     comment     TEXT,
                     latitude    REAL,
-                    longitude   REAL,
-                    UNIQUE(cache_id, prefix, name)
+                    longitude   REAL
                 )
             """))
             conn.execute(text(
@@ -183,6 +185,10 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.execute(text("DROP TABLE waypoints"))
             conn.execute(text("ALTER TABLE waypoints_new RENAME TO waypoints"))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_waypoint_cache_prefix_name "
+                "ON waypoints (cache_id, prefix, name)"
+            ))
             conn.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_waypoints_cache_id ON waypoints (cache_id)"
             ))
