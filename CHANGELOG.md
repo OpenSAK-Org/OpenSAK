@@ -26,6 +26,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Groundspeak block as a direct child, so importing an OpenSAK-exported file (or any GPX 1.1 file)
   found nothing. The importer now reads both GPX 1.0 and 1.1.
 
+- **Reverse geocoding no longer crashes in released builds** (#215) — `reverse_geocoder` and
+  `pycountry` were declared in `pyproject.toml` but missing from `requirements.txt`, which CI and the
+  PyInstaller builds installed from; because they are imported lazily the app started fine but the
+  Country/State/County lookup crashed in every shipped binary, undetected by CI. `pyproject.toml` is
+  now the single source of truth — CI and builds install the project (`pip install -e ".[dev]"`),
+  `requirements.txt` is removed, the bundles ship the libraries' data files (GeoNames CSV, ISO
+  tables), and a smoke test exercises the real lookup so a missing dependency fails CI.
+
 For planned features and known issues see the [GitHub Issues list](https://github.com/AgreeDK/opensak/issues).
 
 ## [1.13.11] — 2026-05-29
