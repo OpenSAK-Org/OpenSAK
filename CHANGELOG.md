@@ -13,6 +13,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   processed and the percentage (e.g. `320 / 500 (64%)`) instead of an indeterminate "running"
   bar, giving a sense of how long the export will take. Suggested in issue #207.
 
+### Fixed
+
+- **Export no longer crashes with DetachedInstanceError** — the cache table loads rows with the
+  description/hint text and logs/waypoints left out for speed, so exporting them straight from the
+  table raised `DetachedInstanceError` (and would otherwise have dropped hints and logs from the
+  output). Exports now reload the full cache data first, so GPX/LOC/GGZ/KML files always include
+  hints, logs and waypoints.
+
 For planned features and known issues see the [GitHub Issues list](https://github.com/AgreeDK/opensak/issues).
 
 ## [1.13.11] — 2026-05-29
