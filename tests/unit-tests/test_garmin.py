@@ -1,6 +1,8 @@
-"""tests/unit-tests/test_garmin.py — Garmin GPX generation/export (no device needed)."""
+"""tests/unit-tests/test_garmin.py — Garmin GPX/LOC/GGZ generation/export (no device needed)."""
 
+import io
 import xml.etree.ElementTree as ET
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,10 +16,15 @@ from opensak.gps.garmin import (
     _cache_symbol,
     _effective_coords,
     _is_garmin,
+    _macos_volumes,
+    debug_scan,
     delete_gpx_files,
     export_to_device,
     export_to_file,
+    find_garmin_devices,
+    generate_ggz,
     generate_gpx,
+    generate_loc,
     get_garmin_gpx_path,
 )
 
@@ -412,3 +419,178 @@ class TestExportResult:
         r = ExportResult()
         r.error = "Permission denied"
         assert "Permission denied" in str(r)
+
+
+# ── generate_loc ──────────────────────────────────────────────────────────────
+
+class TestGenerateLoc:
+    def test_xml_declaration_and_root(self):
+        out = generate_loc([_cache()])
+        assert out.startswith('<?xml version="1.0"')
+        root = ET.fromstring(out.split("\n", 1)[1])
+        assert root.tag == "loc"
+        assert root.get("src") == "OpenSAK"
+
+    def test_waypoint_fields(self):
+        out = generate_loc([_cache(gc_code="GCLOC1", name="LocCache",
+                                   placed_by="Owner", difficulty=2.0, terrain=3.0,
+                                   container="Small")])
+        assert 'id="GCLOC1"' in out
+        assert "coord.info/GCLOC1" in out
+        assert "<container>Small</container>" in out
+
+    def test_cdata_label_restored(self):
+        out = generate_loc([_cache(name="My Cache", placed_by="Bob",
+                                   difficulty=1.5, terrain=2.0)])
+        assert "<![CDATA[My Cache by Bob (1.5/2)]]>" in out
+
+    def test_container_defaults_to_unknown(self):
+        out = generate_loc([_cache(container=None)])
+        assert "<container>Unknown</container>" in out
+
+    def test_corrected_coords_used(self):
+        c = _cache(latitude=55.0, longitude=12.0,
+                   user_note=_note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0))
+        out = generate_loc([c])
+        assert 'lat="60.000000"' in out
+        assert 'lon="20.000000"' in out
+
+    def test_skips_cache_without_coords(self):
+        c = _cache(gc_code="GCNULL")
+        c.latitude = None
+        out = generate_loc([c])
+        assert "GCNULL" not in out
+
+
+# ── generate_ggz ──────────────────────────────────────────────────────────────
+
+def _ggz_entries(blob: bytes) -> dict[str, bytes]:
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        return {n: zf.read(n) for n in zf.namelist() if not n.endswith("/")}
+
+
+class TestGenerateGgz:
+    def test_returns_valid_zip(self):
+        blob = generate_ggz([_cache()])
+        assert isinstance(blob, bytes)
+        assert zipfile.is_zipfile(io.BytesIO(blob))
+
+    def test_contains_gpx_and_index(self):
+        entries = _ggz_entries(generate_ggz([_cache()], filename="myexport"))
+        assert "data/myexport.gpx" in entries
+        assert "index/com/garmin/geocaches/v0/index.xml" in entries
+
+    def test_index_lists_cache(self):
+        entries = _ggz_entries(generate_ggz([_cache(gc_code="GCGGZ1", name="GgzCache")]))
+        index = entries["index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "GCGGZ1" in index
+        assert "GgzCache" in index
+        assert "<crc>" in index
+
+    def test_container_size_mapping(self):
+        index = _ggz_entries(generate_ggz([_cache(container="Regular")]))[
+            "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "<size>4.0</size>" in index
+
+    def test_unknown_container_omits_size(self):
+        index = _ggz_entries(generate_ggz([_cache(container="Huge")]))[
+            "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "<size>" not in index
+
+    def test_no_container_omits_size(self):
+        index = _ggz_entries(generate_ggz([_cache(container=None)]))[
+            "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "<size>" not in index
+
+    def test_found_flag_in_index(self):
+        c = _cache(gc_code="GCFOUND")
+        c.found = True
+        index = _ggz_entries(generate_ggz([c]))[
+            "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "<found>true</found>" in index
+
+    def test_skips_cache_without_coords(self):
+        c = _cache(gc_code="GCNULL")
+        c.longitude = None
+        index = _ggz_entries(generate_ggz([_cache(gc_code="GCOK"), c]))[
+            "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+        assert "GCOK" in index
+        assert "GCNULL" not in index
+
+
+# ── device scanning ───────────────────────────────────────────────────────────
+
+class TestDeviceScan:
+    def test_find_garmin_devices_filters_to_garmin(self, tmp_path, monkeypatch):
+        garmin = tmp_path / "GARMIN_DEV"
+        (garmin / "Garmin").mkdir(parents=True)
+        (garmin / "Garmin" / "GarminDevice.xml").write_text("<device/>")
+        plain = tmp_path / "USB"
+        plain.mkdir()
+        monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [garmin, plain])
+        assert find_garmin_devices() == [garmin]
+
+    def test_debug_scan_reports_devices(self, tmp_path, monkeypatch):
+        garmin = tmp_path / "GARMIN_DEV"
+        (garmin / "Garmin").mkdir(parents=True)
+        (garmin / "Garmin" / "GarminDevice.xml").write_text("<device/>")
+        monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [garmin])
+        report = debug_scan()
+        assert "Garmin scan debug" in report
+        assert "GARMIN" in report
+
+    def test_macos_volumes_returns_list(self):
+        # On the test host /Volumes exists; just assert the shape.
+        assert isinstance(_macos_volumes(), list)
+
+
+# ── error paths ───────────────────────────────────────────────────────────────
+
+class TestErrorPaths:
+    def _device_with_gpx(self, root, names):
+        gpx_dir = root / GARMIN_GPX_SUBPATH
+        gpx_dir.mkdir(parents=True)
+        for n in names:
+            (gpx_dir / n).write_text("x")
+        return gpx_dir
+
+    def test_delete_skips_non_file_match(self, tmp_path):
+        gpx_dir = self._device_with_gpx(tmp_path, ["a.gpx"])
+        (gpx_dir / "dir.gpx").mkdir()  # matches *.gpx but is not a file
+        result = delete_gpx_files(tmp_path)
+        assert result.deleted_count == 1
+
+    def test_delete_records_failed_unlink(self, tmp_path, monkeypatch):
+        self._device_with_gpx(tmp_path, ["a.gpx"])
+        def boom(self, *a, **k):
+            raise OSError("locked")
+        monkeypatch.setattr(Path, "unlink", boom)
+        result = delete_gpx_files(tmp_path)
+        assert result.failed_count == 1
+        assert result.deleted_count == 0
+
+    def test_delete_outer_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "opensak.gps.garmin.get_garmin_gpx_path",
+            lambda root: (_ for _ in ()).throw(OSError("boom")),
+        )
+        result = delete_gpx_files(tmp_path)
+        assert result.success is False
+        assert "fejl" in result.error.lower()
+
+    def test_export_to_device_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "opensak.gps.garmin.generate_gpx",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("nope")),
+        )
+        result = export_to_device([_cache()], tmp_path / "dev")
+        assert result.success is False
+
+    def test_export_to_file_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "opensak.gps.garmin.generate_gpx",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("nope")),
+        )
+        result = export_to_file([_cache()], tmp_path / "out.gpx")
+        assert result.success is False
+        assert "nope" in result.error

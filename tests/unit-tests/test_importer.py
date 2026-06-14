@@ -3,13 +3,14 @@
 import pytest
 from pathlib import Path
 
-from opensak.db.database import get_session
+from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache
-from opensak.importer import import_gpx, import_zip
+from opensak.importer import import_gpx, import_zip, ImportResult
 
 from tests.data import (
     SAMPLE_GPX, SAMPLE_WPTS_GPX, EMPTY_GPX,
     make_variant_gpx, make_gpx_with_inline_wpt, write_gpx, make_zip,
+    build_gpx, cache_wpt,
 )
 
 
@@ -265,3 +266,72 @@ def test_import_gpx_inline_extra_waypoints(tmp_db, tmp_path):
         assert wp.prefix == "PK"
         assert wp.wp_type == "Parking Area"
         assert wp.comment == "Street parking available."
+
+
+# ── ImportResult.__str__ ──────────────────────────────────────────────────────
+
+def test_import_result_str_lists_warnings_and_caps_errors():
+    r = ImportResult()
+    r.created, r.updated, r.waypoints, r.skipped = 3, 1, 2, 4
+    r.warnings.append("limited data")
+    r.errors.extend(f"err{i}" for i in range(7))
+    text = str(r)
+    assert "Caches created : 3" in text
+    assert "⚠ limited data" in text
+    assert "Errors         : 7" in text
+    assert text.count("    - err") == 5  # only first 5 shown
+
+
+# ── import_gpx error/edge paths ───────────────────────────────────────────────
+
+def test_import_gpx_reimport_updates_existing(tmp_path):
+    init_db(db_path=tmp_path / "re.db")
+    first = build_gpx(cache_wpt(
+        "GCUP01", name="Original", difficulty=1.0,
+        logs=[{"type": "Found it", "finder": "A"}],
+        attributes=[{"id": 6, "inc": 1, "name": "Kids"}],
+    ))
+    second = build_gpx(cache_wpt(
+        "GCUP01", name="Updated", difficulty=4.0,
+        logs=[{"type": "Found it", "finder": "B"}],
+        attributes=[{"id": 7, "inc": 0, "name": "Other"}],
+    ))
+    r1 = import_gpx(write_gpx(tmp_path, "a.gpx", first))
+    r2 = import_gpx(write_gpx(tmp_path, "b.gpx", second))
+    assert r1.created == 1
+    assert r2.updated == 1
+    with get_session() as s:
+        c = s.query(Cache).filter_by(gc_code="GCUP01").one()
+        assert c.name == "Updated"
+        assert c.difficulty == pytest.approx(4.0)
+
+
+def test_import_gpx_minimal_cache_without_optional_fields(tmp_path):
+    init_db(db_path=tmp_path / "min.db")
+    f = write_gpx(tmp_path, "min.gpx", build_gpx(cache_wpt("GCMIN1")))
+    result = import_gpx(f)
+    assert result.created == 1
+    assert result.errors == []
+
+
+def test_import_gpx_fatal_parse_error(tmp_path):
+    init_db(db_path=tmp_path / "bad.db")
+    f = write_gpx(tmp_path, "broken.gpx", "<gpx><wpt this is not valid xml")
+    result = import_gpx(f)
+    assert len(result.errors) > 0
+
+
+def test_import_gpx_companion_wpts_file_error(tmp_path):
+    init_db(db_path=tmp_path / "comp.db")
+    gpx = write_gpx(tmp_path, "main.gpx", SAMPLE_GPX)
+    bad_wpts = write_gpx(tmp_path, "main-wpts.gpx", "definitely not xml <<<")
+    result = import_gpx(gpx, wpts_path=bad_wpts)
+    assert any("Waypoints file error" in e for e in result.errors)
+
+
+# ── import_zip edge paths ─────────────────────────────────────────────────────
+
+def test_import_zip_no_gpx_in_archive(tmp_path):
+    z = make_zip(tmp_path, "no_gpx.zip", {"readme.txt": "hello"})
+    result = import_zip(z)
+    assert any("No .gpx" in e for e in result.errors)

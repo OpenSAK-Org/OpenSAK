@@ -11,12 +11,25 @@ import pytest
 
 import opensak.api.geocaching as gc_module
 from opensak.api.geocaching import (
+    _api_get,
     _delete_token,
+    _exchange_code,
     _generate_pkce,
+    _get_user_logs,
     _is_token_valid,
     _load_token,
+    _refresh_token,
     _save_token,
     get_cache_details,
+    get_favorite_points,
+    get_trackables_in_cache,
+    get_user_activity,
+    get_user_archives,
+    get_user_dnfs,
+    get_user_finds,
+    get_user_notes,
+    get_user_profile,
+    get_valid_token,
     is_logged_in,
     logout,
 )
@@ -235,3 +248,164 @@ class TestGetCacheDetails:
         with patch.object(gc_module, "GC_CLIENT_ID", "test_client_id"):
             result = get_cache_details("GC12345")
         assert result is None
+
+
+# ── token persistence edge branches ───────────────────────────────────────────
+
+class TestTokenEdges:
+    def test_save_ignores_chmod_failure(self, token_file, monkeypatch):
+        monkeypatch.setattr(gc_module.os, "chmod", lambda *a, **k: (_ for _ in ()).throw(OSError()))
+        _save_token({"access_token": "x", "expires_at": 9_999_999_999})
+        assert token_file.exists()
+
+    def test_load_returns_none_on_corrupt_json(self, token_file):
+        token_file.write_text("not json", encoding="utf-8")
+        gc_module._cached_token = None
+        assert _load_token() is None
+
+
+# ── _exchange_code / _refresh_token ───────────────────────────────────────────
+
+class TestTokenExchange:
+    def test_exchange_code_saves_token(self, token_file):
+        payload = {"access_token": "AT", "refresh_token": "RT", "expires_in": 1000}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(payload)):
+            token = _exchange_code("auth_code", "verifier")
+        assert token["access_token"] == "AT"
+        assert "expires_at" in token
+        assert _load_token()["refresh_token"] == "RT"
+
+    def test_refresh_returns_none_without_refresh_token(self, token_file):
+        _save_token({"access_token": "AT", "expires_at": 1})  # no refresh_token
+        assert _refresh_token() is None
+
+    def test_refresh_success(self, token_file):
+        _save_token({"access_token": "old", "refresh_token": "RT", "expires_at": 1})
+        payload = {"access_token": "new", "refresh_token": "RT2", "expires_in": 1000}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(payload)):
+            token = _refresh_token()
+        assert token["access_token"] == "new"
+        assert "expires_at" in token
+
+    def test_refresh_returns_none_on_exception(self, token_file):
+        _save_token({"access_token": "old", "refresh_token": "RT", "expires_at": 1})
+        with patch("urllib.request.urlopen", side_effect=RuntimeError("net")):
+            assert _refresh_token() is None
+
+
+# ── get_valid_token ───────────────────────────────────────────────────────────
+
+class TestGetValidToken:
+    def test_none_when_no_token(self, token_file):
+        assert get_valid_token() is None
+
+    def test_returns_access_token_when_valid(self, token_file):
+        _save_token({"access_token": "AT", "expires_at": time.time() + 3600})
+        assert get_valid_token() == "AT"
+
+    def test_refreshes_when_expired(self, token_file):
+        _save_token({"access_token": "old", "refresh_token": "RT", "expires_at": time.time() - 1})
+        payload = {"access_token": "fresh", "refresh_token": "RT2", "expires_in": 1000}
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen(payload)):
+            assert get_valid_token() == "fresh"
+
+    def test_none_when_expired_and_refresh_fails(self, token_file):
+        _save_token({"access_token": "old", "refresh_token": "RT", "expires_at": time.time() - 1})
+        with patch("urllib.request.urlopen", side_effect=RuntimeError("net")):
+            assert get_valid_token() is None
+
+
+# ── _api_get ──────────────────────────────────────────────────────────────────
+
+class TestApiGet:
+    def test_returns_none_when_not_logged_in(self, token_file):
+        assert _api_get("/x") is None
+
+    def test_success_with_params(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen({"ok": True})):
+            assert _api_get("/x", params={"a": 1}) == {"ok": True}
+
+    def test_other_http_error_returns_none(self, logged_in_client):
+        err = urllib.error.HTTPError(url=None, code=500, msg="x", hdrs=None, fp=None)
+        with patch("urllib.request.urlopen", side_effect=err):
+            assert _api_get("/x") is None
+
+    def test_generic_exception_returns_none(self, logged_in_client):
+        with patch("urllib.request.urlopen", side_effect=RuntimeError("boom")):
+            assert _api_get("/x") is None
+
+    def test_401_triggers_refresh_and_retry(self, token_file):
+        _save_token({"access_token": "valid", "refresh_token": "RT", "expires_at": time.time() + 3600})
+        err401 = urllib.error.HTTPError(url=None, code=401, msg="x", hdrs=None, fp=None)
+        with patch.object(gc_module, "GC_CLIENT_ID", "cid"):
+            with patch("urllib.request.urlopen", side_effect=[
+                err401,
+                _mock_urlopen({"access_token": "new", "refresh_token": "RT2", "expires_in": 1000}),
+                _mock_urlopen({"retried": True}),
+            ]):
+                assert _api_get("/x") == {"retried": True}
+
+
+# ── higher-level API functions ────────────────────────────────────────────────
+
+class TestHigherLevelApi:
+    def test_trackables_list_response(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen([{"referenceCode": "TB1"}])):
+            result = get_trackables_in_cache("GC12345")
+        assert result == [{"referenceCode": "TB1"}]
+
+    def test_trackables_data_wrapped_response(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen({"data": [{"referenceCode": "TB2"}]})):
+            result = get_trackables_in_cache("GC12345")
+        assert result == [{"referenceCode": "TB2"}]
+
+    def test_trackables_none_when_client_id_empty(self, token_file):
+        with patch.object(gc_module, "GC_CLIENT_ID", ""):
+            assert get_trackables_in_cache("GC12345") is None
+
+    def test_trackables_none_for_invalid_gc(self, logged_in_client):
+        assert get_trackables_in_cache("INVALID") is None
+
+    def test_trackables_none_when_api_fails(self, logged_in_client):
+        with patch("urllib.request.urlopen", side_effect=RuntimeError("net")):
+            assert get_trackables_in_cache("GC12345") is None
+
+    def test_get_user_logs_none_when_api_fails(self, logged_in_client):
+        with patch("urllib.request.urlopen", side_effect=RuntimeError("net")):
+            assert _get_user_logs("bob", max_results=10) is None
+
+    def test_user_profile_success(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen({"username": "bob"})):
+            assert get_user_profile()["username"] == "bob"
+
+    def test_user_profile_none_without_client_id(self, token_file):
+        with patch.object(gc_module, "GC_CLIENT_ID", ""):
+            assert get_user_profile() is None
+
+    def test_get_user_logs_with_types(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen({"data": [{"referenceCode": "L1"}]})):
+            result = _get_user_logs("bob", log_types=list(gc_module.LogType), max_results=50)
+        assert result == [{"referenceCode": "L1"}]
+
+    def test_get_user_logs_list_response(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen([{"referenceCode": "L2"}])):
+            assert _get_user_logs("bob", max_results=10) == [{"referenceCode": "L2"}]
+
+    def test_get_user_logs_none_without_client_id(self, token_file):
+        with patch.object(gc_module, "GC_CLIENT_ID", ""):
+            assert _get_user_logs("bob", max_results=10) is None
+
+    @pytest.mark.parametrize("func", [
+        get_user_finds, get_user_dnfs, get_user_notes, get_user_archives, get_user_activity,
+    ])
+    def test_user_log_wrappers(self, logged_in_client, func):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen([{"referenceCode": "LW"}])):
+            assert func("bob", 25) == [{"referenceCode": "LW"}]
+
+    def test_favorite_points(self, logged_in_client):
+        with patch("urllib.request.urlopen", return_value=_mock_urlopen({"favoritePoints": 7})):
+            assert get_favorite_points()["favoritePoints"] == 7
+
+    def test_favorite_points_none_without_client_id(self, token_file):
+        with patch.object(gc_module, "GC_CLIENT_ID", ""):
+            assert get_favorite_points() is None

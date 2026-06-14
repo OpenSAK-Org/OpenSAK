@@ -1,10 +1,12 @@
 """tests/unit-tests/test_found_updater.py — found-status sync from a reference DB."""
 
+from datetime import datetime
+
 import pytest
 from pathlib import Path
 
 from opensak.db.database import init_db, get_session
-from opensak.db.models import Cache
+from opensak.db.models import Cache, Log
 from opensak.db.found_updater import get_found_gc_codes, update_found_from_reference
 
 
@@ -58,6 +60,17 @@ class TestGetFoundGcCodes:
         with pytest.raises(RuntimeError, match="Kunne ikke læse reference database"):
             get_found_gc_codes(bad_path)
 
+    def test_parses_found_it_log_date(self, tmp_path, make_cache):
+        ref_path = tmp_path / "ref.db"
+        init_db(db_path=ref_path)
+        with get_session() as s:
+            c = make_cache("GC00001")
+            c.logs.append(Log(log_type="Found it", log_date=datetime(2020, 5, 1)))
+            s.add(c)
+        found = get_found_gc_codes(ref_path)
+        assert found["GC00001"] is not None
+        assert found["GC00001"].year == 2020
+
 
 # ── update_found_from_reference ───────────────────────────────────────────────
 
@@ -101,6 +114,25 @@ class TestUpdateFoundFromReference:
 
         assert result.already == 1
         assert result.updated == 1
+
+    def test_already_found_updates_date_from_reference(self, tmp_path, make_cache):
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+
+        init_db(db_path=ref_path)
+        with get_session() as s:
+            c = make_cache("GC00001")
+            c.logs.append(Log(log_type="Found it", log_date=datetime(2018, 3, 4)))
+            s.add(c)
+        _setup_active_db(active_path, [{"gc_code": "GC00001", "found": True}], make_cache)
+
+        result = update_found_from_reference(ref_path)
+
+        assert result.already == 1
+        with get_session() as s:
+            cache = s.query(Cache).filter_by(gc_code="GC00001").first()
+            assert cache.found_date is not None
+            assert cache.found_date.year == 2018
 
     def test_not_found_counts_ref_codes_missing_from_active(self, tmp_path, make_cache):
         ref_path = tmp_path / "ref.db"

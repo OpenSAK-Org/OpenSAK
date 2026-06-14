@@ -4,6 +4,7 @@ import json
 import pytest
 from pathlib import Path
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache, Attribute, Trackable
@@ -16,6 +17,8 @@ from opensak.filters.engine import (
     DistanceFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
+    HasCorrectedFilter, UserFlagFilter, DnfFilter, FtfFilter,
+    FavoritePointsFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
     # Helpers
     _haversine_km, _iter_filters, FILTER_REGISTRY, SORT_FIELDS,
 )
@@ -727,3 +730,99 @@ def test_where_clause_profile_save_load(tmp_path):
     ]
     assert len(where_filters) == 1
     assert where_filters[0].sql == sql
+
+
+# ── Python-side matches for flag/date/points filters ──────────────────────────
+
+def _cache(**kw):
+    base = dict(
+        user_note=None, user_flag=False, dnf=False, first_to_find=False,
+        favorite_points=0, found=False, found_date=None, dnf_date=None,
+        last_log_date=None,
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+class TestFlagFilters:
+    def test_has_corrected(self):
+        f = HasCorrectedFilter()
+        assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=True))) is True
+        assert f.matches(_cache(user_note=None)) is False
+
+    def test_user_flag(self):
+        f = UserFlagFilter(flagged=True)
+        assert f.matches(_cache(user_flag=True)) is True
+        assert f.matches(_cache(user_flag=False)) is False
+        assert UserFlagFilter.from_dict(f.to_dict()).flagged is True
+
+    def test_dnf(self):
+        f = DnfFilter(has_dnf=True)
+        assert f.matches(_cache(dnf=True)) is True
+        assert f.matches(_cache(dnf=False)) is False
+        assert DnfFilter.from_dict(f.to_dict()).has_dnf is True
+
+    def test_ftf(self):
+        f = FtfFilter(has_ftf=True)
+        assert f.matches(_cache(first_to_find=True)) is True
+        assert f.matches(_cache(first_to_find=False)) is False
+        assert FtfFilter.from_dict(f.to_dict()).has_ftf is True
+
+    def test_favorite_points(self):
+        f = FavoritePointsFilter(min_pts=5, max_pts=10)
+        assert f.matches(_cache(favorite_points=7)) is True
+        assert f.matches(_cache(favorite_points=2)) is False
+        assert f.matches(_cache(favorite_points=None)) is False
+        restored = FavoritePointsFilter.from_dict(f.to_dict())
+        assert (restored.min_pts, restored.max_pts) == (5, 10)
+
+
+class TestDateFilters:
+    FROM = datetime(2020, 1, 1)
+    TO = datetime(2020, 12, 31)
+
+    def test_found_by_me_date(self):
+        f = FoundByMeDateFilter(from_date=self.FROM, to_date=self.TO)
+        assert f.matches(_cache(found=False)) is False
+        assert f.matches(_cache(found=True, found_date=None)) is True
+        assert f.matches(_cache(found=True, found_date=datetime(2020, 6, 1))) is True
+        assert f.matches(_cache(found=True, found_date=datetime(2019, 6, 1))) is False
+        assert f.matches(_cache(found=True, found_date=datetime(2021, 6, 1))) is False
+        restored = FoundByMeDateFilter.from_dict(f.to_dict())
+        assert restored.from_date == self.FROM and restored.to_date == self.TO
+
+    def test_dnf_date(self):
+        f = DnfDateFilter(from_date=self.FROM, to_date=self.TO)
+        assert f.matches(_cache(dnf=False)) is False
+        assert f.matches(_cache(dnf=True, dnf_date=None)) is True
+        assert f.matches(_cache(dnf=True, dnf_date=datetime(2020, 6, 1))) is True
+        assert f.matches(_cache(dnf=True, dnf_date=datetime(2019, 6, 1))) is False
+        restored = DnfDateFilter.from_dict(f.to_dict())
+        assert restored.from_date == self.FROM
+
+    def test_last_log_date(self):
+        f = LastLogDateFilter(from_date=self.FROM, to_date=self.TO)
+        assert f.matches(_cache(last_log_date=None)) is False
+        assert f.matches(_cache(last_log_date=datetime(2020, 6, 1))) is True
+        assert f.matches(_cache(last_log_date=datetime(2019, 6, 1))) is False
+        assert f.matches(_cache(last_log_date=datetime(2021, 6, 1))) is False
+        restored = LastLogDateFilter.from_dict(f.to_dict())
+        assert restored.to_date == self.TO
+
+
+class TestFilterSetEdges:
+    def test_invalid_mode_raises(self):
+        with pytest.raises(ValueError):
+            FilterSet(mode="XOR")
+
+    def test_clear_and_len(self):
+        fs = FilterSet("AND").add(FoundFilter())
+        assert len(fs) == 1
+        fs.clear()
+        assert len(fs) == 0
+
+    def test_empty_set_matches_everything(self):
+        assert FilterSet("AND").matches(_cache()) is True
+
+    def test_repr(self):
+        assert "FilterSet" in repr(FilterSet("OR"))

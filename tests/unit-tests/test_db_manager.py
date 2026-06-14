@@ -1,5 +1,7 @@
 """tests/unit-tests/test_db_manager.py — DatabaseManager unit tests (QSettings mocked)."""
 
+from datetime import datetime
+
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -150,3 +152,105 @@ class TestDeleteDatabase:
         info = manager.new_database("Ghost", db_path)
         manager.delete_database(info)  # file never existed — must not raise
         assert info not in manager.databases
+
+
+# ── DatabaseInfo (pure logic) ─────────────────────────────────────────────────
+
+class TestDatabaseInfo:
+    def test_exists_reflects_file(self, tmp_path):
+        p = tmp_path / "x.db"
+        info = DatabaseInfo("X", p)
+        assert info.exists is False
+        p.touch()
+        assert info.exists is True
+
+    def test_size_mb(self, tmp_path):
+        p = tmp_path / "x.db"
+        p.write_bytes(b"a" * (1024 * 1024))
+        assert DatabaseInfo("X", p).size_mb == pytest.approx(1.0, abs=0.01)
+
+    def test_size_mb_zero_when_missing(self, tmp_path):
+        assert DatabaseInfo("X", tmp_path / "missing.db").size_mb == 0.0
+
+    def test_modified_returns_datetime(self, tmp_path):
+        p = tmp_path / "x.db"
+        p.touch()
+        assert isinstance(DatabaseInfo("X", p).modified, datetime)
+
+    def test_modified_none_when_missing(self, tmp_path):
+        assert DatabaseInfo("X", tmp_path / "missing.db").modified is None
+
+    def test_to_from_dict_roundtrip(self, tmp_path):
+        p = tmp_path / "x.db"
+        d = DatabaseInfo("X", p).to_dict()
+        assert d == {"name": "X", "path": str(p)}
+        restored = DatabaseInfo.from_dict(d)
+        assert restored.name == "X"
+        assert restored.path == p
+
+    def test_repr(self, tmp_path):
+        assert "DatabaseInfo" in repr(DatabaseInfo("X", tmp_path / "x.db"))
+
+
+# ── open_database ─────────────────────────────────────────────────────────────
+
+class TestOpenDatabase:
+    def test_file_not_found_raises(self, manager, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            manager.open_database(tmp_path / "nope.db")
+
+    def test_opens_existing_file(self, manager, tmp_path):
+        p = tmp_path / "ext.db"
+        p.touch()
+        info = manager.open_database(p)
+        assert info.path == p
+        assert info in manager.databases
+
+    def test_returns_existing_entry_for_same_path(self, manager, tmp_path):
+        p = tmp_path / "ext.db"
+        p.touch()
+        assert manager.open_database(p) is manager.open_database(p)
+
+    def test_dedupes_name_collision(self, manager, tmp_path):
+        manager.new_database("data", tmp_path / "a.db")
+        p = tmp_path / "data.db"
+        p.touch()
+        assert manager.open_database(p).name == "data (2)"
+
+
+# ── switch_to / copy_database / ensure_active_initialised ──────────────────────
+
+class TestSwitchTo:
+    def test_switch_sets_active(self, manager, tmp_path):
+        info = manager.new_database("Other", tmp_path / "other.db")
+        manager.switch_to(info)
+        assert manager.active is info
+        assert manager.active_path == info.path
+
+
+class TestCopyDatabase:
+    def test_copies_file_and_adds_entry(self, manager, tmp_path):
+        src = manager.new_database("Src", tmp_path / "src.db")
+        src.path.touch()
+        copy = manager.copy_database(src, "Copy", tmp_path / "copy.db")
+        assert copy.path.exists()
+        assert copy in manager.databases
+
+    def test_default_path_uses_app_data_dir(self, manager, tmp_path):
+        src = manager.new_database("Src", tmp_path / "src.db")
+        src.path.touch()
+        copy = manager.copy_database(src, "CopyDefault")
+        assert copy.path == tmp_path / "CopyDefault.db"
+        assert copy.path.exists()
+
+    def test_rejects_duplicate_name(self, manager, tmp_path):
+        src = manager.new_database("Src", tmp_path / "src.db")
+        src.path.touch()
+        with pytest.raises(ValueError):
+            manager.copy_database(src, "Default", tmp_path / "c.db")
+
+
+class TestEnsureActiveInitialised:
+    def test_initialises_active(self, manager):
+        manager.ensure_active_initialised()  # init_db is patched; exercises the call path
+        assert manager.active is not None

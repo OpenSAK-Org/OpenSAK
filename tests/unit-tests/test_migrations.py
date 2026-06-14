@@ -16,7 +16,26 @@ Tests assert:
 import pytest
 from sqlalchemy import event, text
 
-from opensak.db.database import init_db, get_engine, _run_migrations, SCHEMA_VERSION
+from opensak.db.database import (
+    init_db,
+    get_engine,
+    _make_engine,
+    _run_migrations,
+    SCHEMA_VERSION,
+)
+
+# The original pre-migration schema: only the columns/tables the migrations read
+# or rebuild. Running the migrations against it exercises every add-column /
+# table-rebuild / data-normalisation branch.
+_OLD_SCHEMA = [
+    "CREATE TABLE caches (id INTEGER PRIMARY KEY AUTOINCREMENT, gc_code TEXT, cache_type TEXT, "
+    "container TEXT, difficulty REAL, terrain REAL, hidden_date DATETIME, found_date DATETIME, "
+    "found BOOLEAN, archived BOOLEAN, available BOOLEAN, latitude REAL, longitude REAL)",
+    "CREATE TABLE waypoints (id INTEGER PRIMARY KEY AUTOINCREMENT, cache_id INTEGER, prefix TEXT, "
+    "wp_type TEXT, name TEXT, description TEXT, comment TEXT, latitude REAL, longitude REAL)",
+    "CREATE TABLE user_notes (id INTEGER PRIMARY KEY AUTOINCREMENT, cache_id INTEGER)",
+    "CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, cache_id INTEGER, log_date DATETIME)",
+]
 
 
 def _capture_statements(engine):
@@ -84,3 +103,39 @@ def test_indexes_present_after_init(tmp_path):
         }
     for expected in ("ix_caches_cache_type", "ix_caches_lat_lon", "ix_caches_found"):
         assert expected in names
+
+
+def test_old_schema_runs_every_migration(tmp_path):
+    """A v0 database with the original schema must apply all migrations."""
+    engine = _make_engine(tmp_path / "old.db")
+    with engine.connect() as c:
+        for ddl in _OLD_SCHEMA:
+            c.execute(text(ddl))
+        # Rows that trigger the data-normalisation migrations (5 and 7).
+        c.execute(text(
+            "INSERT INTO caches (gc_code, cache_type, container) "
+            "VALUES ('GC1', 'gps adventures exhibit', 'Nano')"
+        ))
+        c.execute(text("INSERT INTO logs (cache_id, log_date) VALUES (1, '2024-01-01')"))
+        c.execute(text("PRAGMA user_version = 0"))
+        c.commit()
+
+    _run_migrations(engine)
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        note_cols = {r[1] for r in c.execute(text("PRAGMA table_info(user_notes)"))}
+        idx_names = {r[0] for r in c.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='waypoints'"
+        ))}
+        row = c.execute(text("SELECT cache_type, container FROM caches WHERE gc_code='GC1'")).first()
+        version = c.execute(text("PRAGMA user_version")).scalar()
+
+    for col in ("county", "log_count", "parent_gc_code", "owner_name", "last_log_date",
+                "dnf_date", "favorite_points", "distance", "bearing"):
+        assert col in cache_cols
+    assert "is_corrected" in note_cols
+    # The waypoints rebuild (migration 2) recreates this backing index.
+    assert "ix_waypoints_cache_id" in idx_names
+    assert row == ("GPS Adventures Maze", "Micro")  # migration 5 + 7 normalisation
+    assert version == SCHEMA_VERSION

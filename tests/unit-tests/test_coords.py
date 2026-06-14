@@ -6,6 +6,8 @@ from opensak.coords import (
     FORMAT_DMM,
     FORMAT_DMS,
     format_coords,
+    format_lat,
+    format_lon,
     parse_coords,
 )
 
@@ -250,3 +252,45 @@ class TestParseCoordsRoundtrip:
         assert result is not None
         # DMS has lower precision (seconds rounded to 2 dp)
         assert result == pytest.approx((lat, lon), abs=1e-3)
+
+
+# ── format_lat / format_lon (single-axis, used by table columns) ──────────────
+
+class TestFormatLat:
+    def test_dd(self):
+        assert format_lat(55.78750, FORMAT_DD) == "55.787500"
+
+    def test_dd_negative(self):
+        assert format_lat(-33.86785, FORMAT_DD) == "-33.867850"
+
+    def test_dmm_north(self):
+        assert format_lat(55.7875, FORMAT_DMM) == "N55 47.250"
+
+    def test_dmm_south(self):
+        assert format_lat(-33.5, FORMAT_DMM) == "S33 30.000"
+
+    def test_dms_north(self):
+        assert format_lat(55.7875, FORMAT_DMS) == "N55° 47' 15.00\""
+
+    def test_dms_south(self):
+        assert format_lat(-1.5, FORMAT_DMS).startswith("S01°")
+
+
+class TestFormatLon:
+    def test_dd(self):
+        assert format_lon(12.41667, FORMAT_DD) == "12.416670"
+
+    def test_dd_negative(self):
+        assert format_lon(-0.12776, FORMAT_DD) == "-0.127760"
+
+    def test_dmm_east_pads_three_digits(self):
+        assert format_lon(12.41667, FORMAT_DMM) == "E012 25.000"
+
+    def test_dmm_west(self):
+        assert format_lon(-90.379567, FORMAT_DMM) == "W090 22.774"
+
+    def test_dms_east(self):
+        assert format_lon(12.41667, FORMAT_DMS) == "E012° 25' 00.01\""
+
+    def test_dms_west(self):
+        assert format_lon(-90.5, FORMAT_DMS).startswith("W090°")
