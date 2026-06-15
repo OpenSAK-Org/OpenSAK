@@ -602,6 +602,10 @@ STRINGS: dict[str, str] = {
 
     # ── Corrected coordinates ─────────────────────────────────────────────────
     "map_home_label":               "Hem",
+    "map_ctx_copy_coords":          "Kopiera {coords}",
+    "map_ctx_copy_as":              "Kopiera som...",
+    "map_ctx_set_corrected":        "Ange korrigerade koordinater",
+    "map_ctx_corrected_set":        "✓ {gc_code} — korrigerade koordinater angivna: {coords}",
     "detail_corrected_coords":      "Korrigerade koordinater",
     "detail_corrected_tooltip":     "Klicka för att öppna korrigerade koordinater på kartan",
     "detail_corrected_edit_btn":    "✏️  Editera",

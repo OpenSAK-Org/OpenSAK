@@ -604,6 +604,10 @@ STRINGS: dict[str, str] = {
 
     # ── Corrected coordinates ─────────────────────────────────────────────────
     "map_home_label":               "Thuis",
+    "map_ctx_copy_coords":          "Kopieer {coords}",
+    "map_ctx_copy_as":              "Kopieer als...",
+    "map_ctx_set_corrected":        "Gecorrigeerde coördinaten instellen",
+    "map_ctx_corrected_set":        "✓ {gc_code} — gecorrigeerde coördinaten ingesteld: {coords}",
     "detail_corrected_coords":      "Gecorrigeerde coördinaten",
     "detail_corrected_tooltip":     "Klik om gecorrigeerde coördinaten te openen in kaartapp",
     "detail_corrected_edit_btn":    "✏️  Bewerken",

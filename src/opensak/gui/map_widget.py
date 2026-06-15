@@ -13,7 +13,9 @@ from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineProfile
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu
+from PySide6.QtGui import QClipboard
+from PySide6.QtWidgets import QApplication
 
 from opensak.db.models import Cache
 from opensak.lang import tr
@@ -47,11 +49,18 @@ class MapBridge(QObject):
     """
     # Signal afsendt når brugeren klikker en pin på kortet
     cache_clicked = Signal(str)   # gc_code
+    # Signal afsendt når brugeren højreklikker på kortet (ikke på en pin)
+    map_right_clicked = Signal(float, float)   # lat, lon
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
         """Kaldes fra JavaScript når en pin klikkes."""
         self.cache_clicked.emit(gc_code)
+
+    @Slot(float, float)
+    def on_map_right_click(self, lat: float, lon: float) -> None:
+        """Kaldes fra JavaScript når brugeren højreklikker på kortet."""
+        self.map_right_clicked.emit(lat, lon)
 
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
@@ -135,6 +144,13 @@ var bridge = null;
 // ── WebChannel setup ──────────────────────────────────────────────────────────
 new QWebChannel(qt.webChannelTransport, function(channel) {
     bridge = channel.objects.bridge;
+});
+
+// ── Højreklik på kortet ───────────────────────────────────────────────────────
+map.on('contextmenu', function(e) {
+    if (bridge) {
+        bridge.on_map_right_click(e.latlng.lat, e.latlng.lng);
+    }
 });
 
 // ── Hjælpefunktioner ──────────────────────────────────────────────────────────
@@ -329,6 +345,7 @@ class MapWidget(QWidget):
     """
 
     cache_selected = Signal(str)   # gc_code
+    set_corrected_requested = Signal(str, float, float)  # gc_code, lat, lon
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -338,6 +355,7 @@ class MapWidget(QWidget):
         self._pending_caches = None
         self._pending_refresh = None
         self._pending_home = None
+        self._last_selected_gc: str = ""   # senest valgte cache via pin-klik
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -379,6 +397,7 @@ class MapWidget(QWidget):
         self._channel = QWebChannel()
         self._bridge = MapBridge()
         self._bridge.cache_clicked.connect(self.cache_selected)
+        self._bridge.map_right_clicked.connect(self._on_map_right_click)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -557,6 +576,68 @@ class MapWidget(QWidget):
     def pan_to_home(self) -> None:
         if self._ready:
             self._run_js("panToHome()")
+
+    def set_active_cache(self, gc_code: str) -> None:
+        """Sæt den aktuelt valgte cache — bruges af højreklik-menuen til
+        at vide hvilken cache korrigerede koordinater skal sættes på.
+        Kaldes fra mainwindow når cache-valg ændres i liste eller på kortet."""
+        self._last_selected_gc = gc_code
+
+    def _on_map_right_click(self, lat: float, lon: float) -> None:
+        """Vis kontekstmenu når brugeren højreklikker på kortet."""
+        from opensak.coords import format_coords, FORMATS
+        from opensak.utils.types import CoordFormat
+        from opensak.gui.settings import get_settings
+        from opensak.lang import tr
+
+        s = get_settings()
+        preferred_fmt = s.coord_format
+
+        menu = QMenu(self)
+
+        # ── Kopier koordinater (foretrukket format øverst) ────────────────────
+        preferred_str = format_coords(lat, lon, preferred_fmt)
+        act_preferred = menu.addAction(
+            tr("map_ctx_copy_coords").format(coords=preferred_str)
+        )
+
+        # ── Undermenu: kopier i andre formater ────────────────────────────────
+        other_formats = [f for f in CoordFormat if f != preferred_fmt]
+        sub = menu.addMenu(tr("map_ctx_copy_as"))
+        sub_actions = {}
+        for fmt in other_formats:
+            fmt_str = format_coords(lat, lon, fmt)
+            act = sub.addAction(fmt_str)
+            sub_actions[act] = fmt_str
+
+        menu.addSeparator()
+
+        # ── Sæt korrigerede koordinater ───────────────────────────────────────
+        act_corrected = menu.addAction(tr("map_ctx_set_corrected"))
+        # Kun aktiv hvis en cache er valgt
+        has_selected = bool(self._bridge and
+                            hasattr(self, '_last_selected_gc') and
+                            self._last_selected_gc)
+        act_corrected.setEnabled(has_selected)
+
+        # ── Vis menuen ved musemarkøren ───────────────────────────────────────
+        from PySide6.QtGui import QCursor
+        chosen = menu.exec(QCursor.pos())
+
+        if chosen == act_preferred:
+            QApplication.clipboard().setText(preferred_str)
+        elif chosen in sub_actions:
+            QApplication.clipboard().setText(sub_actions[chosen])
+        elif chosen == act_corrected and has_selected:
+            self._set_corrected_from_map(lat, lon)
+
+    def _set_corrected_from_map(self, lat: float, lon: float) -> None:
+        """Sæt korrigerede koordinater på den valgte cache."""
+        gc_code = getattr(self, '_last_selected_gc', None)
+        if not gc_code:
+            return
+        # Emit signal så mainwindow kan håndtere DB-skrivning
+        self.set_corrected_requested.emit(gc_code, lat, lon)
 
     def _cleanup_webengine(self) -> None:
         """Slet QWebEnginePage FØR QWebEngineProfile destrueres.

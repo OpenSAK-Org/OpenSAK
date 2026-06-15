@@ -1202,6 +1202,36 @@ class CacheTableView(QTableView):
                 self.scrollTo(index, self.ScrollHint.PositionAtCenter)
                 return
 
+    def refresh_cache_row(self, gc_code: str) -> None:
+        """Genindlæs ét cache-objekt fra DB og opdatér rækken i modellen.
+
+        Bruges fx efter at korrigerede koordinater er sat via kortets
+        højreklik-menu, så CC-ikonet vises uden at brugeren skal klikke Refresh.
+        """
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache as CacheModel
+        from sqlalchemy.orm import joinedload
+
+        with get_session() as session:
+            fresh = session.query(CacheModel).options(
+                joinedload(CacheModel.user_note),
+                joinedload(CacheModel.waypoints),
+                joinedload(CacheModel.attributes),
+            ).filter_by(gc_code=gc_code).first()
+            if fresh is None:
+                return
+
+        caches = self._model._caches
+        for i, c in enumerate(caches):
+            if c.gc_code == gc_code:
+                caches[i] = fresh
+                break
+        else:
+            return  # cachen er ikke i den aktuelle visning — intet at opdatere
+
+        self._model.beginResetModel()
+        self._model.endResetModel()
+
     def row_count(self) -> int:
         return self._model.rowCount()
 

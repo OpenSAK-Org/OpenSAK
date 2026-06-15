@@ -602,6 +602,10 @@ STRINGS: dict[str, str] = {
 
     # ── Coordonnées corrigées ─────────────────────────────────────────────────
     "map_home_label":               "Domicile",
+    "map_ctx_copy_coords":          "Copier {coords}",
+    "map_ctx_copy_as":              "Copier comme...",
+    "map_ctx_set_corrected":        "Définir les coordonnées corrigées",
+    "map_ctx_corrected_set":        "✓ {gc_code} — coordonnées corrigées définies : {coords}",
     "detail_corrected_coords":      "Coordonnées corrigées",
     "detail_corrected_tooltip":     "Cliquer pour ouvrir les coordonnées corrigées dans l'application de carte",
     "detail_corrected_edit_btn":    "✏️  Modifier",

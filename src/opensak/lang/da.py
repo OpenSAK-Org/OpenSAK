@@ -602,6 +602,10 @@ STRINGS: dict[str, str] = {
 
     # ── Korrigerede koordinater ───────────────────────────────────────────────
     "map_home_label":               "Hjem",
+    "map_ctx_copy_coords":          "Kopier {coords}",
+    "map_ctx_copy_as":              "Kopier som...",
+    "map_ctx_set_corrected":        "Sæt korrigerede koordinater",
+    "map_ctx_corrected_set":        "✓ {gc_code} — korrigerede koordinater sat: {coords}",
     "detail_corrected_coords":      "Korrigerede koordinater",
     "detail_corrected_tooltip":     "Klik for at åbne korrigerede koordinater i kortapp",
     "detail_corrected_edit_btn":    "✏️  Rediger",

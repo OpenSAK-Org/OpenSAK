@@ -216,6 +216,7 @@ class MainWindow(QMainWindow):
         from opensak.gui.map_widget import MapWidget
         self._map_widget = MapWidget()
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
+        self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
         self._map_widget.setMinimumWidth(300)
         self._bottom_splitter.addWidget(self._map_widget)
 
@@ -911,13 +912,12 @@ class MainWindow(QMainWindow):
 
     def _on_cache_selected(self, cache: Cache) -> None:
         """Kaldes når brugeren klikker på en cache i tabellen."""
-        # Genindlæs cachen med alle relationer (logs, waypoints osv.)
-        # da apply_filters() bruger noload() på disse for performance.
         full = self._load_full_cache(cache.gc_code)
         if not full:
             return
         self._detail_panel.show_cache(full)
         self._map_widget.pan_to_cache(full.gc_code)
+        self._map_widget.set_active_cache(full.gc_code)
         self._act_wp_edit.setEnabled(True)
         self._act_wp_delete.setEnabled(True)
         if full.latitude and full.longitude:
@@ -932,12 +932,43 @@ class MainWindow(QMainWindow):
         if full:
             self._cache_table.select_by_gc_code(gc_code)
             self._detail_panel.show_cache(full)
+            self._map_widget.set_active_cache(gc_code)
             self._statusbar.showMessage(
                 f"{full.gc_code} — {full.name}"
             )
 
+    def _on_set_corrected_from_map(self, gc_code: GcCode, lat: float, lon: float) -> None:
+        """Sæt korrigerede koordinater på en cache via højreklik på kortet."""
+        from opensak.db.database import get_session
+        from opensak.db.models import UserNote
+        from opensak.coords import format_coords
+        from opensak.gui.settings import get_settings
+        from sqlalchemy.orm import joinedload
+
+        with get_session() as session:
+            cache = session.query(Cache).options(
+                joinedload(Cache.user_note)
+            ).filter_by(gc_code=gc_code).first()
+            if not cache:
+                return
+            note = cache.user_note
+            if note is None:
+                note = UserNote(cache_id=cache.id)
+                session.add(note)
+            note.corrected_lat = lat
+            note.corrected_lon = lon
+            note.is_corrected = True
+            session.commit()
+
+        coords = format_coords(lat, lon, get_settings().coord_format)
+        self._statusbar.showMessage(
+            tr("map_ctx_corrected_set").format(gc_code=gc_code, coords=coords)
+        )
+        self._on_corrected_coords_changed(gc_code)
+
     def _on_corrected_coords_changed(self, gc_code: GcCode) -> None:
-        """Update the map pin for a single cache after corrected coordinates change."""
+        """Update the map pin and table row after corrected coordinates change."""
+        self._cache_table.refresh_cache_row(gc_code)
         full = self._load_full_cache(gc_code)
         if full:
             self._map_widget.update_cache(full)

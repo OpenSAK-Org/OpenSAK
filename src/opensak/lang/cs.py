@@ -603,6 +603,10 @@ STRINGS: dict[str, str] = {
 
     # ── Corrected coordinates ─────────────────────────────────────────────────
     "map_home_label":               "Domov",
+    "map_ctx_copy_coords":          "Kopírovat {coords}",
+    "map_ctx_copy_as":              "Kopírovat jako...",
+    "map_ctx_set_corrected":        "Nastavit opravené souřadnice",
+    "map_ctx_corrected_set":        "✓ {gc_code} — opravené souřadnice nastaveny: {coords}",
     "detail_corrected_coords":      "Opravené souřadnice",
     "detail_corrected_tooltip":     "Kliknutím otevřete opravené souřadnice v mapové aplikaci",
     "detail_corrected_edit_btn":    "✏️  Upravit",
