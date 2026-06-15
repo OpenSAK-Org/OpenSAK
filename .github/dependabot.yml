@@ -1,10 +1,12 @@
 version: 2
 
-# PRs land on the default branch (main); set target-branch here once a beta branch exists.
+# PRs land on the beta branch (the primary development branch); they go through CI
+# and reach main via a beta -> main PR.
 
 updates:
   - package-ecosystem: pip
     directory: /
+    target-branch: beta
     schedule:
       interval: daily
     open-pull-requests-limit: 10
@@ -14,6 +16,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: beta
     schedule:
       interval: daily
     open-pull-requests-limit: 10
