@@ -12,7 +12,11 @@ __pycache__/
 
 # pytest cache
 .pytest_cache/
+
+# coverage data and reports (config .coveragerc is tracked)
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 
 # Distribution / packaging
