@@ -13,3 +13,6 @@ concurrency:
 jobs:
   test:
     uses: ./.github/workflows/tests.yml
+
+  quality:
+    uses: ./.github/workflows/quality.yml

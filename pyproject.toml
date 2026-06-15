@@ -24,6 +24,7 @@ dev = [
     "pytest>=8.0",
     "pytest-cov",
     "pytest-qt>=4.0",
+    "mypy>=1.8",
 ]
 
 [tool.setuptools.packages.find]
@@ -36,6 +37,16 @@ addopts = "--import-mode=importlib"
 markers = [
     "gui: tests that require a display and pytest-qt",
 ]
+
+# Typed-first: only the modules below are checked; scope expands over time.
+[tool.mypy]
+files = ["src/opensak/db", "src/opensak/filters", "src/opensak/geocoder.py"]
+mypy_path = "src"
+explicit_package_bases = true
+namespace_packages = true
+python_version = "3.11"
+follow_imports = "silent"
+ignore_missing_imports = true
 
 [project.scripts]
 opensak = "opensak.utils.run_cli:main"
