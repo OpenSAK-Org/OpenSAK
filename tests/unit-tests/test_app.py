@@ -133,7 +133,9 @@ def test_main_smoke(qapp, monkeypatch):
     monkeypatch.setattr(appmod, "_make_splash",
                         lambda app: SimpleNamespace(
                             showMessage=lambda *a, **k: None,
-                            finish=lambda w: None))
+                            finish=lambda w: None,
+                            hide=lambda: None,
+                            show=lambda: None))
     monkeypatch.setattr(appmod, "_migrate_legacy_db", lambda: None)
     monkeypatch.setattr("opensak.gui.theme.apply_theme", lambda app: None)
     monkeypatch.setattr("opensak.config.get_language", lambda: "en")
