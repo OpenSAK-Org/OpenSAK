@@ -52,8 +52,11 @@ def find_garmin_devices() -> list[Path]:
 def _is_garmin(path: Path) -> bool:
     """Tjek om en mappe er en Garmin enhed."""
     for marker in GARMIN_MARKERS:
-        if (path / marker).exists():
-            return True
+        try:
+            if (path / marker).exists():
+                return True
+        except OSError:
+            continue
     return False
 
 

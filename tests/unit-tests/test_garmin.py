@@ -351,6 +351,19 @@ class TestIsGarmin:
     def test_non_garmin_path(self, tmp_path):
         assert _is_garmin(tmp_path) is False
 
+    def test_unreadable_marker_does_not_raise(self, tmp_path, monkeypatch):
+        # A candidate like /mnt/lost+found (root-only) makes .exists() raise
+        # PermissionError on Python <=3.12; detection must skip it, not crash.
+        real_exists = Path.exists
+
+        def maybe_boom(self, *args, **kwargs):
+            if str(self).startswith(str(tmp_path)):
+                raise PermissionError(13, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "exists", maybe_boom)
+        assert _is_garmin(tmp_path) is False
+
 
 # ── get_garmin_gpx_path ───────────────────────────────────────────────────────
 
