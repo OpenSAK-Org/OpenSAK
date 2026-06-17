@@ -137,6 +137,7 @@ def test_main_smoke(qapp, monkeypatch):
                             hide=lambda: None,
                             show=lambda: None))
     monkeypatch.setattr(appmod, "_migrate_legacy_db", lambda: None)
+    monkeypatch.setattr("opensak.settings_store.is_first_run", lambda: False)
     monkeypatch.setattr("opensak.gui.theme.apply_theme", lambda app: None)
     monkeypatch.setattr("opensak.config.get_language", lambda: "en")
     monkeypatch.setattr("opensak.lang.load_language", lambda lang: None)
