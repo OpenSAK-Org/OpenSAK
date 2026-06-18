@@ -293,12 +293,68 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_corrected_lon: Optional[float] = None
     gsak_original_lat: Optional[float] = None
     gsak_original_lon: Optional[float] = None
+
+    # ── Issue #269: remaining GSAK "standard" waypoint extension fields ───────
+    # These mirror GSAK's own per-cache user fields (UserFlag, UserSort,
+    # UserData/User2-4, IsPremium, FavPoints). All are optional and only
+    # present when the GPX was exported FROM GSAK itself (not from a raw
+    # geocaching.com Pocket Query) — so None here simply means "not GSAK".
+    gsak_user_flag: Optional[bool] = None
+    gsak_is_premium: Optional[bool] = None
+    gsak_user_sort: Optional[int] = None
+    gsak_user_data_1: Optional[str] = None
+    gsak_user_data_2: Optional[str] = None
+    gsak_user_data_3: Optional[str] = None
+    gsak_user_data_4: Optional[str] = None
+    gsak_fav_points: Optional[int] = None
+
     for gsak_uri in _GSAK_NAMESPACES:
         gsak_ext = wpt_el.find(f"{{{gsak_uri}}}wptExtension")
         if gsak_ext is not None:
             ftf_el = gsak_ext.find(f"{{{gsak_uri}}}FirstToFind")
             if ftf_el is not None and ftf_el.text:
                 gsak_ftf = ftf_el.text.strip().lower() == "true"
+
+            flag_el = gsak_ext.find(f"{{{gsak_uri}}}UserFlag")
+            if flag_el is not None and flag_el.text:
+                gsak_user_flag = flag_el.text.strip().lower() == "true"
+
+            premium_el = gsak_ext.find(f"{{{gsak_uri}}}IsPremium")
+            if premium_el is not None and premium_el.text:
+                gsak_is_premium = premium_el.text.strip().lower() == "true"
+
+            sort_el = gsak_ext.find(f"{{{gsak_uri}}}UserSort")
+            if sort_el is not None and sort_el.text:
+                try:
+                    gsak_user_sort = int(sort_el.text.strip())
+                except ValueError:
+                    pass
+
+            ud1_el = gsak_ext.find(f"{{{gsak_uri}}}UserData")
+            if ud1_el is not None and ud1_el.text and ud1_el.text.strip():
+                gsak_user_data_1 = ud1_el.text.strip()
+
+            ud2_el = gsak_ext.find(f"{{{gsak_uri}}}User2")
+            if ud2_el is not None and ud2_el.text and ud2_el.text.strip():
+                gsak_user_data_2 = ud2_el.text.strip()
+
+            ud3_el = gsak_ext.find(f"{{{gsak_uri}}}User3")
+            if ud3_el is not None and ud3_el.text and ud3_el.text.strip():
+                gsak_user_data_3 = ud3_el.text.strip()
+
+            ud4_el = gsak_ext.find(f"{{{gsak_uri}}}User4")
+            if ud4_el is not None and ud4_el.text and ud4_el.text.strip():
+                gsak_user_data_4 = ud4_el.text.strip()
+
+            # FavPoints: only trustworthy when GSAK itself pulled it from the
+            # Geocaching.com API — but if it's present in the GPX, GSAK has
+            # already done that work for us, so we take it as-is.
+            fav_el = gsak_ext.find(f"{{{gsak_uri}}}FavPoints")
+            if fav_el is not None and fav_el.text:
+                try:
+                    gsak_fav_points = int(fav_el.text.strip())
+                except ValueError:
+                    pass
 
             # Format B: LatBeforeCorrect/LonBeforeCorrect (newer GSAK)
             # The mere PRESENCE of LatBeforeCorrect means CC has been set in GSAK —
@@ -368,6 +424,14 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_corrected_lon": gsak_corrected_lon,
         "gsak_original_lat": gsak_original_lat,
         "gsak_original_lon": gsak_original_lon,
+        "gsak_user_flag":    gsak_user_flag,
+        "gsak_is_premium":   gsak_is_premium,
+        "gsak_user_sort":    gsak_user_sort,
+        "gsak_user_data_1":  gsak_user_data_1,
+        "gsak_user_data_2":  gsak_user_data_2,
+        "gsak_user_data_3":  gsak_user_data_3,
+        "gsak_user_data_4":  gsak_user_data_4,
+        "gsak_fav_points":   gsak_fav_points,
         "found_by_me":       found_by_me,
     }
 
@@ -861,6 +925,29 @@ def _upsert_cache(
         else:
             # Brugeren har IKKE fundet denne cache — FTF ikke relevant
             cache.first_to_find = False
+
+    # ── GSAK personal/user fields (issue #269) ────────────────────────────────
+    # UserFlag, IsPremium, UserSort, UserData1-4 and FavPoints are only ever
+    # present when the GPX came FROM GSAK (not from a raw Geocaching.com
+    # Pocket Query). We only touch a field when GSAK actually supplied a
+    # value, so a plain PQ re-import never wipes data the user entered
+    # manually in OpenSAK or in a previous GSAK-sourced import.
+    if data.get("gsak_user_flag") is not None:
+        cache.user_flag = data["gsak_user_flag"]
+    if data.get("gsak_is_premium") is not None:
+        cache.premium_only = data["gsak_is_premium"]
+    if data.get("gsak_user_sort") is not None:
+        cache.user_sort = data["gsak_user_sort"]
+    if data.get("gsak_user_data_1") is not None:
+        cache.user_data_1 = data["gsak_user_data_1"]
+    if data.get("gsak_user_data_2") is not None:
+        cache.user_data_2 = data["gsak_user_data_2"]
+    if data.get("gsak_user_data_3") is not None:
+        cache.user_data_3 = data["gsak_user_data_3"]
+    if data.get("gsak_user_data_4") is not None:
+        cache.user_data_4 = data["gsak_user_data_4"]
+    if data.get("gsak_fav_points") is not None:
+        cache.favorite_points = data["gsak_fav_points"]
 
     # ── GSAK corrected coordinates (issue #129, #73) ──────────────────────────
     # Corrected coords are stored in UserNote (user data), not on Cache itself.
