@@ -488,7 +488,7 @@ class CacheDetailPanel(QWidget):
             self._raw_hint if self._raw_hint else tr("detail_no_hint")
         )
 
-        # Logs — show up to 10 most recent
+        # Logs — viser alle (sorteret efter dato, nyeste først)
         self._render_logs(cache)
 
     def _render_logs(self, cache: Cache) -> None:
@@ -524,7 +524,7 @@ class CacheDetailPanel(QWidget):
             return
 
         html = []
-        for log in filtered[:20]:
+        for log in filtered:
             colour = colours.get(log.log_type, "#555555")
             date_str = log.log_date.strftime("%d.%m.%Y") if log.log_date else "?"
             text = log.text or ""
