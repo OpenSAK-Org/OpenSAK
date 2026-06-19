@@ -38,7 +38,7 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter,
-    AttributeFilter, HasTrackableFilter, HasCorrectedFilter,
+    AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
@@ -1017,6 +1017,9 @@ class FilterDialog(QDialog):
         cc_no  = self._cc_no.isChecked()
         if cc_yes and not cc_no:
             fs.add(HasCorrectedFilter())
+        elif cc_no and not cc_yes:
+            fs.add(NoCorrectedFilter())
+        # Begge valgt (eller ingen) = vis alt = intet filter
 
         # Datoer — hjælper til at konvertere QDate til datetime
         def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
@@ -1281,6 +1284,9 @@ class FilterDialog(QDialog):
             elif ftype == "has_corrected":
                 self._cc_yes.setChecked(True)
                 self._cc_no.setChecked(False)
+            elif ftype == "no_corrected":
+                self._cc_yes.setChecked(False)
+                self._cc_no.setChecked(True)
             elif ftype == "attribute":
                 attr_id = getattr(f, "attribute_id", None)
                 is_on   = getattr(f, "is_on", True)

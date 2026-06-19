@@ -692,6 +692,25 @@ class HasCorrectedFilter(BaseFilter):
         return cls()
 
 
+class NoCorrectedFilter(BaseFilter):
+    """Keep only caches that do NOT have corrected coordinates set.
+
+    Counterpart to HasCorrectedFilter — mirrors the Premium/NonPremium
+    pair. Without this class, unchecking "has corrected" while leaving
+    only "no corrected" checked in the filter dialog produced no filter
+    at all (bug #274: the Corrected Coordinate flag was silently ignored).
+    """
+    filter_type = "no_corrected"
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        return not bool(note and note.is_corrected)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NoCorrectedFilter":
+        return cls()
+
+
 class UserFlagFilter(BaseFilter):
     """Keep caches based on user_flag value."""
     filter_type = "user_flag"
@@ -911,6 +930,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
+    "no_corrected":  NoCorrectedFilter,
     "premium":       PremiumFilter,
     "non_premium":   NonPremiumFilter,
     "where_clause":       WhereClauseFilter,

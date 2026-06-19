@@ -17,7 +17,7 @@ from opensak.filters.engine import (
     DistanceFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    HasCorrectedFilter, UserFlagFilter, DnfFilter, FtfFilter,
+    HasCorrectedFilter, NoCorrectedFilter, UserFlagFilter, DnfFilter, FtfFilter,
     FavoritePointsFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
     # Helpers
     _haversine_km, _iter_filters, FILTER_REGISTRY, SORT_FIELDS,
@@ -749,6 +749,16 @@ class TestFlagFilters:
         f = HasCorrectedFilter()
         assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=True))) is True
         assert f.matches(_cache(user_note=None)) is False
+
+    def test_no_corrected(self):
+        # Counterpart to HasCorrectedFilter (bug #274 — was missing entirely,
+        # so the "no corrected" filter checkbox had no effect).
+        f = NoCorrectedFilter()
+        assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=True))) is False
+        assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=False))) is True
+        assert f.matches(_cache(user_note=None)) is True
+        assert NoCorrectedFilter.from_dict(f.to_dict()).filter_type == "no_corrected"
+        assert "no_corrected" in FILTER_REGISTRY
 
     def test_user_flag(self):
         f = UserFlagFilter(flagged=True)

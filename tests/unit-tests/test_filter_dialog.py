@@ -17,7 +17,7 @@ from opensak.filters.engine import (
     FilterSet, NameFilter, GcCodeFilter, PlacedByFilter, OwnerFilter,
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter, AvailabilityFilter, DistanceFilter,
-    PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter,
+    PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, FilterProfile,
@@ -134,6 +134,20 @@ class TestBuildFilterset:
         dlg._prem_yes.setChecked(False)
         dlg._prem_no.setChecked(True)
         assert "non_premium" in _types(dlg._build_filterset())
+
+    def test_no_corrected_checkbox_alone_builds_filter(self, dlg):
+        # Bug #274 — checking only "no corrected" (unchecking "has corrected")
+        # produced no filter at all, so the flag was silently ignored.
+        dlg._cc_yes.setChecked(False)
+        dlg._cc_no.setChecked(True)
+        assert "no_corrected" in _types(dlg._build_filterset())
+
+    def test_loads_no_corrected_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(NoCorrectedFilter())
+        dlg._load_filterset(fs)
+        assert dlg._cc_no.isChecked() is True
+        assert dlg._cc_yes.isChecked() is False
 
     def test_misc_filters(self, dlg):
         dlg._country_filter.setText("DK")
