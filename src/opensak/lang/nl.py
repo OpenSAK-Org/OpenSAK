@@ -449,7 +449,7 @@ STRINGS: dict[str, str] = {
     "filter_saved_label":           "Opgeslagen filter:",
     "filter_none":                  "(Geen)",
     "filter_save_btn":              "💾  Opslaan",
-    "filter_delete_profile_tooltip":"Geselecteerd profiel verwijderen",
+    "filter_delete_profile_tooltip":"Geselecteerd filterprofiel verwijderen",
     "filter_apply_btn":             "⚡  Toepassen",
     "filter_reset_all_btn":         "↺  Alles resetten",
     "filter_reset_tab_btn":         "↺  Tabblad resetten",

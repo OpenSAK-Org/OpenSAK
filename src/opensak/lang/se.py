@@ -446,7 +446,7 @@ STRINGS: dict[str, str] = {
     "filter_saved_label":           "Sparat filter:",
     "filter_none":                  "(Inget)",
     "filter_save_btn":              "💾  Spara",
-    "filter_delete_profile_tooltip":"Ta bort vald profil",
+    "filter_delete_profile_tooltip":"Ta bort valt filterprofil",
     "filter_apply_btn":             "⚡  Använd",
     "filter_reset_all_btn":         "↺  Återställ allt",
     "filter_reset_tab_btn":         "↺  Återställ flik",

@@ -446,7 +446,7 @@ STRINGS: dict[str, str] = {
     "filter_saved_label":           "Filtro guardado:",
     "filter_none":                  "(Nenhum)",
     "filter_save_btn":              "💾  Guardar",
-    "filter_delete_profile_tooltip":"Eliminar perfil selecionado",
+    "filter_delete_profile_tooltip":"Eliminar perfil de filtro selecionado",
     "filter_apply_btn":             "⚡  Aplicar",
     "filter_reset_all_btn":         "↺  Repor tudo",
     "filter_reset_tab_btn":         "↺  Repor separador",

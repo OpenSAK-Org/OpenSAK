@@ -446,7 +446,7 @@ STRINGS: dict[str, str] = {
     "filter_saved_label":           "Uložený filtr:",
     "filter_none":                  "(Žádný)",
     "filter_save_btn":              "💾  Uložit",
-    "filter_delete_profile_tooltip":"Smazat vybraný profil",
+    "filter_delete_profile_tooltip":"Smazat vybraný profil filtru",
     "filter_apply_btn":             "⚡  Použít",
     "filter_reset_all_btn":         "↺  Resetovat vše",
     "filter_reset_tab_btn":         "↺  Resetovat záložku",

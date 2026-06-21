@@ -446,7 +446,7 @@ STRINGS: dict[str, str] = {
     "filter_saved_label":           "Gemt filter:",
     "filter_none":                  "(Intet)",
     "filter_save_btn":              "💾  Gem",
-    "filter_delete_profile_tooltip":"Slet valgt profil",
+    "filter_delete_profile_tooltip":"Slet valgt filterprofil",
     "filter_apply_btn":             "⚡  Udfør",
     "filter_reset_all_btn":         "↺  Reset alle",
     "filter_reset_tab_btn":         "↺  Reset fane",
