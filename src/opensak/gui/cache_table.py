@@ -9,7 +9,7 @@ from typing import Optional
 from datetime import datetime
 
 from PySide6.QtCore import (
-    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale
+    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
 )
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication
@@ -120,10 +120,8 @@ def _format_date(d: datetime) -> str:
     if fmt == DateFormat.YMD:
         return d.strftime("%Y-%m-%d")
     # LOCALE: ask Qt for the OS short-date pattern
-    return QLocale.system().toString(
-        d.date() if hasattr(d, "date") else d,
-        QLocale.FormatType.ShortFormat,
-    )
+    qd = QDate(d.year, d.month, d.day)
+    return QLocale.system().toString(qd, QLocale.FormatType.ShortFormat)
 
 
 def _gc_sort_key(gc_code: GcCode) -> str:
