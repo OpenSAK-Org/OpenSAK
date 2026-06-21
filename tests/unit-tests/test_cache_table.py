@@ -106,7 +106,7 @@ class TestHelpers:
         assert _container_text("regular",    None)                == "Regular"
         assert _container_text("large",      None)                == "Large"
         assert _container_text("other",      None)                == "Other"
-        assert _container_text("not chosen", None)                == ""
+        assert _container_text("not chosen", None)                == "Not chosen"
         assert _container_text(None,         None)                == ""
 
     def test_container_text_non_physical_types(self):
@@ -482,6 +482,13 @@ class TestDelegates:
     def test_size_bar_delegate_paints_letter(self, model):
         model.load([_cache(container="other", cache_type="virtual cache")])
         self._paint(SizeBarDelegate(), model, "container")
+
+    def test_size_bar_delegate_paints_not_chosen(self, model):
+        # Issue #328: "Not chosen" must render a "?" label, not blank
+        model.load([_cache(container="Not chosen", cache_type="traditional cache")])
+        d = SizeBarDelegate()
+        assert d._SIZE_LABELS.get("not chosen") == "?"
+        self._paint(d, model, "container")
 
     def test_size_bar_sizehint(self, model):
         from PySide6.QtWidgets import QStyleOptionViewItem

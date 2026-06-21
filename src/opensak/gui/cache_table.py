@@ -199,7 +199,7 @@ _CONTAINER_TEXT_LABELS: dict[str, str] = {
     "regular":    "Regular",
     "large":      "Large",
     "other":      "Other",
-    "not chosen": "",
+    "not chosen": "Not chosen",
 }
 _NON_PHYSICAL_TEXT_LABELS: dict[str, str] = {
     "virtual cache": "Virtual",
@@ -285,7 +285,8 @@ class SizeBarDelegate(QStyledItemDelegate):
     }
     # Bogstaver vist i sidste segment for size-værdier (issue #90)
     _SIZE_LABELS = {
-        "other": "O",
+        "other":      "O",
+        "not chosen": "?",
     }
     # Cache-typer der vises med tomt felt + bogstav (uanset container value)
     _LABEL_TYPES = {
