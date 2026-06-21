@@ -373,6 +373,19 @@ class TestSort:
         model.sort(ALL_COLUMNS.index("name"), Qt.SortOrder.AscendingOrder)
         assert got and got[-1][0] == "name"
 
+    def test_sort_none_vs_string_no_crash(self, model):
+        # Regression: Optional[str] columns (country, state, etc.) caused
+        # TypeError when some caches had None and others had a string value,
+        # because the else branch returned int(0) for None and str for strings.
+        caches = [
+            _cache(gc_code="A", country="Denmark", state="Region H", placed_by="Alice"),
+            _cache(gc_code="B"),  # country/state/placed_by all None
+        ]
+        model.load(caches)
+        for col in ("country", "state", "county", "placed_by", "user_data_1"):
+            model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.AscendingOrder)
+            model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.DescendingOrder)
+
 
 # ── flags / setData (needs DB) ──────────────────────────────────────────────────
 

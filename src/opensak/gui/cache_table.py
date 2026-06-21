@@ -851,8 +851,8 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: _gc_sort_key(c.gc_code or ""), reverse=reverse)
         else:
             self._caches.sort(
-                key=lambda c: (getattr(c, col, "") or "").lower()
-                if isinstance(getattr(c, col, ""), str) else getattr(c, col, 0) or 0,
+                key=lambda c: (getattr(c, col) or "").lower()
+                if isinstance(getattr(c, col), (str, type(None))) else getattr(c, col, 0) or 0,
                 reverse=reverse
             )
         self.endResetModel()
