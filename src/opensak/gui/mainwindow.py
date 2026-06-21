@@ -387,6 +387,8 @@ class MainWindow(QMainWindow):
 
         act_settings = QAction(tr("action_settings"), self)
         act_settings.setShortcut(QKeySequence("Ctrl+,"))
+        # Ctrl+, triggers macOS PreferencesRole auto-assignment, relabeling the action "Preferences".
+        act_settings.setMenuRole(QAction.MenuRole.NoRole)
         act_settings.triggered.connect(self._open_settings)
         tools_menu.addAction(act_settings)
 
