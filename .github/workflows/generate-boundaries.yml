@@ -1,0 +1,156 @@
+# .github/workflows/generate-boundaries.yml
+#
+# Generates the OpenSAK boundary dataset from public geodata and uploads the
+# result as a GitHub Release.
+#
+# Intended to move to the AgreeDK/OpenSAK-Data repo once that repo exists.
+# Running here on the beta branch lets us test the full pipeline first.
+#
+# Triggers:
+#   schedule        — every Monday at 03:00 UTC (full global run)
+#   workflow_dispatch — manual trigger with optional subset + dry-run controls
+
+name: Generate boundary dataset
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: >
+          ISO 3166-1 alpha-2 codes to limit the run (e.g. PT,ES,DK).
+          Leave empty for the full global dataset.
+        required: false
+        default: 'PT,DK'
+
+      no_counties:
+        description: Skip county download (much faster, good for a quick smoke test)
+        type: boolean
+        required: false
+        default: true
+
+      publish:
+        description: Create a GitHub Release with the output files
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed only for the release step
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install shapely
+
+      # ── Build the CLI arguments from the workflow_dispatch inputs ─────────
+      # On a scheduled run every input is empty; that produces a full global run.
+      - name: Resolve generator arguments
+        id: cfg
+        shell: bash
+        run: |
+          ARGS="--out-dir output"
+
+          COUNTRIES="${{ github.event.inputs.countries }}"
+          if [ -n "$COUNTRIES" ]; then
+            ARGS="$ARGS --countries $COUNTRIES"
+          fi
+
+          if [ "${{ github.event.inputs.no_counties }}" = "true" ]; then
+            ARGS="$ARGS --no-counties"
+          fi
+
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
+          # Publish when the release checkbox is ticked, or on a scheduled run.
+          if [ "${{ github.event.inputs.publish }}" = "true" ] \
+             || [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Run the generator ─────────────────────────────────────────────────
+      - name: Generate dataset
+        run: python tools/boundaries/generate.py ${{ steps.cfg.outputs.args }}
+
+      # ── Always upload as a workflow artifact for inspection ───────────────
+      - name: Upload dataset artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boundary-dataset-${{ github.run_number }}
+          path: |
+            output/boundaries.db
+            output/manifest.json
+            output/countries/
+            output/states/
+            output/counties/
+          retention-days: 7
+
+      # ── Optionally publish a GitHub Release ───────────────────────────────
+      # County packs are uploaded flat (e.g. pt.geojson) — that matches the
+      # filename packs.py fetches from the release URL.
+      # countries/world.geojson and states/<cc>.geojson are uploaded with their
+      # directory prefix (countries_world.geojson, states_pt.geojson) to avoid
+      # name collisions with county packs of the same ISO code.
+      - name: Rename files to avoid flat-release name collisions
+        if: steps.cfg.outputs.publish == 'true'
+        shell: bash
+        run: |
+          mkdir -p release-assets
+
+          # boundaries.db and manifest.json — no rename needed
+          cp output/boundaries.db  release-assets/boundaries.db
+          cp output/manifest.json  release-assets/manifest.json
+
+          # countries: world.geojson → release-assets/world.geojson
+          if [ -f output/countries/world.geojson ]; then
+            cp output/countries/world.geojson release-assets/world.geojson
+          fi
+
+          # states: pt.geojson → release-assets/states_pt.geojson
+          for f in output/states/*.geojson; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            cp "$f" "release-assets/states_${base}"
+          done
+
+          # counties: pt.geojson → release-assets/pt.geojson  (no prefix — on-demand fetch)
+          for f in output/counties/*.geojson; do
+            [ -f "$f" ] || continue
+            cp "$f" "release-assets/$(basename "$f")"
+          done
+
+          echo "Release assets:"
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        if: steps.cfg.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "data-${{ github.run_number }}"
+          name: "Boundary dataset – ${{ github.run_number }}"
+          body: |
+            Auto-generated boundary dataset.
+
+            **Sources**
+            - Countries / States: Natural Earth 10m v5.1.2 (public domain)
+            - Counties: GADM 4.1 level-2 (CC-BY-4.0)
+
+            **Asset naming**
+            - `boundaries.db`, `manifest.json` — direct use
+            - `world.geojson` — country polygons
+            - `states_<cc>.geojson` — state/province polygons per country
+            - `<cc>.geojson` — county polygons per country (on-demand via packs.py)
+          files: release-assets/*
