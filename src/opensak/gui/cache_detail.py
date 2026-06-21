@@ -7,8 +7,9 @@ Supports corrected coordinates (user-solved mystery cache finals).
 from __future__ import annotations
 import re
 import webbrowser
+from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
@@ -22,6 +23,19 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
+from opensak.utils.types import DateFormat
+
+
+def _format_date(d: datetime) -> str:
+    fmt = get_settings().date_format
+    if fmt == DateFormat.DMY:
+        return d.strftime("%d.%m.%Y")
+    if fmt == DateFormat.MDY:
+        return d.strftime("%m/%d/%Y")
+    if fmt == DateFormat.YMD:
+        return d.strftime("%Y-%m-%d")
+    qd = QDate(d.year, d.month, d.day)
+    return QLocale.system().toString(qd, QLocale.FormatType.ShortFormat)
 
 
 # issue #219 — geocaching.com logge bruger markdown-links: [linktekst](https://url)
@@ -466,7 +480,7 @@ class CacheDetailPanel(QWidget):
         if cache.placed_by:
             parts.append(tr("detail_placed_by", name=cache.placed_by))
         if cache.hidden_date:
-            parts.append(tr("detail_hidden_date", date=cache.hidden_date.strftime('%d.%m.%Y')))
+            parts.append(tr("detail_hidden_date", date=_format_date(cache.hidden_date)))
         self._placed_lbl.setText("   |   ".join(parts))
 
         # Description — renderes via QWebEngineView så billeder og CJK-fonte virker
@@ -537,7 +551,7 @@ class CacheDetailPanel(QWidget):
         html = []
         for log in filtered:
             colour = colours.get(log.log_type, "#555555")
-            date_str = log.log_date.strftime("%d.%m.%Y") if log.log_date else "?"
+            date_str = _format_date(log.log_date) if log.log_date else "?"
             # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
             text = log.text or ""
             if filter_text and filter_text in text.lower():

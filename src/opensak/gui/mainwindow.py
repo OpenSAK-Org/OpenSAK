@@ -1205,6 +1205,12 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self._reload_home_combo()
             self._map_widget.reload_map(self._refresh_cache_list)
+            self._refresh_cache_list()
+            cache = self._cache_table.selected_cache()
+            if cache:
+                full = self._load_full_cache(cache.gc_code)
+                if full:
+                    self._detail_panel.show_cache(full)
 
     def _reload_home_combo(self) -> None:
         """Genindlæs hjemmepunkts-dropdown fra settings."""
