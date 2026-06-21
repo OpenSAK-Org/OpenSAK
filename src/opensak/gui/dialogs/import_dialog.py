@@ -356,13 +356,15 @@ class ImportDialog(QDialog):
             )
             for cache in query.all():
                 lat, lon = cache.latitude, cache.longitude
+                basis = "posted"
                 if cache.user_note and cache.user_note.is_corrected:
                     clat = cache.user_note.corrected_lat
                     clon = cache.user_note.corrected_lon
                     if clat is not None and clon is not None:
                         lat, lon = clat, clon
+                        basis = "corrected"
                 if lat is not None and lon is not None:
-                    rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon))
+                    rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon, basis=basis))
 
         if not rows:
             self._finish_geocoding()
