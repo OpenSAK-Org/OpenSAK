@@ -1,6 +1,6 @@
 # Development Plan — Offline Reverse Geocoding (County / State / Country)
 
-Status: Phase 0 + Phase 1 DONE (merged into beta). Phase 3 DONE (merged into beta). Phase 4 DONE (merged into beta). Phase 5 DONE (branch `60-phase-5-packaging`). Phase 2 pending (blocked on AgreeDK/OpenSAK-Data repo).
+Status: Phase 0 + Phase 1 DONE (merged into beta). Phase 3 DONE (merged into beta). Phase 4 DONE (merged into beta). Phase 5 DONE (merged into beta). Phase 2 DONE (branch `60-phase-2-packs`, unpushed — awaiting OK).
 Relates to: GitHub issue #60 · design in [`architecture/reverse-geocoding.md`](../architecture/reverse-geocoding.md)
 Scope: full implementation of the offline boundary engine — data pipeline, runtime engine, on-demand packs, schema, GUI, packaging/CI.
 
@@ -61,18 +61,17 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 ---
 
-## Phase 2 — On-demand packs and updates (`src/opensak/geo/packs.py`)
+## Phase 2 — On-demand packs and updates (`src/opensak/geo/packs.py`) ✓ DONE
 
 **Goal:** fetch county packs lazily from `OpenSAK-Data`, cache them locally, and keep both the index and the packs current — all without a project-run server.
 
-**Tasks**
-- [ ] `geo/packs.py` — on a county cache miss, download that country's pack from the `AgreeDK/OpenSAK-Data` Release asset URL, write it under `counties/` with an **atomic** temp-then-swap, and serve locally thereafter.
-- [ ] **"Download all"** — pre-fetch every pack for full offline coverage.
-- [ ] **Update check** — throttled (≈weekly + manual) comparison against the latest `manifest.json`; re-download only the changed `boundaries.db` and any out-of-date *cached* packs, atomically; flag affected caches' `location_dataset` as stale rather than rewriting values.
-- [ ] Tests with the network **mocked/stubbed** (mirror `conftest.py`'s offline pattern): cache-miss → fetch → local second lookup; version compare; atomic swap; offline fallback returns the coarser cached layer, never a wrong guess.
+**What was built:** `geo/packs.py` — `fetch_manifest`, `fetch_pack` (atomic temp+rename), `fetch_all` (downloads all missing packs with progress callback), `check_update` (throttled weekly by manifest.json mtime, bypass with `force=True`), `apply_update` (only re-downloads locally-cached packs that changed; skips uncached packs; saves manifest). `BoundaryStore._load_pack` now triggers `fetch_pack` on a county pack miss; `TerritoryResolver` skips a candidate gracefully when its pack cannot be fetched (returns `None` for county rather than crashing). Two new Waypoint menu actions under the `update_location` flag guard: "Download boundary packs…" and "Check for boundary data updates…", backed by `BoundaryDownloadDialog` and `BoundaryCheckDialog` workers. 19 i18n keys added to all 8 lang files. 23 unit tests with mocked network covering all code paths.
 
-**Acceptance:** a missing country fetches once (mocked) then resolves locally; an update detects a newer manifest and refreshes only what changed.
-**Risk:** medium (network edge cases, atomicity). Size: M.
+**Remaining (blocked on AgreeDK/OpenSAK-Data repo):**
+- [ ] Verify release asset URL pattern once the repo and its first release exist.
+- [ ] Build pipeline step to publish `data/` as GitHub Release assets.
+
+**Acceptance:** ✓ 23 tests pass; throttle, force, atomic write, selective re-download, graceful degradation all covered; 1385 unit tests pass.
 
 ---
 
