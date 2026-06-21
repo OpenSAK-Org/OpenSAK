@@ -334,6 +334,7 @@ class UpdateLocationDialog(QDialog):
         self._worker.row_done.connect(self._on_row_done)
         self._worker.all_done.connect(self._on_done)
         self._worker.cancelled.connect(self._on_cancelled)
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _request_cancel(self) -> None:
@@ -383,5 +384,5 @@ class UpdateLocationDialog(QDialog):
     def closeEvent(self, event) -> None:
         if self._worker and self._worker.isRunning():
             self._worker.request_cancel()
-            self._worker.wait(3000)
+            self._worker.wait()
         super().closeEvent(event)

@@ -215,12 +215,16 @@ class TestUpdateLocationDialog:
                 self.row_done = MagicMock()
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
+                self.finished = MagicMock()
 
             def start(self):
                 started.append(True)
 
             def isRunning(self):
                 return False
+
+            def deleteLater(self):
+                pass
 
         monkeypatch.setattr(uld, "ReverseGeocodeWorker", FakeWorker)
         dlg._start()
@@ -273,6 +277,38 @@ class TestUpdateLocationDialog:
         dlg._worker = worker
         dlg.close()
         worker.request_cancel.assert_called_once()
+        # wait() must be called with no timeout so the dialog never destroys
+        # a still-running QThread (which causes SIGABRT).
+        worker.wait.assert_called_once_with()
+
+    def test_start_connects_finished_to_delete_later(self, qtbot, db, monkeypatch):
+        # finished must be connected to deleteLater so Qt cleans up the C++
+        # thread object only after the thread finishes, preventing GC-driven SIGABRT.
+        dlg = UpdateLocationDialog()
+        qtbot.addWidget(dlg)
+        monkeypatch.setattr(dlg, "_build_rows", lambda: [_CacheRow("GC1", 55.0, 12.0)])
+        connected = []
+
+        class FakeWorker:
+            def __init__(self, rows):
+                self.row_done = MagicMock()
+                self.all_done = MagicMock()
+                self.cancelled = MagicMock()
+                self.finished = MagicMock()
+
+            def start(self):
+                pass
+
+            def isRunning(self):
+                return False
+
+            def deleteLater(self):
+                pass
+
+        fake = FakeWorker([])
+        monkeypatch.setattr(uld, "ReverseGeocodeWorker", lambda rows: fake)
+        dlg._start()
+        fake.finished.connect.assert_any_call(fake.deleteLater)
 
     def test_menu_mode_finalize_redisables_this(self, qtbot, db):
         dlg = UpdateLocationDialog()

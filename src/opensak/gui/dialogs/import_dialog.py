@@ -407,7 +407,7 @@ class ImportDialog(QDialog):
         try:
             if self._geo_worker and self._geo_worker.isRunning():
                 self._geo_worker.request_cancel()
-                self._geo_worker.wait(3000)
+                self._geo_worker.wait()
         except RuntimeError:
             pass
         self._geo_worker = None

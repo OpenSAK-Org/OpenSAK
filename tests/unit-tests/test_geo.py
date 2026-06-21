@@ -17,6 +17,10 @@ _TRI_LOWER = [[[0, 0], [2, 0], [0, 2], [0, 0]]]          # x + y <= 2
 _TRI_UPPER = [[[2, 2], [0, 2], [2, 0], [2, 2]]]          # x + y >= 2
 _FAR_SQUARE = [[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]]
 _BIG_SQUARE = [[[-1, -1], [13, -1], [13, 13], [-1, 13], [-1, -1]]]
+# Isolated triangle: bbox [20,20,22,22] but polygon only covers the lower-left
+# half. A point at (lat=21.5, lon=21.5) is inside the bbox but outside the
+# triangle — the border-crossing bug. lon+lat=43>42 puts it above the hypotenuse.
+_ISOLATED_TRI = [[[20, 20], [22, 20], [20, 22], [20, 20]]]
 
 
 def _feature(layer: str, name: str, parent: str | None, polygon: Any, bbox: list[int]) -> dict[str, Any]:
@@ -39,6 +43,7 @@ def _build_boundaries(data_dir: Path) -> None:
         _feature("county", "Alpha County", "TL/TS", _TRI_LOWER, [0, 0, 2, 2]),
         _feature("county", "Beta County", "TL/TS", _TRI_UPPER, [0, 0, 2, 2]),
         _feature("county", "Gamma County", "TL/TS", _FAR_SQUARE, [10, 10, 12, 12]),
+        _feature("county", "Border County", "TL/TS", _ISOLATED_TRI, [20, 20, 22, 22]),
     ])
     _write_pack(data_dir / "states" / "test.geojson",
                 [_feature("state", "Teststate", "TL", _BIG_SQUARE, [-1, -1, 13, 13])])
@@ -55,11 +60,12 @@ def _build_boundaries(data_dir: Path) -> None:
 
     # rtree rows are (id, min_lat, max_lat, min_lon, max_lon)
     db.executemany("INSERT INTO rtree_county VALUES (?, ?, ?, ?, ?)",
-                   [(1, 0, 2, 0, 2), (2, 0, 2, 0, 2), (3, 10, 12, 10, 12)])
+                   [(1, 0, 2, 0, 2), (2, 0, 2, 0, 2), (3, 10, 12, 10, 12), (4, 20, 22, 20, 22)])
     db.executemany("INSERT INTO region_county VALUES (?, ?, ?, ?, ?, ?, ?)", [
         (1, "Alpha County", "TL/TS", "test.geojson", 0, 1, 1),
         (2, "Beta County", "TL/TS", "test.geojson", 1, 1, 1),
         (3, "Gamma County", "TL/TS", "test.geojson", 2, 1, 1),
+        (4, "Border County", "TL/TS", "test.geojson", 3, 1, 1),
     ])
     db.execute("INSERT INTO rtree_state VALUES (1, -1, 13, -1, 13)")
     db.execute("INSERT INTO region_state VALUES (1, 'Teststate', 'TL', 'test.geojson', 0, 1, 1)")
@@ -141,3 +147,17 @@ class TestResolver:
         # A point inside the big state/country square but outside any county bbox.
         loc = TerritoryResolver(store).resolve(8, 8)
         assert loc == GeoLocation("Testland", "Teststate", None)
+
+    def test_single_bbox_hit_outside_polygon_returns_none(self, store: BoundaryStore):
+        # Regression for border-crossing bug: the R-Tree bbox of Border County
+        # covers (lat=21.5, lon=21.5) and it is the only candidate, but the point
+        # sits above the triangle's hypotenuse (lon+lat=43>42) — outside the polygon.
+        # Before the fix, the single-hit shortcut returned "Border County" without
+        # checking the polygon; now it must return None.
+        loc = TerritoryResolver(store).resolve(21.5, 21.5)
+        assert loc.county is None
+
+    def test_single_bbox_hit_inside_polygon_still_resolves(self, store: BoundaryStore):
+        # Counterpart: a point truly inside Border County's triangle must still resolve.
+        loc = TerritoryResolver(store).resolve(20.5, 20.5)
+        assert loc.county == "Border County"

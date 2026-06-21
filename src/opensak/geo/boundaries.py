@@ -44,10 +44,7 @@ class TerritoryResolver:
         ids = self._store.candidates(layer, lat, lon)
         if not ids:
             return None
-        if len(ids) == 1:
-            region = self._store.region(layer, ids[0])
-            return region.name if region else None
-        for region_id in ids:  # overlap: keep the box the polygon actually contains
+        for region_id in ids:  # always do polygon check — a single bbox hit is not enough near borders
             region = self._store.region(layer, region_id)
             if region is None:
                 continue
