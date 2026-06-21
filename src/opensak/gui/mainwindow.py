@@ -873,8 +873,13 @@ class MainWindow(QMainWindow):
             total_in_db = session.query(Cache).count()
         self._db_count = total_in_db
 
-        # Filter name
-        filter_name = self._active_filter_name
+        # Filter name: named profile > generic "Active" > empty (shows None)
+        if self._active_filter_name:
+            filter_name = self._active_filter_name
+        elif len(self._current_filterset) > 0:
+            filter_name = tr("infobar_filter_active")
+        else:
+            filter_name = ""
 
         # Flagged count
         flagged = sum(1 for c in caches if c.user_flag)

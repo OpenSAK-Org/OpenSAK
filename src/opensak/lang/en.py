@@ -883,6 +883,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #116: Info bar (GSAK-style status bar) ────────────────────
     "infobar_filter":                    "Filter",
     "infobar_filter_none":               "None",
+    "infobar_filter_active":             "Active",
     "infobar_total":                     "caches in database",
     "infobar_center":                    "Center point",
     "infobar_count_label":               "Count:",
