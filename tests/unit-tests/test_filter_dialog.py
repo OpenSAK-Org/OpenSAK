@@ -28,8 +28,10 @@ from opensak.filters.engine import (
 def isolate(monkeypatch):
     # No real profiles on disk; deterministic home for DistanceFilter.
     monkeypatch.setattr(fd.FilterProfile, "list_profiles", staticmethod(lambda: []))
+    from opensak.utils.types import DateFormat
     monkeypatch.setattr("opensak.gui.settings.get_settings",
-                        lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=False))
+                        lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=False,
+                                               date_format=DateFormat.YMD))
 
 
 @pytest.fixture

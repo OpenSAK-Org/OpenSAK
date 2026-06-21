@@ -757,9 +757,27 @@ class FilterDialog(QDialog):
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
         from PySide6.QtWidgets import QScrollArea as _QScrollArea
+        from PySide6.QtCore import QLocale
         from opensak.gui.settings import get_settings
+        from opensak.utils.types import DateFormat
 
-        dist_unit = "mi" if get_settings().use_miles else "km"
+        settings = get_settings()
+        dist_unit = "mi" if settings.use_miles else "km"
+
+        fmt = settings.date_format
+        if fmt == DateFormat.DMY:
+            date_col_eg = "15.06.2020"
+            date_where_eg = "01.01.2023"
+        elif fmt == DateFormat.MDY:
+            date_col_eg = "06/15/2020"
+            date_where_eg = "01/01/2023"
+        elif fmt == DateFormat.YMD:
+            date_col_eg = "2020-06-15"
+            date_where_eg = "2023-01-01"
+        else:  # LOCALE
+            _loc = QLocale.system()
+            date_col_eg = _loc.toString(QDate(2020, 6, 15), QLocale.FormatType.ShortFormat)
+            date_where_eg = _loc.toString(QDate(2023, 1, 1), QLocale.FormatType.ShortFormat)
 
         dlg = QDialog(self)
         dlg.setWindowTitle(tr("filter_where_info_title"))
@@ -798,7 +816,7 @@ class FilterDialog(QDialog):
             f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
             f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
             "<tr><td><code>hidden_date</code></td><td>datetime</td>"
-            "<td>e.g. <code>'2020-06-15'</code></td></tr>"
+            f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
             "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
             "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
             f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
@@ -815,7 +833,7 @@ class FilterDialog(QDialog):
             "<code>favorite_points &gt; 100</code><br>"
             "<code>found = 0 AND available = 1</code><br>"
             "<code>name LIKE '%night%'</code><br>"
-            "<code>hidden_date &gt; '2023-01-01'</code>"
+            f"<code>hidden_date &gt; '{date_where_eg}'</code>"
         )
 
         scroll.setWidget(content)
