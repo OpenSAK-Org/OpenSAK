@@ -66,6 +66,7 @@ Want to translate OpenSAK into a new language, or update an existing one? It onl
        "da": "Dansk",
        "en": "English",
        "fr": "Français",
+       "nl": "Nederlands",
        "pt": "Português",
        "cs": "Čeština",
        "se": "Svenska",
@@ -154,7 +155,7 @@ git push origin main
 opensak-test # or pytest -v tests/
 ```
 
-The test suite covers the database layer, importer, filter engine, and language completeness (72 tests total). New features should include tests where practical.
+The test suite covers the database layer, importer, filter engine, dialogs, GPS/export, and language completeness. New features should include tests where practical.
 
 ---
 

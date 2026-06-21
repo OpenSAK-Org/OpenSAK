@@ -20,6 +20,20 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ---
 
+## Filter tabs
+
+The filter dialog is split across five tabs:
+
+| Tab | What's on it |
+|---|---|
+| **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
+| **Dates** | Hidden date, found by me date, DNF date, last log date |
+| **Other** | Country / State / County, user flag, DNF, FTF, favourite points |
+| **Attributes** | ~70 standard Groundspeak attributes |
+| **WHERE** | Raw SQL WHERE clause for advanced filtering |
+
+---
+
 ## Filter types
 
 ### Cache type
@@ -39,6 +53,8 @@ Show only specific cache types. Select one or more from the list.
 | Wherigo Cache |
 | Virtual Cache |
 | Webcam Cache |
+
+Use **Enable all / Disable all** to quickly select or deselect every type at once.
 
 ---
 
@@ -101,9 +117,7 @@ All three can be toggled independently. Default: available only.
 
 ### Distance
 
-Show only caches within a certain radius of a coordinate. You can also set a minimum distance to exclude caches that are too close.
-
-The reference point defaults to your active home point.
+Show only caches within a certain radius of your active home point. The unit (km or mi) follows your preference set in Settings.
 
 ---
 
@@ -125,13 +139,19 @@ Example: `GC1A` matches GC1A2B3 and GC1A999.
 
 ### Placed by
 
-Show caches placed by owners whose name contains a given text (case-insensitive).
+Show caches placed by owners whose name contains a given text (case-insensitive). This matches the `placed_by` field from the GPX file.
+
+---
+
+### Owner name
+
+Show caches whose current owner name contains a given text (case-insensitive). This matches the `owner` field, which reflects adopted caches correctly — use this instead of *Placed by* when filtering by the person who currently owns the cache.
 
 ---
 
 ### Country / State / County
 
-Show caches located in specific countries, states, or counties. Select one or more values from those present in your database.
+Text contains search (case-insensitive) applied to the country, state, or county fields. Available on the **Other** tab.
 
 ---
 
@@ -139,7 +159,7 @@ Show caches located in specific countries, states, or counties. Select one or mo
 
 Show caches that have a specific Groundspeak attribute set. You can filter for attributes that are present (e.g. "Dogs allowed: yes") or explicitly absent ("Dogs allowed: no").
 
-The filter dialog shows the ~70 standard Groundspeak attributes grouped by category on the **Attributes** tab.
+The filter dialog shows the ~70 standard Groundspeak attributes on the **Attributes** tab.
 
 ---
 
@@ -158,6 +178,74 @@ Show only caches that currently have at least one trackable logged as in the cac
 
 ---
 
+### Corrected coordinates
+
+| Filter | Shows |
+|---|---|
+| Has corrected | Only caches where you have stored corrected (puzzle-solved) coordinates |
+| No corrected | Only caches without corrected coordinates |
+
+---
+
+### User Flag
+
+Filter on whether the user flag is set or not. Available on the **Other** tab.
+
+---
+
+### DNF
+
+Filter on Did Not Find status. Available on the **Other** tab.
+
+---
+
+### FTF (First to Find)
+
+Filter by First to Find status. Available on the **Other** tab.
+
+---
+
+### Favourite points
+
+Filter by a minimum and/or maximum favourite point count. Available on the **Other** tab.
+
+---
+
+## Date filters
+
+All date filters are on the **Dates** tab. Each can have an optional from-date, an optional to-date, or both.
+
+### Hidden date
+
+Filter by the date the cache was placed (hidden).
+
+### Found by me date
+
+Filter by the date you personally found the cache.
+
+### DNF date
+
+Filter by the date a Did Not Find was recorded.
+
+### Last log date
+
+Filter by the date of the most recent log entry for the cache.
+
+---
+
+## WHERE clause filter
+
+The **WHERE** tab lets you enter a raw SQL `WHERE` clause that is applied directly against the cache database. This is intended for advanced users who need conditions not covered by the other filters.
+
+Example:
+```sql
+difficulty > 3 AND terrain > 3
+```
+
+The clause is combined with AND alongside any other active filters.
+
+---
+
 ## Saving a filter profile
 
 Once you have set up a useful combination, save it so you can reload it in one click:
@@ -165,15 +253,13 @@ Once you have set up a useful combination, save it so you can reload it in one c
 1. Configure your filters in the filter dialog
 2. Click **Save profile**
 3. Give it a name (e.g. "Easy day trip" or "Local tradis")
-4. Reload it any time from the filter dialog's profile list
-
-Profiles are stored as JSON files in `~/.local/share/opensak/filters/` (Linux/macOS) or `%APPDATA%\opensak\filters\` (Windows).
+4. Reload it any time from the filter dialog's profile list or the toolbar dropdown
 
 ---
 
 ## Clearing filters
 
-Click **View → Clear filter** or use the clear button in the filter dialog to remove all active filters and show the full cache list.
+Click **View → Clear filter** or use the clear button (shown in red when active) in the toolbar to remove all active filters and show the full cache list.
 
 ---
 
@@ -185,5 +271,7 @@ Click **View → Clear filter** or use the clear button in the filter dialog to 
 | Easy caches for a family trip | Difficulty ≤ 2 + Terrain ≤ 2 + Available |
 | Caches with parking nearby | Attribute: Parking available = yes |
 | All unfound caches, including archived | Not found + Availability: available + unavailable + archived |
-| Caches by a specific owner | Placed by = [owner name] |
+| Caches by a specific owner | Owner name = [owner name] |
 | Mystery caches you have not solved yet | Type = Mystery + Not found |
+| Only unsolved puzzles | Type = Mystery + No corrected coordinates |
+| FTF caches | FTF = Yes |

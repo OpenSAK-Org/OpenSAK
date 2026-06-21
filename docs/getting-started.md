@@ -129,7 +129,7 @@ Click any pin to highlight that cache in the list and show its details.
 
 ## 5. Filtering Your Cache List
 
-Filters let you narrow down the cache list to exactly what you want to see. OpenSAK supports 18 filter types with AND/OR logic.
+Filters let you narrow down the cache list to exactly what you want to see. The filter dialog has five tabs (General, Dates, Other, Attributes, WHERE) covering cache type, D/T, distance, dates, location, attributes, and more, all combinable with AND/OR logic.
 
 ### Opening the Filter Dialog
 Click **View → Set filter…** (or press `Ctrl+F`).
@@ -273,7 +273,7 @@ Each database has its own:
 2. Select your language in the **Language** section
 3. Restart OpenSAK — the new language takes effect on next startup
 
-Currently supported: **Danish (da)**, **English (en)**, **French (fr)**, **Portuguese (pt)**, **German (de)**, **Czech (cs)**, **Swedish (se)**
+Currently supported: **Danish (da)**, **English (en)**, **French (fr)**, **Dutch (nl)**, **Portuguese (pt)**, **German (de)**, **Czech (cs)**, **Swedish (se)**
 
 Want to add a new language? See [CONTRIBUTING.md](https://github.com/AgreeDK/opensak/blob/main/CONTRIBUTING.md) for the step-by-step guide — it only requires translating one file.
 
@@ -297,4 +297,4 @@ Want to add a new language? See [CONTRIBUTING.md](https://github.com/AgreeDK/ope
 
 *OpenSAK is free and open-source software, released under the MIT licence. Contributions are welcome — see [CONTRIBUTING.md](https://github.com/AgreeDK/opensak/blob/main/CONTRIBUTING.md) for details.*
 
-*Last updated for v1.12.0.*
+*Last updated for v1.14.0-beta.*

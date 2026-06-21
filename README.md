@@ -39,7 +39,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ### View & Navigation
 - 🗺️ **Interactive map** with OpenStreetMap and colour-coded cache pins with clustering
-- 🔍 **Advanced filter dialog** — 3 tabs: General, Dates and Attributes (~70 Groundspeak attributes)
+- 🔍 **Advanced filter dialog** — 5 tabs: General, Dates, Other, Attributes (~70 Groundspeak attributes) and a raw SQL WHERE tab
 - 📊 **Configurable columns** — 17+ columns, toggle on/off
 - 🎨 **Status icons** in list — ✅ found, ❌ DNF, 🔒 archived, ⚠️ unavailable
 - 🔗 **Click GC code** → opens cache page on geocaching.com
@@ -74,7 +74,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - All tools open pre-filled with the currently selected cache's coordinates
 
 ### Language Support
-- 🌍 **Danish, English, French, Portuguese, German, Czech and Swedish** built in
+- 🌍 **Danish, English, French, Dutch, Portuguese, German, Czech and Swedish** built in
 - 🔧 **Easy to add new languages** — copy one file, translate, done
 
 ---
@@ -94,7 +94,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 |---|---|
 | [Installation](docs/installation.md) | All platforms, automatic and manual methods, updating, uninstalling |
 | [Getting Started](docs/getting-started.md) | First launch, importing, filtering, GPS export, multiple databases |
-| [Filter Reference](docs/filters.md) | All 20 filter types, AND/OR logic, filter profiles |
+| [Filter Reference](docs/filters.md) | All filter types across 5 tabs, AND/OR logic, filter profiles |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Full shortcut reference |
 | [Feature Flags](docs/feature-flags.md) | Developer feature flag system |
 | [CLI --version flag](docs/cli-version-flag.md) | Print version or run a specific release |
@@ -139,7 +139,7 @@ Please use [GitHub Issues](https://github.com/AgreeDK/opensak/issues) and includ
 - [x] Geocaching Tools menu — coordinate converter, projection, checksum, midpoint, distance & bearing
 - [x] Coordinate format preference (DMM / DMS / DD)
 - [x] French language — contributed by @theyoungstone
-- [x] German, Czech and Swedish languages added
+- [x] German, Czech, Swedish and Dutch languages added
 - [x] Windows installer (.exe) — built automatically via GitHub Actions
 - [x] Linux AppImage — built automatically via GitHub Actions
 - [x] macOS installer (.dmg) — arm64 and x86_64, built automatically via GitHub Actions
