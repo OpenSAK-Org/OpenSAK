@@ -182,13 +182,11 @@ class TestRepairCorruptedBoolKeys:
         store._data = {
             "updates.check_enabled": "AA==",
             "display.use_miles": "AQ==",
-            "display.show_archived": "AA==",
         }
         store._flush()
         ss.repair_corrupted_bool_keys(store)
         assert store.get("updates.check_enabled") is False
         assert store.get("display.use_miles") is True
-        assert store.get("display.show_archived") is False
 
     def test_does_not_touch_unrelated_string_values(self, store):
         store.set("user.gc_username", "AA==")  # coincidentally same string

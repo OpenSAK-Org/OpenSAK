@@ -223,8 +223,6 @@ STRINGS: dict[str, str] = {
     "settings_group_user_locations":                "Benutzerstandorte",
     "settings_group_display":       "Anzeige",
     "settings_use_miles":           "Entfernungen in Meilen anzeigen (anstelle von km)",
-    "settings_show_archived":       "Archivierte Caches anzeigen",
-    "settings_show_found":          "Gefundene Caches anzeigen",
     "settings_map_label":           "Karten-App:",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",

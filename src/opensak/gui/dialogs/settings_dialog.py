@@ -197,12 +197,6 @@ class SettingsDialog(QDialog):
         self._miles_cb = QCheckBox(tr("settings_use_miles"))
         disp_layout.addWidget(self._miles_cb)
 
-        self._archived_cb = QCheckBox(tr("settings_show_archived"))
-        disp_layout.addWidget(self._archived_cb)
-
-        self._found_cb = QCheckBox(tr("settings_show_found"))
-        disp_layout.addWidget(self._found_cb)
-
         map_row = QHBoxLayout()
         map_row.addWidget(QLabel(tr("settings_map_label")))
         self._map_provider = QComboBox()
@@ -842,8 +836,6 @@ class SettingsDialog(QDialog):
         self._install_dir_row.set_path(get_install_dir())
         self._db_dir_row.set_path(get_db_dir())
         self._miles_cb.setChecked(s.use_miles)
-        self._archived_cb.setChecked(s.show_archived)
-        self._found_cb.setChecked(s.show_found)
         idx = self._map_provider.findData(s.map_provider)
         self._map_provider.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._coord_format.findData(s.coord_format)
@@ -884,8 +876,6 @@ class SettingsDialog(QDialog):
             if parse_coords(home_text) is not None:  # keep existing if invalid
                 s.gc_home_location = home_text
         s.use_miles         = self._miles_cb.isChecked()
-        s.show_archived     = self._archived_cb.isChecked()
-        s.show_found        = self._found_cb.isChecked()
         s.map_provider      = self._map_provider.currentData()
         s.coord_format      = self._coord_format.currentData()
         s.date_format       = self._date_format.currentData()

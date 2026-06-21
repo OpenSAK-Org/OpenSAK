@@ -250,8 +250,6 @@ def repair_corrupted_bool_keys(store: SettingsStore) -> None:
     bool_keys = [
         "updates.check_enabled",
         "display.use_miles",
-        "display.show_archived",
-        "display.show_found",
         "location.nominatim_enabled",
     ]
     fixes: dict[str, Any] = {}
@@ -297,8 +295,6 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
             "display/use_miles":        "display.use_miles",
             "display/coord_format":     "display.coord_format",
             "display/map_provider":     "display.map_provider",
-            "display/show_archived":    "display.show_archived",
-            "display/show_found":       "display.show_found",
             # Sprog
             "language":                 "app.language",
             # Søgning

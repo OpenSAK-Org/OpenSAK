@@ -223,8 +223,6 @@ STRINGS: dict[str, str] = {
     "settings_group_user_locations":                "Uživatelská místa",
     "settings_group_display":       "Zobrazení",
     "settings_use_miles":           "Zobrazovat vzdálenosti v mílích (místo km)",
-    "settings_show_archived":       "Zobrazovat archivované keše",
-    "settings_show_found":          "Zobrazovat nalezené keše",
     "settings_map_label":           "Mapová aplikace:",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",

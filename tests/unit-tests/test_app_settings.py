@@ -174,12 +174,6 @@ class TestDisplay:
         s.map_provider = "osm"
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
-    def test_show_flags(self, s):
-        s.show_archived = True
-        s.show_found = False
-        assert s.show_archived is True
-        assert s.show_found is False
-
 
 # ── window state / search / nominatim / paths ─────────────────────────────────────
 

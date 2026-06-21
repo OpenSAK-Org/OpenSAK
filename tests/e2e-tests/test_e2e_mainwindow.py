@@ -189,8 +189,7 @@ class TestCacheList:
         fs = seeded_window._build_current_filterset()
         assert len(fs) >= 2
 
-    def test_show_archived_setting_hides_archived(self, seeded_window):
-        from opensak.gui.settings import get_settings
+    def test_archived_quick_filter_shows_archived(self, seeded_window):
         from opensak.db.database import get_session
         from opensak.db.models import Cache as CacheModel
 
@@ -199,30 +198,12 @@ class TestCacheList:
             cache.archived = True
             session.commit()
 
-        get_settings().show_archived = False
-        seeded_window._quick_filter.setCurrentIndex(0)
-        seeded_window._refresh_cache_list()
-        codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
-        assert "GC12345" not in codes
-
-    def test_show_archived_setting_shows_archived(self, seeded_window):
-        from opensak.gui.settings import get_settings
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache as CacheModel
-
-        with get_session() as session:
-            cache = session.query(CacheModel).filter_by(gc_code="GC12345").one()
-            cache.archived = True
-            session.commit()
-
-        get_settings().show_archived = True
-        seeded_window._quick_filter.setCurrentIndex(0)
+        seeded_window._quick_filter.setCurrentIndex(5)  # "Archived" quick filter
         seeded_window._refresh_cache_list()
         codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
         assert "GC12345" in codes
 
-    def test_archived_quick_filter_overrides_setting(self, seeded_window):
-        from opensak.gui.settings import get_settings
+    def test_archived_visible_by_default(self, seeded_window):
         from opensak.db.database import get_session
         from opensak.db.models import Cache as CacheModel
 
@@ -231,8 +212,7 @@ class TestCacheList:
             cache.archived = True
             session.commit()
 
-        get_settings().show_archived = False
-        seeded_window._quick_filter.setCurrentIndex(5)  # "Archived" quick filter
+        seeded_window._quick_filter.setCurrentIndex(0)
         seeded_window._refresh_cache_list()
         codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
         assert "GC12345" in codes

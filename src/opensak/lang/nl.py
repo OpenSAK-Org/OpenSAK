@@ -226,8 +226,6 @@ STRINGS: dict[str, str] = {
     "settings_group_user_locations":                "Gebruikerslocaties",
     "settings_group_display":       "Weergave",
     "settings_use_miles":           "Afstanden weergeven in mijlen (in plaats van km)",
-    "settings_show_archived":       "Gearchiveerde caches weergeven",
-    "settings_show_found":          "Gevonden caches weergeven",
     "settings_map_label":           "Kaartapp:",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",

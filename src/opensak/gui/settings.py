@@ -285,28 +285,6 @@ class AppSettings:
 
     # ── Display ───────────────────────────────────────────────────────────────
 
-    @property
-    def show_archived(self) -> bool:
-        val = get_store().get("display.show_archived", False)
-        if isinstance(val, bool):
-            return val
-        return str(val).lower() in ("true", "1", "yes")
-
-    @show_archived.setter
-    def show_archived(self, value: bool) -> None:
-        get_store().set("display.show_archived", bool(value))
-
-    @property
-    def show_found(self) -> bool:
-        val = get_store().get("display.show_found", True)
-        if isinstance(val, bool):
-            return val
-        return str(val).lower() in ("true", "1", "yes")
-
-    @show_found.setter
-    def show_found(self, value: bool) -> None:
-        get_store().set("display.show_found", bool(value))
-
     # ── Window state ──────────────────────────────────────────────────────────
 
     @property

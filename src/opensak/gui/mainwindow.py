@@ -982,12 +982,6 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import ArchivedFilter
             fs.add(ArchivedFilter())
 
-        # Hide archived caches globally unless the user explicitly asked for them
-        # (idx 5 = "Archived" quick filter) or enabled them in display settings.
-        if idx != 5 and not get_settings().show_archived:
-            from opensak.filters.engine import AvailabilityFilter
-            fs.add(AvailabilityFilter(show_avail=True, show_unavail=True, show_archived=False))
-
         # GC-nummer søgefelt (søger kun i GC kode)
         gc_search = self._search_gc.text().strip()
         if gc_search:
