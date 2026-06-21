@@ -274,10 +274,10 @@ class CacheDetailPanel(QWidget):
                 )
             )
             self._hint_browser.setPlainText(decoded)
-            self._decode_btn.setText(tr("detail_encode_btn"))
+            self._decode_btn.setText(tr("detail_decode_btn"))
         else:
             self._hint_browser.setPlainText(self._raw_hint)
-            self._decode_btn.setText(tr("detail_decode_btn"))
+            self._decode_btn.setText(tr("detail_encode_btn"))
 
     def _format_coords(self, lat: float, lon: float) -> str:
         settings = get_settings()
@@ -390,7 +390,7 @@ class CacheDetailPanel(QWidget):
         self._log_browser.setHtml("")
         self._raw_hint = ""
         self._hint_decoded = False
-        self._decode_btn.setText(tr("detail_decode_btn"))
+        self._decode_btn.setText(tr("detail_encode_btn"))
         self._log_search.setText("")
         self._cached_logs: list = []
         self._conv_btn.setEnabled(False)
@@ -483,7 +483,7 @@ class CacheDetailPanel(QWidget):
         # Hint — gem rå hint og nulstil decode state
         self._raw_hint = cache.encoded_hints or ""
         self._hint_decoded = False
-        self._decode_btn.setText(tr("detail_decode_btn"))
+        self._decode_btn.setText(tr("detail_encode_btn"))
         self._hint_browser.setPlainText(
             self._raw_hint if self._raw_hint else tr("detail_no_hint")
         )
