@@ -849,6 +849,8 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: int(c.user_flag or False), reverse=reverse)
         elif col == "user_sort":
             self._caches.sort(key=lambda c: c.user_sort if c.user_sort is not None else 999999, reverse=reverse)
+        elif col == "favorite":
+            self._caches.sort(key=lambda c: int(c.favorite_point or False), reverse=reverse)
         elif col == "favorite_points":
             self._caches.sort(key=lambda c: c.favorite_points or 0, reverse=reverse)
         elif col == "container":

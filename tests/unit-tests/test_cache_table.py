@@ -388,10 +388,11 @@ class TestSort:
         ]
         caches[1].user_note = None
         caches[0].user_note = _note(1.0, 2.0)
+        caches[0].favorite_point = True
         m = self._loaded(model, caches)
         for col in ("terrain", "found", "corrected", "log_count", "last_log",
                     "hidden_date", "found_date", "dnf_date", "first_to_find",
-                    "user_flag", "user_sort", "favorite_points", "container",
+                    "user_flag", "user_sort", "favorite", "favorite_points", "container",
                     "latitude", "longitude", "country"):
             m.sort(ALL_COLUMNS.index(col), Qt.SortOrder.AscendingOrder)
             m.sort(ALL_COLUMNS.index(col), Qt.SortOrder.DescendingOrder)
@@ -415,6 +416,19 @@ class TestSort:
         for col in ("country", "state", "county", "placed_by", "user_data_1"):
             model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.AscendingOrder)
             model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.DescendingOrder)
+
+    def test_sort_by_favorite_no_crash(self, model):
+        # Regression #319: sort() fell through to getattr(c, "favorite") but the
+        # model attribute is favorite_point, causing AttributeError.
+        caches = [
+            _cache(gc_code="A", favorite_point=True),
+            _cache(gc_code="B"),
+        ]
+        model.load(caches)
+        model.sort(ALL_COLUMNS.index("favorite"), Qt.SortOrder.AscendingOrder)
+        assert model._caches[0].gc_code == "B"  # non-favourite first
+        model.sort(ALL_COLUMNS.index("favorite"), Qt.SortOrder.DescendingOrder)
+        assert model._caches[0].gc_code == "A"  # favourite first
 
 
 # ── flags / setData (needs DB) ──────────────────────────────────────────────────
