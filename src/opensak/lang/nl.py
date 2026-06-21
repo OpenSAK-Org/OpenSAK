@@ -368,7 +368,8 @@ STRINGS: dict[str, str] = {
     "update_loc_lookup_group":      "Zoekopties",
     "update_loc_use_corrected":     "Gecorrigeerde coördinaten gebruiken indien beschikbaar",
     "update_loc_start_btn":         "▶  Bijwerken starten",
-    "update_loc_info":              "Locatiegegevens worden offline opgezocht via GeoNames-gegevens — snel, geen netwerk vereist, geen limieten.",
+    "update_loc_info":              "Locatiegegevens worden offline opgezocht via grenspolygoondata — snel, geen netwerk vereist, geen limieten.",
+    "update_loc_no_boundaries":     "Boundary data not available. Please run the data pipeline to generate the boundaries database.",
     "update_loc_running":           "Offline opzoeken uitvoeren voor {total} waypoints…",
     "update_loc_done":              "✓ Klaar — {updated} bijgewerkt, {skipped} overgeslagen, {errors} fouten",
     "update_loc_cancelled":         "Geannuleerd — {updated} tot nu toe bijgewerkt",
@@ -378,23 +379,6 @@ STRINGS: dict[str, str] = {
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: fout — {msg}",
     "update_loc_row_skipped":       "{gc_code}: overgeslagen (geen coördinaten)",
-
-    # Dynamic info text (changes when online checkbox is toggled)
-    "update_loc_info_online":       "Zoekt gemeente, provincie en land op uit lokale gegevens, verfijnt het resultaat vervolgens online voor hogere nauwkeurigheid. Vereist internet. Ongeveer 1 seconde per waypoint.",
-
-    # Online refinement
-    "update_loc_online_cb":         "Ook online opzoeken gebruiken voor hogere nauwkeurigheid",
-    "update_loc_online_tooltip":    "Gebruikt OpenStreetMap-grenzenkaarten om resultaten nabij gemeentegrenzen te verfijnen.\nVereist internet. Ongeveer 1 seconde per waypoint.",
-    "update_loc_offline_done":      "✓ Offline opzoeken voltooid ({updated} bijgewerkt). Online verfijning starten...",
-    "update_loc_online_running":    "Online opzoeken: {done} van {total} ({eta})",
-    "update_loc_online_done":       "✓ Online opzoeken voltooid: {updated} verfijnd, {skipped} ongewijzigd, {errors} fouten",
-    "update_loc_online_cancelled":  "Online opzoeken geannuleerd. {updated} tot nu toe verfijnd.",
-    "update_loc_online_row":        "{gc_code}: online opzoeken → {county}",
-    "update_loc_online_skip":       "{gc_code}: geen gegevens van online opzoeken",
-    "update_loc_eta_sec":           "{n}s resterend",
-    "update_loc_eta_min":           "{m}m {s}s resterend",
-    "update_loc_eta_hr":            "{h}u {m}m resterend",
-
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nieuwe database",
     "db_name_label":                "Naam:",

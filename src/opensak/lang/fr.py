@@ -365,7 +365,8 @@ STRINGS: dict[str, str] = {
 
     "update_loc_use_corrected":     "Utiliser les coordonnées corrigées si disponibles",
     "update_loc_start_btn":         "▶  Lancer la mise à jour",
-    "update_loc_info":              "Les données de localisation sont recherchées hors ligne à l'aide des données GeoNames — rapide, sans réseau requis, sans limites de débit.",
+    "update_loc_info":              "Les données de localisation sont recherchées hors ligne à l'aide des données de polygones de limites — rapide, sans réseau requis, sans limites de débit.",
+    "update_loc_no_boundaries":     "Boundary data not available. Please run the data pipeline to generate the boundaries database.",
     "update_loc_running":           "Recherche hors ligne pour {total} caches en cours…",
     "update_loc_done":              "✓ Terminé — {updated} mis à jour, {skipped} ignorés, {errors} erreurs",
     "update_loc_cancelled":         "Annulé — {updated} mis à jour jusqu'ici",
@@ -375,23 +376,6 @@ STRINGS: dict[str, str] = {
     "update_loc_row":               "{gc_code} : {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code} : erreur — {msg}",
     "update_loc_row_skipped":       "{gc_code} : ignoré (pas de coordonnées)",
-    # Dynamic info text (changes when online checkbox is toggled)
-    "update_loc_info_online":       "Looks up county, state and country from local data first, then refines the result online for higher accuracy. Requires internet. About 1 second per waypoint.",
-
-    # Online refinement (replaces Nominatim terminology for end users)
-    "update_loc_online_cb":         "Also use online lookup for higher accuracy",
-    "update_loc_online_tooltip":    "Uses OpenStreetMap boundary maps to refine results near county borders.\nRequires internet. About 1 second per waypoint.",
-    "update_loc_offline_done":      "✓ Offline lookup complete ({updated} updated). Starting online refinement...",
-    "update_loc_online_running":    "Online lookup: {done} of {total} ({eta})",
-    "update_loc_online_done":       "✓ Online lookup complete: {updated} refined, {skipped} unchanged, {errors} errors",
-    "update_loc_online_cancelled":  "Online lookup cancelled. {updated} refined so far.",
-    "update_loc_online_row":        "{gc_code}: online lookup → {county}",
-    "update_loc_online_skip":       "{gc_code}: no data from online lookup",
-
-    "update_loc_eta_sec":           "{n}s remaining",
-    "update_loc_eta_min":           "{m}m {s}s remaining",
-    "update_loc_eta_hr":            "{h}h {m}m remaining",
-
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nouvelle base de données",
     "db_name_label":                "Nom:",
