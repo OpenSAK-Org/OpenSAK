@@ -322,6 +322,8 @@ STRINGS: dict[str, str] = {
         "<p>Un outil open source de gestion de géocaching "
         "pour Linux, Mac et Windows.</p>"
         "<p>Développé avec Python et PySide6.</p>"
+        "<p>Boundary data &copy; OpenStreetMap contributors and GSAK, "
+        "licensed <a href='https://opendatacommons.org/licenses/odbl/'>ODbL</a>.</p>"
         "<p><a href='https://github.com/AgreeDK/opensak'>"
         "github.com/AgreeDK/opensak</a></p>",
     # ── Waypoint dialog — validation ──────────────────────────────────────────
