@@ -301,6 +301,14 @@ class SizeBarDelegate(QStyledItemDelegate):
     _EMPTY_COLOR = QColor("#c8d4ea")   # lys grå baggrund
     _LABEL_COLOR = QColor("#4a72b0")   # bogstav-farve (mørkere blå)
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._icon_size = 7  # Default, opdateres via set_icon_size()
+
+    def set_icon_size(self, size: int) -> None:
+        """Opdatér icon-størrelse (bruges når settings ændres)."""
+        self._icon_size = size
+
     def paint(self, painter: QPainter, option, index) -> None:
         from PySide6.QtWidgets import QStyle
         data = index.data(Qt.ItemDataRole.UserRole + 10) or {}
@@ -347,8 +355,7 @@ class SizeBarDelegate(QStyledItemDelegate):
             if label and is_last:
                 painter.setPen(self._LABEL_COLOR)
                 font = painter.font()
-                sizes = TEXT_SIZE_MAP[get_settings().text_size]
-                font.setPointSize(sizes["icon"])
+                font.setPointSize(self._icon_size)
                 font.setBold(True)
                 painter.setFont(font)
                 painter.drawText(seg_rect, Qt.AlignmentFlag.AlignCenter, label)
@@ -982,6 +989,8 @@ class CacheTableView(QTableView):
                         self.setItemDelegateForColumn(i, None)  # type: ignore[arg-type]
                     else:
                         self._size_bar_delegate = SizeBarDelegate(self)
+                        sizes = TEXT_SIZE_MAP[get_settings().text_size]
+                        self._size_bar_delegate.set_icon_size(sizes["icon"])
                         self.setItemDelegateForColumn(i, self._size_bar_delegate)
                 elif col_id == "gc_code":
                     self._gc_code_delegate = GcCodeDelegate(self)
@@ -1332,6 +1341,11 @@ class CacheTableView(QTableView):
 
     def refresh_visuals(self) -> None:
         """Re-paint all visible cells after UI size change (font-size, etc.)."""
+        # Opdatér SizeBarDelegate icon-størrelse
+        if hasattr(self, "_size_bar_delegate"):
+            sizes = TEXT_SIZE_MAP[get_settings().text_size]
+            self._size_bar_delegate.set_icon_size(sizes["icon"])
+        # Genrender alle celler
         self._model.refresh_visuals()
 
     def row_count(self) -> int:
