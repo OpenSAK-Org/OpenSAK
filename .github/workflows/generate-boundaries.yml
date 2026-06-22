@@ -137,7 +137,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.cfg.outputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: "data-${{ github.run_number }}"
           name: "Boundary dataset – ${{ github.run_number }}"
