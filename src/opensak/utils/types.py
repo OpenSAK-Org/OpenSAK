@@ -48,6 +48,24 @@ class DateFormat(StrEnum):
     YMD    = "ymd"     # yyyy-mm-dd
 
 
+class TextSize(StrEnum):
+    """Text and icon sizes for UI elements (issue #286/#288/#290)."""
+    SMALL  = "small"   # Kompakt: 6/11/9 pt
+    MEDIUM = "medium"  # Standard: 7/13/10 pt (default)
+    LARGE  = "large"   # Stor: 9/15/12 pt
+
+
+# Font sizes (pt) for each TextSize level. Maps to:
+#   icon_pt (type icon in cache grid)
+#   label_pt (info label in detail panel)
+#   secondary_pt (corrected coords, hints label)
+TEXT_SIZE_MAP = {
+    TextSize.SMALL:  {"icon": 6, "label": 11, "secondary": 9},
+    TextSize.MEDIUM: {"icon": 7, "label": 13, "secondary": 10},
+    TextSize.LARGE:  {"icon": 9, "label": 15, "secondary": 12},
+}
+
+
 # (lat, lon) in decimal degrees — WGS-84.
 Coordinate: TypeAlias = tuple[float, float]
 

@@ -9,7 +9,7 @@ i stedet for QSettings. API'et er identisk med det gamle for at undgå
 from __future__ import annotations
 import json
 import base64
-from opensak.utils.types import CoordFormat, DateFormat
+from opensak.utils.types import CoordFormat, DateFormat, TextSize
 from opensak.settings_store import get_store
 
 
@@ -267,7 +267,20 @@ class AppSettings:
     def date_format(self, value: DateFormat) -> None:
         get_store().set("display.date_format", DateFormat(value).value)
 
+    @property
+    def text_size(self) -> TextSize:
+        raw = get_store().get("display.text_size", TextSize.MEDIUM.value)
+        try:
+            return TextSize(raw)
+        except ValueError:
+            return TextSize.MEDIUM
+
+    @text_size.setter
+    def text_size(self, value: TextSize) -> None:
+        get_store().set("display.text_size", TextSize(value).value)
+
     # ── Kort udbyder ──────────────────────────────────────────────────────────
+
 
     @property
     def map_provider(self) -> str:

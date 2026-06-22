@@ -19,7 +19,7 @@ from opensak.filters.engine import _haversine_km, haversine_km_batch
 from opensak.gui.settings import get_settings
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
 from opensak.lang import tr
-from opensak.utils.types import DateFormat, GcCode
+from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.gui.icon_provider import get_cache_type_icon, get_cache_size_icon
 from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display
@@ -347,7 +347,8 @@ class SizeBarDelegate(QStyledItemDelegate):
             if label and is_last:
                 painter.setPen(self._LABEL_COLOR)
                 font = painter.font()
-                font.setPointSize(7)
+                sizes = TEXT_SIZE_MAP[get_settings().text_size]
+                font.setPointSize(sizes["icon"])
                 font.setBold(True)
                 painter.setFont(font)
                 painter.drawText(seg_rect, Qt.AlignmentFlag.AlignCenter, label)
@@ -603,6 +604,9 @@ class CacheTableModel(QAbstractTableModel):
                     fmt = get_settings().coord_format
                     coords = format_coords(note.corrected_lat, note.corrected_lon, fmt)
                     return tr("col_corrected_tooltip", coords=coords)
+            if col == "user_flag":
+                if not cache.user_flag:
+                    return tr("col_user_flag_tooltip")
             if col in ("latitude", "longitude"):
                 # Vis tooltip der angiver om koordinaterne er korrigerede
                 note = cache.user_note
@@ -887,6 +891,13 @@ class CacheTableModel(QAbstractTableModel):
             )
         self.endResetModel()
         self.sort_changed.emit(col, not reverse)
+
+    def refresh_visuals(self) -> None:
+        """Force re-painting of all visible cells after UI size change."""
+        if self._caches:
+            first = self.index(0, 0)
+            last = self.index(len(self._caches) - 1, len(self._columns) - 1)
+            self.dataChanged.emit(first, last)
 
 
 class CacheTableView(QTableView):
@@ -1318,6 +1329,10 @@ class CacheTableView(QTableView):
 
         self._model.beginResetModel()
         self._model.endResetModel()
+
+    def refresh_visuals(self) -> None:
+        """Re-paint all visible cells after UI size change (font-size, etc.)."""
+        self._model.refresh_visuals()
 
     def row_count(self) -> int:
         return self._model.rowCount()

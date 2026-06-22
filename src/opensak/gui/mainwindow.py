@@ -1200,6 +1200,7 @@ class MainWindow(QMainWindow):
             self._reload_home_combo()
             self._map_widget.reload_map(self._refresh_cache_list)
             self._refresh_cache_list()
+            self._cache_table.refresh_visuals()  # Re-paint icons/text after size change
             cache = self._cache_table.selected_cache()
             if cache:
                 full = self._load_full_cache(cache.gc_code)

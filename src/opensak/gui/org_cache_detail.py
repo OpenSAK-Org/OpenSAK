@@ -23,7 +23,7 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
-from opensak.utils.types import DateFormat, TEXT_SIZE_MAP
+from opensak.utils.types import DateFormat
 from opensak.hint_detect import split_hint
 
 
@@ -85,7 +85,7 @@ class CacheDetailPanel(QWidget):
         # ── Header ────────────────────────────────────────────────────────────
         self._title = QLabel(tr("detail_select_cache"))
         font = QFont()
-        font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["label"])
+        font.setPointSize(13)
         font.setBold(True)
         self._title.setFont(font)
         self._title.setWordWrap(True)
@@ -160,7 +160,7 @@ class CacheDetailPanel(QWidget):
         cap_corrected.setStyleSheet("color: #e65100; font-size: 10px; border: none; background: transparent;")
         self._corrected_lbl = QLabel("—")
         corrected_font = QFont()
-        corrected_font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["secondary"])
+        corrected_font.setPointSize(10)
         corrected_font.setBold(True)
         self._corrected_lbl.setFont(corrected_font)
         self._corrected_lbl.setStyleSheet(
@@ -283,7 +283,7 @@ class CacheDetailPanel(QWidget):
     def _meta_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         font = QFont()
-        font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["secondary"])
+        font.setPointSize(10)
         font.setBold(True)
         lbl.setFont(font)
         return lbl
@@ -318,7 +318,7 @@ class CacheDetailPanel(QWidget):
         settings = get_settings()
         app = settings.map_provider
         lat, lon = self._current_lat, self._current_lon
-        if app == "google":
+        if app == "googlemaps":
             webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
         else:
             webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
@@ -329,7 +329,7 @@ class CacheDetailPanel(QWidget):
         settings = get_settings()
         app = settings.map_provider
         lat, lon = self._corrected_lat, self._corrected_lon
-        if app == "google":
+        if app == "googlemaps":
             webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
         else:
             webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
@@ -393,32 +393,6 @@ class CacheDetailPanel(QWidget):
                 self._format_coords(self._corrected_lat, self._corrected_lon)
             )
 
-    def _apply_ui_sizes(self) -> None:
-        """Re-apply text/icon sizes from current settings. Called after settings change."""
-        sizes = TEXT_SIZE_MAP[get_settings().text_size]
-        
-        # Title (main label)
-        font = self._title.font()
-        font.setPointSize(sizes["label"])
-        font.setBold(True)
-        self._title.setFont(font)
-        
-        # Metadata labels (GC Code, Type, D/T, Container, Country, Coords)
-        for lbl in [self._gc_code_lbl, self._type_lbl, self._dt_lbl, 
-                    self._container_lbl, self._country_lbl, self._coords_lbl]:
-            font = lbl.font()
-            font.setPointSize(sizes["secondary"])
-            font.setBold(True)
-            lbl.setFont(font)
-        
-        # Corrected coords label
-        font = self._corrected_lbl.font()
-        font.setPointSize(sizes["secondary"])
-        font.setBold(True)
-        self._corrected_lbl.setFont(font)
-        
-        self._title.update()  # Force repaint
-
     def clear(self) -> None:
         self._current_gc_code: str | None = None
         self._current_lat: float | None = None
@@ -454,7 +428,6 @@ class CacheDetailPanel(QWidget):
         found_mark = " ✓" if cache.found else ""
         archived_mark = tr("detail_archived_mark") if cache.archived else ""
         self._title.setText(f"{cache.name}{found_mark}{archived_mark}")
-        self._apply_ui_sizes()  # Re-apply sizes after settings change
 
         # Meta — GC kode som klikbart link
         gc = cache.gc_code or "—"

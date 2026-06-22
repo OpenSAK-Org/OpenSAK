@@ -19,7 +19,7 @@ from opensak.gui.settings import get_settings, HomePoint
 from opensak.gui.dialogs.widgets import DirRow
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.coords import FORMATS, format_coords
-from opensak.utils.types import CoordFormat, DateFormat
+from opensak.utils.types import CoordFormat, DateFormat, TextSize
 
 
 # ── Baggrundstråd til OAuth + API-kald ───────────────────────────────────────
@@ -232,6 +232,16 @@ class SettingsDialog(QDialog):
         date_fmt_row.addWidget(self._date_format)
         date_fmt_row.addStretch()
         disp_layout.addLayout(date_fmt_row)
+
+        text_size_row = QHBoxLayout()
+        text_size_row.addWidget(QLabel(tr("settings_text_size_label")))
+        self._text_size = QComboBox()
+        self._text_size.addItem(tr("settings_text_size_small"), TextSize.SMALL)
+        self._text_size.addItem(tr("settings_text_size_medium"), TextSize.MEDIUM)
+        self._text_size.addItem(tr("settings_text_size_large"), TextSize.LARGE)
+        text_size_row.addWidget(self._text_size)
+        text_size_row.addStretch()
+        disp_layout.addLayout(text_size_row)
 
         layout.addWidget(disp_group)
 
@@ -849,6 +859,8 @@ class SettingsDialog(QDialog):
         self._coord_format.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._date_format.findData(s.date_format)
         self._date_format.setCurrentIndex(idx if idx >= 0 else 0)
+        idx = self._text_size.findData(s.text_size)
+        self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -886,6 +898,7 @@ class SettingsDialog(QDialog):
         s.map_provider      = self._map_provider.currentData()
         s.coord_format      = self._coord_format.currentData()
         s.date_format       = self._date_format.currentData()
+        s.text_size         = self._text_size.currentData()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()
