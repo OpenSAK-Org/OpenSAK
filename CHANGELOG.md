@@ -8,6 +8,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.0-beta.8] — 2026-06-22
+
+> **Beta release** — continuing the 1.14.0 testing period.
+
+### Fixed
+
+- **Hint encoding detection reversed** (fixes #329) — geocaching.com Pocket Query
+  GPX files deliver hints as **plaintext** in the `<groundspeak:encoded_hints>`
+  tag, but OpenSAK assumed the field always contained ROT13-ciphertext. The
+  display logic was backwards: OpenSAK would show plaintext hints as gibberish
+  and vice versa. A new heuristic `split_hint()` function analyzes vowel
+  density to detect whether the hint is human-readable plaintext or encrypted
+  ROT13, and displays accordingly. Default display is always **obscured**
+  (ciphertext); pressing "Decode hint" reveals the plaintext. The same fix
+  was applied to KML export. Regression tested against 24 real Danish hints.
+
+- **Google Maps link didn't open** (fixes #321) — the cache detail pane has an
+  option to open a cache's coordinates in an external map app (Google Maps or
+  OpenStreetMap). The settings dialog stored the choice as `"google"`, but
+  the code checked for `"googlemaps"`, so the condition never matched and
+  clicking the link did nothing. Fixed by aligning the constant.
+
+- **Cache detail panel custom delegate segfault** (related to #286/#287) —
+  when implementing text/icon size scaling, the `SizeBarDelegate` (which
+  renders the size bar in the cache list) was calling `get_settings()` during
+  every `paint()` event, which occurs hundreds of times per second as rows
+  are rendered. This caused a segmentation fault in the test suite. Fixed by
+  caching the icon size in the delegate and updating it only when settings
+  actually change.
+
+### Changed
+
+- **UI text and icon sizes are now adjustable** (fixes #286, #287, #290) —
+  a new dropdown in Settings → Display: "Text and icon size" offers three
+  choices: Small, Medium (default), and Large. Affects the cache type icon
+  size in the list view, the cache detail panel title and metadata labels,
+  and the tab labels. Useful for users with reduced visual acuity. The
+  setting persists across restarts and is per-database.
+
+### Added
+
+- **Debug logging for reverse geocoding module** (closes #232) — the `geo`
+  module (boundaries, packs, store) now supports the same debug-flag system
+  as the other modules. Enable via `debug_flags.py` to see logs of when the
+  boundary database opens, packs are loaded, and coordinates are resolved to
+  country/state/county. Logs appear in `opensak.log` when the flag is active.
+
+---
+
 ## [1.14.0-beta.7] — 2026-06-19
 
 > **Beta release** — continuing the 1.14.0 testing period.
