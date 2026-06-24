@@ -132,8 +132,17 @@ def fetch_latest_prerelease() -> dict | None:
     Hent seneste PRE-RELEASE (beta/alpha/rc) fra GitHub API.
 
     Kun relevant for brugere der allerede kører en beta — main-brugere
-    rammer aldrig denne funktion. Henter listen over alle releases (nyeste
-    først) og returnerer den første der er markeret som pre-release.
+    rammer aldrig denne funktion. Henter listen over alle releases og
+    sammenligner ALLE markeret som pre-release med _parse_version(), så den
+    rigtige "højeste" version vælges uanset rækkefølgen GitHub returnerer
+    dem i.
+
+    GitHub's /releases liste-endpoint sorterer efter commit-datoen på det
+    commit tagget peger på — IKKE efter hvornår release'en faktisk blev
+    oprettet/publiceret. Det betyder den nyeste beta ikke er garanteret at
+    stå først i listen (oplevet i praksis: beta.9 stod før beta.10). At
+    bare tage data[0] med prerelease=True ville derfor kunne tilbyde en
+    ældre beta som "nyeste".
 
     Returnerer dict med keys 'tag_name', 'html_url', 'name' eller None ved
     fejl eller hvis ingen pre-release findes blandt de seneste releases.
@@ -149,17 +158,27 @@ def fetch_latest_prerelease() -> dict | None:
             data = json.load(resp)
         if not isinstance(data, list):
             return None
+
+        best_release: dict | None = None
+        best_version = (0, 0, 0, 0)
         for entry in data:
-            if entry.get("prerelease"):
-                release = {
-                    "tag_name": entry.get("tag_name", ""),
+            if not entry.get("prerelease"):
+                continue
+            tag = entry.get("tag_name", "")
+            version = _parse_version(tag)
+            if best_release is None or version > best_version:
+                best_version = version
+                best_release = {
+                    "tag_name": tag,
                     "html_url": entry.get("html_url", RELEASES_PAGE),
                     "name":     entry.get("name", ""),
                 }
-                log.debug("Seneste beta-release: %s", release["tag_name"])
-                return release
-        log.debug("Ingen pre-release fundet blandt de seneste %d releases", MAX_RELEASES_TO_SCAN)
-        return None
+
+        if best_release:
+            log.debug("Seneste beta-release: %s", best_release["tag_name"])
+        else:
+            log.debug("Ingen pre-release fundet blandt de seneste %d releases", MAX_RELEASES_TO_SCAN)
+        return best_release
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
         log.debug("Kunne ikke hente beta-releases: %s", exc)
         return None

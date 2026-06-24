@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.0-beta.11] — 2026-06-24
+
+> **Beta release** — continuing the 1.14.0 testing period.
+
+### Fixed
+
+- **Beta update check could offer an older beta instead of the latest one** —
+  `fetch_latest_prerelease()` picked the first pre-release entry returned by
+  GitHub's releases list, assuming it was always the newest. GitHub actually
+  sorts that list by the commit date behind each tag, not by when the
+  release was created, so the order doesn't always match version order
+  (observed in practice: beta.9 listed ahead of beta.10). The function now
+  compares every pre-release in the list and picks the genuinely highest
+  version, regardless of the order GitHub returns them in.
+
+---
+
 ## [1.14.0-beta.10] — 2026-06-24
 
 > **Beta release** — continuing the 1.14.0 testing period.

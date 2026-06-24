@@ -212,7 +212,7 @@ class _FakeListResp(_FakeResp):
         self._bytes = json.dumps(payload_list).encode()
 
 
-def test_fetch_prerelease_finds_first_prerelease_entry(monkeypatch):
+def test_fetch_prerelease_finds_highest_version_entry(monkeypatch):
     _patch_urlopen(monkeypatch, lambda: _FakeListResp([
         {"tag_name": "v1.14.0", "html_url": "https://x/stable", "prerelease": False},
         {"tag_name": "v1.14.0-beta.2", "html_url": "https://x/beta2", "prerelease": True},
@@ -221,6 +221,21 @@ def test_fetch_prerelease_finds_first_prerelease_entry(monkeypatch):
     from opensak.updater import fetch_latest_prerelease
     out = fetch_latest_prerelease()
     assert out["tag_name"] == "v1.14.0-beta.2"
+
+
+def test_fetch_prerelease_ignores_github_api_order(monkeypatch):
+    """GitHub's /releases list is sorted by the tag's commit date, not by when
+    the release was actually created — in practice this can list an older
+    beta before a newer one (observed: beta.9 listed before beta.10). The
+    function must pick the highest version regardless of array order."""
+    _patch_urlopen(monkeypatch, lambda: _FakeListResp([
+        {"tag_name": "v1.14.0-beta.9", "html_url": "https://x/beta9", "prerelease": True},
+        {"tag_name": "v1.14.0-beta.10", "html_url": "https://x/beta10", "prerelease": True},
+    ]))
+    from opensak.updater import fetch_latest_prerelease
+    out = fetch_latest_prerelease()
+    assert out["tag_name"] == "v1.14.0-beta.10"
+    assert out["html_url"] == "https://x/beta10"
 
 
 def test_fetch_prerelease_returns_none_when_no_prerelease_present(monkeypatch):
