@@ -56,7 +56,7 @@ jobs:
 
       # Kept as a debug aid — if the PR step below ever fails, the raw PNGs
       # are still recoverable from this run's artifact.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: opensak-screenshots
           path: screenshot-output/*.png
