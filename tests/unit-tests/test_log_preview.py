@@ -107,14 +107,13 @@ def test_log_browser_opens_external_links(qtbot):
     assert panel._log_browser.openExternalLinks() is True
 
 
-def test_markdown_link_combined_with_search_highlight(qtbot):
-    # Søgning highlighter stadig korrekt selv når logteksten indeholder et link
+def test_markdown_link_rendered_in_log_html(qtbot):
+    # Markdown links in log text are converted to HTML anchors
     panel = CacheDetailPanel()
     qtbot.addWidget(panel)
 
     text = "Great day, see [trip report](https://coord.info/GCAGGGG) for more."
-    panel._render_log_html([_log(text)], filter_text="great day")
+    panel._render_log_html([_log(text)])
 
     html = panel._log_browser.toHtml()
-    assert "<mark>" in html.lower() or "mark" in html.lower()
     assert "coord.info/GCAGGGG" in html

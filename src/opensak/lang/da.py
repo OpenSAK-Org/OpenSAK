@@ -157,8 +157,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Sæt filter",
     "filter_tab_dates":             "Datoer",
     "filter_tab_attributes":        "Attributter",
+    "filter_tab_text_search":       "Tekstsøgning",
     "filter_tab_where":             "Where",
     "filter_tab_misc":             "Øvrigt",
+    "filter_text_search_group":       "Fritekst søgning",
+    "filter_text_search_label":       "Søgetekst",
+    "filter_text_search_placeholder": "Ord at søge efter",
+    "filter_text_search_notes":       "Personlige noter",
     "filter_geo_group":            "Geografisk placering",
     "filter_country_label":        "Land",
     "filter_state_label":          "Stat/Region",
@@ -188,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Afstand fra hjempunkt i {unit}",
     "filter_where_note_userdata":   "Personlige brugerfelter",
     "filter_where_examples_heading": "Eksempler:",
+    "filter_where_subquery_heading": "Søgning i relaterede tabeller (EXISTS underforespørgsel):",
+    "filter_where_note_log_text":   "En hvilken som helst logbesked",
+    "filter_where_note_user_note":  "Personlig bruger-note",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Send til GPS",
@@ -547,14 +555,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(Ingen koordinater)",
     "detail_decode_btn":            "🔓  Dekod hint (ROT13)",
     "detail_encode_btn":            "🔒  Kodér hint (ROT13)",
-    "detail_log_search_placeholder":"Søg i logs…",
     "detail_archived_mark":         " [ARKIVERET]",
     "detail_placed_by":             "Udlagt af: {name}",
     "detail_hidden_date":           "Dato: {date}",
     "detail_no_description":        "(Ingen beskrivelse)",
     "detail_no_hint":               "(Intet hint)",
     "detail_no_logs":               "(Ingen logs)",
-    "detail_no_logs_match":         "(Ingen logs matcher '{text}')",
 
     # ── Toolbar ekstra ────────────────────────────────────────────────────────
 

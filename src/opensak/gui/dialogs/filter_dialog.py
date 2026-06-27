@@ -1,12 +1,13 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Fem faner:
+Seks faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Attributter — alle Groundspeak attributter
-5. Where       — rå SQL WHERE-betingelse
+5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+6. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -43,6 +44,7 @@ from opensak.filters.engine import (
     WhereClauseFilter,
     UserFlagFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
+    TextSearchFilter,
     FilterProfile,
 )
 
@@ -270,11 +272,13 @@ class FilterDialog(QDialog):
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
         self._attributes_tab = self._build_attributes_tab()
+        self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
+        self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
 
@@ -717,6 +721,41 @@ class FilterDialog(QDialog):
         outer_layout.addWidget(table)
         return outer
 
+    def _build_text_search_tab(self) -> QWidget:
+        """Tekstsøgning fane — søg i fritekst felter."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        group = QGroupBox(tr("filter_text_search_group"))
+        group_layout = QFormLayout(group)
+        group_layout.setSpacing(8)
+
+        self._text_search_input = QLineEdit()
+        self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
+        group_layout.addRow(tr("filter_text_search_label"), self._text_search_input)
+
+        self._text_search_description = QCheckBox(tr("detail_tab_desc"))
+        self._text_search_description.setChecked(True)
+        group_layout.addRow(self._text_search_description)
+
+        self._text_search_logs = QCheckBox(tr("detail_tab_logs"))
+        self._text_search_logs.setChecked(True)
+        group_layout.addRow(self._text_search_logs)
+
+        self._text_search_notes = QCheckBox(tr("filter_text_search_notes"))
+        self._text_search_notes.setChecked(True)
+        group_layout.addRow(self._text_search_notes)
+
+        self._text_search_hint = QCheckBox(tr("detail_tab_hint"))
+        self._text_search_hint.setChecked(False)
+        group_layout.addRow(self._text_search_hint)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
     def _build_where_tab(self) -> QWidget:
         """Where filter fane — SQL WHERE clause editor."""
         widget = QWidget()
@@ -836,7 +875,17 @@ class FilterDialog(QDialog):
             "<code>favorite_points &gt; 100</code><br>"
             "<code>found = 0 AND available = 1</code><br>"
             "<code>name LIKE '%night%'</code><br>"
-            f"<code>hidden_date &gt; '{date_where_eg}'</code>"
+            "<code>long_description LIKE '%waterfall%'</code><br>"
+            f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
+            f"<b>{tr('filter_where_subquery_heading')}</b><br>"
+            "<table cellspacing='4'>"
+            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+            f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
+            f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
+            "</table><br>"
+            "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
+            "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
         )
 
         scroll.setWidget(content)
@@ -932,11 +981,19 @@ class FilterDialog(QDialog):
             nej_cb.setChecked(False)
             ingen_cb.setChecked(True)
 
+    def _reset_text_search(self) -> None:
+        self._text_search_input.clear()
+        self._text_search_description.setChecked(True)
+        self._text_search_logs.setChecked(True)
+        self._text_search_notes.setChecked(True)
+        self._text_search_hint.setChecked(False)
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
         self._reset_attributes()
+        self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
@@ -954,6 +1011,8 @@ class FilterDialog(QDialog):
             self._reset_misc()
         elif tab is self._attributes_tab:
             self._reset_attributes()
+        elif tab is self._text_search_tab:
+            self._reset_text_search()
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
 
@@ -1158,6 +1217,17 @@ class FilterDialog(QDialog):
                     attr_or.add(af)
                 fs.add(attr_or)
 
+        # Tekstsøgning
+        ts_text = self._text_search_input.text().strip()
+        if ts_text:
+            fs.add(TextSearchFilter(
+                text=ts_text,
+                search_description=self._text_search_description.isChecked(),
+                search_logs=self._text_search_logs.isChecked(),
+                search_notes=self._text_search_notes.isChecked(),
+                search_hint=self._text_search_hint.isChecked(),
+            ))
+
         # WHERE clause
         if self._where_tab is not None:
             sql = self._where_sql_general.toPlainText().strip()
@@ -1325,6 +1395,12 @@ class FilterDialog(QDialog):
                         ja_cb.setChecked(True)
                     else:
                         nej_cb.setChecked(True)
+            elif ftype == "text_search":
+                self._text_search_input.setText(getattr(f, "text", ""))
+                self._text_search_description.setChecked(getattr(f, "search_description", True))
+                self._text_search_logs.setChecked(getattr(f, "search_logs", True))
+                self._text_search_notes.setChecked(getattr(f, "search_notes", True))
+                self._text_search_hint.setChecked(getattr(f, "search_hint", False))
             elif ftype == "where_clause":
                 if self._where_tab is not None:
                     self._where_sql_general.setPlainText(getattr(f, "sql", ""))

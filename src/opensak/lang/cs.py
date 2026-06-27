@@ -157,8 +157,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Nastavit filtr",
     "filter_tab_dates":             "Data",
     "filter_tab_attributes":        "Atributy",
+    "filter_tab_text_search":       "Hledání v textu",
     "filter_tab_where":             "Where",
     "filter_tab_misc":             "Ostatní",
+    "filter_text_search_group":       "Fulltextové vyhledávání",
+    "filter_text_search_label":       "Hledaný text",
+    "filter_text_search_placeholder": "Slova k vyhledání",
+    "filter_text_search_notes":       "Osobní poznámky",
     "filter_geo_group":            "Geografická poloha",
     "filter_country_label":        "Země",
     "filter_state_label":          "Stát/Kraj",
@@ -188,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Vzdálenost od domácího bodu v {unit}",
     "filter_where_note_userdata":   "Osobní uživatelská pole",
     "filter_where_examples_heading": "Příklady:",
+    "filter_where_subquery_heading": "Hledání v souvisejících tabulkách (poddotaz EXISTS):",
+    "filter_where_note_log_text":   "Libovolný text logu",
+    "filter_where_note_user_note":  "Osobní uživatelská poznámka",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Odeslat do GPS",
@@ -548,14 +556,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(Žádné souřadnice)",
     "detail_decode_btn":            "🔓  Dekódovat nápovědu (ROT13)",
     "detail_encode_btn":            "🔒  Kódovat nápovědu (ROT13)",
-    "detail_log_search_placeholder":"Hledat v lozích…",
     "detail_archived_mark":         " [ARCHIVOVÁNO]",
     "detail_placed_by":             "Umístil: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Bez popisu)",
     "detail_no_hint":               "(Bez nápovědy)",
     "detail_no_logs":               "(Žádné logy)",
-    "detail_no_logs_match":         "(Žádné logy neodpovídají '{text}')",
 
     # ── Toolbar extras ────────────────────────────────────────────────────────
 

@@ -307,3 +307,69 @@ def test_where_tab_validate_invalid_sql_returns_error(seeded_window, qtbot):
     assert error is not None
     assert len(error) > 0
     dialog.close()
+
+
+# ── TextSearchFilter integration via _on_filter_applied ───────────────────────
+
+
+def test_text_search_description_narrows_rows(seeded_window, qtbot):
+    # Seeded: GC99999/GCAAA02 have long_description "Solve the puzzle first."
+    # GC12345/GCAAA01 have "A longer description." — "puzzle" matches only 2.
+    from opensak.filters.engine import FilterSet, SortSpec, TextSearchFilter
+
+    window = seeded_window
+    assert window._cache_table.row_count() == TOTAL
+
+    fs = FilterSet()
+    fs.add(TextSearchFilter("puzzle", search_description=True,
+                            search_logs=False, search_notes=False, search_hint=False))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Puzzle")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 2
+
+
+def test_text_search_hint_narrows_rows(seeded_window, qtbot):
+    # "rock" appears only in GC12345/GCAAA01 hint ("Under a rock.").
+    from opensak.filters.engine import FilterSet, SortSpec, TextSearchFilter
+
+    window = seeded_window
+    assert window._cache_table.row_count() == TOTAL
+
+    fs = FilterSet()
+    fs.add(TextSearchFilter("rock", search_description=False,
+                            search_logs=False, search_notes=False, search_hint=True))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Rock hint")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 2
+
+
+def test_text_search_no_match_returns_zero(seeded_window, qtbot):
+    from opensak.filters.engine import FilterSet, SortSpec, TextSearchFilter
+
+    window = seeded_window
+
+    fs = FilterSet()
+    fs.add(TextSearchFilter("zzznomatch"))
+    window._on_filter_applied(fs, SortSpec("name"), "No match")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 0
+
+
+def test_where_exists_logs_narrows_rows(seeded_window, qtbot):
+    # "TFTC" appears only in GC12345/GCAAA01 log texts.
+    from opensak.filters.engine import FilterSet, SortSpec, WhereClauseFilter
+
+    window = seeded_window
+    assert window._cache_table.row_count() == TOTAL
+
+    fs = FilterSet()
+    fs.add(WhereClauseFilter(
+        "EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')"
+    ))
+    window._on_filter_applied(fs, SortSpec("name"), "TFTC logs")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 2

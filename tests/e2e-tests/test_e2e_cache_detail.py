@@ -120,34 +120,15 @@ def test_encode_button_restores_obscured_hint(seeded_window, qtbot):
     assert panel._hint_browser.toPlainText() == "Haqre n ebpx."
 
 
-# ── Log search ─────────────────────────────────────────────────────────────────
+# ── Log rendering ──────────────────────────────────────────────────────────────
 
 
-def test_log_search_filters_visible_log_entries(seeded_window, qtbot):
-    # Typing in the log search field re-renders logs to show only matching entries.
+def test_logs_tab_renders_all_log_entries(seeded_window, qtbot):
+    # All log entries for the selected cache are displayed in the logs browser.
     window = seeded_window
     _select_by_gc(window, qtbot, "GC12345")
 
     panel = window._detail_panel
-    panel._log_search.setText("TFTC")
-    qtbot.wait(50)
-
-    html = panel._log_browser.toHtml()
-    assert "TFTC" in html
-    assert "Could not find it" not in html
-
-
-def test_log_search_clear_restores_all_logs(seeded_window, qtbot):
-    # Clearing the log search field shows all log entries again.
-    window = seeded_window
-    _select_by_gc(window, qtbot, "GC12345")
-
-    panel = window._detail_panel
-    panel._log_search.setText("TFTC")
-    qtbot.wait(50)
-    panel._log_search.setText("")
-    qtbot.wait(50)
-
     html = panel._log_browser.toHtml()
     assert "TFTC" in html
     assert "Could not find it" in html

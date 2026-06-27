@@ -160,8 +160,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Filter instellen",
     "filter_tab_dates":             "Datums",
     "filter_tab_attributes":        "Attributen",
+    "filter_tab_text_search":       "Tekstzoekopdracht",
     "filter_tab_where":             "Waar",
     "filter_tab_misc":             "Overige",
+    "filter_text_search_group":       "Volledige tekst zoeken",
+    "filter_text_search_label":       "Zoektekst",
+    "filter_text_search_placeholder": "Zoekwoorden invoeren",
+    "filter_text_search_notes":       "Persoonlijke notities",
     "filter_geo_group":            "Geografische locatie",
     "filter_country_label":        "Land",
     "filter_state_label":          "Staat/Regio",
@@ -191,6 +196,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Afstand van thuispunt in {unit}",
     "filter_where_note_userdata":   "Persoonlijke gebruikersvelden",
     "filter_where_examples_heading": "Voorbeelden:",
+    "filter_where_subquery_heading": "Zoeken in gerelateerde tabellen (EXISTS subquery):",
+    "filter_where_note_log_text":   "Willekeurige logtekst",
+    "filter_where_note_user_note":  "Persoonlijke gebruikersnoot",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Naar GPS sturen",
@@ -551,14 +559,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(Geen coördinaten)",
     "detail_decode_btn":            "🔓  Hint decoderen (ROT13)",
     "detail_encode_btn":            "🔒  Hint coderen (ROT13)",
-    "detail_log_search_placeholder":"Zoeken in logs…",
     "detail_archived_mark":         " [GEARCHIVEERD]",
     "detail_placed_by":             "Geplaatst door: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Geen beschrijving)",
     "detail_no_hint":               "(Geen hint)",
     "detail_no_logs":               "(Geen logs)",
-    "detail_no_logs_match":         "(Geen logs gevonden voor '{text}')",
 
     # ── Cache table columns ───────────────────────────────────────────────────
     "col_gc_code":      "GC-code",

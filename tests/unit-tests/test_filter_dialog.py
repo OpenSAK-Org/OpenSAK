@@ -20,7 +20,8 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, FilterProfile,
+    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, TextSearchFilter,
+    FilterProfile,
 )
 
 
@@ -66,8 +67,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_five_tabs(self, dlg):
-        assert dlg._tabs.count() == 5
+    def test_six_tabs(self, dlg):
+        assert dlg._tabs.count() == 6
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -194,6 +195,28 @@ class TestBuildFilterset:
         dlg._where_sql_general.setPlainText("found = 0")
         assert "where_clause" in _types(dlg._build_filterset())
 
+    def test_text_search_builds_filter(self, dlg):
+        dlg._text_search_input.setText("waterfall")
+        types = _types(dlg._build_filterset())
+        assert "text_search" in types
+
+    def test_text_search_empty_text_no_filter(self, dlg):
+        dlg._text_search_input.setText("  ")
+        assert "text_search" not in _types(dlg._build_filterset())
+
+    def test_text_search_hint_flag_propagates(self, dlg):
+        dlg._text_search_input.setText("rock")
+        dlg._text_search_hint.setChecked(True)
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.search_hint is True
+
+    def test_text_search_logs_enabled_by_default(self, dlg):
+        dlg._text_search_input.setText("TFTC")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.search_logs is True
+
 
 # ── load_filterset roundtrip ────────────────────────────────────────────────────
 
@@ -259,6 +282,17 @@ class TestLoadFilterset:
         dlg._load_filterset(fs)        # exercises the fixed _attr_mode_all toggle
         assert dlg._attr_mode_all.isChecked() is False
         assert dlg._attr_boxes[attr_id][0].isChecked() is True
+
+    def test_loads_text_search_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(TextSearchFilter("waterfall", search_description=True,
+                                search_logs=False, search_notes=False, search_hint=True))
+        dlg._load_filterset(fs)
+        assert dlg._text_search_input.text() == "waterfall"
+        assert dlg._text_search_description.isChecked() is True
+        assert dlg._text_search_logs.isChecked() is False
+        assert dlg._text_search_notes.isChecked() is False
+        assert dlg._text_search_hint.isChecked() is True
 
 
 # ── reset ───────────────────────────────────────────────────────────────────────

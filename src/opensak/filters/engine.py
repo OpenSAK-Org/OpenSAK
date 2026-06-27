@@ -997,6 +997,102 @@ class LastLogDateFilter(BaseFilter):
         )
 
 
+class TextSearchFilter(BaseFilter):
+    """Keep caches whose text fields contain *text* (case-insensitive).
+
+    Searches any combination of: short/long description, log texts,
+    personal user notes, and the encoded hint.
+    """
+    filter_type = "text_search"
+
+    def __init__(
+        self,
+        text: str,
+        search_description: bool = True,
+        search_logs: bool = True,
+        search_notes: bool = True,
+        search_hint: bool = False,
+    ):
+        self.text = text.strip()
+        self.search_description = search_description
+        self.search_logs = search_logs
+        self.search_notes = search_notes
+        self.search_hint = search_hint
+
+    def apply_to_query(self, query):
+        if not self.text:
+            return None
+        from sqlalchemy import func, exists, or_
+        from opensak.db.models import Log, UserNote
+
+        pattern = f"%{self.text.lower()}%"
+        conditions = []
+        if self.search_description:
+            conditions.append(func.lower(Cache.short_description).like(pattern))
+            conditions.append(func.lower(Cache.long_description).like(pattern))
+        if self.search_hint:
+            conditions.append(func.lower(Cache.encoded_hints).like(pattern))
+        if self.search_logs:
+            conditions.append(
+                exists().where(
+                    (Log.cache_id == Cache.id)
+                    & func.lower(Log.text).like(pattern)
+                )
+            )
+        if self.search_notes:
+            conditions.append(
+                exists().where(
+                    (UserNote.cache_id == Cache.id)
+                    & func.lower(UserNote.note).like(pattern)
+                )
+            )
+        if not conditions:
+            return None
+        return query.filter(or_(*conditions))
+
+    def matches(self, cache: Cache) -> bool:
+        if not self.text:
+            return True
+        needle = self.text.lower()
+        if self.search_description:
+            if cache.short_description and needle in cache.short_description.lower():
+                return True
+            if cache.long_description and needle in cache.long_description.lower():
+                return True
+        if self.search_hint:
+            if cache.encoded_hints and needle in cache.encoded_hints.lower():
+                return True
+        if self.search_notes:
+            if cache.user_note and cache.user_note.note:
+                if needle in cache.user_note.note.lower():
+                    return True
+        if self.search_logs:
+            for log in cache.logs:
+                if log.text and needle in log.text.lower():
+                    return True
+        return False
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "text": self.text,
+            "search_description": self.search_description,
+            "search_logs": self.search_logs,
+            "search_notes": self.search_notes,
+            "search_hint": self.search_hint,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TextSearchFilter":
+        return cls(
+            text=data.get("text", ""),
+            search_description=data.get("search_description", True),
+            search_logs=data.get("search_logs", True),
+            search_notes=data.get("search_notes", True),
+            search_hint=data.get("search_hint", False),
+        )
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -1031,6 +1127,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
+    "text_search":        TextSearchFilter,
 }
 
 
@@ -1337,25 +1434,31 @@ def apply_filters(
     needs_trackables  = filterset is not None and any(
         isinstance(f, HasTrackableFilter) for f in _iter_filters(filterset)
     )
+    _text_filters = [
+        f for f in _iter_filters(filterset)
+        if isinstance(f, TextSearchFilter) and f.text
+    ] if filterset is not None else []
+    needs_description = any(f.search_description for f in _text_filters)
+    needs_hint        = any(f.search_hint        for f in _text_filters)
+    # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
+    # would pull all logs for all caches. Python matches() will lazy-load
+    # logs only for the already-filtered result set.
+    needs_logs        = any(f.search_logs        for f in _text_filters)
 
     from sqlalchemy.orm import defer, joinedload, noload
-    query = session.query(Cache).options(
+    _opts: list = [
         joinedload(Cache.attributes) if needs_attributes else noload(Cache.attributes),
         joinedload(Cache.trackables) if needs_trackables else noload(Cache.trackables),
-        noload(Cache.logs),       # load on-demand when user opens a cache
-        noload(Cache.waypoints),  # load on-demand when user opens a cache
-        joinedload(Cache.user_note),  # one-to-one, cheap; needed for corrected-coords
-        # Defer the large free-text blobs — they dominate per-row size but are
-        # never shown in the cache table (only in the detail panel, which loads
-        # each cache separately via _load_full_cache()). Deferring them keeps
-        # the table refresh light on big databases. A load_only() allow-list was
-        # rejected as too fragile: the table model and Python-level filters read
-        # a wide, scattered set of scalar columns, and missing one would trigger
-        # a lazy SELECT per row (N+1). These three blobs carry ~all the weight.
-        defer(Cache.short_description),
-        defer(Cache.long_description),
-        defer(Cache.encoded_hints),
-    )
+        joinedload(Cache.logs)       if needs_logs        else noload(Cache.logs),
+        noload(Cache.waypoints),
+        joinedload(Cache.user_note),
+    ]
+    # Defer the large free-text blobs unless text search needs them.
+    if not needs_description:
+        _opts += [defer(Cache.short_description), defer(Cache.long_description)]
+    if not needs_hint:
+        _opts.append(defer(Cache.encoded_hints))
+    query = session.query(Cache).options(*_opts)
 
     # Push SQL-capable filters into the query before loading rows.
     # This lets SQLite discard non-matching rows before any Python objects are

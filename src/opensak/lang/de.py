@@ -157,8 +157,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Filter einstellen",
     "filter_tab_dates":             "Datum",
     "filter_tab_attributes":        "Attribute",
+    "filter_tab_text_search":       "Textsuche",
     "filter_tab_where":             "Where",
     "filter_tab_misc":             "Sonstiges",
+    "filter_text_search_group":       "Volltextsuche",
+    "filter_text_search_label":       "Suchtext",
+    "filter_text_search_placeholder": "Suchbegriffe eingeben",
+    "filter_text_search_notes":       "Persönliche Notizen",
     "filter_geo_group":            "Geografische Lage",
     "filter_country_label":        "Land",
     "filter_state_label":          "Bundesland/Region",
@@ -188,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Entfernung vom Heimatpunkt in {unit}",
     "filter_where_note_userdata":   "Persönliche Benutzerfelder",
     "filter_where_examples_heading": "Beispiele:",
+    "filter_where_subquery_heading": "Suche in verwandten Tabellen (EXISTS-Unterabfrage):",
+    "filter_where_note_log_text":   "Beliebiger Log-Text",
+    "filter_where_note_user_note":  "Persönliche Benutzernotiz",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "An GPS senden",
@@ -547,14 +555,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(Keine Koordinaten)",
     "detail_decode_btn":            "🔓  Hinweis dekodieren (ROT13)",
     "detail_encode_btn":            "🔒  Hinweis kodieren (ROT13)",
-    "detail_log_search_placeholder":"In Logs suchen…",
     "detail_archived_mark":         " [ARCHIVIERT]",
     "detail_placed_by":             "Versteckt von: {name}",
     "detail_hidden_date":           "Datum: {date}",
     "detail_no_description":        "(Keine Beschreibung)",
     "detail_no_hint":               "(Kein Hinweis)",
     "detail_no_logs":               "(Keine Logs)",
-    "detail_no_logs_match":         "(Keine Übereinstimmungen zu '{text}')",
 
     # ── Toolbar extras ────────────────────────────────────────────────────────
 

@@ -157,8 +157,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Définir le filtre",
     "filter_tab_dates":             "Dates",
     "filter_tab_attributes":        "Attributs",
+    "filter_tab_text_search":       "Recherche texte",
     "filter_tab_where":             "Where",
     "filter_tab_misc":             "Divers",
+    "filter_text_search_group":       "Recherche plein texte",
+    "filter_text_search_label":       "Texte recherché",
+    "filter_text_search_placeholder": "Mots à rechercher",
+    "filter_text_search_notes":       "Notes personnelles",
     "filter_geo_group":            "Localisation géographique",
     "filter_country_label":        "Pays",
     "filter_state_label":          "État/Région",
@@ -188,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Distance du point d'origine en {unit}",
     "filter_where_note_userdata":   "Champs utilisateur personnels",
     "filter_where_examples_heading": "Exemples :",
+    "filter_where_subquery_heading": "Recherche dans les tables associées (sous-requête EXISTS) :",
+    "filter_where_note_log_text":   "N'importe quel texte de log",
+    "filter_where_note_user_note":  "Note personnelle de l'utilisateur",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Envoyer au GPS",
@@ -547,14 +555,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(Pas de coordonnées)",
     "detail_decode_btn":            "🔓  Decoder l'indice (ROT13)",
     "detail_encode_btn":            "🔒  Encoder l'indice (ROT13)",
-    "detail_log_search_placeholder":"Rechercher dans les logs…",
     "detail_archived_mark":         " [ARCHIVÉE]",
     "detail_placed_by":             "Placée par: {name}",
     "detail_hidden_date":           "Date: {date}",
     "detail_no_description":        "(Aucune description)",
     "detail_no_hint":               "(Aucun indice)",
     "detail_no_logs":               "(Aucun log)",
-    "detail_no_logs_match":         "(Aucun log ne correspond à '{text}')",
 
     # ── Toolbar extras ────────────────────────────────────────────────────────
 

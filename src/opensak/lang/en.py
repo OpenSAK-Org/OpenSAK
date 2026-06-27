@@ -157,8 +157,13 @@ STRINGS: dict[str, str] = {
     "filter_dialog_title":          "Set filter",
     "filter_tab_dates":             "Dates",
     "filter_tab_attributes":        "Attributes",
+    "filter_tab_text_search":       "Text Search",
     "filter_tab_where":             "Where",
     "filter_tab_misc":             "Other",
+    "filter_text_search_group":       "Full-text search",
+    "filter_text_search_label":       "Search text",
+    "filter_text_search_placeholder": "Words to search for",
+    "filter_text_search_notes":       "Personal notes",
     "filter_geo_group":            "Geographic location",
     "filter_country_label":        "Country",
     "filter_state_label":          "State/Region",
@@ -188,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Distance from home point in {unit}",
     "filter_where_note_userdata":   "Personal user fields",
     "filter_where_examples_heading": "Examples:",
+    "filter_where_subquery_heading": "Searching related tables (EXISTS subquery):",
+    "filter_where_note_log_text":   "Any log text",
+    "filter_where_note_user_note":  "Personal user note",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Send to GPS",
@@ -546,14 +554,12 @@ STRINGS: dict[str, str] = {
     "detail_wp_no_coords":          "(No coordinates)",
     "detail_decode_btn":            "🔓  Decode hint (ROT13)",
     "detail_encode_btn":            "🔒  Encode hint (ROT13)",
-    "detail_log_search_placeholder":"Search in logs…",
     "detail_archived_mark":         " [ARCHIVED]",
     "detail_placed_by":             "Placed by: {name}",
     "detail_hidden_date":           "Date: {date}",
     "detail_no_description":        "(No description)",
     "detail_no_hint":               "(No hint)",
     "detail_no_logs":               "(No logs)",
-    "detail_no_logs_match":         "(No logs match '{text}')",
 
     # ── Toolbar extras ────────────────────────────────────────────────────────
 

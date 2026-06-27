@@ -277,17 +277,6 @@ class CacheDetailPanel(QWidget):
         log_layout.setContentsMargins(0, 4, 0, 0)
         log_layout.setSpacing(4)
 
-        # Søgefelt til logs
-        from PySide6.QtWidgets import QLineEdit
-        log_search_row = QHBoxLayout()
-        self._log_search = QLineEdit()
-        self._log_search.setPlaceholderText(tr("detail_log_search_placeholder"))
-        self._log_search.setMaximumWidth(250)
-        self._log_search.textChanged.connect(self._filter_logs)
-        log_search_row.addWidget(self._log_search)
-        log_search_row.addStretch()
-        log_layout.addLayout(log_search_row)
-
         self._log_browser = QTextBrowser()
         self._log_browser.setOpenExternalLinks(True)  # issue #219 — links åbnes i systemets browser
         log_layout.addWidget(self._log_browser)
@@ -319,10 +308,6 @@ class CacheDetailPanel(QWidget):
         font.setBold(True)
         lbl.setFont(font)
         return lbl
-
-    def _filter_logs(self, text: str) -> None:
-        """Filtrer logs baseret på søgetekst."""
-        self._render_log_html(self._cached_logs, filter_text=text.lower())
 
     def _toggle_hint_decode(self) -> None:
         self._hint_decoded = not self._hint_decoded
@@ -519,8 +504,6 @@ class CacheDetailPanel(QWidget):
         self._hint_cipher = ""
         self._hint_decoded = False
         self._decode_btn.setText(tr("detail_decode_btn"))
-        self._log_search.setText("")
-        self._cached_logs: list = []
         self._conv_btn.setEnabled(False)
         self._corrected_frame.setVisible(False)
         self._add_corrected_btn.setVisible(False)
@@ -646,45 +629,21 @@ class CacheDetailPanel(QWidget):
             key=lambda l: l.log_date or 0,
             reverse=True
         )
-        self._cached_logs = logs
-        self._log_search.setText("")
         self._tabs.setTabText(2, tr("detail_tab_logs_count", count=len(logs)) if logs else tr("detail_tab_logs"))
         self._render_log_html(logs)
 
-    def _render_log_html(self, logs: list, filter_text: str = "") -> None:
-        """Render logs som HTML, evt. filtreret."""
+    def _render_log_html(self, logs: list) -> None:
         if not logs:
             self._log_browser.setPlainText(tr("detail_no_logs"))
             return
 
         colours = LOG_COLOURS
-
-        filtered = logs
-        if filter_text:
-            filtered = [
-                l for l in logs
-                if filter_text in (l.text or "").lower()
-                or filter_text in (l.finder or "").lower()
-                or filter_text in (l.log_type or "").lower()
-            ]
-
-        if not filtered:
-            self._log_browser.setPlainText(tr("detail_no_logs_match", text=filter_text))
-            return
-
         html = []
-        for log in filtered:
+        for log in logs:
             colour = colours.get(log.log_type, "#555555")
             date_str = _format_date(log.log_date) if log.log_date else "?"
             # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
             text = log.text or ""
-            if filter_text and filter_text in text.lower():
-                idx = text.lower().find(filter_text)
-                text = (
-                    text[:idx]
-                    + f'<mark>{text[idx:idx+len(filter_text)]}</mark>'
-                    + text[idx+len(filter_text):]
-                )
             # issue #219 — markdown-links [tekst](url) gøres til klikbare <a> tags
             text = _convert_markdown_links(text)
             html.append(
