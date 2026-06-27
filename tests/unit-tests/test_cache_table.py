@@ -55,7 +55,7 @@ def fake_settings(monkeypatch, qapp):
     s = SimpleNamespace(
         home_lat=55.0, home_lon=12.0, use_miles=False,
         coord_format=CoordFormat.DMM, date_format=DateFormat.DMY,
-        gc_username="", map_provider="google",
+        gc_username="", map_provider="google", text_size=TextSize.MEDIUM,
     )
     s.get_maps_url = lambda lat, lon: f"https://maps?{lat},{lon}"
     monkeypatch.setattr(ct, "get_settings", lambda: s)
