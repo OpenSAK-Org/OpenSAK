@@ -499,6 +499,7 @@ class CacheDetailPanel(QWidget):
         self._corrected_frame.setVisible(False)
         self._add_corrected_btn.setVisible(False)
         self._current_waypoints: list = []
+        self._tabs.setTabVisible(4, False)
         self.waypoints_tab_hidden.emit()
 
     def show_cache(self, cache: Cache) -> None:
@@ -597,6 +598,7 @@ class CacheDetailPanel(QWidget):
         )
 
         # Personal note
+        self._tabs.setTabVisible(4, True)
         self._note_editor.setPlainText(
             (cache.user_note.note or "") if cache.user_note else ""
         )
