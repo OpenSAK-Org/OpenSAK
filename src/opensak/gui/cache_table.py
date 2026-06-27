@@ -596,10 +596,12 @@ class CacheTableModel(QAbstractTableModel):
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
         if role == Qt.ItemDataRole.FontRole:
+            text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+            font = QFont()
+            font.setPointSize(TEXT_SIZE_MAP[text_size]["grid"])
             if cache.found:
-                font = QFont()
                 font.setItalic(True)
-                return font
+            return font
 
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == "cache_type":
@@ -938,7 +940,8 @@ class CacheTableView(QTableView):
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
-        self.verticalHeader().setDefaultSectionSize(24)
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        self.verticalHeader().setDefaultSectionSize(TEXT_SIZE_MAP[text_size]["row_height"])
         self._applying_widths = False
         self._apply_column_widths()
         self.horizontalHeader().setSortIndicatorShown(True)
@@ -1346,12 +1349,11 @@ class CacheTableView(QTableView):
 
     def refresh_visuals(self) -> None:
         """Re-paint all visible cells after UI size change (font-size, etc.)."""
-        # Opdatér SizeBarDelegate icon-størrelse
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        sizes = TEXT_SIZE_MAP[text_size]
         if hasattr(self, "_size_bar_delegate"):
-            text_size = getattr(get_settings(), 'text_size', TextSize.MEDIUM)
-            sizes = TEXT_SIZE_MAP[text_size]
             self._size_bar_delegate.set_icon_size(sizes["icon"])
-        # Genrender alle celler
+        self.verticalHeader().setDefaultSectionSize(sizes["row_height"])
         self._model.refresh_visuals()
 
     def row_count(self) -> int:

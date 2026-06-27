@@ -62,20 +62,22 @@ def norm_locale_date_fmt(raw: str) -> str:
 
 
 class TextSize(StrEnum):
-    """Text and icon sizes for UI elements (issue #286/#288/#290)."""
-    SMALL  = "small"   # Kompakt: 5/9/8 pt
-    MEDIUM = "medium"  # Standard: 7/13/10 pt (default)
-    LARGE  = "large"   # Stor: 10/18/14 pt
+    """Text and icon sizes for UI elements (issue #286/#288/#290/#375)."""
+    SMALL  = "small"   # Kompakt: 5/9/8/8 pt, 20 px rows
+    MEDIUM = "medium"  # Standard: 7/13/10/10 pt, 24 px rows (default)
+    LARGE  = "large"   # Stor: 10/18/14/13 pt, 30 px rows
 
 
 # Font sizes (pt) for each TextSize level. Maps to:
-#   icon_pt (type icon in cache grid)
-#   label_pt (info label in detail panel)
-#   secondary_pt (corrected coords, hints label)
+#   icon_pt       — type icon in cache grid (SizeBarDelegate)
+#   label_pt      — info label in detail panel
+#   secondary_pt  — corrected coords, hints label
+#   grid_pt       — cell text in the cache grid
+#   row_height    — vertical section size (px) in the cache grid
 TEXT_SIZE_MAP = {
-    TextSize.SMALL:  {"icon": 5, "label": 9,  "secondary": 8},
-    TextSize.MEDIUM: {"icon": 7, "label": 13, "secondary": 10},
-    TextSize.LARGE:  {"icon": 10, "label": 18, "secondary": 14},
+    TextSize.SMALL:  {"icon": 5,  "label": 9,  "secondary": 8,  "grid": 8,  "row_height": 20},
+    TextSize.MEDIUM: {"icon": 7,  "label": 13, "secondary": 10, "grid": 10, "row_height": 24},
+    TextSize.LARGE:  {"icon": 10, "label": 18, "secondary": 14, "grid": 13, "row_height": 30},
 }
 
 

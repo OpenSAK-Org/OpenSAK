@@ -23,7 +23,7 @@ from opensak.gui.cache_table import (
     _gc_sort_key,
 )
 from opensak.db.models import Cache, UserNote
-from opensak.utils.types import CoordFormat, DateFormat
+from opensak.utils.types import CoordFormat, DateFormat, TextSize, TEXT_SIZE_MAP
 
 ALL_COLUMNS = [
     "gc_code", "name", "cache_type", "difficulty", "terrain", "container",
@@ -278,6 +278,24 @@ class TestDataRoles:
         model.load([_cache(found=True)])
         font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
         assert font is not None and font.italic()
+
+    def test_font_role_uses_grid_pt(self, model, fake_settings):
+        # FontRole always returns a font sized to the current text_size grid_pt.
+        for size in TextSize:
+            fake_settings.text_size = size
+            model.load([_cache(found=False)])
+            font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
+            assert font is not None
+            assert font.pointSize() == TEXT_SIZE_MAP[size]["grid"]
+
+    def test_font_role_found_italic_keeps_grid_pt(self, model, fake_settings):
+        # Found caches: italic AND correct point size.
+        fake_settings.text_size = TextSize.LARGE
+        model.load([_cache(found=True)])
+        font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
+        assert font is not None
+        assert font.italic()
+        assert font.pointSize() == TEXT_SIZE_MAP[TextSize.LARGE]["grid"]
 
     def test_tooltip_cache_type(self, model):
         model.load([_cache(cache_type="Unknown Cache")])
@@ -838,3 +856,10 @@ class TestView:
         view.load_caches([])
         from PySide6.QtCore import QPoint
         view._show_context_menu(QPoint(0, 0))  # indexAt -> invalid -> early return
+
+    def test_refresh_visuals_updates_row_height(self, view, fake_settings):
+        # refresh_visuals must sync row height with the current text_size setting.
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            assert view.verticalHeader().defaultSectionSize() == TEXT_SIZE_MAP[size]["row_height"]
