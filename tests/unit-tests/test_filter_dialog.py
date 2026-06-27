@@ -211,12 +211,11 @@ class TestBuildFilterset:
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
         assert f.search_hint is True
 
-    def test_text_search_logs_always_false(self, dlg):
-        # Log search is intentionally not exposed in the UI.
+    def test_text_search_logs_enabled_by_default(self, dlg):
         dlg._text_search_input.setText("TFTC")
         fs = dlg._build_filterset()
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
-        assert f.search_logs is False
+        assert f.search_logs is True
 
 
 # ── load_filterset roundtrip ────────────────────────────────────────────────────
@@ -287,10 +286,11 @@ class TestLoadFilterset:
     def test_loads_text_search_filter(self, dlg):
         fs = FilterSet(mode="AND")
         fs.add(TextSearchFilter("waterfall", search_description=True,
-                                search_notes=False, search_hint=True))
+                                search_logs=False, search_notes=False, search_hint=True))
         dlg._load_filterset(fs)
         assert dlg._text_search_input.text() == "waterfall"
         assert dlg._text_search_description.isChecked() is True
+        assert dlg._text_search_logs.isChecked() is False
         assert dlg._text_search_notes.isChecked() is False
         assert dlg._text_search_hint.isChecked() is True
 

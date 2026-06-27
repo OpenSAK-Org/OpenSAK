@@ -6,7 +6,7 @@ Seks faner:
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Attributter — alle Groundspeak attributter
-5. Tekstsøgning — søg i beskrivelse, noter og hint
+5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
 6. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
@@ -740,6 +740,10 @@ class FilterDialog(QDialog):
         self._text_search_description.setChecked(True)
         group_layout.addRow(self._text_search_description)
 
+        self._text_search_logs = QCheckBox(tr("detail_tab_logs"))
+        self._text_search_logs.setChecked(True)
+        group_layout.addRow(self._text_search_logs)
+
         self._text_search_notes = QCheckBox(tr("filter_text_search_notes"))
         self._text_search_notes.setChecked(True)
         group_layout.addRow(self._text_search_notes)
@@ -980,6 +984,7 @@ class FilterDialog(QDialog):
     def _reset_text_search(self) -> None:
         self._text_search_input.clear()
         self._text_search_description.setChecked(True)
+        self._text_search_logs.setChecked(True)
         self._text_search_notes.setChecked(True)
         self._text_search_hint.setChecked(False)
 
@@ -1218,7 +1223,7 @@ class FilterDialog(QDialog):
             fs.add(TextSearchFilter(
                 text=ts_text,
                 search_description=self._text_search_description.isChecked(),
-                search_logs=False,
+                search_logs=self._text_search_logs.isChecked(),
                 search_notes=self._text_search_notes.isChecked(),
                 search_hint=self._text_search_hint.isChecked(),
             ))
@@ -1393,6 +1398,7 @@ class FilterDialog(QDialog):
             elif ftype == "text_search":
                 self._text_search_input.setText(getattr(f, "text", ""))
                 self._text_search_description.setChecked(getattr(f, "search_description", True))
+                self._text_search_logs.setChecked(getattr(f, "search_logs", True))
                 self._text_search_notes.setChecked(getattr(f, "search_notes", True))
                 self._text_search_hint.setChecked(getattr(f, "search_hint", False))
             elif ftype == "where_clause":
