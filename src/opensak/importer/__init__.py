@@ -307,6 +307,7 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_user_data_3: Optional[str] = None
     gsak_user_data_4: Optional[str] = None
     gsak_fav_points: Optional[int] = None
+    gsak_user_note: Optional[str] = None
 
     for gsak_uri in _GSAK_NAMESPACES:
         gsak_ext = wpt_el.find(f"{{{gsak_uri}}}wptExtension")
@@ -355,6 +356,10 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
                     gsak_fav_points = int(fav_el.text.strip())
                 except ValueError:
                     pass
+
+            note_el = gsak_ext.find(f"{{{gsak_uri}}}UserNote")
+            if note_el is not None and note_el.text and note_el.text.strip():
+                gsak_user_note = note_el.text.strip()
 
             # Format B: LatBeforeCorrect/LonBeforeCorrect (newer GSAK)
             # The mere PRESENCE of LatBeforeCorrect means CC has been set in GSAK —
@@ -432,6 +437,7 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_user_data_3":  gsak_user_data_3,
         "gsak_user_data_4":  gsak_user_data_4,
         "gsak_fav_points":   gsak_fav_points,
+        "gsak_user_note":    gsak_user_note,
         "found_by_me":       found_by_me,
     }
 
@@ -968,6 +974,20 @@ def _upsert_cache(
         cache.user_data_4 = data["gsak_user_data_4"]
     if data.get("gsak_fav_points") is not None:
         cache.favorite_points = data["gsak_fav_points"]
+
+    # ── GSAK personal note (issue #389) ──────────────────────────────────────
+    # Write only when GSAK supplied a non-empty note, and never overwrite an
+    # existing non-empty note so that manually entered notes survive re-import.
+    gsak_note_text = data.get("gsak_user_note")
+    if gsak_note_text:
+        if cache.user_note is None:
+            session.flush()
+            note = UserNote(cache_id=cache.id)
+            session.add(note)
+            session.flush()
+            cache.user_note = note
+        if not cache.user_note.note:
+            cache.user_note.note = gsak_note_text
 
     # ── GSAK corrected coordinates (issue #129, #73) ──────────────────────────
     # Corrected coords are stored in UserNote (user data), not on Cache itself.
