@@ -165,13 +165,19 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         _text(wpt_el, "gpx:name", gpx_ns) or
         _text(wpt_el, "gpx:n", gpx_ns)
     )
-    # Accept GC codes (standard caches) and LC codes (Adventure Lab / lab2gpx)
-    if not gc_code or not (gc_code.startswith("GC") or gc_code.startswith("LC")):
+    if not gc_code:
         return None
 
     # Cache type from <type>Geocache|Traditional Cache</type>
     type_raw = _text(wpt_el, "gpx:type", gpx_ns) or ""
     cache_type_full = type_raw.split("|")[-1].strip() if "|" in type_raw else type_raw
+
+    # Accept GC codes (standard caches), LC codes (Adventure Lab / lab2gpx),
+    # and any other code the type field identifies as a Geocache — covers other
+    # lab2gpx-encoded Adventure Lab prefixes such as LB, LA, etc.
+    if not gc_code.startswith("GC") and not gc_code.startswith("LC"):
+        if not type_raw.startswith("Geocache"):
+            return None
 
     hidden_raw = _text(wpt_el, "gpx:time", gpx_ns)
 

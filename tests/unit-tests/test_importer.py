@@ -285,6 +285,24 @@ def test_import_zip_multiple_with_companion_wpts(tmp_db, tmp_path):
         assert any(wp.prefix == "PK" for wp in cache.waypoints)
 
 
+def test_import_lb_lab_cache_codes(tmp_db, tmp_path):
+    # lab2gpx exports Adventure Lab stages with LB* codes (Geocache|Lab Cache).
+    # These were silently dropped because only GC and LC prefixes were accepted.
+    gpx = write_gpx(tmp_path, "labs.gpx", build_gpx(
+        cache_wpt("LB1AQD01", name="Lab Stage 1", cache_type="Lab Cache"),
+        cache_wpt("LB1AQD02", name="Lab Stage 2", cache_type="Lab Cache"),
+        cache_wpt("LC9XYZ01", name="Lab Stage LC", cache_type="Lab Cache"),
+    ))
+    with get_session() as s:
+        result = import_gpx(gpx, s)
+    assert result.total == 3, f"Expected 3 imported, got {result.total}"
+    assert result.errors == []
+    with get_session() as s:
+        assert s.query(Cache).filter_by(gc_code="LB1AQD01").count() == 1
+        assert s.query(Cache).filter_by(gc_code="LB1AQD02").count() == 1
+        assert s.query(Cache).filter_by(gc_code="LC9XYZ01").count() == 1
+
+
 def test_import_gpx_inline_extra_waypoints(tmp_db, tmp_path):
     # Verify extra waypoints embedded in the main GPX are linked to their cache.
     with get_session() as s:
