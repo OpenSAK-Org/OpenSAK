@@ -4,13 +4,13 @@
 
 ## Problem with the legacy approach
 
-Before this flag, distance was recomputed on **every `_refresh_cache_list()` call** — which fires on every filter change, sort change, search keystroke, import, and dialog close. For a database with tens of thousands of caches this meant running the same Haversine batch dozens of times per session, even when neither the cache coordinates nor the centre point had changed.
+Previously, distance was recomputed on **every `_refresh_cache_list()` call** — which fires on every filter change, sort change, search keystroke, import, and dialog close. For a database with tens of thousands of caches this meant running the same Haversine batch dozens of times per session, even when neither the cache coordinates nor the centre point had changed.
 
 There was also a secondary inefficiency: when the sort column was `distance`, `apply_filters()` computed it a second time in a per-row scalar loop independently of the vectorised batch already computed by the table model.
 
 ---
 
-## New design (flag ON)
+## Design
 
 ### One write per centre-point change, zero writes per refresh
 
@@ -37,11 +37,9 @@ user changes centre point
 
 ### SQL-level sort
 
-When the flag is ON, `_sql_order_expr("distance")` returns `COALESCE(caches.distance, 99999.0)`, so `apply_filters()` can push `ORDER BY distance` into SQLite instead of sorting in Python after loading all rows.
+`_sql_order_expr("distance")` returns `COALESCE(caches.distance, 99999.0)`, so `apply_filters()` pushes `ORDER BY distance` into SQLite instead of sorting in Python after loading all rows.
 
 ### Table model
-
-`CacheTableModel._update_distances()` dispatches on the flag:
 
 `CacheTableModel._update_distances()` reads `cache.distance` / `cache.bearing` from the already-loaded ORM objects — no recomputation on refresh.
 
@@ -75,8 +73,8 @@ Vincenty does not vectorise cleanly (it is iterative), so the batch form is a pl
 ### Dispatcher
 
 ```python
-distance_km(lat1, lon1, lat2, lon2)         # scalar — reads flag + setting
-distance_km_batch(lat0, lon0, lats, lons)   # batch  — reads flag + setting
+distance_km(lat1, lon1, lat2, lon2)         # scalar — reads distance_method setting
+distance_km_batch(lat0, lon0, lats, lons)   # batch  — reads distance_method setting
 ```
 
 Both read `AppSettings.distance_method` and dispatch accordingly.
@@ -95,7 +93,6 @@ Both read `AppSettings.distance_method` and dispatch accordingly.
 | `src/opensak/gui/dialogs/settings_dialog.py` | Added "Distance Calculation" group in Advanced tab |
 | `src/opensak/lang/en.py` + all others | Added `settings_group_distance`, `settings_distance_method_label`, `settings_distance_haversine`, `settings_distance_vincenty`, `settings_distance_hint` |
 | `tests/unit-tests/test_distance.py` | Added Vincenty tests, dispatcher tests, `recalculate_distances()` tests |
-| `tests/unit-tests/test_flags.py` | Added `TestDistanceComputation` class; updated default-flags assertions |
 
 ---
 

@@ -1267,11 +1267,8 @@ class MainWindow(QMainWindow):
                 s.set_active_home(point)
                 # Pan kort til ny lokation — INGEN HTML reload
                 self._map_widget.pan_to_location(point.lat, point.lon, point.name)
-                # When flag is ON: write distances to DB once; table reads the column.
-                from opensak.utils import flags as _flags
-                if _flags.distance_computation:
-                    from opensak.db.database import recalculate_distances
-                    recalculate_distances(point.lat, point.lon)
+                from opensak.db.database import recalculate_distances
+                recalculate_distances(point.lat, point.lon)
                 # Opdater distances i cache-listen
                 self._refresh_cache_list()
                 self._update_info_bar()
@@ -1282,12 +1279,10 @@ class MainWindow(QMainWindow):
 
     def _initial_load(self) -> None:
         """Første load ved opstart — vent på kort hvis ikke klar."""
-        from opensak.utils import flags as _flags
-        if _flags.distance_computation:
-            s = get_settings()
-            if s.home_lat and s.home_lon:
-                from opensak.db.database import recalculate_distances
-                recalculate_distances(s.home_lat, s.home_lon)
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances
+            recalculate_distances(s.home_lat, s.home_lon)
         if not self._map_widget.is_ready():
             self._map_widget.set_pending_refresh(self._refresh_cache_list)
         else:

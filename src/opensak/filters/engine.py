@@ -138,8 +138,7 @@ def vincenty_km_batch(lat0: float, lon0: float, lats, lons):
 def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Scalar distance (km) dispatched by the user's distance_method setting."""
     from opensak.gui.settings import get_settings
-    from opensak.utils import flags
-    if flags.distance_computation and get_settings().distance_method == "vincenty":
+    if get_settings().distance_method == "vincenty":
         return _vincenty_km(lat1, lon1, lat2, lon2)
     return _haversine_km(lat1, lon1, lat2, lon2)
 
@@ -147,8 +146,7 @@ def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def distance_km_batch(lat0: float, lon0: float, lats, lons):
     """Batch distance (km) dispatched by the user's distance_method setting."""
     from opensak.gui.settings import get_settings
-    from opensak.utils import flags
-    if flags.distance_computation and get_settings().distance_method == "vincenty":
+    if get_settings().distance_method == "vincenty":
         return vincenty_km_batch(lat0, lon0, lats, lons)
     return haversine_km_batch(lat0, lon0, lats, lons)
 
@@ -1150,12 +1148,10 @@ def _sql_order_expr(field: str):
     reproduces the Python key exactly (COALESCE for the ``x or default``
     fallbacks). Text fields are deliberately excluded — SQLite's lower() is
     ASCII-only and would diverge from Python's Unicode str.lower() on accented
-    values. When the distance-computation flag is ON, distance is stored in the
-    DB column and can be ordered in SQL; otherwise it stays in Python.
+    values. Distance is stored in the DB column and ordered in SQL via COALESCE.
     """
-    from opensak.utils import flags
     from sqlalchemy import func
-    distance_expr = func.coalesce(Cache.distance, 99999.0) if flags.distance_computation else None
+    distance_expr = func.coalesce(Cache.distance, 99999.0)
     exprs = {
         # Numeric (mirror "x or 0.0/0/999999")
         "difficulty":      func.coalesce(Cache.difficulty, 0.0),
@@ -1383,17 +1379,12 @@ def apply_filters(
     # Python filter pass below preserves row order, so a SQL-ordered result
     # stays ordered. A trailing Cache.id keeps the order identical to Python's
     # stable sort (ties retain the id-ascending load order).
-    # When distance-computation flag is ON the DB column is pre-populated so
-    # distance sort is also pushed to SQL via _sql_order_expr; otherwise it
-    # falls back to the Python scalar loop further below.
-    from opensak.utils import flags as _flags
     sql_sorted = False
-    if not (sort.field == "distance" and distance_from and not _flags.distance_computation):
-        order_expr = _sql_order_expr(sort.field)
-        if order_expr is not None:
-            direction = order_expr.asc() if sort.ascending else order_expr.desc()
-            query = query.order_by(direction, Cache.id.asc())
-            sql_sorted = True
+    order_expr = _sql_order_expr(sort.field)
+    if order_expr is not None:
+        direction = order_expr.asc() if sort.ascending else order_expr.desc()
+        query = query.order_by(direction, Cache.id.asc())
+        sql_sorted = True
 
     all_caches = query.all()
 
@@ -1403,16 +1394,9 @@ def apply_filters(
     else:
         results = list(all_caches)
 
-    # Sort in Python only for fields not handled by SQL above.
-    # Distance stays in Python only when the flag is OFF (legacy path).
+    # Sort in Python only for fields not handled by SQL.
     if not sql_sorted:
-        if sort.field == "distance" and distance_from and not _flags.distance_computation:
-            lat, lon = distance_from
-            results.sort(
-                key=lambda c: _haversine_km(lat, lon, c.latitude or 0, c.longitude or 0),
-                reverse=not sort.ascending,
-            )
-        elif sort.field in SORT_FIELDS:
+        if sort.field in SORT_FIELDS:
             results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
 
     if limit:

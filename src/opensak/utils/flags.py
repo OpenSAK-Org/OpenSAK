@@ -30,7 +30,6 @@ _FEATURES_FILE: Path = Path(__file__).parent.parent.parent.parent / "features.js
 _RELEASE_DEFAULTS: dict[str, bool] = {
     "update-location": False,
     "reverse-geocoding": False,
-    "distance-computation": False,
 }
 
 
@@ -73,4 +72,3 @@ _flags = _load()
 
 update_location: bool      = _flags["update-location"]
 reverse_geocoding: bool    = _flags["reverse-geocoding"]
-distance_computation: bool = _flags["distance-computation"]

@@ -15,7 +15,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication
 
 from opensak.db.models import Cache
-from opensak.filters.engine import _haversine_km, haversine_km_batch
+from opensak.filters.engine import _haversine_km
 from opensak.gui.settings import get_settings
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
 from opensak.lang import tr
@@ -521,35 +521,13 @@ class CacheTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def _update_distances(self) -> None:
-        from opensak.utils import flags as _flags
         self._distances = {}
         self._bearings = {}
-
-        if _flags.distance_computation:
-            # Flag ON: distance and bearing are pre-computed in the DB by
-            # recalculate_distances(); just read from the already-loaded objects.
-            for c in self._caches:
-                if c.distance is not None:
-                    self._distances[c.id] = float(c.distance)
-                if c.bearing is not None:
-                    self._bearings[c.id] = float(c.bearing)
-            return
-
-        # Flag OFF (legacy): vectorised on-the-fly computation per refresh.
-        settings = get_settings()
-        valid = [
-            c for c in self._caches
-            if c.latitude is not None and c.longitude is not None
-        ]
-        if not valid:
-            return
-        lats = [c.latitude for c in valid]
-        lons = [c.longitude for c in valid]
-        dists = haversine_km_batch(settings.home_lat, settings.home_lon, lats, lons)
-        bears = _bearing_deg_batch(settings.home_lat, settings.home_lon, lats, lons)
-        for i, c in enumerate(valid):
-            self._distances[c.id] = float(dists[i])
-            self._bearings[c.id] = float(bears[i])
+        for c in self._caches:
+            if c.distance is not None:
+                self._distances[c.id] = float(c.distance)
+            if c.bearing is not None:
+                self._bearings[c.id] = float(c.bearing)
 
     def cache_at(self, row: int) -> Optional[Cache]:
         if 0 <= row < len(self._caches):

@@ -3,7 +3,7 @@
 Batch (numpy) haversine/bearing must match the scalar versions, and the bbox
 pre-narrow must return the same caches as the exact Python filter.
 Also covers Vincenty accuracy, distance_km_batch dispatcher, and
-recalculate_distances() DB population (distance-computation feature flag).
+recalculate_distances() DB population.
 """
 
 import math
@@ -176,8 +176,7 @@ def test_vincenty_coincident_points():
 
 # ── distance_km / distance_km_batch dispatcher ────────────────────────────────
 
-def test_dispatcher_uses_haversine_by_default(patch_features_file, monkeypatch):
-    patch_features_file({"distance-computation": True})
+def test_dispatcher_uses_haversine_by_default(monkeypatch):
     from opensak.gui import settings as smod
     monkeypatch.setattr(smod.get_settings(), "distance_method", "haversine")
     d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
@@ -185,22 +184,11 @@ def test_dispatcher_uses_haversine_by_default(patch_features_file, monkeypatch):
     assert d == pytest.approx(expected, abs=1e-9)
 
 
-def test_dispatcher_uses_vincenty_when_set(patch_features_file, monkeypatch):
-    patch_features_file({"distance-computation": True})
+def test_dispatcher_uses_vincenty_when_set(monkeypatch):
     from opensak.gui import settings as smod
     monkeypatch.setattr(smod.get_settings(), "distance_method", "vincenty")
     d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
     expected = _vincenty_km(55.6761, 12.5683, 56.1629, 10.2039)
-    assert d == pytest.approx(expected, abs=1e-9)
-
-
-def test_dispatcher_ignores_method_when_flag_off(patch_features_file, monkeypatch):
-    patch_features_file({"distance-computation": False})
-    from opensak.gui import settings as smod
-    monkeypatch.setattr(smod.get_settings(), "distance_method", "vincenty")
-    # Flag is OFF → always Haversine regardless of method setting
-    d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
-    expected = _haversine_km(55.6761, 12.5683, 56.1629, 10.2039)
     assert d == pytest.approx(expected, abs=1e-9)
 
 

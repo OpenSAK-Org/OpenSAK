@@ -1,5 +1,4 @@
 {
   "update-location": false,
-  "reverse-geocoding": false,
-  "distance-computation": true
+  "reverse-geocoding": false
 }

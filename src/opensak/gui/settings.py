@@ -232,7 +232,6 @@ class AppSettings:
     def distance_method(self) -> str:
         """Distance calculation method — 'haversine' (default) or 'vincenty'.
 
-        Only used when the distance-computation feature flag is ON.
         Haversine matches Groundspeak's behaviour; Vincenty WGS84 is more
         accurate (~0.3 % improvement for long distances).
         """
