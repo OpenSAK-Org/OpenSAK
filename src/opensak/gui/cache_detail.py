@@ -23,7 +23,7 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
-from opensak.gui.icon_provider import get_cache_type_pixmap
+from opensak.gui.icon_provider import get_cache_type_pixmap_composite
 from opensak.utils.types import DateFormat, TEXT_SIZE_MAP, norm_locale_date_fmt
 from opensak.hint_detect import split_hint
 
@@ -479,7 +479,8 @@ class CacheDetailPanel(QWidget):
         cache_type = getattr(self, "_current_cache_type", None)
         if cache_type is not None:
             found = getattr(self, "_current_found", False)
-            pixmap = get_cache_type_pixmap(cache_type, icon_size, found=found)
+            dnf = getattr(self, "_current_dnf", False)
+            pixmap = get_cache_type_pixmap_composite(cache_type, icon_size, found=found, dnf=dnf)
             self._type_icon_lbl.setPixmap(pixmap)
             self._type_icon_lbl.setFixedSize(icon_size, icon_size)
 
@@ -496,6 +497,7 @@ class CacheDetailPanel(QWidget):
         self._corrected_lon = None
         self._current_cache_type: str | None = None
         self._current_found: bool = False
+        self._current_dnf: bool = False
         self._type_icon_lbl.clear()
         self._coords_lbl.setStyleSheet("")
         self._title.setText(tr("detail_select_cache"))
@@ -535,7 +537,8 @@ class CacheDetailPanel(QWidget):
 
         # Type icon — store for resize and render at current size
         self._current_cache_type = cache.cache_type
-        self._current_found = cache.found or False
+        self._current_found = bool(cache.found)
+        self._current_dnf = bool(cache.dnf)
         self._apply_ui_sizes()  # Re-apply sizes (also renders the icon)
 
         # Meta — GC kode som klikbart link
