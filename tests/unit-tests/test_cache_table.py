@@ -582,6 +582,39 @@ class TestDelegates:
                 return None
         assert d._bg_color(_Idx()) is None
 
+    def test_gc_code_text_for_bg_light(self):
+        # Issue #366: light pastel bg → black text
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor as _QColor
+        assert GcCodeDelegate._text_for_bg(GcCodeDelegate._COLOR_ARCHIVED) == \
+            _QColor(Qt.GlobalColor.black)
+        assert GcCodeDelegate._text_for_bg(GcCodeDelegate._COLOR_FOUND) == \
+            _QColor(Qt.GlobalColor.black)
+
+    def test_gc_code_text_for_bg_dark(self):
+        # Issue #366: dark bg (hypothetical) → white text
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor as _QColor
+        assert GcCodeDelegate._text_for_bg(_QColor("#1e1e1e")) == \
+            _QColor(Qt.GlobalColor.white)
+
+    def test_gc_code_paint_dark_mode_no_crash(self, model):
+        # Issue #366: paint must succeed with a dark palette without crash
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QPalette, QColor as _QColor
+        model.load([_cache(gc_code="GCARCH", archived=True)])
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        pm = QPixmap(80, 24)
+        painter = QPainter(pm)
+        opt = QStyleOptionViewItem()
+        opt.rect = QRect(0, 0, 80, 24)
+        dark_palette = QPalette()
+        dark_palette.setColor(QPalette.ColorRole.Window, _QColor("#1e1e1e"))
+        opt.palette = dark_palette
+        GcCodeDelegate().paint(painter, opt, idx)
+        painter.end()
+
 
 # ── view ────────────────────────────────────────────────────────────────────────
 

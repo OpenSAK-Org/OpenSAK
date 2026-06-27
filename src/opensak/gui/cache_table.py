@@ -370,19 +370,16 @@ class SizeBarDelegate(QStyledItemDelegate):
 
 
 class GcCodeDelegate(QStyledItemDelegate):
-    """Issue #117/#270: Tegner farvet baggrund i gc_code-kolonnen (GSAK-style).
+    """Issue #117/#270/#366: Tegner farvet baggrund i gc_code-kolonnen (GSAK-style).
 
-    Farve-prioritet (dæmpede pastellfarver, sort tekst — farverne i issue #270
-    er valgt af Allan efter sammenligning med en rigtig GSAK-installation):
+    Farve-prioritet (dæmpede pastellfarver — uændrede fra issue #270):
       1. Archived / unavailable  → rødlig  (#f1948a) — delt farve for begge
       2. Placed (brugeren er CO) → grøn    (#7dcea0)
       3. Found                   → gul     (#f9e79f)
       4. Not found               → ingen   (standard rækkefarve)
 
-    Valg: farvet baggrund frem for farvet tekst giver bedre læsbarhed
-    og matcher GSAK's visuelle stil. Sort tekst bruges konsekvent på alle
-    statusfarver, inkl. disabled — som tidligere brugte orange tekst på rød
-    baggrund og var næsten ulæseligt (issue #270).
+    Issue #366: tekstfarve vælges via WCAG-luminans (_text_for_bg) i stedet
+    for hardkodet sort — sikrer læsbarhed uanset tema (light/dark mode).
 
     Issue #272: owner_name sammenlignes via normalize_geocacher_name() i
     stedet for blot strip()/lower(), så caches stadig farves korrekt selv
@@ -394,8 +391,16 @@ class GcCodeDelegate(QStyledItemDelegate):
     _COLOR_PLACED   = QColor("#7dcea0")   # grøn  — egne caches
     _COLOR_FOUND    = QColor("#f9e79f")   # gul   — fundet
 
+    @staticmethod
+    def _text_for_bg(bg: QColor) -> QColor:
+        # WCAG relative luminance: threshold 0.179 → black above, white below
+        r, g, b = bg.redF(), bg.greenF(), bg.blueF()
+        def _lin(c: float) -> float:
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        L = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+        return QColor(Qt.GlobalColor.black) if L > 0.179 else QColor(Qt.GlobalColor.white)
+
     def _bg_color(self, index) -> QColor | None:
-        """Returnér baggrundsfarve for denne cache, eller None for default."""
         from opensak.gui.settings import get_settings
         cache = index.data(Qt.ItemDataRole.UserRole)
         if cache is None:
@@ -416,53 +421,40 @@ class GcCodeDelegate(QStyledItemDelegate):
         painter.save()
 
         if is_selected:
-            # Valgt række: brug standard selection-farve
             painter.fillRect(option.rect, QColor("#3daee9"))
         else:
             bg = self._bg_color(index)
             if bg is not None:
                 painter.fillRect(option.rect, bg)
             else:
-                # Ingen statusfarve — lad standard delegate tegne baggrund
-                # (alternating rows mv.)
                 super().paint(painter, option, index)
                 painter.restore()
                 return
 
-        # Tegn tekst — farven følger tema/palette undtagen på statusfarve-baggrunde
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         text_rect = option.rect.adjusted(4, 0, -4, 0)
-
         cache = index.data(Qt.ItemDataRole.UserRole)
 
-        # Tekstfarve-prioritet (issue #270 — sort tekst på alle statusfarver,
-        # inkl. disabled, der tidligere havde næsten ulæselig orange-på-rød):
-        #   Valgt række    → highlightedText (hvid på blå)
-        #   statusfarve bg → sort (pastels er altid lyse, sort er altid læsbart)
-        #   ingen baggrund → palette.text() (følger light/dark tema)
         if is_selected:
             text_color = option.palette.highlightedText().color()
         elif bg is not None:
-            # Statusfarve baggrund (rød/gul/grøn pastel) — sort er altid læsbart
-            text_color = QColor(Qt.GlobalColor.black)
+            text_color = self._text_for_bg(bg)
         else:
             text_color = option.palette.text().color()
 
         painter.setPen(text_color)
-
         painter.drawText(
             text_rect,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             text,
         )
 
-        # Strikethrough for archived — tegn en linje hen over teksten
         if not is_selected and cache is not None and cache.archived:
             fm = painter.fontMetrics()
             text_width = fm.horizontalAdvance(text)
             mid_y = option.rect.center().y()
             x_start = text_rect.left()
-            painter.setPen(QColor(Qt.GlobalColor.black))
+            painter.setPen(text_color)
             painter.drawLine(x_start, mid_y, x_start + text_width, mid_y)
 
         painter.restore()
