@@ -9,11 +9,11 @@ import re
 import webbrowser
 from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
-from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale
+from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale, QEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
-    QPushButton
+    QPushButton, QPlainTextEdit
 )
 from PySide6.QtGui import QFont
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -288,6 +288,15 @@ class CacheDetailPanel(QWidget):
         wp_layout.addWidget(self._wp_browser)
         self._tabs.addTab(wp_widget, tr("detail_tab_waypoints"))
 
+        note_widget = QWidget()
+        note_layout = QVBoxLayout(note_widget)
+        note_layout.setContentsMargins(0, 4, 0, 0)
+        self._note_editor = QPlainTextEdit()
+        self._note_editor.setPlaceholderText(tr("detail_note_placeholder"))
+        self._note_editor.installEventFilter(self)
+        note_layout.addWidget(self._note_editor)
+        self._tabs.addTab(note_widget, tr("detail_tab_notes"))
+
         layout.addWidget(self._tabs)
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -392,6 +401,31 @@ class CacheDetailPanel(QWidget):
         if self._current_gc_code:
             self.corrected_coords_changed.emit(self._current_gc_code)
 
+    def eventFilter(self, obj, event) -> bool:
+        note_editor = getattr(self, "_note_editor", None)
+        if note_editor is not None and obj is note_editor and event.type() == QEvent.Type.FocusOut:
+            self._save_note()
+        return super().eventFilter(obj, event)
+
+    def _save_note(self) -> None:
+        if not self._current_gc_code:
+            return
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache as CacheModel, UserNote
+        text = self._note_editor.toPlainText().strip() or None
+        with get_session() as s:
+            cache_row = s.query(CacheModel).filter_by(gc_code=self._current_gc_code).one_or_none()
+            if cache_row is None:
+                return
+            note = cache_row.user_note
+            if note is None:
+                s.flush()
+                note = UserNote(cache_id=cache_row.id)
+                s.add(note)
+                s.flush()
+                cache_row.user_note = note
+            note.note = text
+
     def _update_corrected_ui(self) -> None:
         """Opdater visningen af korrigerede koordinater."""
         has_corrected = self._corrected_lat is not None
@@ -453,6 +487,7 @@ class CacheDetailPanel(QWidget):
         self._hint_browser.setPlainText("")
         self._log_browser.setHtml("")
         self._wp_browser.setPlainText("")
+        self._note_editor.setPlainText("")
         self._tabs.setTabText(3, tr("detail_tab_waypoints"))
         self._hint_plain = ""
         self._hint_cipher = ""
@@ -559,6 +594,11 @@ class CacheDetailPanel(QWidget):
         self._decode_btn.setText(tr("detail_decode_btn"))
         self._hint_browser.setPlainText(
             self._hint_cipher if self._hint_cipher else tr("detail_no_hint")
+        )
+
+        # Personal note
+        self._note_editor.setPlainText(
+            (cache.user_note.note or "") if cache.user_note else ""
         )
 
         # Logs — viser alle (sorteret efter dato, nyeste først)

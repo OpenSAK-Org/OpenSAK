@@ -547,6 +547,8 @@ STRINGS: dict[str, str] = {
     "detail_tab_waypoints":         "Waypoints",
     "detail_tab_waypoints_count":   "Waypoints ({count})",
     "detail_no_waypoints":          "(Inga underordnade waypoints)",
+    "detail_tab_notes":             "Anteckningar",
+    "detail_note_placeholder":      "Lägg till en personlig anteckning för denna cache…",
     "detail_wp_no_coords":          "(Inga koordinater)",
     "detail_decode_btn":            "🔓  Avkoda ledtråd (ROT13)",
     "detail_encode_btn":            "🔒  Koda ledtråd (ROT13)",

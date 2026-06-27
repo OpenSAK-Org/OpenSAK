@@ -547,6 +547,8 @@ STRINGS: dict[str, str] = {
     "detail_tab_waypoints":         "Points de passage",
     "detail_tab_waypoints_count":   "Points de passage ({count})",
     "detail_no_waypoints":          "(Aucun point de passage enfant)",
+    "detail_tab_notes":             "Notes",
+    "detail_note_placeholder":      "Ajouter une note personnelle pour ce cache…",
     "detail_wp_no_coords":          "(Pas de coordonnées)",
     "detail_decode_btn":            "🔓  Decoder l'indice (ROT13)",
     "detail_encode_btn":            "🔒  Encoder l'indice (ROT13)",

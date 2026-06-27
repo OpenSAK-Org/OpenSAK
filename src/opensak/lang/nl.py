@@ -551,6 +551,8 @@ STRINGS: dict[str, str] = {
     "detail_tab_waypoints":         "Waypoints",
     "detail_tab_waypoints_count":   "Waypoints ({count})",
     "detail_no_waypoints":          "(Geen onderliggende waypoints)",
+    "detail_tab_notes":             "Notities",
+    "detail_note_placeholder":      "Voeg een persoonlijke notitie toe voor deze cache…",
     "detail_wp_no_coords":          "(Geen coördinaten)",
     "detail_decode_btn":            "🔓  Hint decoderen (ROT13)",
     "detail_encode_btn":            "🔒  Hint coderen (ROT13)",
