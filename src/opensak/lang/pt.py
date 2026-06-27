@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} caches carregadas — clique numa cache para ver o mapa",
     "import_log_placeholder":       "Os resultados da importação aparecerão aqui…",
     "import_all_done":            "✓ Todos os {count} ficheiros foram processados.",
-    "import_geocode_checkbox":      "🌍  Geocodificar concelho / estado / país em falta após importação",
     "import_geocode_running":       "📍  A geocodificar dados de localização em falta…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Configurações",
-    "settings_group_location":      "Coordenadas de casa",
     "settings_group_user_locations":                "Localizações do utilizador",
     "settings_group_display":       "Mostrar",
-    "settings_use_miles":           "Mostrar distâncias em milhas (em vez de km)",
 
 
     "settings_map_label":           "Mapa:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Concluído — {updated} atualizados, {skipped} ignorados, {errors} erros",
     "update_loc_cancelled":         "Cancelado — {updated} atualizados até agora",
     "update_loc_log_placeholder":   "Os resultados aparecerão aqui…",
-    "update_loc_no_db":             "Nenhuma base de dados aberta.",
     "update_loc_nothing_to_do":     "Nenhuma cache para atualizar com o âmbito selecionado.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: erro — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: ignorado (sem coordenadas)",
 
     # ── Diálogos de pacotes de fronteiras ─────────────────────────────────────
     "boundary_dl_title":            "Transferir pacotes de fronteiras",
@@ -565,7 +560,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Ícone de estado",
     "col_gc_code":      "Código GC",
     "col_name":         "Nome",
     "col_type":         "Tipo",
@@ -708,7 +702,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Coordenadas Corrigidas",
     "corrected_dialog_heading":     "Coordenadas corrigidas — {gc_code}",
-    "corrected_dialog_hint":        "Introduza as coordenadas resolvidas no formato DMM, DMS ou DD. Estas serão utilizadas para a exportação GPS e mostradas no mapa.",
     "corrected_dialog_input_label": "Coordenadas:",
     "corrected_dialog_original":    "Coordenadas originais:",
     "corrected_dialog_corrected":   "Coordenadas corrigidas:",
@@ -818,8 +811,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terreno (mais fácil primeiro)",
     "trip_sort_hidden_date":        "Data de colocação (mais recente primeiro)",
     "trip_sort_name":               "Nome (A-Z)",
-    "trip_cb_not_found":            "Apenas caches que não encontrei",
-    "trip_cb_available":            "Apenas disponíveis (não arquivadas)",
     "trip_preview_group":           "Pré-visualização",
     "trip_result_label":            "{count} caches selecionadas para a viagem",
     "trip_btn_export_gps":          "📤  Enviar para GPS…",
@@ -836,14 +827,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 O raio é calculado a partir do seu ponto central (definido nas Configurações). Defina o raio como 0 para ver todas as caches sem filtragem por distância.",
-    "trip_found_hint":                         "Requer que tenha executado \"Atualizar encontrados\" (menu Ferramentas) para que as caches encontradas sejam marcadas corretamente.",
     "trip_no_center_warning":                  "⚠️  O ponto central não está definido — vá às Configurações e insira o seu ponto de casa, ou defina o raio para 0.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Latitude",
     "settings_hp_col_lon":                     "Longitude",
-    "settings_hp_activate":                    "★ Ativar",
     "settings_hp_add_group":                   "Adicionar / editar ponto",
     "settings_hp_name_label":                  "Nome:",
     "settings_hp_name_placeholder":            "ex: Casa, Refúgio…",

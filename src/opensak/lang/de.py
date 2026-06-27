@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} Caches geladen — einen Cache anklicken, um ihn auf der Karte anzusehen",
     "import_log_placeholder":       "Importergebnisse werden hier angezeigt…",
     "import_all_done":            "✓ Alle {count} Dateien verarbeitet.",
-    "import_geocode_checkbox":      "🌍  Fehlende Landkreis / Bundesland / Land nach Import ermitteln",
     "import_geocode_running":       "📍  Fehlende Standortdaten werden ermittelt…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Einstellungen",
-    "settings_group_location":      "Heimat-Koordinaten",
     "settings_group_user_locations":                "Benutzerstandorte",
     "settings_group_display":       "Anzeige",
-    "settings_use_miles":           "Entfernungen in Meilen anzeigen (anstelle von km)",
 
 
     "settings_map_label":           "Karten-App:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Fertig — {updated} aktualisiert, {skipped} übersprungen, {errors} Fehler",
     "update_loc_cancelled":         "Abgebrochen — {updated} bisher aktualisiert",
     "update_loc_log_placeholder":   "Ergebnisse erscheinen hier…",
-    "update_loc_no_db":             "Keine Datenbank geöffnet.",
     "update_loc_nothing_to_do":     "Keine Caches mit dem gewählten Umfang zu aktualisieren.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: Fehler — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: übersprungen (keine Koordinaten)",
 
     # ── Grenzpolygon-Dialoge ──────────────────────────────────────────────────
     "boundary_dl_title":            "Grenzpolygon-Pakete herunterladen",
@@ -564,7 +559,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Status-Icon",
     "col_gc_code":      "GC-Code",
     "col_name":         "Name",
     "col_type":         "Typ",
@@ -707,7 +701,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Korrigierte Koordinaten",
     "corrected_dialog_heading":     "Korrigierte Koordinaten — {gc_code}",
-    "corrected_dialog_hint":        "Gib die berechneten Koordinaten im DMM-, DMS- oder DD-Format ein. Diese werden für den GPS-Export verwendet und auf der Karte angezeigt.",
     "corrected_dialog_input_label": "Koordinaten:",
     "corrected_dialog_original":    "Originalkoordinaten:",
     "corrected_dialog_corrected":   "Korrigierte Koordinaten:",
@@ -817,8 +810,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terrain (Einfachster zuerst)",
     "trip_sort_hidden_date":        "Versteckdatum (Neuester zuerst)",
     "trip_sort_name":               "Name (A–Z)",
-    "trip_cb_not_found":            "Nur noch nicht gefundene Caches",
-    "trip_cb_available":            "Nur verfügbar (nicht archiviert)",
     "trip_preview_group":           "Vorschau",
     "trip_result_label":            "{count} Caches ausgewählt für diesen Ausflug",
     "trip_btn_export_gps":          "📤  An GPS senden…",
@@ -835,14 +826,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 Der Radius wird von deinem Mittelpunkt aus berechnet (festgelegt in den Einstellungen). Stelle den Radius auf 0 ein, um alle Caches ohne Entfernungsfilter anzuzeigen.",
-    "trip_found_hint":                         "Voraussetzung ist, dass Sie die Option \"Funde aktualisieren\" (Menü „Tools“) ausgeführt haben, damit die gefundenen Caches korrekt markiert werden.",
     "trip_no_center_warning":                  "⚠️  Der Mittelpunkt ist nicht festgelegt – gehe zu Einstellungen und gib deinen Startpunkt ein oder stelle den Radius auf 0 ein.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Breite",
     "settings_hp_col_lon":                     "Länge",
-    "settings_hp_activate":                    "★ Aktivieren",
     "settings_hp_add_group":                   "Punkt hinzufügen / bearbeiten",
     "settings_hp_name_label":                  "Name:",
     "settings_hp_name_placeholder":            "z.B. Heimat, Hütte…",

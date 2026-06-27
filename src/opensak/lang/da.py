@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} caches indlæst — klik på en cache for at se kortet",
     "import_log_placeholder":       "Import-resultat vises her…",
     "import_all_done":            "✓ Alle {count} filer er behandlet.",
-    "import_geocode_checkbox":      "🌍  Geokod manglende amt / region / land efter import",
     "import_geocode_running":       "📍  Geokoder manglende lokationsdata…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Indstillinger dialog ──────────────────────────────────────────────────
     "settings_dialog_title":        "Indstillinger",
-    "settings_group_location":      "Hjemkoordinat",
     "settings_group_user_locations":                "Brugerplaceringer",
     "settings_group_display":       "Visning",
-    "settings_use_miles":           "Vis afstande i miles (i stedet for km)",
 
 
     "settings_map_label":           "Kortapp:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Færdig — {updated} opdateret, {skipped} sprunget over, {errors} fejl",
     "update_loc_cancelled":         "Annulleret — {updated} opdateret indtil videre",
     "update_loc_log_placeholder":   "Resultater vises her…",
-    "update_loc_no_db":             "Ingen database åben.",
     "update_loc_nothing_to_do":     "Ingen caches at opdatere med det valgte omfang.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: fejl — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: sprunget over (ingen koordinater)",
 
     # ── Grænsefladedata-dialoger ──────────────────────────────────────────────
     "boundary_dl_title":            "Download grænsefladedata",
@@ -564,7 +559,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar ekstra ────────────────────────────────────────────────────────
 
     # ── Cache tabel kolonner ──────────────────────────────────────────────────
-    "col_status_icon":  "Status ikon",
     "col_gc_code":      "GC Kode",
     "col_name":         "Navn",
     "col_type":         "Type",
@@ -707,7 +701,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Korrigerede koordinater",
     "corrected_dialog_heading":     "Korrigerede koordinater — {gc_code}",
-    "corrected_dialog_hint":        "Indtast de løste koordinater i DMM, DMS eller DD format. De bruges ved GPS export og vises på kortet.",
     "corrected_dialog_input_label": "Koordinater:",
     "corrected_dialog_original":    "Originale koordinater:",
     "corrected_dialog_corrected":   "Korrigerede koordinater:",
@@ -817,8 +810,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terræn (lettest først)",
     "trip_sort_hidden_date":        "Udgivelsesdato (nyeste først)",
     "trip_sort_name":               "Navn (A–Z)",
-    "trip_cb_not_found":            "Kun caches jeg ikke har fundet",
-    "trip_cb_available":            "Kun tilgængelige (ikke arkiverede)",
     "trip_preview_group":           "Forhåndsvisning",
     "trip_result_label":            "{count} caches valgt til turen",
     "trip_btn_export_gps":          "📤  Send til GPS…",
@@ -835,14 +826,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 Radius beregnes fra dit centerpunkt (sat under Indstillinger). Sæt radius til 0 for at se alle caches uden afstandsfilter.",
-    "trip_found_hint":                         "Kræver at du har kørt \"Opdater fund\" (Funktioner-menuen) for at funde caches er markeret korrekt.",
     "trip_no_center_warning":                  "⚠️  Centerpunkt er ikke sat — gå til Indstillinger og angiv dit hjemmepunkt, eller sæt radius til 0.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Breddegrad",
     "settings_hp_col_lon":                     "Længdegrad",
-    "settings_hp_activate":                    "★ Aktivér",
     "settings_hp_add_group":                   "Tilføj / rediger punkt",
     "settings_hp_name_label":                  "Navn:",
     "settings_hp_name_placeholder":            "f.eks. Hjem, Sommerhus…",

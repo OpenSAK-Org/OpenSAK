@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} caches loaded — click a cache to view on map",
     "import_log_placeholder":       "Import results will appear here…",
     "import_all_done":            "✓ All {count} files processed.",
-    "import_geocode_checkbox":      "🌍  Geocode missing county / state / country after import",
     "import_geocode_running":       "📍  Looking up missing location data (offline)…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Settings",
-    "settings_group_location":      "Home coordinates",
     "settings_group_user_locations":                "User locations",
     "settings_group_display":       "Display",
-    "settings_use_miles":           "Show distances in miles (instead of km)",
 
 
     "settings_map_label":           "Map app:",
@@ -394,11 +391,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Done — {updated} updated, {skipped} skipped, {errors} errors",
     "update_loc_cancelled":         "Cancelled — {updated} updated so far",
     "update_loc_log_placeholder":   "Results will appear here…",
-    "update_loc_no_db":             "No database open.",
     "update_loc_nothing_to_do":     "No waypoints to update with the selected scope.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: error — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: skipped (no coordinates)",
 
     # ── Boundary packs dialogs ────────────────────────────────────────────────
     "boundary_dl_title":            "Download Boundary Packs",
@@ -563,7 +558,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Status icon",
     "col_gc_code":      "GC Code",
     "col_name":         "Name",
     "col_type":         "Type",
@@ -706,7 +700,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Corrected Coordinates",
     "corrected_dialog_heading":     "Corrected coordinates — {gc_code}",
-    "corrected_dialog_hint":        "Enter the solved coordinates in DMM, DMS or DD format. These will be used for GPS export and shown on the map.",
     "corrected_dialog_input_label": "Coordinates:",
     "corrected_dialog_original":    "Original coordinates:",
     "corrected_dialog_corrected":   "Corrected coordinates:",
@@ -816,8 +809,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terrain (easiest first)",
     "trip_sort_hidden_date":        "Placed date (newest first)",
     "trip_sort_name":               "Name (A–Z)",
-    "trip_cb_not_found":            "Only caches I have not found",
-    "trip_cb_available":            "Only available (not archived)",
     "trip_preview_group":           "Preview",
     "trip_result_label":            "{count} caches selected for the trip",
     "trip_btn_export_gps":          "📤  Send to GPS…",
@@ -834,14 +825,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 Radius is calculated from your centre point (set under Settings). Set radius to 0 to see all caches without distance filtering.",
-    "trip_found_hint":                         "Requires that you have run \"Update finds\" (Tools menu) for found caches to be marked correctly.",
     "trip_no_center_warning":                  "⚠️  Centre point is not set — go to Settings and enter your home point, or set radius to 0.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Latitude",
     "settings_hp_col_lon":                     "Longitude",
-    "settings_hp_activate":                    "★ Activate",
     "settings_hp_add_group":                   "Add / edit point",
     "settings_hp_name_label":                  "Name:",
     "settings_hp_name_placeholder":            "e.g. Home, Cottage…",

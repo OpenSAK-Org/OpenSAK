@@ -154,7 +154,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":          "✓ {count} caches geladen — klik op een cache om op de kaart te zien",
     "import_log_placeholder":       "Importresultaten verschijnen hier…",
     "import_all_done":              "✓ Alle {count} bestanden verwerkt.",
-    "import_geocode_checkbox":      "🌍  Ontbrekende gemeente / provincie / land opzoeken na import",
     "import_geocode_running":       "📍  Ontbrekende locatiegegevens opzoeken (offline)…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -223,10 +222,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Instellingen",
-    "settings_group_location":      "Thuiscoördinaten",
     "settings_group_user_locations":                "Gebruikerslocaties",
     "settings_group_display":       "Weergave",
-    "settings_use_miles":           "Afstanden weergeven in mijlen (in plaats van km)",
 
 
     "settings_map_label":           "Kaartapp:",
@@ -398,11 +395,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Klaar — {updated} bijgewerkt, {skipped} overgeslagen, {errors} fouten",
     "update_loc_cancelled":         "Geannuleerd — {updated} tot nu toe bijgewerkt",
     "update_loc_log_placeholder":   "Resultaten verschijnen hier…",
-    "update_loc_no_db":             "Geen database geopend.",
     "update_loc_nothing_to_do":     "Geen waypoints om bij te werken met het geselecteerde bereik.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: fout — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: overgeslagen (geen coördinaten)",
 
     # ── Grenspakket-dialoogvensters ───────────────────────────────────────────
     "boundary_dl_title":            "Grenspakketten downloaden",
@@ -566,7 +561,6 @@ STRINGS: dict[str, str] = {
     "detail_no_logs_match":         "(Geen logs gevonden voor '{text}')",
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Statuspictogram",
     "col_gc_code":      "GC-code",
     "col_name":         "Naam",
     "col_type":         "Type",
@@ -709,7 +703,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Gecorrigeerde coördinaten",
     "corrected_dialog_heading":     "Gecorrigeerde coördinaten — {gc_code}",
-    "corrected_dialog_hint":        "Voer de opgeloste coördinaten in DMM-, DMS- of DD-formaat in. Deze worden gebruikt voor GPS-export en weergegeven op de kaart.",
     "corrected_dialog_input_label": "Coördinaten:",
     "corrected_dialog_original":    "Originele coördinaten:",
     "corrected_dialog_corrected":   "Gecorrigeerde coördinaten:",
@@ -818,8 +811,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terrein (makkelijkste eerst)",
     "trip_sort_hidden_date":        "Verborgen datum (nieuwste eerst)",
     "trip_sort_name":               "Naam (A–Z)",
-    "trip_cb_not_found":            "Alleen caches die ik nog niet heb gevonden",
-    "trip_cb_available":            "Alleen beschikbaar (niet gearchiveerd)",
     "trip_preview_group":           "Voorbeeld",
     "trip_result_label":            "{count} caches geselecteerd voor de reis",
     "trip_btn_export_gps":          "📤  Naar GPS sturen…",
@@ -835,13 +826,11 @@ STRINGS: dict[str, str] = {
     "toolbar_home_tooltip":         "Kaart centreren op thuispunt",
 
     "trip_center_info":                        "📍 Straal wordt berekend vanuit jouw middelpunt (ingesteld onder Instellingen). Stel straal in op 0 om alle caches zonder afstandsfilter te zien.",
-    "trip_found_hint":                         "Vereist dat je 'Vondsten bijwerken' hebt uitgevoerd (menu Extra's) zodat gevonden caches correct zijn gemarkeerd.",
     "trip_no_center_warning":                  "⚠️  Middelpunt is niet ingesteld — ga naar Instellingen en voer je thuispunt in, of stel straal in op 0.",
 
     # ── Home points in settings ────────────────────────────────────────────
     "settings_hp_col_lat":                     "Breedtegraad",
     "settings_hp_col_lon":                     "Lengtegraad",
-    "settings_hp_activate":                    "★ Activeren",
     "settings_hp_add_group":                   "Punt toevoegen / bewerken",
     "settings_hp_name_label":                  "Naam:",
     "settings_hp_name_placeholder":            "bijv. Thuis, Vakantiehuisje…",

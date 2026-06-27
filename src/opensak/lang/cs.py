@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} keší načteno — kliknutím zobrazíte mapu",
     "import_log_placeholder":       "Výsledky importu se zobrazí zde…",
     "import_all_done":            "✓ Všech {count} souborů bylo zpracováno.",
-    "import_geocode_checkbox":      "🌍  Geokódovat chybějící okres / kraj / zemi po importu",
     "import_geocode_running":       "📍  Geokóduji chybějící údaje o poloze…",
     
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Nastavení",
-    "settings_group_location":      "Domácí souřadnice",
     "settings_group_user_locations":                "Uživatelská místa",
     "settings_group_display":       "Zobrazení",
-    "settings_use_miles":           "Zobrazovat vzdálenosti v mílích (místo km)",
 
 
     "settings_map_label":           "Mapová aplikace:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Hotovo — {updated} aktualizováno, {skipped} přeskočeno, {errors} chyb",
     "update_loc_cancelled":         "Zrušeno — {updated} aktualizováno doposud",
     "update_loc_log_placeholder":   "Výsledky se zobrazí zde…",
-    "update_loc_no_db":             "Žádná databáze není otevřena.",
     "update_loc_nothing_to_do":     "Žádné kešky k aktualizaci s vybraným rozsahem.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: chyba — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: přeskočeno (žádné souřadnice)",
 
     # ── Boundary packs dialogs ────────────────────────────────────────────────
     "boundary_dl_title":            "Download Boundary Packs",
@@ -565,7 +560,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Ikona stavu",
     "col_gc_code":      "GC kód",
     "col_name":         "Název",
     "col_type":         "Typ",
@@ -708,7 +702,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Opravené souřadnice",
     "corrected_dialog_heading":     "Opravené souřadnice — {gc_code}",
-    "corrected_dialog_hint":        "Zadejte vyřešené souřadnice ve formátu DMM, DMS nebo DD. Budou použity pro export do GPS a zobrazeny na mapě.",
     "corrected_dialog_input_label": "Souřadnice:",
     "corrected_dialog_original":    "Původní souřadnice:",
     "corrected_dialog_corrected":   "Opravené souřadnice:",
@@ -817,8 +810,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terén (nejsnazší první)",
     "trip_sort_hidden_date":        "Datum umístění (nejnovější první)",
     "trip_sort_name":               "Název (A–Z)",
-    "trip_cb_not_found":            "Pouze keše, které jsem nenašel",
-    "trip_cb_available":            "Pouze dostupné (nearhivované)",
     "trip_preview_group":           "Náhled",
     "trip_result_label":            "{count} keší vybráno pro výlet",
     "trip_btn_export_gps":          "📤  Odeslat do GPS…",
@@ -834,13 +825,11 @@ STRINGS: dict[str, str] = {
     "toolbar_home_tooltip":         "Přesunout mapu na domácí bod",
 
     "trip_center_info":             "📍 Poloměr je počítán od vašeho středového bodu (nastavte v Nastavení). Nastavte poloměr na 0 pro zobrazení všech keší bez omezení vzdálenosti.",
-    "trip_found_hint":              "Vyžaduje, abyste spustili 'Aktualizovat nálezy' (menu Nástroje), aby byly nalezené keše správně označeny.",
     "trip_no_center_warning":       "⚠️  Středový bod není nastaven — přejděte do Nastavení a zadejte domácí bod, nebo nastavte poloměr na 0.",
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Zeměpisná šířka",
     "settings_hp_col_lon":                     "Zeměpisná délka",
-    "settings_hp_activate":                    "★ Aktivovat",
     "settings_hp_add_group":                   "Přidat / upravit bod",
     "settings_hp_name_label":                  "Název:",
     "settings_hp_name_placeholder":            "např. Domov, Chata…",

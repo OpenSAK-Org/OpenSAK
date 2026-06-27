@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} caches chargées — cliquez sur un cache pour voir la carte",
     "import_log_placeholder":       "Les résultats d'importation s'afficheront ici…",
     "import_all_done":            "✓ Les {count} fichiers ont été traités.",
-    "import_geocode_checkbox":      "🌍  Géocoder le département / région / pays manquants après l'import",
     "import_geocode_running":       "📍  Géocodage des données de localisation manquantes…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Paramètres",
-    "settings_group_location":      "Coordonnées de base",
     "settings_group_user_locations":                "Emplacements utilisateur",
     "settings_group_display":       "Affichage",
-    "settings_use_miles":           "Afficher les distances en miles (au lieu de km)",
 
 
     "settings_map_label":           "Application de carte:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Terminé — {updated} mis à jour, {skipped} ignorés, {errors} erreurs",
     "update_loc_cancelled":         "Annulé — {updated} mis à jour jusqu'ici",
     "update_loc_log_placeholder":   "Les résultats apparaîtront ici…",
-    "update_loc_no_db":             "Aucune base de données ouverte.",
     "update_loc_nothing_to_do":     "Aucun cache à mettre à jour avec le périmètre sélectionné.",
     "update_loc_row":               "{gc_code} : {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code} : erreur — {msg}",
-    "update_loc_row_skipped":       "{gc_code} : ignoré (pas de coordonnées)",
 
     # ── Boîtes de dialogue packs de frontières ────────────────────────────────
     "boundary_dl_title":            "Télécharger les packs de frontières",
@@ -564,7 +559,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
 
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Icone de statut",
     "col_gc_code":      "Code GC",
     "col_name":         "Nom",
     "col_type":         "Type",
@@ -707,7 +701,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Coordonnées corrigées",
     "corrected_dialog_heading":     "Coordonnées corrigées — {gc_code}",
-    "corrected_dialog_hint":        "Saisir les coordonnées résolues au format DMM, DMS ou DD. Elles seront utilisées pour l'export GPS et affichées sur la carte.",
     "corrected_dialog_input_label": "Coordonnées :",
     "corrected_dialog_original":    "Coordonnées d'origine :",
     "corrected_dialog_corrected":   "Coordonnées corrigées :",
@@ -817,8 +810,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terrain (plus facile en premier)",
     "trip_sort_hidden_date":        "Date de pose (plus récente en premier)",
     "trip_sort_name":               "Nom (A–Z)",
-    "trip_cb_not_found":            "Uniquement les caches non trouvées",
-    "trip_cb_available":            "Uniquement disponibles (non archivées)",
     "trip_preview_group":           "Aperçu",
     "trip_result_label":            "{count} caches sélectionnées pour la sortie",
     "trip_btn_export_gps":          "📤  Envoyer vers GPS…",
@@ -835,14 +826,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 Le rayon est calculé depuis votre point central (défini dans les Paramètres). Mettez le rayon à 0 pour voir toutes les caches sans filtre de distance.",
-    "trip_found_hint":                         "Nécessite que vous ayez exécuté \"Mettre à jour les trouvailles\" (menu Outils) pour que les caches trouvées soient correctement marquées.",
     "trip_no_center_warning":                  "⚠️  Le point central n'est pas défini — allez dans Paramètres et saisissez votre point de départ, ou mettez le rayon à 0.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Latitude",
     "settings_hp_col_lon":                     "Longitude",
-    "settings_hp_activate":                    "★ Activer",
     "settings_hp_add_group":                   "Ajouter / modifier un point",
     "settings_hp_name_label":                  "Nom :",
     "settings_hp_name_placeholder":            "ex. Domicile, Résidence…",

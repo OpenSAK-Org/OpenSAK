@@ -151,7 +151,6 @@ STRINGS: dict[str, str] = {
     "import_table_loaded":         "✓ {count} cacher laddade — klicka på en cache för att se den på kartan",
     "import_log_placeholder":       "Resultatet av importen visas här…",
     "import_all_done":            "✓ Alla {count} filer har bearbetats.",
-    "import_geocode_checkbox":      "🌍  Geokoda saknad kommun / län / land efter import",
     "import_geocode_running":       "📍  Geokoderar saknade platsdata…",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
@@ -220,10 +219,8 @@ STRINGS: dict[str, str] = {
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Inställningar",
-    "settings_group_location":      "Hemkoordinater",
     "settings_group_user_locations":                "Användarplatser",
     "settings_group_display":       "Visa",
-    "settings_use_miles":           "Visa avstånd i miles (i stället för km)",
 
 
     "settings_map_label":           "Kart app:",
@@ -395,11 +392,9 @@ STRINGS: dict[str, str] = {
     "update_loc_done":              "✓ Klart — {updated} uppdaterade, {skipped} hoppade över, {errors} fel",
     "update_loc_cancelled":         "Avbrutet — {updated} uppdaterade hittills",
     "update_loc_log_placeholder":   "Resultaten visas här…",
-    "update_loc_no_db":             "Ingen databas är öppen.",
     "update_loc_nothing_to_do":     "Inga cacher att uppdatera med det valda omfånget.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: fel — {msg}",
-    "update_loc_row_skipped":       "{gc_code}: hoppades över (inga koordinater)",
 
     # ── Gränspaket-dialoger ───────────────────────────────────────────────────
     "boundary_dl_title":            "Ladda ner gränspaket",
@@ -564,7 +559,6 @@ STRINGS: dict[str, str] = {
     # ── Toolbar extras ────────────────────────────────────────────────────────
     
     # ── Cache table columns ───────────────────────────────────────────────────
-    "col_status_icon":  "Status ikon",
     "col_gc_code":      "GC Kod",
     "col_name":         "Namn",
     "col_type":         "Typ",
@@ -707,7 +701,6 @@ STRINGS: dict[str, str] = {
 
     "corrected_dialog_title":       "Korrigerade koordinater",
     "corrected_dialog_heading":     "Korrigerade koordinater — {gc_code}",
-    "corrected_dialog_hint":        "Ange lösta koordinater i DMM, DMS or DD format. Dessa används vid export till GPS och visas på kartan.",
     "corrected_dialog_input_label": "Koordinater:",
     "corrected_dialog_original":    "Ursprungliga koordinater:",
     "corrected_dialog_corrected":   "Korrigerade koordinater:",
@@ -817,8 +810,6 @@ STRINGS: dict[str, str] = {
     "trip_sort_terrain":            "Terräng (lättast först)",
     "trip_sort_hidden_date":        "Utlagt datum (nyast först)",
     "trip_sort_name":               "Namn (A–Z)",
-    "trip_cb_not_found":            "Bara cacher som jag inte har hittat",
-    "trip_cb_available":            "Bara tillgängliga (inte arkiverade)",
     "trip_preview_group":           "Förhandsvisning",
     "trip_result_label":            "{count} cacher valda för resan",
     "trip_btn_export_gps":          "📤  Skicka till GPS…",
@@ -835,14 +826,12 @@ STRINGS: dict[str, str] = {
 
 
     "trip_center_info":                        "📍 Radien beräknas från din centrumpunkt (ställs in under Inställningar). Ange radien som 0 för att se alla cacher utan avståndsfiltrering.",
-    "trip_found_hint":                         "Kräver att du har kört \"Uppdatera hittade\" (Verktygsmeny) för att hittade cacher ska flaggas rätt.",
     "trip_no_center_warning":                  "⚠️  Centrum är inte satt - gå till Inställning och ange din hemmapunkt eller sätt radien till 0.",
 
 
     # ── Hjemmepunkter i indstillinger ────────────────────────────────────────
     "settings_hp_col_lat":                     "Latitud",
     "settings_hp_col_lon":                     "Longitud",
-    "settings_hp_activate":                    "★ Aktivera",
     "settings_hp_add_group":                   "Lägg till / editera punkt",
     "settings_hp_name_label":                  "Namn:",
     "settings_hp_name_placeholder":            "e.g. Hem, Stugan…",
