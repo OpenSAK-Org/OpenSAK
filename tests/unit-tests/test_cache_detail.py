@@ -192,3 +192,128 @@ def test_clear_emits_waypoints_hidden(monkeypatch, qapp):
     panel.waypoints_tab_hidden.connect(lambda: hidden.append(True))
     panel.clear()
     assert hidden == [True]
+
+
+# ── Notes tab tests (issue #390) ──────────────────────────────────────────────
+
+import textwrap
+from opensak.db.database import get_session, init_db
+from opensak.importer import import_gpx
+
+
+def _write_gpx(tmp_path, content: str):
+    p = tmp_path / "test.gpx"
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+def _minimal_gpx(gsak_ext: str = "") -> str:
+    return textwrap.dedent(f"""\
+        <?xml version="1.0" encoding="utf-8"?>
+        <gpx xmlns="http://www.topografix.com/GPX/1/0"
+             xmlns:groundspeak="http://www.groundspeak.com/cache/1/0/1"
+             xmlns:gsak="http://www.gsak.net/xmlv1/6"
+             version="1.0" creator="GSAK">
+          <wpt lat="55.0000" lon="10.0000">
+            <time>2024-01-01T00:00:00</time>
+            <n>GCNOTES1</n>
+            <desc>Notes Cache by Owner, Traditional Cache (2/2)</desc>
+            <type>Geocache|Traditional Cache</type>
+            <groundspeak:cache id="1" archived="False" available="True">
+              <groundspeak:name>Notes Cache</groundspeak:name>
+              <groundspeak:placed_by>Owner</groundspeak:placed_by>
+              <groundspeak:owner id="1">Owner</groundspeak:owner>
+              <groundspeak:type>Traditional Cache</groundspeak:type>
+              <groundspeak:container>Small</groundspeak:container>
+              <groundspeak:difficulty>2.0</groundspeak:difficulty>
+              <groundspeak:terrain>2.0</groundspeak:terrain>
+              <groundspeak:country>Denmark</groundspeak:country>
+              <groundspeak:state>Zealand</groundspeak:state>
+              <groundspeak:encoded_hints></groundspeak:encoded_hints>
+              <groundspeak:logs></groundspeak:logs>
+            </groundspeak:cache>
+            {gsak_ext}
+          </wpt>
+        </gpx>
+    """)
+
+
+def test_notes_tab_exists_at_index_4(monkeypatch, qapp):
+    # The Notes tab must be the fifth tab (index 4).
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    assert panel._tabs.tabText(4) == tr("detail_tab_notes")
+
+
+def test_notes_tab_loads_existing_note(monkeypatch, tmp_path, qapp):
+    # When a cache with a UserNote is shown, the editor is pre-filled.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    db_path = tmp_path / "notes_load.db"
+    init_db(db_path=db_path)
+    gpx = _minimal_gpx("""
+        <gsak:wptExtension>
+          <gsak:UserNote>Pre-loaded note text.</gsak:UserNote>
+        </gsak:wptExtension>
+    """)
+    import_gpx(_write_gpx(tmp_path, gpx), db_path)
+
+    from opensak.db.models import Cache as CacheModel
+    from sqlalchemy.orm import joinedload
+    with get_session() as s:
+        cache = (
+            s.query(CacheModel)
+            .options(
+                joinedload(CacheModel.user_note),
+                joinedload(CacheModel.logs),
+                joinedload(CacheModel.waypoints),
+            )
+            .filter_by(gc_code="GCNOTES1")
+            .one()
+        )
+        s.expunge_all()
+
+    panel = CacheDetailPanel()
+    panel.show_cache(cache)
+    assert panel._note_editor.toPlainText() == "Pre-loaded note text."
+
+
+def test_notes_tab_save_roundtrip(monkeypatch, tmp_path, qapp):
+    # Typing a note and calling _save_note() persists it to the DB.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    db_path = tmp_path / "notes_save.db"
+    init_db(db_path=db_path)
+    import_gpx(_write_gpx(tmp_path, _minimal_gpx()), db_path)
+
+    from opensak.db.models import Cache as CacheModel
+    from sqlalchemy.orm import joinedload
+    with get_session() as s:
+        cache = (
+            s.query(CacheModel)
+            .options(
+                joinedload(CacheModel.user_note),
+                joinedload(CacheModel.logs),
+                joinedload(CacheModel.waypoints),
+            )
+            .filter_by(gc_code="GCNOTES1")
+            .one()
+        )
+        s.expunge_all()
+
+    panel = CacheDetailPanel()
+    panel.show_cache(cache)
+    panel._note_editor.setPlainText("My personal note.")
+    panel._save_note()
+
+    with get_session() as s:
+        cache2 = s.query(CacheModel).filter_by(gc_code="GCNOTES1").one()
+        assert cache2.user_note is not None
+        assert cache2.user_note.note == "My personal note."
+
+
+def test_notes_tab_clear_resets_editor(monkeypatch, qapp):
+    # clear() must empty the note editor.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._note_editor.setPlainText("Some text")
+    panel.clear()
+    assert panel._note_editor.toPlainText() == ""
