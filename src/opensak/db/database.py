@@ -535,6 +535,65 @@ def reload_caches_full(caches: list) -> list:
     return [by_id.get(c.id, c) if isinstance(c, Cache) else c for c in caches]
 
 
+# ── Distance recalculation ────────────────────────────────────────────────────
+
+def recalculate_distances(lat: float, lon: float) -> int:
+    """Recompute distance and bearing for every cache and persist to the DB.
+
+    Called once whenever the active centre point changes (not on every table
+    refresh). Uses distance_km_batch() which dispatches to Haversine or
+    Vincenty depending on the user's distance_method setting.
+
+    Returns the number of caches updated.
+    """
+    from opensak.filters.engine import distance_km_batch
+
+    def _bearing_batch(lat0: float, lon0: float, lats: list, lons: list) -> list:
+        # Bearing computation — vectorised with numpy when available.
+        import math
+        try:
+            import numpy as np
+            r = math.pi / 180
+            la0 = lat0 * r
+            la = np.asarray(lats, dtype=float) * r
+            dlon = (np.asarray(lons, dtype=float) - lon0) * r
+            x = np.sin(dlon) * np.cos(la)
+            y = math.cos(la0) * np.sin(la) - math.sin(la0) * np.cos(la) * np.cos(dlon)
+            return list((np.degrees(np.arctan2(x, y)) + 360) % 360)
+        except ImportError:
+            def _scalar(la2: float, lo2: float) -> float:
+                r2 = math.pi / 180
+                dlon2 = (lo2 - lon0) * r2
+                la02 = lat0 * r2
+                la22 = la2 * r2
+                x2 = math.sin(dlon2) * math.cos(la22)
+                y2 = math.cos(la02) * math.sin(la22) - math.sin(la02) * math.cos(la22) * math.cos(dlon2)
+                return (math.degrees(math.atan2(x2, y2)) + 360) % 360
+            return [_scalar(la, lo) for la, lo in zip(lats, lons)]
+
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        ids  = [r[0] for r in rows]
+        lats = [r[1] for r in rows]
+        lons = [r[2] for r in rows]
+
+        dists = distance_km_batch(lat, lon, lats, lons)
+        bears = _bearing_batch(lat, lon, lats, lons)
+
+        session.execute(
+            text("UPDATE caches SET distance = :d, bearing = :b WHERE id = :id"),
+            [{"d": float(dists[i]), "b": float(bears[i]), "id": ids[i]} for i in range(len(ids))],
+        )
+
+    return len(ids)
+
+
 # ── Health-check helper ───────────────────────────────────────────────────────
 
 def db_health_check() -> dict:
