@@ -1,6 +1,9 @@
 """tests/unit-tests/test_distance.py — distance/bearing math + DistanceFilter.
 
-Batch (numpy) haversine/bearing must match the scalar versions, and the bbox pre-narrow must return the same caches as the exact Python filter.
+Batch (numpy) haversine/bearing must match the scalar versions, and the bbox
+pre-narrow must return the same caches as the exact Python filter.
+Also covers Vincenty accuracy, distance_km_batch dispatcher, and
+recalculate_distances() DB population (distance-computation feature flag).
 """
 
 import math
@@ -11,6 +14,7 @@ from opensak.db.database import get_session, make_session
 from opensak.db.models import Cache
 from opensak.filters.engine import (
     _haversine_km, haversine_km_batch, apply_filters, FilterSet, DistanceFilter,
+    _vincenty_km, vincenty_km_batch, distance_km, distance_km_batch,
 )
 from opensak.gui.cache_table import _bearing_deg, _bearing_deg_batch
 
@@ -128,3 +132,128 @@ def test_lat_lon_index_created(tmp_db):
             ))
         }
     assert "ix_caches_lat_lon" in names
+
+
+# ── Vincenty ──────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("lat1, lon1, lat2, lon2", [
+    (55.6761, 12.5683, 56.1629, 10.2039),   # Copenhagen → Aarhus
+    (55.6761, 12.5683, 52.5200, 13.4050),   # Copenhagen → Berlin
+    (0.0,     0.0,     1.0,     1.0),        # short equatorial leg
+    (0.0,     0.0,     0.0,    90.0),        # quarter-meridian
+])
+def test_vincenty_agrees_with_haversine_within_half_percent(lat1, lon1, lat2, lon2):
+    h = _haversine_km(lat1, lon1, lat2, lon2)
+    v = _vincenty_km(lat1, lon1, lat2, lon2)
+    # Ellipsoidal vs spherical; agreement should be within 0.5 % for real cases.
+    assert abs(h - v) / max(h, 1e-9) < 0.005
+
+
+def test_vincenty_more_accurate_than_haversine_long_distance():
+    # For long distances, Vincenty should differ slightly from Haversine
+    # (Earth is oblate, not spherical); both should be within 0.5 % of each other.
+    lat1, lon1 = 55.6761, 12.5683   # Copenhagen
+    lat2, lon2 = -33.8688, 151.2093  # Sydney
+    h = _haversine_km(lat1, lon1, lat2, lon2)
+    v = _vincenty_km(lat1, lon1, lat2, lon2)
+    assert abs(h - v) / v < 0.005   # < 0.5 % difference
+    assert v != h                    # they must actually differ
+
+
+def test_vincenty_batch_matches_scalar():
+    origin = (55.6761, 12.5683)
+    lats = [p[0] for p in SAMPLE_POINTS]
+    lons = [p[1] for p in SAMPLE_POINTS]
+    lat0, lon0 = origin
+    batch = vincenty_km_batch(lat0, lon0, lats, lons)
+    for i, (la, lo) in enumerate(SAMPLE_POINTS):
+        assert batch[i] == pytest.approx(_vincenty_km(lat0, lon0, la, lo), abs=1e-9)
+
+
+def test_vincenty_coincident_points():
+    assert _vincenty_km(55.0, 12.0, 55.0, 12.0) == 0.0
+
+
+# ── distance_km / distance_km_batch dispatcher ────────────────────────────────
+
+def test_dispatcher_uses_haversine_by_default(patch_features_file, monkeypatch):
+    patch_features_file({"distance-computation": True})
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", "haversine")
+    d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
+    expected = _haversine_km(55.6761, 12.5683, 56.1629, 10.2039)
+    assert d == pytest.approx(expected, abs=1e-9)
+
+
+def test_dispatcher_uses_vincenty_when_set(patch_features_file, monkeypatch):
+    patch_features_file({"distance-computation": True})
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", "vincenty")
+    d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
+    expected = _vincenty_km(55.6761, 12.5683, 56.1629, 10.2039)
+    assert d == pytest.approx(expected, abs=1e-9)
+
+
+def test_dispatcher_ignores_method_when_flag_off(patch_features_file, monkeypatch):
+    patch_features_file({"distance-computation": False})
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", "vincenty")
+    # Flag is OFF → always Haversine regardless of method setting
+    d = distance_km(55.6761, 12.5683, 56.1629, 10.2039)
+    expected = _haversine_km(55.6761, 12.5683, 56.1629, 10.2039)
+    assert d == pytest.approx(expected, abs=1e-9)
+
+
+# ── recalculate_distances() DB population ─────────────────────────────────────
+
+@pytest.fixture()
+def two_cache_db(tmp_path):
+    from opensak.db.database import init_db
+    db_path = tmp_path / "two.db"
+    init_db(db_path=db_path)
+    s = make_session()
+    s.add(Cache(gc_code="GCAAA1", name="Alpha", cache_type="Traditional Cache",
+                latitude=55.6761, longitude=12.5683))
+    s.add(Cache(gc_code="GCAAA2", name="Beta",  cache_type="Traditional Cache",
+                latitude=56.1629, longitude=10.2039))
+    s.commit()
+    s.close()
+    return db_path
+
+
+def test_recalculate_distances_populates_column(two_cache_db):
+    from opensak.db.database import recalculate_distances
+    home_lat, home_lon = 55.6761, 12.5683  # Copenhagen
+    count = recalculate_distances(home_lat, home_lon)
+    assert count == 2
+
+    with get_session() as s:
+        caches = {c.gc_code: c for c in s.query(Cache).all()}
+
+    # Alpha is at the home point — distance must be 0
+    assert caches["GCAAA1"].distance == pytest.approx(0.0, abs=0.01)
+    assert caches["GCAAA1"].bearing is not None
+
+    # Beta (Aarhus) is ~157 km NW — distance must be in that ballpark
+    assert 140.0 < caches["GCAAA2"].distance < 175.0
+    assert caches["GCAAA2"].bearing is not None
+
+
+def test_recalculate_distances_returns_zero_on_empty_db(tmp_path):
+    from opensak.db.database import init_db, recalculate_distances
+    db_path = tmp_path / "empty.db"
+    init_db(db_path=db_path)
+    assert recalculate_distances(55.0, 12.0) == 0
+
+
+def test_recalculate_distances_consistent_with_haversine(two_cache_db):
+    from opensak.db.database import recalculate_distances
+    home_lat, home_lon = 55.6761, 12.5683
+    recalculate_distances(home_lat, home_lon)
+
+    with get_session() as s:
+        caches = {c.gc_code: c for c in s.query(Cache).all()}
+
+    # Default method is Haversine — stored value must match scalar exactly.
+    expected = _haversine_km(home_lat, home_lon, 56.1629, 10.2039)
+    assert caches["GCAAA2"].distance == pytest.approx(expected, rel=1e-4)

@@ -11,6 +11,7 @@ class TestLoad:
         assert flags_module._flags == {
             "update-location": False,
             "reverse-geocoding": False,
+            "distance-computation": False,
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -25,6 +26,7 @@ class TestLoad:
         assert result == {
             "update-location": False,
             "reverse-geocoding": False,
+            "distance-computation": False,
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):
@@ -50,6 +52,19 @@ class TestReverseGeocoding:
     def test_false_when_explicitly_disabled_in_file(self, patch_features_file):
         patch_features_file({"reverse-geocoding": False})
         assert flags_module.reverse_geocoding is False
+
+
+class TestDistanceComputation:
+    def test_false_by_default_when_file_absent(self, no_features_file):
+        assert flags_module.distance_computation is False
+
+    def test_true_when_enabled_in_file(self, patch_features_file):
+        patch_features_file({"distance-computation": True})
+        assert flags_module.distance_computation is True
+
+    def test_false_when_explicitly_disabled_in_file(self, patch_features_file):
+        patch_features_file({"distance-computation": False})
+        assert flags_module.distance_computation is False
 
 
 # ── _parse_argv() ─────────────────────────────────────────────────────────────
