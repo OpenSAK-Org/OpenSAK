@@ -193,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Distance du point d'origine en {unit}",
     "filter_where_note_userdata":   "Champs utilisateur personnels",
     "filter_where_examples_heading": "Exemples :",
+    "filter_where_subquery_heading": "Recherche dans les tables associées (sous-requête EXISTS) :",
+    "filter_where_note_log_text":   "N'importe quel texte de log",
+    "filter_where_note_user_note":  "Note personnelle de l'utilisateur",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Envoyer au GPS",

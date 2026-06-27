@@ -193,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Avstånd från hemmabasen i {unit}",
     "filter_where_note_userdata":   "Personliga användarfält",
     "filter_where_examples_heading": "Exempel:",
+    "filter_where_subquery_heading": "Sökning i relaterade tabeller (EXISTS-underfråga):",
+    "filter_where_note_log_text":   "Valfri loggtext",
+    "filter_where_note_user_note":  "Personlig användaranteckning",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Skicka till GPS",

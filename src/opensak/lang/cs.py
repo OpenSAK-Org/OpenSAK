@@ -193,6 +193,9 @@ STRINGS: dict[str, str] = {
     "filter_where_note_distance":   "Vzdálenost od domácího bodu v {unit}",
     "filter_where_note_userdata":   "Osobní uživatelská pole",
     "filter_where_examples_heading": "Příklady:",
+    "filter_where_subquery_heading": "Hledání v souvisejících tabulkách (poddotaz EXISTS):",
+    "filter_where_note_log_text":   "Libovolný text logu",
+    "filter_where_note_user_note":  "Osobní uživatelská poznámka",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_dialog_title":             "Odeslat do GPS",
