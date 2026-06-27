@@ -1,9 +1,5 @@
 # Distance Computation — Architecture
 
-Feature flag: `distance-computation`  
-Default: `false` (release builds always off for now)  
-Enable: edit `features.json` → `"distance-computation": true`, or pass `--feature distance-computation=true` at launch.
-
 ---
 
 ## Problem with the legacy approach
@@ -47,10 +43,7 @@ When the flag is ON, `_sql_order_expr("distance")` returns `COALESCE(caches.dist
 
 `CacheTableModel._update_distances()` dispatches on the flag:
 
-| Flag | Behaviour |
-|------|-----------|
-| OFF  | Vectorised Haversine batch computed on every refresh (legacy) |
-| ON   | Reads `cache.distance` / `cache.bearing` from the already-loaded ORM objects |
+`CacheTableModel._update_distances()` reads `cache.distance` / `cache.bearing` from the already-loaded ORM objects — no recomputation on refresh.
 
 ---
 
@@ -86,7 +79,7 @@ distance_km(lat1, lon1, lat2, lon2)         # scalar — reads flag + setting
 distance_km_batch(lat0, lon0, lats, lons)   # batch  — reads flag + setting
 ```
 
-When the flag is OFF, both always call Haversine regardless of `distance_method`.
+Both read `AppSettings.distance_method` and dispatch accordingly.
 
 ---
 
@@ -94,14 +87,12 @@ When the flag is OFF, both always call Haversine regardless of `distance_method`
 
 | File | What changed |
 |------|-------------|
-| `features.json` | Added `"distance-computation": false` |
-| `src/opensak/utils/flags.py` | Added `"distance-computation"` to `_RELEASE_DEFAULTS`; exposed as `flags.distance_computation` |
-| `src/opensak/filters/engine.py` | Added `_vincenty_km`, `vincenty_km_batch`, `distance_km`, `distance_km_batch`; updated `_sql_order_expr` and `apply_filters` to use DB column when flag ON |
+| `src/opensak/filters/engine.py` | Added `_vincenty_km`, `vincenty_km_batch`, `distance_km`, `distance_km_batch`; updated `_sql_order_expr` and `apply_filters` to use DB column |
 | `src/opensak/db/database.py` | Added `recalculate_distances(lat, lon) → int` |
 | `src/opensak/gui/settings.py` | Added `AppSettings.distance_method` property |
-| `src/opensak/gui/mainwindow.py` | `_on_home_changed()` and `_initial_load()` call `recalculate_distances()` when flag ON |
-| `src/opensak/gui/cache_table.py` | `_update_distances()` reads from ORM column when flag ON |
-| `src/opensak/gui/dialogs/settings_dialog.py` | Added "Distance Calculation" group in Advanced tab (gated on flag) |
+| `src/opensak/gui/mainwindow.py` | `_on_home_changed()` and `_initial_load()` call `recalculate_distances()` |
+| `src/opensak/gui/cache_table.py` | `_update_distances()` reads from ORM column |
+| `src/opensak/gui/dialogs/settings_dialog.py` | Added "Distance Calculation" group in Advanced tab |
 | `src/opensak/lang/en.py` + all others | Added `settings_group_distance`, `settings_distance_method_label`, `settings_distance_haversine`, `settings_distance_vincenty`, `settings_distance_hint` |
 | `tests/unit-tests/test_distance.py` | Added Vincenty tests, dispatcher tests, `recalculate_distances()` tests |
 | `tests/unit-tests/test_flags.py` | Added `TestDistanceComputation` class; updated default-flags assertions |
@@ -117,9 +108,6 @@ Distance is relative to the user's active centre point, which can change at any 
 ## Testing
 
 ```bash
-# Enable the flag for one run
-python run.py --feature distance-computation=true
-
 # Unit tests (all methods + DB population)
 pytest tests/unit-tests/test_distance.py tests/unit-tests/test_flags.py -v
 ```
