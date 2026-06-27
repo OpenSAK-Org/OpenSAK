@@ -152,8 +152,8 @@ def _gc_sort_key(gc_code: GcCode) -> str:
 #
 #   Group 2: Empty bars + letter (sorted alphabetically by the letter)
 #            EarthCache  → 'E'
-#            Lab Cache   → 'L'
 #            Other       → 'O'
+#            Lab Cache   → 'V'  (shown as Virtual)
 #            Virtual     → 'V'
 #
 #   Group 3: Empty bars, no letter
@@ -185,7 +185,7 @@ _CONTAINER_PHYSICAL_ORDER = {
 # types can be added here and they'll slot in alphabetically by their letter.
 _NON_PHYSICAL_TYPE_LETTERS = {
     "earthcache":                   "E",
-    "lab cache":                    "L",
+    "lab cache":                    "V",
     "virtual cache":                "V",
     "locationless (reverse) cache": "R",
 }
@@ -205,7 +205,7 @@ _CONTAINER_TEXT_LABELS: dict[str, str] = {
 _NON_PHYSICAL_TEXT_LABELS: dict[str, str] = {
     "virtual cache": "Virtual",
     "earthcache":    "Earth",
-    "lab cache":     "Lab",
+    "lab cache":     "Virtual",
 }
 
 
@@ -270,7 +270,7 @@ class SizeBarDelegate(QStyledItemDelegate):
       Other         → 'O'   (ukendt fysisk størrelse)
       Virtual Cache → 'V'   (ingen fysisk container — by cache_type)
       EarthCache    → 'E'   (ingen fysisk container — by cache_type)
-      Lab Cache     → 'L'   (ingen fysisk container — by cache_type)
+      Lab Cache     → 'V'   (ingen fysisk container — vises som Virtual)
     Not chosen og tom → 5 tomme segmenter, intet bogstav
     """
 
@@ -293,7 +293,7 @@ class SizeBarDelegate(QStyledItemDelegate):
     _LABEL_TYPES = {
         "virtual cache": "V",
         "earthcache":    "E",
-        "lab cache":     "L",
+        "lab cache":     "V",
     }
 
     _SEG_COUNT   = 5

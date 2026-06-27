@@ -1175,6 +1175,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_after_import(self) -> None:
         """Reload both cache table and map after a successful import."""
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances
+            recalculate_distances(s.home_lat, s.home_lon)
         self._refresh_cache_list()
         count = self._cache_table.row_count()
         self._statusbar.showMessage(

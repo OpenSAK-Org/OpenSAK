@@ -41,7 +41,7 @@ def test_physical_containers_sorted_smallest_to_largest_in_group_1():
 def test_non_physical_types_use_group_2_letter_alphabetically():
     # cache_type wins over container value: a Virtual with container 'Other' sorts as 'V'.
     assert _container_sort_key("Other", "EarthCache") == (2, "E")
-    assert _container_sort_key("Other", "Lab Cache") == (2, "L")
+    assert _container_sort_key("Other", "Lab Cache") == (2, "V")
     assert _container_sort_key("Other") == (2, "O")
     assert _container_sort_key("Other", "Virtual Cache") == (2, "V")
 
@@ -68,9 +68,9 @@ def test_full_ascending_order_physical_then_letters_then_empty():
         FakeCache("SMALL", "Small"),
     ]
     assert _sort(caches) == [
-        "MICRO", "SMALL", "REGULAR", "LARGE",   # group 1, smallest first
-        "EARTH", "LAB", "OTHER", "VIRT",        # group 2, E < L < O < V
-        "NOTCHOSEN",                            # group 3
+        "MICRO", "SMALL", "REGULAR", "LARGE",       # group 1, smallest first
+        "EARTH", "OTHER", "VIRT", "LAB",            # group 2, E < O < V (Lab sorts as V with Virtual)
+        "NOTCHOSEN",                                # group 3
     ]
 
 

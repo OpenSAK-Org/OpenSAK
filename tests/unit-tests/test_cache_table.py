@@ -113,7 +113,7 @@ class TestHelpers:
         from opensak.gui.cache_table import _container_text
         assert _container_text("other", "Virtual Cache") == "Virtual"
         assert _container_text("other", "EarthCache")    == "Earth"
-        assert _container_text("other", "Lab Cache")     == "Lab"
+        assert _container_text("other", "Lab Cache")     == "Virtual"
 
 
 # ── model basics ────────────────────────────────────────────────────────────────
