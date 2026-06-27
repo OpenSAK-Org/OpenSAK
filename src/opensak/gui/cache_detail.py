@@ -418,7 +418,10 @@ class CacheDetailPanel(QWidget):
         font.setBold(True)
         self._corrected_lbl.setFont(font)
         
-        self._title.update()  # Force repaint
+        self._title.update()
+
+    def refresh_sizes(self) -> None:
+        self._apply_ui_sizes()
 
     def clear(self) -> None:
         self._current_gc_code: str | None = None

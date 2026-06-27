@@ -1201,15 +1201,16 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
         if dlg.exec():
+            prev_cache = self._cache_table.selected_cache()
             self._reload_home_combo()
             self._map_widget.reload_map(self._refresh_cache_list)
             self._refresh_cache_list()
-            self._cache_table.refresh_visuals()  # Re-paint icons/text after size change
-            cache = self._cache_table.selected_cache()
-            if cache:
-                full = self._load_full_cache(cache.gc_code)
-                if full:
-                    self._detail_panel.show_cache(full)
+            self._cache_table.refresh_visuals()
+            full = self._load_full_cache(prev_cache.gc_code) if prev_cache else None
+            if full:
+                self._detail_panel.show_cache(full)
+            else:
+                self._detail_panel.refresh_sizes()
 
     def _reload_home_combo(self) -> None:
         """Genindlæs hjemmepunkts-dropdown fra settings."""
