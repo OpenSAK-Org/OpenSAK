@@ -8,6 +8,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.0-beta.13] — 2026-06-27
+
+> **Beta release** — continuing the 1.14.0 testing period.
+
+### Fixed
+
+- **No way to actually run the setup wizard again** (fixes #358) — Settings →
+  Advanced told users to "run the setup wizard again" to change the
+  installation folder, but there was no way to actually do that — the
+  wizard only ever opened automatically on first launch. A "Run setup
+  wizard again" button has been added right below that note. While
+  building it, a related latent bug was also fixed: the wizard's
+  database-folder step defaulted to the installation folder instead of the
+  actual current database folder, which would otherwise have silently
+  suggested moving an already-configured database folder back on a re-run.
+
+- **User Guide "Changelog" link pointed to `main` instead of the release
+  tag** — a beta tester reported via Facebook that the Changelog link on
+  the opensak.com User Guide page opened the stable changelog instead of
+  the beta one the page actually documents. The link (present in both
+  `site/user-guide.html` and `docs/opensak-user-guide.html`) now pins to
+  the exact release tag instead of a branch name — the same fix already
+  applied to the in-app update popup in beta.10. A regression test now
+  checks both files on every CI run so this can't silently resurface
+  somewhere else.
+
+### Notes
+
+- All 8 language files updated with the new wizard button label and
+  related strings.
+
+---
+
 ## [1.14.0-beta.12] — 2026-06-25
 
 > **Beta release** — continuing the 1.14.0 testing period.
