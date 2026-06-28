@@ -6,7 +6,6 @@ Files are imported sequentially in a background thread.
 """
 
 from __future__ import annotations
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -42,7 +41,7 @@ class ImportWorker(QThread):
     def run(self) -> None:
         from opensak.db.database import get_session, init_db
         from opensak.db.manager import get_db_manager
-        from opensak.importer import import_gpx, import_zip, _count_wpts
+        from opensak.importer import import_gpx, import_zip, _count_wpts, _is_companion_gpx
         from opensak.utils.utils import get_import_type, ImportType
 
         # Switch to target DB if different from active
@@ -60,26 +59,38 @@ class ImportWorker(QThread):
                 self.file_started.emit(i, path.name)
                 try:
                     import_type: ImportType = get_import_type(path)
-                    importers: dict[ImportType, Callable] = {
-                        ImportType.GPX: import_gpx,
-                        ImportType.ZIP: import_zip,
-                    }
-                    import_func = importers[import_type]
 
                     if import_type == ImportType.GPX:
                         try:
                             self.total.emit(_count_wpts(path))
                         except Exception:
                             self.total.emit(-1)
+                        # Find a companion file by inspecting GPX content,
+                        # not by assuming a specific filename convention.
+                        wpts_path = None
+                        try:
+                            wpts_path = next(
+                                (
+                                    f for f in sorted(path.parent.glob("*.gpx"))
+                                    if f != path and _is_companion_gpx(f)
+                                ),
+                                None,
+                            )
+                        except Exception:
+                            pass
+                        with get_session() as session:
+                            result = import_gpx(
+                                path, session,
+                                wpts_path=wpts_path,
+                                progress_cb=self.progress.emit,
+                            )
                     else:
                         self.total.emit(-1)
-
-                    with get_session() as session:
-                        result = import_func(
-                            path,
-                            session,
-                            progress_cb=self.progress.emit
-                        )
+                        with get_session() as session:
+                            result = import_zip(
+                                path, session,
+                                progress_cb=self.progress.emit,
+                            )
 
                     self.file_finished.emit(i, result)
 
@@ -199,8 +210,35 @@ class ImportDialog(QDialog):
 
     # ── File management ───────────────────────────────────────────────────────
 
+    def _filter_companion_wpts(self, new_paths: list[Path]) -> list[Path]:
+        from opensak.importer import _is_companion_gpx
+
+        gpx_in_new = [p for p in new_paths if p.suffix.lower() == ".gpx"]
+        if not gpx_in_new:
+            return new_paths
+
+        # Identify which new GPX files are companion (waypoints-only) files.
+        new_companions = {p for p in gpx_in_new if _is_companion_gpx(p)}
+        if not new_companions:
+            return new_paths
+
+        # Only filter companions when at least one main cache GPX is present
+        # (in the new batch or already in the list). If all files are companions,
+        # the user is importing them standalone — keep all.
+        has_main = any(p not in new_companions for p in gpx_in_new)
+        if not has_main:
+            has_main = any(
+                p.suffix.lower() == ".gpx" and not _is_companion_gpx(p)
+                for p in self._selected_paths
+            )
+        if not has_main:
+            return new_paths
+
+        return [p for p in new_paths if p not in new_companions]
+
     def add_files(self, paths: list[Path]) -> None:
         """Add files to the import list (used by drag & drop from MainWindow)."""
+        paths = self._filter_companion_wpts(paths)
         existing_names = {p.name for p in self._selected_paths}
         for p in paths:
             if p.name not in existing_names:
@@ -221,9 +259,9 @@ class ImportDialog(QDialog):
             tr("import_file_filter")
         )
         if paths:
+            filtered = self._filter_companion_wpts([Path(s) for s in paths])
             existing_names = {p.name for p in self._selected_paths}
-            for path_str in paths:
-                p = Path(path_str)
+            for p in filtered:
                 if p.name not in existing_names:
                     self._selected_paths.append(p)
                     item = QListWidgetItem(f"⏳  {p.name}")

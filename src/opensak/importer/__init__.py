@@ -88,6 +88,35 @@ def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
     return None
 
 
+# ── Companion file detector ───────────────────────────────────────────────────
+
+def _is_companion_gpx(path: Path) -> bool:
+    """Return True if the GPX contains only extra waypoints, not cache entries.
+
+    Reads up to the first <wpt> element only — fast enough to call at dialog
+    time without blocking the UI.  A companion file has wpt entries with
+    type "Waypoint|…"; a main cache GPX has type "Geocache|…" or a
+    Groundspeak cache extension block.
+    """
+    try:
+        for _, elem in etree.iterparse(str(path), events=("end",), tag=None):
+            if etree.QName(elem).localname != "wpt":
+                elem.clear()
+                continue
+            gpx_ns = {"gpx": etree.QName(elem).namespace or NS["gpx"]}
+            type_raw = _text(elem, "gpx:type", gpx_ns) or ""
+            if type_raw.startswith("Geocache"):
+                return False
+            for gs_uri in _GS_NAMESPACES:
+                if elem.find(f".//{{{gs_uri}}}cache") is not None:
+                    return False
+            # First wpt is not a cache entry — companion file
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # ── Waypoint (extra) parser ───────────────────────────────────────────────────
 
 def _parse_extra_waypoints(tree) -> dict[str, list[dict]]:
@@ -115,7 +144,10 @@ def _parse_extra_waypoints(tree) -> dict[str, list[dict]]:
     ns = {"gpx": root.nsmap.get(None, "http://www.topografix.com/GPX/1/0")}
 
     for wpt in root.findall("{%s}wpt" % ns["gpx"]):
-        name_el = wpt.find("{%s}n" % ns["gpx"])
+        name_el = (
+            wpt.find("{%s}n" % ns["gpx"]) or
+            wpt.find("{%s}name" % ns["gpx"])
+        )
         name = name_el.text.strip() if name_el is not None and name_el.text else ""
         if len(name) < 3:
             continue
@@ -1417,41 +1449,40 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp)
 
-        gpx_files = sorted(f for f in tmp.glob("*.gpx") if "-wpts" not in f.name.lower())
+        # Classify GPX files by content, not by name.
+        all_gpx = sorted(tmp.glob("*.gpx"))
+        companions = [f for f in all_gpx if _is_companion_gpx(f)]
+        gpx_files  = [f for f in all_gpx if f not in set(companions)]
 
         if not gpx_files:
             overall_result.errors.append("No .gpx file found in zip")
             return overall_result
 
-        # Step 1: Parse all GPX files in parallel (pure CPU, no DB)
+        # Step 1: Parse all main GPX files in parallel (pure CPU, no DB).
+        # Companions are processed in step 3 after all caches are written so
+        # _link_extra_waypoints can match them against the full cache table.
         parsed_files = []
         with ThreadPoolExecutor(max_workers=min(8, len(gpx_files))) as executor:
-            futures = {}
-            for gpx_path in gpx_files:
-                wpts_candidate = tmp / f"{gpx_path.stem}-wpts.gpx"
-                wpts = wpts_candidate if wpts_candidate.exists() else None
-                futures[executor.submit(_parse_gpx_to_data, gpx_path, wpts)] = gpx_path
-
+            futures = {
+                executor.submit(_parse_gpx_to_data, gpx_path, None): gpx_path
+                for gpx_path in gpx_files
+            }
             for future in futures:
                 try:
-                    caches, extra_wpts, companion_data, errors = future.result()
-                    parsed_files.append((futures[future], caches, extra_wpts, companion_data))
+                    caches, extra_wpts, _, errors = future.result()
+                    parsed_files.append((futures[future], caches, extra_wpts))
                     overall_result.errors.extend(errors)
                 except Exception as e:
                     overall_result.errors.append(f"Parse error: {str(e)}")
 
-        # Step 2: Write all parsed data sequentially (single session, no contention)
+        # Step 2: Write all parsed cache data sequentially (single session).
         db_session = make_session()
-        # Preload once, shared across every GPX in the zip so a cache created
-        # from one file is recognised when another references the same gc_code.
         existing_ids = _load_existing_gc_map(db_session)
         _enter_bulk_import_pragmas(db_session)
         try:
-            for gpx_path, caches, extra_wpts, companion_data in parsed_files:
+            for gpx_path, caches, extra_wpts in parsed_files:
                 source = gpx_path.name
 
-                # Write each file's caches one batch per SAVEPOINT (with a
-                # per-cache fallback on failure — see _flush_cache_batch).
                 for i in range(0, len(caches), 200):
                     _flush_cache_batch(
                         db_session, caches[i:i + 200], source,
@@ -1460,7 +1491,6 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     db_session.commit()
                 db_session.expunge_all()
 
-                # Deduplicate and insert extra waypoints from main GPX
                 if extra_wpts:
                     seen: set = set()
                     unique_wpts: list = []
@@ -1472,10 +1502,16 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     overall_result.waypoints += _insert_extra_wpts(db_session, unique_wpts)
                     db_session.commit()
 
-                # Link companion waypoints file data
-                if companion_data:
+            # Step 3: Link all companion files against the now-complete cache table.
+            for companion_path in companions:
+                try:
+                    wpts_tree = etree.parse(str(companion_path))
+                    companion_data = _parse_extra_waypoints(wpts_tree)
                     overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
                     db_session.commit()
+                except Exception as e:
+                    overall_result.errors.append(f"Waypoints file error ({companion_path.name}): {e}")
+
         except Exception:
             db_session.rollback()
             raise

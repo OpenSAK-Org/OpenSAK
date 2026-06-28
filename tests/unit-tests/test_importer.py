@@ -5,7 +5,7 @@ from pathlib import Path
 
 from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache
-from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts
+from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx
 
 from tests.data import (
     SAMPLE_GPX, SAMPLE_WPTS_GPX, EMPTY_GPX,
@@ -285,6 +285,55 @@ def test_import_zip_multiple_with_companion_wpts(tmp_db, tmp_path):
         assert any(wp.prefix == "PK" for wp in cache.waypoints)
 
 
+def test_import_zip_companion_detected_by_content_not_name(tmp_db, tmp_path):
+    # Companion file with a non-standard name (no -wpts suffix) must still be
+    # detected and linked when its content identifies it as waypoints-only.
+    with get_session() as s:
+        for cache in s.query(Cache).all():
+            s.delete(cache)
+
+    z = make_zip(tmp_path, "renamed_wpts.zip", {
+        "caches.gpx":    SAMPLE_GPX,
+        "extras.gpx":    SAMPLE_WPTS_GPX,   # no -wpts in the name
+    })
+
+    result = import_zip(z)
+
+    assert result.waypoints >= 1, "companion file should be linked by content, not name"
+    assert result.errors == []
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert any(wp.prefix == "PK" for wp in cache.waypoints)
+
+
+def test_parse_extra_waypoints_handles_name_element(tmp_db, tmp_path):
+    # Real geocaching.com companion files use <name> not <n> for the waypoint
+    # code.  _parse_extra_waypoints must handle both.
+    wpts_name_fmt = """\
+<?xml version="1.0" encoding="utf-8"?>
+<gpx version="1.0" creator="Groundspeak, Inc."
+     xmlns="http://www.topografix.com/GPX/1/0">
+  <name>Waypoints</name>
+  <wpt lat="55.6762" lon="12.5680">
+    <name>PK2345</name>
+    <desc>Parking</desc>
+    <type>Waypoint|Parking Area</type>
+    <cmt>Park here.</cmt>
+  </wpt>
+</gpx>
+"""
+    gpx  = write_gpx(tmp_path, "main.gpx",  SAMPLE_GPX)
+    wpts = write_gpx(tmp_path, "wpts.gpx",  wpts_name_fmt)
+
+    with get_session() as s:
+        result = import_gpx(gpx, s, wpts_path=wpts)
+
+    assert result.waypoints == 1, "<name> element in companion file not parsed"
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert any(wp.prefix == "PK" for wp in cache.waypoints)
+
+
 def test_import_lb_lab_cache_codes(tmp_db, tmp_path):
     # lab2gpx exports Adventure Lab stages with LB* codes (Geocache|Lab Cache).
     # These were silently dropped because only GC and LC prefixes were accepted.
@@ -405,3 +454,24 @@ def test_count_wpts(tmp_path):
 def test_count_wpts_empty(tmp_path):
     f = write_gpx(tmp_path, "empty.gpx", '<?xml version="1.0"?><gpx version="1.0"></gpx>')
     assert _count_wpts(f) == 0
+
+
+# ── _is_companion_gpx ─────────────────────────────────────────────────────────
+
+def test_is_companion_gpx_returns_false_for_cache_file(tmp_path):
+    f = write_gpx(tmp_path, "caches.gpx", SAMPLE_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_true_for_wpts_file(tmp_path):
+    f = write_gpx(tmp_path, "wpts.gpx", SAMPLE_WPTS_GPX)
+    assert _is_companion_gpx(f) is True
+
+
+def test_is_companion_gpx_returns_false_for_empty_file(tmp_path):
+    f = write_gpx(tmp_path, "empty.gpx", EMPTY_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_false_for_nonexistent_file(tmp_path):
+    assert _is_companion_gpx(tmp_path / "ghost.gpx") is False
