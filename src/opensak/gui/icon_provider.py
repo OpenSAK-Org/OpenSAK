@@ -576,7 +576,23 @@ _FLAG_PLACEHOLDER_SVG = (
 )
 
 
+_LOCK_PLACEHOLDER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="none"'
+    ' stroke="#aaaaaa" stroke-width="1.3"/>'
+    '<path d="M5.5 7 V5 a2.5 2.5 0 0 1 5 0 V7" fill="none"'
+    ' stroke="#aaaaaa" stroke-width="1.3"/>'
+    '</svg>'
+)
+
+
 @lru_cache(maxsize=8)
 def get_flag_placeholder_icon(size: int = 16) -> QIcon:
     """Faint outlined flag QIcon shown in the user_flag column when flag is unset."""
     return QIcon(_svg_to_pixmap(_FLAG_PLACEHOLDER_SVG, size))
+
+
+@lru_cache(maxsize=8)
+def get_lock_placeholder_icon(size: int = 16) -> QIcon:
+    """Faint outlined open-padlock QIcon shown in the locked column when unset (issue #202)."""
+    return QIcon(_svg_to_pixmap(_LOCK_PLACEHOLDER_SVG, size))

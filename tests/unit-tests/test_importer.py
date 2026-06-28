@@ -233,6 +233,74 @@ def test_reimport_updates_not_duplicates(tmp_db, gpx_file):
         assert log_count == 2, f"Expected 2 logs after re-import, got {log_count}"
 
 
+# ── Issue #202: Lock a cache ────────────────────────────────────────────────
+
+def test_reimport_skips_scalar_fields_when_locked(tmp_db, gpx_file, tmp_path):
+    # A locked cache must keep its scalar fields exactly as they were,
+    # even when a re-import would otherwise change them (e.g. a difficulty
+    # rerate or a renamed listing).
+    with get_session() as s:
+        import_gpx(gpx_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        cache.locked = True
+
+    changed_gpx = (
+        SAMPLE_GPX
+        .replace(
+            "<groundspeak:difficulty>2.0</groundspeak:difficulty>",
+            "<groundspeak:difficulty>4.5</groundspeak:difficulty>",
+        )
+        .replace(
+            "<groundspeak:name>Test Traditional</groundspeak:name>",
+            "<groundspeak:name>Renamed Cache</groundspeak:name>",
+        )
+    )
+    changed_file = write_gpx(tmp_path, "changed.gpx", changed_gpx)
+
+    with get_session() as s:
+        import_gpx(changed_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.difficulty == pytest.approx(2.0), \
+            "Locked cache's difficulty was overwritten by re-import!"
+        assert cache.name == "Test Traditional", \
+            "Locked cache's name was overwritten by re-import!"
+        # locked itself is untouched by import — only cleared by the user.
+        assert cache.locked is True
+
+
+def test_reimport_still_updates_when_unlocked(tmp_db, gpx_file, tmp_path):
+    # Sanity counterpart to the test above: an *unlocked* cache (the
+    # default) must still pick up changes on re-import, same as before
+    # issue #202 — locking must not accidentally become the default.
+    with get_session() as s:
+        import_gpx(gpx_file, s)
+
+    # tmp_db is module-scoped and GC12345 may have been left locked by an
+    # earlier test in this module — explicitly unlock so this test is
+    # order-independent.
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        cache.locked = False
+
+    changed_gpx = SAMPLE_GPX.replace(
+        "<groundspeak:difficulty>2.0</groundspeak:difficulty>",
+        "<groundspeak:difficulty>4.5</groundspeak:difficulty>",
+    )
+    changed_file = write_gpx(tmp_path, "changed_unlocked.gpx", changed_gpx)
+
+    with get_session() as s:
+        import_gpx(changed_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.difficulty == pytest.approx(4.5)
+        assert cache.locked is False
+
+
 # ── Edge cases ────────────────────────────────────────────────────────────────
 
 def test_import_empty_gpx(tmp_db, tmp_path):

@@ -799,16 +799,24 @@ def _upsert_cache(
         session.flush()
 
     # Scalar fields
-    for field in (
-        "name", "cache_type", "container", "latitude", "longitude",
-        "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
-        "hidden_date", "available", "archived",
-        "country", "state", "county",
-        "short_description", "short_desc_html",
-        "long_description",  "long_desc_html",
-        "encoded_hints",
-    ):
-        setattr(cache, field, data.get(field))
+    # ── Issue #202: Lock a cache ──────────────────────────────────────────
+    # A locked cache keeps its current scalar values exactly as they were
+    # the last time it was unlocked/imported — re-imports (PQ/GPX) no longer
+    # touch name, type, container, coordinates, D/T, owner, status,
+    # descriptions, hint or country/state/county. New caches can't be locked
+    # yet (the checkbox lives on existing caches only), so this only applies
+    # when updating an existing row.
+    if existing is None or not cache.locked:
+        for field in (
+            "name", "cache_type", "container", "latitude", "longitude",
+            "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
+            "hidden_date", "available", "archived",
+            "country", "state", "county",
+            "short_description", "short_desc_html",
+            "long_description",  "long_desc_html",
+            "encoded_hints",
+        ):
+            setattr(cache, field, data.get(field))
 
     cache.source_file = source_file
 

@@ -143,6 +143,15 @@ class Cache(Base):
     # NULL for all real geocaches imported from GPX/PQ.
     parent_gc_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
 
+    # ── Issue #202: Lock a cache ─────────────────────────────────────────────
+    # When True, _upsert_cache() skips overwriting the scalar GPX-sourced
+    # fields (name, type, container, coordinates, D/T, owner, status,
+    # descriptions, hint, country/state/county) on re-import. Lets users
+    # preserve a cache's data as it was when found, even if the listing
+    # changes later (e.g. a difficulty rerate). Logs/attributes/waypoints are
+    # not affected — they're rebuilt fresh on every import regardless.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Location provenance (issue #60 — reverse-geocoding phase 3)
     # 'groundspeak' = taken from GPX import, 'computed' = offline boundary engine
     location_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)

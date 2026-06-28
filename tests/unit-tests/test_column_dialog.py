@@ -55,6 +55,11 @@ class TestColumnHelpers:
         # favorite requires the Geocaching API and will always be empty without it
         assert "favorite" not in get_visible_columns()
 
+    def test_locked_in_defaults(self, store):
+        # Issue #202: locked is a general-purpose data-protection flag, visible
+        # by default like user_flag/corrected.
+        assert "locked" in get_visible_columns()
+
     def test_visible_roundtrip(self, store):
         set_visible_columns(["gc_code", "name", "country"])
         assert get_visible_columns() == ["gc_code", "name", "country"]

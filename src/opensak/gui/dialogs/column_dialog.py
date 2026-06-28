@@ -21,6 +21,7 @@ _ALL_COLUMNS_DEF = [
     # col_user_flag og col_corrected viser kun ikon i kolonneoverskriften,
     # men i Column Chooser bruges _label-varianten med læsbar tekst.
     ("user_flag",    "col_user_flag_label",    30,  True),
+    ("locked",       "col_locked_label",       30,  True),
     ("gc_code",      "col_gc_code",      80,  True),
     ("name",         "col_name",        260,  True),
     ("cache_type",   "col_type",          40,  True),   # ikon + tooltip, ingen tekst

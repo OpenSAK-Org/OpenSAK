@@ -17,7 +17,7 @@ from opensak.filters.engine import (
     DistanceFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    HasCorrectedFilter, NoCorrectedFilter, UserFlagFilter, DnfFilter, FtfFilter,
+    HasCorrectedFilter, NoCorrectedFilter, UserFlagFilter, LockedFilter, DnfFilter, FtfFilter,
     FavoritePointsFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
     # Helpers
     _haversine_km, _iter_filters, FILTER_REGISTRY, SORT_FIELDS,
@@ -804,7 +804,7 @@ def test_where_clause_distance_far(tmp_db):
 
 def _cache(**kw):
     base = dict(
-        user_note=None, user_flag=False, dnf=False, first_to_find=False,
+        user_note=None, user_flag=False, locked=False, dnf=False, first_to_find=False,
         favorite_points=0, found=False, found_date=None, dnf_date=None,
         last_log_date=None,
     )
@@ -833,6 +833,14 @@ class TestFlagFilters:
         assert f.matches(_cache(user_flag=True)) is True
         assert f.matches(_cache(user_flag=False)) is False
         assert UserFlagFilter.from_dict(f.to_dict()).flagged is True
+
+    def test_locked(self):
+        # Issue #202: filter on lock status.
+        f = LockedFilter(locked=True)
+        assert f.matches(_cache(locked=True)) is True
+        assert f.matches(_cache(locked=False)) is False
+        assert LockedFilter.from_dict(f.to_dict()).locked is True
+        assert "locked" in FILTER_REGISTRY
 
     def test_dnf(self):
         f = DnfFilter(has_dnf=True)

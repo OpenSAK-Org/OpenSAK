@@ -284,6 +284,13 @@ class WaypointDialog(QDialog):
         self._premium = QCheckBox(tr("wp_cb_premium"))
         form.addRow("", self._premium)
 
+        # Issue #202: lock a cache so PQ/GPX re-imports can't overwrite its
+        # fields. Placed with the other general cache flags, not the personal
+        # ones below — locking isn't about your own stats, it's about
+        # protecting the cache record itself.
+        self._locked = QCheckBox(tr("wp_cb_locked"))
+        form.addRow("", self._locked)
+
         self._found = QCheckBox(tr("wp_cb_found"))
         form.addRow(tr("wp_label_personal"), self._found)
 
@@ -418,6 +425,7 @@ class WaypointDialog(QDialog):
             self._available.setChecked(cache.available if cache.available is not None else True)
             self._archived.setChecked(cache.archived if cache.archived is not None else False)
             self._premium.setChecked(cache.premium_only if cache.premium_only is not None else False)
+            self._locked.setChecked(cache.locked if cache.locked is not None else False)
             self._found.setChecked(cache.found if cache.found is not None else False)
             self._dnf.setChecked(cache.dnf if cache.dnf is not None else False)
             self._favorite.setChecked(cache.favorite_point if cache.favorite_point is not None else False)
@@ -495,6 +503,7 @@ class WaypointDialog(QDialog):
             "available":         self._available.isChecked(),
             "archived":          self._archived.isChecked(),
             "premium_only":      self._premium.isChecked(),
+            "locked":            self._locked.isChecked(),
             "found":             self._found.isChecked(),
             "dnf":               self._dnf.isChecked(),
             "favorite_point":    self._favorite.isChecked(),

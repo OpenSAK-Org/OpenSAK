@@ -21,7 +21,7 @@ from opensak.coords import format_coords, format_lat, format_lon, format_lat, fo
 from opensak.lang import tr
 from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
 from opensak.utils.utils import normalize_geocacher_name
-from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon
+from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon, get_lock_placeholder_icon
 from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display, get_type_display
 import math
 
@@ -97,6 +97,7 @@ def get_column_defs() -> dict:
         "first_to_find":   (tr("col_first_to_find"),   45),
         "favorite_points": (tr("col_favorite_points"), 55),
         "user_flag":       (tr("col_user_flag"),    30),
+        "locked":          (tr("col_locked"),       30),
         "bearing":         (tr("col_bearing"),           55),
         "user_sort":       (tr("col_user_sort"),       55),
         "user_data_1":     (tr("col_user_data_1"),    100),
@@ -515,16 +516,16 @@ class CacheTableModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
-        if index.isValid() and self._columns[index.column()] in ("user_flag", "first_to_find"):
+        if index.isValid() and self._columns[index.column()] in ("user_flag", "first_to_find", "locked"):
             return base | Qt.ItemFlag.ItemIsEditable
         return base
 
     def setData(self, index: QModelIndex | QPersistentModelIndex, value, role=Qt.ItemDataRole.EditRole) -> bool:
-        """Toggle user_flag eller first_to_find når brugeren klikker på kolonnen."""
+        """Toggle user_flag, first_to_find eller locked når brugeren klikker på kolonnen."""
         if not index.isValid():
             return False
         col = self._columns[index.column()]
-        if col not in ("user_flag", "first_to_find"):
+        if col not in ("user_flag", "first_to_find", "locked"):
             return False
         cache = self._caches[index.row()]
         from opensak.db.database import get_session
@@ -537,6 +538,14 @@ class CacheTableModel(QAbstractTableModel):
                     c.user_flag = new_val
             cache.user_flag = new_val
             self.flags_changed.emit()
+        elif col == "locked":
+            # Issue #202: lock/unlock a cache directly from the grid.
+            new_val = not bool(cache.locked)
+            with get_session() as session:
+                c = session.query(CacheModel).filter_by(gc_code=cache.gc_code).first()
+                if c:
+                    c.locked = new_val
+            cache.locked = new_val
         else:  # first_to_find
             new_val = not bool(cache.first_to_find)
             with get_session() as session:
@@ -590,6 +599,8 @@ class CacheTableModel(QAbstractTableModel):
                     return tr("col_corrected_header_tooltip")
                 if col_id == "user_flag":
                     return tr("col_user_flag_header_tooltip")
+                if col_id == "locked":
+                    return tr("col_locked_header_tooltip")
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return Qt.AlignmentFlag.AlignCenter
         return None
@@ -606,7 +617,7 @@ class CacheTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.TextAlignmentRole:
             if col in ("cache_type", "difficulty", "terrain", "distance", "found",
                        "dnf", "premium_only", "archived", "log_count",
-                       "corrected", "first_to_find", "user_flag", "bearing",
+                       "corrected", "first_to_find", "user_flag", "locked", "bearing",
                        "user_sort", "favorite_points",
                        "latitude", "longitude"):
                 return Qt.AlignmentFlag.AlignCenter
@@ -637,6 +648,8 @@ class CacheTableModel(QAbstractTableModel):
             if col == "user_flag":
                 if not cache.user_flag:
                     return tr("col_user_flag_tooltip")
+            if col == "locked":
+                return tr("col_locked_tooltip") if cache.locked else tr("col_locked_tooltip_unset")
             if col in ("latitude", "longitude"):
                 # Vis tooltip der angiver om koordinaterne er korrigerede
                 note = cache.user_note
@@ -709,6 +722,8 @@ class CacheTableModel(QAbstractTableModel):
             return None
         if col == "user_flag" and not cache.user_flag:
             return get_flag_placeholder_icon(16)
+        if col == "locked" and not cache.locked:
+            return get_lock_placeholder_icon(16)
         return None
 
     @staticmethod
@@ -808,6 +823,8 @@ class CacheTableModel(QAbstractTableModel):
             return str(cache.favorite_points) if cache.favorite_points is not None else ""
         if col == "user_flag":
             return "🚩" if cache.user_flag else ""
+        if col == "locked":
+            return "🔒" if cache.locked else ""
         if col == "user_sort":
             return str(cache.user_sort) if cache.user_sort is not None else ""
         if col == "user_data_1":
@@ -873,6 +890,8 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: int(c.first_to_find or False), reverse=reverse)
         elif col == "user_flag":
             self._caches.sort(key=lambda c: int(c.user_flag or False), reverse=reverse)
+        elif col == "locked":
+            self._caches.sort(key=lambda c: int(c.locked or False), reverse=reverse)
         elif col == "user_sort":
             self._caches.sort(key=lambda c: c.user_sort if c.user_sort is not None else 999999, reverse=reverse)
         elif col == "favorite":
@@ -970,11 +989,11 @@ class CacheTableView(QTableView):
         """)
 
     def mousePressEvent(self, event) -> None:
-        """Klik på user_flag- eller first_to_find-kolonnen toggler feltet direkte."""
+        """Klik på user_flag-, first_to_find- eller locked-kolonnen toggler feltet direkte."""
         index = self.indexAt(event.pos())
         if index.isValid():
             col = self._model._columns[index.column()]
-            if col in ("user_flag", "first_to_find") and event.button() == Qt.MouseButton.LeftButton:
+            if col in ("user_flag", "first_to_find", "locked") and event.button() == Qt.MouseButton.LeftButton:
                 self._model.setData(index, None)
                 return
         super().mousePressEvent(event)

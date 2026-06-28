@@ -42,7 +42,7 @@ from opensak.filters.engine import (
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
     TextSearchFilter,
     FilterProfile,
@@ -591,6 +591,18 @@ class FilterDialog(QDialog):
         flag_layout.addStretch()
         layout.addRow(flag_group)
 
+        # Locked (issue #202)
+        locked_group = QGroupBox(tr("filter_locked_group"))
+        locked_layout = QHBoxLayout(locked_group)
+        self._locked_yes = QCheckBox(tr("yes"))
+        self._locked_yes.setChecked(True)
+        self._locked_no  = QCheckBox(tr("no"))
+        self._locked_no.setChecked(True)
+        locked_layout.addWidget(self._locked_yes)
+        locked_layout.addWidget(self._locked_no)
+        locked_layout.addStretch()
+        layout.addRow(locked_group)
+
         # DNF
         dnf_group = QGroupBox(tr("filter_dnf_group"))
         dnf_layout = QHBoxLayout(dnf_group)
@@ -967,6 +979,8 @@ class FilterDialog(QDialog):
         self._county_filter.clear()
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
+        self._locked_yes.setChecked(True)
+        self._locked_no.setChecked(True)
         self._dnf_yes.setChecked(True)
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
@@ -1174,6 +1188,14 @@ class FilterDialog(QDialog):
             fs.add(UserFlagFilter(flagged=True))
         elif flag_no and not flag_yes:
             fs.add(UserFlagFilter(flagged=False))
+
+        # Locked (issue #202)
+        locked_yes = self._locked_yes.isChecked()
+        locked_no  = self._locked_no.isChecked()
+        if locked_yes and not locked_no:
+            fs.add(LockedFilter(locked=True))
+        elif locked_no and not locked_yes:
+            fs.add(LockedFilter(locked=False))
 
         # DNF
         dnf_yes = self._dnf_yes.isChecked()
@@ -1414,6 +1436,10 @@ class FilterDialog(QDialog):
                 flagged = getattr(f, "flagged", True)
                 self._flag_yes.setChecked(flagged)
                 self._flag_no.setChecked(not flagged)
+            elif ftype == "locked":
+                locked = getattr(f, "locked", True)
+                self._locked_yes.setChecked(locked)
+                self._locked_no.setChecked(not locked)
             elif ftype == "dnf":
                 has_dnf = getattr(f, "has_dnf", True)
                 self._dnf_yes.setChecked(has_dnf)

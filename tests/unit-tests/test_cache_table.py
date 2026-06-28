@@ -31,7 +31,7 @@ ALL_COLUMNS = [
     "country", "state", "county", "distance", "found", "placed_by",
     "hidden_date", "last_log", "log_count", "dnf", "premium_only", "archived",
     "favorite", "corrected", "latitude", "longitude", "found_date", "dnf_date",
-    "first_to_find", "favorite_points", "user_flag", "bearing", "user_sort",
+    "first_to_find", "favorite_points", "user_flag", "locked", "bearing", "user_sort",
     "user_data_1", "user_data_2", "user_data_3", "user_data_4",
 ]
 
@@ -42,6 +42,7 @@ def _cache(**kw):
     c.available = kw.pop("available", True)
     c.archived = kw.pop("archived", False)
     c.found = kw.pop("found", False)
+    c.locked = kw.pop("locked", False)
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -386,6 +387,16 @@ class TestDataRoles:
         assert model.data(unset_idx, Qt.ItemDataRole.DecorationRole) is not None
         assert model.data(set_idx,   Qt.ItemDataRole.DecorationRole) is None
 
+    def test_lock_placeholder_icon_when_unset(self, model):
+        # Issue #202: same placeholder pattern as user_flag.
+        model.load([_cache(locked=False), _cache(gc_code="GCB", locked=True)])
+        unset_idx = model.index(0, ALL_COLUMNS.index("locked"))
+        set_idx   = model.index(1, ALL_COLUMNS.index("locked"))
+        assert model.data(unset_idx, Qt.ItemDataRole.DecorationRole) is not None
+        assert model.data(set_idx,   Qt.ItemDataRole.DecorationRole) is None
+        assert model.data(set_idx, Qt.ItemDataRole.DisplayRole) == "🔒"
+        assert model.data(unset_idx, Qt.ItemDataRole.DisplayRole) == ""
+
     def test_userrole_returns_cache_and_dict(self, model):
         model.load([_cache(container="Micro", cache_type="Virtual Cache")])
         idx = model.index(0, 0)
@@ -522,6 +533,8 @@ class TestSetData:
         model.load([_cache()])
         uf = model.index(0, ALL_COLUMNS.index("user_flag"))
         assert model.flags(uf) & Qt.ItemFlag.ItemIsEditable
+        lk = model.index(0, ALL_COLUMNS.index("locked"))
+        assert model.flags(lk) & Qt.ItemFlag.ItemIsEditable
         nf = model.index(0, ALL_COLUMNS.index("name"))
         assert not (model.flags(nf) & Qt.ItemFlag.ItemIsEditable)
 
@@ -552,6 +565,23 @@ class TestSetData:
         ok = model.setData(model.index(0, ALL_COLUMNS.index("first_to_find")), None)
         assert ok is True
         assert cache.first_to_find is True
+
+    def test_setdata_toggles_locked(self, model, db_session, make_cache):
+        # Issue #202: click-to-toggle locked column, same pattern as user_flag
+        # and first_to_find — persisted to DB and reflected on the transient
+        # row used by the table.
+        c = make_cache(gc_code="GCLOCK")
+        db_session.add(c)
+        db_session.commit()
+        cache = _cache(gc_code="GCLOCK", locked=False)
+        model.load([cache])
+        ok = model.setData(model.index(0, ALL_COLUMNS.index("locked")), None)
+        assert ok is True
+        assert cache.locked is True
+        # Toggling again unlocks it.
+        ok2 = model.setData(model.index(0, ALL_COLUMNS.index("locked")), None)
+        assert ok2 is True
+        assert cache.locked is False
 
 
 # ── delegates ───────────────────────────────────────────────────────────────────

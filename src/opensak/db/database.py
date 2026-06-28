@@ -62,7 +62,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -456,6 +456,21 @@ def _run_migrations(engine: Engine) -> None:
             """))
             conn.commit()
             print("Migration: tilføjede caches.waypoint_count")
+
+        # ── Migration 15: locked flag on caches (issue #202) ─────────────────
+        # When set, _upsert_cache() skips overwriting scalar GPX-sourced
+        # fields on re-import, so a manually corrected/locked cache survives
+        # later PQ/GPX imports unchanged.
+        existing_caches_15 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "locked" not in existing_caches_15:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN locked BOOLEAN NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+            print("Migration: tilføjede caches.locked")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

@@ -18,7 +18,7 @@ from opensak.filters.engine import (
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter, AvailabilityFilter, DistanceFilter,
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
-    CountryFilter, StateFilter, CountyFilter, UserFlagFilter, DnfFilter,
+    CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, TextSearchFilter,
     FilterProfile,
@@ -157,12 +157,27 @@ class TestBuildFilterset:
         dlg._state_filter.setText("Z")
         dlg._county_filter.setText("C")
         dlg._flag_no.setChecked(False)   # flag yes only
+        dlg._locked_no.setChecked(False)  # locked yes only (issue #202)
         dlg._dnf_no.setChecked(False)
         dlg._ftf_no.setChecked(False)
         dlg._fav_enabled.setChecked(True)
         types = _types(dlg._build_filterset())
-        assert {"country", "state", "county", "user_flag", "dnf", "ftf",
+        assert {"country", "state", "county", "user_flag", "locked", "dnf", "ftf",
                 "favorite_points"} <= set(types)
+
+    def test_loads_locked_filter(self, dlg):
+        # Issue #202: round-trip a saved "Locked = No" profile.
+        fs = FilterSet(mode="AND")
+        fs.add(LockedFilter(locked=False))
+        dlg._load_filterset(fs)
+        assert dlg._locked_no.isChecked() is True
+        assert dlg._locked_yes.isChecked() is False
+
+    def test_reset_misc_clears_locked(self, dlg):
+        dlg._locked_no.setChecked(False)
+        dlg._reset_misc()
+        assert dlg._locked_yes.isChecked() is True
+        assert dlg._locked_no.isChecked() is True
 
     def test_date_filters(self, dlg):
         dlg._hidden_from_enabled.setChecked(True)

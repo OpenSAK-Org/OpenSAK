@@ -819,6 +819,24 @@ class UserFlagFilter(BaseFilter):
         return cls(flagged=data["flagged"])
 
 
+class LockedFilter(BaseFilter):
+    """Keep caches based on locked value (issue #202)."""
+    filter_type = "locked"
+
+    def __init__(self, locked: bool):
+        self.locked = locked
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.locked) == self.locked
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "locked": self.locked}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LockedFilter":
+        return cls(locked=data["locked"])
+
+
 class DnfFilter(BaseFilter):
     """Keep caches based on DNF (Did Not Find) flag."""
     filter_type = "dnf"
@@ -1121,6 +1139,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "non_premium":   NonPremiumFilter,
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
+    "locked":             LockedFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
     "favorite_points":    FavoritePointsFilter,
@@ -1253,6 +1272,7 @@ SORT_FIELDS: dict[str, Any] = {
     "corrected":       lambda c: 0,   # placeholder — model.sort() håndterer det
     "first_to_find":   lambda c: int(c.first_to_find or False),
     "user_flag":       lambda c: int(c.user_flag or False),
+    "locked":          lambda c: int(c.locked or False),
     "user_sort":       lambda c: c.user_sort if c.user_sort is not None else 999999,
     "user_data_1":     lambda c: (c.user_data_1 or "").lower(),
     "user_data_2":     lambda c: (c.user_data_2 or "").lower(),
@@ -1287,6 +1307,7 @@ def _sql_order_expr(field: str):
         "favorite":        Cache.favorite_point,
         "first_to_find":   func.coalesce(Cache.first_to_find, 0),
         "user_flag":       func.coalesce(Cache.user_flag, 0),
+        "locked":          func.coalesce(Cache.locked, 0),
         # Dates — plain column ordering (NULLs first ascending in SQLite, i.e.
         # treated as earliest). This also fixes the latent SORT_FIELDS bug where
         # "x or 0" mixes datetime and int and raises TypeError on mixed NULLs.
