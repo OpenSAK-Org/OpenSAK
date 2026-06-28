@@ -22,7 +22,7 @@ from opensak.lang import tr
 from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon
-from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display
+from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display, get_type_display
 import math
 
 
@@ -215,6 +215,10 @@ def _container_text(container: str | None, cache_type: str | None) -> str:
         return _NON_PHYSICAL_TEXT_LABELS[type_key]
     size_key = (container or "").lower()
     return _CONTAINER_TEXT_LABELS.get(size_key, (container or "").title())
+
+
+def _type_text(cache_type: str | None) -> str:
+    return (cache_type or "").replace("Unknown", "Mystery")
 
 
 def _container_sort_key(container: str | None, cache_type: str | None = None) -> tuple:
@@ -658,6 +662,8 @@ class CacheTableModel(QAbstractTableModel):
     def _decoration_value(self, cache: Cache, col: str):
         """Return QIcon for columns that show icons."""
         if col == "cache_type":
+            if get_type_display() == "text":
+                return None
             icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
             return get_cache_type_icon(self._type_icon_key(cache), size=icon_size)
         if col == "container":
@@ -690,7 +696,9 @@ class CacheTableModel(QAbstractTableModel):
         if col == "name":
             return cache.name or ""
         if col == "cache_type":
-            return ""   # ikon vises via DecorationRole — fuldt navn i tooltip
+            if get_type_display() in ("text", "both"):
+                return _type_text(cache.cache_type)
+            return ""  # icon-only: DecorationRole, full name in tooltip
         if col == "difficulty":
             return f"{cache.difficulty:.1f}" if cache.difficulty else "?"
         if col == "terrain":
