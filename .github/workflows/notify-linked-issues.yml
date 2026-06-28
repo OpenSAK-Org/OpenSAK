@@ -36,4 +36,11 @@ jobs:
                 issue_number: issueNumber,
                 body: `This has been merged in PR #${prNumber} and will be included in the **next beta release**. 🎉`
               });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'completed'
+              });
             }
