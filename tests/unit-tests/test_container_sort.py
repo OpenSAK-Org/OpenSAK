@@ -1,4 +1,4 @@
-# tests/unit-tests/test_container_sort.py — Container column sort key (issue #90).
+# tests/unit-tests/test_container_sort.py — Container column sort key (#90, #412).
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Optional
 import pytest
 
 from opensak.gui.cache_table import _container_sort_key
+from opensak.filters.engine import SORT_FIELDS
 
 
 @dataclass
@@ -87,3 +88,37 @@ def test_stable_sort_preserves_secondary_order_within_a_group():
         FakeCache("FAR_LARGE", "Large"),
     ]
     assert _sort(caches) == ["CLOSE_SMALL", "MID_SMALL", "CLOSE_LARGE", "MID_LARGE", "FAR_LARGE"]
+
+
+# Issue #412: SORT_FIELDS["container"] must use the same logical order as
+# _container_sort_key, not alphabetical string comparison.
+def test_sort_fields_container_uses_logical_order_not_alphabetical():
+    # Alphabetical order of container values: "" < "Large" < "Micro" < "Not chosen"
+    # < "Other" < "Regular" < "Small". Logical order: micro, small, regular, large,
+    # then non-physical (by letter), then empty/not-chosen.
+    sort_fn = SORT_FIELDS["container"]
+    caches = [
+        FakeCache("LARGE",     "Large",      "Traditional Cache"),
+        FakeCache("MICRO",     "Micro",      "Traditional Cache"),
+        FakeCache("NC",        "Not chosen", "Traditional Cache"),
+        FakeCache("VIRT",      "Other",      "Virtual Cache"),
+        FakeCache("REGULAR",   "Regular",    "Traditional Cache"),
+        FakeCache("OTHER",     "Other",      "Traditional Cache"),
+        FakeCache("EARTH",     "",           "EarthCache"),
+        FakeCache("SMALL",     "Small",      "Traditional Cache"),
+    ]
+    caches.sort(key=sort_fn)
+    gc_codes = [c.gc_code for c in caches]
+    assert gc_codes == ["MICRO", "SMALL", "REGULAR", "LARGE", "EARTH", "OTHER", "VIRT", "NC"]
+
+
+def test_sort_fields_container_non_physical_type_overrides_other_container():
+    # A Virtual Cache with container="Other" must sort as non-physical (2,"V"),
+    # NOT as "other" container (2,"O"). This requires checking cache_type.
+    sort_fn = SORT_FIELDS["container"]
+    virtual = FakeCache("VIRT", "Other", "Virtual Cache")
+    other_trad = FakeCache("OTHR", "Other", "Traditional Cache")
+    earth = FakeCache("EART", "Other", "EarthCache")
+    caches = [virtual, other_trad, earth]
+    caches.sort(key=sort_fn)
+    assert [c.gc_code for c in caches] == ["EART", "OTHR", "VIRT"]
