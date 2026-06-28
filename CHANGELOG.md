@@ -17,6 +17,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Lock a cache against import overwrites** (closes #202) — a long-requested
+  GSAK feature. Locking a cache (via the new 🔒 column, or the checkbox in
+  "Edit cache…") freezes its scalar fields — name, type, container,
+  coordinates, D/T, owner, status, descriptions, hint, country/state/county —
+  exactly as they are, so a later PQ/GPX re-import (e.g. after the listing
+  gets a difficulty rerate) can't silently change data your stats already
+  depend on. Logs, attributes and waypoints still refresh normally on
+  re-import — locking only protects the cache record itself. Filterable via
+  a new "Locked" Yes/No group in the filter dialog, sortable like any other
+  column.
+
 - **Personal notes, round-trippable with GSAK** (closes #389, #390, #391, #392) —
   the cache detail panel has a new "Notes" tab for your own free-text notes per
   cache, separate from the geocaching.com description and logs. Notes are
@@ -161,8 +172,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - 11 unused translation keys were removed (#397) after a new CI test started
   detecting language keys with no remaining source reference — this should
   keep the language files from quietly accumulating dead entries going forward.
-- All 8 language files were updated for the new Waypoints, Notes, Attributes
-  and Keyboard Shortcuts strings.
+- All 8 language files were updated for the new Waypoints, Notes, Attributes,
+  Keyboard Shortcuts and Locked strings.
 - `pyproject.toml`'s version field is now sourced dynamically from
   `src/opensak/__init__.py` instead of being maintained by hand in two places
   — this had silently drifted (`pyproject.toml` still said beta.6 while the
