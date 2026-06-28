@@ -29,11 +29,40 @@ jobs:
             }
 
             for (const issueNumber of issues) {
-              console.log(`Commenting on issue #${issueNumber}`);
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+
+              const labels = issue.labels.map(l => l.name.toLowerCase());
+              const author = issue.user.login;
+
+              let subject;
+              if (labels.some(l => l.includes('bug'))) {
+                subject = 'This was fixed';
+              } else if (labels.some(l => l.includes('feature'))) {
+                subject = 'This feature has been completed';
+              } else if (labels.some(l => l.includes('improvement'))) {
+                subject = 'This improvement has been completed';
+              } else {
+                subject = 'This has been completed';
+              }
+
+              const body = `@${author} ${subject} in PR #${prNumber} and will be included in the **next beta release**. 🎉`;
+
+              console.log(`Commenting and closing issue #${issueNumber}`);
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: issueNumber,
-                body: `This has been merged in PR #${prNumber} and will be included in the **next beta release**. 🎉`
+                body,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'completed',
               });
             }
