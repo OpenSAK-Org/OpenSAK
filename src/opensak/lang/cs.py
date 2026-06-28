@@ -507,6 +507,10 @@ STRINGS: dict[str, str] = {
     "container_display_label":      "Zobrazení velikosti:",
     "container_display_bar":        "Pruh",
     "container_display_text":       "Text",
+    "type_display_label":           "Zobrazení typu:",
+    "type_display_icon":            "Ikona",
+    "type_display_text":            "Text",
+    "type_display_both":            "Ikona + Text",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_saved_label":           "Uložený filtr:",

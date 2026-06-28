@@ -137,6 +137,20 @@ def set_container_display(mode: str) -> None:
     get_store().set(_CONTAINER_DISPLAY_KEY, mode)
 
 
+_TYPE_DISPLAY_KEY = "columns.type_display"
+
+
+def get_type_display() -> str:
+    """Return the cache_type column display mode: 'icon', 'text', or 'both'."""
+    val = get_store().get(_TYPE_DISPLAY_KEY, "icon")
+    return val if val in ("icon", "text", "both") else "icon"
+
+
+def set_type_display(mode: str) -> None:
+    """Persist the cache_type column display mode."""
+    get_store().set(_TYPE_DISPLAY_KEY, mode)
+
+
 class ColumnChooserDialog(QDialog):
     """Dialog til at vælge hvilke kolonner der vises i cachelisten."""
 
@@ -191,6 +205,20 @@ class ColumnChooserDialog(QDialog):
         display_row.addWidget(self._container_display_combo)
         layout.addLayout(display_row)
 
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel(tr("type_display_label")))
+        self._type_display_combo = QComboBox()
+        for label, value in (
+            (tr("type_display_icon"), "icon"),
+            (tr("type_display_text"), "text"),
+            (tr("type_display_both"), "both"),
+        ):
+            self._type_display_combo.addItem(label, value)
+        _type_idx = {"icon": 0, "text": 1, "both": 2}.get(get_type_display(), 0)
+        self._type_display_combo.setCurrentIndex(_type_idx)
+        type_row.addWidget(self._type_display_combo)
+        layout.addLayout(type_row)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
@@ -233,4 +261,5 @@ class ColumnChooserDialog(QDialog):
 
         set_visible_columns(visible)
         set_container_display(self._container_display_combo.currentData())
+        set_type_display(self._type_display_combo.currentData())
         self.accept()

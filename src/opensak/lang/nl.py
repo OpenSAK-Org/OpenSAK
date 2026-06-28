@@ -510,6 +510,10 @@ STRINGS: dict[str, str] = {
     "container_display_label":      "Grootte weergave:",
     "container_display_bar":        "Balk",
     "container_display_text":       "Tekst",
+    "type_display_label":           "Type weergave:",
+    "type_display_icon":            "Pictogram",
+    "type_display_text":            "Tekst",
+    "type_display_both":            "Pictogram + Tekst",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_saved_label":           "Opgeslagen filter:",

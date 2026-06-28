@@ -507,6 +507,10 @@ STRINGS: dict[str, str] = {
     "container_display_label":      "Affichage taille:",
     "container_display_bar":        "Barre",
     "container_display_text":       "Texte",
+    "type_display_label":           "Affichage type:",
+    "type_display_icon":            "Icône",
+    "type_display_text":            "Texte",
+    "type_display_both":            "Icône + Texte",
 
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_saved_label":           "Filtre enregistré:",
