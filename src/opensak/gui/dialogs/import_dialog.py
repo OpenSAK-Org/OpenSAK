@@ -41,7 +41,7 @@ class ImportWorker(QThread):
     def run(self) -> None:
         from opensak.db.database import get_session, init_db
         from opensak.db.manager import get_db_manager
-        from opensak.importer import import_gpx, import_zip, _count_wpts
+        from opensak.importer import import_gpx, import_zip, _count_wpts, _is_companion_gpx
         from opensak.utils.utils import get_import_type, ImportType
 
         # Switch to target DB if different from active
@@ -65,8 +65,19 @@ class ImportWorker(QThread):
                             self.total.emit(_count_wpts(path))
                         except Exception:
                             self.total.emit(-1)
-                        wpts_candidate = path.parent / f"{path.stem}-wpts.gpx"
-                        wpts_path = wpts_candidate if wpts_candidate.exists() else None
+                        # Find a companion file by inspecting GPX content,
+                        # not by assuming a specific filename convention.
+                        wpts_path = None
+                        try:
+                            wpts_path = next(
+                                (
+                                    f for f in sorted(path.parent.glob("*.gpx"))
+                                    if f != path and _is_companion_gpx(f)
+                                ),
+                                None,
+                            )
+                        except Exception:
+                            pass
                         with get_session() as session:
                             result = import_gpx(
                                 path, session,
@@ -200,19 +211,30 @@ class ImportDialog(QDialog):
     # ── File management ───────────────────────────────────────────────────────
 
     def _filter_companion_wpts(self, new_paths: list[Path]) -> list[Path]:
-        # Drop any -wpts.gpx whose parent .gpx is already in the list or in
-        # the same batch — the parent will auto-detect and import the companion.
-        all_gpx_names = (
-            {p.name for p in self._selected_paths if p.suffix.lower() == ".gpx"}
-            | {p.name for p in new_paths if p.suffix.lower() == ".gpx"}
-        )
-        return [
-            p for p in new_paths
-            if not (
-                p.name.lower().endswith("-wpts.gpx")
-                and p.name[: -len("-wpts.gpx")] + ".gpx" in all_gpx_names
+        from opensak.importer import _is_companion_gpx
+
+        gpx_in_new = [p for p in new_paths if p.suffix.lower() == ".gpx"]
+        if not gpx_in_new:
+            return new_paths
+
+        # Identify which new GPX files are companion (waypoints-only) files.
+        new_companions = {p for p in gpx_in_new if _is_companion_gpx(p)}
+        if not new_companions:
+            return new_paths
+
+        # Only filter companions when at least one main cache GPX is present
+        # (in the new batch or already in the list). If all files are companions,
+        # the user is importing them standalone — keep all.
+        has_main = any(p not in new_companions for p in gpx_in_new)
+        if not has_main:
+            has_main = any(
+                p.suffix.lower() == ".gpx" and not _is_companion_gpx(p)
+                for p in self._selected_paths
             )
-        ]
+        if not has_main:
+            return new_paths
+
+        return [p for p in new_paths if p not in new_companions]
 
     def add_files(self, paths: list[Path]) -> None:
         """Add files to the import list (used by drag & drop from MainWindow)."""

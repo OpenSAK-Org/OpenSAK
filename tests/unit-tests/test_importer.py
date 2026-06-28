@@ -5,7 +5,7 @@ from pathlib import Path
 
 from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache
-from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts
+from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx
 
 from tests.data import (
     SAMPLE_GPX, SAMPLE_WPTS_GPX, EMPTY_GPX,
@@ -405,3 +405,24 @@ def test_count_wpts(tmp_path):
 def test_count_wpts_empty(tmp_path):
     f = write_gpx(tmp_path, "empty.gpx", '<?xml version="1.0"?><gpx version="1.0"></gpx>')
     assert _count_wpts(f) == 0
+
+
+# ── _is_companion_gpx ─────────────────────────────────────────────────────────
+
+def test_is_companion_gpx_returns_false_for_cache_file(tmp_path):
+    f = write_gpx(tmp_path, "caches.gpx", SAMPLE_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_true_for_wpts_file(tmp_path):
+    f = write_gpx(tmp_path, "wpts.gpx", SAMPLE_WPTS_GPX)
+    assert _is_companion_gpx(f) is True
+
+
+def test_is_companion_gpx_returns_false_for_empty_file(tmp_path):
+    f = write_gpx(tmp_path, "empty.gpx", EMPTY_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_false_for_nonexistent_file(tmp_path):
+    assert _is_companion_gpx(tmp_path / "ghost.gpx") is False

@@ -88,12 +88,13 @@ class TestImportWorker:
         assert inits == [Path("/other.db"), Path("/active.db")]
 
     def test_run_gpx_passes_companion_wpts_path(self, monkeypatch, tmp_path):
-        # When a -wpts.gpx file sits next to the selected .gpx, it must be
-        # detected and passed as wpts_path to import_gpx.
+        # Companion detected by content inspection, not filename.
+        from tests.data import SAMPLE_GPX, SAMPLE_WPTS_GPX
+
         gpx = tmp_path / "pq.gpx"
-        gpx.write_text("")
-        wpts = tmp_path / "pq-wpts.gpx"
-        wpts.write_text("")
+        gpx.write_text(SAMPLE_GPX)
+        wpts = tmp_path / "anyname.gpx"       # name is irrelevant — content decides
+        wpts.write_text(SAMPLE_WPTS_GPX)
 
         ImportType = self._patch_common(monkeypatch)
         monkeypatch.setattr("opensak.utils.utils.get_import_type", lambda p: ImportType.GPX)
@@ -114,9 +115,11 @@ class TestImportWorker:
         assert received[0] == wpts
 
     def test_run_gpx_no_companion_wpts_path_is_none(self, monkeypatch, tmp_path):
-        # When no -wpts.gpx file exists, wpts_path must be None (not a missing file).
+        # No other GPX in directory → wpts_path must be None.
+        from tests.data import SAMPLE_GPX
+
         gpx = tmp_path / "solo.gpx"
-        gpx.write_text("")
+        gpx.write_text(SAMPLE_GPX)
 
         ImportType = self._patch_common(monkeypatch)
         monkeypatch.setattr("opensak.utils.utils.get_import_type", lambda p: ImportType.GPX)
@@ -165,13 +168,18 @@ class TestImportDialog:
         assert len(dlg._selected_paths) == 2  # a.gpx deduped by name
         assert dlg._import_btn.isEnabled() is True
 
-    def test_add_files_drops_companion_wpts_when_parent_present(self, dlg):
-        # Dropping both GPX and its -wpts companion: only parent should appear.
+    def test_add_files_drops_companion_wpts_when_parent_present(self, dlg, monkeypatch):
+        # Dropping both files: companion detected by content, not name.
+        monkeypatch.setattr(
+            "opensak.importer._is_companion_gpx",
+            lambda p: p.name == "pq-wpts.gpx",
+        )
         dlg.add_files([Path("/d/pq.gpx"), Path("/d/pq-wpts.gpx")])
         assert [p.name for p in dlg._selected_paths] == ["pq.gpx"]
 
-    def test_add_files_keeps_companion_wpts_when_parent_absent(self, dlg):
-        # Dropping just the -wpts file (parent not in list) should keep it.
+    def test_add_files_keeps_companion_wpts_when_parent_absent(self, dlg, monkeypatch):
+        # Dropping just a companion file (no parent in list) must keep it.
+        monkeypatch.setattr("opensak.importer._is_companion_gpx", lambda p: True)
         dlg.add_files([Path("/d/pq-wpts.gpx")])
         assert [p.name for p in dlg._selected_paths] == ["pq-wpts.gpx"]
 
@@ -186,6 +194,10 @@ class TestImportDialog:
         monkeypatch.setattr(
             idlg.QFileDialog, "getOpenFileNames",
             lambda *a, **k: (["/d/pq.gpx", "/d/pq-wpts.gpx"], "f"),
+        )
+        monkeypatch.setattr(
+            "opensak.importer._is_companion_gpx",
+            lambda p: p.name == "pq-wpts.gpx",
         )
         dlg._browse()
         assert [p.name for p in dlg._selected_paths] == ["pq.gpx"]
