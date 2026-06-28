@@ -11,8 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    uses: ./.github/workflows/tests.yml
-
   quality:
     uses: ./.github/workflows/quality.yml
+
+  test:
+    needs: quality
+    uses: ./.github/workflows/tests.yml
