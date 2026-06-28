@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "About &OpenSAK…",
     "action_check_update":          "Check for updates…",
     "action_user_guide":            "User Guide",
+    "action_shortcuts":             "⌨️  &Keyboard Shortcuts…",
 
     "action_open_log_file": "Open log file",
     "log_file_not_found": "Log file not found yet: {path}",
+
+    # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Keyboard Shortcuts",
+    "shortcuts_col_action":         "Action",
+    "shortcuts_col_shortcut":       "Shortcut",
+    "shortcuts_reset_all":          "Reset All to Defaults",
+    "shortcut_manage_databases":    "Manage Databases",
+    "shortcut_import":              "Import GPX / PQ Zip",
+    "shortcut_quit":                "Quit",
+    "shortcut_add_cache":           "Add Cache",
+    "shortcut_edit_cache":          "Edit Cache",
+    "shortcut_delete_cache":        "Delete Cache",
+    "shortcut_refresh":             "Refresh List",
+    "shortcut_filter":              "Set Filter",
+    "shortcut_settings":            "Settings",
+    "shortcut_gps_export":          "Send to GPS",
+    "shortcut_trip_planner":        "Trip Planner",
+    "shortcut_coord_converter":     "Coordinate Converter",
+    "shortcut_projection":          "Coordinate Projection",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Tools",

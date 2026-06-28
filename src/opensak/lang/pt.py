@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "Sobre o &OpenSAK…",
     "action_check_update":          "Verificar atualizações…",
     "action_user_guide":            "Guia do utilizador",
+    "action_shortcuts":             "⌨️  &Atalhos de teclado…",
 
     "action_open_log_file": "Abrir ficheiro de registo",
     "log_file_not_found": "Ficheiro de registo ainda não encontrado: {path}",
+
+    # ── Atalhos de teclado dialog ─────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Atalhos de teclado",
+    "shortcuts_col_action":         "Ação",
+    "shortcuts_col_shortcut":       "Atalho",
+    "shortcuts_reset_all":          "Repor todos os padrões",
+    "shortcut_manage_databases":    "Gerir bases de dados",
+    "shortcut_import":              "Importar GPX / PQ zip",
+    "shortcut_quit":                "Sair",
+    "shortcut_add_cache":           "Adicionar cache",
+    "shortcut_edit_cache":          "Editar cache",
+    "shortcut_delete_cache":        "Eliminar cache",
+    "shortcut_refresh":             "Atualizar lista",
+    "shortcut_filter":              "Definir filtro",
+    "shortcut_settings":            "Definições",
+    "shortcut_gps_export":          "Enviar para GPS",
+    "shortcut_trip_planner":        "Planeador de percurso",
+    "shortcut_coord_converter":     "Conversor de coordenadas",
+    "shortcut_projection":          "Projeção de coordenadas",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Ferramentas de geocaching",

@@ -204,6 +204,8 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_menu()
         self._setup_toolbar()
+        self._setup_shortcut_registry()
+        self._apply_saved_shortcuts()
         self._setup_search_bar()
         self._setup_statusbar()
         self._restore_state()
@@ -310,18 +312,18 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        act_quit = QAction(tr("action_quit"), self)
-        act_quit.setShortcut(QKeySequence("Ctrl+Q"))
-        act_quit.triggered.connect(self.close)
-        file_menu.addAction(act_quit)
+        self._act_quit = QAction(tr("action_quit"), self)
+        self._act_quit.setShortcut(QKeySequence("Ctrl+Q"))
+        self._act_quit.triggered.connect(self.close)
+        file_menu.addAction(self._act_quit)
 
         # ── Waypoint ──────────────────────────────────────────────────────────
         wp_menu = menubar.addMenu(tr("menu_waypoint"))
 
-        act_wp_add = QAction(tr("action_wp_add"), self)
-        act_wp_add.setShortcut(QKeySequence("Ctrl+N"))
-        act_wp_add.triggered.connect(self._add_waypoint)
-        wp_menu.addAction(act_wp_add)
+        self._act_wp_add = QAction(tr("action_wp_add"), self)
+        self._act_wp_add.setShortcut(QKeySequence("Ctrl+N"))
+        self._act_wp_add.triggered.connect(self._add_waypoint)
+        wp_menu.addAction(self._act_wp_add)
 
         self._act_wp_edit = QAction(tr("action_wp_edit"), self)
         self._act_wp_edit.setShortcut(QKeySequence("Ctrl+E"))
@@ -372,17 +374,17 @@ class MainWindow(QMainWindow):
         # ── Vis ───────────────────────────────────────────────────────────────
         view_menu = menubar.addMenu(tr("menu_view"))
 
-        act_refresh = QAction(tr("action_refresh"), self)
-        act_refresh.setShortcut(QKeySequence("F5"))
-        act_refresh.triggered.connect(self._refresh_cache_list)
-        view_menu.addAction(act_refresh)
+        self._act_refresh = QAction(tr("action_refresh"), self)
+        self._act_refresh.setShortcut(QKeySequence("F5"))
+        self._act_refresh.triggered.connect(self._refresh_cache_list)
+        view_menu.addAction(self._act_refresh)
 
         view_menu.addSeparator()
 
-        act_filter = QAction(tr("action_filter"), self)
-        act_filter.setShortcut("Ctrl+F")
-        act_filter.triggered.connect(self._open_filter_dialog)
-        view_menu.addAction(act_filter)
+        self._act_filter_menu = QAction(tr("action_filter"), self)
+        self._act_filter_menu.setShortcut("Ctrl+F")
+        self._act_filter_menu.triggered.connect(self._open_filter_dialog)
+        view_menu.addAction(self._act_filter_menu)
 
         act_clear = QAction(tr("action_clear_filter"), self)
         act_clear.triggered.connect(self._clear_filter)
@@ -397,12 +399,12 @@ class MainWindow(QMainWindow):
         # ── Funktioner ────────────────────────────────────────────────────────
         tools_menu = menubar.addMenu(tr("menu_tools"))
 
-        act_settings = QAction(tr("action_settings"), self)
-        act_settings.setShortcut(QKeySequence("Ctrl+,"))
+        self._act_settings = QAction(tr("action_settings"), self)
+        self._act_settings.setShortcut(QKeySequence("Ctrl+,"))
         # Ctrl+, triggers macOS PreferencesRole auto-assignment, relabeling the action "Preferences".
-        act_settings.setMenuRole(QAction.MenuRole.NoRole)
-        act_settings.triggered.connect(self._open_settings)
-        tools_menu.addAction(act_settings)
+        self._act_settings.setMenuRole(QAction.MenuRole.NoRole)
+        self._act_settings.triggered.connect(self._open_settings)
+        tools_menu.addAction(self._act_settings)
 
         tools_menu.addSeparator()
 
@@ -426,15 +428,15 @@ class MainWindow(QMainWindow):
         # ── Geocaching Værktøjer ──────────────────────────────────────────────
         gc_tools_menu = menubar.addMenu(tr("menu_gc_tools"))
 
-        act_coord_converter = QAction(tr("action_coord_converter"), self)
-        act_coord_converter.setShortcut(QKeySequence("Ctrl+K"))
-        act_coord_converter.triggered.connect(self._open_coord_converter)
-        gc_tools_menu.addAction(act_coord_converter)
+        self._act_coord_converter = QAction(tr("action_coord_converter"), self)
+        self._act_coord_converter.setShortcut(QKeySequence("Ctrl+K"))
+        self._act_coord_converter.triggered.connect(self._open_coord_converter)
+        gc_tools_menu.addAction(self._act_coord_converter)
 
-        act_projection = QAction(tr("action_projection"), self)
-        act_projection.setShortcut(QKeySequence("Ctrl+P"))
-        act_projection.triggered.connect(self._open_projection)
-        gc_tools_menu.addAction(act_projection)
+        self._act_projection = QAction(tr("action_projection"), self)
+        self._act_projection.setShortcut(QKeySequence("Ctrl+P"))
+        self._act_projection.triggered.connect(self._open_projection)
+        gc_tools_menu.addAction(self._act_projection)
 
         gc_tools_menu.addSeparator()
 
@@ -464,6 +466,12 @@ class MainWindow(QMainWindow):
         act_check_update = QAction(tr("action_check_update"), self)
         act_check_update.triggered.connect(self._check_update_manual)
         help_menu.addAction(act_check_update)
+
+        help_menu.addSeparator()
+
+        act_shortcuts = QAction(tr("action_shortcuts"), self)
+        act_shortcuts.triggered.connect(self._open_shortcuts)
+        help_menu.addAction(act_shortcuts)
 
         help_menu.addSeparator()
 
@@ -1218,6 +1226,53 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
             else:
                 self._detail_panel.refresh_sizes()
+
+    # ── Tastaturgenveje ────────────────────────────────────────────────────────
+
+    def _setup_shortcut_registry(self) -> None:
+        # Each entry: (settings_key, label_lang_key, [actions sharing this shortcut])
+        self._shortcut_registry: list[tuple[str, str, list[QAction]]] = [
+            ("manage_databases",  "shortcut_manage_databases",  [self._act_db_manager]),
+            ("import",            "shortcut_import",            [self._act_import]),
+            ("quit",              "shortcut_quit",              [self._act_quit]),
+            ("add_cache",         "shortcut_add_cache",         [self._act_wp_add]),
+            ("edit_cache",        "shortcut_edit_cache",        [self._act_wp_edit]),
+            ("delete_cache",      "shortcut_delete_cache",      [self._act_wp_delete]),
+            ("refresh",           "shortcut_refresh",           [self._act_refresh]),
+            ("filter",            "shortcut_filter",            [self._act_filter_menu, self._act_filter]),
+            ("settings",          "shortcut_settings",          [self._act_settings]),
+            ("gps_export",        "shortcut_gps_export",        [self._act_gps_export]),
+            ("trip_planner",      "shortcut_trip_planner",      [self._act_trip_planner]),
+            ("coord_converter",   "shortcut_coord_converter",   [self._act_coord_converter]),
+            ("projection",        "shortcut_projection",        [self._act_projection]),
+        ]
+
+    def _apply_saved_shortcuts(self) -> None:
+        from PySide6.QtCore import QSettings
+        s = QSettings("OpenSAK Project", "OpenSAK")
+        for key, _label, actions in self._shortcut_registry:
+            saved = s.value(f"shortcuts/{key}", "")
+            if saved:
+                seq = QKeySequence(str(saved))
+                for act in actions:
+                    act.setShortcut(seq)
+
+    def _open_shortcuts(self) -> None:
+        from opensak.gui.dialogs.shortcuts_dialog import ShortcutsDialog
+        from PySide6.QtCore import QSettings
+        dlg = ShortcutsDialog(self._shortcut_registry, self)
+        if dlg.exec():
+            new_shortcuts = dlg.get_shortcuts()
+            s = QSettings("OpenSAK Project", "OpenSAK")
+            for key, _label, actions in self._shortcut_registry:
+                seq_str = new_shortcuts.get(key, "")
+                if seq_str:
+                    s.setValue(f"shortcuts/{key}", seq_str)
+                else:
+                    s.remove(f"shortcuts/{key}")
+                seq = QKeySequence(seq_str) if seq_str else QKeySequence()
+                for act in actions:
+                    act.setShortcut(seq)
 
     def _reload_home_combo(self) -> None:
         """Genindlæs hjemmepunkts-dropdown fra settings."""

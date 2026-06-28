@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "Om &OpenSAK…",
     "action_check_update":          "Sök efter uppdateringar…",
     "action_user_guide":            "Användarguide",
+    "action_shortcuts":             "⌨️  &Tangentbordsgenvägar…",
 
     "action_open_log_file": "Öppna loggfil",
     "log_file_not_found": "Loggfilen hittades inte än: {path}",
+
+    # ── Tangentbordsgenvägar-dialog ───────────────────────────────────────────
+    "shortcuts_dialog_title":       "Tangentbordsgenvägar",
+    "shortcuts_col_action":         "Åtgärd",
+    "shortcuts_col_shortcut":       "Genväg",
+    "shortcuts_reset_all":          "Återställ alla till standard",
+    "shortcut_manage_databases":    "Hantera databaser",
+    "shortcut_import":              "Importera GPX / PQ zip",
+    "shortcut_quit":                "Avsluta",
+    "shortcut_add_cache":           "Lägg till cache",
+    "shortcut_edit_cache":          "Redigera cache",
+    "shortcut_delete_cache":        "Ta bort cache",
+    "shortcut_refresh":             "Uppdatera lista",
+    "shortcut_filter":              "Ange filter",
+    "shortcut_settings":            "Inställningar",
+    "shortcut_gps_export":          "Skicka till GPS",
+    "shortcut_trip_planner":        "Reseplanerare",
+    "shortcut_coord_converter":     "Koordinatomvandlare",
+    "shortcut_projection":          "Koordinatprojektion",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Verktyg",

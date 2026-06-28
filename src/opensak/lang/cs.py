@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "O &OpenSAK…",
     "action_check_update":          "Zkontrolovat aktualizace…",
     "action_user_guide":            "Uživatelská příručka",
+    "action_shortcuts":             "⌨️  &Klávesové zkratky…",
 
     "action_open_log_file": "Otevřít soubor protokolu",
     "log_file_not_found": "Soubor protokolu ještě nebyl nalezen: {path}",
+
+    # ── Klávesové zkratky dialog ──────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Klávesové zkratky",
+    "shortcuts_col_action":         "Akce",
+    "shortcuts_col_shortcut":       "Zkratka",
+    "shortcuts_reset_all":          "Obnovit výchozí hodnoty",
+    "shortcut_manage_databases":    "Spravovat databáze",
+    "shortcut_import":              "Importovat GPX / PQ zip",
+    "shortcut_quit":                "Ukončit",
+    "shortcut_add_cache":           "Přidat kešku",
+    "shortcut_edit_cache":          "Upravit kešku",
+    "shortcut_delete_cache":        "Smazat kešku",
+    "shortcut_refresh":             "Obnovit seznam",
+    "shortcut_filter":              "Nastavit filtr",
+    "shortcut_settings":            "Nastavení",
+    "shortcut_gps_export":          "Odeslat do GPS",
+    "shortcut_trip_planner":        "Plánování trasy",
+    "shortcut_coord_converter":     "Převodník souřadnic",
+    "shortcut_projection":          "Projekce souřadnic",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Nástroje",

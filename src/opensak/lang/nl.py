@@ -83,9 +83,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "Over &OpenSAK…",
     "action_check_update":          "Controleren op updates…",
     "action_user_guide":            "Gebruikershandleiding",
+    "action_shortcuts":             "⌨️  &Sneltoetsen…",
 
     "action_open_log_file": "Logbestand openen",
     "log_file_not_found": "Logbestand nog niet gevonden: {path}",
+
+    # ── Sneltoetsen-dialog ────────────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Sneltoetsen",
+    "shortcuts_col_action":         "Actie",
+    "shortcuts_col_shortcut":       "Sneltoets",
+    "shortcuts_reset_all":          "Alles resetten",
+    "shortcut_manage_databases":    "Databases beheren",
+    "shortcut_import":              "GPX / PQ zip importeren",
+    "shortcut_quit":                "Afsluiten",
+    "shortcut_add_cache":           "Cache toevoegen",
+    "shortcut_edit_cache":          "Cache bewerken",
+    "shortcut_delete_cache":        "Cache verwijderen",
+    "shortcut_refresh":             "Lijst vernieuwen",
+    "shortcut_filter":              "Filter instellen",
+    "shortcut_settings":            "Instellingen",
+    "shortcut_gps_export":          "Naar GPS sturen",
+    "shortcut_trip_planner":        "Routeplanner",
+    "shortcut_coord_converter":     "Coördinatenomzetter",
+    "shortcut_projection":          "Coördinatenprojectie",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Extra's",

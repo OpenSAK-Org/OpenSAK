@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "A propos d'&OpenSAK…",
     "action_check_update":          "Vérifier les mises à jour…",
     "action_user_guide":            "Guide utilisateur",
+    "action_shortcuts":             "⌨️  &Raccourcis clavier…",
 
     "action_open_log_file": "Ouvrir le fichier journal",
     "log_file_not_found": "Fichier journal introuvable : {path}",
+
+    # ── Raccourcis clavier dialog ─────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Raccourcis clavier",
+    "shortcuts_col_action":         "Action",
+    "shortcuts_col_shortcut":       "Raccourci",
+    "shortcuts_reset_all":          "Rétablir les valeurs par défaut",
+    "shortcut_manage_databases":    "Gérer les bases de données",
+    "shortcut_import":              "Importer GPX / PQ zip",
+    "shortcut_quit":                "Quitter",
+    "shortcut_add_cache":           "Ajouter une cache",
+    "shortcut_edit_cache":          "Modifier la cache",
+    "shortcut_delete_cache":        "Supprimer la cache",
+    "shortcut_refresh":             "Actualiser la liste",
+    "shortcut_filter":              "Définir le filtre",
+    "shortcut_settings":            "Paramètres",
+    "shortcut_gps_export":          "Envoyer vers GPS",
+    "shortcut_trip_planner":        "Planificateur de voyage",
+    "shortcut_coord_converter":     "Convertisseur de coordonnées",
+    "shortcut_projection":          "Projection de coordonnées",
 
     # ── Menu Outils de géocaching ─────────────────────────────────────────────
     "menu_gc_tools":                "&Outils géo",

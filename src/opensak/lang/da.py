@@ -80,9 +80,29 @@ STRINGS: dict[str, str] = {
     "action_about":                 "Om &OpenSAK…",
     "action_check_update":          "Tjek for opdateringer…",
     "action_user_guide":            "Brugervejledning",
+    "action_shortcuts":             "⌨️  &Tastaturgenveje…",
 
     "action_open_log_file": "Åbn logfil",
     "log_file_not_found": "Logfil ikke fundet endnu: {path}",
+
+    # ── Tastaturgenveje-dialog ────────────────────────────────────────────────
+    "shortcuts_dialog_title":       "Tastaturgenveje",
+    "shortcuts_col_action":         "Handling",
+    "shortcuts_col_shortcut":       "Genvej",
+    "shortcuts_reset_all":          "Nulstil alle til standard",
+    "shortcut_manage_databases":    "Administrer databaser",
+    "shortcut_import":              "Importer GPX / PQ zip",
+    "shortcut_quit":                "Afslut",
+    "shortcut_add_cache":           "Tilføj cache",
+    "shortcut_edit_cache":          "Rediger cache",
+    "shortcut_delete_cache":        "Slet cache",
+    "shortcut_refresh":             "Opdater liste",
+    "shortcut_filter":              "Indstil filter",
+    "shortcut_settings":            "Indstillinger",
+    "shortcut_gps_export":          "Send til GPS",
+    "shortcut_trip_planner":        "Turplanlægger",
+    "shortcut_coord_converter":     "Koordinatkonverter",
+    "shortcut_projection":          "Koordinatprojektion",
 
     # ── Geocaching Værktøjer-menu ─────────────────────────────────────────────
     "menu_gc_tools":                "&Værktøjer",
