@@ -615,11 +615,13 @@ class CacheTableModel(QAbstractTableModel):
             return self._display_value(cache, col)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in ("cache_type", "difficulty", "terrain", "distance", "found",
-                       "dnf", "premium_only", "archived", "log_count",
-                       "corrected", "first_to_find", "user_flag", "locked", "bearing",
-                       "user_sort", "favorite_points",
-                       "latitude", "longitude"):
+            if col in ("cache_type", "difficulty", "terrain", "container",
+                       "distance", "found", "dnf", "premium_only", "archived",
+                       "log_count", "corrected", "first_to_find", "user_flag",
+                       "locked", "bearing", "user_sort", "favorite_points",
+                       "latitude", "longitude", "favorite",
+                       "hidden_date", "last_log", "found_date", "dnf_date",
+                       "placed_by"):
                 return Qt.AlignmentFlag.AlignCenter
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 

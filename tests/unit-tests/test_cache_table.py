@@ -304,11 +304,14 @@ class TestDataRoles:
 
     def test_alignment_role(self, model):
         model.load([_cache()])
-        for col in ("cache_type", "difficulty", "terrain", "distance", "found"):
+        for col in ("cache_type", "difficulty", "terrain", "distance", "found",
+                    "container", "favorite", "hidden_date", "last_log",
+                    "found_date", "dnf_date", "placed_by"):
             idx = model.index(0, ALL_COLUMNS.index(col))
             assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) == Qt.AlignmentFlag.AlignCenter, col
-        left_idx = model.index(0, ALL_COLUMNS.index("name"))
-        assert model.data(left_idx, Qt.ItemDataRole.TextAlignmentRole) != Qt.AlignmentFlag.AlignCenter
+        for col in ("name", "gc_code", "country", "state", "county"):
+            idx = model.index(0, ALL_COLUMNS.index(col))
+            assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) != Qt.AlignmentFlag.AlignCenter, col
 
     def test_font_role_italic_when_found(self, model):
         model.load([_cache(found=True)])
