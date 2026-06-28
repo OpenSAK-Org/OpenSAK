@@ -208,3 +208,145 @@ class TestRepairCorruptedBoolKeys:
         store.set("updates.check_enabled", True)
         raw = json.loads(store._path.read_text(encoding="utf-8"))
         assert raw["updates.check_enabled"] is True
+
+
+# ── sync and invalidate_path_cache ─────────────────────────────────────────
+
+class TestSyncAndInvalidate:
+    def test_sync_flushes_loaded_data(self, store):
+        store.set("x", 99)
+        store.sync()
+        raw = json.loads(store._path.read_text(encoding="utf-8"))
+        assert raw["x"] == 99
+
+    def test_sync_no_op_when_data_not_loaded(self, store):
+        store._data = None
+        store.sync()  # must not raise
+
+    def test_invalidate_path_cache_resets_both(self, store):
+        store.set("y", 1)
+        store.invalidate_path_cache()
+        assert store._path is None
+        assert store._data is None
+
+
+# ── module-level singleton ─────────────────────────────────────────────────
+
+class TestModuleSingleton:
+    def test_get_store_returns_instance(self, monkeypatch):
+        monkeypatch.setattr(ss, "_store", None)
+        result = ss.get_store()
+        assert isinstance(result, ss.SettingsStore)
+
+    def test_get_store_returns_same_instance(self, monkeypatch):
+        monkeypatch.setattr(ss, "_store", None)
+        assert ss.get_store() is ss.get_store()
+
+    def test_reset_store_creates_new_instance(self, monkeypatch):
+        monkeypatch.setattr(ss, "_store", None)
+        first = ss.get_store()
+        ss.reset_store()
+        second = ss.get_store()
+        assert first is not second
+
+
+# ── _load edge cases ───────────────────────────────────────────────────────
+
+class TestLoadEdgeCases:
+    def test_invalid_json_falls_back_to_empty_dict(self, tmp_path):
+        path = tmp_path / "opensak.json"
+        path.write_text("not json", encoding="utf-8")
+        store = ss.SettingsStore()
+        store._path = path
+        assert store.get("anything") is None
+        assert store._data == {}
+
+    def test_non_dict_json_falls_back_to_empty_dict(self, tmp_path):
+        path = tmp_path / "opensak.json"
+        path.write_text("[1, 2, 3]", encoding="utf-8")
+        store = ss.SettingsStore()
+        store._path = path
+        assert store.get("anything") is None
+        assert store._data == {}
+
+
+# ── helper functions ───────────────────────────────────────────────────────
+
+class TestHelperFunctions:
+    def test_is_first_run_true_when_wizard_not_completed(self, monkeypatch, tmp_path):
+        store = ss.SettingsStore()
+        store._data = {}
+        store._path = tmp_path / "opensak.json"
+        monkeypatch.setattr(ss, "_store", store)
+        assert ss.is_first_run() is True
+
+    def test_mark_wizard_completed_clears_first_run(self, monkeypatch, tmp_path):
+        store = ss.SettingsStore()
+        store._data = {}
+        store._path = tmp_path / "opensak.json"
+        monkeypatch.setattr(ss, "_store", store)
+        ss.mark_wizard_completed()
+        assert ss.is_first_run() is False
+
+    def test_get_db_dir_falls_back_to_install_dir(self, monkeypatch, tmp_path):
+        store = ss.SettingsStore()
+        store._data = {}
+        store._path = tmp_path / "opensak.json"
+        monkeypatch.setattr(ss, "_store", store)
+        monkeypatch.setattr(ss, "get_install_dir", lambda: tmp_path)
+        assert ss.get_db_dir() == tmp_path
+
+    def test_get_db_dir_uses_custom_dir_when_set(self, monkeypatch, tmp_path):
+        custom = tmp_path / "dbs"
+        store = ss.SettingsStore()
+        store._data = {"databases.dir": str(custom)}
+        store._path = tmp_path / "opensak.json"
+        monkeypatch.setattr(ss, "_store", store)
+        result = ss.get_db_dir()
+        assert result == custom
+        assert result.exists()
+
+
+# ── bootstrap / install dir ────────────────────────────────────────────────
+
+class TestBootstrapAndInstallDir:
+    def test_get_install_dir_reads_bootstrap_json(self, monkeypatch, tmp_path):
+        custom = tmp_path / "myinstall"
+        bootstrap = tmp_path / "bootstrap.json"
+        bootstrap.write_text(json.dumps({"install_dir": str(custom)}), encoding="utf-8")
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+        result = ss.get_install_dir()
+        assert result == custom
+        assert result.exists()
+
+    def test_get_install_dir_falls_back_on_missing_key(self, monkeypatch, tmp_path):
+        bootstrap = tmp_path / "bootstrap.json"
+        bootstrap.write_text("{}", encoding="utf-8")
+        fallback = tmp_path / "fallback"
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+        monkeypatch.setattr(ss, "_default_install_dir", lambda: fallback)
+        assert ss.get_install_dir() == fallback
+
+    def test_get_install_dir_falls_back_on_invalid_json(self, monkeypatch, tmp_path):
+        bootstrap = tmp_path / "bootstrap.json"
+        bootstrap.write_text("INVALID", encoding="utf-8")
+        fallback = tmp_path / "fallback"
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+        monkeypatch.setattr(ss, "_default_install_dir", lambda: fallback)
+        assert ss.get_install_dir() == fallback
+
+    def test_set_install_dir_writes_bootstrap_json(self, monkeypatch, tmp_path):
+        bootstrap = tmp_path / "bootstrap.json"
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+        ss.set_install_dir(tmp_path / "install")
+        data = json.loads(bootstrap.read_text(encoding="utf-8"))
+        assert data["install_dir"] == str(tmp_path / "install")
+
+    def test_set_install_dir_preserves_existing_keys(self, monkeypatch, tmp_path):
+        bootstrap = tmp_path / "bootstrap.json"
+        bootstrap.write_text(json.dumps({"other": "value"}), encoding="utf-8")
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+        ss.set_install_dir(tmp_path / "install")
+        data = json.loads(bootstrap.read_text(encoding="utf-8"))
+        assert data["other"] == "value"
+        assert "install_dir" in data
