@@ -39,6 +39,11 @@ class TestColumnHelpers:
         assert all(len(c) == 4 for c in cols)
         assert {"gc_code", "name"} <= {c[0] for c in cols}
 
+    def test_cache_type_default_width_fits_header(self):
+        # Issue #414: 28px truncated the "Type" header; minimum must be >= 40.
+        col_map = {fid: w for fid, _, w, _ in get_all_columns()}
+        assert col_map["cache_type"] >= 40
+
     def test_visible_defaults_when_unset(self, store):
         vis = get_visible_columns()
         assert "gc_code" in vis

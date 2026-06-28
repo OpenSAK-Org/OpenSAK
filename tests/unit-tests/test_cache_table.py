@@ -129,6 +129,11 @@ class TestModelBasics:
         assert model.cache_at(0) is not None
         assert model.cache_at(5) is None
 
+    def test_cache_type_default_width_is_not_too_narrow(self):
+        # Issue #414: 28px truncated the "Type" header; default must be >= 40.
+        from opensak.gui.cache_table import get_column_defs
+        assert get_column_defs()["cache_type"][1] >= 40
+
     def test_header_display_and_alignment(self, model):
         name = model.headerData(1, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
         assert isinstance(name, str) and name
