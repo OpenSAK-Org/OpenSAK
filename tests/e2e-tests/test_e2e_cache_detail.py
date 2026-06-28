@@ -132,3 +132,53 @@ def test_logs_tab_renders_all_log_entries(seeded_window, qtbot):
     html = panel._log_browser.toHtml()
     assert "TFTC" in html
     assert "Could not find it" in html
+
+
+def test_logs_tab_renders_when_some_logs_have_no_date(qtbot, tmp_path, monkeypatch):
+    # Regression: sorting mixed datetime/None log_date values crashed with TypeError
+    # before the fix (key returned int 0 for None, incomparable with datetime).
+    pytest.importorskip("pytestqt")
+    from tests.data import (
+        cache_wpt, build_gpx, write_gpx,
+        make_fake_manager, seed_standard_caches,
+    )
+    from opensak.db.database import init_db, get_session
+    from opensak.importer import import_gpx
+    from opensak.lang import load_language
+    import opensak.db.manager as mgr_module
+    from opensak.gui.mainwindow import MainWindow
+
+    load_language("en")
+    db_path = tmp_path / "test_nolog.db"
+    init_db(db_path=db_path)
+
+    gpx = build_gpx(cache_wpt(
+        "GCNOLOG",
+        logs=[
+            {"id": 1, "type": "Found it", "date": "2025-06-01T00:00:00Z", "text": "dated log"},
+            {"id": 2, "type": "Note",     "date": "",                     "text": "dateless log"},
+        ],
+    ))
+    gpx_file = write_gpx(tmp_path, "nolog.gpx", gpx)
+    with get_session() as session:
+        import_gpx(gpx_file, session)
+
+    monkeypatch.setattr(mgr_module, "_manager", make_fake_manager(db_path, name="NologTest"))
+    monkeypatch.setattr(MainWindow, "_initial_load", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_update_background", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_setup_complete", lambda self: None)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window._refresh_cache_list()
+
+    _select_by_gc(window, qtbot, "GCNOLOG")
+
+    html = window._detail_panel._log_browser.toHtml()
+    assert "dated log" in html
+    assert "dateless log" in html
+
+    window.close()
+    mgr_module._manager = None
