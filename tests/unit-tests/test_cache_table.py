@@ -61,7 +61,6 @@ def fake_settings(monkeypatch, qapp):
     monkeypatch.setattr(ct, "get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     monkeypatch.setattr(ct, "get_cache_type_icon", lambda *a, **k: QPixmap(4, 4))
-    monkeypatch.setattr(ct, "get_cache_size_icon", lambda *a, **k: QPixmap(4, 4))
     return s
 
 
@@ -177,9 +176,12 @@ class TestDisplayValues:
         monkeypatch.setattr(ct, "get_container_display", lambda: "text")
         assert model._decoration_value(_cache(container="micro"), "container") is None
 
-    def test_container_bar_mode_returns_icon(self, model, monkeypatch):
+    def test_container_bar_mode_no_decoration_icon(self, model, monkeypatch):
+        # Issue #416: in "bar" mode SizeBarDelegate paints the cell entirely;
+        # returning a DecorationRole icon here caused it to show as an artifact
+        # behind the first bar segment via super().paint().
         monkeypatch.setattr(ct, "get_container_display", lambda: "bar")
-        assert model._decoration_value(_cache(container="micro"), "container") is not None
+        assert model._decoration_value(_cache(container="micro"), "container") is None
 
     def test_difficulty_terrain(self, model):
         assert model._display_value(_cache(difficulty=2.5), "difficulty") == "2.5"
@@ -345,7 +347,9 @@ class TestDataRoles:
         type_idx = model.index(0, ALL_COLUMNS.index("cache_type"))
         cont_idx = model.index(0, ALL_COLUMNS.index("container"))
         assert model.data(type_idx, Qt.ItemDataRole.DecorationRole) is not None
-        assert model.data(cont_idx, Qt.ItemDataRole.DecorationRole) is not None
+        # Issue #416: container column has no DecorationRole icon; SizeBarDelegate
+        # paints the cell entirely, so no icon should be returned here.
+        assert model.data(cont_idx, Qt.ItemDataRole.DecorationRole) is None
 
     def test_flag_placeholder_icon_when_unset(self, model):
         model.load([_cache(user_flag=False), _cache(gc_code="GCB", user_flag=True)])
@@ -376,10 +380,6 @@ class TestIconKeys:
     def test_type_icon_mapping(self):
         assert CacheTableModel._type_icon_key(_cache(cache_type="Multi-cache")) == "multi"
         assert CacheTableModel._type_icon_key(_cache(cache_type="Weird Type")) == "unknown"
-
-    def test_size_icon_mapping(self):
-        assert CacheTableModel._size_icon_key(_cache(container="large")) == "large"
-        assert CacheTableModel._size_icon_key(_cache(container="whatever")) == "other"
 
 
 # ── effective coords ────────────────────────────────────────────────────────────

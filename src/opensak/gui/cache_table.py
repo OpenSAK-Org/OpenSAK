@@ -21,7 +21,7 @@ from opensak.coords import format_coords, format_lat, format_lon, format_lat, fo
 from opensak.lang import tr
 from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
 from opensak.utils.utils import normalize_geocacher_name
-from opensak.gui.icon_provider import get_cache_type_icon, get_cache_size_icon, get_flag_placeholder_icon
+from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon
 from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display
 import math
 
@@ -655,30 +655,17 @@ class CacheTableModel(QAbstractTableModel):
         }
         return mapping.get(t, "unknown")
 
-    @staticmethod
-    def _size_icon_key(cache: Cache) -> str:
-        """Map container string to icon_provider size key."""
-        mapping = {
-            "micro":      "micro",
-            "small":      "small",
-            "regular":    "regular",
-            "large":      "large",
-            "other":      "other",
-            "not chosen": "not_chosen",
-            "virtual":    "not_chosen",
-        }
-        return mapping.get((cache.container or "").lower(), "other")
-
     def _decoration_value(self, cache: Cache, col: str):
         """Return QIcon for columns that show icons."""
         if col == "cache_type":
             icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
             return get_cache_type_icon(self._type_icon_key(cache), size=icon_size)
         if col == "container":
-            if get_container_display() == "text":
-                return None
-            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
-            return get_cache_size_icon(self._size_icon_key(cache), size=icon_size)
+            # "bar" mode: SizeBarDelegate paints the segments; returning an icon
+            # here would cause super().paint() to draw it behind the first bar
+            # segment, producing a visual artifact (issue #416).
+            # "text" mode: display value is plain text, no decoration needed.
+            return None
         if col == "user_flag" and not cache.user_flag:
             return get_flag_placeholder_icon(16)
         return None
