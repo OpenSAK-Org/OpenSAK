@@ -8,6 +8,168 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.0-beta.16] — 2026-06-29
+
+> **Beta release** — continuing the 1.14.0 testing period. Supersedes the
+> `v1.14.0-beta.15` tag, which was cut from a commit where `__init__.py` had
+> not actually been bumped yet (see Notes) and never got a published release
+> as a result.
+
+### Added
+
+- **Personal notes, round-trippable with GSAK** (closes #389, #390, #391, #392) —
+  the cache detail panel has a new "Notes" tab for your own free-text notes per
+  cache, separate from the geocaching.com description and logs. Notes are
+  parsed in on import from GSAK-exported GPX (`gsak:UserNote` in the
+  `wptExtension` block) without ever overwriting an existing non-empty note on
+  re-import, and are written back out the same way on export, so a note
+  survives an export → GSAK → re-import round-trip. The tab is hidden when no
+  cache is selected instead of showing an empty, clickable-looking editor.
+  Closes another piece of the GSAK field-parity goal from issue #33.
+
+- **Child waypoints are finally visible in the UI** (closes #376, #377, #378,
+  #393) — waypoints were already imported and stored, but invisible unless you
+  knew to look on the map. Cache names with waypoints now show in **bold** in
+  the list, the detail panel has a new "Waypoints" tab (count shown in the tab
+  title) listing each waypoint's prefix, type, name, coordinates, description
+  and comment, and selecting it shows the waypoint markers on the map. Closes
+  the "child waypoint gaps" item from the backlog.
+
+- **Attributes tab in the cache detail panel** (closes #417) — a new tab lists
+  every cache attribute with a green ✓ or red ✗ marker and the attribute name,
+  with a "(No attributes)" placeholder when there are none. Tab title shows
+  the attribute count, matching the pattern used for Waypoints and Notes.
+
+- **Keyboard Shortcuts dialog** (closes #205) — Help → "Keyboard Shortcuts…"
+  opens a searchable reference of every shortcut in the app. Shortcuts are now
+  managed through a central registry, with any user overrides persisted in
+  QSettings and reapplied on startup.
+
+- **Full-text search filter** (closes #294) — a new "Text Search" tab in the
+  filter dialog searches cache descriptions (short + long), logs, and personal
+  notes (hint text off by default). Uses SQL `EXISTS`/`LIKE` pushdown rather
+  than loading every cache into Python to search it, so it stays fast on large
+  databases.
+
+- **Cache type icon in the detail panel** (closes #286) — the cache title in
+  the detail panel now shows its type icon to the left, scaling with the
+  Small/Medium/Large text-size setting. While building this, the found/DNF
+  smiley overlays on map pins were also corrected — found caches always get
+  the gold smiley and DNF caches the dark-blue one, independent of cache type,
+  matching GSAK's convention.
+
+- **Type column display options, plus assorted visual fixes** (closes #413,
+  #414, #415, #416) — the cache-type column can now show an icon only (default),
+  the type name as text, or both, via a new setting in the column dialog.
+  Alongside that: the column's default width was too narrow to show a type
+  name comfortably (now 40px), its content wasn't centred, and in bar-mode
+  (size bars) the old circular type badge briefly peeked out from behind the
+  bar segments — all three fixed.
+
+- **Distance calculation reworked: computed once per centre-point change
+  instead of on every refresh** (closes #60) — distance and bearing used to be
+  recalculated from scratch on every filter change, sort, search keystroke and
+  import, which got noticeably slow on large databases. They're now stored on
+  the cache row and recomputed only when the centre point actually changes, with
+  sorting pushed into SQL. A new **Vincenty (WGS84)** method is also available
+  alongside the existing Haversine default in Settings → Advanced → Distance
+  Calculation, for up to ~0.3% more accurate distances over long ranges.
+
+- **Active filter count in the info bar** (closes #373) — the info bar now
+  shows e.g. "3 filters active" instead of a generic "Active" label, so you can
+  tell at a glance how many filter conditions are currently applied without
+  opening the dialog.
+
+### Fixed
+
+- **A companion `-wpts.gpx` file could be imported as a second, duplicate set
+  of caches** (fixes #410) — GSAK and others export a cache's child waypoints
+  to a separate file alongside the main GPX. Detection used to key off the
+  `-wpts` filename suffix, so a renamed companion file slipped through and got
+  imported as if it were its own set of caches. Detection now inspects the
+  file's actual content instead of its name, so renaming doesn't fool it.
+
+- **Container/size column sorted alphabetically instead of logically**
+  (fixes #412) — a Virtual Cache (`container = "Other"`) sorted under "O", and
+  physical sizes sorted as text ("Large" before "Micro") rather than by actual
+  size. Container sort now follows the same micro→small→regular→large
+  ordering already used for the on-screen size bars.
+
+- **Favorites column showing on new databases despite always being empty**
+  (fixes #418) — favourite point counts can only be populated via the
+  Geocaching.com Live API, which OpenSAK doesn't have yet, so the column was
+  guaranteed to be blank. It's now off by default for newly created databases.
+
+- **Adventure Lab stages with `LB*` codes were silently dropped on import**
+  (fixes #359) — `lab2gpx` exports Adventure Lab stages under several prefixes
+  (`LB`, `LA`, …), but the importer only recognized `GC` and `LC`. Any other
+  prefix fell through to the "extra waypoint" path and vanished with no error.
+  The importer now also accepts any code whose `<type>` field identifies it as
+  a Geocache, regardless of prefix.
+
+- **Newly imported caches showed no distance or bearing until restart**
+  (fixes #359) — `recalculate_distances()` only ran at startup and on
+  centre-point change, so freshly imported caches sat with `NULL` distance
+  until one of those happened to fire. Import now triggers a recalculation
+  too, when a home point is configured.
+
+- **GC Code text could be unreadable in dark mode** (fixes #366) — text colour
+  in the GC Code column was hardcoded to black; it's now computed per
+  background pastel using WCAG relative luminance, so it stays readable in
+  both themes. The archived-cache strikethrough line follows the same rule.
+
+- **Unset flag column had no visual indicator** (fixes #290) — clicking the
+  flag column to set a flag had no affordance beyond a tooltip; a faint
+  outlined flag icon now shows when the flag is unset.
+
+- **Locale-aware dates weren't zero-padded consistently** (fixes #369) — a few
+  call sites formatted dates manually instead of going through the shared
+  locale-date helper, producing inconsistent day/month padding depending on
+  where the date was shown. All call sites now go through one function.
+
+- **Enter key in the filter dialog opened "Save profile" instead of applying
+  the filter** (fixes #370) — the Apply button looked bold but wasn't Qt's
+  actual default button, so Enter triggered Save instead. Apply is now wired
+  as the real default.
+
+- **Text/icon size setting didn't take effect until you reselected a cache**
+  (fixes #371) — refreshing the cache list cleared the table selection as a
+  side effect, so the code path that re-applies the new size never ran until
+  you clicked a cache again. The previously-selected cache is now restored
+  after refresh, and the empty-state placeholder picks up the new size too.
+
+- **Import progress bar was indeterminate** (fixes #372) — GPX imports now
+  pre-scan the waypoint count so the progress bar can show real progress
+  instead of just spinning.
+
+- **Small/Large text size options looked almost identical to Medium**
+  (fixes #374, #375) — the size range has been widened so the difference is
+  actually visible, and the setting now also applies to the cache grid's font
+  and row height, not just the detail panel.
+
+### Notes
+
+- The `v1.14.0-beta.15` tag should be treated as void. It was cut from a
+  commit where `src/opensak/__init__.py` still read `1.14.0-beta.14` — a local
+  version bump that was never actually committed — while `CHANGELOG.md` and
+  `site/user-guide.html` already claimed beta.15. That mismatch is what made
+  `test_user_guide_changelog_link_pins_to_release_tag` fail across every CI
+  matrix leg. `__init__.py` has since been corrected on `beta`, the full
+  pipeline is green, and this entry (beta.16) is the one that actually ships.
+  No public GitHub Release was ever published for beta.15, so nothing
+  user-facing needs correcting.
+- 11 unused translation keys were removed (#397) after a new CI test started
+  detecting language keys with no remaining source reference — this should
+  keep the language files from quietly accumulating dead entries going forward.
+- All 8 language files were updated for the new Waypoints, Notes, Attributes
+  and Keyboard Shortcuts strings.
+- `pyproject.toml`'s version field is now sourced dynamically from
+  `src/opensak/__init__.py` instead of being maintained by hand in two places
+  — this had silently drifted (`pyproject.toml` still said beta.6 while the
+  app reported beta.14).
+
+---
+
 ## [1.14.0-beta.14] — 2026-06-27
 
 > **Beta release** — continuing the 1.14.0 testing period.
