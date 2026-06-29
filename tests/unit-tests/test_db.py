@@ -354,3 +354,138 @@ class TestReloadCachesFull:
         ghost = Cache(gc_code="GCGONE", name="Not saved")
         ghost.id = 424242  # an id with no matching row
         assert reload_caches_full([ghost]) == [ghost]
+
+
+# ── Location provenance columns (issue #60 phase 3) ──────────────────────────
+
+class TestLocationProvenanceColumns:
+    def test_columns_default_to_null(self, tmp_path):
+        # Fresh DB: all four provenance columns must be present and default NULL.
+        import sqlite3 as _sql
+        init_db(db_path=tmp_path / "prov.db")
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCPROV1", name="Provenance test",
+                cache_type="Traditional Cache", latitude=55.0, longitude=12.0,
+            )
+            s.add(cache)
+
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GCPROV1").one()
+            assert c.location_source is None
+            assert c.location_basis is None
+            assert c.location_updated is None
+            assert c.location_dataset is None
+
+    def test_columns_are_writable(self, tmp_path):
+        from datetime import datetime
+        init_db(db_path=tmp_path / "prov2.db")
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCPROV2", name="Written", cache_type="Traditional Cache",
+                latitude=55.0, longitude=12.0,
+                location_source="computed", location_basis="posted",
+                location_updated=datetime(2025, 6, 1),
+                location_dataset="2025-06-01",
+            )
+            s.add(cache)
+
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GCPROV2").one()
+            assert c.location_source == "computed"
+            assert c.location_basis == "posted"
+            assert c.location_dataset == "2025-06-01"
+
+    def test_migration_adds_columns_to_old_schema(self, tmp_path):
+        # Create a v12 DB, strip the 4 provenance columns, rewind to v11,
+        # then re-run init_db() — migration 12 must re-add all four.
+        import sqlite3 as _sql
+        from opensak.db.database import _migrated_paths
+
+        db_file = tmp_path / "old_schema.db"
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        provenance = ("location_source", "location_basis", "location_updated", "location_dataset")
+        with _sql.connect(db_file) as con:
+            for col in provenance:
+                con.execute(f"ALTER TABLE caches DROP COLUMN {col}")
+            con.execute("PRAGMA user_version = 11")
+
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        cols = {
+            row[1]
+            for row in _sql.connect(db_file).execute("PRAGMA table_info(caches)").fetchall()
+        }
+        for col in provenance:
+            assert col in cols, f"migration 12 did not restore column: {col}"
+
+    def test_migration_13_adds_parent_gc_code_to_waypoints(self, tmp_path):
+        # Create a v13 DB, drop parent_gc_code, rewind to v12, re-run init_db —
+        # migration 13 must add the column and back-fill it from caches.
+        import sqlite3 as _sql
+        from opensak.db.database import _migrated_paths
+        from opensak.db.models import Cache, Waypoint
+
+        db_file = tmp_path / "m13.db"
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        from opensak.db.database import get_session
+        with get_session() as s:
+            cache = Cache(gc_code="GCTEST1", name="Test", cache_type="Traditional Cache",
+                          latitude=55.0, longitude=12.0)
+            s.add(cache)
+            s.flush()
+            s.add(Waypoint(cache_id=cache.id, parent_gc_code="GCTEST1",
+                           prefix="PK", wp_type="Parking Area"))
+            s.commit()
+
+        with _sql.connect(db_file) as con:
+            con.execute("ALTER TABLE waypoints DROP COLUMN parent_gc_code")
+            con.execute("PRAGMA user_version = 12")
+
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with _sql.connect(db_file) as con:
+            wpt_cols = {row[1] for row in con.execute("PRAGMA table_info(waypoints)").fetchall()}
+            assert "parent_gc_code" in wpt_cols, "migration 13 did not add waypoints.parent_gc_code"
+            gc = con.execute("SELECT parent_gc_code FROM waypoints LIMIT 1").fetchone()[0]
+            assert gc == "GCTEST1", f"back-fill failed: got {gc!r}"
+
+    def test_migration_14_adds_waypoint_count_to_caches(self, tmp_path):
+        # Create a v14 DB, drop waypoint_count, rewind to v13, re-run init_db —
+        # migration 14 must add the column and back-fill it from waypoints.
+        import sqlite3 as _sql
+        from opensak.db.database import _migrated_paths
+        from opensak.db.models import Cache, Waypoint
+
+        db_file = tmp_path / "m14.db"
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        from opensak.db.database import get_session
+        with get_session() as s:
+            cache = Cache(gc_code="GCWPT01", name="Test", cache_type="Traditional Cache",
+                          latitude=55.0, longitude=12.0)
+            s.add(cache)
+            s.flush()
+            s.add(Waypoint(cache_id=cache.id, parent_gc_code="GCWPT01",
+                           prefix="PK", wp_type="Parking Area"))
+            s.commit()
+
+        with _sql.connect(db_file) as con:
+            con.execute("ALTER TABLE caches DROP COLUMN waypoint_count")
+            con.execute("PRAGMA user_version = 13")
+
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with _sql.connect(db_file) as con:
+            cache_cols = {row[1] for row in con.execute("PRAGMA table_info(caches)").fetchall()}
+            assert "waypoint_count" in cache_cols, "migration 14 did not add caches.waypoint_count"
+            cnt = con.execute("SELECT waypoint_count FROM caches WHERE gc_code='GCWPT01'").fetchone()[0]
+            assert cnt == 1, f"back-fill failed: got {cnt!r}"

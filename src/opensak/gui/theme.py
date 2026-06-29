@@ -200,14 +200,22 @@ def apply_theme(app: "QApplication", theme: str | None = None) -> None:
     palette = _dark_palette() if dark else _light_palette()
     app.setPalette(palette)
 
+    from PySide6.QtWidgets import QWidget
+
     # Qt does not always propagate a new palette to already-visible widgets
     # automatically — we need to poke each top-level window so it repaints.
+    # Widgets with palette() references in their stylesheets also need
+    # setStyleSheet() re-called to force re-evaluation of those references;
+    # update() alone repaints but does not re-parse the cached stylesheet.
     for widget in app.topLevelWidgets():
         widget.setPalette(palette)
+        if widget.styleSheet():
+            widget.setStyleSheet(widget.styleSheet())
         widget.update()
-        # Also refresh all child widgets that might have inherited the old palette
-        for child in widget.findChildren(__import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget):
+        for child in widget.findChildren(QWidget):
             child.setPalette(palette)
+            if child.styleSheet():
+                child.setStyleSheet(child.styleSheet())
             child.update()
 
 

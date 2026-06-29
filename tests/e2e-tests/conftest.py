@@ -8,6 +8,19 @@ from tests.data import make_fake_manager, seed_standard_caches
 
 
 @pytest.fixture(autouse=True)
+def _isolate_store(tmp_path, monkeypatch):
+    """Isolate SettingsStore so each test gets a fresh in-memory store."""
+    from opensak import settings_store as ss
+    fresh = ss.SettingsStore()
+    fresh._data = {}
+    fresh._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(ss, "_store", fresh)
+    # Reset AppSettings singleton too
+    import opensak.gui.settings as smod
+    monkeypatch.setattr(smod, "_settings", None)
+
+
+@pytest.fixture(autouse=True)
 def _quiet_startup(monkeypatch):
     """Disable the delayed singleShot callbacks that fire mid-test.
 

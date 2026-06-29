@@ -17,10 +17,11 @@ from opensak.filters.engine import (
     FilterSet, NameFilter, GcCodeFilter, PlacedByFilter, OwnerFilter,
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter, AvailabilityFilter, DistanceFilter,
-    PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter,
-    CountryFilter, StateFilter, CountyFilter, UserFlagFilter, DnfFilter,
+    PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
+    CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, FilterProfile,
+    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, TextSearchFilter,
+    FilterProfile,
 )
 
 
@@ -28,8 +29,10 @@ from opensak.filters.engine import (
 def isolate(monkeypatch):
     # No real profiles on disk; deterministic home for DistanceFilter.
     monkeypatch.setattr(fd.FilterProfile, "list_profiles", staticmethod(lambda: []))
+    from opensak.utils.types import DateFormat
     monkeypatch.setattr("opensak.gui.settings.get_settings",
-                        lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0))
+                        lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=False,
+                                               date_format=DateFormat.YMD))
 
 
 @pytest.fixture
@@ -64,8 +67,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_five_tabs(self, dlg):
-        assert dlg._tabs.count() == 5
+    def test_six_tabs(self, dlg):
+        assert dlg._tabs.count() == 6
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -135,17 +138,46 @@ class TestBuildFilterset:
         dlg._prem_no.setChecked(True)
         assert "non_premium" in _types(dlg._build_filterset())
 
+    def test_no_corrected_checkbox_alone_builds_filter(self, dlg):
+        # Bug #274 — checking only "no corrected" (unchecking "has corrected")
+        # produced no filter at all, so the flag was silently ignored.
+        dlg._cc_yes.setChecked(False)
+        dlg._cc_no.setChecked(True)
+        assert "no_corrected" in _types(dlg._build_filterset())
+
+    def test_loads_no_corrected_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(NoCorrectedFilter())
+        dlg._load_filterset(fs)
+        assert dlg._cc_no.isChecked() is True
+        assert dlg._cc_yes.isChecked() is False
+
     def test_misc_filters(self, dlg):
         dlg._country_filter.setText("DK")
         dlg._state_filter.setText("Z")
         dlg._county_filter.setText("C")
         dlg._flag_no.setChecked(False)   # flag yes only
+        dlg._locked_no.setChecked(False)  # locked yes only (issue #202)
         dlg._dnf_no.setChecked(False)
         dlg._ftf_no.setChecked(False)
         dlg._fav_enabled.setChecked(True)
         types = _types(dlg._build_filterset())
-        assert {"country", "state", "county", "user_flag", "dnf", "ftf",
+        assert {"country", "state", "county", "user_flag", "locked", "dnf", "ftf",
                 "favorite_points"} <= set(types)
+
+    def test_loads_locked_filter(self, dlg):
+        # Issue #202: round-trip a saved "Locked = No" profile.
+        fs = FilterSet(mode="AND")
+        fs.add(LockedFilter(locked=False))
+        dlg._load_filterset(fs)
+        assert dlg._locked_no.isChecked() is True
+        assert dlg._locked_yes.isChecked() is False
+
+    def test_reset_misc_clears_locked(self, dlg):
+        dlg._locked_no.setChecked(False)
+        dlg._reset_misc()
+        assert dlg._locked_yes.isChecked() is True
+        assert dlg._locked_no.isChecked() is True
 
     def test_date_filters(self, dlg):
         dlg._hidden_from_enabled.setChecked(True)
@@ -177,6 +209,28 @@ class TestBuildFilterset:
     def test_where_clause(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
         assert "where_clause" in _types(dlg._build_filterset())
+
+    def test_text_search_builds_filter(self, dlg):
+        dlg._text_search_input.setText("waterfall")
+        types = _types(dlg._build_filterset())
+        assert "text_search" in types
+
+    def test_text_search_empty_text_no_filter(self, dlg):
+        dlg._text_search_input.setText("  ")
+        assert "text_search" not in _types(dlg._build_filterset())
+
+    def test_text_search_hint_flag_propagates(self, dlg):
+        dlg._text_search_input.setText("rock")
+        dlg._text_search_hint.setChecked(True)
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.search_hint is True
+
+    def test_text_search_logs_enabled_by_default(self, dlg):
+        dlg._text_search_input.setText("TFTC")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.search_logs is True
 
 
 # ── load_filterset roundtrip ────────────────────────────────────────────────────
@@ -243,6 +297,17 @@ class TestLoadFilterset:
         dlg._load_filterset(fs)        # exercises the fixed _attr_mode_all toggle
         assert dlg._attr_mode_all.isChecked() is False
         assert dlg._attr_boxes[attr_id][0].isChecked() is True
+
+    def test_loads_text_search_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(TextSearchFilter("waterfall", search_description=True,
+                                search_logs=False, search_notes=False, search_hint=True))
+        dlg._load_filterset(fs)
+        assert dlg._text_search_input.text() == "waterfall"
+        assert dlg._text_search_description.isChecked() is True
+        assert dlg._text_search_logs.isChecked() is False
+        assert dlg._text_search_notes.isChecked() is False
+        assert dlg._text_search_hint.isChecked() is True
 
 
 # ── reset ───────────────────────────────────────────────────────────────────────
@@ -352,6 +417,25 @@ class TestProfiles:
         assert not p.exists()
 
 
+# ── default button / Enter key (#370) ──────────────────────────────────────────
+
+class TestDefaultButton:
+    def test_apply_is_default_and_save_is_not(self, dlg):
+        from PySide6.QtWidgets import QPushButton
+        buttons = dlg.findChildren(QPushButton)
+        default_buttons = [b for b in buttons if b.isDefault()]
+        # exactly one default button, and it is not the narrow save button (maxWidth 110)
+        assert len(default_buttons) == 1
+        assert default_buttons[0].maximumWidth() != 110
+
+    def test_save_btn_not_autodefault(self, dlg):
+        from PySide6.QtWidgets import QPushButton
+        # the save button is the only one with maxWidth 110
+        buttons = dlg.findChildren(QPushButton)
+        save_btn = next(b for b in buttons if b.maximumWidth() == 110)
+        assert not save_btn.autoDefault()
+
+
 # ── apply ───────────────────────────────────────────────────────────────────────
 
 class TestApply:
@@ -370,3 +454,57 @@ class TestApply:
         assert captured == []                       # not emitted
         assert dlg._where_error_label.toPlainText() != ""
         assert not dlg._where_error_label.isHidden()
+
+
+# ── distance unit preference (#327) ─────────────────────────────────────────────
+
+class TestDistanceUnitPref:
+    @pytest.fixture
+    def dlg_mi(self, qtbot, monkeypatch):
+        monkeypatch.setattr(
+            "opensak.gui.settings.get_settings",
+            lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True),
+        )
+        d = FilterDialog()
+        qtbot.addWidget(d)
+        return d
+
+    def test_suffix_km_by_default(self, dlg):
+        assert dlg._dist_max.suffix() == " km"
+
+    def test_suffix_mi_when_use_miles(self, dlg_mi):
+        assert dlg_mi._dist_max.suffix() == " mi"
+
+    def test_build_converts_mi_to_km(self, dlg_mi):
+        dlg_mi._dist_enabled.setChecked(True)
+        dlg_mi._dist_max.setValue(50.0)
+        fs = dlg_mi._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert abs(f.max_km - 50.0 * 1.60934) < 0.01
+
+    def test_build_km_passthrough(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        dlg._dist_max.setValue(50.0)
+        fs = dlg._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert abs(f.max_km - 50.0) < 0.01
+
+    def test_load_converts_km_to_mi(self, dlg_mi):
+        fs = FilterSet(mode="AND")
+        fs.add(DistanceFilter(55.0, 12.0, 80.0))
+        dlg_mi._load_filterset(fs)
+        assert abs(dlg_mi._dist_max.value() - 80.0 * 0.621371) < 0.01
+
+    def test_load_km_passthrough(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DistanceFilter(55.0, 12.0, 25.0))
+        dlg._load_filterset(fs)
+        assert abs(dlg._dist_max.value() - 25.0) < 0.01
+
+    def test_roundtrip_mi(self, dlg_mi):
+        # Enter 50 mi → build → DistanceFilter stores km → load back → should show 50 mi.
+        dlg_mi._dist_enabled.setChecked(True)
+        dlg_mi._dist_max.setValue(50.0)
+        fs = dlg_mi._build_filterset()
+        dlg_mi._load_filterset(fs)
+        assert abs(dlg_mi._dist_max.value() - 50.0) < 0.1

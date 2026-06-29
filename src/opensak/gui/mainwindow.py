@@ -4,7 +4,7 @@ src/opensak/gui/mainwindow.py — Main application window.
 
 from __future__ import annotations
 from typing import TYPE_CHECKING, cast
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
@@ -27,10 +27,31 @@ from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
 from opensak.utils.types import GcCode
+from opensak.utils.utils import normalize_geocacher_name
 from opensak.updater import UpdateCheckWorker, RELEASES_PAGE
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.trip_dialog import TripPlannerDialog
+
+
+class ClickableLabel(QLabel):
+    """QLabel der opfører sig som en klikbar knap (issue #270).
+
+    Bruges til de farvede count-felter i InfoBar, så et klik kan filtrere
+    cache-listen til den status feltet repræsenterer — ligesom man kan
+    klikke på status-tællerne i GSAK's Count panel.
+    """
+
+    clicked = Signal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 
 class InfoBar(QFrame):
@@ -39,8 +60,17 @@ class InfoBar(QFrame):
     Shows (left to right):
       Filter name | Total caches in DB | Flagged count | Center point
       ... spacer ...
-      Count label:  Found (yellow)  All-in-filter (white)  Inactive (red)  Owned (green)
+      Count label:  Found (gul bg)  All-in-filter (neutral)  Inactive (rød bg)  Owned (grøn bg)
+
+    Issue #270: count-felterne matcher nu samme farver som gc_code-kolonnen
+    (sort tekst på farvet baggrund, GSAK-style) og er klikbare — et klik
+    filtrerer cache-listen til den tilsvarende status, ligesom i GSAK.
     """
+
+    found_clicked    = Signal()
+    all_clicked      = Signal()
+    inactive_clicked = Signal()
+    owned_clicked    = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -87,32 +117,42 @@ class InfoBar(QFrame):
         # ── Spacer ────────────────────────────────────────────────────────────
         row.addStretch()
 
-        # ── Right side: color-coded counts ────────────────────────────────────
-        count_style = f"{small} font-weight: bold; padding: 0 3px;"
+        # ── Right side: color-coded counts (issue #270 — GSAK-farver, klikbare) ─
+        count_style = (
+            f"{small} font-weight: bold; color: #000000; "
+            "padding: 1px 5px; border-radius: 3px;"
+        )
 
         lbl_prefix = QLabel(tr("infobar_count_label"))
         lbl_prefix.setStyleSheet(f"{small} padding: 0 4px;")
         row.addWidget(lbl_prefix)
 
-        self._found_lbl = QLabel("0")
-        self._found_lbl.setStyleSheet(f"{count_style} color: #1e8449;")   # grøn — found
+        self._found_lbl = ClickableLabel("0")
+        self._found_lbl.setStyleSheet(f"{count_style} background-color: #f9e79f;")   # gul — fundet
         self._found_lbl.setToolTip(tr("infobar_found_tooltip"))
         row.addWidget(self._found_lbl)
 
-        self._all_lbl = QLabel("0")
-        self._all_lbl.setStyleSheet(f"{count_style} color: palette(text);")
+        self._all_lbl = ClickableLabel("0")
+        self._all_lbl.setStyleSheet(
+            f"{small} font-weight: bold; padding: 1px 5px; color: palette(text);"
+        )
         self._all_lbl.setToolTip(tr("infobar_all_tooltip"))
         row.addWidget(self._all_lbl)
 
-        self._inactive_lbl = QLabel("0")
-        self._inactive_lbl.setStyleSheet(f"{count_style} color: #c62828;")
+        self._inactive_lbl = ClickableLabel("0")
+        self._inactive_lbl.setStyleSheet(f"{count_style} background-color: #f1948a;")  # rød — arkiveret/disabled
         self._inactive_lbl.setToolTip(tr("infobar_inactive_tooltip"))
         row.addWidget(self._inactive_lbl)
 
-        self._owned_lbl = QLabel("0")
-        self._owned_lbl.setStyleSheet(f"{count_style} color: #d68910;")   # gul — owned/placed
+        self._owned_lbl = ClickableLabel("0")
+        self._owned_lbl.setStyleSheet(f"{count_style} background-color: #7dcea0;")   # grøn — egne caches
         self._owned_lbl.setToolTip(tr("infobar_owned_tooltip"))
         row.addWidget(self._owned_lbl)
+
+        self._found_lbl.clicked.connect(self.found_clicked)
+        self._all_lbl.clicked.connect(self.all_clicked)
+        self._inactive_lbl.clicked.connect(self.inactive_clicked)
+        self._owned_lbl.clicked.connect(self.owned_clicked)
 
     @staticmethod
     def _sep() -> QFrame:
@@ -164,6 +204,8 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_menu()
         self._setup_toolbar()
+        self._setup_shortcut_registry()
+        self._apply_saved_shortcuts()
         self._setup_search_bar()
         self._setup_statusbar()
         self._restore_state()
@@ -207,6 +249,10 @@ class MainWindow(QMainWindow):
 
         # Info bar (GSAK-style, issue #116)
         self._info_bar = InfoBar()
+        self._info_bar.found_clicked.connect(lambda: self._filter_by_status("found"))
+        self._info_bar.all_clicked.connect(lambda: self._filter_by_status("all"))
+        self._info_bar.inactive_clicked.connect(lambda: self._filter_by_status("inactive"))
+        self._info_bar.owned_clicked.connect(lambda: self._filter_by_status("owned"))
         bottom_layout.addWidget(self._info_bar)
 
         # Horisontal splitter — detaljer til venstre, kort til højre
@@ -222,6 +268,8 @@ class MainWindow(QMainWindow):
         self._map_widget = MapWidget()
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
         self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
+        self._detail_panel.waypoints_tab_shown.connect(self._map_widget.show_waypoint_markers)
+        self._detail_panel.waypoints_tab_hidden.connect(self._map_widget.clear_waypoint_markers)
         self._map_widget.setMinimumWidth(300)
         self._bottom_splitter.addWidget(self._map_widget)
 
@@ -264,18 +312,18 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        act_quit = QAction(tr("action_quit"), self)
-        act_quit.setShortcut(QKeySequence("Ctrl+Q"))
-        act_quit.triggered.connect(self.close)
-        file_menu.addAction(act_quit)
+        self._act_quit = QAction(tr("action_quit"), self)
+        self._act_quit.setShortcut(QKeySequence("Ctrl+Q"))
+        self._act_quit.triggered.connect(self.close)
+        file_menu.addAction(self._act_quit)
 
         # ── Waypoint ──────────────────────────────────────────────────────────
         wp_menu = menubar.addMenu(tr("menu_waypoint"))
 
-        act_wp_add = QAction(tr("action_wp_add"), self)
-        act_wp_add.setShortcut(QKeySequence("Ctrl+N"))
-        act_wp_add.triggered.connect(self._add_waypoint)
-        wp_menu.addAction(act_wp_add)
+        self._act_wp_add = QAction(tr("action_wp_add"), self)
+        self._act_wp_add.setShortcut(QKeySequence("Ctrl+N"))
+        self._act_wp_add.triggered.connect(self._add_waypoint)
+        wp_menu.addAction(self._act_wp_add)
 
         self._act_wp_edit = QAction(tr("action_wp_edit"), self)
         self._act_wp_edit.setShortcut(QKeySequence("Ctrl+E"))
@@ -313,20 +361,30 @@ class MainWindow(QMainWindow):
             act_update_location.triggered.connect(self._open_update_location)
             wp_menu.addAction(act_update_location)
 
+            wp_menu.addSeparator()
+
+            act_download_boundaries = QAction(tr("action_download_boundaries"), self)
+            act_download_boundaries.triggered.connect(self._open_download_boundaries)
+            wp_menu.addAction(act_download_boundaries)
+
+            act_check_boundaries = QAction(tr("action_check_boundaries"), self)
+            act_check_boundaries.triggered.connect(self._open_check_boundaries)
+            wp_menu.addAction(act_check_boundaries)
+
         # ── Vis ───────────────────────────────────────────────────────────────
         view_menu = menubar.addMenu(tr("menu_view"))
 
-        act_refresh = QAction(tr("action_refresh"), self)
-        act_refresh.setShortcut(QKeySequence("F5"))
-        act_refresh.triggered.connect(self._refresh_cache_list)
-        view_menu.addAction(act_refresh)
+        self._act_refresh = QAction(tr("action_refresh"), self)
+        self._act_refresh.setShortcut(QKeySequence("F5"))
+        self._act_refresh.triggered.connect(self._refresh_cache_list)
+        view_menu.addAction(self._act_refresh)
 
         view_menu.addSeparator()
 
-        act_filter = QAction(tr("action_filter"), self)
-        act_filter.setShortcut("Ctrl+F")
-        act_filter.triggered.connect(self._open_filter_dialog)
-        view_menu.addAction(act_filter)
+        self._act_filter_menu = QAction(tr("action_filter"), self)
+        self._act_filter_menu.setShortcut("Ctrl+F")
+        self._act_filter_menu.triggered.connect(self._open_filter_dialog)
+        view_menu.addAction(self._act_filter_menu)
 
         act_clear = QAction(tr("action_clear_filter"), self)
         act_clear.triggered.connect(self._clear_filter)
@@ -341,10 +399,12 @@ class MainWindow(QMainWindow):
         # ── Funktioner ────────────────────────────────────────────────────────
         tools_menu = menubar.addMenu(tr("menu_tools"))
 
-        act_settings = QAction(tr("action_settings"), self)
-        act_settings.setShortcut(QKeySequence("Ctrl+,"))
-        act_settings.triggered.connect(self._open_settings)
-        tools_menu.addAction(act_settings)
+        self._act_settings = QAction(tr("action_settings"), self)
+        self._act_settings.setShortcut(QKeySequence("Ctrl+,"))
+        # Ctrl+, triggers macOS PreferencesRole auto-assignment, relabeling the action "Preferences".
+        self._act_settings.setMenuRole(QAction.MenuRole.NoRole)
+        self._act_settings.triggered.connect(self._open_settings)
+        tools_menu.addAction(self._act_settings)
 
         tools_menu.addSeparator()
 
@@ -368,15 +428,15 @@ class MainWindow(QMainWindow):
         # ── Geocaching Værktøjer ──────────────────────────────────────────────
         gc_tools_menu = menubar.addMenu(tr("menu_gc_tools"))
 
-        act_coord_converter = QAction(tr("action_coord_converter"), self)
-        act_coord_converter.setShortcut(QKeySequence("Ctrl+K"))
-        act_coord_converter.triggered.connect(self._open_coord_converter)
-        gc_tools_menu.addAction(act_coord_converter)
+        self._act_coord_converter = QAction(tr("action_coord_converter"), self)
+        self._act_coord_converter.setShortcut(QKeySequence("Ctrl+K"))
+        self._act_coord_converter.triggered.connect(self._open_coord_converter)
+        gc_tools_menu.addAction(self._act_coord_converter)
 
-        act_projection = QAction(tr("action_projection"), self)
-        act_projection.setShortcut(QKeySequence("Ctrl+P"))
-        act_projection.triggered.connect(self._open_projection)
-        gc_tools_menu.addAction(act_projection)
+        self._act_projection = QAction(tr("action_projection"), self)
+        self._act_projection.setShortcut(QKeySequence("Ctrl+P"))
+        self._act_projection.triggered.connect(self._open_projection)
+        gc_tools_menu.addAction(self._act_projection)
 
         gc_tools_menu.addSeparator()
 
@@ -399,9 +459,25 @@ class MainWindow(QMainWindow):
         act_about.triggered.connect(self._show_about)
         help_menu.addAction(act_about)
 
+        act_user_guide = QAction(tr("action_user_guide"), self)
+        act_user_guide.triggered.connect(self._open_user_guide)
+        help_menu.addAction(act_user_guide)
+
         act_check_update = QAction(tr("action_check_update"), self)
         act_check_update.triggered.connect(self._check_update_manual)
         help_menu.addAction(act_check_update)
+
+        help_menu.addSeparator()
+
+        act_shortcuts = QAction(tr("action_shortcuts"), self)
+        act_shortcuts.triggered.connect(self._open_shortcuts)
+        help_menu.addAction(act_shortcuts)
+
+        help_menu.addSeparator()
+
+        act_open_log = QAction(tr("action_open_log_file"), self)
+        act_open_log.triggered.connect(self._open_log_file)
+        help_menu.addAction(act_open_log)
 
         # ── Vis-dropdown i menulinjen ─────────────────────────────────────────
         menubar.addSeparator()
@@ -675,6 +751,8 @@ class MainWindow(QMainWindow):
         self._detail_panel.clear()
         self._load_sort_for_active_db()
         self._reload_home_combo()
+        # Genindlæs kolonner for den nye database (issue #199)
+        self._cache_table.reload_columns()
         # Reload kort med aktuel lokation for denne DB
         self._map_widget.reload_map(self._refresh_cache_list)
         self._statusbar.showMessage(
@@ -819,8 +897,13 @@ class MainWindow(QMainWindow):
             total_in_db = session.query(Cache).count()
         self._db_count = total_in_db
 
-        # Filter name
-        filter_name = self._active_filter_name
+        # Filter name: named profile > generic "Active" > empty (shows None)
+        if self._active_filter_name:
+            filter_name = self._active_filter_name
+        elif len(self._current_filterset) > 0:
+            filter_name = tr("infobar_filter_active", count=len(self._current_filterset))
+        else:
+            filter_name = ""
 
         # Flagged count
         flagged = sum(1 for c in caches if c.user_flag)
@@ -833,12 +916,15 @@ class MainWindow(QMainWindow):
         all_in_filter = len(caches)
         inactive = sum(1 for c in caches if c.archived or not c.available)
 
-        # Owned: match placed_by against stored GC username
-        gc_user = s.gc_username.strip().lower() if s.gc_username else ""
+        # Owned: match owner_name against stored GC username (issue #270 —
+        # GSAK counts the 'Owner' tag, not 'Placed by'; adopted caches can
+        # have a different placed_by than the current owner). Comparison is
+        # whitespace/case-normalized (issue #272: irregular GPX whitespace).
+        gc_user = normalize_geocacher_name(s.gc_username)
         if gc_user:
             owned = sum(
                 1 for c in caches
-                if c.placed_by and c.placed_by.strip().lower() == gc_user
+                if normalize_geocacher_name(c.owner_name) == gc_user
             )
         else:
             owned = 0
@@ -853,6 +939,40 @@ class MainWindow(QMainWindow):
             inactive=inactive,
             owned=owned,
         )
+
+    def _filter_by_status(self, status: str) -> None:
+        """Klik på et farvet count-felt i info-baren (issue #270).
+
+        Anvender et filter der matcher præcis den status der blev klikket
+        på — ligesom man i GSAK kan klikke på status-tællerne i Count panel
+        for at filtrere cache-listen til den status.
+        """
+        if status == "all":
+            self._clear_filter()
+            return
+
+        from opensak.filters.engine import FoundFilter, AvailabilityFilter, OwnerFilter
+        fs = FilterSet(mode="AND")
+
+        if status == "found":
+            fs.add(FoundFilter())
+            label = tr("infobar_filter_found")
+        elif status == "owned":
+            s = get_settings()
+            gc_user = (s.gc_username or "").strip()
+            if not gc_user:
+                self._statusbar.showMessage(tr("infobar_owned_no_username"), 5000)
+                return
+            fs.add(OwnerFilter(gc_user))  # issue #270: match 'owner', not 'placed_by'
+            label = tr("infobar_filter_owned")
+        elif status == "inactive":
+            # Samme definition som i _update_info_bar: archived OR ikke tilgængelig
+            fs.add(AvailabilityFilter(show_avail=False, show_unavail=True, show_archived=True))
+            label = tr("infobar_filter_inactive")
+        else:
+            return
+
+        self._on_filter_applied(fs, self._current_sort, label)
 
     def _build_current_filterset(self) -> FilterSet:
         """Build a FilterSet from the current quick filter + search box."""
@@ -979,6 +1099,11 @@ class MainWindow(QMainWindow):
             self._map_widget.update_cache(full)
 
     def _on_search_changed(self, text: str) -> None:
+        has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
+        if has_search:
+            self._set_clear_filter_active(True)
+        elif not self._active_filter_name:
+            self._set_clear_filter_active(False)
         min_chars, debounce_ms = self._search_thresholds()
         if text == "":
             # Clearing always fires immediately
@@ -1058,6 +1183,11 @@ class MainWindow(QMainWindow):
 
     def _refresh_after_import(self) -> None:
         """Reload both cache table and map after a successful import."""
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances
+            recalculate_distances(s.home_lat, s.home_lon)
         self._refresh_cache_list()
         count = self._cache_table.row_count()
         self._statusbar.showMessage(
@@ -1086,8 +1216,63 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.settings_dialog import SettingsDialog
         dlg = SettingsDialog(self)
         if dlg.exec():
+            prev_cache = self._cache_table.selected_cache()
             self._reload_home_combo()
             self._map_widget.reload_map(self._refresh_cache_list)
+            self._refresh_cache_list()
+            self._cache_table.refresh_visuals()
+            full = self._load_full_cache(prev_cache.gc_code) if prev_cache else None
+            if full:
+                self._detail_panel.show_cache(full)
+            else:
+                self._detail_panel.refresh_sizes()
+
+    # ── Tastaturgenveje ────────────────────────────────────────────────────────
+
+    def _setup_shortcut_registry(self) -> None:
+        # Each entry: (settings_key, label_lang_key, [actions sharing this shortcut])
+        self._shortcut_registry: list[tuple[str, str, list[QAction]]] = [
+            ("manage_databases",  "shortcut_manage_databases",  [self._act_db_manager]),
+            ("import",            "shortcut_import",            [self._act_import]),
+            ("quit",              "shortcut_quit",              [self._act_quit]),
+            ("add_cache",         "shortcut_add_cache",         [self._act_wp_add]),
+            ("edit_cache",        "shortcut_edit_cache",        [self._act_wp_edit]),
+            ("delete_cache",      "shortcut_delete_cache",      [self._act_wp_delete]),
+            ("refresh",           "shortcut_refresh",           [self._act_refresh]),
+            ("filter",            "shortcut_filter",            [self._act_filter_menu, self._act_filter]),
+            ("settings",          "shortcut_settings",          [self._act_settings]),
+            ("gps_export",        "shortcut_gps_export",        [self._act_gps_export]),
+            ("trip_planner",      "shortcut_trip_planner",      [self._act_trip_planner]),
+            ("coord_converter",   "shortcut_coord_converter",   [self._act_coord_converter]),
+            ("projection",        "shortcut_projection",        [self._act_projection]),
+        ]
+
+    def _apply_saved_shortcuts(self) -> None:
+        from PySide6.QtCore import QSettings
+        s = QSettings("OpenSAK Project", "OpenSAK")
+        for key, _label, actions in self._shortcut_registry:
+            saved = s.value(f"shortcuts/{key}", "")
+            if saved:
+                seq = QKeySequence(str(saved))
+                for act in actions:
+                    act.setShortcut(seq)
+
+    def _open_shortcuts(self) -> None:
+        from opensak.gui.dialogs.shortcuts_dialog import ShortcutsDialog
+        from PySide6.QtCore import QSettings
+        dlg = ShortcutsDialog(self._shortcut_registry, self)
+        if dlg.exec():
+            new_shortcuts = dlg.get_shortcuts()
+            s = QSettings("OpenSAK Project", "OpenSAK")
+            for key, _label, actions in self._shortcut_registry:
+                seq_str = new_shortcuts.get(key, "")
+                if seq_str:
+                    s.setValue(f"shortcuts/{key}", seq_str)
+                else:
+                    s.remove(f"shortcuts/{key}")
+                seq = QKeySequence(seq_str) if seq_str else QKeySequence()
+                for act in actions:
+                    act.setShortcut(seq)
 
     def _reload_home_combo(self) -> None:
         """Genindlæs hjemmepunkts-dropdown fra settings."""
@@ -1107,6 +1292,22 @@ class MainWindow(QMainWindow):
                     self._home_combo.setCurrentIndex(i)
                     break
         self._home_combo.blockSignals(False)
+        self._sync_active_home_coords()
+
+    def _sync_active_home_coords(self) -> None:
+        # _reload_home_combo blocks signals, so _on_home_changed never fires
+        # during a reload. This ensures home_lat/home_lon always reflect the
+        # active home point before _update_distances reads them.
+        s = get_settings()
+        name = s.active_home_name
+        for p in s.home_points:
+            if p.name == name:
+                if p.name == "★ Home":
+                    real = s.get_gc_home_point()
+                    s.set_active_home(real if real else p)
+                else:
+                    s.set_active_home(p)
+                return
 
     def _on_home_changed(self, index: int) -> None:
         """Skift aktivt hjemmepunkt — gem per-db og pan kort."""
@@ -1122,15 +1323,12 @@ class MainWindow(QMainWindow):
                     point = real if real else p
                 else:
                     point = p
-                # Gem direkte til QSettings uden at bruge setters
-                # (for at undgå evt. caching-problemer)
-                db_key_prefix = s._db_key("")
-                s._s.setValue(f"{db_key_prefix}active_home_name", point.name)
-                s._s.setValue(f"{db_key_prefix}home_lat", point.lat)
-                s._s.setValue(f"{db_key_prefix}home_lon", point.lon)
-                s._s.sync()
+                # Gem via settings API
+                s.set_active_home(point)
                 # Pan kort til ny lokation — INGEN HTML reload
                 self._map_widget.pan_to_location(point.lat, point.lon, point.name)
+                from opensak.db.database import recalculate_distances
+                recalculate_distances(point.lat, point.lon)
                 # Opdater distances i cache-listen
                 self._refresh_cache_list()
                 self._update_info_bar()
@@ -1141,6 +1339,10 @@ class MainWindow(QMainWindow):
 
     def _initial_load(self) -> None:
         """Første load ved opstart — vent på kort hvis ikke klar."""
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances
+            recalculate_distances(s.home_lat, s.home_lon)
         if not self._map_widget.is_ready():
             self._map_widget.set_pending_refresh(self._refresh_cache_list)
         else:
@@ -1220,7 +1422,18 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.waypoint_dialog import WaypointDialog
         from opensak.db.database import get_session
         from opensak.db.models import Cache
-        dlg = WaypointDialog(self, cache=cache)
+
+        # apply_filters() defer()'er short_description/long_description/
+        # encoded_hints i listevisningen (ydelse på store DB'er). Cache-objektet
+        # fra tabel-rækken kan derfor IKKE bruges direkte her — _populate() ville
+        # udløse et forsinket load på en allerede lukket session og kaste
+        # DetachedInstanceError. Genindlæs altid en komplet kopi først,
+        # samme mønster som _on_cache_selected()/_load_full_cache().
+        full_cache = self._load_full_cache(cache.gc_code)
+        if not full_cache:
+            return
+
+        dlg = WaypointDialog(self, cache=full_cache)
         if dlg.exec():
             data = dlg.get_data()
             with get_session() as session:
@@ -1374,39 +1587,40 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
 
     def _save_sort_for_active_db(self) -> None:
-        """Gem aktuel sortering og aktivt filter-profil per database i QSettings."""
+        """Gem aktuel sortering og aktivt filter-profil per database i opensak.json."""
         from opensak.db.manager import get_db_manager
-        from PySide6.QtCore import QSettings
+        from opensak.settings_store import get_store
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG save: ingen aktiv database")
             return
-        s = QSettings("OpenSAK Project", "OpenSAK")
-        key = f"sort/{str(manager.active.path)}"
-        s.setValue(f"{key}/field", self._current_sort.field)
-        s.setValue(f"{key}/ascending", self._current_sort.ascending)
-        s.setValue(f"{key}/filter_profile", self._active_filter_name)
-        s.sync()
+        key = f"sort.{str(manager.active.path)}"
+        get_store().set_many({
+            f"{key}.field":          self._current_sort.field,
+            f"{key}.ascending":      self._current_sort.ascending,
+            f"{key}.filter_profile": self._active_filter_name,
+        })
 
     def _load_sort_for_active_db(self) -> None:
-        """Indlaes gemt sortering og filter-profil for den aktive database fra QSettings."""
+        """Indlaes gemt sortering og filter-profil for den aktive database fra opensak.json."""
         from opensak.db.manager import get_db_manager
-        from PySide6.QtCore import QSettings
+        from opensak.settings_store import get_store
         from opensak.filters.engine import FilterProfile
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG load: ingen aktiv database")
             return
-        s = QSettings("OpenSAK Project", "OpenSAK")
-        key = f"sort/{str(manager.active.path)}"
-        field = cast(str, s.value(f"{key}/field", "name"))
-        ascending = cast(bool, s.value(f"{key}/ascending", True, type=bool))
+        s = get_store()
+        key = f"sort.{str(manager.active.path)}"
+        field = str(s.get(f"{key}.field", "name"))
+        asc_raw = s.get(f"{key}.ascending", True)
+        ascending = asc_raw if isinstance(asc_raw, bool) else str(asc_raw).lower() in ("true", "1", "yes")
         self._current_sort = SortSpec(field, ascending=ascending)
         # Genanvend sort-indikatoren i tabellen hvis den allerede er loaded
         if hasattr(self, "_cache_table"):
             self._cache_table.apply_sort(field, ascending)
         # Genindlæs gemt filter-profil for denne database
-        profile_name = s.value(f"{key}/filter_profile", "")
+        profile_name = str(s.get(f"{key}.filter_profile", ""))
         if profile_name:
             paths = FilterProfile.list_profiles()
             for path in paths:
@@ -1500,6 +1714,10 @@ class MainWindow(QMainWindow):
     def _clear_filter(self) -> None:
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
+        for field in (self._search_gc, self._search_box):
+            field.blockSignals(True)
+            field.clear()
+            field.blockSignals(False)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -1671,6 +1889,14 @@ class MainWindow(QMainWindow):
         dlg.location_updated.connect(self._refresh_cache_list)
         dlg.exec()
 
+    def _open_download_boundaries(self) -> None:
+        from opensak.gui.dialogs.boundary_packs_dialog import BoundaryDownloadDialog
+        BoundaryDownloadDialog(self).exec()
+
+    def _open_check_boundaries(self) -> None:
+        from opensak.gui.dialogs.boundary_packs_dialog import BoundaryCheckDialog
+        BoundaryCheckDialog(self).exec()
+
     def _open_coord_converter(self) -> None:
         """Åbn koordinatkonverter — præ-udfyld med valgt cache hvis mulig."""
         if self._trip_planner_active():
@@ -1744,14 +1970,35 @@ class MainWindow(QMainWindow):
             tr("about_text", version=__version__),
         )
 
+    def _open_user_guide(self) -> None:
+        """Open the online User Guide in the default browser."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl("https://opensak.com/user-guide.html"))
+
+    def _open_log_file(self) -> None:
+        """Åbn logfilen i systemets standard tekstprogram (issue #232)."""
+        from opensak.config import get_log_path
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        log_path = get_log_path()
+        if not log_path.exists():
+            QMessageBox.information(
+                self,
+                tr("action_open_log_file"),
+                tr("log_file_not_found", path=str(log_path)),
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
+
     # ── Opdateringsstjek ───────────────────────────────────────────────────────
 
     def _check_update_background(self) -> None:
         """Kald ved opstart — tjekker lydløst i baggrunden."""
         from opensak import __version__
-        from PySide6.QtCore import QSettings
-        s = QSettings("OpenSAK Project", "OpenSAK")
-        if not s.value("updates/check_enabled", True, type=bool):
+        from opensak.gui.settings import get_settings
+        if not get_settings().updates_check_enabled:
             return
         self._update_worker = UpdateCheckWorker(__version__, parent=self)
         self._update_worker.update_available.connect(self._on_update_available)
@@ -1762,7 +2009,9 @@ class MainWindow(QMainWindow):
         from opensak import __version__
         self._manual_update_worker = UpdateCheckWorker(__version__, parent=self)
         self._manual_update_worker.update_available.connect(
-            lambda tag, url: self._on_update_available(tag, url, manual=True)
+            lambda tag, url, is_prerelease: self._on_update_available(
+                tag, url, is_prerelease, manual=True
+            )
         )
         self._manual_update_worker.check_done.connect(
             self._on_manual_check_done
@@ -1780,25 +2029,31 @@ class MainWindow(QMainWindow):
             )
 
     def _on_update_available(
-        self, latest_tag: str, url: str, *, manual: bool = False
+        self, latest_tag: str, url: str, is_prerelease: bool = False, *, manual: bool = False
     ) -> None:
-        """Vis notifikationsdialog om ny version."""
+        """Vis notifikationsdialog om ny version (stabil eller beta)."""
         self._manual_found_update = True
 
         # Ved automatisk tjek: ignorer versioner brugeren har valgt at springe over
         if not manual:
-            from PySide6.QtCore import QSettings
-            s = QSettings("OpenSAK Project", "OpenSAK")
-            skipped = s.value("updates/skipped_version", "", type=str)
-            if skipped == latest_tag:
+            from opensak.gui.settings import get_settings
+            if get_settings().updates_skipped_version == latest_tag:
                 return
 
         from opensak import __version__
-        changelog_url = "https://github.com/AgreeDK/opensak/blob/main/CHANGELOG.md"
+        # Point at the specific release tag, not always `main` — betas live on
+        # the `beta` branch and aren't merged to `main` until they go stable,
+        # so a hardcoded main link showed the wrong (older) changelog entry
+        # for anyone running a beta.
+        changelog_url = f"https://github.com/AgreeDK/opensak/blob/{latest_tag}/CHANGELOG.md"
 
         msg = QMessageBox(self)
-        msg.setWindowTitle(tr("update_available_title"))
-        msg.setText(tr("update_available_msg", latest=latest_tag, current=__version__))
+        if is_prerelease:
+            msg.setWindowTitle(tr("beta_update_available_title"))
+            msg.setText(tr("beta_update_available_msg", latest=latest_tag, current=__version__))
+        else:
+            msg.setWindowTitle(tr("update_available_title"))
+            msg.setText(tr("update_available_msg", latest=latest_tag, current=__version__))
         msg.setInformativeText(
             tr("update_available_info")
             + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
@@ -1815,7 +2070,6 @@ class MainWindow(QMainWindow):
             import webbrowser
             webbrowser.open(url)
         elif clicked == btn_skip:
-            from PySide6.QtCore import QSettings
-            s = QSettings("OpenSAK Project", "OpenSAK")
-            s.setValue("updates/skipped_version", latest_tag)
+            from opensak.gui.settings import get_settings
+            get_settings().updates_skipped_version = latest_tag
 

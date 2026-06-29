@@ -34,9 +34,19 @@ jobs:
       - name: Run unit tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest tests/unit-tests -v --cov=opensak --cov-report=term-missing
+        run: pytest tests/unit-tests -v --cov=opensak --cov-report=term-missing --cov-fail-under=80
+      - name: Coverage summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Unit Test Coverage"
+            echo ""
+            coverage report --format=markdown --skip-covered --skip-empty
+          } >> "$GITHUB_STEP_SUMMARY"
 
   e2e-tests:
+    needs: unit-tests
     runs-on: ubuntu-latest
     strategy:
       matrix:

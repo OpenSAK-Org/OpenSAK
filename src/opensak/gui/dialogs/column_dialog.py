@@ -9,10 +9,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QPushButton,
-    QDialogButtonBox
+    QDialogButtonBox, QComboBox
 )
-from PySide6.QtCore import QSettings
 from opensak.lang import tr
+from opensak.settings_store import get_store
 
 # Alle tilgængelige kolonner: (felt_id, visningsnavn, bredde, standard_synlig)
 # Kolonnestruktur: (felt_id, tr_nøgle, bredde, standard_synlig)
@@ -21,16 +21,17 @@ _ALL_COLUMNS_DEF = [
     # col_user_flag og col_corrected viser kun ikon i kolonneoverskriften,
     # men i Column Chooser bruges _label-varianten med læsbar tekst.
     ("user_flag",    "col_user_flag_label",    30,  True),
+    ("locked",       "col_locked_label",       30,  True),
     ("gc_code",      "col_gc_code",      80,  True),
     ("name",         "col_name",        260,  True),
-    ("cache_type",   "col_type",          28,  True),   # ikon + tooltip, ingen tekst
+    ("cache_type",   "col_type",          40,  True),   # ikon + tooltip, ingen tekst
     ("container",    "col_container",    80,  True),   # størrelses-bar
     ("difficulty",   "col_difficulty",   36,  True),
     ("terrain",      "col_terrain",      36,  True),
     ("distance",     "col_distance",     75,  True),
     ("bearing",      "col_bearing",      70,  True),
     ("found",        "col_found",        36,  True),
-    ("favorite",     "col_favorite",     36,  True),
+    ("favorite",     "col_favorite",     36, False),
     ("corrected",    "col_corrected_label",    36,  True),
     # Ekstra kolonner (fra)
     ("country",      "col_country",      80, False),
@@ -70,10 +71,29 @@ ALL_COLUMNS = property(lambda self: get_all_columns()) if False else None  # se 
 ALWAYS_VISIBLE = {"gc_code", "name"}
 
 
+def _col_key(suffix: str) -> str:
+    """
+    Returner en settings-nøgle der er unik per aktiv database.
+
+    Format: "columns.<db_name>.<suffix>"
+    Falder tilbage til "columns.default.<suffix>" hvis ingen aktiv database.
+    Issue #199: column views gemmes per database-navn.
+    """
+    try:
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        if manager.active:
+            # Brug database-navn (ikke sti) — mere læsbart og portabelt
+            safe = manager.active.name.replace(".", "_").replace(" ", "_")
+            return f"columns.{safe}.{suffix}"
+    except Exception:
+        pass
+    return f"columns.default.{suffix}"
+
+
 def get_visible_columns() -> list[str]:
-    """Returner liste over synlige kolonne-id'er fra QSettings."""
-    s = QSettings("OpenSAK Project", "OpenSAK")
-    saved = s.value("columns/visible")
+    """Returner liste over synlige kolonne-id'er for den aktive database."""
+    saved = get_store().get(_col_key("visible"))
     if saved:
         return list(saved)
     # Standard: vis de kolonner der er markeret som standard
@@ -81,29 +101,55 @@ def get_visible_columns() -> list[str]:
 
 
 def set_visible_columns(col_ids: list[str]) -> None:
-    """Gem liste over synlige kolonne-id'er til QSettings."""
-    s = QSettings("OpenSAK Project", "OpenSAK")
-    s.setValue("columns/visible", col_ids)
-    s.sync()
+    """Gem liste over synlige kolonne-id'er for den aktive database."""
+    get_store().set(_col_key("visible"), col_ids)
 
 
 def get_column_widths() -> dict[str, int]:
-    """Return saved column widths (col_id -> px) from QSettings."""
-    s = QSettings("OpenSAK Project", "OpenSAK")
-    raw = s.value("columns/widths", None)
+    """Return saved column widths (col_id -> px) for the active database."""
+    raw = get_store().get(_col_key("widths"))
     if raw:
         try:
-            return json.loads(cast(str, raw))
+            if isinstance(raw, str):
+                return json.loads(raw)
+            if isinstance(raw, dict):
+                return {k: int(v) for k, v in raw.items()}
         except Exception:
             pass
     return {}
 
 
 def set_column_widths(widths: dict[str, int]) -> None:
-    """Persist column widths (col_id -> px) to QSettings."""
-    s = QSettings("OpenSAK Project", "OpenSAK")
-    s.setValue("columns/widths", json.dumps(widths))
-    s.sync()
+    """Persist column widths (col_id -> px) for the active database."""
+    get_store().set(_col_key("widths"), widths)
+
+
+_CONTAINER_DISPLAY_KEY = "columns.container_display"
+
+
+def get_container_display() -> str:
+    """Return the container column display mode: 'bar' or 'text'."""
+    val = get_store().get(_CONTAINER_DISPLAY_KEY, "bar")
+    return val if val in ("bar", "text") else "bar"
+
+
+def set_container_display(mode: str) -> None:
+    """Persist the container column display mode."""
+    get_store().set(_CONTAINER_DISPLAY_KEY, mode)
+
+
+_TYPE_DISPLAY_KEY = "columns.type_display"
+
+
+def get_type_display() -> str:
+    """Return the cache_type column display mode: 'icon', 'text', or 'both'."""
+    val = get_store().get(_TYPE_DISPLAY_KEY, "icon")
+    return val if val in ("icon", "text", "both") else "icon"
+
+
+def set_type_display(mode: str) -> None:
+    """Persist the cache_type column display mode."""
+    get_store().set(_TYPE_DISPLAY_KEY, mode)
 
 
 class ColumnChooserDialog(QDialog):
@@ -147,6 +193,33 @@ class ColumnChooserDialog(QDialog):
         btn_row.addWidget(select_default)
         layout.addLayout(btn_row)
 
+        display_row = QHBoxLayout()
+        display_row.addWidget(QLabel(tr("container_display_label")))
+        self._container_display_combo = QComboBox()
+        for label, value in (
+            (tr("container_display_bar"),  "bar"),
+            (tr("container_display_text"), "text"),
+        ):
+            self._container_display_combo.addItem(label, value)
+        current_mode = get_container_display()
+        self._container_display_combo.setCurrentIndex(0 if current_mode == "bar" else 1)
+        display_row.addWidget(self._container_display_combo)
+        layout.addLayout(display_row)
+
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel(tr("type_display_label")))
+        self._type_display_combo = QComboBox()
+        for label, value in (
+            (tr("type_display_icon"), "icon"),
+            (tr("container_display_text"), "text"),
+            (tr("type_display_both"), "both"),
+        ):
+            self._type_display_combo.addItem(label, value)
+        _type_idx = {"icon": 0, "text": 1, "both": 2}.get(get_type_display(), 0)
+        self._type_display_combo.setCurrentIndex(_type_idx)
+        type_row.addWidget(self._type_display_combo)
+        layout.addLayout(type_row)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
@@ -173,14 +246,21 @@ class ColumnChooserDialog(QDialog):
                 )
 
     def _save_and_accept(self) -> None:
-        visible = []
-        for i in range(self._list.count()):
-            item = self._list.item(i)
-            if item.checkState() == Qt.CheckState.Checked:
-                visible.append(item.data(Qt.ItemDataRole.UserRole))
-        # Sørg for at altid-synlige er med
-        for col_id in ALWAYS_VISIBLE:
-            if col_id not in visible:
-                visible.insert(0, col_id)
+        checked: set[str] = {
+            self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._list.count())
+            if self._list.item(i).checkState() == Qt.CheckState.Checked
+        } | ALWAYS_VISIBLE
+
+        old_order = get_visible_columns()
+        old_set = set(old_order)
+
+        # Keep existing visible columns in the user's drag order, then append
+        # newly added columns in _ALL_COLUMNS_DEF order (predictable insertion).
+        visible = [c for c in old_order if c in checked]
+        visible += [fid for fid, *_ in _ALL_COLUMNS_DEF if fid in checked and fid not in old_set]
+
         set_visible_columns(visible)
+        set_container_display(self._container_display_combo.currentData())
+        set_type_display(self._type_display_combo.currentData())
         self.accept()

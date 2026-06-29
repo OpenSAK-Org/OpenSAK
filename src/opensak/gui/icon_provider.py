@@ -413,8 +413,19 @@ def _get_found_svg_for_key(key: str) -> str:
     svg = _get_found_svg(key)
     if svg:
         return svg
-    # Fallback til generisk found ikon
     return _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
+
+
+def _get_found_overlay_svg() -> str:
+    """Gold smiley used as the fixed overlay for found caches (all types)."""
+    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_gold.svg")
+    return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
+
+
+def _get_dnf_overlay_svg() -> str:
+    """Dark-blue smiley used as the fixed overlay for DNF caches (all types)."""
+    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_dark_blue.svg")
+    return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -459,17 +470,17 @@ def get_cache_type_pixmap(cache_type: str, size: int = 32, found: bool = False) 
     return _svg_to_pixmap(svg, size)
 
 
-def get_map_pin_html(cache_type: str, found: bool = False) -> str:
+def get_map_pin_html(cache_type: str, found: bool = False, dnf: bool = False) -> str:
     """
     Return HTML streng til en Leaflet divIcon map pin.
-    Viser altid det rigtige cache type ikon — smiley overlay hvis found=True.
+    Viser cache type ikon som base med smiley overlay i øverste højre hjørne:
+      found=True → gold smiley; dnf=True (og ikke found) → dark-blue smiley.
     Bruger base64 <img> tag så SVG farver bevares korrekt i browser.
     """
     import base64
 
     key = _db_type_to_key(cache_type)
 
-    # Altid vis cache type ikon som base
     svg = _get_svg_for_key(key)
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
     img_html = (
@@ -478,11 +489,16 @@ def get_map_pin_html(cache_type: str, found: bool = False) -> str:
     )
 
     if found:
-        # Smiley overlay i øverste højre hjørne
-        found_svg = _get_found_svg_for_key(key)
-        found_b64 = base64.b64encode(found_svg.encode("utf-8")).decode("ascii")
+        overlay_svg = _get_found_overlay_svg()
+    elif dnf:
+        overlay_svg = _get_dnf_overlay_svg()
+    else:
+        overlay_svg = None
+
+    if overlay_svg:
+        overlay_b64 = base64.b64encode(overlay_svg.encode("utf-8")).decode("ascii")
         overlay = (
-            f'<img src="data:image/svg+xml;base64,{found_b64}" '
+            f'<img src="data:image/svg+xml;base64,{overlay_b64}" '
             f'width="16" height="16" '
             f'style="position:absolute;top:-4px;right:-4px;display:block;'
             f'filter:drop-shadow(0 1px 1px rgba(0,0,0,0.5));"/>'
@@ -499,6 +515,47 @@ def get_map_pin_html(cache_type: str, found: bool = False) -> str:
     )
 
 
+def get_cache_type_pixmap_composite(
+    cache_type: str,
+    size: int = 32,
+    found: bool = False,
+    dnf: bool = False,
+) -> QPixmap:
+    """
+    Return QPixmap with the cache type icon and, if found or dnf, a smiley
+    overlay centred on the icon's top-right corner (half inside, half outside)
+    — matching the map pin appearance.
+      found → gold smiley; dnf (and not found) → dark-blue smiley.
+    """
+    key = _db_type_to_key(cache_type)
+    base = _svg_to_pixmap(_get_svg_for_key(key), size)
+
+    if found:
+        overlay_svg = _get_found_overlay_svg()
+    elif dnf:
+        overlay_svg = _get_dnf_overlay_svg()
+    else:
+        return base
+
+    overlay_size = max(8, size // 2)
+    half = overlay_size // 2
+
+    # Canvas is enlarged by `half` on the right and top so the smiley can
+    # straddle the icon's top-right corner (center of smiley = corner of icon).
+    canvas_w = size + half
+    canvas_h = size + half
+    canvas = QPixmap(canvas_w, canvas_h)
+    canvas.fill(Qt.GlobalColor.transparent)
+
+    overlay_px = _svg_to_pixmap(overlay_svg, overlay_size)
+
+    painter = QPainter(canvas)
+    painter.drawPixmap(0, half, base)                        # icon shifted down
+    painter.drawPixmap(size - half, 0, overlay_px)          # smiley at top-right
+    painter.end()
+    return canvas
+
+
 def get_all_type_keys() -> list[str]:
     """Return sorteret liste af alle kendte cache type nøgler."""
     return sorted(set(list(_FALLBACK_SVGS.keys()) + list(_TYPE_FILE_MAP.keys())))
@@ -507,3 +564,35 @@ def get_all_type_keys() -> list[str]:
 def get_all_size_keys() -> list[str]:
     """Return sorteret liste af alle kendte cache størrelse nøgler."""
     return sorted(_CACHE_SIZE_SVGS.keys())
+
+
+_FLAG_PLACEHOLDER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<line x1="4" y1="2" x2="4" y2="14" stroke="#aaaaaa" stroke-width="1.5"'
+    ' stroke-linecap="round"/>'
+    '<polygon points="4,3 13,6 4,9" fill="none" stroke="#aaaaaa" stroke-width="1"'
+    ' stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+_LOCK_PLACEHOLDER_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="none"'
+    ' stroke="#aaaaaa" stroke-width="1.3"/>'
+    '<path d="M5.5 7 V5 a2.5 2.5 0 0 1 5 0 V7" fill="none"'
+    ' stroke="#aaaaaa" stroke-width="1.3"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_flag_placeholder_icon(size: int = 16) -> QIcon:
+    """Faint outlined flag QIcon shown in the user_flag column when flag is unset."""
+    return QIcon(_svg_to_pixmap(_FLAG_PLACEHOLDER_SVG, size))
+
+
+@lru_cache(maxsize=8)
+def get_lock_placeholder_icon(size: int = 16) -> QIcon:
+    """Faint outlined open-padlock QIcon shown in the locked column when unset (issue #202)."""
+    return QIcon(_svg_to_pixmap(_LOCK_PLACEHOLDER_SVG, size))

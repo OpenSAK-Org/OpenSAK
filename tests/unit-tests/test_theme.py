@@ -139,6 +139,27 @@ class TestApplyTheme:
         theme.apply_theme(qapp, "dark")
         assert w.palette().color(QPalette.ColorRole.Window).lightness() < 100
 
+    def test_palette_stylesheet_refs_reapplied_on_theme_switch(self, qtbot, qapp):
+        # Regression for #325: palette() refs in stylesheets were not re-evaluated
+        # after a theme switch because update() alone does not re-parse the stylesheet.
+        from PySide6.QtWidgets import QWidget, QLabel
+        w = QWidget()
+        lbl = QLabel("stats", w)
+        lbl.setStyleSheet("color: palette(text); font-size: 11px;")
+        w.setStyleSheet("QWidget { background-color: palette(window); }")
+        qtbot.addWidget(w)
+        w.show()
+
+        theme.apply_theme(qapp, "dark")
+        assert w.palette().color(QPalette.ColorRole.Window).lightness() < 100
+        assert "palette(window)" in w.styleSheet()
+
+        theme.apply_theme(qapp, "light")
+        assert w.palette().color(QPalette.ColorRole.Window).lightness() > 200
+        # stylesheet must survive re-application intact
+        assert "palette(window)" in w.styleSheet()
+        assert "palette(text)" in lbl.styleSheet()
+
 
 # ── effective_theme ─────────────────────────────────────────────────────────────
 

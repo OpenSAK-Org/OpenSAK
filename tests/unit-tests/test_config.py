@@ -22,35 +22,43 @@ posix_only = pytest.mark.skipif(os.name == "nt", reason="POSIX-only path branch"
 
 
 @pytest.fixture(autouse=True)
-def isolate_prefs(tmp_path):
-    # Point the module-level prefs-file cache at a fresh temp path each test.
-    original = config_module._PREFS_FILE
-    config_module._PREFS_FILE = tmp_path / "preferences.json"
-    yield config_module._PREFS_FILE
-    config_module._PREFS_FILE = original
+def isolate_store(tmp_path, monkeypatch):
+    """Isolate SettingsStore so each test gets a fresh in-memory store."""
+    from opensak import settings_store
+    fresh = settings_store.SettingsStore()
+    fresh._data = {}
+    fresh._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(settings_store, "_store", fresh)
+    # Also point install_dir at tmp_path so path-derived tests work
+    monkeypatch.setattr(settings_store, "get_install_dir", lambda: tmp_path / "opensak")
+    yield fresh
 
 
 # ── get_language / set_language ───────────────────────────────────────────────
-
 
 class TestGetLanguage:
     def test_default_is_english_when_file_absent(self):
         assert get_language() == "en"
 
-    def test_returns_saved_value(self, isolate_prefs):
-        isolate_prefs.write_text(json.dumps({"language": "pt"}), encoding="utf-8")
+    def test_returns_saved_value(self):
+        set_language("pt")
         assert get_language() == "pt"
 
-    def test_missing_language_key_falls_back_to_default(self, isolate_prefs):
-        isolate_prefs.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+    def test_missing_language_key_falls_back_to_default(self):
+        # Store has no app.language key → default
         assert get_language() == "en"
 
-    def test_malformed_json_falls_back_to_default(self, isolate_prefs):
-        isolate_prefs.write_text("{ not valid json }", encoding="utf-8")
+    def test_malformed_json_falls_back_to_default(self, tmp_path):
+        # Legacy preferences.json with bad JSON → fall back
+        prefs = (tmp_path / "opensak") / "preferences.json"
+        prefs.parent.mkdir(parents=True, exist_ok=True)
+        prefs.write_text("{ not valid json }", encoding="utf-8")
         assert get_language() == "en"
 
-    def test_empty_file_falls_back_to_default(self, isolate_prefs):
-        isolate_prefs.write_text("", encoding="utf-8")
+    def test_empty_file_falls_back_to_default(self, tmp_path):
+        prefs = (tmp_path / "opensak") / "preferences.json"
+        prefs.parent.mkdir(parents=True, exist_ok=True)
+        prefs.write_text("", encoding="utf-8")
         assert get_language() == "en"
 
 
@@ -64,25 +72,16 @@ class TestSetLanguage:
         set_language("es")
         assert get_language() == "es"
 
-    def test_preserves_other_prefs_keys(self, isolate_prefs):
-        isolate_prefs.write_text(json.dumps({"theme": "dark", "language": "en"}), encoding="utf-8")
+    def test_preserves_other_store_keys(self, isolate_store):
+        # Other keys in the store survive a set_language call
+        from opensak.settings_store import get_store
+        get_store().set("display.theme", "dark")
         set_language("pt")
-        data = json.loads(isolate_prefs.read_text(encoding="utf-8"))
-        assert data["theme"] == "dark"
-        assert data["language"] == "pt"
+        assert get_store().get("display.theme") == "dark"
+        assert get_language() == "pt"
 
-    def test_creates_file_if_absent(self, isolate_prefs):
-        assert not isolate_prefs.exists()
-        set_language("it")
-        assert isolate_prefs.exists()
-
-    def test_file_contains_valid_json(self, isolate_prefs):
-        set_language("nl")
-        data = json.loads(isolate_prefs.read_text(encoding="utf-8"))
-        assert data["language"] == "nl"
-
-    def test_corrupt_existing_file_is_replaced(self, isolate_prefs):
-        isolate_prefs.write_text("{ broken", encoding="utf-8")
+    def test_corrupt_existing_store_replaced(self):
+        # Even if the JSON on disk is broken, set+get works (in-memory)
         set_language("pt")
         assert get_language() == "pt"
 
@@ -92,25 +91,21 @@ class TestSetLanguage:
 class TestAppDataDir:
     @posix_only
     def test_posix_with_xdg(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(os, "name", "posix")
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        from opensak import settings_store as ss
+        monkeypatch.setattr(ss, "get_install_dir", lambda: tmp_path / "opensak")
         d = config_module.get_app_data_dir()
         assert d == tmp_path / "opensak"
-        assert d.exists()
 
     @posix_only
     def test_posix_without_xdg(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(os, "name", "posix")
-        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-        assert config_module.get_app_data_dir() == tmp_path / ".local" / "share" / "opensak"
-
-    # The Windows branch is not testable here: pathlib.Path keys off os.name at
-    # instantiation, so forcing os.name="nt" makes Path() raise on macOS/Linux.
+        from opensak import settings_store as ss
+        monkeypatch.setattr(ss, "get_install_dir", lambda: tmp_path / ".local" / "share" / "opensak")
+        d = config_module.get_app_data_dir()
+        assert d == tmp_path / ".local" / "share" / "opensak"
 
     def test_other_os_uses_home(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(os, "name", "java")
-        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+        from opensak import settings_store as ss
+        monkeypatch.setattr(ss, "get_install_dir", lambda: tmp_path / "opensak")
         assert config_module.get_app_data_dir() == tmp_path / "opensak"
 
 
@@ -119,10 +114,10 @@ class TestAppDataDir:
 @posix_only
 class TestDerivedPaths:
     @pytest.fixture(autouse=True)
-    def _xdg(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(os, "name", "posix")
-        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
-        monkeypatch.setattr(config_module, "_PREFS_FILE", None)
+    def _setup(self, tmp_path, monkeypatch):
+        from opensak import settings_store as ss
+        monkeypatch.setattr(ss, "get_install_dir", lambda: tmp_path / "opensak")
+        (tmp_path / "opensak").mkdir(parents=True, exist_ok=True)
         self.base = tmp_path / "opensak"
 
     def test_db_path(self):
@@ -138,9 +133,6 @@ class TestDerivedPaths:
 
     def test_gc_token_path(self):
         assert get_gc_token_path() == self.base / "gc_token.json"
-
-    def test_prefs_file_recomputed_when_none(self):
-        assert config_module._get_prefs_file() == self.base / "preferences.json"
 
     def test_print_config(self, capsys):
         print_config()

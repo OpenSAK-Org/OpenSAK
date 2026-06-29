@@ -1,10 +1,21 @@
 name: Deploy site
 
+# Issue: this used to trigger only on `release: published`. But build.yml
+# creates the GitHub Release using `secrets.GITHUB_TOKEN` (via
+# softprops/action-gh-release) — and GitHub's anti-recursion rule means
+# events produced *by* GITHUB_TOKEN never trigger other workflows in the
+# same repo. So `release: published` has silently never fired for a single
+# beta release; the June 25 ref-pinning fix corrected *what* would be
+# deployed if this ran, but not *whether* it ran at all. Triggering on the
+# tag push itself fixes that: `git push origin vX.Y.Z` is a normal,
+# non-GITHUB_TOKEN push, so it fires like any other push event.
+# `release: published` is kept as a secondary trigger for the rare case of
+# manually editing/republishing a release by hand via the GitHub UI.
 on:
   push:
     branches: [main]
-    paths:
-      - "site/**"
+    tags:
+      - "v*"
   release:
     types: [published]
   workflow_dispatch:

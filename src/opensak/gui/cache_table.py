@@ -9,19 +9,20 @@ from typing import Optional
 from datetime import datetime
 
 from PySide6.QtCore import (
-    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint
+    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
 )
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication
 
 from opensak.db.models import Cache
-from opensak.filters.engine import _haversine_km, haversine_km_batch
+from opensak.filters.engine import _haversine_km
 from opensak.gui.settings import get_settings
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
 from opensak.lang import tr
-from opensak.utils.types import GcCode
-from opensak.gui.icon_provider import get_cache_type_icon, get_cache_size_icon
-from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths
+from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
+from opensak.utils.utils import normalize_geocacher_name
+from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon, get_lock_placeholder_icon
+from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display, get_type_display
 import math
 
 
@@ -69,7 +70,7 @@ def get_column_defs() -> dict:
     return {
         "gc_code":      (tr("col_gc_code"),           80),
         "name":         (tr("col_name"),             260),
-        "cache_type":   (tr("col_type"),              28),
+        "cache_type":   (tr("col_type"),              40),
         "difficulty":   (tr("col_difficulty"),        50),
         "terrain":      (tr("col_terrain"),           50),
         "container":    (tr("col_container"),         80),
@@ -96,6 +97,7 @@ def get_column_defs() -> dict:
         "first_to_find":   (tr("col_first_to_find"),   45),
         "favorite_points": (tr("col_favorite_points"), 55),
         "user_flag":       (tr("col_user_flag"),    30),
+        "locked":          (tr("col_locked"),       30),
         "bearing":         (tr("col_bearing"),           55),
         "user_sort":       (tr("col_user_sort"),       55),
         "user_data_1":     (tr("col_user_data_1"),    100),
@@ -108,6 +110,20 @@ def get_column_defs() -> dict:
 def _get_active_columns() -> list[str]:
     from opensak.gui.dialogs.column_dialog import get_visible_columns
     return get_visible_columns()
+
+
+def _format_date(d: datetime) -> str:
+    fmt = get_settings().date_format
+    if fmt == DateFormat.DMY:
+        return d.strftime("%d.%m.%Y")
+    if fmt == DateFormat.MDY:
+        return d.strftime("%m/%d/%Y")
+    if fmt == DateFormat.YMD:
+        return d.strftime("%Y-%m-%d")
+    # LOCALE: ask Qt for the OS short-date pattern, normalised to zero-padded fields
+    qd = QDate(d.year, d.month, d.day)
+    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
+    return QLocale.system().toString(qd, locale_fmt)
 
 
 def _gc_sort_key(gc_code: GcCode) -> str:
@@ -137,8 +153,8 @@ def _gc_sort_key(gc_code: GcCode) -> str:
 #
 #   Group 2: Empty bars + letter (sorted alphabetically by the letter)
 #            EarthCache  → 'E'
-#            Lab Cache   → 'L'
 #            Other       → 'O'
+#            Lab Cache   → 'V'  (shown as Virtual)
 #            Virtual     → 'V'
 #
 #   Group 3: Empty bars, no letter
@@ -170,13 +186,40 @@ _CONTAINER_PHYSICAL_ORDER = {
 # types can be added here and they'll slot in alphabetically by their letter.
 _NON_PHYSICAL_TYPE_LETTERS = {
     "earthcache":                   "E",
-    "lab cache":                    "L",
+    "lab cache":                    "V",
     "virtual cache":                "V",
     "locationless (reverse) cache": "R",
 }
 
 # Empty / unknown markers — group 3 (sorts last)
 _EMPTY_CONTAINERS = {"", "not chosen"}
+
+# Text labels for the 'text' and 'both' display modes (issue #291)
+_CONTAINER_TEXT_LABELS: dict[str, str] = {
+    "micro":      "Micro",
+    "small":      "Small",
+    "regular":    "Regular",
+    "large":      "Large",
+    "other":      "Other",
+    "not chosen": "Not chosen",
+}
+_NON_PHYSICAL_TEXT_LABELS: dict[str, str] = {
+    "virtual cache": "Virtual",
+    "earthcache":    "Earth",
+    "lab cache":     "Virtual",
+}
+
+
+def _container_text(container: str | None, cache_type: str | None) -> str:
+    type_key = (cache_type or "").lower()
+    if type_key in _NON_PHYSICAL_TEXT_LABELS:
+        return _NON_PHYSICAL_TEXT_LABELS[type_key]
+    size_key = (container or "").lower()
+    return _CONTAINER_TEXT_LABELS.get(size_key, (container or "").title())
+
+
+def _type_text(cache_type: str | None) -> str:
+    return (cache_type or "").replace("Unknown", "Mystery")
 
 
 def _container_sort_key(container: str | None, cache_type: str | None = None) -> tuple:
@@ -223,6 +266,41 @@ from PySide6.QtGui import QPainter, QColor
 from PySide6.QtCore import QRect
 
 
+class CacheTypeDelegate(QStyledItemDelegate):
+    """Centers the cache-type icon in the column (icon-only mode).
+
+    In 'text' and 'both' modes the default delegate handles rendering;
+    this delegate only kicks in for 'icon' mode where Qt's default would
+    left-align the decoration inside the content rect.
+    """
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        if get_type_display() != "icon":
+            super().paint(painter, option, index)
+            return
+
+        raw = index.data(Qt.ItemDataRole.DecorationRole)
+        if not raw:
+            super().paint(painter, option, index)
+            return
+
+        from PySide6.QtWidgets import QStyle
+        from PySide6.QtGui import QIcon, QPixmap
+        if isinstance(raw, QPixmap):
+            icon = QIcon(raw)
+        elif isinstance(raw, QIcon):
+            icon = raw
+        else:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, option.widget)
+        icon.paint(painter, option.rect, Qt.AlignmentFlag.AlignCenter)
+        painter.restore()
+
+
 class SizeBarDelegate(QStyledItemDelegate):
     """Tegner GSAK-stil segmenteret størrelsesindikator for container-kolonnen.
 
@@ -232,7 +310,7 @@ class SizeBarDelegate(QStyledItemDelegate):
       Other         → 'O'   (ukendt fysisk størrelse)
       Virtual Cache → 'V'   (ingen fysisk container — by cache_type)
       EarthCache    → 'E'   (ingen fysisk container — by cache_type)
-      Lab Cache     → 'L'   (ingen fysisk container — by cache_type)
+      Lab Cache     → 'V'   (ingen fysisk container — vises som Virtual)
     Not chosen og tom → 5 tomme segmenter, intet bogstav
     """
 
@@ -248,13 +326,14 @@ class SizeBarDelegate(QStyledItemDelegate):
     }
     # Bogstaver vist i sidste segment for size-værdier (issue #90)
     _SIZE_LABELS = {
-        "other": "O",
+        "other":      "O",
+        "not chosen": "?",
     }
     # Cache-typer der vises med tomt felt + bogstav (uanset container value)
     _LABEL_TYPES = {
         "virtual cache": "V",
         "earthcache":    "E",
-        "lab cache":     "L",
+        "lab cache":     "V",
     }
 
     _SEG_COUNT   = 5
@@ -262,6 +341,14 @@ class SizeBarDelegate(QStyledItemDelegate):
     _BAR_COLOR   = QColor("#5b8dd9")   # GSAK-blå
     _EMPTY_COLOR = QColor("#c8d4ea")   # lys grå baggrund
     _LABEL_COLOR = QColor("#4a72b0")   # bogstav-farve (mørkere blå)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._icon_size = 7  # Default, opdateres via set_icon_size()
+
+    def set_icon_size(self, size: int) -> None:
+        """Opdatér icon-størrelse (bruges når settings ændres)."""
+        self._icon_size = size
 
     def paint(self, painter: QPainter, option, index) -> None:
         from PySide6.QtWidgets import QStyle
@@ -309,7 +396,7 @@ class SizeBarDelegate(QStyledItemDelegate):
             if label and is_last:
                 painter.setPen(self._LABEL_COLOR)
                 font = painter.font()
-                font.setPointSize(7)
+                font.setPointSize(self._icon_size)
                 font.setBold(True)
                 painter.setFont(font)
                 painter.drawText(seg_rect, Qt.AlignmentFlag.AlignCenter, label)
@@ -324,32 +411,45 @@ class SizeBarDelegate(QStyledItemDelegate):
 
 
 class GcCodeDelegate(QStyledItemDelegate):
-    """Issue #117: Tegner farvet baggrund i gc_code-kolonnen (GSAK-style).
+    """Issue #117/#270/#366: Tegner farvet baggrund i gc_code-kolonnen (GSAK-style).
 
-    Farve-prioritet (dæmpede pastellfarver, sort tekst):
-      1. Archived / unavailable  → rødlig  (#f5b7b1)
-      2. Placed (brugeren er CO) → gul     (#fdebd0)
-      3. Found                   → grøn    (#a9dfbf)
+    Farve-prioritet (dæmpede pastellfarver — uændrede fra issue #270):
+      1. Archived / unavailable  → rødlig  (#f1948a) — delt farve for begge
+      2. Placed (brugeren er CO) → grøn    (#7dcea0)
+      3. Found                   → gul     (#f9e79f)
       4. Not found               → ingen   (standard rækkefarve)
 
-    Valg: farvet baggrund frem for farvet tekst giver bedre læsbarhed
-    og matcher GSAK's visuelle stil.
+    Issue #366: tekstfarve vælges via WCAG-luminans (_text_for_bg) i stedet
+    for hardkodet sort — sikrer læsbarhed uanset tema (light/dark mode).
+
+    Issue #272: owner_name sammenlignes via normalize_geocacher_name() i
+    stedet for blot strip()/lower(), så caches stadig farves korrekt selv
+    når GPX-filen indeholder dobbelte mellemrum eller non-breaking spaces
+    (\\xa0) i ejernavnet — set i eksporter fra visse tredjeparts-værktøjer.
     """
 
-    _COLOR_ARCHIVED = QColor("#f1948a")   # rød
-    _COLOR_PLACED   = QColor("#f9e79f")   # gul
-    _COLOR_FOUND    = QColor("#7dcea0")   # grøn
+    _COLOR_ARCHIVED = QColor("#f1948a")   # rød   — archived OG disabled
+    _COLOR_PLACED   = QColor("#7dcea0")   # grøn  — egne caches
+    _COLOR_FOUND    = QColor("#f9e79f")   # gul   — fundet
+
+    @staticmethod
+    def _text_for_bg(bg: QColor) -> QColor:
+        # WCAG relative luminance: threshold 0.179 → black above, white below
+        r, g, b = bg.redF(), bg.greenF(), bg.blueF()
+        def _lin(c: float) -> float:
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        L = 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+        return QColor(Qt.GlobalColor.black) if L > 0.179 else QColor(Qt.GlobalColor.white)
 
     def _bg_color(self, index) -> QColor | None:
-        """Returnér baggrundsfarve for denne cache, eller None for default."""
         from opensak.gui.settings import get_settings
         cache = index.data(Qt.ItemDataRole.UserRole)
         if cache is None:
             return None
         if cache.archived or not cache.available:
             return self._COLOR_ARCHIVED
-        gc_username = (get_settings().gc_username or "").strip().lower()
-        if gc_username and (cache.owner_name or "").strip().lower() == gc_username:
+        gc_username = normalize_geocacher_name(get_settings().gc_username)
+        if gc_username and normalize_geocacher_name(cache.owner_name) == gc_username:
             return self._COLOR_PLACED
         if cache.found:
             return self._COLOR_FOUND
@@ -362,55 +462,40 @@ class GcCodeDelegate(QStyledItemDelegate):
         painter.save()
 
         if is_selected:
-            # Valgt række: brug standard selection-farve
             painter.fillRect(option.rect, QColor("#3daee9"))
         else:
             bg = self._bg_color(index)
             if bg is not None:
                 painter.fillRect(option.rect, bg)
             else:
-                # Ingen statusfarve — lad standard delegate tegne baggrund
-                # (alternating rows mv.)
                 super().paint(painter, option, index)
                 painter.restore()
                 return
 
-        # Tegn tekst — farven følger tema/palette undtagen på statusfarve-baggrunde
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         text_rect = option.rect.adjusted(4, 0, -4, 0)
-
         cache = index.data(Qt.ItemDataRole.UserRole)
 
-        # Tekstfarve-prioritet:
-        #   Valgt række          → highlightedText (hvid på blå)
-        #   disabled/unavailable → orange
-        #   statusfarve baggrund → sort (pastels er altid lyse, sort er altid læsbart)
-        #   ingen baggrund       → palette.text() (følger light/dark tema)
         if is_selected:
             text_color = option.palette.highlightedText().color()
-        elif cache is not None and not cache.available and not cache.archived:
-            text_color = QColor("#e67e22")  # orange for disabled
         elif bg is not None:
-            # Statusfarve baggrund (rød/gul/grøn pastel) — sort er altid læsbart
-            text_color = QColor(Qt.GlobalColor.black)
+            text_color = self._text_for_bg(bg)
         else:
             text_color = option.palette.text().color()
 
         painter.setPen(text_color)
-
         painter.drawText(
             text_rect,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             text,
         )
 
-        # Strikethrough for archived — tegn en linje hen over teksten
         if not is_selected and cache is not None and cache.archived:
             fm = painter.fontMetrics()
             text_width = fm.horizontalAdvance(text)
             mid_y = option.rect.center().y()
             x_start = text_rect.left()
-            painter.setPen(QColor(Qt.GlobalColor.black))
+            painter.setPen(text_color)
             painter.drawLine(x_start, mid_y, x_start + text_width, mid_y)
 
         painter.restore()
@@ -431,16 +516,16 @@ class CacheTableModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
-        if index.isValid() and self._columns[index.column()] in ("user_flag", "first_to_find"):
+        if index.isValid() and self._columns[index.column()] in ("user_flag", "first_to_find", "locked"):
             return base | Qt.ItemFlag.ItemIsEditable
         return base
 
     def setData(self, index: QModelIndex | QPersistentModelIndex, value, role=Qt.ItemDataRole.EditRole) -> bool:
-        """Toggle user_flag eller first_to_find når brugeren klikker på kolonnen."""
+        """Toggle user_flag, first_to_find eller locked når brugeren klikker på kolonnen."""
         if not index.isValid():
             return False
         col = self._columns[index.column()]
-        if col not in ("user_flag", "first_to_find"):
+        if col not in ("user_flag", "first_to_find", "locked"):
             return False
         cache = self._caches[index.row()]
         from opensak.db.database import get_session
@@ -453,6 +538,14 @@ class CacheTableModel(QAbstractTableModel):
                     c.user_flag = new_val
             cache.user_flag = new_val
             self.flags_changed.emit()
+        elif col == "locked":
+            # Issue #202: lock/unlock a cache directly from the grid.
+            new_val = not bool(cache.locked)
+            with get_session() as session:
+                c = session.query(CacheModel).filter_by(gc_code=cache.gc_code).first()
+                if c:
+                    c.locked = new_val
+            cache.locked = new_val
         else:  # first_to_find
             new_val = not bool(cache.first_to_find)
             with get_session() as session:
@@ -476,26 +569,13 @@ class CacheTableModel(QAbstractTableModel):
         self.endResetModel()
 
     def _update_distances(self) -> None:
-        # Vectorised: compute distance + bearing for every cache in one numpy
-        # pass instead of a per-row Python loop. This runs on every table
-        # refresh, so on large databases (100k+ caches) the loop was a real
-        # per-keystroke cost; the batch form is ~negligible.
-        settings = get_settings()
         self._distances = {}
         self._bearings = {}
-        valid = [
-            c for c in self._caches
-            if c.latitude is not None and c.longitude is not None
-        ]
-        if not valid:
-            return
-        lats = [c.latitude for c in valid]
-        lons = [c.longitude for c in valid]
-        dists = haversine_km_batch(settings.home_lat, settings.home_lon, lats, lons)
-        bears = _bearing_deg_batch(settings.home_lat, settings.home_lon, lats, lons)
-        for i, c in enumerate(valid):
-            self._distances[c.id] = float(dists[i])
-            self._bearings[c.id] = float(bears[i])
+        for c in self._caches:
+            if c.distance is not None:
+                self._distances[c.id] = float(c.distance)
+            if c.bearing is not None:
+                self._bearings[c.id] = float(c.bearing)
 
     def cache_at(self, row: int) -> Optional[Cache]:
         if 0 <= row < len(self._caches):
@@ -519,6 +599,8 @@ class CacheTableModel(QAbstractTableModel):
                     return tr("col_corrected_header_tooltip")
                 if col_id == "user_flag":
                     return tr("col_user_flag_header_tooltip")
+                if col_id == "locked":
+                    return tr("col_locked_header_tooltip")
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return Qt.AlignmentFlag.AlignCenter
         return None
@@ -533,19 +615,25 @@ class CacheTableModel(QAbstractTableModel):
             return self._display_value(cache, col)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            if col in ("difficulty", "terrain", "distance", "found",
-                       "dnf", "premium_only", "archived", "log_count",
-                       "corrected", "first_to_find", "user_flag", "bearing",
-                       "user_sort", "favorite_points",
-                       "latitude", "longitude"):
+            if col in ("cache_type", "difficulty", "terrain", "container",
+                       "distance", "found", "dnf", "premium_only", "archived",
+                       "log_count", "corrected", "first_to_find", "user_flag",
+                       "locked", "bearing", "user_sort", "favorite_points",
+                       "latitude", "longitude", "favorite",
+                       "hidden_date", "last_log", "found_date", "dnf_date",
+                       "placed_by"):
                 return Qt.AlignmentFlag.AlignCenter
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
         if role == Qt.ItemDataRole.FontRole:
+            text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+            font = QFont()
+            font.setPointSize(TEXT_SIZE_MAP[text_size]["grid"])
             if cache.found:
-                font = QFont()
                 font.setItalic(True)
-                return font
+            if col == "name" and (cache.waypoint_count or 0) > 0:
+                font.setBold(True)
+            return font
 
         if role == Qt.ItemDataRole.ToolTipRole:
             if col == "cache_type":
@@ -559,6 +647,11 @@ class CacheTableModel(QAbstractTableModel):
                     fmt = get_settings().coord_format
                     coords = format_coords(note.corrected_lat, note.corrected_lon, fmt)
                     return tr("col_corrected_tooltip", coords=coords)
+            if col == "user_flag":
+                if not cache.user_flag:
+                    return tr("col_user_flag_tooltip")
+            if col == "locked":
+                return tr("col_locked_tooltip") if cache.locked else tr("col_locked_tooltip_unset")
             if col in ("latitude", "longitude"):
                 # Vis tooltip der angiver om koordinaterne er korrigerede
                 note = cache.user_note
@@ -616,29 +709,23 @@ class CacheTableModel(QAbstractTableModel):
         }
         return mapping.get(t, "unknown")
 
-    @staticmethod
-    def _size_icon_key(cache: Cache) -> str:
-        """Map container string to icon_provider size key."""
-        mapping = {
-            "micro":      "micro",
-            "small":      "small",
-            "regular":    "regular",
-            "large":      "large",
-            "other":      "other",
-            "not chosen": "not_chosen",
-            "virtual":    "not_chosen",
-        }
-        return mapping.get((cache.container or "").lower(), "other")
-
     def _decoration_value(self, cache: Cache, col: str):
         """Return QIcon for columns that show icons."""
         if col == "cache_type":
-            return get_cache_type_icon(
-                self._type_icon_key(cache),
-                size=24,
-            )
+            if get_type_display() == "text":
+                return None
+            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+            return get_cache_type_icon(self._type_icon_key(cache), size=icon_size)
         if col == "container":
-            return get_cache_size_icon(self._size_icon_key(cache), size=20)
+            # "bar" mode: SizeBarDelegate paints the segments; returning an icon
+            # here would cause super().paint() to draw it behind the first bar
+            # segment, producing a visual artifact (issue #416).
+            # "text" mode: display value is plain text, no decoration needed.
+            return None
+        if col == "user_flag" and not cache.user_flag:
+            return get_flag_placeholder_icon(16)
+        if col == "locked" and not cache.locked:
+            return get_lock_placeholder_icon(16)
         return None
 
     @staticmethod
@@ -661,13 +748,17 @@ class CacheTableModel(QAbstractTableModel):
         if col == "name":
             return cache.name or ""
         if col == "cache_type":
-            return ""   # ikon vises via DecorationRole — fuldt navn i tooltip
+            if get_type_display() in ("text", "both"):
+                return _type_text(cache.cache_type)
+            return ""  # icon-only: DecorationRole, full name in tooltip
         if col == "difficulty":
             return f"{cache.difficulty:.1f}" if cache.difficulty else "?"
         if col == "terrain":
             return f"{cache.terrain:.1f}" if cache.terrain else "?"
         if col == "container":
-            return ""   # ikon vises via DecorationRole
+            if get_container_display() == "text":
+                return _container_text(cache.container, cache.cache_type)
+            return ""   # bar: delegate draws
         if col == "country":
             return cache.country or ""
         if col == "state":
@@ -691,9 +782,9 @@ class CacheTableModel(QAbstractTableModel):
         if col == "placed_by":
             return cache.placed_by or ""
         if col == "hidden_date":
-            return cache.hidden_date.strftime("%d.%m.%Y") if cache.hidden_date else ""
+            return _format_date(cache.hidden_date) if cache.hidden_date else ""
         if col == "last_log":
-            return cache.last_log_date.strftime("%d.%m.%Y") if cache.last_log_date else ""
+            return _format_date(cache.last_log_date) if cache.last_log_date else ""
         if col == "log_count":
             # Issue #87: use cached log_count column instead of len(cache.logs)
             # because logs are noload'ed for performance and would always be
@@ -725,15 +816,17 @@ class CacheTableModel(QAbstractTableModel):
             return format_lon(lon, fmt)
         # ── Issue #33: GSAK-compatible fields ─────────────────────────────────
         if col == "found_date":
-            return cache.found_date.strftime("%d.%m.%Y") if cache.found_date else ""
+            return _format_date(cache.found_date) if cache.found_date else ""
         if col == "dnf_date":
-            return cache.dnf_date.strftime("%d.%m.%Y") if cache.dnf_date else ""
+            return _format_date(cache.dnf_date) if cache.dnf_date else ""
         if col == "first_to_find":
             return "FTF" if cache.first_to_find else ""
         if col == "favorite_points":
             return str(cache.favorite_points) if cache.favorite_points is not None else ""
         if col == "user_flag":
             return "🚩" if cache.user_flag else ""
+        if col == "locked":
+            return "🔒" if cache.locked else ""
         if col == "user_sort":
             return str(cache.user_sort) if cache.user_sort is not None else ""
         if col == "user_data_1":
@@ -799,8 +892,12 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: int(c.first_to_find or False), reverse=reverse)
         elif col == "user_flag":
             self._caches.sort(key=lambda c: int(c.user_flag or False), reverse=reverse)
+        elif col == "locked":
+            self._caches.sort(key=lambda c: int(c.locked or False), reverse=reverse)
         elif col == "user_sort":
             self._caches.sort(key=lambda c: c.user_sort if c.user_sort is not None else 999999, reverse=reverse)
+        elif col == "favorite":
+            self._caches.sort(key=lambda c: int(c.favorite_point or False), reverse=reverse)
         elif col == "favorite_points":
             self._caches.sort(key=lambda c: c.favorite_points or 0, reverse=reverse)
         elif col == "container":
@@ -831,12 +928,19 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: _gc_sort_key(c.gc_code or ""), reverse=reverse)
         else:
             self._caches.sort(
-                key=lambda c: (getattr(c, col, "") or "").lower()
-                if isinstance(getattr(c, col, ""), str) else getattr(c, col, 0) or 0,
+                key=lambda c: (getattr(c, col) or "").lower()
+                if isinstance(getattr(c, col), (str, type(None))) else getattr(c, col, 0) or 0,
                 reverse=reverse
             )
         self.endResetModel()
         self.sort_changed.emit(col, not reverse)
+
+    def refresh_visuals(self) -> None:
+        """Force re-painting of all visible cells after UI size change."""
+        if self._caches:
+            first = self.index(0, 0)
+            last = self.index(len(self._caches) - 1, len(self._columns) - 1)
+            self.dataChanged.emit(first, last)
 
 
 class CacheTableView(QTableView):
@@ -866,11 +970,14 @@ class CacheTableView(QTableView):
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
-        self.verticalHeader().setDefaultSectionSize(24)
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        self.verticalHeader().setDefaultSectionSize(TEXT_SIZE_MAP[text_size]["row_height"])
         self._applying_widths = False
         self._apply_column_widths()
         self.horizontalHeader().setSortIndicatorShown(True)
+        self.horizontalHeader().setSectionsMovable(True)
         self.horizontalHeader().sectionResized.connect(self._on_column_resized)
+        self.horizontalHeader().sectionMoved.connect(self._on_column_moved)
         self.selectionModel().currentRowChanged.connect(self._on_row_changed)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -884,11 +991,11 @@ class CacheTableView(QTableView):
         """)
 
     def mousePressEvent(self, event) -> None:
-        """Klik på user_flag- eller first_to_find-kolonnen toggler feltet direkte."""
+        """Klik på user_flag-, first_to_find- eller locked-kolonnen toggler feltet direkte."""
         index = self.indexAt(event.pos())
         if index.isValid():
             col = self._model._columns[index.column()]
-            if col in ("user_flag", "first_to_find") and event.button() == Qt.MouseButton.LeftButton:
+            if col in ("user_flag", "first_to_find", "locked") and event.button() == Qt.MouseButton.LeftButton:
                 self._model.setData(index, None)
                 return
         super().mousePressEvent(event)
@@ -915,8 +1022,17 @@ class CacheTableView(QTableView):
                 self.setColumnWidth(i, width)
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
                 if col_id == "container":
-                    self._size_bar_delegate = SizeBarDelegate(self)
-                    self.setItemDelegateForColumn(i, self._size_bar_delegate)
+                    if get_container_display() == "text":
+                        self.setItemDelegateForColumn(i, None)  # type: ignore[arg-type]
+                    else:
+                        self._size_bar_delegate = SizeBarDelegate(self)
+                        text_size = getattr(get_settings(), 'text_size', TextSize.MEDIUM)
+                        sizes = TEXT_SIZE_MAP[text_size]
+                        self._size_bar_delegate.set_icon_size(sizes["icon"])
+                        self.setItemDelegateForColumn(i, self._size_bar_delegate)
+                elif col_id == "cache_type":
+                    self._cache_type_delegate = CacheTypeDelegate(self)
+                    self.setItemDelegateForColumn(i, self._cache_type_delegate)
                 elif col_id == "gc_code":
                     self._gc_code_delegate = GcCodeDelegate(self)
                     self.setItemDelegateForColumn(i, self._gc_code_delegate)
@@ -928,6 +1044,13 @@ class CacheTableView(QTableView):
                 header.setSectionResizeMode(
                     name_idx, QHeaderView.ResizeMode.Interactive
                 )
+            # Genskab visuel kolonne-rækkefølge fra opensak.json (issue #199).
+            # `columns` er allerede i gemt rækkefølge — sørg for at header-sektionerne
+            # følger samme rækkefølge visuelt (logisk indeks 0..n-1 i den orden).
+            for visual_pos, _col_id in enumerate(columns):
+                current_visual = header.visualIndex(visual_pos)
+                if current_visual != visual_pos:
+                    header.moveSection(current_visual, visual_pos)
         finally:
             self._applying_widths = False
 
@@ -941,6 +1064,28 @@ class CacheTableView(QTableView):
         widths = get_column_widths()
         widths[col_id] = new_size
         set_column_widths(widths)
+
+    def _on_column_moved(self, _logical_index: int, old_visual: int, new_visual: int) -> None:
+        """Gem ny kolonne-rækkefølge når brugeren trækker en kolonne (issue #199)."""
+        if self._applying_widths:
+            return
+        from opensak.gui.dialogs.column_dialog import set_visible_columns
+        header = self.horizontalHeader()
+        columns = self._model._columns
+        # Byg ny rækkefølge af col_id'er baseret på aktuel visuel position
+        new_order = [
+            columns[header.logicalIndex(visual_pos)]
+            for visual_pos in range(len(columns))
+        ]
+        set_visible_columns(new_order)
+        # Genindlæs model med ny logisk rækkefølge, og nulstil header til
+        # identitets-rækkefølge (0..n-1) så fremtidige resizes/sorts matcher.
+        self._applying_widths = True
+        try:
+            self._model.reload_columns()
+            self._apply_column_widths()
+        finally:
+            self._applying_widths = False
 
     def reload_columns(self) -> None:
         """Opdatér kolonner fra indstillinger."""
@@ -1234,6 +1379,15 @@ class CacheTableView(QTableView):
 
         self._model.beginResetModel()
         self._model.endResetModel()
+
+    def refresh_visuals(self) -> None:
+        """Re-paint all visible cells after UI size change (font-size, etc.)."""
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        sizes = TEXT_SIZE_MAP[text_size]
+        if hasattr(self, "_size_bar_delegate"):
+            self._size_bar_delegate.set_icon_size(sizes["icon"])
+        self.verticalHeader().setDefaultSectionSize(sizes["row_height"])
+        self._model.refresh_visuals()
 
     def row_count(self) -> int:
         return self._model.rowCount()

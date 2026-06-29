@@ -15,6 +15,7 @@ from opensak.gui import cache_table as ct
 from opensak.gui.cache_table import (
     CacheTableModel,
     CacheTableView,
+    CacheTypeDelegate,
     SizeBarDelegate,
     GcCodeDelegate,
     _bearing_deg,
@@ -23,14 +24,14 @@ from opensak.gui.cache_table import (
     _gc_sort_key,
 )
 from opensak.db.models import Cache, UserNote
-from opensak.utils.types import CoordFormat
+from opensak.utils.types import CoordFormat, DateFormat, TextSize, TEXT_SIZE_MAP
 
 ALL_COLUMNS = [
     "gc_code", "name", "cache_type", "difficulty", "terrain", "container",
     "country", "state", "county", "distance", "found", "placed_by",
     "hidden_date", "last_log", "log_count", "dnf", "premium_only", "archived",
     "favorite", "corrected", "latitude", "longitude", "found_date", "dnf_date",
-    "first_to_find", "favorite_points", "user_flag", "bearing", "user_sort",
+    "first_to_find", "favorite_points", "user_flag", "locked", "bearing", "user_sort",
     "user_data_1", "user_data_2", "user_data_3", "user_data_4",
 ]
 
@@ -41,6 +42,7 @@ def _cache(**kw):
     c.available = kw.pop("available", True)
     c.archived = kw.pop("archived", False)
     c.found = kw.pop("found", False)
+    c.locked = kw.pop("locked", False)
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -54,13 +56,13 @@ def _note(lat=56.0, lon=13.0, corrected=True):
 def fake_settings(monkeypatch, qapp):
     s = SimpleNamespace(
         home_lat=55.0, home_lon=12.0, use_miles=False,
-        coord_format=CoordFormat.DMM, gc_username="", map_provider="google",
+        coord_format=CoordFormat.DMM, date_format=DateFormat.DMY,
+        gc_username="", map_provider="google", text_size=TextSize.MEDIUM,
     )
     s.get_maps_url = lambda lat, lon: f"https://maps?{lat},{lon}"
     monkeypatch.setattr(ct, "get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     monkeypatch.setattr(ct, "get_cache_type_icon", lambda *a, **k: QPixmap(4, 4))
-    monkeypatch.setattr(ct, "get_cache_size_icon", lambda *a, **k: QPixmap(4, 4))
     return s
 
 
@@ -98,6 +100,32 @@ class TestHelpers:
         assert _gc_sort_key("") == ""
         assert _gc_sort_key("ABC").startswith("GC")
 
+    def test_container_text_physical_sizes(self):
+        from opensak.gui.cache_table import _container_text
+        assert _container_text("micro",      "Traditional Cache") == "Micro"
+        assert _container_text("small",      None)                == "Small"
+        assert _container_text("regular",    None)                == "Regular"
+        assert _container_text("large",      None)                == "Large"
+        assert _container_text("other",      None)                == "Other"
+        assert _container_text("not chosen", None)                == "Not chosen"
+        assert _container_text(None,         None)                == ""
+
+    def test_container_text_non_physical_types(self):
+        from opensak.gui.cache_table import _container_text
+        assert _container_text("other", "Virtual Cache") == "Virtual"
+        assert _container_text("other", "EarthCache")    == "Earth"
+        assert _container_text("other", "Lab Cache")     == "Virtual"
+
+    def test_type_text_passthrough(self):
+        from opensak.gui.cache_table import _type_text
+        assert _type_text("Traditional Cache") == "Traditional Cache"
+        assert _type_text("Multi-cache")       == "Multi-cache"
+        assert _type_text(None)                == ""
+
+    def test_type_text_normalises_unknown(self):
+        from opensak.gui.cache_table import _type_text
+        assert _type_text("Unknown Cache") == "Mystery Cache"
+
 
 # ── model basics ────────────────────────────────────────────────────────────────
 
@@ -111,6 +139,11 @@ class TestModelBasics:
         model.load([_cache()])
         assert model.cache_at(0) is not None
         assert model.cache_at(5) is None
+
+    def test_cache_type_default_width_is_not_too_narrow(self):
+        # Issue #414: 28px truncated the "Type" header; default must be >= 40.
+        from opensak.gui.cache_table import get_column_defs
+        assert get_column_defs()["cache_type"][1] >= 40
 
     def test_header_display_and_alignment(self, model):
         name = model.headerData(1, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
@@ -142,8 +175,41 @@ class TestDisplayValues:
         assert dv(c, "county") == "Cty"
         assert dv(c, "placed_by") == "Owner"
         assert dv(c, "cache_type") == ""   # icon only
-        assert dv(c, "container") == ""    # icon only
+        assert dv(c, "container") == ""    # bar mode: delegate draws
         assert dv(c, "unknown_col") == ""
+
+    def test_container_text_mode_display(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_container_display", lambda: "text")
+        assert model._display_value(_cache(container="regular", cache_type="Traditional Cache"), "container") == "Regular"
+        assert model._display_value(_cache(container="other",   cache_type="Virtual Cache"),     "container") == "Virtual"
+        assert model._display_value(_cache(container="micro",   cache_type=None),                "container") == "Micro"
+
+    def test_container_text_mode_suppresses_icon(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_container_display", lambda: "text")
+        assert model._decoration_value(_cache(container="micro"), "container") is None
+
+    def test_container_bar_mode_no_decoration_icon(self, model, monkeypatch):
+        # Issue #416: in "bar" mode SizeBarDelegate paints the cell entirely;
+        # returning a DecorationRole icon here caused it to show as an artifact
+        # behind the first bar segment via super().paint().
+        monkeypatch.setattr(ct, "get_container_display", lambda: "bar")
+        assert model._decoration_value(_cache(container="micro"), "container") is None
+
+    def test_type_icon_mode_no_text(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "icon")
+        assert model._display_value(_cache(cache_type="Traditional Cache"), "cache_type") == ""
+
+    def test_type_text_mode_shows_text_no_icon(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "text")
+        assert model._display_value(_cache(cache_type="Traditional Cache"), "cache_type") == "Traditional Cache"
+        assert model._display_value(_cache(cache_type="Unknown Cache"),     "cache_type") == "Mystery Cache"
+        assert model._display_value(_cache(cache_type=None),                "cache_type") == ""
+        assert model._decoration_value(_cache(cache_type="Traditional Cache"), "cache_type") is None
+
+    def test_type_both_mode_shows_text_and_icon(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "both")
+        assert model._display_value(_cache(cache_type="Multi-cache"), "cache_type") == "Multi-cache"
+        assert model._decoration_value(_cache(cache_type="Multi-cache"), "cache_type") is not None
 
     def test_difficulty_terrain(self, model):
         assert model._display_value(_cache(difficulty=2.5), "difficulty") == "2.5"
@@ -181,13 +247,26 @@ class TestDisplayValues:
         assert model._display_value(_cache(first_to_find=True), "first_to_find") == "FTF"
         assert model._display_value(_cache(user_flag=True), "user_flag") == "🚩"
 
-    def test_dates(self, model):
+    def test_dates(self, model, fake_settings):
         d = datetime(2024, 3, 1)
+        # DMY (default in fake_settings)
         assert model._display_value(_cache(hidden_date=d), "hidden_date") == "01.03.2024"
         assert model._display_value(_cache(last_log_date=d), "last_log") == "01.03.2024"
         assert model._display_value(_cache(found_date=d), "found_date") == "01.03.2024"
         assert model._display_value(_cache(dnf_date=d), "dnf_date") == "01.03.2024"
         assert model._display_value(_cache(), "hidden_date") == ""
+        # MDY
+        fake_settings.date_format = DateFormat.MDY
+        assert model._display_value(_cache(hidden_date=d), "hidden_date") == "03/01/2024"
+        # YMD
+        fake_settings.date_format = DateFormat.YMD
+        assert model._display_value(_cache(hidden_date=d), "hidden_date") == "2024-03-01"
+        # LOCALE — verify non-empty and zero-padded (regression for issue #369)
+        fake_settings.date_format = DateFormat.LOCALE
+        result = model._display_value(_cache(hidden_date=d), "hidden_date")
+        assert result
+        # March 1 — both day and month are single digits; must appear with leading zero.
+        assert "01" in result and "03" in result
 
     def test_counts_and_user_fields(self, model):
         assert model._display_value(_cache(log_count=7), "log_count") == "7"
@@ -225,15 +304,61 @@ class TestDataRoles:
 
     def test_alignment_role(self, model):
         model.load([_cache()])
-        center_idx = model.index(0, ALL_COLUMNS.index("difficulty"))
-        assert model.data(center_idx, Qt.ItemDataRole.TextAlignmentRole) == Qt.AlignmentFlag.AlignCenter
-        left_idx = model.index(0, ALL_COLUMNS.index("name"))
-        assert model.data(left_idx, Qt.ItemDataRole.TextAlignmentRole) != Qt.AlignmentFlag.AlignCenter
+        for col in ("cache_type", "difficulty", "terrain", "distance", "found",
+                    "container", "favorite", "hidden_date", "last_log",
+                    "found_date", "dnf_date", "placed_by"):
+            idx = model.index(0, ALL_COLUMNS.index(col))
+            assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) == Qt.AlignmentFlag.AlignCenter, col
+        for col in ("name", "gc_code", "country", "state", "county"):
+            idx = model.index(0, ALL_COLUMNS.index(col))
+            assert model.data(idx, Qt.ItemDataRole.TextAlignmentRole) != Qt.AlignmentFlag.AlignCenter, col
 
     def test_font_role_italic_when_found(self, model):
         model.load([_cache(found=True)])
         font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
         assert font is not None and font.italic()
+
+    def test_font_role_uses_grid_pt(self, model, fake_settings):
+        # FontRole always returns a font sized to the current text_size grid_pt.
+        for size in TextSize:
+            fake_settings.text_size = size
+            model.load([_cache(found=False)])
+            font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
+            assert font is not None
+            assert font.pointSize() == TEXT_SIZE_MAP[size]["grid"]
+
+    def test_font_role_found_italic_keeps_grid_pt(self, model, fake_settings):
+        # Found caches: italic AND correct point size.
+        fake_settings.text_size = TextSize.LARGE
+        model.load([_cache(found=True)])
+        font = model.data(model.index(0, 0), Qt.ItemDataRole.FontRole)
+        assert font is not None
+        assert font.italic()
+        assert font.pointSize() == TEXT_SIZE_MAP[TextSize.LARGE]["grid"]
+
+    def test_font_role_bold_name_when_has_waypoints(self, model):
+        # Name column must be bold when waypoint_count > 0.
+        c = _cache(waypoint_count=2)
+        model.load([c])
+        name_col = ALL_COLUMNS.index("name")
+        font = model.data(model.index(0, name_col), Qt.ItemDataRole.FontRole)
+        assert font is not None and font.bold()
+
+    def test_font_role_no_bold_name_without_waypoints(self, model):
+        # Name column must not be bold when waypoint_count == 0.
+        c = _cache(waypoint_count=0)
+        model.load([c])
+        name_col = ALL_COLUMNS.index("name")
+        font = model.data(model.index(0, name_col), Qt.ItemDataRole.FontRole)
+        assert font is not None and not font.bold()
+
+    def test_font_role_other_col_not_bold_with_waypoints(self, model):
+        # Non-name columns must not be bold even when waypoints exist.
+        c = _cache(waypoint_count=3)
+        model.load([c])
+        gc_col = ALL_COLUMNS.index("gc_code")
+        font = model.data(model.index(0, gc_col), Qt.ItemDataRole.FontRole)
+        assert font is not None and not font.bold()
 
     def test_tooltip_cache_type(self, model):
         model.load([_cache(cache_type="Unknown Cache")])
@@ -254,7 +379,26 @@ class TestDataRoles:
         type_idx = model.index(0, ALL_COLUMNS.index("cache_type"))
         cont_idx = model.index(0, ALL_COLUMNS.index("container"))
         assert model.data(type_idx, Qt.ItemDataRole.DecorationRole) is not None
-        assert model.data(cont_idx, Qt.ItemDataRole.DecorationRole) is not None
+        # Issue #416: container column has no DecorationRole icon; SizeBarDelegate
+        # paints the cell entirely, so no icon should be returned here.
+        assert model.data(cont_idx, Qt.ItemDataRole.DecorationRole) is None
+
+    def test_flag_placeholder_icon_when_unset(self, model):
+        model.load([_cache(user_flag=False), _cache(gc_code="GCB", user_flag=True)])
+        unset_idx = model.index(0, ALL_COLUMNS.index("user_flag"))
+        set_idx   = model.index(1, ALL_COLUMNS.index("user_flag"))
+        assert model.data(unset_idx, Qt.ItemDataRole.DecorationRole) is not None
+        assert model.data(set_idx,   Qt.ItemDataRole.DecorationRole) is None
+
+    def test_lock_placeholder_icon_when_unset(self, model):
+        # Issue #202: same placeholder pattern as user_flag.
+        model.load([_cache(locked=False), _cache(gc_code="GCB", locked=True)])
+        unset_idx = model.index(0, ALL_COLUMNS.index("locked"))
+        set_idx   = model.index(1, ALL_COLUMNS.index("locked"))
+        assert model.data(unset_idx, Qt.ItemDataRole.DecorationRole) is not None
+        assert model.data(set_idx,   Qt.ItemDataRole.DecorationRole) is None
+        assert model.data(set_idx, Qt.ItemDataRole.DisplayRole) == "🔒"
+        assert model.data(unset_idx, Qt.ItemDataRole.DisplayRole) == ""
 
     def test_userrole_returns_cache_and_dict(self, model):
         model.load([_cache(container="Micro", cache_type="Virtual Cache")])
@@ -278,10 +422,6 @@ class TestIconKeys:
     def test_type_icon_mapping(self):
         assert CacheTableModel._type_icon_key(_cache(cache_type="Multi-cache")) == "multi"
         assert CacheTableModel._type_icon_key(_cache(cache_type="Weird Type")) == "unknown"
-
-    def test_size_icon_mapping(self):
-        assert CacheTableModel._size_icon_key(_cache(container="large")) == "large"
-        assert CacheTableModel._size_icon_key(_cache(container="whatever")) == "other"
 
 
 # ── effective coords ────────────────────────────────────────────────────────────
@@ -346,10 +486,11 @@ class TestSort:
         ]
         caches[1].user_note = None
         caches[0].user_note = _note(1.0, 2.0)
+        caches[0].favorite_point = True
         m = self._loaded(model, caches)
         for col in ("terrain", "found", "corrected", "log_count", "last_log",
                     "hidden_date", "found_date", "dnf_date", "first_to_find",
-                    "user_flag", "user_sort", "favorite_points", "container",
+                    "user_flag", "user_sort", "favorite", "favorite_points", "container",
                     "latitude", "longitude", "country"):
             m.sort(ALL_COLUMNS.index(col), Qt.SortOrder.AscendingOrder)
             m.sort(ALL_COLUMNS.index(col), Qt.SortOrder.DescendingOrder)
@@ -361,6 +502,32 @@ class TestSort:
         model.sort(ALL_COLUMNS.index("name"), Qt.SortOrder.AscendingOrder)
         assert got and got[-1][0] == "name"
 
+    def test_sort_none_vs_string_no_crash(self, model):
+        # Regression: Optional[str] columns (country, state, etc.) caused
+        # TypeError when some caches had None and others had a string value,
+        # because the else branch returned int(0) for None and str for strings.
+        caches = [
+            _cache(gc_code="A", country="Denmark", state="Region H", placed_by="Alice"),
+            _cache(gc_code="B"),  # country/state/placed_by all None
+        ]
+        model.load(caches)
+        for col in ("country", "state", "county", "placed_by", "user_data_1"):
+            model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.AscendingOrder)
+            model.sort(ALL_COLUMNS.index(col), Qt.SortOrder.DescendingOrder)
+
+    def test_sort_by_favorite_no_crash(self, model):
+        # Regression #319: sort() fell through to getattr(c, "favorite") but the
+        # model attribute is favorite_point, causing AttributeError.
+        caches = [
+            _cache(gc_code="A", favorite_point=True),
+            _cache(gc_code="B"),
+        ]
+        model.load(caches)
+        model.sort(ALL_COLUMNS.index("favorite"), Qt.SortOrder.AscendingOrder)
+        assert model._caches[0].gc_code == "B"  # non-favourite first
+        model.sort(ALL_COLUMNS.index("favorite"), Qt.SortOrder.DescendingOrder)
+        assert model._caches[0].gc_code == "A"  # favourite first
+
 
 # ── flags / setData (needs DB) ──────────────────────────────────────────────────
 
@@ -369,6 +536,8 @@ class TestSetData:
         model.load([_cache()])
         uf = model.index(0, ALL_COLUMNS.index("user_flag"))
         assert model.flags(uf) & Qt.ItemFlag.ItemIsEditable
+        lk = model.index(0, ALL_COLUMNS.index("locked"))
+        assert model.flags(lk) & Qt.ItemFlag.ItemIsEditable
         nf = model.index(0, ALL_COLUMNS.index("name"))
         assert not (model.flags(nf) & Qt.ItemFlag.ItemIsEditable)
 
@@ -400,6 +569,23 @@ class TestSetData:
         assert ok is True
         assert cache.first_to_find is True
 
+    def test_setdata_toggles_locked(self, model, db_session, make_cache):
+        # Issue #202: click-to-toggle locked column, same pattern as user_flag
+        # and first_to_find — persisted to DB and reflected on the transient
+        # row used by the table.
+        c = make_cache(gc_code="GCLOCK")
+        db_session.add(c)
+        db_session.commit()
+        cache = _cache(gc_code="GCLOCK", locked=False)
+        model.load([cache])
+        ok = model.setData(model.index(0, ALL_COLUMNS.index("locked")), None)
+        assert ok is True
+        assert cache.locked is True
+        # Toggling again unlocks it.
+        ok2 = model.setData(model.index(0, ALL_COLUMNS.index("locked")), None)
+        assert ok2 is True
+        assert cache.locked is False
+
 
 # ── delegates ───────────────────────────────────────────────────────────────────
 
@@ -418,6 +604,22 @@ class TestDelegates:
         delegate.paint(painter, opt, idx)
         painter.end()
 
+    def test_cache_type_delegate_paints_icon_mode(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "icon")
+        model.load([_cache(cache_type="Traditional Cache")])
+        self._paint(CacheTypeDelegate(), model, "cache_type")
+        self._paint(CacheTypeDelegate(), model, "cache_type", selected=True)
+
+    def test_cache_type_delegate_falls_back_in_text_mode(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "text")
+        model.load([_cache(cache_type="Traditional Cache")])
+        self._paint(CacheTypeDelegate(), model, "cache_type")
+
+    def test_cache_type_delegate_falls_back_in_both_mode(self, model, monkeypatch):
+        monkeypatch.setattr(ct, "get_type_display", lambda: "both")
+        model.load([_cache(cache_type="Traditional Cache")])
+        self._paint(CacheTypeDelegate(), model, "cache_type")
+
     def test_size_bar_delegate_paints_physical(self, model):
         model.load([_cache(container="small", cache_type="traditional cache")])
         d = SizeBarDelegate()
@@ -427,6 +629,13 @@ class TestDelegates:
     def test_size_bar_delegate_paints_letter(self, model):
         model.load([_cache(container="other", cache_type="virtual cache")])
         self._paint(SizeBarDelegate(), model, "container")
+
+    def test_size_bar_delegate_paints_not_chosen(self, model):
+        # Issue #328: "Not chosen" must render a "?" label, not blank
+        model.load([_cache(container="Not chosen", cache_type="traditional cache")])
+        d = SizeBarDelegate()
+        assert d._SIZE_LABELS.get("not chosen") == "?"
+        self._paint(d, model, "container")
 
     def test_size_bar_sizehint(self, model):
         from PySide6.QtWidgets import QStyleOptionViewItem
@@ -460,6 +669,44 @@ class TestDelegates:
         model.load([c])
         self._paint(GcCodeDelegate(), model, "gc_code")
 
+    def test_gc_code_delegate_owner_match_irregular_whitespace(self, model, fake_settings):
+        """Issue #272: some GPX exports embed non-breaking spaces or doubled
+        whitespace inside multi-word owner names. The owner match must still
+        succeed once both sides are whitespace-normalized."""
+        fake_settings.gc_username = "Cheminer  Will"      # double space, as typed in Settings
+        c = _cache(gc_code="GCNBSP", found=False, available=True, archived=False)
+        c.owner_name = "Cheminer\xa0Will"                  # non-breaking space, from GPX
+        model.load([c])
+        d = GcCodeDelegate()
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        assert d._bg_color(idx) == GcCodeDelegate._COLOR_PLACED
+
+    def test_gc_code_delegate_owner_match_gsak_stats_suffix(self, model, fake_settings):
+        """Issue #272 (confirmed root cause, see Owned_Export.gpx): GSAK's
+        statistics macro (e.g. FindStatGen) appends found/hide counts to the
+        owner field on export, e.g. 'Cheminer Will (F=1361 H=54)'. This must
+        still match the plain username configured in Settings."""
+        fake_settings.gc_username = "Cheminer Will"
+        c = _cache(gc_code="GCSTATS", found=False, available=True, archived=False)
+        c.owner_name = "Cheminer Will (F=1361 H=54)"
+        model.load([c])
+        d = GcCodeDelegate()
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        assert d._bg_color(idx) == GcCodeDelegate._COLOR_PLACED
+
+    def test_gc_code_delegate_uses_owner_not_placed_by(self, model, fake_settings):
+        """Issue #270: an adopted cache (owner differs from the original
+        placer) must still be colored as 'owned' when owner_name matches —
+        even though placed_by does not."""
+        fake_settings.gc_username = "AdoptedOwner"
+        c = _cache(gc_code="GCADOPT", found=False, available=True, archived=False)
+        c.placed_by = "OriginalPlacer"
+        c.owner_name = "AdoptedOwner"
+        model.load([c])
+        d = GcCodeDelegate()
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        assert d._bg_color(idx) == GcCodeDelegate._COLOR_PLACED
+
     def test_gc_code_bg_none_when_no_cache(self, model):
         d = GcCodeDelegate()
 
@@ -467,6 +714,39 @@ class TestDelegates:
             def data(self, role):
                 return None
         assert d._bg_color(_Idx()) is None
+
+    def test_gc_code_text_for_bg_light(self):
+        # Issue #366: light pastel bg → black text
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor as _QColor
+        assert GcCodeDelegate._text_for_bg(GcCodeDelegate._COLOR_ARCHIVED) == \
+            _QColor(Qt.GlobalColor.black)
+        assert GcCodeDelegate._text_for_bg(GcCodeDelegate._COLOR_FOUND) == \
+            _QColor(Qt.GlobalColor.black)
+
+    def test_gc_code_text_for_bg_dark(self):
+        # Issue #366: dark bg (hypothetical) → white text
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor as _QColor
+        assert GcCodeDelegate._text_for_bg(_QColor("#1e1e1e")) == \
+            _QColor(Qt.GlobalColor.white)
+
+    def test_gc_code_paint_dark_mode_no_crash(self, model):
+        # Issue #366: paint must succeed with a dark palette without crash
+        from PySide6.QtWidgets import QStyleOptionViewItem
+        from PySide6.QtCore import QRect
+        from PySide6.QtGui import QPalette, QColor as _QColor
+        model.load([_cache(gc_code="GCARCH", archived=True)])
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        pm = QPixmap(80, 24)
+        painter = QPainter(pm)
+        opt = QStyleOptionViewItem()
+        opt.rect = QRect(0, 0, 80, 24)
+        dark_palette = QPalette()
+        dark_palette.setColor(QPalette.ColorRole.Window, _QColor("#1e1e1e"))
+        opt.palette = dark_palette
+        GcCodeDelegate().paint(painter, opt, idx)
+        painter.end()
 
 
 # ── view ────────────────────────────────────────────────────────────────────────
@@ -483,11 +763,13 @@ def view(monkeypatch, qtbot):
 
 class TestView:
     def test_construction_sets_delegates(self, view):
-        # container + gc_code columns get custom delegates
+        # container + gc_code + cache_type columns get custom delegates
         assert isinstance(view.itemDelegateForColumn(ALL_COLUMNS.index("container")),
                           SizeBarDelegate)
         assert isinstance(view.itemDelegateForColumn(ALL_COLUMNS.index("gc_code")),
                           GcCodeDelegate)
+        assert isinstance(view.itemDelegateForColumn(ALL_COLUMNS.index("cache_type")),
+                          CacheTypeDelegate)
 
     def test_load_and_counts(self, view):
         view.load_caches([_cache(gc_code="A"), _cache(gc_code="B", user_flag=True)])
@@ -682,3 +964,10 @@ class TestView:
         view.load_caches([])
         from PySide6.QtCore import QPoint
         view._show_context_menu(QPoint(0, 0))  # indexAt -> invalid -> early return
+
+    def test_refresh_visuals_updates_row_height(self, view, fake_settings):
+        # refresh_visuals must sync row height with the current text_size setting.
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            assert view.verticalHeader().defaultSectionSize() == TEXT_SIZE_MAP[size]["row_height"]

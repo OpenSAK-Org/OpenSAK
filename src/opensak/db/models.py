@@ -132,10 +132,34 @@ class Cache(Base):
     # without loading the noload'ed logs relationship. Updated on import.
     last_log_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # ── Issue #377: Cached waypoint count ────────────────────────────────────
+    # Number of child waypoints (parking, stages, etc.), cached so the grid
+    # can show a visual cue without loading the noload'ed waypoints relation.
+    # Updated on import in _insert_extra_wpts() and _link_extra_waypoints().
+    waypoint_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # Custom waypoint link (issue #141)
     # For CW... entries: optionally links to a parent geocache's gc_code.
     # NULL for all real geocaches imported from GPX/PQ.
     parent_gc_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+
+    # ── Issue #202: Lock a cache ─────────────────────────────────────────────
+    # When True, _upsert_cache() skips overwriting the scalar GPX-sourced
+    # fields (name, type, container, coordinates, D/T, owner, status,
+    # descriptions, hint, country/state/county) on re-import. Lets users
+    # preserve a cache's data as it was when found, even if the listing
+    # changes later (e.g. a difficulty rerate). Logs/attributes/waypoints are
+    # not affected — they're rebuilt fresh on every import regardless.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Location provenance (issue #60 — reverse-geocoding phase 3)
+    # 'groundspeak' = taken from GPX import, 'computed' = offline boundary engine
+    location_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # 'posted' = original coordinates used, 'corrected' = user-solved coords used
+    location_basis: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    location_updated: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # boundaries dataset version string (e.g. "2025-06-01") used for the last resolve
+    location_dataset: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Metadata
     imported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -187,6 +211,9 @@ class Waypoint(Base):
 
     latitude: Mapped[Optional[float]] = mapped_column(Float)   # None = coordinates not yet known
     longitude: Mapped[Optional[float]] = mapped_column(Float)
+
+    # GC code of the parent cache (issue #376 — mirrors cParent in GSAK)
+    parent_gc_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="waypoints")

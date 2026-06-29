@@ -35,7 +35,7 @@ def _note(corrected=False):
 def _cache(**kw):
     d = dict(gc_code="GC1", name="Name", cache_type="Traditional Cache",
              difficulty=1.5, terrain=2.0, latitude=55.0, longitude=12.0,
-             found=False, user_note=None)
+             found=False, dnf=False, user_note=None)
     d.update(kw)
     return SimpleNamespace(**d)
 
@@ -186,6 +186,25 @@ class TestJsMethods:
     def test_update_home(self, w):
         w.update_home()
         assert any("setHomeLocation" in js for js in w._page.js)
+
+    def test_show_waypoint_markers(self, w):
+        import json
+        wps = json.dumps([{"lat": 55.1, "lon": 12.1, "prefix": "PK", "wp_type": "Parking", "name": "P"}])
+        w.show_waypoint_markers(wps)
+        assert any("showWaypointMarkers" in js for js in w._page.js)
+
+    def test_clear_waypoint_markers(self, w):
+        w.clear_waypoint_markers()
+        assert w._page.js == ["clearWaypointMarkers()"]
+
+    def test_waypoint_methods_noop_when_not_ready(self, qtbot):
+        # Regression for #393: waypoint marker methods no-op before map is loaded.
+        widget = MapWidget()
+        qtbot.addWidget(widget)
+        widget._page = FakePage()
+        widget.show_waypoint_markers("[]")
+        widget.clear_waypoint_markers()
+        assert widget._page.js == []
 
     def test_methods_noop_when_not_ready(self, qtbot):
         widget = MapWidget()

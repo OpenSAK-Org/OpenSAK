@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opensak"
-version = "1.13.11"
+dynamic = ["version"]
 description = "OpenSAK — Open Source geocaching management tool (GSAK successor)"
 readme = "README.md"
 license = { text = "MIT" }
@@ -14,9 +14,9 @@ dependencies = [
     "alembic>=1.13",
     "lxml>=5.0",
     "PySide6>=6.6",
-    "reverse_geocoder>=1.5",
-    "pycountry>=23.12",
     "numpy>=1.24",
+    "certifi>=2024.2.2",
+    "shapely>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -30,10 +30,17 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = { attr = "opensak.__version__" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests/unit-tests", "tests/e2e-tests"]
 pythonpath = ["src", "."]
 addopts = "--import-mode=importlib"
+# tests/screenshots is a separate, slower, opt-in suite for generating
+# marketing/doc screenshots (site/, User Guide) — it must not run as part of
+# a normal `pytest tests/` sweep. Run it explicitly: pytest tests/screenshots -v
+norecursedirs = [".git", ".venv", "build", "dist", "tests/screenshots"]
 markers = [
     "gui: tests that require a display and pytest-qt",
 ]

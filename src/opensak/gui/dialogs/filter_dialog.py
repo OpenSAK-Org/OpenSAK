@@ -1,12 +1,13 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Fem faner:
+Seks faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Attributter — alle Groundspeak attributter
-5. Where       — rå SQL WHERE-betingelse
+5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+6. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -38,11 +39,12 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter,
-    AttributeFilter, HasTrackableFilter, HasCorrectedFilter,
+    AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
+    TextSearchFilter,
     FilterProfile,
 )
 
@@ -250,6 +252,7 @@ class FilterDialog(QDialog):
 
         save_btn = QPushButton(tr("filter_save_btn"))
         save_btn.setMaximumWidth(110)
+        save_btn.setAutoDefault(False)
         save_btn.clicked.connect(self._save_profile)
         profile_row.addWidget(save_btn)
 
@@ -269,11 +272,13 @@ class FilterDialog(QDialog):
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
         self._attributes_tab = self._build_attributes_tab()
+        self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
+        self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
 
@@ -281,7 +286,7 @@ class FilterDialog(QDialog):
         btn_row = QHBoxLayout()
 
         apply_btn = QPushButton(tr("filter_apply_btn"))
-        apply_btn.setStyleSheet("font-weight: bold;")
+        apply_btn.setDefault(True)
         apply_btn.clicked.connect(self._apply)
         btn_row.addWidget(apply_btn)
 
@@ -437,7 +442,8 @@ class FilterDialog(QDialog):
         self._dist_max = QDoubleSpinBox()
         self._dist_max.setRange(0.1, 9999.0)
         self._dist_max.setValue(50.0)
-        self._dist_max.setSuffix(" km")
+        from opensak.gui.settings import get_settings as _gs
+        self._dist_max.setSuffix(" mi" if _gs().use_miles else " km")
         self._dist_max.setEnabled(False)
         dist_layout.addWidget(self._dist_max)
         dist_layout.addStretch()
@@ -585,6 +591,18 @@ class FilterDialog(QDialog):
         flag_layout.addStretch()
         layout.addRow(flag_group)
 
+        # Locked (issue #202)
+        locked_group = QGroupBox(tr("filter_locked_group"))
+        locked_layout = QHBoxLayout(locked_group)
+        self._locked_yes = QCheckBox(tr("yes"))
+        self._locked_yes.setChecked(True)
+        self._locked_no  = QCheckBox(tr("no"))
+        self._locked_no.setChecked(True)
+        locked_layout.addWidget(self._locked_yes)
+        locked_layout.addWidget(self._locked_no)
+        locked_layout.addStretch()
+        layout.addRow(locked_group)
+
         # DNF
         dnf_group = QGroupBox(tr("filter_dnf_group"))
         dnf_layout = QHBoxLayout(dnf_group)
@@ -715,6 +733,41 @@ class FilterDialog(QDialog):
         outer_layout.addWidget(table)
         return outer
 
+    def _build_text_search_tab(self) -> QWidget:
+        """Tekstsøgning fane — søg i fritekst felter."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        group = QGroupBox(tr("filter_text_search_group"))
+        group_layout = QFormLayout(group)
+        group_layout.setSpacing(8)
+
+        self._text_search_input = QLineEdit()
+        self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
+        group_layout.addRow(tr("filter_text_search_label"), self._text_search_input)
+
+        self._text_search_description = QCheckBox(tr("detail_tab_desc"))
+        self._text_search_description.setChecked(True)
+        group_layout.addRow(self._text_search_description)
+
+        self._text_search_logs = QCheckBox(tr("detail_tab_logs"))
+        self._text_search_logs.setChecked(True)
+        group_layout.addRow(self._text_search_logs)
+
+        self._text_search_notes = QCheckBox(tr("filter_text_search_notes"))
+        self._text_search_notes.setChecked(True)
+        group_layout.addRow(self._text_search_notes)
+
+        self._text_search_hint = QCheckBox(tr("detail_tab_hint"))
+        self._text_search_hint.setChecked(False)
+        group_layout.addRow(self._text_search_hint)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        return widget
+
     def _build_where_tab(self) -> QWidget:
         """Where filter fane — SQL WHERE clause editor."""
         widget = QWidget()
@@ -757,6 +810,28 @@ class FilterDialog(QDialog):
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
         from PySide6.QtWidgets import QScrollArea as _QScrollArea
+        from PySide6.QtCore import QLocale
+        from opensak.gui.settings import get_settings
+        from opensak.utils.types import DateFormat, norm_locale_date_fmt
+
+        settings = get_settings()
+        dist_unit = "mi" if settings.use_miles else "km"
+
+        fmt = settings.date_format
+        if fmt == DateFormat.DMY:
+            date_col_eg = "15.06.2020"
+            date_where_eg = "01.01.2023"
+        elif fmt == DateFormat.MDY:
+            date_col_eg = "06/15/2020"
+            date_where_eg = "01/01/2023"
+        elif fmt == DateFormat.YMD:
+            date_col_eg = "2020-06-15"
+            date_where_eg = "2023-01-01"
+        else:  # LOCALE
+            _loc = QLocale.system()
+            _fmt = norm_locale_date_fmt(_loc.dateFormat(QLocale.FormatType.ShortFormat))
+            date_col_eg = _loc.toString(QDate(2020, 6, 15), _fmt)
+            date_where_eg = _loc.toString(QDate(2023, 1, 1), _fmt)
 
         dlg = QDialog(self)
         dlg.setWindowTitle(tr("filter_where_info_title"))
@@ -795,14 +870,14 @@ class FilterDialog(QDialog):
             f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
             f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
             "<tr><td><code>hidden_date</code></td><td>datetime</td>"
-            "<td>e.g. <code>'2020-06-15'</code></td></tr>"
+            f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
             "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
             "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
             f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
             "<tr><td><code>premium_only</code></td><td>boolean</td><td>1 or 0</td></tr>"
             f"<tr><td><code>favorite_points</code></td><td>integer</td><td>{tr('filter_where_note_fav')}</td></tr>"
             f"<tr><td><code>log_count</code></td><td>integer</td><td>{tr('filter_where_note_logcount')}</td></tr>"
-            f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance')}</td></tr>"
+            f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance', unit=dist_unit)}</td></tr>"
             f"<tr><td><code>user_data_1</code> – <code>user_data_4</code></td>"
             f"<td>text</td><td>{tr('filter_where_note_userdata')}</td></tr>"
             "</table><br>"
@@ -812,7 +887,17 @@ class FilterDialog(QDialog):
             "<code>favorite_points &gt; 100</code><br>"
             "<code>found = 0 AND available = 1</code><br>"
             "<code>name LIKE '%night%'</code><br>"
-            "<code>hidden_date &gt; '2023-01-01'</code>"
+            "<code>long_description LIKE '%waterfall%'</code><br>"
+            f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
+            f"<b>{tr('filter_where_subquery_heading')}</b><br>"
+            "<table cellspacing='4'>"
+            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+            f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
+            f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
+            "</table><br>"
+            "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
+            "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
         )
 
         scroll.setWidget(content)
@@ -894,6 +979,8 @@ class FilterDialog(QDialog):
         self._county_filter.clear()
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
+        self._locked_yes.setChecked(True)
+        self._locked_no.setChecked(True)
         self._dnf_yes.setChecked(True)
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
@@ -908,11 +995,19 @@ class FilterDialog(QDialog):
             nej_cb.setChecked(False)
             ingen_cb.setChecked(True)
 
+    def _reset_text_search(self) -> None:
+        self._text_search_input.clear()
+        self._text_search_description.setChecked(True)
+        self._text_search_logs.setChecked(True)
+        self._text_search_notes.setChecked(True)
+        self._text_search_hint.setChecked(False)
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
         self._reset_attributes()
+        self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
@@ -930,6 +1025,8 @@ class FilterDialog(QDialog):
             self._reset_misc()
         elif tab is self._attributes_tab:
             self._reset_attributes()
+        elif tab is self._text_search_tab:
+            self._reset_text_search()
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
 
@@ -996,7 +1093,9 @@ class FilterDialog(QDialog):
         if self._dist_enabled.isChecked():
             from opensak.gui.settings import get_settings
             s = get_settings()
-            fs.add(DistanceFilter(s.home_lat, s.home_lon, self._dist_max.value()))
+            dist_val = self._dist_max.value()
+            max_km = dist_val * 1.60934 if s.use_miles else dist_val
+            fs.add(DistanceFilter(s.home_lat, s.home_lon, max_km))
 
         # Premium
         prem_yes = self._prem_yes.isChecked()
@@ -1017,6 +1116,9 @@ class FilterDialog(QDialog):
         cc_no  = self._cc_no.isChecked()
         if cc_yes and not cc_no:
             fs.add(HasCorrectedFilter())
+        elif cc_no and not cc_yes:
+            fs.add(NoCorrectedFilter())
+        # Begge valgt (eller ingen) = vis alt = intet filter
 
         # Datoer — hjælper til at konvertere QDate til datetime
         def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
@@ -1087,6 +1189,14 @@ class FilterDialog(QDialog):
         elif flag_no and not flag_yes:
             fs.add(UserFlagFilter(flagged=False))
 
+        # Locked (issue #202)
+        locked_yes = self._locked_yes.isChecked()
+        locked_no  = self._locked_no.isChecked()
+        if locked_yes and not locked_no:
+            fs.add(LockedFilter(locked=True))
+        elif locked_no and not locked_yes:
+            fs.add(LockedFilter(locked=False))
+
         # DNF
         dnf_yes = self._dnf_yes.isChecked()
         dnf_no  = self._dnf_no.isChecked()
@@ -1128,6 +1238,17 @@ class FilterDialog(QDialog):
                 for af in attr_filters:
                     attr_or.add(af)
                 fs.add(attr_or)
+
+        # Tekstsøgning
+        ts_text = self._text_search_input.text().strip()
+        if ts_text:
+            fs.add(TextSearchFilter(
+                text=ts_text,
+                search_description=self._text_search_description.isChecked(),
+                search_logs=self._text_search_logs.isChecked(),
+                search_notes=self._text_search_notes.isChecked(),
+                search_hint=self._text_search_hint.isChecked(),
+            ))
 
         # WHERE clause
         if self._where_tab is not None:
@@ -1268,7 +1389,10 @@ class FilterDialog(QDialog):
                 self._archived_cb.setChecked(True)
             elif ftype == "distance":
                 self._dist_enabled.setChecked(True)
-                self._dist_max.setValue(getattr(f, "max_km", 10.0))
+                from opensak.gui.settings import get_settings as _gs
+                saved_km = getattr(f, "max_km", 10.0)
+                display = saved_km * 0.621371 if _gs().use_miles else saved_km
+                self._dist_max.setValue(display)
             elif ftype == "premium":
                 self._prem_yes.setChecked(True)
                 self._prem_no.setChecked(False)
@@ -1281,6 +1405,9 @@ class FilterDialog(QDialog):
             elif ftype == "has_corrected":
                 self._cc_yes.setChecked(True)
                 self._cc_no.setChecked(False)
+            elif ftype == "no_corrected":
+                self._cc_yes.setChecked(False)
+                self._cc_no.setChecked(True)
             elif ftype == "attribute":
                 attr_id = getattr(f, "attribute_id", None)
                 is_on   = getattr(f, "is_on", True)
@@ -1290,6 +1417,12 @@ class FilterDialog(QDialog):
                         ja_cb.setChecked(True)
                     else:
                         nej_cb.setChecked(True)
+            elif ftype == "text_search":
+                self._text_search_input.setText(getattr(f, "text", ""))
+                self._text_search_description.setChecked(getattr(f, "search_description", True))
+                self._text_search_logs.setChecked(getattr(f, "search_logs", True))
+                self._text_search_notes.setChecked(getattr(f, "search_notes", True))
+                self._text_search_hint.setChecked(getattr(f, "search_hint", False))
             elif ftype == "where_clause":
                 if self._where_tab is not None:
                     self._where_sql_general.setPlainText(getattr(f, "sql", ""))
@@ -1303,6 +1436,10 @@ class FilterDialog(QDialog):
                 flagged = getattr(f, "flagged", True)
                 self._flag_yes.setChecked(flagged)
                 self._flag_no.setChecked(not flagged)
+            elif ftype == "locked":
+                locked = getattr(f, "locked", True)
+                self._locked_yes.setChecked(locked)
+                self._locked_no.setChecked(not locked)
             elif ftype == "dnf":
                 has_dnf = getattr(f, "has_dnf", True)
                 self._dnf_yes.setChecked(has_dnf)

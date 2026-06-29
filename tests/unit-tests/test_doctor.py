@@ -253,7 +253,7 @@ class TestCheckFeatureFlags:
     def test_failure_branch(self, monkeypatch):
         # Drop a flag attribute so getattr() inside the check raises -> except branch.
         from opensak.utils import flags
-        monkeypatch.delattr(flags, "where_filter", raising=False)
+        monkeypatch.delattr(flags, "update_location", raising=False)
         _, ok, _ = check_feature_flags()
         assert ok is False
 

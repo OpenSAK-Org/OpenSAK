@@ -1,12 +1,10 @@
-# tests/unit-tests/test_app_settings.py — AppSettings / HomePoint (temp-INI).
+# tests/unit-tests/test_app_settings.py — AppSettings / HomePoint (isolated store).
 
 from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("pytestqt")
-
-from PySide6.QtCore import QSettings
 
 from opensak.gui.settings import AppSettings, HomePoint
 from opensak.utils.types import CoordFormat
@@ -16,18 +14,22 @@ _VALID = "N55 47.250 E012 25.000"
 
 @pytest.fixture
 def s(tmp_path, monkeypatch):
-    # Bind AppSettings to an explicit temp INI — full isolation from the real
-    # user settings (a plain attribute swap, no class patching).
+    """Isolated AppSettings — SettingsStore backed by a temp opensak.json."""
+    # Isolate the store so each test gets a fresh in-memory dict
+    from opensak import settings_store
+    fresh_store = settings_store.SettingsStore()
+    fresh_store._data = {}   # empty, no disk I/O
+    fresh_store._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(settings_store, "_store", fresh_store)
+
     monkeypatch.setattr(
         "opensak.db.manager.get_db_manager",
         lambda: (_ for _ in ()).throw(RuntimeError("no manager")),
     )
-    obj = AppSettings()
-    obj._s = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
-    return obj
+    return AppSettings()
 
 
-# ── HomePoint ───────────────────────────────────────────────────────────────────
+# ── HomePoint ────────────────────────────────────────────────────────────────────
 
 class TestHomePoint:
     def test_to_from_dict_roundtrip(self):
@@ -40,7 +42,7 @@ class TestHomePoint:
         assert repr(HomePoint("X", 1.0, 2.0)) == "HomePoint('X', 1.0, 2.0)"
 
 
-# ── home lat/lon (global fallback path) ─────────────────────────────────────────
+# ── home lat/lon (global fallback path) ──────────────────────────────────────────
 
 class TestHomeCoords:
     def test_defaults(self, s):
@@ -54,7 +56,7 @@ class TestHomeCoords:
         assert s.home_lon == pytest.approx(2.5)
 
 
-# ── per-database key resolution ─────────────────────────────────────────────────
+# ── per-database key resolution ──────────────────────────────────────────────────
 
 class TestPerDbKeys:
     def test_per_db_key_used_when_active(self, s, monkeypatch):
@@ -64,11 +66,10 @@ class TestPerDbKeys:
             lambda: SimpleNamespace(active=active),
         )
         s.home_lat = 10.0
-        # stored under per-db key; a fresh read resolves the same per-db value
         assert s.home_lat == pytest.approx(10.0)
 
 
-# ── home points list ────────────────────────────────────────────────────────────
+# ── home points list ─────────────────────────────────────────────────────────────
 
 class TestHomePoints:
     def test_empty_by_default(self, s):
@@ -83,7 +84,8 @@ class TestHomePoints:
         assert s.home_points == []
 
     def test_corrupt_json_ignored(self, s):
-        s._s.setValue("homepoints/list", "{not json")
+        from opensak.settings_store import get_store
+        get_store().set("homepoints.list", "{not json")
         assert s.home_points == []
 
     def test_gc_home_prepended_as_star(self, s):
@@ -115,7 +117,7 @@ class TestHomePoints:
         assert s.active_home_name == ""
 
 
-# ── geocaching user fields ──────────────────────────────────────────────────────
+# ── geocaching user fields ────────────────────────────────────────────────────────
 
 class TestGcFields:
     def test_username_stripped(self, s):
@@ -146,7 +148,7 @@ class TestGcFields:
         assert s.is_setup_complete() is True
 
 
-# ── display / format / units ────────────────────────────────────────────────────
+# ── display / format / units ──────────────────────────────────────────────────────
 
 class TestDisplay:
     def test_theme_roundtrip(self, s):
@@ -163,7 +165,8 @@ class TestDisplay:
         assert s.coord_format == CoordFormat.DMS
 
     def test_coord_format_invalid_defaults_dmm(self, s):
-        s._s.setValue("display/coord_format", "bogus")
+        from opensak.settings_store import get_store
+        get_store().set("display.coord_format", "bogus")
         assert s.coord_format == CoordFormat.DMM
 
     def test_map_provider_and_url(self, s):
@@ -171,14 +174,8 @@ class TestDisplay:
         s.map_provider = "osm"
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
-    def test_show_flags(self, s):
-        s.show_archived = True
-        s.show_found = False
-        assert s.show_archived is True
-        assert s.show_found is False
 
-
-# ── window state / search / nominatim / paths ───────────────────────────────────
+# ── window state / search / nominatim / paths ─────────────────────────────────────
 
 class TestMisc:
     def test_window_state_roundtrip(self, s):
@@ -217,7 +214,7 @@ class TestMisc:
 
     def test_sync_does_not_raise(self, s):
         s.gc_username = "bob"
-        s.sync()  # flush to disk
+        s.sync()
 
     def test_get_settings_is_singleton(self):
         from opensak.gui.settings import get_settings

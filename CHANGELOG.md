@@ -8,6 +8,165 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.0] — 2026-06-29
+
+> First stable release of the 1.14.0 cycle. Replaces the run of
+> `1.14.0-beta.1` … `1.14.0-beta.20` builds — see git history for the
+> detailed beta-by-beta log if needed.
+
+### Added
+
+- **Lock a cache against import overwrites** (closes #202) — a long-requested
+  GSAK feature. Locking a cache freezes its scalar fields (name, type,
+  container, coordinates, D/T, owner, status, descriptions, hint,
+  country/state/county) so a later PQ/GPX re-import can't silently change
+  data your stats depend on. Logs, attributes and waypoints still refresh
+  normally. Filterable and sortable like any other column.
+
+- **Personal notes, round-trippable with GSAK** (closes #389, #390, #391, #392)
+  — a new "Notes" tab on the cache detail panel for free-text notes per
+  cache, separate from the geocaching.com description and logs. Imported
+  from and exported back to GSAK's `gsak:UserNote` extension, so a note
+  survives an export → GSAK → re-import round trip.
+
+- **Child waypoints are now visible in the UI** (closes #376, #377, #378,
+  #393) — cache names with waypoints show in bold in the list, a new
+  "Waypoints" tab lists each one's prefix, type, name, coordinates and
+  description, and selecting it shows the markers on the map.
+
+- **Attributes tab in the cache detail panel** (closes #417) — lists every
+  cache attribute with a green ✓ or red ✗ marker.
+
+- **Keyboard Shortcuts dialog** (closes #205) — Help → "Keyboard
+  Shortcuts…" opens a searchable reference of every shortcut. Shortcuts are
+  managed through a central registry; user overrides persist across
+  restarts.
+
+- **Full-text search filter** (closes #294) — a new "Text Search" tab in the
+  filter dialog searches cache descriptions, logs, and personal notes
+  (hint text off by default), pushed down to SQL so it stays fast on large
+  databases.
+
+- **Cache type icon in the detail panel** (closes #286) — shown next to the
+  cache title, scaling with the text-size setting. Found/DNF map-pin
+  smileys now correctly use gold/dark-blue regardless of cache type,
+  matching GSAK.
+
+- **Type column display options** (closes #413, #414, #415, #416) — show
+  icon only (default), name as text, or both, via a new column-dialog
+  setting.
+
+- **Distance calculation reworked** (closes #60) — now computed once per
+  centre-point change instead of on every refresh, which kept large
+  databases noticeably faster. A new Vincenty (WGS84) method is available
+  alongside the existing Haversine default in Settings → Advanced.
+
+- **Active filter count in the info bar** (closes #373) — shows e.g. "3
+  filters active" instead of a generic label.
+
+- **Welcome wizard for first-run setup** (closes #210) — walks new
+  installations through language, installation folder, database folder,
+  optional Geocaching.com profile, and a confirmation screen. A new "Run
+  setup wizard again" button in Settings → Advanced (fixes #358) lets you
+  re-run it later, e.g. to change folders.
+
+- **JSON-based settings store** (closes #209) — replaces QSettings and the
+  old `preferences.json` with a single `opensak.json` file. Existing
+  installations migrate automatically and transparently on first launch of
+  this version.
+
+- **Database and installation folders manageable from Settings → Advanced**
+  — view both folders, and move existing databases to a new folder (with
+  the option to keep or delete the originals) without going through the
+  setup wizard again.
+
+- **Per-database column views with drag-to-reorder** (closes #199) — visible
+  columns and widths are remembered separately per database; drag column
+  headers to reorder them.
+
+- **UI text and icon size is now adjustable** (closes #286, #287, #290) — a
+  new Settings → Display option offers Small, Medium (default), and Large,
+  affecting the cache list, detail panel, and tab labels.
+
+- **GC Code colors and clickable status counts now match GSAK** (issue
+  #270) — found caches show yellow, your own caches show green, and
+  clicking a colored count in the info bar (Found / My caches / Inactive /
+  All) filters the list to that status.
+
+- **GSAK personal/user fields are now imported** (closes #269) — `UserFlag`,
+  `IsPremium`, `UserSort`, `UserData`/`User2`/`User3`/`User4` and
+  `FavPoints` from GSAK-exported GPX are imported without overwriting data
+  on a later plain Pocket Query re-import.
+
+- **Full log text shown without truncation** (fixes #218), and **links in
+  logs are now clickable** (fixes #219), matching the existing behaviour of
+  the cache description tab.
+
+- **User Guide link in the Help menu** — opens the online User Guide
+  directly in your default browser.
+
+- **Debug logging system** — writes to `opensak.log` in the install
+  directory (resets on startup, rotates at 1 MB). "Open log file" was added
+  to the Help menu, making it easy to attach when reporting issues.
+
+- **New "no corrected coordinates" filter** (fixes #274) — mirrors the
+  existing Premium/Non-Premium filter pair; previously unchecking "has
+  corrected coordinates" alone produced no filter at all.
+
+### Changed
+
+- **Owned-cache counting and coloring now use the `owner` field instead of
+  `placed_by`** (issue #270) — an adopted cache is now attributed to its
+  current owner, matching GSAK.
+
+### Fixed
+
+- **Hint encoding detection was reversed** (fixes #329) — geocaching.com PQ
+  exports deliver hints as plaintext, not ROT13 ciphertext as previously
+  assumed; OpenSAK was showing plaintext hints as gibberish and vice versa.
+  Display defaults to obscured either way; "Decode hint" reveals it.
+- **Google Maps link in the cache detail pane didn't open** (fixes #321).
+- **GSAK GPX logs were capped at 20 entries** (fixes #266) — all logs are
+  now shown.
+- **A companion `-wpts.gpx` file could import as a duplicate set of caches**
+  (fixes #410) — detection now inspects file content instead of filename.
+- **Container/size column sorted alphabetically instead of by actual size**
+  (fixes #412).
+- **Favorites column showed on new databases despite always being empty**
+  (fixes #418) — off by default now, since populating it requires the
+  Geocaching.com Live API, which OpenSAK doesn't have yet.
+- **Adventure Lab stages with non-`GC`/`LC` prefixes were silently dropped
+  on import** (fixes #359).
+- **Newly imported caches showed no distance or bearing until restart**
+  (fixes #359).
+- **GC Code text could be unreadable in dark mode** (fixes #366).
+- **Unset flag column had no visual indicator** (fixes #290).
+- **Locale-aware dates weren't zero-padded consistently** (fixes #369).
+- **Enter key in the filter dialog triggered "Save profile" instead of
+  Apply** (fixes #370).
+- **Text/icon size setting didn't take effect until reselecting a cache**
+  (fixes #371).
+- **Import progress bar was indeterminate** (fixes #372) — now shows real
+  progress based on a waypoint pre-scan.
+- **Small/Large text size options looked almost identical to Medium**
+  (fixes #374, #375) — range widened, and the setting now also applies to
+  the cache grid's font and row height.
+- **Cache detail panel could crash when sorting logs with some entries
+  missing a date** (fixes #429).
+- **Several cache-table columns weren't center-aligned like their
+  neighbours** (fixes #431).
+- **Update checker failed with SSL certificate errors on Windows** — the
+  bundled `.exe` now explicitly uses `certifi`'s certificate bundle.
+- **Setup wizard's database-folder step defaulted to the install folder
+  instead of the actual database folder** on re-run.
+- **Boolean settings could silently corrupt to base64 strings** in the new
+  JSON settings store — existing corrupted values repair automatically on
+  startup.
+
+For planned features and known issues see the [GitHub Issues list](https://github.com/AgreeDK/opensak/issues).
+
+---
+
 ## [1.13.12] — 2026-06-15
 
 ### Added

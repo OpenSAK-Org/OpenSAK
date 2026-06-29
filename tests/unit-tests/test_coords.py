@@ -224,6 +224,52 @@ class TestParseCoordsInvalid:
         assert parse_coords("   ") is None
 
 
+class TestParseCoordsOutOfRange:
+    # Regression for #323: syntactically valid but geographically impossible inputs
+    # must return None instead of producing nonsense coordinates.
+
+    def test_dd_lat_exceeds_90(self):
+        assert parse_coords("91.0, 10.0") is None
+
+    def test_dd_lon_exceeds_180(self):
+        assert parse_coords("45.0, 181.0") is None
+
+    def test_dd_lat_below_minus_90(self):
+        assert parse_coords("-91.0, 10.0") is None
+
+    def test_dd_lon_below_minus_180(self):
+        assert parse_coords("45.0, -181.0") is None
+
+    def test_dmm_lat_degrees_exceeds_90(self):
+        # N418 33.000 E008 40.000 — lat degrees way out of range
+        assert parse_coords("N418 33.000 E008 40.000") is None
+
+    def test_dmm_lon_minutes_overflow(self):
+        # minutes value far exceeds 59.999
+        assert parse_coords("N41 08.330 W008 40000000000000.323") is None
+
+    def test_dmm_lat_minutes_at_60(self):
+        assert parse_coords("N41 60.000 E008 30.000") is None
+
+    def test_dmm_lon_degrees_exceeds_180(self):
+        assert parse_coords("N41 30.000 E181 00.000") is None
+
+    def test_dms_lat_degrees_exceeds_90(self):
+        assert parse_coords("N91° 00' 00.00\" E012° 00' 00.00\"") is None
+
+    def test_dms_lat_minutes_at_60(self):
+        assert parse_coords("N45° 60' 00.00\" E012° 00' 00.00\"") is None
+
+    def test_dms_lon_seconds_at_60(self):
+        assert parse_coords("N45° 00' 00.00\" E012° 00' 60.00\"") is None
+
+    def test_boundary_lat_90_is_valid(self):
+        assert parse_coords("N90 00.000 E000 00.000") is not None
+
+    def test_boundary_lon_180_is_valid(self):
+        assert parse_coords("N00 00.000 E180 00.000") is not None
+
+
 class TestParseCoordsRoundtrip:
     # format_coords → parse_coords should recover the original values.
 

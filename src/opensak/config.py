@@ -1,6 +1,10 @@
 """
 config.py — Application configuration and path management.
 All paths use pathlib.Path so they work identically on Linux and Windows.
+
+Fra version 1.14.0 (issue #209) bruges settings_store til at finde
+installations-mappen. De øvrige hjælpefunktioner her er beregnet til
+afledte stier (logs, imports, tokens) der altid er relative til install-mappen.
 """
 from pathlib import Path
 import os
@@ -8,30 +12,19 @@ import os
 
 def get_app_data_dir() -> Path:
     """
-    Return the platform-appropriate directory for storing app data.
-    - Linux:   ~/.local/share/opensak
-    - Windows: %APPDATA%\\opensak
-    - macOS:   ~/Library/Application Support/opensak
-    """
-    if os.name == "nt":
-        # Windows
-        base = Path(os.environ.get("APPDATA", Path.home()))
-    elif os.name == "posix":
-        xdg = os.environ.get("XDG_DATA_HOME")
-        if xdg:
-            base = Path(xdg)
-        else:
-            base = Path.home() / ".local" / "share"
-    else:
-        base = Path.home()
+    Return the installations-mappen (install_dir).
 
-    app_dir = base / "opensak"
-    app_dir.mkdir(parents=True, exist_ok=True)
-    return app_dir
+    Delegerer til settings_store.get_install_dir() som læser bootstrap.json.
+    Opretter mappen automatisk hvis den ikke eksisterer.
+
+    Compat: andre moduler importerer denne funktion — den virker stadig.
+    """
+    from opensak.settings_store import get_install_dir
+    return get_install_dir()
 
 
 def get_db_path() -> Path:
-    """Return the full path to the SQLite database file."""
+    """Return the full path to the legacy SQLite database file (pre-1.14.0)."""
     return get_app_data_dir() / "opensak.db"
 
 
@@ -55,49 +48,44 @@ def get_gc_token_path() -> Path:
     return get_app_data_dir() / "gc_token.json"
 
 
-# ── Language / Preferences ────────────────────────────────────────────────────
-
-_PREFS_FILE = None
-
-
-def _get_prefs_file() -> Path:
-    """Return the path to the preferences file (JSON)."""
-    global _PREFS_FILE
-    if _PREFS_FILE is None:
-        _PREFS_FILE = get_app_data_dir() / "preferences.json"
-    return _PREFS_FILE
-
+# ── Language ──────────────────────────────────────────────────────────────────
 
 def get_language() -> str:
     """
     Return the saved language code.
     Default: 'en' (English) for new installations.
-    Once the user selects a language it is saved and restored on next startup.
+
+    Læser fra settings_store (opensak.json) siden 1.14.0.
+    Falder tilbage til preferences.json for migration af ældre installationer.
     """
+    from opensak.settings_store import get_store
+    store = get_store()
+
+    # Forsøg først den nye store
+    lang = store.get("app.language")
+    if lang:
+        return str(lang)
+
+    # Migration: læs fra gammel preferences.json
     import json
-    prefs_file = _get_prefs_file()
+    prefs_file = get_app_data_dir() / "preferences.json"
     if prefs_file.exists():
         try:
             data = json.loads(prefs_file.read_text(encoding="utf-8"))
-            return data.get("language", "en")
+            legacy_lang = data.get("language", "en")
+            # Migrer til ny store med det samme
+            store.set("app.language", legacy_lang)
+            return legacy_lang
         except (json.JSONDecodeError, OSError):
             pass
+
     return "en"
 
 
 def set_language(lang_code: str) -> None:
-    """Save the language code to disk."""
-    import json
-    prefs_file = _get_prefs_file()
-    # Read existing preferences (to avoid overwriting other settings)
-    data: dict = {}
-    if prefs_file.exists():
-        try:
-            data = json.loads(prefs_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    data["language"] = lang_code
-    prefs_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    """Save the language code to disk via settings_store."""
+    from opensak.settings_store import get_store
+    get_store().set("app.language", lang_code)
 
 
 # ── Convenience summary (useful for debug / startup banner) ──────────────────

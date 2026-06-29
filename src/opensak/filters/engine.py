@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -67,6 +68,91 @@ def haversine_km_batch(lat0: float, lon0: float, lats, lons):
     dlam = lo - l0
     a = np.sin(dphi / 2) ** 2 + math.cos(p0) * np.cos(la) * np.sin(dlam / 2) ** 2
     return R * 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+
+def _vincenty_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Vincenty WGS84 ellipsoidal distance in kilometres.
+
+    More accurate than Haversine (accounts for the oblate spheroid); the
+    difference is up to ~0.3 % on long distances. Falls back to Haversine
+    when the formula fails to converge (antipodal points).
+    """
+    # WGS84 ellipsoid parameters
+    a = 6378.137          # semi-major axis (km)
+    f = 1 / 298.257223563
+    b = a * (1 - f)       # semi-minor axis (km)
+
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    L = math.radians(lon2 - lon1)
+
+    U1 = math.atan((1 - f) * math.tan(phi1))
+    U2 = math.atan((1 - f) * math.tan(phi2))
+    sU1, cU1 = math.sin(U1), math.cos(U1)
+    sU2, cU2 = math.sin(U2), math.cos(U2)
+
+    lam = L
+    for _ in range(100):
+        sl = math.sin(lam)
+        cl = math.cos(lam)
+        sin_sigma = math.sqrt((cU2 * sl) ** 2 + (cU1 * sU2 - sU1 * cU2 * cl) ** 2)
+        if sin_sigma == 0.0:
+            return 0.0  # coincident points
+        cos_sigma = sU1 * sU2 + cU1 * cU2 * cl
+        sigma = math.atan2(sin_sigma, cos_sigma)
+        sin_alpha = cU1 * cU2 * sl / sin_sigma
+        cos2a = 1 - sin_alpha ** 2
+        cos2sm = (cos_sigma - 2 * sU1 * sU2 / cos2a) if cos2a else 0.0
+        C = f / 16 * cos2a * (4 + f * (4 - 3 * cos2a))
+        lam_prev = lam
+        lam = L + (1 - C) * f * sin_alpha * (
+            sigma + C * sin_sigma * (cos2sm + C * cos_sigma * (-1 + 2 * cos2sm ** 2))
+        )
+        if abs(lam - lam_prev) < 1e-12:
+            break
+    else:
+        return _haversine_km(lat1, lon1, lat2, lon2)  # non-convergence fallback
+
+    u2 = cos2a * (a ** 2 - b ** 2) / b ** 2
+    Av = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)))
+    Bv = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)))
+    ds = Bv * sin_sigma * (
+        cos2sm + Bv / 4 * (
+            cos_sigma * (-1 + 2 * cos2sm ** 2)
+            - Bv / 6 * cos2sm * (-3 + 4 * sin_sigma ** 2) * (-3 + 4 * cos2sm ** 2)
+        )
+    )
+    return b * Av * (sigma - ds)
+
+
+def vincenty_km_batch(lat0: float, lon0: float, lats, lons):
+    """Vincenty WGS84 distance (km) from (lat0, lon0) to each point.
+
+    Vincenty is iterative and does not vectorise cleanly, so this always
+    falls back to a Python loop. The cost is still small because this path
+    only runs once per centre-point change (not on every table refresh).
+    Returns a list of floats.
+    """
+    return [_vincenty_km(lat0, lon0, la, lo) for la, lo in zip(lats, lons)]
+
+
+def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Scalar distance (km) dispatched by the user's distance_method setting."""
+    from opensak.gui.settings import get_settings
+    if get_settings().distance_method == "vincenty":
+        return _vincenty_km(lat1, lon1, lat2, lon2)
+    return _haversine_km(lat1, lon1, lat2, lon2)
+
+
+def distance_km_batch(lat0: float, lon0: float, lats, lons):
+    """Batch distance (km) dispatched by the user's distance_method setting."""
+    from opensak.gui.settings import get_settings
+    if get_settings().distance_method == "vincenty":
+        return vincenty_km_batch(lat0, lon0, lats, lons)
+    return haversine_km_batch(lat0, lon0, lats, lons)
+
+
+# Matches the word "distance" but not substrings like "my_distance".
+_DISTANCE_RE = re.compile(r"\bdistance\b")
 
 
 # ── Base filter ───────────────────────────────────────────────────────────────
@@ -453,19 +539,23 @@ class GcCodeFilter(BaseFilter):
 
     def __init__(self, text: str):
         self.text = text.upper()
+        # When the input already has the "GC" prefix, a prefix match is enough
+        # and lets SQLite use the B-tree index on gc_code.  Without the prefix,
+        # use a substring match so "BEK" finds "GCBEKKA".
+        self._prefix = self.text.startswith("GC")
         self._sql_applied = False
 
     def apply_to_query(self, query):
         from sqlalchemy import func
         self._sql_applied = True
-        # GC codes are always searched from the start (GC12345) — use a prefix
-        # match so SQLite can exploit the existing B-tree index on gc_code.
-        return query.filter(func.upper(Cache.gc_code).like(f"{self.text}%"))
+        pattern = f"{self.text}%" if self._prefix else f"%{self.text}%"
+        return query.filter(func.upper(Cache.gc_code).like(pattern))
 
     def matches(self, cache: Cache) -> bool:
         if self._sql_applied:
             return True
-        return (cache.gc_code or "").upper().startswith(self.text)
+        code = (cache.gc_code or "").upper()
+        return code.startswith(self.text) if self._prefix else self.text in code
 
     def to_dict(self) -> dict:
         return {"filter_type": self.filter_type, "text": self.text}
@@ -692,6 +782,25 @@ class HasCorrectedFilter(BaseFilter):
         return cls()
 
 
+class NoCorrectedFilter(BaseFilter):
+    """Keep only caches that do NOT have corrected coordinates set.
+
+    Counterpart to HasCorrectedFilter — mirrors the Premium/NonPremium
+    pair. Without this class, unchecking "has corrected" while leaving
+    only "no corrected" checked in the filter dialog produced no filter
+    at all (bug #274: the Corrected Coordinate flag was silently ignored).
+    """
+    filter_type = "no_corrected"
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        return not bool(note and note.is_corrected)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "NoCorrectedFilter":
+        return cls()
+
+
 class UserFlagFilter(BaseFilter):
     """Keep caches based on user_flag value."""
     filter_type = "user_flag"
@@ -708,6 +817,24 @@ class UserFlagFilter(BaseFilter):
     @classmethod
     def from_dict(cls, data: dict) -> "UserFlagFilter":
         return cls(flagged=data["flagged"])
+
+
+class LockedFilter(BaseFilter):
+    """Keep caches based on locked value (issue #202)."""
+    filter_type = "locked"
+
+    def __init__(self, locked: bool):
+        self.locked = locked
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.locked) == self.locked
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "locked": self.locked}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LockedFilter":
+        return cls(locked=data["locked"])
 
 
 class DnfFilter(BaseFilter):
@@ -888,6 +1015,102 @@ class LastLogDateFilter(BaseFilter):
         )
 
 
+class TextSearchFilter(BaseFilter):
+    """Keep caches whose text fields contain *text* (case-insensitive).
+
+    Searches any combination of: short/long description, log texts,
+    personal user notes, and the encoded hint.
+    """
+    filter_type = "text_search"
+
+    def __init__(
+        self,
+        text: str,
+        search_description: bool = True,
+        search_logs: bool = True,
+        search_notes: bool = True,
+        search_hint: bool = False,
+    ):
+        self.text = text.strip()
+        self.search_description = search_description
+        self.search_logs = search_logs
+        self.search_notes = search_notes
+        self.search_hint = search_hint
+
+    def apply_to_query(self, query):
+        if not self.text:
+            return None
+        from sqlalchemy import func, exists, or_
+        from opensak.db.models import Log, UserNote
+
+        pattern = f"%{self.text.lower()}%"
+        conditions = []
+        if self.search_description:
+            conditions.append(func.lower(Cache.short_description).like(pattern))
+            conditions.append(func.lower(Cache.long_description).like(pattern))
+        if self.search_hint:
+            conditions.append(func.lower(Cache.encoded_hints).like(pattern))
+        if self.search_logs:
+            conditions.append(
+                exists().where(
+                    (Log.cache_id == Cache.id)
+                    & func.lower(Log.text).like(pattern)
+                )
+            )
+        if self.search_notes:
+            conditions.append(
+                exists().where(
+                    (UserNote.cache_id == Cache.id)
+                    & func.lower(UserNote.note).like(pattern)
+                )
+            )
+        if not conditions:
+            return None
+        return query.filter(or_(*conditions))
+
+    def matches(self, cache: Cache) -> bool:
+        if not self.text:
+            return True
+        needle = self.text.lower()
+        if self.search_description:
+            if cache.short_description and needle in cache.short_description.lower():
+                return True
+            if cache.long_description and needle in cache.long_description.lower():
+                return True
+        if self.search_hint:
+            if cache.encoded_hints and needle in cache.encoded_hints.lower():
+                return True
+        if self.search_notes:
+            if cache.user_note and cache.user_note.note:
+                if needle in cache.user_note.note.lower():
+                    return True
+        if self.search_logs:
+            for log in cache.logs:
+                if log.text and needle in log.text.lower():
+                    return True
+        return False
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "text": self.text,
+            "search_description": self.search_description,
+            "search_logs": self.search_logs,
+            "search_notes": self.search_notes,
+            "search_hint": self.search_hint,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TextSearchFilter":
+        return cls(
+            text=data.get("text", ""),
+            search_description=data.get("search_description", True),
+            search_logs=data.get("search_logs", True),
+            search_notes=data.get("search_notes", True),
+            search_hint=data.get("search_hint", False),
+        )
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -911,16 +1134,19 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
+    "no_corrected":  NoCorrectedFilter,
     "premium":       PremiumFilter,
     "non_premium":   NonPremiumFilter,
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
+    "locked":             LockedFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
     "favorite_points":    FavoritePointsFilter,
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
+    "text_search":        TextSearchFilter,
 }
 
 
@@ -992,6 +1218,30 @@ class FilterSet:
 
 # ── Sort spec ─────────────────────────────────────────────────────────────────
 
+# Logical container sort: physical sizes first (micro→large), then non-physical
+# types (earthcache/lab/virtual), then empty/not-chosen. Mirrors _container_sort_key
+# in gui/cache_table.py — both must be kept in sync.
+_CONTAINER_PHYSICAL_ORDER = {"micro": 1, "small": 2, "regular": 3, "large": 4}
+_NON_PHYSICAL_TYPES = {
+    "earthcache": "E", "lab cache": "V",
+    "virtual cache": "V", "locationless (reverse) cache": "R",
+}
+_EMPTY_CONTAINERS = {"", "not chosen"}
+
+
+def _container_sort_key(c) -> tuple:
+    ct = (c.cache_type or "").strip().lower()
+    letter = _NON_PHYSICAL_TYPES.get(ct)
+    if letter is not None:
+        return (2, letter)
+    key = (c.container or "").strip().lower()
+    if key in _CONTAINER_PHYSICAL_ORDER:
+        return (1, _CONTAINER_PHYSICAL_ORDER[key])
+    if key in _EMPTY_CONTAINERS:
+        return (3, "")
+    return (2, "O")
+
+
 # Valid sort fields and how to extract the sort key from a Cache object
 SORT_FIELDS: dict[str, Any] = {
     "name":            lambda c: (c.name or "").lower(),
@@ -1004,7 +1254,7 @@ SORT_FIELDS: dict[str, Any] = {
     "state":           lambda c: (c.state or "").lower(),
     "county":          lambda c: (c.county or "").lower(),
     "placed_by":       lambda c: (c.placed_by or "").lower(),
-    "container":       lambda c: (c.container or "").lower(),
+    "container":       _container_sort_key,
     "found":           lambda c: int(c.found),
     "archived":        lambda c: int(c.archived),
     # Kolonner sorteret i CacheTableModel — accepteres af SortSpec men bruges
@@ -1022,6 +1272,7 @@ SORT_FIELDS: dict[str, Any] = {
     "corrected":       lambda c: 0,   # placeholder — model.sort() håndterer det
     "first_to_find":   lambda c: int(c.first_to_find or False),
     "user_flag":       lambda c: int(c.user_flag or False),
+    "locked":          lambda c: int(c.locked or False),
     "user_sort":       lambda c: c.user_sort if c.user_sort is not None else 999999,
     "user_data_1":     lambda c: (c.user_data_1 or "").lower(),
     "user_data_2":     lambda c: (c.user_data_2 or "").lower(),
@@ -1038,14 +1289,11 @@ def _sql_order_expr(field: str):
     reproduces the Python key exactly (COALESCE for the ``x or default``
     fallbacks). Text fields are deliberately excluded — SQLite's lower() is
     ASCII-only and would diverge from Python's Unicode str.lower() on accented
-    values. Derived / model-only fields (distance, bearing, log_count,
-    last_log, corrected, lat/lon) are also excluded and stay in Python.
-
-    The caller must append Cache.id as a final tiebreaker so the SQL order
-    matches Python's *stable* sort (ties keep the id-ascending load order).
+    values. Distance is stored in the DB column and ordered in SQL via COALESCE.
     """
     from sqlalchemy import func
-    return {
+    distance_expr = func.coalesce(Cache.distance, 99999.0)
+    exprs = {
         # Numeric (mirror "x or 0.0/0/999999")
         "difficulty":      func.coalesce(Cache.difficulty, 0.0),
         "terrain":         func.coalesce(Cache.terrain, 0.0),
@@ -1059,13 +1307,17 @@ def _sql_order_expr(field: str):
         "favorite":        Cache.favorite_point,
         "first_to_find":   func.coalesce(Cache.first_to_find, 0),
         "user_flag":       func.coalesce(Cache.user_flag, 0),
+        "locked":          func.coalesce(Cache.locked, 0),
         # Dates — plain column ordering (NULLs first ascending in SQLite, i.e.
         # treated as earliest). This also fixes the latent SORT_FIELDS bug where
         # "x or 0" mixes datetime and int and raises TypeError on mixed NULLs.
         "hidden_date":     Cache.hidden_date,
         "found_date":      Cache.found_date,
         "dnf_date":        Cache.dnf_date,
-    }.get(field)
+        # distance: only sortable in SQL when the DB column is populated
+        "distance":        distance_expr,
+    }
+    return exprs.get(field)
 
 
 @dataclass
@@ -1173,15 +1425,49 @@ def apply_filters(
     # This must happen before the Python-level filter loop below.
     if filterset:
         from sqlalchemy import text as _sa_text
-        for _f in _iter_filters(filterset):
-            if isinstance(_f, WhereClauseFilter) and _f.sql:
-                try:
-                    _result = session.execute(
-                        _sa_text(f"SELECT id FROM caches WHERE ({_f.sql})")
-                    )
-                    _f._matching_ids = {row[0] for row in _result}
-                except Exception:
-                    _f._matching_ids = set()  # invalid SQL → no matches
+        _where_filters = [
+            _f for _f in _iter_filters(filterset)
+            if isinstance(_f, WhereClauseFilter) and _f.sql
+        ]
+        _dist_udf_ready = False
+        if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
+            # The "distance" column in the caches table is never persisted — it
+            # is always NULL. Register a SQLite UDF so WHERE clauses can use
+            # "distance" as haversine distance from the home point. SQL
+            # references to "distance" are rewritten to the UDF call below.
+            _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
+            try:
+                from opensak.gui.settings import get_settings as _gs
+                _st = _gs()
+                _home_lat, _home_lon = _st.home_lat, _st.home_lon
+                _use_miles = _st.use_miles
+            except Exception:
+                pass
+            if distance_from:
+                _home_lat, _home_lon = distance_from
+            _factor = 0.621371 if _use_miles else 1.0
+            def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
+                if lat is None or lon is None:
+                    return None
+                return _haversine_km(_h, _o, lat, lon) * _k
+            _dbapi = session.connection().connection.dbapi_connection
+            assert _dbapi is not None
+            _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+            _dist_udf_ready = True
+
+        for _f in _where_filters:
+            try:
+                _sql = (
+                    _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", _f.sql)
+                    if _dist_udf_ready
+                    else _f.sql
+                )
+                _result = session.execute(
+                    _sa_text(f"SELECT id FROM caches WHERE ({_sql})")
+                )
+                _f._matching_ids = {row[0] for row in _result}
+            except Exception:
+                _f._matching_ids = set()  # invalid SQL → no matches
 
     # Determine which relationships are actually needed by the active filters.
     # Only joinedload what is required — avoids loading thousands of attribute
@@ -1193,25 +1479,31 @@ def apply_filters(
     needs_trackables  = filterset is not None and any(
         isinstance(f, HasTrackableFilter) for f in _iter_filters(filterset)
     )
+    _text_filters = [
+        f for f in _iter_filters(filterset)
+        if isinstance(f, TextSearchFilter) and f.text
+    ] if filterset is not None else []
+    needs_description = any(f.search_description for f in _text_filters)
+    needs_hint        = any(f.search_hint        for f in _text_filters)
+    # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
+    # would pull all logs for all caches. Python matches() will lazy-load
+    # logs only for the already-filtered result set.
+    needs_logs        = any(f.search_logs        for f in _text_filters)
 
     from sqlalchemy.orm import defer, joinedload, noload
-    query = session.query(Cache).options(
+    _opts: list = [
         joinedload(Cache.attributes) if needs_attributes else noload(Cache.attributes),
         joinedload(Cache.trackables) if needs_trackables else noload(Cache.trackables),
-        noload(Cache.logs),       # load on-demand when user opens a cache
-        noload(Cache.waypoints),  # load on-demand when user opens a cache
-        joinedload(Cache.user_note),  # one-to-one, cheap; needed for corrected-coords
-        # Defer the large free-text blobs — they dominate per-row size but are
-        # never shown in the cache table (only in the detail panel, which loads
-        # each cache separately via _load_full_cache()). Deferring them keeps
-        # the table refresh light on big databases. A load_only() allow-list was
-        # rejected as too fragile: the table model and Python-level filters read
-        # a wide, scattered set of scalar columns, and missing one would trigger
-        # a lazy SELECT per row (N+1). These three blobs carry ~all the weight.
-        defer(Cache.short_description),
-        defer(Cache.long_description),
-        defer(Cache.encoded_hints),
-    )
+        joinedload(Cache.logs)       if needs_logs        else noload(Cache.logs),
+        noload(Cache.waypoints),
+        joinedload(Cache.user_note),
+    ]
+    # Defer the large free-text blobs unless text search needs them.
+    if not needs_description:
+        _opts += [defer(Cache.short_description), defer(Cache.long_description)]
+    if not needs_hint:
+        _opts.append(defer(Cache.encoded_hints))
+    query = session.query(Cache).options(*_opts)
 
     # Push SQL-capable filters into the query before loading rows.
     # This lets SQLite discard non-matching rows before any Python objects are
@@ -1231,18 +1523,16 @@ def apply_filters(
     if sort is None:
         sort = SortSpec("name", ascending=True)
 
-    # Push ORDER BY into SQL for the safe (numeric/boolean/date) fields. The
+    # Push ORDER BY into SQL for safe (numeric/boolean/date) fields. The
     # Python filter pass below preserves row order, so a SQL-ordered result
     # stays ordered. A trailing Cache.id keeps the order identical to Python's
-    # stable sort (ties retain the id-ascending load order). The distance sort
-    # needs a live reference point, so it always stays in Python.
+    # stable sort (ties retain the id-ascending load order).
     sql_sorted = False
-    if not (sort.field == "distance" and distance_from):
-        order_expr = _sql_order_expr(sort.field)
-        if order_expr is not None:
-            direction = order_expr.asc() if sort.ascending else order_expr.desc()
-            query = query.order_by(direction, Cache.id.asc())
-            sql_sorted = True
+    order_expr = _sql_order_expr(sort.field)
+    if order_expr is not None:
+        direction = order_expr.asc() if sort.ascending else order_expr.desc()
+        query = query.order_by(direction, Cache.id.asc())
+        sql_sorted = True
 
     all_caches = query.all()
 
@@ -1252,15 +1542,9 @@ def apply_filters(
     else:
         results = list(all_caches)
 
-    # Sort in Python only for fields not handled by SQL above.
+    # Sort in Python only for fields not handled by SQL.
     if not sql_sorted:
-        if sort.field == "distance" and distance_from:
-            lat, lon = distance_from
-            results.sort(
-                key=lambda c: _haversine_km(lat, lon, c.latitude or 0, c.longitude or 0),
-                reverse=not sort.ascending,
-            )
-        elif sort.field in SORT_FIELDS:
+        if sort.field in SORT_FIELDS:
             results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
 
     if limit:

@@ -6,7 +6,6 @@ Files are imported sequentially in a background thread.
 """
 
 from __future__ import annotations
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
@@ -27,6 +26,7 @@ class ImportWorker(QThread):
     file_finished = Signal(int, object)  # (index, ImportResult)
     file_error    = Signal(int, str)     # (index, error message)
     progress      = Signal(int)          # cache count within current file
+    total         = Signal(int)          # total wpt count for current file (-1 = unknown)
     # Completion is reported via QThread.finished (emitted after run() returns
     # and isRunning() is already false), NOT a custom signal emitted from inside
     # run(). Emitting from run()'s tail let the dialog proceed — and tests tear
@@ -41,7 +41,7 @@ class ImportWorker(QThread):
     def run(self) -> None:
         from opensak.db.database import get_session, init_db
         from opensak.db.manager import get_db_manager
-        from opensak.importer import import_gpx, import_zip
+        from opensak.importer import import_gpx, import_zip, _count_wpts, _is_companion_gpx
         from opensak.utils.utils import get_import_type, ImportType
 
         # Switch to target DB if different from active
@@ -59,18 +59,38 @@ class ImportWorker(QThread):
                 self.file_started.emit(i, path.name)
                 try:
                     import_type: ImportType = get_import_type(path)
-                    importers: dict[ImportType, Callable] = {
-                        ImportType.GPX: import_gpx,
-                        ImportType.ZIP: import_zip,
-                    }
-                    import_func = importers[import_type]
 
-                    with get_session() as session:
-                        result = import_func(
-                            path,
-                            session,
-                            progress_cb=self.progress.emit
-                        )
+                    if import_type == ImportType.GPX:
+                        try:
+                            self.total.emit(_count_wpts(path))
+                        except Exception:
+                            self.total.emit(-1)
+                        # Find a companion file by inspecting GPX content,
+                        # not by assuming a specific filename convention.
+                        wpts_path = None
+                        try:
+                            wpts_path = next(
+                                (
+                                    f for f in sorted(path.parent.glob("*.gpx"))
+                                    if f != path and _is_companion_gpx(f)
+                                ),
+                                None,
+                            )
+                        except Exception:
+                            pass
+                        with get_session() as session:
+                            result = import_gpx(
+                                path, session,
+                                wpts_path=wpts_path,
+                                progress_cb=self.progress.emit,
+                            )
+                    else:
+                        self.total.emit(-1)
+                        with get_session() as session:
+                            result = import_zip(
+                                path, session,
+                                progress_cb=self.progress.emit,
+                            )
 
                     self.file_finished.emit(i, result)
 
@@ -190,8 +210,35 @@ class ImportDialog(QDialog):
 
     # ── File management ───────────────────────────────────────────────────────
 
+    def _filter_companion_wpts(self, new_paths: list[Path]) -> list[Path]:
+        from opensak.importer import _is_companion_gpx
+
+        gpx_in_new = [p for p in new_paths if p.suffix.lower() == ".gpx"]
+        if not gpx_in_new:
+            return new_paths
+
+        # Identify which new GPX files are companion (waypoints-only) files.
+        new_companions = {p for p in gpx_in_new if _is_companion_gpx(p)}
+        if not new_companions:
+            return new_paths
+
+        # Only filter companions when at least one main cache GPX is present
+        # (in the new batch or already in the list). If all files are companions,
+        # the user is importing them standalone — keep all.
+        has_main = any(p not in new_companions for p in gpx_in_new)
+        if not has_main:
+            has_main = any(
+                p.suffix.lower() == ".gpx" and not _is_companion_gpx(p)
+                for p in self._selected_paths
+            )
+        if not has_main:
+            return new_paths
+
+        return [p for p in new_paths if p not in new_companions]
+
     def add_files(self, paths: list[Path]) -> None:
         """Add files to the import list (used by drag & drop from MainWindow)."""
+        paths = self._filter_companion_wpts(paths)
         existing_names = {p.name for p in self._selected_paths}
         for p in paths:
             if p.name not in existing_names:
@@ -212,9 +259,9 @@ class ImportDialog(QDialog):
             tr("import_file_filter")
         )
         if paths:
+            filtered = self._filter_companion_wpts([Path(s) for s in paths])
             existing_names = {p.name for p in self._selected_paths}
-            for path_str in paths:
-                p = Path(path_str)
+            for p in filtered:
                 if p.name not in existing_names:
                     self._selected_paths.append(p)
                     item = QListWidgetItem(f"⏳  {p.name}")
@@ -269,6 +316,7 @@ class ImportDialog(QDialog):
         self._worker.file_finished.connect(self._on_file_finished)
         self._worker.file_error.connect(self._on_file_error)
         self._worker.progress.connect(self._on_progress)
+        self._worker.total.connect(self._on_total)
         # React to QThread.finished (thread already stopped) rather than a signal
         # emitted from inside run(). Connect _on_all_done before deleteLater so it
         # runs first; both are queued, and by the time they run isRunning() is
@@ -283,12 +331,22 @@ class ImportDialog(QDialog):
             item.setText(f"🔄  {name}")
         self._file_list.scrollToItem(self._file_list.item(index))
         self._append_log(tr("import_running_file", name=name))
+        self._progress.setRange(0, 0)  # indeterminate while pre-counting
+
+    def _on_total(self, total: int) -> None:
+        if total > 0:
+            self._progress.setRange(0, total)
+            self._progress.setValue(0)
+        else:
+            self._progress.setRange(0, 0)
 
     def _on_progress(self, count: int) -> None:
         if count < 0:
             self._replace_last_log_line(f"  {tr('import_saving')}")
         elif count % 100 == 0 and count > 0:
             self._replace_last_log_line(f"  {tr('import_progress', count=count)}")
+        if count >= 0 and self._progress.maximum() > 0:
+            self._progress.setValue(count)
 
     def _on_file_finished(self, index: int, result) -> None:
         path = self._selected_paths[index]
@@ -356,13 +414,15 @@ class ImportDialog(QDialog):
             )
             for cache in query.all():
                 lat, lon = cache.latitude, cache.longitude
+                basis = "posted"
                 if cache.user_note and cache.user_note.is_corrected:
                     clat = cache.user_note.corrected_lat
                     clon = cache.user_note.corrected_lon
                     if clat is not None and clon is not None:
                         lat, lon = clat, clon
+                        basis = "corrected"
                 if lat is not None and lon is not None:
-                    rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon))
+                    rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon, basis=basis))
 
         if not rows:
             self._finish_geocoding()
@@ -405,7 +465,7 @@ class ImportDialog(QDialog):
         try:
             if self._geo_worker and self._geo_worker.isRunning():
                 self._geo_worker.request_cancel()
-                self._geo_worker.wait(3000)
+                self._geo_worker.wait()
         except RuntimeError:
             pass
         self._geo_worker = None

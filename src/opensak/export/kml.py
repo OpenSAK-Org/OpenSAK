@@ -83,12 +83,12 @@ def _cache_description(cache: Cache) -> str:
         lines.append(f"<br/>{_esc(cache.short_description)}")
 
     if cache.encoded_hints:
-        import codecs
+        from opensak.hint_detect import split_hint
         try:
-            decoded = codecs.decode(cache.encoded_hints, "rot_13")
+            plain, _cipher = split_hint(cache.encoded_hints)
         except Exception:
-            decoded = cache.encoded_hints or ""
-        lines.append(f"<br/><i>Hint: {_esc(decoded)}</i>")
+            plain = cache.encoded_hints or ""
+        lines.append(f"<br/><i>Hint: {_esc(plain)}</i>")
 
     gc_url = f"https://www.geocaching.com/geocache/{_esc(cache.gc_code)}"
     lines.append(f"<br/><a href='{gc_url}'>{_esc(cache.gc_code)}</a>")

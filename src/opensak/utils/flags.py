@@ -7,14 +7,14 @@ False.  Developers edit features.json locally to turn features on.
 
 CLI overrides (highest priority, useful for one-off testing):
 
-    python run.py --feature where-filter=true
-    python run.py --feature where-filter=true --feature other-flag=false
+    python run.py --feature reverse-geocoding=true
+    python run.py --feature reverse-geocoding=true --feature other-flag=false
 
 Usage::
 
     from opensak.utils import flags
 
-    if flags.where_filter:
+    if flags.reverse_geocoding:
         ...  # new feature path
 """
 
@@ -28,9 +28,8 @@ from pathlib import Path
 _FEATURES_FILE: Path = Path(__file__).parent.parent.parent.parent / "features.json"
 
 _RELEASE_DEFAULTS: dict[str, bool] = {
-    "where-filter": True,
-    "db-combo": True,
     "update-location": False,
+    "reverse-geocoding": False,
 }
 
 
@@ -71,6 +70,5 @@ _flags = _load()
 
 # ── Public flag attributes ────────────────────────────────────────────────────
 
-where_filter: bool = _flags["where-filter"]
-db_combo: bool = _flags["db-combo"]
-update_location: bool = _flags["update-location"]
+update_location: bool      = _flags["update-location"]
+reverse_geocoding: bool    = _flags["reverse-geocoding"]

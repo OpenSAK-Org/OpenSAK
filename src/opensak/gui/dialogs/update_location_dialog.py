@@ -1,9 +1,8 @@
 """
 src/opensak/gui/dialogs/update_location_dialog.py — Update cache locations dialog.
 
-Two-phase reverse geocoding:
-  Phase 1 (always): offline KD-tree (GeoNames), instant, no network.
-  Phase 2 (opt-in): online OpenStreetMap lookup, 1 req/sec.
+Offline reverse geocoding via the boundary polygon engine (TerritoryResolver).
+Fills country / state / county and writes provenance columns for every resolved cache.
 
 Always opened as the same dialog; entry point controls the default scope:
   - Via menu (gc_codes=None): "Only caches with missing location data" is default.
@@ -12,8 +11,8 @@ Always opened as the same dialog; entry point controls the default scope:
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -28,12 +27,13 @@ from opensak.lang import tr
 # ── Data types ────────────────────────────────────────────────────────────────
 
 class _CacheRow:
-    __slots__ = ("gc_code", "lat", "lon")
+    __slots__ = ("gc_code", "lat", "lon", "basis")
 
-    def __init__(self, gc_code: str, lat: float, lon: float) -> None:
+    def __init__(self, gc_code: str, lat: float, lon: float, basis: str = "posted") -> None:
         self.gc_code = gc_code
         self.lat = lat
         self.lon = lon
+        self.basis = basis
 
 
 @dataclass
@@ -44,28 +44,18 @@ class UpdateLocationResult:
     error_msgs: list[str] = field(default_factory=list)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _format_eta(remaining_seconds: int) -> str:
-    if remaining_seconds < 60:
-        return tr("update_loc_eta_sec", n=remaining_seconds)
-    elif remaining_seconds < 3600:
-        m, s = divmod(remaining_seconds, 60)
-        return tr("update_loc_eta_min", m=m, s=s)
-    else:
-        h, rem = divmod(remaining_seconds, 3600)
-        m = rem // 60
-        return tr("update_loc_eta_hr", h=h, m=m)
-
-
-# ── Workers ───────────────────────────────────────────────────────────────────
+# ── Worker ────────────────────────────────────────────────────────────────────
 
 class ReverseGeocodeWorker(QThread):
-    """
-    Phase 1: offline geocoding using the reverse_geocoder KD-tree (GeoNames).
+    """Offline geocoding via the boundary polygon engine.
 
-    Fills country + state + county for all rows in a single batch call.
-    No network, no rate limit — runs in under a second for any database size.
+    Resolves country / state / county for each row and writes all four
+    provenance columns (location_source, location_basis, location_updated,
+    location_dataset).  No network, no rate limit.
+
+    Two-phase execution:
+      1. Parallel resolve — ThreadPoolExecutor, one BoundaryStore per thread.
+      2. Bulk write — single IN query loads all caches; one transaction commits all.
     """
 
     row_done  = Signal(str, str)  # (gc_code, log_line)
@@ -81,7 +71,10 @@ class ReverseGeocodeWorker(QThread):
         self._cancel = True
 
     def run(self) -> None:
-        from opensak.geocoder import fast_batch_geocode
+        import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from opensak.geo.store import BoundaryStore
+        from opensak.geo.boundaries import TerritoryResolver
         from opensak.db.database import get_session
         from opensak.db.models import Cache
 
@@ -91,26 +84,84 @@ class ReverseGeocodeWorker(QThread):
             self.cancelled.emit(result)
             return
 
-        coords = [(row.lat, row.lon) for row in self._rows]
-        locations = fast_batch_geocode(coords)
+        check = BoundaryStore()
+        if not check.available():
+            result.errors += 1
+            self.row_done.emit("", tr("update_loc_no_boundaries"))
+            self.all_done.emit(result)
+            return
 
+        dataset = check.dataset_version()
+        check.close()
+        now = datetime.now(timezone.utc)
+
+        # Phase 1 — parallel resolve.
+        # _shared_packs is injected into every thread's BoundaryStore so GeoJSON
+        # packs are loaded from disk at most once across all threads. Each thread
+        # still gets its own SQLite connection (not thread-safe to share). Dict
+        # writes under the GIL are atomic; the only race is two threads loading
+        # the same missing pack simultaneously — harmless, second write wins.
+        import threading
+        _shared_packs: dict = {}
+        _tls = threading.local()
+
+        def _resolve_one(row: _CacheRow):
+            if self._cancel:
+                return None
+            if not hasattr(_tls, "resolver"):
+                s = BoundaryStore()
+                s._packs = _shared_packs
+                _tls.store = s
+                _tls.resolver = TerritoryResolver(s)
+            loc = _tls.resolver.resolve(row.lat, row.lon)
+            return row, loc
+
+        workers = min(4, os.cpu_count() or 1)
+        resolved = []
+        cancelled = False
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_resolve_one, row): row for row in self._rows}
+            for future in as_completed(futures):
+                if self._cancel:
+                    cancelled = True
+                    break
+                pair = future.result()
+                if pair is None:
+                    continue
+                row, loc = pair
+                self.row_done.emit(row.gc_code, tr(
+                    "update_loc_row",
+                    gc_code=row.gc_code,
+                    country=loc.country or "–",
+                    state=loc.state or "–",
+                    county=loc.county or "–",
+                ))
+                resolved.append((row, loc))
+
+        if cancelled or self._cancel:
+            self.cancelled.emit(result)
+            return
+
+        # Phase 2 — bulk write in one transaction (single IN query, no per-row SELECT)
+        resolved_map = {row.gc_code: (row, loc) for row, loc in resolved}
         try:
             with get_session() as session:
-                for row, loc in zip(self._rows, locations):
-                    cache = session.query(Cache).filter_by(gc_code=row.gc_code).first()
-                    if cache:
-                        cache.country = loc.country
-                        cache.state   = loc.state
-                        cache.county  = loc.county
-                        result.updated += 1
-                        line = tr(
-                            "update_loc_row",
-                            gc_code=row.gc_code,
-                            country=loc.country or "–",
-                            state=loc.state or "–",
-                            county=loc.county or "–",
-                        )
-                        self.row_done.emit(row.gc_code, line)
+                caches = (
+                    session.query(Cache)
+                    .filter(Cache.gc_code.in_(list(resolved_map)))
+                    .all()
+                )
+                for cache in caches:
+                    row, loc = resolved_map[cache.gc_code]
+                    cache.country          = loc.country
+                    cache.state            = loc.state
+                    cache.county           = loc.county
+                    cache.location_source  = "boundary"
+                    cache.location_basis   = row.basis
+                    cache.location_updated = now
+                    cache.location_dataset = dataset
+                    result.updated += 1
         except Exception as exc:
             result.errors += 1
             self.row_done.emit("", tr("update_loc_row_error", gc_code="batch", msg=str(exc)))
@@ -122,100 +173,10 @@ class ReverseGeocodeWorker(QThread):
         self.all_done.emit(result)
 
 
-class OnlineLookupWorker(QThread):
-    """
-    Phase 2: online lookup via OpenStreetMap at 1 request/second.
-
-    Refines county/state/country for each cache using OSM polygon boundaries.
-    Requires internet. Only non-None fields are written back, so Phase 1 data
-    is never erased by a failed or empty online response.
-    """
-
-    row_done  = Signal(str, str)   # (gc_code, log_line)
-    progress  = Signal(int, int)   # (done, total)
-    all_done  = Signal(object)     # UpdateLocationResult
-    cancelled = Signal(object)     # UpdateLocationResult
-
-    def __init__(self, rows: list[_CacheRow], *, parent=None):
-        super().__init__(parent)
-        self._rows = rows
-        self._cancel = False
-
-    def request_cancel(self) -> None:
-        self._cancel = True
-
-    def run(self) -> None:
-        from opensak.geocoder import nominatim_reverse
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache
-
-        result = UpdateLocationResult()
-        total = len(self._rows)
-
-        for i, row in enumerate(self._rows):
-            if self._cancel:
-                self.cancelled.emit(result)
-                return
-
-            t0 = time.monotonic()
-            loc = nominatim_reverse(row.lat, row.lon)
-            elapsed = time.monotonic() - t0
-
-            if loc.country is None and loc.state is None and loc.county is None:
-                result.skipped += 1
-                self.row_done.emit(
-                    row.gc_code,
-                    tr("update_loc_online_skip", gc_code=row.gc_code),
-                )
-            else:
-                try:
-                    with get_session() as session:
-                        cache = session.query(Cache).filter_by(gc_code=row.gc_code).first()
-                        if cache:
-                            if loc.country is not None:
-                                cache.country = loc.country
-                            if loc.state is not None:
-                                cache.state = loc.state
-                            if loc.county is not None:
-                                cache.county = loc.county
-                            result.updated += 1
-                            self.row_done.emit(
-                                row.gc_code,
-                                tr(
-                                    "update_loc_online_row",
-                                    gc_code=row.gc_code,
-                                    county=loc.county or "–",
-                                ),
-                            )
-                except Exception as exc:
-                    result.errors += 1
-                    self.row_done.emit(
-                        "",
-                        tr("update_loc_row_error", gc_code=row.gc_code, msg=str(exc)),
-                    )
-
-            self.progress.emit(i + 1, total)
-
-            # Maintain 1 req/sec; sleep in small steps to allow cancellation
-            if i < total - 1:
-                deadline = t0 + 1.0
-                while time.monotonic() < deadline:
-                    if self._cancel:
-                        self.cancelled.emit(result)
-                        return
-                    time.sleep(0.05)
-
-        self.all_done.emit(result)
-
-
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
 class UpdateLocationDialog(QDialog):
-    """
-    Dialog to update cache locations via reverse geocoding.
-
-    Phase 1 (always active): offline GeoNames KD-tree — instant.
-    Phase 2 (opt-in): online OpenStreetMap lookup — 1 req/sec.
+    """Dialog to update cache locations via offline reverse geocoding.
 
     The same dialog is used from the menu and from the right-click context menu.
     When gc_codes is None (menu): "Only caches with missing location data" is default.
@@ -231,20 +192,15 @@ class UpdateLocationDialog(QDialog):
         self.setWindowTitle(tr("update_loc_title"))
         self.setMinimumWidth(460)
         self.setMinimumHeight(420)
-        self._worker: ReverseGeocodeWorker | OnlineLookupWorker | None = None
-        self._pending_rows: list[_CacheRow] = []
+        self._worker: ReverseGeocodeWorker | None = None
         self._setup_ui()
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
-        from opensak.utils import flags
-        from opensak.gui.settings import get_settings
-
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        # Info label — text changes when the online checkbox is toggled
         self._info_label = QLabel(tr("update_loc_info"))
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet("color: palette(mid);")
@@ -264,10 +220,8 @@ class UpdateLocationDialog(QDialog):
         layout.addWidget(self._scope_box)
 
         if self._from_context_menu:
-            # Right-click: default to "Only this cache"
             self._rb_this.setChecked(True)
         else:
-            # Menu: "Only this cache" is irrelevant — disable and default to missing
             self._rb_this.setEnabled(False)
             self._rb_missing.setChecked(True)
 
@@ -275,21 +229,10 @@ class UpdateLocationDialog(QDialog):
         self._lookup_box = QGroupBox(tr("update_loc_lookup_group"))
         lookup_layout = QVBoxLayout(self._lookup_box)
 
+        # Default to posted coordinates (False); user may opt into corrected.
         self._cb_corrected = QCheckBox(tr("update_loc_use_corrected"))
-        self._cb_corrected.setChecked(True)
+        self._cb_corrected.setChecked(False)
         lookup_layout.addWidget(self._cb_corrected)
-
-        # Online lookup checkbox — always visible when flag is on;
-        # initial state comes from the Advanced Settings default.
-        if flags.update_location:
-            self._cb_online: QCheckBox | None = QCheckBox(tr("update_loc_online_cb"))
-            self._cb_online.setChecked(get_settings().nominatim_enabled)
-            self._cb_online.setToolTip(tr("update_loc_online_tooltip"))
-            self._cb_online.stateChanged.connect(self._on_online_toggled)
-            lookup_layout.addWidget(self._cb_online)
-            self._on_online_toggled()
-        else:
-            self._cb_online = None
 
         layout.addWidget(self._lookup_box)
 
@@ -301,6 +244,7 @@ class UpdateLocationDialog(QDialog):
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)
         self._progress.setVisible(False)
+        self._progress_resolved = 0
         layout.addWidget(self._progress)
 
         # ── Log ───────────────────────────────────────────────────────────────
@@ -329,14 +273,6 @@ class UpdateLocationDialog(QDialog):
 
         layout.addLayout(btn_row)
 
-    # ── Dynamic info text ─────────────────────────────────────────────────────
-
-    def _on_online_toggled(self) -> None:
-        if self._cb_online and self._cb_online.isChecked():
-            self._info_label.setText(tr("update_loc_info_online"))
-        else:
-            self._info_label.setText(tr("update_loc_info"))
-
     # ── Row building ──────────────────────────────────────────────────────────
 
     def _build_rows(self) -> list[_CacheRow]:
@@ -364,14 +300,16 @@ class UpdateLocationDialog(QDialog):
 
             for cache in query.all():
                 lat, lon = cache.latitude, cache.longitude
+                basis = "posted"
                 if use_corrected and cache.user_note and cache.user_note.is_corrected:
                     clat = cache.user_note.corrected_lat
                     clon = cache.user_note.corrected_lon
                     if clat is not None and clon is not None:
                         lat, lon = clat, clon
+                        basis = "corrected"
                 if lat is None or lon is None:
                     continue
-                rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon))
+                rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon, basis=basis))
 
         return rows
 
@@ -383,30 +321,20 @@ class UpdateLocationDialog(QDialog):
             self._progress_label.setText(tr("update_loc_nothing_to_do"))
             return
 
-        self._pending_rows = rows
         self._set_controls_enabled(False)
 
-        self._progress.setRange(0, 0)
+        self._progress.setRange(0, len(rows))
+        self._progress.setValue(0)
         self._progress.setVisible(True)
+        self._progress_resolved = 0
         self._log.clear()
         self._progress_label.setText(tr("update_loc_running", total=len(rows)))
 
         self._worker = ReverseGeocodeWorker(rows)
         self._worker.row_done.connect(self._on_row_done)
-        self._worker.all_done.connect(self._on_phase1_done)
-        self._worker.cancelled.connect(self._on_phase1_cancelled)
-        self._worker.start()
-
-    def _start_online_phase(self, rows: list[_CacheRow]) -> None:
-        self._progress.setRange(0, len(rows))
-        self._progress.setValue(0)
-        self._cancel_btn.setEnabled(True)
-
-        self._worker = OnlineLookupWorker(rows)
-        self._worker.row_done.connect(self._on_row_done)
-        self._worker.progress.connect(self._on_online_progress)
-        self._worker.all_done.connect(self._on_online_done)
-        self._worker.cancelled.connect(self._on_online_cancelled)
+        self._worker.all_done.connect(self._on_done)
+        self._worker.cancelled.connect(self._on_cancelled)
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _request_cancel(self) -> None:
@@ -414,64 +342,27 @@ class UpdateLocationDialog(QDialog):
             self._worker.request_cancel()
         self._cancel_btn.setEnabled(False)
 
-    # ── Worker signals — Phase 1 ──────────────────────────────────────────────
+    # ── Worker signals ────────────────────────────────────────────────────────
 
-    def _on_row_done(self, _gc_code: str, line: str) -> None:
+    def _on_row_done(self, gc_code: str, line: str) -> None:
         self._log.append(line)
+        if gc_code:  # empty gc_code = error banner, not a resolved row
+            self._progress_resolved += 1
+            self._progress.setValue(self._progress_resolved)
 
-    def _on_phase1_done(self, result: UpdateLocationResult) -> None:
+    def _on_done(self, result: UpdateLocationResult) -> None:
         self.location_updated.emit()
-
-        online_requested = self._cb_online is not None and self._cb_online.isChecked()
-        if online_requested and self._pending_rows:
-            self._progress_label.setText(tr(
-                "update_loc_offline_done",
-                updated=result.updated,
-            ))
-            self._start_online_phase(self._pending_rows)
-        else:
-            self._finalize()
-            self._progress_label.setText(tr(
-                "update_loc_done",
-                updated=result.updated,
-                skipped=result.skipped,
-                errors=result.errors,
-            ))
-
-    def _on_phase1_cancelled(self, result: UpdateLocationResult) -> None:
-        self._finalize()
-        self._progress_label.setText(tr("update_loc_cancelled", updated=result.updated))
-        if result.updated > 0:
-            self.location_updated.emit()
-
-    # ── Worker signals — Phase 2 ──────────────────────────────────────────────
-
-    def _on_online_progress(self, done: int, total: int) -> None:
-        self._progress.setValue(done)
-        eta = _format_eta(total - done)
-        self._progress_label.setText(tr(
-            "update_loc_online_running",
-            done=done,
-            total=total,
-            eta=eta,
-        ))
-
-    def _on_online_done(self, result: UpdateLocationResult) -> None:
         self._finalize()
         self._progress_label.setText(tr(
-            "update_loc_online_done",
+            "update_loc_done",
             updated=result.updated,
             skipped=result.skipped,
             errors=result.errors,
         ))
-        self.location_updated.emit()
 
-    def _on_online_cancelled(self, result: UpdateLocationResult) -> None:
+    def _on_cancelled(self, result: UpdateLocationResult) -> None:
         self._finalize()
-        self._progress_label.setText(tr(
-            "update_loc_online_cancelled",
-            updated=result.updated,
-        ))
+        self._progress_label.setText(tr("update_loc_cancelled", updated=result.updated))
         if result.updated > 0:
             self.location_updated.emit()
 
@@ -487,12 +378,11 @@ class UpdateLocationDialog(QDialog):
     def _finalize(self) -> None:
         self._progress.setVisible(False)
         self._set_controls_enabled(True)
-        # Re-disable "Only this cache" if opened from menu
         if not self._from_context_menu:
             self._rb_this.setEnabled(False)
 
     def closeEvent(self, event) -> None:
         if self._worker and self._worker.isRunning():
             self._worker.request_cancel()
-            self._worker.wait(3000)
+            self._worker.wait()
         super().closeEvent(event)

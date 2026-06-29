@@ -5,6 +5,7 @@ import pytest
 import ast
 
 LANG_DIR = pathlib.Path("src/opensak/lang")
+SRC_DIR = pathlib.Path("src/opensak")
 REFERENCE_LANG = "en"  # reference language file
 
 def load_strings(file_path: pathlib.Path):
@@ -115,4 +116,40 @@ def test_no_globally_redundant_values():
         "The following key pairs have identical translations in every language "
         "and should be merged into a single key:\n"
         + "\n".join(f"  '{k1}' == '{k2}'  ({repr(v)})" for k1, k2, v in redundant_pairs)
+    )
+
+
+def _collect_string_literals(src_dir: pathlib.Path) -> set[str]:
+    """Return all string literal values found in Python source under src_dir (via AST)."""
+    literals: set[str] = set()
+    for f in sorted(src_dir.rglob("*.py")):
+        if f.parent.name == "lang":
+            continue
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                literals.add(node.value)
+    return literals
+
+
+def test_no_unused_keys():
+    """Every key defined in the reference language file must appear at least once
+    as a string literal in the application source (outside the lang/ package).
+
+    Unused keys are dead translations that bloat every language file and mislead
+    contributors who maintain translations.  Remove the key from all language files
+    (and from this test's assertion message) when it genuinely has no caller.
+    """
+    all_keys = set(ref_strings.keys())
+    used_literals = _collect_string_literals(SRC_DIR)
+    unused = all_keys - used_literals
+
+    assert not unused, (
+        f"{len(unused)} translation key(s) defined in {REFERENCE_LANG}.py are never "
+        "used as string literals in the application source.  Either add a tr() call "
+        "or remove the key from every language file:\n"
+        + "\n".join(f"  {k!r}" for k in sorted(unused))
     )

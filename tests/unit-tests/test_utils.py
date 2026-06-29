@@ -128,3 +128,73 @@ class TestGetImportType:
     def test_unsupported_json_raises(self):
         with pytest.raises(ValueError, match="Unsupported file format"):
             get_import_type(Path("data.json"))
+
+
+# ── normalize_geocacher_name (issue #272) ────────────────────────────────────
+
+from opensak.utils.utils import normalize_geocacher_name
+
+
+class TestNormalizeGeocacherName:
+    def test_plain_name(self):
+        assert normalize_geocacher_name("AB Green") == "ab green"
+
+    def test_none_returns_empty(self):
+        assert normalize_geocacher_name(None) == ""
+
+    def test_empty_string_returns_empty(self):
+        assert normalize_geocacher_name("") == ""
+
+    def test_strips_gsak_stats_suffix(self):
+        # Real-world case from issue #272: GSAK FindStatGen-style macro
+        # appends found/hide counts to the owner field on export.
+        assert normalize_geocacher_name("Cheminer Will (F=1361 H=54)") == "cheminer will"
+
+    def test_strips_single_stat_suffix(self):
+        assert normalize_geocacher_name("Some Cacher (FTF=3)") == "some cacher"
+
+    def test_collapses_irregular_whitespace(self):
+        assert normalize_geocacher_name("Cheminer\xa0Will") == "cheminer will"
+        assert normalize_geocacher_name("Cheminer  Will") == "cheminer will"
+
+    def test_combines_suffix_and_whitespace_handling(self):
+        assert normalize_geocacher_name("Cheminer\xa0Will  (F=1361 H=54)") == "cheminer will"
+
+    def test_case_insensitive(self):
+        assert normalize_geocacher_name("CHEMINER WILL") == normalize_geocacher_name("cheminer will")
+
+    def test_does_not_strip_unrelated_parenthetical_content(self):
+        # Only the specific "(Key=N ...)" stats pattern is stripped — other
+        # parenthetical content in a name is left intact.
+        assert normalize_geocacher_name("Team (Denmark)") == "team (denmark)"
+
+
+# ── norm_locale_date_fmt (issue #369) ────────────────────────────────────────
+
+from opensak.utils.types import norm_locale_date_fmt
+
+
+class TestNormLocaleDateFmt:
+    def test_single_d_padded(self):
+        assert norm_locale_date_fmt("d/M/yy") == "dd/MM/yyyy"
+
+    def test_space_separated_no_leading_zeros(self):
+        # Regression for issue #369: some macOS locales produce "d M yyyy"
+        assert norm_locale_date_fmt("d M yyyy") == "dd MM yyyy"
+
+    def test_already_padded_unchanged(self):
+        assert norm_locale_date_fmt("dd.MM.yyyy") == "dd.MM.yyyy"
+
+    def test_two_digit_year_expanded(self):
+        assert norm_locale_date_fmt("MM/dd/yy") == "MM/dd/yyyy"
+
+    def test_abbreviated_weekday_untouched(self):
+        # ddd is an abbreviated weekday — must not become dddd
+        assert norm_locale_date_fmt("ddd, d MMM yyyy") == "ddd, dd MMM yyyy"
+
+    def test_full_month_name_untouched(self):
+        # MMMM is the full month name — must not become MMMMM
+        assert norm_locale_date_fmt("d MMMM yyyy") == "dd MMMM yyyy"
+
+    def test_four_digit_year_unchanged(self):
+        assert norm_locale_date_fmt("d/M/yyyy") == "dd/MM/yyyy"

@@ -16,13 +16,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
 
 from ...export.kml import export_kml
+from ...gui.icon import OpenSAKMessageBox as QMessageBox
 from ...lang import tr
 from . import make_progress_cb
 

@@ -71,19 +71,27 @@ def test_detail_panel_clears_between_caches(seeded_window, qtbot):
 
 
 # ── Hint tab ───────────────────────────────────────────────────────────────────
+# issue #329: geocaching.com leverer hints i klartekst i moderne PQ'er.
+# OpenSAK gætter (via split_hint/vokal-heuristik) hvilken retning der er
+# læsbar, og viser altid den SKJULTE udgave som standard (spoiler-
+# beskyttelse) — uanset om kildedata reelt var klartekst eller ROT13.
+# Test-fixturens hint "Under a rock." er kort (under heuristikkens
+# tærskel) og antages derfor at være klartekst, så den skjulte
+# standardvisning er dens ROT13-transformation "Haqre n ebpx.".
 
 
-def test_hint_tab_shows_raw_encoded_text(seeded_window, qtbot):
-    # The hint browser initially shows the raw (ROT13-encoded) hint text.
+def test_hint_tab_shows_obscured_text_by_default(seeded_window, qtbot):
+    # Hint-browseren viser som udgangspunkt den skjulte (ROT13'ede) udgave,
+    # ikke den læsbare klartekst — uanset hvilken retning kildedata var i.
     window = seeded_window
     _select_by_gc(window, qtbot, "GC12345")
 
-    raw = window._detail_panel._hint_browser.toPlainText()
-    assert raw == "Under a rock."
+    shown = window._detail_panel._hint_browser.toPlainText()
+    assert shown == "Haqre n ebpx."
 
 
-def test_decode_button_rot13_decodes_hint(seeded_window, qtbot):
-    # Clicking 'Decode' translates 'Under a rock.' via ROT13 to 'Haqre n ebpx.'.
+def test_decode_button_reveals_plaintext_hint(seeded_window, qtbot):
+    # Klik på 'Decode' afslører den læsbare klartekst.
     window = seeded_window
     _select_by_gc(window, qtbot, "GC12345")
 
@@ -94,11 +102,11 @@ def test_decode_button_rot13_decodes_hint(seeded_window, qtbot):
     qtbot.wait(50)
 
     assert panel._hint_decoded
-    assert panel._hint_browser.toPlainText() == "Haqre n ebpx."
+    assert panel._hint_browser.toPlainText() == "Under a rock."
 
 
-def test_encode_button_restores_raw_hint(seeded_window, qtbot):
-    # Clicking 'Encode' after 'Decode' restores the original hint text.
+def test_encode_button_restores_obscured_hint(seeded_window, qtbot):
+    # Klik på 'Encode' efter 'Decode' skjuler hint'et igen.
     window = seeded_window
     _select_by_gc(window, qtbot, "GC12345")
 
@@ -109,37 +117,68 @@ def test_encode_button_restores_raw_hint(seeded_window, qtbot):
     qtbot.wait(30)
 
     assert not panel._hint_decoded
-    assert panel._hint_browser.toPlainText() == "Under a rock."
+    assert panel._hint_browser.toPlainText() == "Haqre n ebpx."
 
 
-# ── Log search ─────────────────────────────────────────────────────────────────
+# ── Log rendering ──────────────────────────────────────────────────────────────
 
 
-def test_log_search_filters_visible_log_entries(seeded_window, qtbot):
-    # Typing in the log search field re-renders logs to show only matching entries.
+def test_logs_tab_renders_all_log_entries(seeded_window, qtbot):
+    # All log entries for the selected cache are displayed in the logs browser.
     window = seeded_window
     _select_by_gc(window, qtbot, "GC12345")
 
     panel = window._detail_panel
-    panel._log_search.setText("TFTC")
-    qtbot.wait(50)
-
-    html = panel._log_browser.toHtml()
-    assert "TFTC" in html
-    assert "Could not find it" not in html
-
-
-def test_log_search_clear_restores_all_logs(seeded_window, qtbot):
-    # Clearing the log search field shows all log entries again.
-    window = seeded_window
-    _select_by_gc(window, qtbot, "GC12345")
-
-    panel = window._detail_panel
-    panel._log_search.setText("TFTC")
-    qtbot.wait(50)
-    panel._log_search.setText("")
-    qtbot.wait(50)
-
     html = panel._log_browser.toHtml()
     assert "TFTC" in html
     assert "Could not find it" in html
+
+
+def test_logs_tab_renders_when_some_logs_have_no_date(qtbot, tmp_path, monkeypatch):
+    # Regression: sorting mixed datetime/None log_date values crashed with TypeError
+    # before the fix (key returned int 0 for None, incomparable with datetime).
+    pytest.importorskip("pytestqt")
+    from tests.data import (
+        cache_wpt, build_gpx, write_gpx,
+        make_fake_manager, seed_standard_caches,
+    )
+    from opensak.db.database import init_db, get_session
+    from opensak.importer import import_gpx
+    from opensak.lang import load_language
+    import opensak.db.manager as mgr_module
+    from opensak.gui.mainwindow import MainWindow
+
+    load_language("en")
+    db_path = tmp_path / "test_nolog.db"
+    init_db(db_path=db_path)
+
+    gpx = build_gpx(cache_wpt(
+        "GCNOLOG",
+        logs=[
+            {"id": 1, "type": "Found it", "date": "2025-06-01T00:00:00Z", "text": "dated log"},
+            {"id": 2, "type": "Note",     "date": "",                     "text": "dateless log"},
+        ],
+    ))
+    gpx_file = write_gpx(tmp_path, "nolog.gpx", gpx)
+    with get_session() as session:
+        import_gpx(gpx_file, session)
+
+    monkeypatch.setattr(mgr_module, "_manager", make_fake_manager(db_path, name="NologTest"))
+    monkeypatch.setattr(MainWindow, "_initial_load", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_update_background", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_setup_complete", lambda self: None)
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitExposed(window)
+    window._refresh_cache_list()
+
+    _select_by_gc(window, qtbot, "GCNOLOG")
+
+    html = window._detail_panel._log_browser.toHtml()
+    assert "dated log" in html
+    assert "dateless log" in html
+
+    window.close()
+    mgr_module._manager = None

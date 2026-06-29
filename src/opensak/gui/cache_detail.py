@@ -7,12 +7,13 @@ Supports corrected coordinates (user-solved mystery cache finals).
 from __future__ import annotations
 import re
 import webbrowser
+from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale, QEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
-    QPushButton
+    QPushButton, QPlainTextEdit
 )
 from PySide6.QtGui import QFont
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -22,6 +23,32 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
+from opensak.gui.icon_provider import get_cache_type_pixmap_composite
+from opensak.utils.types import DateFormat, TEXT_SIZE_MAP, norm_locale_date_fmt
+from opensak.hint_detect import split_hint
+
+
+def _format_date(d: datetime) -> str:
+    fmt = get_settings().date_format
+    if fmt == DateFormat.DMY:
+        return d.strftime("%d.%m.%Y")
+    if fmt == DateFormat.MDY:
+        return d.strftime("%m/%d/%Y")
+    if fmt == DateFormat.YMD:
+        return d.strftime("%Y-%m-%d")
+    qd = QDate(d.year, d.month, d.day)
+    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
+    return QLocale.system().toString(qd, locale_fmt)
+
+
+# issue #219 — geocaching.com logge bruger markdown-links: [linktekst](https://url)
+# Disse vises i dag som rå tekst; konverter dem til klikbare <a> tags.
+_MD_LINK_RE = re.compile(r'\[([^\[\]]+)\]\((https?://[^\s)]+)\)')
+
+
+def _convert_markdown_links(text: str) -> str:
+    """Konverter markdown-links [tekst](url) i logtekst til klikbare HTML-links."""
+    return _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
 
 
 class _DescWebPage(QWebEnginePage):
@@ -46,6 +73,8 @@ class CacheDetailPanel(QWidget):
     """Displays full details for a single selected cache."""
 
     corrected_coords_changed = Signal(str)  # gc_code
+    waypoints_tab_shown = Signal(str)       # JSON: [{lat, lon, prefix, wp_type, name}, ...]
+    waypoints_tab_hidden = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,13 +87,24 @@ class CacheDetailPanel(QWidget):
         layout.setSpacing(4)
 
         # ── Header ────────────────────────────────────────────────────────────
+        header_row = QHBoxLayout()
+        header_row.setSpacing(8)
+        header_row.setContentsMargins(0, 0, 0, 0)
+
+        self._type_icon_lbl = QLabel()
+        self._type_icon_lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self._type_icon_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        header_row.addWidget(self._type_icon_lbl)
+
         self._title = QLabel(tr("detail_select_cache"))
         font = QFont()
-        font.setPointSize(13)
+        font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["label"])
         font.setBold(True)
         self._title.setFont(font)
         self._title.setWordWrap(True)
-        layout.addWidget(self._title)
+        header_row.addWidget(self._title, 1)
+
+        layout.addLayout(header_row)
 
         # ── Meta row (GC code | Type | D/T | Container | Country) ────────────
         meta_frame = QFrame()
@@ -135,7 +175,7 @@ class CacheDetailPanel(QWidget):
         cap_corrected.setStyleSheet("color: #e65100; font-size: 10px; border: none; background: transparent;")
         self._corrected_lbl = QLabel("—")
         corrected_font = QFont()
-        corrected_font.setPointSize(10)
+        corrected_font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["secondary"])
         corrected_font.setBold(True)
         self._corrected_lbl.setFont(corrected_font)
         self._corrected_lbl.setStyleSheet(
@@ -222,6 +262,8 @@ class CacheDetailPanel(QWidget):
         self._decode_btn.setMaximumWidth(200)
         self._decode_btn.clicked.connect(self._toggle_hint_decode)
         self._hint_decoded = False
+        self._hint_plain = ""
+        self._hint_cipher = ""
         hint_btn_row.addWidget(self._decode_btn)
         hint_btn_row.addStretch()
         hint_layout.addLayout(hint_btn_row)
@@ -235,48 +277,54 @@ class CacheDetailPanel(QWidget):
         log_layout.setContentsMargins(0, 4, 0, 0)
         log_layout.setSpacing(4)
 
-        # Søgefelt til logs
-        from PySide6.QtWidgets import QLineEdit
-        log_search_row = QHBoxLayout()
-        self._log_search = QLineEdit()
-        self._log_search.setPlaceholderText(tr("detail_log_search_placeholder"))
-        self._log_search.setMaximumWidth(250)
-        self._log_search.textChanged.connect(self._filter_logs)
-        log_search_row.addWidget(self._log_search)
-        log_search_row.addStretch()
-        log_layout.addLayout(log_search_row)
-
         self._log_browser = QTextBrowser()
+        self._log_browser.setOpenExternalLinks(True)  # issue #219 — links åbnes i systemets browser
         log_layout.addWidget(self._log_browser)
         self._tabs.addTab(log_widget, tr("detail_tab_logs"))
 
+        wp_widget = QWidget()
+        wp_layout = QVBoxLayout(wp_widget)
+        wp_layout.setContentsMargins(0, 4, 0, 0)
+        self._wp_browser = QTextBrowser()
+        wp_layout.addWidget(self._wp_browser)
+        self._tabs.addTab(wp_widget, tr("detail_tab_waypoints"))
+
+        attr_widget = QWidget()
+        attr_layout = QVBoxLayout(attr_widget)
+        attr_layout.setContentsMargins(0, 4, 0, 0)
+        self._attr_browser = QTextBrowser()
+        attr_layout.addWidget(self._attr_browser)
+        self._tabs.addTab(attr_widget, tr("filter_tab_attributes"))
+
+        note_widget = QWidget()
+        note_layout = QVBoxLayout(note_widget)
+        note_layout.setContentsMargins(0, 4, 0, 0)
+        self._note_editor = QPlainTextEdit()
+        self._note_editor.setPlaceholderText(tr("detail_note_placeholder"))
+        self._note_editor.installEventFilter(self)
+        note_layout.addWidget(self._note_editor)
+        self._tabs.addTab(note_widget, tr("detail_tab_notes"))
+
         layout.addWidget(self._tabs)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
     def _meta_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
         font = QFont()
-        font.setPointSize(10)
+        font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["secondary"])
         font.setBold(True)
         lbl.setFont(font)
         return lbl
 
-    def _filter_logs(self, text: str) -> None:
-        """Filtrer logs baseret på søgetekst."""
-        self._render_log_html(self._cached_logs, filter_text=text.lower())
-
     def _toggle_hint_decode(self) -> None:
         self._hint_decoded = not self._hint_decoded
         if self._hint_decoded:
-            decoded = self._raw_hint.translate(
-                str.maketrans(
-                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-                    "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm"
-                )
-            )
-            self._hint_browser.setPlainText(decoded)
+            shown = self._hint_plain if self._hint_plain else tr("detail_no_hint")
+            self._hint_browser.setPlainText(shown)
             self._decode_btn.setText(tr("detail_encode_btn"))
         else:
-            self._hint_browser.setPlainText(self._raw_hint)
+            shown = self._hint_cipher if self._hint_cipher else tr("detail_no_hint")
+            self._hint_browser.setPlainText(shown)
             self._decode_btn.setText(tr("detail_decode_btn"))
 
     def _format_coords(self, lat: float, lon: float) -> str:
@@ -294,7 +342,7 @@ class CacheDetailPanel(QWidget):
         settings = get_settings()
         app = settings.map_provider
         lat, lon = self._current_lat, self._current_lon
-        if app == "googlemaps":
+        if app == "google":
             webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
         else:
             webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
@@ -305,7 +353,7 @@ class CacheDetailPanel(QWidget):
         settings = get_settings()
         app = settings.map_provider
         lat, lon = self._corrected_lat, self._corrected_lon
-        if app == "googlemaps":
+        if app == "google":
             webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
         else:
             webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
@@ -357,6 +405,31 @@ class CacheDetailPanel(QWidget):
         if self._current_gc_code:
             self.corrected_coords_changed.emit(self._current_gc_code)
 
+    def eventFilter(self, obj, event) -> bool:
+        note_editor = getattr(self, "_note_editor", None)
+        if note_editor is not None and obj is note_editor and event.type() == QEvent.Type.FocusOut:
+            self._save_note()
+        return super().eventFilter(obj, event)
+
+    def _save_note(self) -> None:
+        if not self._current_gc_code:
+            return
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache as CacheModel, UserNote
+        text = self._note_editor.toPlainText().strip() or None
+        with get_session() as s:
+            cache_row = s.query(CacheModel).filter_by(gc_code=self._current_gc_code).one_or_none()
+            if cache_row is None:
+                return
+            note = cache_row.user_note
+            if note is None:
+                s.flush()
+                note = UserNote(cache_id=cache_row.id)
+                s.add(note)
+                s.flush()
+                cache_row.user_note = note
+            note.note = text
+
     def _update_corrected_ui(self) -> None:
         """Opdater visningen af korrigerede koordinater."""
         has_corrected = self._corrected_lat is not None
@@ -369,12 +442,55 @@ class CacheDetailPanel(QWidget):
                 self._format_coords(self._corrected_lat, self._corrected_lon)
             )
 
+    def _apply_ui_sizes(self) -> None:
+        """Re-apply text/icon sizes from current settings. Called after settings change."""
+        sizes = TEXT_SIZE_MAP[get_settings().text_size]
+
+        # Title (main label)
+        font = self._title.font()
+        font.setPointSize(sizes["label"])
+        font.setBold(True)
+        self._title.setFont(font)
+
+        # Metadata labels (GC Code, Type, D/T, Container, Country, Coords)
+        for lbl in [self._gc_code_lbl, self._type_lbl, self._dt_lbl,
+                    self._container_lbl, self._country_lbl, self._coords_lbl]:
+            font = lbl.font()
+            font.setPointSize(sizes["secondary"])
+            font.setBold(True)
+            lbl.setFont(font)
+
+        # Corrected coords label
+        font = self._corrected_lbl.font()
+        font.setPointSize(sizes["secondary"])
+        font.setBold(True)
+        self._corrected_lbl.setFont(font)
+
+        # Type icon — re-render at new size if a cache is shown
+        icon_size = sizes["detail_icon"]
+        cache_type = getattr(self, "_current_cache_type", None)
+        if cache_type is not None:
+            found = getattr(self, "_current_found", False)
+            dnf = getattr(self, "_current_dnf", False)
+            pixmap = get_cache_type_pixmap_composite(cache_type, icon_size, found=found, dnf=dnf)
+            self._type_icon_lbl.setPixmap(pixmap)
+            self._type_icon_lbl.setFixedSize(pixmap.width(), pixmap.height())
+
+        self._title.update()
+
+    def refresh_sizes(self) -> None:
+        self._apply_ui_sizes()
+
     def clear(self) -> None:
         self._current_gc_code: str | None = None
         self._current_lat: float | None = None
         self._current_lon: float | None = None
         self._corrected_lat = None
         self._corrected_lon = None
+        self._current_cache_type: str | None = None
+        self._current_found: bool = False
+        self._current_dnf: bool = False
+        self._type_icon_lbl.clear()
         self._coords_lbl.setStyleSheet("")
         self._title.setText(tr("detail_select_cache"))
         self._gc_code_lbl.setText("—")
@@ -388,14 +504,21 @@ class CacheDetailPanel(QWidget):
         self._desc_view.setHtml("")
         self._hint_browser.setPlainText("")
         self._log_browser.setHtml("")
-        self._raw_hint = ""
+        self._wp_browser.setPlainText("")
+        self._note_editor.setPlainText("")
+        self._tabs.setTabText(3, tr("detail_tab_waypoints"))
+        self._tabs.setTabText(4, tr("filter_tab_attributes"))
+        self._hint_plain = ""
+        self._hint_cipher = ""
         self._hint_decoded = False
         self._decode_btn.setText(tr("detail_decode_btn"))
-        self._log_search.setText("")
-        self._cached_logs: list = []
         self._conv_btn.setEnabled(False)
         self._corrected_frame.setVisible(False)
         self._add_corrected_btn.setVisible(False)
+        self._current_waypoints: list = []
+        self._attr_browser.setPlainText("")
+        self._tabs.setTabVisible(5, False)
+        self.waypoints_tab_hidden.emit()
 
     def show_cache(self, cache: Cache) -> None:
         """Populate the panel with data from *cache*."""
@@ -403,6 +526,12 @@ class CacheDetailPanel(QWidget):
         found_mark = " ✓" if cache.found else ""
         archived_mark = tr("detail_archived_mark") if cache.archived else ""
         self._title.setText(f"{cache.name}{found_mark}{archived_mark}")
+
+        # Type icon — store for resize and render at current size
+        self._current_cache_type = cache.cache_type
+        self._current_found = bool(cache.found)
+        self._current_dnf = bool(cache.dnf)
+        self._apply_ui_sizes()  # Re-apply sizes (also renders the icon)
 
         # Meta — GC kode som klikbart link
         gc = cache.gc_code or "—"
@@ -455,7 +584,7 @@ class CacheDetailPanel(QWidget):
         if cache.placed_by:
             parts.append(tr("detail_placed_by", name=cache.placed_by))
         if cache.hidden_date:
-            parts.append(tr("detail_hidden_date", date=cache.hidden_date.strftime('%d.%m.%Y')))
+            parts.append(tr("detail_hidden_date", date=_format_date(cache.hidden_date)))
         self._placed_lbl.setText("   |   ".join(parts))
 
         # Description — renderes via QWebEngineView så billeder og CJK-fonte virker
@@ -480,63 +609,55 @@ class CacheDetailPanel(QWidget):
                 f"<p style='color:gray'>{tr('detail_no_description')}</p>"
             ))
 
-        # Hint — gem rå hint og nulstil decode state
-        self._raw_hint = cache.encoded_hints or ""
+        # Hint — issue #329: geocaching.com leverer hints i klartekst i
+        # moderne PQ'er, men ældre GSAK-eksporter kan stadig indeholde ægte
+        # ROT13-kodet tekst. split_hint() gætter hvilken er hvilken og vi
+        # viser altid den skjulte udgave som standard (spoiler-beskyttelse).
+        self._hint_plain, self._hint_cipher = split_hint(cache.encoded_hints or "")
         self._hint_decoded = False
         self._decode_btn.setText(tr("detail_decode_btn"))
         self._hint_browser.setPlainText(
-            self._raw_hint if self._raw_hint else tr("detail_no_hint")
+            self._hint_cipher if self._hint_cipher else tr("detail_no_hint")
         )
 
-        # Logs — show up to 10 most recent
+        # Personal note
+        self._tabs.setTabVisible(5, True)
+        self._note_editor.setPlainText(
+            (cache.user_note.note or "") if cache.user_note else ""
+        )
+
+        # Logs — viser alle (sorteret efter dato, nyeste først)
         self._render_logs(cache)
+
+        # Child waypoints
+        self._render_waypoints(cache)
+
+        # Attributes
+        self._render_attributes(cache)
 
     def _render_logs(self, cache: Cache) -> None:
         logs = sorted(
             cache.logs,
-            key=lambda l: l.log_date or 0,
+            key=lambda l: l.log_date or datetime.min,
             reverse=True
         )
-        self._cached_logs = logs
-        self._log_search.setText("")
         self._tabs.setTabText(2, tr("detail_tab_logs_count", count=len(logs)) if logs else tr("detail_tab_logs"))
         self._render_log_html(logs)
 
-    def _render_log_html(self, logs: list, filter_text: str = "") -> None:
-        """Render logs som HTML, evt. filtreret."""
+    def _render_log_html(self, logs: list) -> None:
         if not logs:
             self._log_browser.setPlainText(tr("detail_no_logs"))
             return
 
         colours = LOG_COLOURS
-
-        filtered = logs
-        if filter_text:
-            filtered = [
-                l for l in logs
-                if filter_text in (l.text or "").lower()
-                or filter_text in (l.finder or "").lower()
-                or filter_text in (l.log_type or "").lower()
-            ]
-
-        if not filtered:
-            self._log_browser.setPlainText(tr("detail_no_logs_match", text=filter_text))
-            return
-
         html = []
-        for log in filtered[:20]:
+        for log in logs:
             colour = colours.get(log.log_type, "#555555")
-            date_str = log.log_date.strftime("%d.%m.%Y") if log.log_date else "?"
+            date_str = _format_date(log.log_date) if log.log_date else "?"
+            # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
             text = log.text or ""
-            if len(text) > 500:
-                text = text[:500] + "…"
-            if filter_text and filter_text in text.lower():
-                idx = text.lower().find(filter_text)
-                text = (
-                    text[:idx]
-                    + f'<mark>{text[idx:idx+len(filter_text)]}</mark>'
-                    + text[idx+len(filter_text):]
-                )
+            # issue #219 — markdown-links [tekst](url) gøres til klikbare <a> tags
+            text = _convert_markdown_links(text)
             html.append(
                 f'<p><b style="color:{colour}">{log.log_type}</b> '
                 f'— {log.finder or "?"} '
@@ -545,6 +666,73 @@ class CacheDetailPanel(QWidget):
             )
 
         self._log_browser.setHtml("".join(html))
+
+    def _render_waypoints(self, cache: Cache) -> None:
+        wps = cache.waypoints
+        self._current_waypoints = list(wps)
+        count = len(wps)
+        tab_idx = 3
+        self._tabs.setTabText(
+            tab_idx,
+            tr("detail_tab_waypoints_count", count=count) if count else tr("detail_tab_waypoints"),
+        )
+        if not wps:
+            self._wp_browser.setPlainText(tr("detail_no_waypoints"))
+            return
+        html = []
+        for wp in sorted(wps, key=lambda w: w.prefix or ""):
+            if wp.latitude is not None and wp.longitude is not None:
+                coords = self._format_coords(wp.latitude, wp.longitude)
+            else:
+                coords = tr("detail_wp_no_coords")
+            name_part = f" — {wp.name}" if wp.name else ""
+            html.append(
+                f'<p><b>[{wp.prefix}]</b> <b>{wp.wp_type or "?"}</b>{name_part}'
+                f'<br><span style="color:gray">{coords}</span></p>'
+            )
+            if wp.description:
+                html.append(f'<p style="margin-top:2px">{wp.description}</p>')
+            if wp.comment:
+                html.append(f'<p style="color:#555;margin-top:2px"><i>{wp.comment}</i></p>')
+            html.append("<hr>")
+        self._wp_browser.setHtml("".join(html))
+        if self._tabs.currentIndex() == 3:
+            self._emit_waypoint_markers()
+
+    def _render_attributes(self, cache: Cache) -> None:
+        attrs = sorted(cache.attributes, key=lambda a: (not a.is_on, a.name or ""))
+        tab_idx = 4
+        if not attrs:
+            self._tabs.setTabText(tab_idx, tr("filter_tab_attributes"))
+            self._attr_browser.setPlainText(tr("detail_no_attrs"))
+            return
+        self._tabs.setTabText(tab_idx, tr("detail_tab_attrs_count", count=len(attrs)))
+        html = []
+        for attr in attrs:
+            symbol = "✓" if attr.is_on else "✗"
+            colour = "#2e7d32" if attr.is_on else "#c62828"
+            name = attr.name or str(attr.attribute_id)
+            html.append(
+                f'<p><span style="color:{colour};font-weight:bold">{symbol}</span> {name}</p>'
+            )
+        self._attr_browser.setHtml("".join(html))
+
+    def _on_tab_changed(self, idx: int) -> None:
+        if idx == 3:
+            self._emit_waypoint_markers()
+        else:
+            self.waypoints_tab_hidden.emit()
+
+    def _emit_waypoint_markers(self) -> None:
+        import json
+        data = [
+            {"lat": wp.latitude, "lon": wp.longitude,
+             "prefix": wp.prefix or "", "wp_type": wp.wp_type or "",
+             "name": wp.name or ""}
+            for wp in self._current_waypoints
+            if wp.latitude is not None and wp.longitude is not None
+        ]
+        self.waypoints_tab_shown.emit(json.dumps(data))
 
     def _cleanup_webengine(self) -> None:
         """Slet QWebEnginePage før Qt rydder defaultProfile op.

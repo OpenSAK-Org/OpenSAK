@@ -81,11 +81,12 @@ def _log(log_id="1", log_type="Found it", finder="Tester", text="TFTC", log_date
     )
 
 
-def _note(is_corrected=True, corrected_lat=55.0, corrected_lon=12.0):
+def _note(is_corrected=True, corrected_lat=55.0, corrected_lon=12.0, note=None):
     return SimpleNamespace(
         is_corrected=is_corrected,
         corrected_lat=corrected_lat,
         corrected_lon=corrected_lon,
+        note=note,
     )
 
 
@@ -207,6 +208,26 @@ class TestGenerateGpx:
         result = generate_gpx([c])
         assert "Original" in result
         assert "55.000000" in result
+
+    def test_user_note_emitted_as_gsak_element(self):
+        n = _note(is_corrected=False, note="My personal note")
+        result = generate_gpx([_cache(user_note=n)])
+        assert "gsak:UserNote" in result
+        assert "My personal note" in result
+
+    def test_gsak_namespace_declared_when_note_present(self):
+        n = _note(is_corrected=False, note="A note")
+        result = generate_gpx([_cache(user_note=n)])
+        assert "http://www.gsak.net/xmlv1/6" in result
+
+    def test_no_gsak_extension_when_note_absent(self):
+        result = generate_gpx([_cache(user_note=None)])
+        assert "gsak:wptExtension" not in result
+
+    def test_no_gsak_extension_when_note_is_empty_string(self):
+        n = _note(is_corrected=False, note="")
+        result = generate_gpx([_cache(user_note=n)])
+        assert "gsak:wptExtension" not in result
 
     def test_empty_cache_list_produces_valid_gpx(self):
         result = generate_gpx([])
@@ -349,6 +370,19 @@ class TestIsGarmin:
         assert _is_garmin(tmp_path) is True
 
     def test_non_garmin_path(self, tmp_path):
+        assert _is_garmin(tmp_path) is False
+
+    def test_unreadable_marker_does_not_raise(self, tmp_path, monkeypatch):
+        # A candidate like /mnt/lost+found (root-only) makes .exists() raise
+        # PermissionError on Python <=3.12; detection must skip it, not crash.
+        real_exists = Path.exists
+
+        def maybe_boom(self, *args, **kwargs):
+            if str(self).startswith(str(tmp_path)):
+                raise PermissionError(13, "Permission denied")
+            return real_exists(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "exists", maybe_boom)
         assert _is_garmin(tmp_path) is False
 
 

@@ -1,0 +1,68 @@
+name: Notify linked issues on beta merge
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches:
+      - beta
+
+jobs:
+  notify:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Comment on linked issues
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const prNumber = context.payload.pull_request.number;
+
+            const pattern = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
+            const issues = [...new Set([...body.matchAll(pattern)].map(m => parseInt(m[1])))];
+
+            if (issues.length === 0) {
+              console.log('No linked issues found in PR body.');
+              return;
+            }
+
+            for (const issueNumber of issues) {
+              const { data: issue } = await github.rest.issues.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+              });
+
+              const labels = issue.labels.map(l => l.name.toLowerCase());
+              const author = issue.user.login;
+
+              let subject;
+              if (labels.some(l => l.includes('bug'))) {
+                subject = 'This was fixed';
+              } else if (labels.some(l => l.includes('feature'))) {
+                subject = 'This feature has been completed';
+              } else if (labels.some(l => l.includes('improvement'))) {
+                subject = 'This improvement has been completed';
+              } else {
+                subject = 'This has been completed';
+              }
+
+              const body = `@${author} ${subject} in PR #${prNumber} and will be included in the **next beta release**. 🎉`;
+
+              console.log(`Commenting and closing issue #${issueNumber}`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+            }

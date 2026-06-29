@@ -17,7 +17,7 @@ from opensak.filters.engine import (
     DistanceFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    HasCorrectedFilter, UserFlagFilter, DnfFilter, FtfFilter,
+    HasCorrectedFilter, NoCorrectedFilter, UserFlagFilter, LockedFilter, DnfFilter, FtfFilter,
     FavoritePointsFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
     # Helpers
     _haversine_km, _iter_filters, FILTER_REGISTRY, SORT_FIELDS,
@@ -234,6 +234,43 @@ def test_gc_code_filter(tmp_db):
         results = apply_filters(s, FilterSet().add(GcCodeFilter("GC00001")))
     assert len(results) == 1
     assert results[0].gc_code == "GC00001"
+
+
+def test_gc_code_filter_partial_no_prefix_sql(tmp_db):
+    # SQL path: "00001" (no GC prefix) must find GC00001 via substring match.
+    with get_session() as s:
+        results = apply_filters(s, FilterSet().add(GcCodeFilter("00001")))
+    codes = {c.gc_code for c in results}
+    assert "GC00001" in codes
+    assert "GC00002" not in codes
+
+
+def test_gc_code_filter_partial_all_match_sql(tmp_db):
+    # SQL path: "0000" is contained in all six seeded GC codes.
+    with get_session() as s:
+        results = apply_filters(s, FilterSet().add(GcCodeFilter("0000")))
+    assert len(results) == 6
+
+
+def test_gc_code_filter_python_path_with_prefix(tmp_db):
+    # Python path (no SQL call): prefix match when text starts with "GC".
+    f = GcCodeFilter("GC00001")
+    with get_session() as s:
+        all_caches = s.query(Cache).all()
+    matches = [c for c in all_caches if f.matches(c)]
+    assert len(matches) == 1
+    assert matches[0].gc_code == "GC00001"
+
+
+def test_gc_code_filter_python_path_without_prefix(tmp_db):
+    # Python path (no SQL call): substring match when text has no "GC" prefix.
+    f = GcCodeFilter("00001")
+    with get_session() as s:
+        all_caches = s.query(Cache).all()
+    matches = [c for c in all_caches if f.matches(c)]
+    codes = {c.gc_code for c in matches}
+    assert "GC00001" in codes
+    assert "GC00002" not in codes
 
 
 def test_placed_by_filter(tmp_db):
@@ -732,11 +769,42 @@ def test_where_clause_profile_save_load(tmp_path):
     assert where_filters[0].sql == sql
 
 
+def test_where_clause_distance_close(tmp_db):
+    # "distance < 1" from Copenhagen should match only the two caches there.
+    home = (55.6761, 12.5683)
+    with get_session() as s:
+        results = apply_filters(
+            s, FilterSet().add(WhereClauseFilter("distance < 1")),
+            distance_from=home,
+        )
+    codes = {c.gc_code for c in results}
+    assert "GC00001" in codes   # ~0 km
+    assert "GC00002" in codes   # ~0.45 km
+    assert "GC00003" not in codes  # ~155 km
+    assert "GC00005" not in codes  # ~353 km
+
+
+def test_where_clause_distance_far(tmp_db):
+    # "distance > 100" from Copenhagen should exclude the two nearby caches.
+    home = (55.6761, 12.5683)
+    with get_session() as s:
+        results = apply_filters(
+            s, FilterSet().add(WhereClauseFilter("distance > 100")),
+            distance_from=home,
+        )
+    codes = {c.gc_code for c in results}
+    assert "GC00001" not in codes
+    assert "GC00002" not in codes
+    assert "GC00003" in codes   # ~155 km
+    assert "GC00004" in codes   # ~218 km
+    assert "GC00005" in codes   # ~353 km
+
+
 # ── Python-side matches for flag/date/points filters ──────────────────────────
 
 def _cache(**kw):
     base = dict(
-        user_note=None, user_flag=False, dnf=False, first_to_find=False,
+        user_note=None, user_flag=False, locked=False, dnf=False, first_to_find=False,
         favorite_points=0, found=False, found_date=None, dnf_date=None,
         last_log_date=None,
     )
@@ -750,11 +818,29 @@ class TestFlagFilters:
         assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=True))) is True
         assert f.matches(_cache(user_note=None)) is False
 
+    def test_no_corrected(self):
+        # Counterpart to HasCorrectedFilter (bug #274 — was missing entirely,
+        # so the "no corrected" filter checkbox had no effect).
+        f = NoCorrectedFilter()
+        assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=True))) is False
+        assert f.matches(_cache(user_note=SimpleNamespace(is_corrected=False))) is True
+        assert f.matches(_cache(user_note=None)) is True
+        assert NoCorrectedFilter.from_dict(f.to_dict()).filter_type == "no_corrected"
+        assert "no_corrected" in FILTER_REGISTRY
+
     def test_user_flag(self):
         f = UserFlagFilter(flagged=True)
         assert f.matches(_cache(user_flag=True)) is True
         assert f.matches(_cache(user_flag=False)) is False
         assert UserFlagFilter.from_dict(f.to_dict()).flagged is True
+
+    def test_locked(self):
+        # Issue #202: filter on lock status.
+        f = LockedFilter(locked=True)
+        assert f.matches(_cache(locked=True)) is True
+        assert f.matches(_cache(locked=False)) is False
+        assert LockedFilter.from_dict(f.to_dict()).locked is True
+        assert "locked" in FILTER_REGISTRY
 
     def test_dnf(self):
         f = DnfFilter(has_dnf=True)

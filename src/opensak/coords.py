@@ -116,10 +116,15 @@ def format_lon(lon: float, fmt: CoordFormat) -> str:
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
 
+def _valid_range(lat: float, lon: float) -> bool:
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+
+
 def parse_coords(text: str) -> Coordinate | None:
     """
     Try to parse a coordinate string in any supported format.
-    Returns (lat, lon) as decimal degrees, or None if parsing fails.
+    Returns (lat, lon) as decimal degrees, or None if parsing fails or
+    the values fall outside valid geographic ranges.
 
     Accepted formats
     ----------------
@@ -138,7 +143,8 @@ def parse_coords(text: str) -> Coordinate | None:
         r'^([+-]?\d+\.\d+)[,\s]+([+-]?\d+\.\d+)$', text
     )
     if m:
-        return float(m.group(1)), float(m.group(2))
+        lat, lon = float(m.group(1)), float(m.group(2))
+        return (lat, lon) if _valid_range(lat, lon) else None
 
     # ── DMM°: "N 34° 58.088' E 034° 03.281'" (geocaching.com format) ─────────
     # Grads-tegn efter grader, apostrof efter minutter er valgfri (fixes #59)
@@ -149,13 +155,15 @@ def parse_coords(text: str) -> Coordinate | None:
     )
     if m:
         lat_h, lat_d, lat_m, lon_h, lon_d, lon_m = m.groups()
+        if float(lat_m) >= 60.0 or float(lon_m) >= 60.0:
+            return None
         lat = int(lat_d) + float(lat_m) / 60
         lon = int(lon_d) + float(lon_m) / 60
         if lat_h.upper() == "S":
             lat = -lat
         if lon_h.upper() == "W":
             lon = -lon
-        return lat, lon
+        return (lat, lon) if _valid_range(lat, lon) else None
 
     # Plain DMM "N55 47.250 E012 25.000" is already matched by the DMM° branch
     # above (the degree sign and apostrophe are optional there), so no separate
@@ -169,12 +177,16 @@ def parse_coords(text: str) -> Coordinate | None:
     )
     if m:
         lat_h, lat_d, lat_m, lat_s, lon_h, lon_d, lon_m, lon_s = m.groups()
+        if int(lat_m) >= 60 or int(lon_m) >= 60:
+            return None
+        if float(lat_s) >= 60.0 or float(lon_s) >= 60.0:
+            return None
         lat = int(lat_d) + int(lat_m) / 60 + float(lat_s) / 3600
         lon = int(lon_d) + int(lon_m) / 60 + float(lon_s) / 3600
         if lat_h.upper() == "S":
             lat = -lat
         if lon_h.upper() == "W":
             lon = -lon
-        return lat, lon
+        return (lat, lon) if _valid_range(lat, lon) else None
 
     return None

@@ -88,6 +88,35 @@ def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
     return None
 
 
+# ── Companion file detector ───────────────────────────────────────────────────
+
+def _is_companion_gpx(path: Path) -> bool:
+    """Return True if the GPX contains only extra waypoints, not cache entries.
+
+    Reads up to the first <wpt> element only — fast enough to call at dialog
+    time without blocking the UI.  A companion file has wpt entries with
+    type "Waypoint|…"; a main cache GPX has type "Geocache|…" or a
+    Groundspeak cache extension block.
+    """
+    try:
+        for _, elem in etree.iterparse(str(path), events=("end",), tag=None):
+            if etree.QName(elem).localname != "wpt":
+                elem.clear()
+                continue
+            gpx_ns = {"gpx": etree.QName(elem).namespace or NS["gpx"]}
+            type_raw = _text(elem, "gpx:type", gpx_ns) or ""
+            if type_raw.startswith("Geocache"):
+                return False
+            for gs_uri in _GS_NAMESPACES:
+                if elem.find(f".//{{{gs_uri}}}cache") is not None:
+                    return False
+            # First wpt is not a cache entry — companion file
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # ── Waypoint (extra) parser ───────────────────────────────────────────────────
 
 def _parse_extra_waypoints(tree) -> dict[str, list[dict]]:
@@ -115,7 +144,10 @@ def _parse_extra_waypoints(tree) -> dict[str, list[dict]]:
     ns = {"gpx": root.nsmap.get(None, "http://www.topografix.com/GPX/1/0")}
 
     for wpt in root.findall("{%s}wpt" % ns["gpx"]):
-        name_el = wpt.find("{%s}n" % ns["gpx"])
+        name_el = (
+            wpt.find("{%s}n" % ns["gpx"]) or
+            wpt.find("{%s}name" % ns["gpx"])
+        )
         name = name_el.text.strip() if name_el is not None and name_el.text else ""
         if len(name) < 3:
             continue
@@ -165,13 +197,19 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         _text(wpt_el, "gpx:name", gpx_ns) or
         _text(wpt_el, "gpx:n", gpx_ns)
     )
-    # Accept GC codes (standard caches) and LC codes (Adventure Lab / lab2gpx)
-    if not gc_code or not (gc_code.startswith("GC") or gc_code.startswith("LC")):
+    if not gc_code:
         return None
 
     # Cache type from <type>Geocache|Traditional Cache</type>
     type_raw = _text(wpt_el, "gpx:type", gpx_ns) or ""
     cache_type_full = type_raw.split("|")[-1].strip() if "|" in type_raw else type_raw
+
+    # Accept GC codes (standard caches), LC codes (Adventure Lab / lab2gpx),
+    # and any other code the type field identifies as a Geocache — covers other
+    # lab2gpx-encoded Adventure Lab prefixes such as LB, LA, etc.
+    if not gc_code.startswith("GC") and not gc_code.startswith("LC"):
+        if not type_raw.startswith("Geocache"):
+            return None
 
     hidden_raw = _text(wpt_el, "gpx:time", gpx_ns)
 
@@ -293,12 +331,75 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_corrected_lon: Optional[float] = None
     gsak_original_lat: Optional[float] = None
     gsak_original_lon: Optional[float] = None
+
+    # ── Issue #269: remaining GSAK "standard" waypoint extension fields ───────
+    # These mirror GSAK's own per-cache user fields (UserFlag, UserSort,
+    # UserData/User2-4, IsPremium, FavPoints). All are optional and only
+    # present when the GPX was exported FROM GSAK itself (not from a raw
+    # geocaching.com Pocket Query) — so None here simply means "not GSAK".
+    gsak_user_flag: Optional[bool] = None
+    gsak_is_premium: Optional[bool] = None
+    gsak_user_sort: Optional[int] = None
+    gsak_user_data_1: Optional[str] = None
+    gsak_user_data_2: Optional[str] = None
+    gsak_user_data_3: Optional[str] = None
+    gsak_user_data_4: Optional[str] = None
+    gsak_fav_points: Optional[int] = None
+    gsak_user_note: Optional[str] = None
+
     for gsak_uri in _GSAK_NAMESPACES:
-        gsak_ext = wpt_el.find(f"{{{gsak_uri}}}wptExtension")
+        # Search descendants: gsak:wptExtension may be a direct <wpt> child (GSAK
+        # format) or nested inside <extensions> (OpenSAK GPX 1.1 export).
+        gsak_ext = wpt_el.find(f".//{{{gsak_uri}}}wptExtension")
         if gsak_ext is not None:
             ftf_el = gsak_ext.find(f"{{{gsak_uri}}}FirstToFind")
             if ftf_el is not None and ftf_el.text:
                 gsak_ftf = ftf_el.text.strip().lower() == "true"
+
+            flag_el = gsak_ext.find(f"{{{gsak_uri}}}UserFlag")
+            if flag_el is not None and flag_el.text:
+                gsak_user_flag = flag_el.text.strip().lower() == "true"
+
+            premium_el = gsak_ext.find(f"{{{gsak_uri}}}IsPremium")
+            if premium_el is not None and premium_el.text:
+                gsak_is_premium = premium_el.text.strip().lower() == "true"
+
+            sort_el = gsak_ext.find(f"{{{gsak_uri}}}UserSort")
+            if sort_el is not None and sort_el.text:
+                try:
+                    gsak_user_sort = int(sort_el.text.strip())
+                except ValueError:
+                    pass
+
+            ud1_el = gsak_ext.find(f"{{{gsak_uri}}}UserData")
+            if ud1_el is not None and ud1_el.text and ud1_el.text.strip():
+                gsak_user_data_1 = ud1_el.text.strip()
+
+            ud2_el = gsak_ext.find(f"{{{gsak_uri}}}User2")
+            if ud2_el is not None and ud2_el.text and ud2_el.text.strip():
+                gsak_user_data_2 = ud2_el.text.strip()
+
+            ud3_el = gsak_ext.find(f"{{{gsak_uri}}}User3")
+            if ud3_el is not None and ud3_el.text and ud3_el.text.strip():
+                gsak_user_data_3 = ud3_el.text.strip()
+
+            ud4_el = gsak_ext.find(f"{{{gsak_uri}}}User4")
+            if ud4_el is not None and ud4_el.text and ud4_el.text.strip():
+                gsak_user_data_4 = ud4_el.text.strip()
+
+            # FavPoints: only trustworthy when GSAK itself pulled it from the
+            # Geocaching.com API — but if it's present in the GPX, GSAK has
+            # already done that work for us, so we take it as-is.
+            fav_el = gsak_ext.find(f"{{{gsak_uri}}}FavPoints")
+            if fav_el is not None and fav_el.text:
+                try:
+                    gsak_fav_points = int(fav_el.text.strip())
+                except ValueError:
+                    pass
+
+            note_el = gsak_ext.find(f"{{{gsak_uri}}}UserNote")
+            if note_el is not None and note_el.text and note_el.text.strip():
+                gsak_user_note = note_el.text.strip()
 
             # Format B: LatBeforeCorrect/LonBeforeCorrect (newer GSAK)
             # The mere PRESENCE of LatBeforeCorrect means CC has been set in GSAK —
@@ -368,6 +469,15 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_corrected_lon": gsak_corrected_lon,
         "gsak_original_lat": gsak_original_lat,
         "gsak_original_lon": gsak_original_lon,
+        "gsak_user_flag":    gsak_user_flag,
+        "gsak_is_premium":   gsak_is_premium,
+        "gsak_user_sort":    gsak_user_sort,
+        "gsak_user_data_1":  gsak_user_data_1,
+        "gsak_user_data_2":  gsak_user_data_2,
+        "gsak_user_data_3":  gsak_user_data_3,
+        "gsak_user_data_4":  gsak_user_data_4,
+        "gsak_fav_points":   gsak_fav_points,
+        "gsak_user_note":    gsak_user_note,
         "found_by_me":       found_by_me,
     }
 
@@ -465,11 +575,13 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
     ``DELETE ... WHERE cache_id IN (...)`` rather than one fetch-sync DELETE per
     suffix. Commits to disk every *commit_every* caches to keep RAM flat.
     """
-    # Build suffix→cache_id once (suffix == gc_code without the 2-char prefix).
+    # Build suffix→cache_id and suffix→gc_code once.
     suffix_to_cache_id: dict[str, int] = {}
+    suffix_to_gc_code: dict[str, str] = {}
     for cache_id, gc_code in session.query(Cache.id, Cache.gc_code):
         if gc_code and len(gc_code) > 2:
             suffix_to_cache_id[gc_code[2:]] = cache_id
+            suffix_to_gc_code[gc_code[2:]] = gc_code
 
     # Group waypoints per suffix.
     wpts_by_suffix: dict[str, list] = {}
@@ -495,9 +607,11 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
         if cache_id is None:
             continue
 
+        parent_gc = suffix_to_gc_code.get(suffix)
         for wp in wps:
             session.add(Waypoint(
                 cache_id=cache_id,
+                parent_gc_code=parent_gc,
                 prefix=wp["prefix"],
                 wp_type=wp["wp_type"],
                 name=wp["name"],
@@ -514,6 +628,21 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
             session.expunge_all()
 
     session.commit()
+
+    # Refresh waypoint_count for every affected cache in one SQL pass.
+    if target_ids:
+        for i in range(0, len(target_ids), 500):
+            chunk = target_ids[i:i + 500]
+            placeholders = ", ".join(str(cid) for cid in chunk)
+            session.execute(_sa_text(f"""
+                UPDATE caches
+                SET waypoint_count = (
+                    SELECT COUNT(*) FROM waypoints WHERE waypoints.cache_id = caches.id
+                )
+                WHERE id IN ({placeholders})
+            """))
+        session.commit()
+
     return count
 
 
@@ -666,19 +795,28 @@ def _upsert_cache(
         session.query(Attribute).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         session.query(Trackable).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         session.query(Waypoint).filter_by(cache_id=cache.id).delete(synchronize_session=False)
+        cache.waypoint_count = 0
         session.flush()
 
     # Scalar fields
-    for field in (
-        "name", "cache_type", "container", "latitude", "longitude",
-        "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
-        "hidden_date", "available", "archived",
-        "country", "state", "county",
-        "short_description", "short_desc_html",
-        "long_description",  "long_desc_html",
-        "encoded_hints",
-    ):
-        setattr(cache, field, data.get(field))
+    # ── Issue #202: Lock a cache ──────────────────────────────────────────
+    # A locked cache keeps its current scalar values exactly as they were
+    # the last time it was unlocked/imported — re-imports (PQ/GPX) no longer
+    # touch name, type, container, coordinates, D/T, owner, status,
+    # descriptions, hint or country/state/county. New caches can't be locked
+    # yet (the checkbox lives on existing caches only), so this only applies
+    # when updating an existing row.
+    if existing is None or not cache.locked:
+        for field in (
+            "name", "cache_type", "container", "latitude", "longitude",
+            "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
+            "hidden_date", "available", "archived",
+            "country", "state", "county",
+            "short_description", "short_desc_html",
+            "long_description",  "long_desc_html",
+            "encoded_hints",
+        ):
+            setattr(cache, field, data.get(field))
 
     cache.source_file = source_file
 
@@ -862,6 +1000,43 @@ def _upsert_cache(
             # Brugeren har IKKE fundet denne cache — FTF ikke relevant
             cache.first_to_find = False
 
+    # ── GSAK personal/user fields (issue #269) ────────────────────────────────
+    # UserFlag, IsPremium, UserSort, UserData1-4 and FavPoints are only ever
+    # present when the GPX came FROM GSAK (not from a raw Geocaching.com
+    # Pocket Query). We only touch a field when GSAK actually supplied a
+    # value, so a plain PQ re-import never wipes data the user entered
+    # manually in OpenSAK or in a previous GSAK-sourced import.
+    if data.get("gsak_user_flag") is not None:
+        cache.user_flag = data["gsak_user_flag"]
+    if data.get("gsak_is_premium") is not None:
+        cache.premium_only = data["gsak_is_premium"]
+    if data.get("gsak_user_sort") is not None:
+        cache.user_sort = data["gsak_user_sort"]
+    if data.get("gsak_user_data_1") is not None:
+        cache.user_data_1 = data["gsak_user_data_1"]
+    if data.get("gsak_user_data_2") is not None:
+        cache.user_data_2 = data["gsak_user_data_2"]
+    if data.get("gsak_user_data_3") is not None:
+        cache.user_data_3 = data["gsak_user_data_3"]
+    if data.get("gsak_user_data_4") is not None:
+        cache.user_data_4 = data["gsak_user_data_4"]
+    if data.get("gsak_fav_points") is not None:
+        cache.favorite_points = data["gsak_fav_points"]
+
+    # ── GSAK personal note (issue #389) ──────────────────────────────────────
+    # Write only when GSAK supplied a non-empty note, and never overwrite an
+    # existing non-empty note so that manually entered notes survive re-import.
+    gsak_note_text = data.get("gsak_user_note")
+    if gsak_note_text:
+        if cache.user_note is None:
+            session.flush()
+            note = UserNote(cache_id=cache.id)
+            session.add(note)
+            session.flush()
+            cache.user_note = note
+        if not cache.user_note.note:
+            cache.user_note.note = gsak_note_text
+
     # ── GSAK corrected coordinates (issue #129, #73) ──────────────────────────
     # Corrected coords are stored in UserNote (user data), not on Cache itself.
     # Only write if GSAK actually exported them (non-zero values).
@@ -982,23 +1157,24 @@ def _link_extra_waypoints(
         return 0
 
     # Build an ends-with index: for each suffix length present, map the cache's
-    # trailing chars of that length → cache_id (first match wins, matching the
-    # old .first() semantics).
+    # trailing chars of that length → (cache_id, gc_code).
     lengths = {len(s) for s in extra if s}
-    tail_index: dict[int, dict[str, int]] = {n: {} for n in lengths}
+    tail_index: dict[int, dict[str, tuple[int, str]]] = {n: {} for n in lengths}
     for cid, gc in session.query(Cache.id, Cache.gc_code):
         if not gc:
             continue
         for n in lengths:
             if len(gc) >= n:
-                tail_index[n].setdefault(gc[-n:], cid)
+                tail_index[n].setdefault(gc[-n:], (cid, gc))
 
-    # Resolve each suffix to a cache_id once.
+    # Resolve each suffix to a (cache_id, gc_code) pair once.
     resolved: dict[str, int] = {}
+    resolved_gc: dict[str, str] = {}
     for suffix in extra:
-        cid = tail_index.get(len(suffix), {}).get(suffix)
-        if cid is not None:
-            resolved[suffix] = cid
+        pair = tail_index.get(len(suffix), {}).get(suffix)
+        if pair is not None:
+            resolved[suffix] = pair[0]
+            resolved_gc[suffix] = pair[1]
 
     if not resolved:
         return 0
@@ -1017,9 +1193,11 @@ def _link_extra_waypoints(
         cache_id = resolved.get(suffix)
         if cache_id is None:
             continue
+        parent_gc = resolved_gc.get(suffix)
         for wp in wpts:
             session.add(Waypoint(
                 cache_id=cache_id,
+                parent_gc_code=parent_gc,
                 prefix=wp["prefix"],
                 wp_type=wp["wp_type"],
                 name=wp["name"],
@@ -1029,6 +1207,23 @@ def _link_extra_waypoints(
                 longitude=wp["longitude"],
             ))
             count += 1
+
+    # Refresh waypoint_count for every matched cache in one SQL pass.
+    # flush() is required because autoflush=False; the subquery must see the
+    # newly added Waypoint rows before the UPDATE executes.
+    if target_ids:
+        session.flush()
+        for i in range(0, len(target_ids), 500):
+            chunk = target_ids[i:i + 500]
+            placeholders = ", ".join(str(cid) for cid in chunk)
+            session.execute(_sa_text(f"""
+                UPDATE caches
+                SET waypoint_count = (
+                    SELECT COUNT(*) FROM waypoints WHERE waypoints.cache_id = caches.id
+                )
+                WHERE id IN ({placeholders})
+            """))
+        session.commit()
 
     return count
 
@@ -1115,6 +1310,15 @@ def _parse_gpx_to_data(
             errors.append(f"Waypoints file error: {e}")
 
     return caches, extra_wpts, companion_data, errors
+
+
+def _count_wpts(gpx_path: Path) -> int:
+    count = 0
+    for _, elem in etree.iterparse(str(gpx_path), events=("end",)):
+        if etree.QName(elem).localname == "wpt":
+            count += 1
+        elem.clear()
+    return count
 
 
 def import_gpx(
@@ -1253,41 +1457,40 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp)
 
-        gpx_files = sorted(f for f in tmp.glob("*.gpx") if "-wpts" not in f.name.lower())
+        # Classify GPX files by content, not by name.
+        all_gpx = sorted(tmp.glob("*.gpx"))
+        companions = [f for f in all_gpx if _is_companion_gpx(f)]
+        gpx_files  = [f for f in all_gpx if f not in set(companions)]
 
         if not gpx_files:
             overall_result.errors.append("No .gpx file found in zip")
             return overall_result
 
-        # Step 1: Parse all GPX files in parallel (pure CPU, no DB)
+        # Step 1: Parse all main GPX files in parallel (pure CPU, no DB).
+        # Companions are processed in step 3 after all caches are written so
+        # _link_extra_waypoints can match them against the full cache table.
         parsed_files = []
         with ThreadPoolExecutor(max_workers=min(8, len(gpx_files))) as executor:
-            futures = {}
-            for gpx_path in gpx_files:
-                wpts_candidate = tmp / f"{gpx_path.stem}-wpts.gpx"
-                wpts = wpts_candidate if wpts_candidate.exists() else None
-                futures[executor.submit(_parse_gpx_to_data, gpx_path, wpts)] = gpx_path
-
+            futures = {
+                executor.submit(_parse_gpx_to_data, gpx_path, None): gpx_path
+                for gpx_path in gpx_files
+            }
             for future in futures:
                 try:
-                    caches, extra_wpts, companion_data, errors = future.result()
-                    parsed_files.append((futures[future], caches, extra_wpts, companion_data))
+                    caches, extra_wpts, _, errors = future.result()
+                    parsed_files.append((futures[future], caches, extra_wpts))
                     overall_result.errors.extend(errors)
                 except Exception as e:
                     overall_result.errors.append(f"Parse error: {str(e)}")
 
-        # Step 2: Write all parsed data sequentially (single session, no contention)
+        # Step 2: Write all parsed cache data sequentially (single session).
         db_session = make_session()
-        # Preload once, shared across every GPX in the zip so a cache created
-        # from one file is recognised when another references the same gc_code.
         existing_ids = _load_existing_gc_map(db_session)
         _enter_bulk_import_pragmas(db_session)
         try:
-            for gpx_path, caches, extra_wpts, companion_data in parsed_files:
+            for gpx_path, caches, extra_wpts in parsed_files:
                 source = gpx_path.name
 
-                # Write each file's caches one batch per SAVEPOINT (with a
-                # per-cache fallback on failure — see _flush_cache_batch).
                 for i in range(0, len(caches), 200):
                     _flush_cache_batch(
                         db_session, caches[i:i + 200], source,
@@ -1296,7 +1499,6 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     db_session.commit()
                 db_session.expunge_all()
 
-                # Deduplicate and insert extra waypoints from main GPX
                 if extra_wpts:
                     seen: set = set()
                     unique_wpts: list = []
@@ -1308,10 +1510,16 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     overall_result.waypoints += _insert_extra_wpts(db_session, unique_wpts)
                     db_session.commit()
 
-                # Link companion waypoints file data
-                if companion_data:
+            # Step 3: Link all companion files against the now-complete cache table.
+            for companion_path in companions:
+                try:
+                    wpts_tree = etree.parse(str(companion_path))
+                    companion_data = _parse_extra_waypoints(wpts_tree)
                     overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
                     db_session.commit()
+                except Exception as e:
+                    overall_result.errors.append(f"Waypoints file error ({companion_path.name}): {e}")
+
         except Exception:
             db_session.rollback()
             raise

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache
-from opensak.importer import import_gpx, import_zip, ImportResult
+from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx
 
 from tests.data import (
     SAMPLE_GPX, SAMPLE_WPTS_GPX, EMPTY_GPX,
@@ -129,6 +129,45 @@ def test_import_with_companion_wpts(tmp_db, gpx_file, wpts_file):
         assert wp.prefix == "PK"
         assert wp.latitude == pytest.approx(55.6762)
         assert wp.comment == "Park here and walk 200m south."
+        assert wp.parent_gc_code == "GC12345"
+
+
+def test_waypoint_count_set_after_companion_import(tmp_db, gpx_file, wpts_file):
+    # waypoint_count on the Cache row must reflect companion waypoints after import.
+    with get_session() as s:
+        import_gpx(gpx_file, s, wpts_path=wpts_file)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.waypoint_count == 1
+        no_wpts = s.query(Cache).filter_by(gc_code="GC99999").one()
+        assert no_wpts.waypoint_count == 0
+
+
+def test_waypoint_count_set_after_inline_import(tmp_db, tmp_path):
+    # waypoint_count must be set when waypoints are embedded in the same GPX.
+    gpx = write_gpx(tmp_path, "inline.gpx", make_gpx_with_inline_wpt())
+    import_gpx(gpx)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.waypoint_count == 1
+
+
+def test_waypoint_count_reset_on_reimport_without_wpts(tmp_db, gpx_file, wpts_file, tmp_path):
+    # Re-importing a cache without waypoints must zero out waypoint_count.
+    with get_session() as s:
+        import_gpx(gpx_file, s, wpts_path=wpts_file)
+
+    with get_session() as s:
+        assert s.query(Cache).filter_by(gc_code="GC12345").one().waypoint_count == 1
+
+    # Re-import the same GPX without the companion file.
+    with get_session() as s:
+        import_gpx(gpx_file, s)
+
+    with get_session() as s:
+        assert s.query(Cache).filter_by(gc_code="GC12345").one().waypoint_count == 0
 
 
 # ── ZIP import tests ──────────────────────────────────────────────────────────
@@ -194,6 +233,74 @@ def test_reimport_updates_not_duplicates(tmp_db, gpx_file):
         assert log_count == 2, f"Expected 2 logs after re-import, got {log_count}"
 
 
+# ── Issue #202: Lock a cache ────────────────────────────────────────────────
+
+def test_reimport_skips_scalar_fields_when_locked(tmp_db, gpx_file, tmp_path):
+    # A locked cache must keep its scalar fields exactly as they were,
+    # even when a re-import would otherwise change them (e.g. a difficulty
+    # rerate or a renamed listing).
+    with get_session() as s:
+        import_gpx(gpx_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        cache.locked = True
+
+    changed_gpx = (
+        SAMPLE_GPX
+        .replace(
+            "<groundspeak:difficulty>2.0</groundspeak:difficulty>",
+            "<groundspeak:difficulty>4.5</groundspeak:difficulty>",
+        )
+        .replace(
+            "<groundspeak:name>Test Traditional</groundspeak:name>",
+            "<groundspeak:name>Renamed Cache</groundspeak:name>",
+        )
+    )
+    changed_file = write_gpx(tmp_path, "changed.gpx", changed_gpx)
+
+    with get_session() as s:
+        import_gpx(changed_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.difficulty == pytest.approx(2.0), \
+            "Locked cache's difficulty was overwritten by re-import!"
+        assert cache.name == "Test Traditional", \
+            "Locked cache's name was overwritten by re-import!"
+        # locked itself is untouched by import — only cleared by the user.
+        assert cache.locked is True
+
+
+def test_reimport_still_updates_when_unlocked(tmp_db, gpx_file, tmp_path):
+    # Sanity counterpart to the test above: an *unlocked* cache (the
+    # default) must still pick up changes on re-import, same as before
+    # issue #202 — locking must not accidentally become the default.
+    with get_session() as s:
+        import_gpx(gpx_file, s)
+
+    # tmp_db is module-scoped and GC12345 may have been left locked by an
+    # earlier test in this module — explicitly unlock so this test is
+    # order-independent.
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        cache.locked = False
+
+    changed_gpx = SAMPLE_GPX.replace(
+        "<groundspeak:difficulty>2.0</groundspeak:difficulty>",
+        "<groundspeak:difficulty>4.5</groundspeak:difficulty>",
+    )
+    changed_file = write_gpx(tmp_path, "changed_unlocked.gpx", changed_gpx)
+
+    with get_session() as s:
+        import_gpx(changed_file, s)
+
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert cache.difficulty == pytest.approx(4.5)
+        assert cache.locked is False
+
+
 # ── Edge cases ────────────────────────────────────────────────────────────────
 
 def test_import_empty_gpx(tmp_db, tmp_path):
@@ -246,6 +353,73 @@ def test_import_zip_multiple_with_companion_wpts(tmp_db, tmp_path):
         assert any(wp.prefix == "PK" for wp in cache.waypoints)
 
 
+def test_import_zip_companion_detected_by_content_not_name(tmp_db, tmp_path):
+    # Companion file with a non-standard name (no -wpts suffix) must still be
+    # detected and linked when its content identifies it as waypoints-only.
+    with get_session() as s:
+        for cache in s.query(Cache).all():
+            s.delete(cache)
+
+    z = make_zip(tmp_path, "renamed_wpts.zip", {
+        "caches.gpx":    SAMPLE_GPX,
+        "extras.gpx":    SAMPLE_WPTS_GPX,   # no -wpts in the name
+    })
+
+    result = import_zip(z)
+
+    assert result.waypoints >= 1, "companion file should be linked by content, not name"
+    assert result.errors == []
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert any(wp.prefix == "PK" for wp in cache.waypoints)
+
+
+def test_parse_extra_waypoints_handles_name_element(tmp_db, tmp_path):
+    # Real geocaching.com companion files use <name> not <n> for the waypoint
+    # code.  _parse_extra_waypoints must handle both.
+    wpts_name_fmt = """\
+<?xml version="1.0" encoding="utf-8"?>
+<gpx version="1.0" creator="Groundspeak, Inc."
+     xmlns="http://www.topografix.com/GPX/1/0">
+  <name>Waypoints</name>
+  <wpt lat="55.6762" lon="12.5680">
+    <name>PK2345</name>
+    <desc>Parking</desc>
+    <type>Waypoint|Parking Area</type>
+    <cmt>Park here.</cmt>
+  </wpt>
+</gpx>
+"""
+    gpx  = write_gpx(tmp_path, "main.gpx",  SAMPLE_GPX)
+    wpts = write_gpx(tmp_path, "wpts.gpx",  wpts_name_fmt)
+
+    with get_session() as s:
+        result = import_gpx(gpx, s, wpts_path=wpts)
+
+    assert result.waypoints == 1, "<name> element in companion file not parsed"
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GC12345").one()
+        assert any(wp.prefix == "PK" for wp in cache.waypoints)
+
+
+def test_import_lb_lab_cache_codes(tmp_db, tmp_path):
+    # lab2gpx exports Adventure Lab stages with LB* codes (Geocache|Lab Cache).
+    # These were silently dropped because only GC and LC prefixes were accepted.
+    gpx = write_gpx(tmp_path, "labs.gpx", build_gpx(
+        cache_wpt("LB1AQD01", name="Lab Stage 1", cache_type="Lab Cache"),
+        cache_wpt("LB1AQD02", name="Lab Stage 2", cache_type="Lab Cache"),
+        cache_wpt("LC9XYZ01", name="Lab Stage LC", cache_type="Lab Cache"),
+    ))
+    with get_session() as s:
+        result = import_gpx(gpx, s)
+    assert result.total == 3, f"Expected 3 imported, got {result.total}"
+    assert result.errors == []
+    with get_session() as s:
+        assert s.query(Cache).filter_by(gc_code="LB1AQD01").count() == 1
+        assert s.query(Cache).filter_by(gc_code="LB1AQD02").count() == 1
+        assert s.query(Cache).filter_by(gc_code="LC9XYZ01").count() == 1
+
+
 def test_import_gpx_inline_extra_waypoints(tmp_db, tmp_path):
     # Verify extra waypoints embedded in the main GPX are linked to their cache.
     with get_session() as s:
@@ -266,6 +440,7 @@ def test_import_gpx_inline_extra_waypoints(tmp_db, tmp_path):
         assert wp.prefix == "PK"
         assert wp.wp_type == "Parking Area"
         assert wp.comment == "Street parking available."
+        assert wp.parent_gc_code == "GC12345"
 
 
 # ── ImportResult.__str__ ──────────────────────────────────────────────────────
@@ -335,3 +510,36 @@ def test_import_zip_no_gpx_in_archive(tmp_path):
     z = make_zip(tmp_path, "no_gpx.zip", {"readme.txt": "hello"})
     result = import_zip(z)
     assert any("No .gpx" in e for e in result.errors)
+
+
+def test_count_wpts(tmp_path):
+    # _count_wpts must return the exact number of <wpt> elements without importing
+    gpx = build_gpx(cache_wpt("GC0001"), cache_wpt("GC0002"), cache_wpt("GC0003"))
+    f = write_gpx(tmp_path, "count_test.gpx", gpx)
+    assert _count_wpts(f) == 3
+
+
+def test_count_wpts_empty(tmp_path):
+    f = write_gpx(tmp_path, "empty.gpx", '<?xml version="1.0"?><gpx version="1.0"></gpx>')
+    assert _count_wpts(f) == 0
+
+
+# ── _is_companion_gpx ─────────────────────────────────────────────────────────
+
+def test_is_companion_gpx_returns_false_for_cache_file(tmp_path):
+    f = write_gpx(tmp_path, "caches.gpx", SAMPLE_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_true_for_wpts_file(tmp_path):
+    f = write_gpx(tmp_path, "wpts.gpx", SAMPLE_WPTS_GPX)
+    assert _is_companion_gpx(f) is True
+
+
+def test_is_companion_gpx_returns_false_for_empty_file(tmp_path):
+    f = write_gpx(tmp_path, "empty.gpx", EMPTY_GPX)
+    assert _is_companion_gpx(f) is False
+
+
+def test_is_companion_gpx_returns_false_for_nonexistent_file(tmp_path):
+    assert _is_companion_gpx(tmp_path / "ghost.gpx") is False

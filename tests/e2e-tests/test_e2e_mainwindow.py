@@ -7,8 +7,6 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import QSettings
-
 import opensak.gui.icon as icon_mod
 from opensak.gui.mainwindow import MainWindow
 
@@ -16,8 +14,6 @@ from opensak.gui.mainwindow import MainWindow
 _REAL_INITIAL_LOAD = MainWindow._initial_load
 _REAL_CHECK_SETUP = MainWindow._check_setup_complete
 _REAL_CHECK_UPDATE_BG = MainWindow._check_update_background
-
-_RealQSettings = QSettings
 
 
 # ── fakes ─────────────────────────────────────────────────────────────────────
@@ -89,23 +85,18 @@ def _wp_data(gc_code="CW001"):
 
 @pytest.fixture(autouse=True)
 def iso_settings(tmp_path, monkeypatch):
-    # Redirect AppSettings + raw QSettings("OpenSAK...") to throwaway INIs.
-    from opensak.gui import settings as smod
-    appset = smod.get_settings()
-    orig = appset._s
-    appset._s = _RealQSettings(str(tmp_path / "appset.ini"),
-                               _RealQSettings.Format.IniFormat)
+    # Redirect SettingsStore to a fresh in-memory store per test.
+    from opensak import settings_store as ss
+    fresh = ss.SettingsStore()
+    fresh._data = {}
+    fresh._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(ss, "_store", fresh)
 
-    raw_ini = str(tmp_path / "raw.ini")
+    # Reset AppSettings singleton so it picks up the new store
+    import opensak.gui.settings as smod
+    monkeypatch.setattr(smod, "_settings", None)
 
-    def factory(*a, **k):
-        if len(a) >= 2 and isinstance(a[0], str) and "OpenSAK" in a[0]:
-            return _RealQSettings(raw_ini, _RealQSettings.Format.IniFormat)
-        return _RealQSettings(*a, **k)
-
-    monkeypatch.setattr("PySide6.QtCore.QSettings", factory)
-    yield SimpleNamespace(appset=appset, raw_ini=raw_ini)
-    appset._s = orig
+    yield SimpleNamespace(store=fresh)
 
 
 @pytest.fixture
@@ -198,6 +189,34 @@ class TestCacheList:
         fs = seeded_window._build_current_filterset()
         assert len(fs) >= 2
 
+    def test_archived_quick_filter_shows_archived(self, seeded_window):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache as CacheModel
+
+        with get_session() as session:
+            cache = session.query(CacheModel).filter_by(gc_code="GC12345").one()
+            cache.archived = True
+            session.commit()
+
+        seeded_window._quick_filter.setCurrentIndex(5)  # "Archived" quick filter
+        seeded_window._refresh_cache_list()
+        codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+        assert "GC12345" in codes
+
+    def test_archived_visible_by_default(self, seeded_window):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache as CacheModel
+
+        with get_session() as session:
+            cache = session.query(CacheModel).filter_by(gc_code="GC12345").one()
+            cache.archived = True
+            session.commit()
+
+        seeded_window._quick_filter.setCurrentIndex(0)
+        seeded_window._refresh_cache_list()
+        codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+        assert "GC12345" in codes
+
     def test_refresh_with_active_filterset(self, seeded_window):
         from opensak.filters.engine import FilterSet, GcCodeFilter
         fs = FilterSet(mode="AND")
@@ -208,9 +227,52 @@ class TestCacheList:
     def test_update_info_bar(self, seeded_window):
         seeded_window._update_info_bar()
 
-    def test_update_info_bar_with_owner(self, seeded_window, iso_settings):
-        iso_settings.appset.gc_username = "TestOwner"
+    def test_infobar_shows_filter_count(self, seeded_window):
+        # regression for #373: infobar must show count, not generic "Active"
+        from opensak.filters.engine import FilterSet, GcCodeFilter, CacheTypeFilter
+        fs = FilterSet(mode="AND")
+        fs.add(GcCodeFilter("GC12345"))
+        fs.add(CacheTypeFilter(["Traditional Cache"]))
+        seeded_window._current_filterset = fs
         seeded_window._update_info_bar()
+        text = seeded_window._info_bar._filter_lbl.text()
+        assert "2" in text
+        assert "Active" not in text and "Aktiv" not in text
+
+    def test_update_info_bar_with_owner(self, seeded_window, iso_settings):
+        from opensak.gui.settings import get_settings
+        get_settings().gc_username = "TestOwner"
+        seeded_window._update_info_bar()
+        expected = sum(
+            1 for c in seeded_window._cache_table.get_all_caches()
+            if (c.owner_name or "").strip().lower() == "testowner"
+        )
+        assert expected > 0
+        assert seeded_window._info_bar._owned_lbl.text() == str(expected)
+
+    def test_owned_count_uses_owner_not_placed_by(self, seeded_window, iso_settings):
+        """Issue #270: GSAK counts the cache 'Owner', not the original
+        'Placed by'. An adopted cache (the two differ) must be counted and
+        be filterable by its current owner."""
+        from opensak.gui.settings import get_settings
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+
+        with get_session() as session:
+            cache = session.query(Cache).filter_by(gc_code="GC12345").one()
+            cache.placed_by = "OriginalPlacer"
+            cache.owner_name = "AdoptedOwner"
+            session.commit()
+
+        get_settings().gc_username = "AdoptedOwner"
+        seeded_window._refresh_cache_list()
+        assert seeded_window._info_bar._owned_lbl.text() == "1"
+
+        # Clicking the owned tile must filter by owner — a PlacedByFilter
+        # would find nothing here since placed_by is "OriginalPlacer".
+        seeded_window._filter_by_status("owned")
+        assert seeded_window._cache_table.row_count() == 1
+        assert seeded_window._cache_table.get_all_caches()[0].gc_code == "GC12345"
 
 
 # ── selection slots ───────────────────────────────────────────────────────────
@@ -415,13 +477,39 @@ class TestWaypoints:
             "opensak.gui.dialogs.waypoint_dialog.WaypointDialog",
             fake_dialog(exec_result=1, data=_wp_data("GC12345")))
         seeded_window._edit_waypoint_from_cache(cache)
+        updated = seeded_window._load_full_cache("GC12345")
+        assert updated.name == "New WP"
 
     def test_edit_waypoint_from_cache_cancelled(self, seeded_window, monkeypatch):
         cache = seeded_window._load_full_cache("GC12345")
+        before = cache.name
         monkeypatch.setattr(
             "opensak.gui.dialogs.waypoint_dialog.WaypointDialog",
             fake_dialog(exec_result=0))
         seeded_window._edit_waypoint_from_cache(cache)
+        assert seeded_window._load_full_cache("GC12345").name == before
+
+    def test_edit_waypoint_from_cache_with_deferred_fields(self, seeded_window, monkeypatch):
+        """Regression test: apply_filters() (used by the grid/_refresh_cache_list)
+        defer()'s short_description/long_description/encoded_hints for performance.
+        A cache object coming straight from that query -- exactly what the grid
+        passes to Edit Cache via right-click or the menu -- must not blow up with
+        DetachedInstanceError when the dialog opens (_edit_waypoint_from_cache
+        must reload a full copy first; see _load_full_cache()).
+        """
+        from opensak.db.database import get_session
+        from opensak.filters.engine import apply_filters, FilterSet
+        from opensak.gui.dialogs import waypoint_dialog as wpd
+
+        with get_session() as session:
+            caches = apply_filters(session, FilterSet())
+        row_cache = next(c for c in caches if c.gc_code == "GC12345")
+        # Session is now closed -- row_cache's text fields are still deferred.
+
+        # Real __init__ / _populate() must run (that's what crashed before the
+        # fix); only stub exec() so the modal dialog doesn't block the test.
+        monkeypatch.setattr(wpd.WaypointDialog, "exec", lambda self: 0)
+        seeded_window._edit_waypoint_from_cache(row_cache)  # must not raise
 
     def test_delete_waypoint_no_selection(self, seeded_window):
         seeded_window._cache_table.clearSelection()
@@ -499,10 +587,9 @@ class TestSort:
     def test_load_sort_with_saved_profile(self, seeded_window, monkeypatch, iso_settings):
         from opensak.db.manager import get_db_manager
         from opensak.filters.engine import FilterSet, SortSpec
-        key = f"sort/{get_db_manager().active.path}"
-        s = _RealQSettings(iso_settings.raw_ini, _RealQSettings.Format.IniFormat)
-        s.setValue(f"{key}/filter_profile", "MyProfile")
-        s.sync()
+        from opensak.settings_store import get_store
+        key = f"sort.{get_db_manager().active.path}"
+        get_store().set(f"{key}.filter_profile", "MyProfile")
         prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
                                sort=SortSpec("name"))
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
@@ -514,10 +601,9 @@ class TestSort:
 
     def test_load_sort_profile_load_error(self, seeded_window, monkeypatch, iso_settings):
         from opensak.db.manager import get_db_manager
-        key = f"sort/{get_db_manager().active.path}"
-        s = _RealQSettings(iso_settings.raw_ini, _RealQSettings.Format.IniFormat)
-        s.setValue(f"{key}/filter_profile", "Ghost")
-        s.sync()
+        from opensak.settings_store import get_store
+        key = f"sort.{get_db_manager().active.path}"
+        get_store().set(f"{key}.filter_profile", "Ghost")
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
                             staticmethod(lambda: [Path("/x/p.json")]))
         monkeypatch.setattr(
@@ -700,12 +786,34 @@ class TestTripBlocked:
 
 
 class TestHomeAndCwExtra:
+    def test_reload_home_combo_syncs_home_coords(self, seeded_window):
+        # Regression: _reload_home_combo blocked signals, so home_lat/lon were
+        # never written on startup/db-switch, causing distances from Copenhagen.
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        p = HomePoint("Idaho", 43.5, -116.2)
+        s.add_or_update_home_point(p)
+        s.active_home_name = p.name  # name only — lat/lon not yet written
+        assert s.home_lat == pytest.approx(55.6761)  # Copenhagen default
+        seeded_window._reload_home_combo()
+        assert s.home_lat == pytest.approx(43.5)
+        assert s.home_lon == pytest.approx(-116.2)
+
+    def test_reload_home_combo_syncs_star_home_coords(self, seeded_window):
+        # ★ Home coordinates come from gc_home_location, not homepoints.list.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_home_location = "N43 30.000 W116 12.000"
+        s.active_home_name = "★ Home"
+        seeded_window._reload_home_combo()
+        assert s.home_lat == pytest.approx(43.5, abs=0.01)
+        assert s.home_lon == pytest.approx(-116.2, abs=0.01)
+
     def test_on_home_changed_user_and_gc_home(self, seeded_window, iso_settings):
-        from opensak.gui.settings import HomePoint
-        s = iso_settings.appset
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
         s.gc_home_location = "N55 40.566 E012 34.098"
         s.home_points = [HomePoint("Work", 56.0, 10.0)]
-        s._s.sync()
         seeded_window._reload_home_combo()
         visited = 0
         for i in range(seeded_window._home_combo.count()):
@@ -796,7 +904,34 @@ class TestAboutUpdates:
         seeded_window._on_update_available("v9.9.9", "http://x", manual=False)
 
     def test_on_update_available_skipped(self, seeded_window, mbox_ok, iso_settings):
-        raw = _RealQSettings(iso_settings.raw_ini, _RealQSettings.Format.IniFormat)
-        raw.setValue("updates/skipped_version", "v1.2.3")
-        raw.sync()
+        from opensak.gui.settings import get_settings
+        get_settings().updates_skipped_version = "v1.2.3"
         seeded_window._on_update_available("v1.2.3", "http://x", manual=False)
+
+    def test_on_update_available_changelog_link_uses_tag_not_branch(
+        self, seeded_window, monkeypatch
+    ):
+        """Regression for the bug fixed in beta.10: the changelog link must
+        always pin to the immutable release tag, never a moving branch name
+        like 'main' or 'beta'. A branch-HEAD link drifts as soon as that
+        branch moves on, so beta testers ended up seeing the stable
+        changelog instead of the beta entry they were told about — exactly
+        what a hardcoded 'blob/main/CHANGELOG.md' caused before. Fail this
+        test before reinstating any literal branch name in the link.
+        """
+        captured: dict[str, str] = {}
+
+        def fake_exec(self):
+            captured["informative_text"] = self.informativeText()
+            return icon_mod.QMessageBox.StandardButton.Ok
+
+        monkeypatch.setattr(icon_mod.QMessageBox, "exec", fake_exec)
+
+        seeded_window._on_update_available(
+            "v1.14.0-beta.12", "http://x", is_prerelease=True, manual=True
+        )
+
+        text = captured["informative_text"]
+        assert "blob/v1.14.0-beta.12/CHANGELOG.md" in text
+        assert "blob/main/" not in text
+        assert "blob/beta/" not in text

@@ -52,8 +52,11 @@ def find_garmin_devices() -> list[Path]:
 def _is_garmin(path: Path) -> bool:
     """Tjek om en mappe er en Garmin enhed."""
     for marker in GARMIN_MARKERS:
-        if (path / marker).exists():
-            return True
+        try:
+            if (path / marker).exists():
+                return True
+        except OSError:
+            continue
     return False
 
 
@@ -250,6 +253,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
     gpx.set("creator", "OpenSAK")
     gpx.set("xmlns", "http://www.topografix.com/GPX/1/1")
     gpx.set("xmlns:groundspeak", "http://www.groundspeak.com/cache/1/0/1")
+    gpx.set("xmlns:gsak", "http://www.gsak.net/xmlv1/6")
     gpx.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
 
     # Metadata
@@ -356,6 +360,14 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
                 gs_text = SubElement(gs_log, "groundspeak:text")
                 gs_text.set("encoded", "False")
                 gs_text.text = (log.text or "")[:500]
+
+        # GSAK personal note
+        note = getattr(cache, "user_note", None)
+        note_text = getattr(note, "note", None) if note else None
+        if note_text:
+            gsak_ext = SubElement(extensions, "gsak:wptExtension")
+            gsak_note = SubElement(gsak_ext, "gsak:UserNote")
+            gsak_note.text = note_text
 
     _indent(gpx)
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(

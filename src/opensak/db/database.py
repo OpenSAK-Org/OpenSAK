@@ -62,7 +62,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 15
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -97,22 +97,27 @@ def init_db(db_path: Path | None = None) -> Engine:
             from opensak.config import get_db_path
             db_path = get_db_path()
 
-    _engine = _make_engine(db_path)
-    _SessionLocal = sessionmaker(
-        bind=_engine,
+    new_engine = _make_engine(db_path)
+    new_session = sessionmaker(
+        bind=new_engine,
         autoflush=False,
         autocommit=False,
         expire_on_commit=False,  # keep objects usable after session closes
     )
 
-    # Create all tables that don't exist yet (safe to call multiple times)
-    Base.metadata.create_all(_engine)
+    # Create all tables that don't exist yet (safe to call multiple times).
+    # Do this before touching the globals — if the file is not a valid SQLite
+    # database create_all() raises here and the current engine is unaffected.
+    Base.metadata.create_all(new_engine)
 
     # Kør schema-migrationer for eksisterende databaser (kun én gang per DB-sti)
     if db_path not in _migrated_paths:
-        _run_migrations(_engine)
+        _run_migrations(new_engine)
         _migrated_paths.add(db_path)
 
+    # Only swap the global pointers after everything above succeeded.
+    _engine = new_engine
+    _SessionLocal = new_session
     return _engine
 
 
@@ -388,6 +393,85 @@ def _run_migrations(engine: Engine) -> None:
             conn.commit()
             print(f"Migration: oprettede {len(created_idx)} indexes på caches ({', '.join(created_idx)})")
 
+        # ── Migration 12: location provenance columns (issue #60 phase 3) ──────
+        # Four nullable columns record where territory values came from and which
+        # dataset version produced them — needed by the Phase 4 GUI and the
+        # stale-indicator logic. All default to NULL ("unknown / imported").
+        existing_caches = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        provenance_columns = [
+            ("location_source",  "VARCHAR(16)"),
+            ("location_basis",   "VARCHAR(16)"),
+            ("location_updated", "DATETIME"),
+            ("location_dataset", "VARCHAR(64)"),
+        ]
+        added = []
+        for col_name, col_def in provenance_columns:
+            if col_name not in existing_caches:
+                conn.execute(text(f"ALTER TABLE caches ADD COLUMN {col_name} {col_def}"))
+                added.append(col_name)
+        if added:
+            conn.commit()
+            print(f"Migration: tilføjede provenance-kolonner til caches: {', '.join(added)}")
+
+        # ── Migration 13: parent_gc_code on waypoints (issue #376) ───────────
+        # Stores the parent cache's GC code directly on the waypoint row —
+        # mirrors cParent in GSAK and enables JOIN-free filter queries.
+        existing_wpts = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(waypoints)")).fetchall()
+        ]
+        if "parent_gc_code" not in existing_wpts:
+            conn.execute(text(
+                "ALTER TABLE waypoints ADD COLUMN parent_gc_code VARCHAR(16)"
+            ))
+            # Back-fill from the caches table via the existing FK.
+            conn.execute(text("""
+                UPDATE waypoints
+                SET parent_gc_code = (
+                    SELECT gc_code FROM caches WHERE caches.id = waypoints.cache_id
+                )
+            """))
+            conn.commit()
+            print("Migration: tilføjede waypoints.parent_gc_code")
+
+        # ── Migration 14: waypoint_count on caches (issue #377) ──────────────
+        # Cached count of child waypoints so the grid can show a visual cue
+        # without loading the noload'ed waypoints relationship.
+        existing_caches_14 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "waypoint_count" not in existing_caches_14:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN waypoint_count INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.execute(text("""
+                UPDATE caches
+                SET waypoint_count = (
+                    SELECT COUNT(*) FROM waypoints WHERE waypoints.cache_id = caches.id
+                )
+            """))
+            conn.commit()
+            print("Migration: tilføjede caches.waypoint_count")
+
+        # ── Migration 15: locked flag on caches (issue #202) ─────────────────
+        # When set, _upsert_cache() skips overwriting scalar GPX-sourced
+        # fields on re-import, so a manually corrected/locked cache survives
+        # later PQ/GPX imports unchanged.
+        existing_caches_15 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "locked" not in existing_caches_15:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN locked BOOLEAN NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+            print("Migration: tilføjede caches.locked")
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -505,6 +589,65 @@ def reload_caches_full(caches: list) -> list:
 
     by_id = {c.id: c for c in rows}
     return [by_id.get(c.id, c) if isinstance(c, Cache) else c for c in caches]
+
+
+# ── Distance recalculation ────────────────────────────────────────────────────
+
+def recalculate_distances(lat: float, lon: float) -> int:
+    """Recompute distance and bearing for every cache and persist to the DB.
+
+    Called once whenever the active centre point changes (not on every table
+    refresh). Uses distance_km_batch() which dispatches to Haversine or
+    Vincenty depending on the user's distance_method setting.
+
+    Returns the number of caches updated.
+    """
+    from opensak.filters.engine import distance_km_batch
+
+    def _bearing_batch(lat0: float, lon0: float, lats: list, lons: list) -> list:
+        # Bearing computation — vectorised with numpy when available.
+        import math
+        try:
+            import numpy as np
+            r = math.pi / 180
+            la0 = lat0 * r
+            la = np.asarray(lats, dtype=float) * r
+            dlon = (np.asarray(lons, dtype=float) - lon0) * r
+            x = np.sin(dlon) * np.cos(la)
+            y = math.cos(la0) * np.sin(la) - math.sin(la0) * np.cos(la) * np.cos(dlon)
+            return list((np.degrees(np.arctan2(x, y)) + 360) % 360)
+        except ImportError:
+            def _scalar(la2: float, lo2: float) -> float:
+                r2 = math.pi / 180
+                dlon2 = (lo2 - lon0) * r2
+                la02 = lat0 * r2
+                la22 = la2 * r2
+                x2 = math.sin(dlon2) * math.cos(la22)
+                y2 = math.cos(la02) * math.sin(la22) - math.sin(la02) * math.cos(la22) * math.cos(dlon2)
+                return (math.degrees(math.atan2(x2, y2)) + 360) % 360
+            return [_scalar(la, lo) for la, lo in zip(lats, lons)]
+
+    with get_session() as session:
+        rows = session.execute(
+            text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
+        ).fetchall()
+
+        if not rows:
+            return 0
+
+        ids  = [r[0] for r in rows]
+        lats = [r[1] for r in rows]
+        lons = [r[2] for r in rows]
+
+        dists = distance_km_batch(lat, lon, lats, lons)
+        bears = _bearing_batch(lat, lon, lats, lons)
+
+        session.execute(
+            text("UPDATE caches SET distance = :d, bearing = :b WHERE id = :id"),
+            [{"d": float(dists[i]), "b": float(bears[i]), "id": ids[i]} for i in range(len(ids))],
+        )
+
+    return len(ids)
 
 
 # ── Health-check helper ───────────────────────────────────────────────────────

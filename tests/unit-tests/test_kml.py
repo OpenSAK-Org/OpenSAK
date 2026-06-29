@@ -84,8 +84,25 @@ class TestCacheDescription:
         assert "A nice cache" in _cache_description(_cache(short_description="A nice cache"))
 
     def test_hint_rot13_decoded(self):
-        # "Haqre n ebpx" is rot13 of "Under a rock"
+        # Langt nok ROT13-eksempel til at heuristikken (split_hint) kan
+        # afgøre retningen sikkert — simulerer en ægte ROT13-kodet hint fra
+        # en gammel GSAK-eksport.
+        rot13_text = "Haqre n ynetr ebpx sbezngvba arne gur byq bnx gerr"
+        text = _cache_description(_cache(encoded_hints=rot13_text))
+        assert "Under a large rock formation near the old oak tree" in text
+
+    def test_short_hint_defaults_to_plaintext(self):
+        # Regression for #329: korte hints er under heuristikkens tærskel
+        # og antages bevidst at være klartekst (den almindelige case for
+        # moderne geocaching.com-data) — selv hvis de ligner ROT13.
         text = _cache_description(_cache(encoded_hints="Haqre n ebpx"))
+        assert "Haqre n ebpx" in text
+
+    def test_hint_already_plaintext_kept_as_is(self):
+        # Regression for #329: geocaching.com leverer i dag hints i
+        # klartekst. KML-eksporten skal IKKE rode en allerede læsbar hint
+        # til gibberish ved at antage den er ROT13-kodet.
+        text = _cache_description(_cache(encoded_hints="Under a rock"))
         assert "Under a rock" in text
 
     def test_hint_decode_failure_falls_back(self):

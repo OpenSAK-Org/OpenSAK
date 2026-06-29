@@ -93,9 +93,9 @@ SAMPLE_WPTS_GPX = """\
      version="1.0"
      creator="Groundspeak, Inc."
      xmlns="http://www.topografix.com/GPX/1/0">
-  <n>Waypoints for Cache Listings</n>
+  <name>Waypoints for Cache Listings</name>
   <wpt lat="55.6762" lon="12.5680">
-    <n>PK2345</n>
+    <name>PK2345</name>
     <desc>Parking Area</desc>
     <sym>Parking Area</sym>
     <type>Waypoint|Parking Area</type>

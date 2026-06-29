@@ -52,8 +52,11 @@ visible record per release.
 ## 3. Website & docs
 
 - [ ] `opensak.com` User Guide reflects the final feature set — no leftover
-      `beta.N` version labels anywhere in `site/user-guide.html` or
-      `docs/opensak-user-guide.html`
+      `beta.N` version labels anywhere in `site/user-guide.html` (the only
+      copy as of beta.14 — there is no longer a synced `docs/` duplicate)
+- [ ] Changelog link on the User Guide page pins to the new release tag —
+      there's a unit test for this too (`test_user_guide_changelog_link_pins_to_release_tag`),
+      let it run, don't eyeball it
 - [ ] Any "planned, not available" callouts (e.g. GGZ export) still accurate
       for what's actually shipping in this version
 - [ ] Download/links on the website point at the new stable tag, not an old

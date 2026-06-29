@@ -35,9 +35,9 @@ class TileInterceptor(QWebEngineUrlRequestInterceptor):
 from opensak.gui.icon_provider import get_map_pin_html as _get_pin_html
 
 
-def _cache_pin_html(cache_type: str, found: bool) -> str:
-    """Return Leaflet divIcon HTML for a cache — SVG ikon, smiley hvis fundet."""
-    return _get_pin_html(cache_type, found=found)
+def _cache_pin_html(cache_type: str, found: bool, dnf: bool = False) -> str:
+    """Return Leaflet divIcon HTML for a cache — type icon with gold/blue smiley overlay."""
+    return _get_pin_html(cache_type, found=found, dnf=dnf)
 
 
 # ── Python ↔ JavaScript bro ───────────────────────────────────────────────────
@@ -100,6 +100,22 @@ MAP_HTML = """<!DOCTYPE html>
     border: 3px solid #fff;
     box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   }
+  .waypoint-marker {
+    width: 22px; height: 22px;
+    background: #7b1fa2;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 9px;
+    font-weight: bold;
+    font-family: sans-serif;
+    text-align: center;
+    line-height: 22px;
+  }
 </style>
 </head>
 <body>
@@ -140,6 +156,7 @@ var markers = {};          // gc_code → marker
 var homeMarker = null;
 var selectedGcCode = null;
 var bridge = null;
+var waypointMarkers = [];
 
 // ── WebChannel setup ──────────────────────────────────────────────────────────
 new QWebChannel(qt.webChannelTransport, function(channel) {
@@ -293,6 +310,37 @@ function panToHome() {
     if (homeMarker) {
         map.panTo(homeMarker.getLatLng());
         map.setZoom(12);
+    }
+}
+
+function clearWaypointMarkers() {
+    waypointMarkers.forEach(function(m) { map.removeLayer(m); });
+    waypointMarkers = [];
+}
+
+function showWaypointMarkers(waypointsJson) {
+    clearWaypointMarkers();
+    var wps = JSON.parse(waypointsJson);
+    wps.forEach(function(wp) {
+        var icon = L.divIcon({
+            className: '',
+            html: '<div class="waypoint-marker">' + wp.prefix + '</div>',
+            iconSize: [22, 22],
+            iconAnchor: [11, 11],
+            popupAnchor: [0, -13]
+        });
+        var label = '[' + wp.prefix + '] ' + (wp.wp_type || '');
+        var popup = '<b>[' + wp.prefix + ']</b> ' + (wp.wp_type || '') + (wp.name ? '<br>' + wp.name : '');
+        var m = L.marker([wp.lat, wp.lon], {icon: icon, title: label});
+        m.bindPopup(popup);
+        m.addTo(map);
+        waypointMarkers.push(m);
+    });
+    if (waypointMarkers.length > 0) {
+        try {
+            var group = L.featureGroup(waypointMarkers);
+            map.fitBounds(group.getBounds().pad(0.5));
+        } catch(e) {}
     }
 }
 
@@ -488,7 +536,7 @@ class MapWidget(QWidget):
                 "clon":           eff_lon,
                 "corrected":      has_corrected,
                 "corrected_label": tr("detail_corrected_coords"),
-                "pin_html":       _cache_pin_html(c.cache_type or "", bool(c.found)),
+                "pin_html":       _cache_pin_html(c.cache_type or "", bool(c.found), bool(c.dnf)),
                 "found":          c.found,
             })
 
@@ -504,6 +552,18 @@ class MapWidget(QWidget):
             self._run_js(f"panToCache('{safe}')")
 
 
+
+    def show_waypoint_markers(self, waypoints_json: str) -> None:
+        """Render child waypoint markers on the map (called when Waypoints tab is activated)."""
+        if not self._ready:
+            return
+        safe = waypoints_json.replace("\\", "\\\\").replace("`", "\\`")
+        self._run_js(f"showWaypointMarkers(`{safe}`)")
+
+    def clear_waypoint_markers(self) -> None:
+        """Remove all waypoint markers (called when Waypoints tab is left)."""
+        if self._ready:
+            self._run_js("clearWaypointMarkers()")
 
     def fit_all(self) -> None:
         if self._ready:
@@ -529,7 +589,7 @@ class MapWidget(QWidget):
             "clon":            eff_lon,
             "corrected":       has_corrected,
             "corrected_label": tr("detail_corrected_coords"),
-            "pin_html":        _cache_pin_html(cache.cache_type or "", bool(cache.found)),
+            "pin_html":        _cache_pin_html(cache.cache_type or "", bool(cache.found), bool(cache.dnf)),
             "found":           cache.found,
         }
         json_str = json.dumps(data, ensure_ascii=False)

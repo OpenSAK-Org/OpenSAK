@@ -1,9 +1,9 @@
 # tests/unit-tests/test_update_location_dialog.py — reverse-geocode location updater.
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 pytest.importorskip("pytestqt")
 
@@ -12,17 +12,28 @@ from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache
 from opensak.gui.dialogs import update_location_dialog as uld
 from opensak.gui.dialogs.update_location_dialog import (
-    OnlineLookupWorker,
     ReverseGeocodeWorker,
     UpdateLocationDialog,
     UpdateLocationResult,
     _CacheRow,
-    _format_eta,
 )
 
 
 def _loc(country="DK", state="ZL", county="CPH"):
     return SimpleNamespace(country=country, state=state, county=county)
+
+
+def _fake_store(available=True, version="42"):
+    store = MagicMock()
+    store.available.return_value = available
+    store.dataset_version.return_value = version
+    return store
+
+
+def _fake_resolver(loc=None):
+    resolver = MagicMock()
+    resolver.resolve.return_value = loc or _loc()
+    return resolver
 
 
 @pytest.fixture
@@ -37,34 +48,40 @@ def db(tmp_path):
 
 
 @pytest.fixture
-def gui(monkeypatch):
-    monkeypatch.setattr(flags, "update_location", True, raising=False)
-    monkeypatch.setattr(
-        "opensak.gui.settings.get_settings",
-        lambda: SimpleNamespace(nominatim_enabled=False),
-    )
-
-
-# ── _format_eta ───────────────────────────────────────────────────────────────
-
-class TestFormatEta:
-    @pytest.mark.parametrize("secs", [30, 120, 7200])
-    def test_returns_string(self, secs):
-        assert isinstance(_format_eta(secs), str)
+def geo_mocks(monkeypatch):
+    store = _fake_store()
+    resolver = _fake_resolver()
+    monkeypatch.setattr("opensak.geo.store.BoundaryStore", lambda: store)
+    monkeypatch.setattr("opensak.geo.boundaries.TerritoryResolver", lambda s: resolver)
+    return store, resolver
 
 
 # ── ReverseGeocodeWorker ──────────────────────────────────────────────────────
 
 class TestReverseGeocodeWorker:
-    def test_run_updates_db(self, db, monkeypatch):
-        monkeypatch.setattr("opensak.geocoder.fast_batch_geocode", lambda c: [_loc()])
+    def test_run_updates_db(self, db, geo_mocks):
         w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
         done = []
         w.all_done.connect(done.append)
         w.run()
         assert done[0].updated == 1
         with get_session() as s:
-            assert s.query(Cache).filter_by(gc_code="GC1").first().country == "DK"
+            c = s.query(Cache).filter_by(gc_code="GC1").first()
+            assert c.country == "DK"
+            assert c.state == "ZL"
+            assert c.county == "CPH"
+
+    def test_run_writes_provenance(self, db, geo_mocks):
+        w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0, basis="corrected")])
+        done = []
+        w.all_done.connect(done.append)
+        w.run()
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GC1").first()
+            assert c.location_source == "boundary"
+            assert c.location_basis == "corrected"
+            assert c.location_updated is not None
+            assert c.location_dataset == "42"
 
     def test_run_cancelled_before_start(self, db):
         w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
@@ -74,114 +91,89 @@ class TestReverseGeocodeWorker:
         w.run()
         assert cancelled
 
-    def test_run_error_still_finishes(self, db, monkeypatch):
-        monkeypatch.setattr("opensak.geocoder.fast_batch_geocode", lambda c: [_loc()])
-        def boom():
-            raise RuntimeError("db boom")
-        monkeypatch.setattr("opensak.db.database.get_session", boom)
+    def test_run_no_boundaries_emits_error(self, db, monkeypatch):
+        store = _fake_store(available=False)
+        monkeypatch.setattr("opensak.geo.store.BoundaryStore", lambda: store)
+        w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
+        done = []
+        w.all_done.connect(done.append)
+        w.run()
+        assert done[0].errors == 1
+        assert done[0].updated == 0
+
+    def test_run_db_error_records_error(self, db, geo_mocks, monkeypatch):
+        class _Boom:
+            def __enter__(self): raise RuntimeError("db boom")
+            def __exit__(self, *a): pass
+        monkeypatch.setattr("opensak.db.database.get_session", lambda: _Boom())
         w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
         done = []
         w.all_done.connect(done.append)
         w.run()
         assert done[0].errors == 1
 
-
-# ── OnlineLookupWorker ────────────────────────────────────────────────────────
-
-class TestOnlineLookupWorker:
-    def test_run_updates_partial_fields(self, db, monkeypatch):
-        monkeypatch.setattr(
-            "opensak.geocoder.nominatim_reverse",
-            lambda lat, lon: _loc(country="NEW", state="ST", county="C2"),
-        )
-        w = OnlineLookupWorker([_CacheRow("GC1", 55.0, 12.0)])
+    def test_run_updates_multiple_caches(self, db, geo_mocks):
+        # Exercises parallel resolve + bulk write path with more than one row.
+        rows = [_CacheRow("GC1", 55.0, 12.0), _CacheRow("GC2", 56.0, 10.0)]
+        w = ReverseGeocodeWorker(rows)
         done = []
         w.all_done.connect(done.append)
         w.run()
-        assert done[0].updated == 1
+        assert done[0].updated == 2
         with get_session() as s:
-            assert s.query(Cache).filter_by(gc_code="GC1").first().country == "NEW"
+            for gc_code in ("GC1", "GC2"):
+                c = s.query(Cache).filter_by(gc_code=gc_code).first()
+                assert c.country == "DK"
+                assert c.state == "ZL"
 
-    def test_run_error_path(self, db, monkeypatch):
-        monkeypatch.setattr(
-            "opensak.geocoder.nominatim_reverse", lambda lat, lon: _loc(country="X")
-        )
-        def boom():
-            raise RuntimeError("db down")
-        monkeypatch.setattr("opensak.db.database.get_session", boom)
-        w = OnlineLookupWorker([_CacheRow("GC1", 55.0, 12.0)])
-        done = []
-        w.all_done.connect(done.append)
-        w.run()
-        assert done[0].errors == 1
+    def test_default_basis_is_posted(self):
+        row = _CacheRow("GC1", 55.0, 12.0)
+        assert row.basis == "posted"
 
-    def test_run_skips_empty_response(self, db, monkeypatch):
-        monkeypatch.setattr(
-            "opensak.geocoder.nominatim_reverse", lambda lat, lon: _loc(None, None, None)
-        )
-        w = OnlineLookupWorker([_CacheRow("GC1", 55.0, 12.0)])
-        done = []
-        w.all_done.connect(done.append)
-        w.run()
-        assert done[0].skipped == 1
-
-    def test_run_cancelled_before_start(self, db):
-        w = OnlineLookupWorker([_CacheRow("GC1", 55.0, 12.0)])
-        w.request_cancel()
-        cancelled = []
-        w.cancelled.connect(cancelled.append)
-        w.run()
-        assert cancelled
+    def test_explicit_basis_corrected(self):
+        row = _CacheRow("GC1", 55.0, 12.0, basis="corrected")
+        assert row.basis == "corrected"
 
 
 # ── UpdateLocationDialog ──────────────────────────────────────────────────────
 
 class TestUpdateLocationDialog:
-    def test_menu_mode_defaults(self, qtbot, gui):
+    def test_menu_mode_defaults(self, qtbot):
         dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
         assert dlg._rb_this.isEnabled() is False
         assert dlg._rb_missing.isChecked() is True
 
-    def test_context_menu_mode_defaults(self, qtbot, gui):
+    def test_context_menu_mode_defaults(self, qtbot):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         assert dlg._rb_this.isChecked() is True
 
-    def test_online_flag_off_hides_checkbox(self, qtbot, monkeypatch):
-        monkeypatch.setattr(flags, "update_location", False, raising=False)
-        dlg = UpdateLocationDialog(gc_codes=["GC1"])
+    def test_corrected_checkbox_defaults_unchecked(self, qtbot):
+        dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
-        assert dlg._cb_online is None
+        assert dlg._cb_corrected.isChecked() is False
 
-    def test_online_toggle_changes_info(self, qtbot, gui):
-        dlg = UpdateLocationDialog(gc_codes=["GC1"])
-        qtbot.addWidget(dlg)
-        dlg._cb_online.setChecked(True)
-        on = dlg._info_label.text()
-        dlg._cb_online.setChecked(False)
-        assert on != dlg._info_label.text()
-
-    def test_build_rows_missing_scope(self, qtbot, gui, db):
+    def test_build_rows_missing_scope(self, qtbot, db):
         dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
         dlg._rb_missing.setChecked(True)
         codes = {r.gc_code for r in dlg._build_rows()}
         assert "GC1" in codes and "GC2" not in codes
 
-    def test_build_rows_all_scope(self, qtbot, gui, db):
+    def test_build_rows_all_scope(self, qtbot, db):
         dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
         dlg._rb_all.setChecked(True)
         assert {r.gc_code for r in dlg._build_rows()} == {"GC1", "GC2"}
 
-    def test_build_rows_this_scope(self, qtbot, gui, db):
+    def test_build_rows_this_scope(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC2"])
         qtbot.addWidget(dlg)
         dlg._rb_this.setChecked(True)
         assert {r.gc_code for r in dlg._build_rows()} == {"GC2"}
 
-    def test_build_rows_uses_corrected_coords(self, qtbot, gui, tmp_path):
+    def test_build_rows_uses_corrected_coords(self, qtbot, tmp_path):
         from opensak.db.models import UserNote
         init_db(db_path=tmp_path / "corr.db")
         with get_session() as s:
@@ -195,22 +187,24 @@ class TestUpdateLocationDialog:
         dlg._cb_corrected.setChecked(True)
         rows = dlg._build_rows()
         assert (rows[0].lat, rows[0].lon) == (20.0, 21.0)
+        assert rows[0].basis == "corrected"
 
-    def test_menu_mode_finalize_redisables_this(self, qtbot, gui, db):
-        dlg = UpdateLocationDialog()  # menu mode
+    def test_build_rows_posted_basis_when_not_corrected(self, qtbot, db):
+        dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
-        dlg._cb_online.setChecked(False)
-        dlg._on_phase1_done(UpdateLocationResult(updated=1))
-        assert dlg._rb_this.isEnabled() is False
+        dlg._rb_all.setChecked(True)
+        dlg._cb_corrected.setChecked(False)
+        for row in dlg._build_rows():
+            assert row.basis == "posted"
 
-    def test_start_nothing_to_do(self, qtbot, gui, db, monkeypatch):
+    def test_start_nothing_to_do(self, qtbot, db, monkeypatch):
         dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
         monkeypatch.setattr(dlg, "_build_rows", lambda: [])
         dlg._start()
         assert dlg._progress_label.text() != ""
 
-    def test_start_launches_phase1_worker(self, qtbot, gui, db, monkeypatch):
+    def test_start_launches_worker(self, qtbot, db, monkeypatch):
         dlg = UpdateLocationDialog()
         qtbot.addWidget(dlg)
         monkeypatch.setattr(dlg, "_build_rows", lambda: [_CacheRow("GC1", 55.0, 12.0)])
@@ -221,91 +215,61 @@ class TestUpdateLocationDialog:
                 self.row_done = MagicMock()
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
+                self.finished = MagicMock()
 
             def start(self):
                 started.append(True)
 
             def isRunning(self):
                 return False
+
+            def deleteLater(self):
+                pass
 
         monkeypatch.setattr(uld, "ReverseGeocodeWorker", FakeWorker)
         dlg._start()
         assert started == [True]
         assert dlg._start_btn.isEnabled() is False
 
-    def test_phase1_done_finalizes_without_online(self, qtbot, gui, db):
+    def test_done_signal_and_finalize(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
-        dlg._cb_online.setChecked(False)
         fired = []
         dlg.location_updated.connect(lambda: fired.append(True))
-        dlg._on_phase1_done(UpdateLocationResult(updated=2))
+        dlg._on_done(UpdateLocationResult(updated=2))
         assert fired == [True]
         assert dlg._start_btn.isEnabled() is True
 
-    def test_phase1_done_starts_online_phase(self, qtbot, gui, db, monkeypatch):
-        dlg = UpdateLocationDialog(gc_codes=["GC1"])
-        qtbot.addWidget(dlg)
-        dlg._cb_online.setChecked(True)
-        dlg._pending_rows = [_CacheRow("GC1", 55.0, 12.0)]
-        started = []
-
-        class FakeWorker:
-            def __init__(self, rows):
-                self.row_done = MagicMock()
-                self.progress = MagicMock()
-                self.all_done = MagicMock()
-                self.cancelled = MagicMock()
-
-            def start(self):
-                started.append(True)
-
-            def isRunning(self):
-                return False
-
-        monkeypatch.setattr(uld, "OnlineLookupWorker", FakeWorker)
-        dlg._on_phase1_done(UpdateLocationResult(updated=1))
-        assert started == [True]
-
-    def test_phase1_cancelled_emits_when_updated(self, qtbot, gui, db):
+    def test_cancelled_emits_when_updated(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         fired = []
         dlg.location_updated.connect(lambda: fired.append(True))
-        dlg._on_phase1_cancelled(UpdateLocationResult(updated=1))
+        dlg._on_cancelled(UpdateLocationResult(updated=1))
         assert fired == [True]
 
-    def test_online_progress_updates_bar(self, qtbot, gui, db):
-        dlg = UpdateLocationDialog(gc_codes=["GC1"])
-        qtbot.addWidget(dlg)
-        dlg._progress.setRange(0, 10)
-        dlg._on_online_progress(3, 10)
-        assert dlg._progress.value() == 3
-
-    def test_online_done_and_cancelled(self, qtbot, gui, db):
+    def test_cancelled_no_emit_when_zero_updated(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         fired = []
         dlg.location_updated.connect(lambda: fired.append(True))
-        dlg._on_online_done(UpdateLocationResult(updated=1))
-        dlg._on_online_cancelled(UpdateLocationResult(updated=1))
-        assert fired.count(True) >= 1
-        assert dlg._progress_label.text() != ""
+        dlg._on_cancelled(UpdateLocationResult(updated=0))
+        assert fired == []
 
-    def test_row_done_appends_to_log(self, qtbot, gui, db):
+    def test_row_done_appends_to_log(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         dlg._on_row_done("GC1", "a log line")
         assert "a log line" in dlg._log.toPlainText()
 
-    def test_request_cancel(self, qtbot, gui, db):
+    def test_request_cancel(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         dlg._worker = MagicMock()
         dlg._request_cancel()
         dlg._worker.request_cancel.assert_called_once()
 
-    def test_close_event_cancels_running_worker(self, qtbot, gui, db):
+    def test_close_event_cancels_running_worker(self, qtbot, db):
         dlg = UpdateLocationDialog(gc_codes=["GC1"])
         qtbot.addWidget(dlg)
         worker = MagicMock()
@@ -313,3 +277,41 @@ class TestUpdateLocationDialog:
         dlg._worker = worker
         dlg.close()
         worker.request_cancel.assert_called_once()
+        # wait() must be called with no timeout so the dialog never destroys
+        # a still-running QThread (which causes SIGABRT).
+        worker.wait.assert_called_once_with()
+
+    def test_start_connects_finished_to_delete_later(self, qtbot, db, monkeypatch):
+        # finished must be connected to deleteLater so Qt cleans up the C++
+        # thread object only after the thread finishes, preventing GC-driven SIGABRT.
+        dlg = UpdateLocationDialog()
+        qtbot.addWidget(dlg)
+        monkeypatch.setattr(dlg, "_build_rows", lambda: [_CacheRow("GC1", 55.0, 12.0)])
+        connected = []
+
+        class FakeWorker:
+            def __init__(self, rows):
+                self.row_done = MagicMock()
+                self.all_done = MagicMock()
+                self.cancelled = MagicMock()
+                self.finished = MagicMock()
+
+            def start(self):
+                pass
+
+            def isRunning(self):
+                return False
+
+            def deleteLater(self):
+                pass
+
+        fake = FakeWorker([])
+        monkeypatch.setattr(uld, "ReverseGeocodeWorker", lambda rows: fake)
+        dlg._start()
+        fake.finished.connect.assert_any_call(fake.deleteLater)
+
+    def test_menu_mode_finalize_redisables_this(self, qtbot, db):
+        dlg = UpdateLocationDialog()
+        qtbot.addWidget(dlg)
+        dlg._on_done(UpdateLocationResult(updated=1))
+        assert dlg._rb_this.isEnabled() is False

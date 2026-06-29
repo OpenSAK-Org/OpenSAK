@@ -126,3 +126,34 @@ class TestMapPin:
         html = ip.get_map_pin_html("Traditional Cache", found=True)
         assert html.count("<img") == 2
         assert "drop-shadow" in html
+
+    def test_dnf_has_overlay(self):
+        # Regression for #286: DNF caches show a dark-blue smiley overlay.
+        html = ip.get_map_pin_html("Traditional Cache", dnf=True)
+        assert html.count("<img") == 2
+
+    def test_found_and_dnf_prefers_found(self):
+        # found takes priority over dnf when both are set.
+        html_found = ip.get_map_pin_html("Traditional Cache", found=True)
+        html_both  = ip.get_map_pin_html("Traditional Cache", found=True, dnf=True)
+        assert html_found == html_both
+
+
+# ── composite pixmap ──────────────────────────────────────────────────────────
+
+class TestCompositePixmap:
+    def test_no_overlay_matches_plain(self):
+        # Regression for #286: no found/dnf → same as get_cache_type_pixmap.
+        composite = ip.get_cache_type_pixmap_composite("Traditional Cache", 32)
+        plain = ip.get_cache_type_pixmap("Traditional Cache", 32)
+        assert composite.size() == plain.size()
+
+    def test_found_composite_returns_pixmap(self):
+        pix = ip.get_cache_type_pixmap_composite("Traditional Cache", 28, found=True)
+        assert isinstance(pix, QPixmap)
+        assert not pix.isNull()
+
+    def test_dnf_composite_returns_pixmap(self):
+        pix = ip.get_cache_type_pixmap_composite("Multi-cache", 28, dnf=True)
+        assert isinstance(pix, QPixmap)
+        assert not pix.isNull()

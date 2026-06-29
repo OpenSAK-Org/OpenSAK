@@ -29,3 +29,29 @@ def get_import_type(path: Path) -> ImportType:
         raise ValueError(f"Unsupported file format: {suffix}")
         
     return mapping[suffix]
+
+
+# Issue #272: users who run a GSAK "statistics" macro (e.g. FindStatGen) get
+# found/hide counts appended to the owner field on export, e.g.
+# "Cheminer Will (F=1361 H=54)". The trailing "(Key=N ...)" block is not
+# part of the actual name and must be stripped before comparing against the
+# plain username configured in Settings.
+_GSAK_STATS_SUFFIX_RE = re.compile(r"\s*\([A-Za-z]+=\d+(?:\s+[A-Za-z]+=\d+)*\)\s*$")
+
+
+def normalize_geocacher_name(name: str | None) -> str:
+    """Normalize a geocacher display name for case/whitespace-insensitive matching.
+
+    Handles two real-world GPX export quirks (issue #272):
+      1. GSAK statistics-macro decoration — a trailing "(F=1361 H=54)"-style
+         block appended to the owner name — is stripped.
+      2. Irregular whitespace (incl. non-breaking spaces, \\xa0) inside the
+         name is collapsed to single regular spaces.
+
+    The result is stripped and lowercased. Used to compare an imported
+    'owner'/'placed_by' name against the user's configured GC username.
+    """
+    if not name:
+        return ""
+    cleaned = _GSAK_STATS_SUFFIX_RE.sub("", name)
+    return re.sub(r"\s+", " ", cleaned).strip().lower()

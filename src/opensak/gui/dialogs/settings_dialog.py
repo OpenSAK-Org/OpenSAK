@@ -16,9 +16,10 @@ from PySide6.QtWidgets import (
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
 from opensak.gui.settings import get_settings, HomePoint
+from opensak.gui.dialogs.widgets import DirRow
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.coords import FORMATS, format_coords
-from opensak.utils.types import CoordFormat
+from opensak.utils.types import CoordFormat, DateFormat, TextSize
 
 
 # ── Baggrundstråd til OAuth + API-kald ───────────────────────────────────────
@@ -193,14 +194,14 @@ class SettingsDialog(QDialog):
         disp_group = QGroupBox(tr("settings_group_display"))
         disp_layout = QVBoxLayout(disp_group)
 
-        self._miles_cb = QCheckBox(tr("settings_use_miles"))
-        disp_layout.addWidget(self._miles_cb)
-
-        self._archived_cb = QCheckBox(tr("settings_show_archived"))
-        disp_layout.addWidget(self._archived_cb)
-
-        self._found_cb = QCheckBox(tr("settings_show_found"))
-        disp_layout.addWidget(self._found_cb)
+        unit_row = QHBoxLayout()
+        unit_row.addWidget(QLabel(tr("dist_distance_label")))
+        self._unit_combo = QComboBox()
+        self._unit_combo.addItem(tr("trip_unit_km"), False)
+        self._unit_combo.addItem(tr("trip_unit_mi"), True)
+        unit_row.addWidget(self._unit_combo)
+        unit_row.addStretch()
+        disp_layout.addLayout(unit_row)
 
         map_row = QHBoxLayout()
         map_row.addWidget(QLabel(tr("settings_map_label")))
@@ -220,6 +221,27 @@ class SettingsDialog(QDialog):
         coord_fmt_row.addWidget(self._coord_format)
         coord_fmt_row.addStretch()
         disp_layout.addLayout(coord_fmt_row)
+
+        date_fmt_row = QHBoxLayout()
+        date_fmt_row.addWidget(QLabel(tr("settings_date_format_label")))
+        self._date_format = QComboBox()
+        self._date_format.addItem(tr("settings_date_format_locale"), DateFormat.LOCALE)
+        self._date_format.addItem("dd.mm.yyyy", DateFormat.DMY)
+        self._date_format.addItem("mm/dd/yyyy", DateFormat.MDY)
+        self._date_format.addItem("yyyy-mm-dd", DateFormat.YMD)
+        date_fmt_row.addWidget(self._date_format)
+        date_fmt_row.addStretch()
+        disp_layout.addLayout(date_fmt_row)
+
+        text_size_row = QHBoxLayout()
+        text_size_row.addWidget(QLabel(tr("settings_text_size_label")))
+        self._text_size = QComboBox()
+        self._text_size.addItem(tr("settings_text_size_small"), TextSize.SMALL)
+        self._text_size.addItem(tr("settings_text_size_medium"), TextSize.MEDIUM)
+        self._text_size.addItem(tr("settings_text_size_large"), TextSize.LARGE)
+        text_size_row.addWidget(self._text_size)
+        text_size_row.addStretch()
+        disp_layout.addLayout(text_size_row)
 
         layout.addWidget(disp_group)
 
@@ -326,6 +348,42 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
+        # ── Folders (install / database location) ──────────────────────────────
+        from opensak.settings_store import get_install_dir, get_db_dir
+
+        folders_group = QGroupBox(tr("settings_group_folders"))
+        folders_layout = QVBoxLayout(folders_group)
+
+        folders_layout.addWidget(QLabel(tr("settings_install_dir_label")))
+        self._install_dir_row = DirRow(get_install_dir(), browsable=False)
+        folders_layout.addWidget(self._install_dir_row)
+        install_note = QLabel(tr("settings_install_dir_note"))
+        install_note.setWordWrap(True)
+        install_note.setStyleSheet("color: gray; font-size: 10px;")
+        folders_layout.addWidget(install_note)
+
+        # Issue #358: tidligere lovede teksten ovenfor at man kunne "køre
+        # opsætnings-guiden igen", men der var ingen vej til faktisk at gøre
+        # det — wizarden blev kun vist automatisk ved allerførste opstart.
+        run_wizard_row = QHBoxLayout()
+        run_wizard_btn = QPushButton(tr("settings_run_wizard_button"))
+        run_wizard_btn.clicked.connect(self._on_run_wizard_again)
+        run_wizard_row.addWidget(run_wizard_btn)
+        run_wizard_row.addStretch()
+        folders_layout.addLayout(run_wizard_row)
+
+        folders_layout.addSpacing(8)
+        folders_layout.addWidget(QLabel(tr("settings_db_dir_label")))
+        self._db_dir_row = DirRow(get_db_dir())
+        folders_layout.addWidget(self._db_dir_row)
+
+        folders_hint = QLabel(tr("settings_folders_restart_hint"))
+        folders_hint.setWordWrap(True)
+        folders_hint.setStyleSheet("color: gray; font-size: 10px;")
+        folders_layout.addWidget(folders_hint)
+
+        layout.addWidget(folders_group)
+
         # ── Search behaviour ──────────────────────────────────────────────────
         search_group = QGroupBox(tr("settings_group_search"))
         search_layout = QVBoxLayout(search_group)
@@ -385,8 +443,71 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(update_group)
 
+        # ── Distance calculation ───────────────────────────────────────────────
+        dist_group = QGroupBox(tr("settings_group_distance"))
+        dist_layout = QVBoxLayout(dist_group)
+
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel(tr("settings_distance_method_label")))
+        self._distance_method_combo: QComboBox = QComboBox()
+        self._distance_method_combo.addItem(tr("settings_distance_haversine"), "haversine")
+        self._distance_method_combo.addItem(tr("settings_distance_vincenty"),  "vincenty")
+        method_row.addWidget(self._distance_method_combo)
+        method_row.addStretch()
+        dist_layout.addLayout(method_row)
+
+        dist_hint = QLabel(tr("settings_distance_hint"))
+        dist_hint.setWordWrap(True)
+        dist_hint.setStyleSheet("color: gray; font-size: 10px;")
+        dist_layout.addWidget(dist_hint)
+
+        layout.addWidget(dist_group)
+
         layout.addStretch()
         return tab
+
+    def _on_run_wizard_again(self) -> None:
+        """
+        Genåbn velkomst-wizarden manuelt (issue #358).
+
+        Wizarden gemmer selv sine valg direkte i settings_store, uafhængigt
+        af denne dialogs egen _save()/accept()-flow. Vi opdaterer derfor kun
+        de viste mappe-felter bagefter, og advarer kun om genstart hvis der
+        faktisk blev ændret noget der kræver det.
+        """
+        from opensak.settings_store import get_install_dir, get_db_dir
+        from opensak.gui.dialogs.welcome_wizard import WelcomeWizard
+
+        old_install_dir = get_install_dir()
+        old_db_dir = get_db_dir()
+        old_lang = current_language()
+
+        wizard = WelcomeWizard(self)
+        wizard.exec()
+
+        new_install_dir = get_install_dir()
+        new_db_dir = get_db_dir()
+        self._install_dir_row.set_path(new_install_dir)
+        self._db_dir_row.set_path(new_db_dir)
+
+        if new_install_dir != old_install_dir:
+            QMessageBox.information(
+                self,
+                tr("restart_required"),
+                tr("settings_run_wizard_restart_notice"),
+            )
+        elif new_db_dir != old_db_dir:
+            QMessageBox.information(
+                self,
+                tr("restart_required"),
+                tr("settings_db_dir_changed_message"),
+            )
+        elif current_language() != old_lang:
+            QMessageBox.information(
+                self,
+                tr("restart_required"),
+                tr("restart_message"),
+            )
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
@@ -800,13 +921,19 @@ class SettingsDialog(QDialog):
     def _load(self) -> None:
         s = get_settings()
         self._reload_points_table()
-        self._miles_cb.setChecked(s.use_miles)
-        self._archived_cb.setChecked(s.show_archived)
-        self._found_cb.setChecked(s.show_found)
+        from opensak.settings_store import get_install_dir, get_db_dir
+        self._install_dir_row.set_path(get_install_dir())
+        self._db_dir_row.set_path(get_db_dir())
+        idx = self._unit_combo.findData(s.use_miles)
+        self._unit_combo.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._map_provider.findData(s.map_provider)
         self._map_provider.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._coord_format.findData(s.coord_format)
         self._coord_format.setCurrentIndex(idx if idx >= 0 else 0)
+        idx = self._date_format.findData(s.date_format)
+        self._date_format.setCurrentIndex(idx if idx >= 0 else 0)
+        idx = self._text_size.findData(s.text_size)
+        self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -818,9 +945,9 @@ class SettingsDialog(QDialog):
         self._search_debounce_ms.setValue(s.search_debounce_ms)
         if self._nominatim_cb is not None:
             self._nominatim_cb.setChecked(s.nominatim_enabled)
-        from PySide6.QtCore import QSettings
-        qs = QSettings("OpenSAK Project", "OpenSAK")
-        self._update_check_cb.setChecked(cast(bool, qs.value("updates/check_enabled", True, type=bool)))
+        self._update_check_cb.setChecked(s.updates_check_enabled)
+        idx = self._distance_method_combo.findData(s.distance_method)
+        self._distance_method_combo.setCurrentIndex(idx if idx >= 0 else 0)
         # Opdater GC-status
         self._refresh_gc_status_on_open()
 
@@ -842,11 +969,11 @@ class SettingsDialog(QDialog):
             from opensak.coords import parse_coords
             if parse_coords(home_text) is not None:  # keep existing if invalid
                 s.gc_home_location = home_text
-        s.use_miles         = self._miles_cb.isChecked()
-        s.show_archived     = self._archived_cb.isChecked()
-        s.show_found        = self._found_cb.isChecked()
+        s.use_miles         = bool(self._unit_combo.currentData())
         s.map_provider      = self._map_provider.currentData()
         s.coord_format      = self._coord_format.currentData()
+        s.date_format       = self._date_format.currentData()
+        s.text_size         = self._text_size.currentData()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()
@@ -860,10 +987,56 @@ class SettingsDialog(QDialog):
                 apply_theme(cast(QApplication, app), new_theme)
         if self._nominatim_cb is not None:
             s.nominatim_enabled = self._nominatim_cb.isChecked()
+        s.updates_check_enabled = self._update_check_cb.isChecked()
+        s.distance_method = self._distance_method_combo.currentData()
         s.sync()
-        from PySide6.QtCore import QSettings
-        qs = QSettings("OpenSAK Project", "OpenSAK")
-        qs.setValue("updates/check_enabled", self._update_check_cb.isChecked())
+
+        # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
+        from opensak.settings_store import get_db_dir, get_store
+        new_db_dir = self._db_dir_row.path
+        if new_db_dir != get_db_dir():
+            from opensak.db.manager import get_db_manager
+            manager = get_db_manager()
+            existing_count = len(manager.databases)
+
+            if existing_count > 0:
+                move_box = QMessageBox(self)
+                move_box.setWindowTitle(tr("settings_move_databases_title"))
+                move_box.setText(
+                    tr("settings_move_databases_msg", count=existing_count)
+                )
+                move_box.setIcon(QMessageBox.Icon.Question)
+                btn_move_keep = move_box.addButton(
+                    tr("settings_move_keep_originals"), QMessageBox.ButtonRole.AcceptRole
+                )
+                btn_move_delete = move_box.addButton(
+                    tr("settings_move_delete_originals"), QMessageBox.ButtonRole.DestructiveRole
+                )
+                btn_no_move = move_box.addButton(
+                    tr("settings_move_skip"), QMessageBox.ButtonRole.RejectRole
+                )
+                move_box.exec()
+                clicked = move_box.clickedButton()
+
+                if clicked in (btn_move_keep, btn_move_delete):
+                    delete_originals = clicked == btn_move_delete
+                    errors = manager.move_databases_to(new_db_dir, delete_originals)
+                    if errors:
+                        QMessageBox.warning(
+                            self,
+                            tr("settings_move_errors_title"),
+                            "\n".join(errors),
+                        )
+                # btn_no_move: gemmer kun stien — eksisterende databaser
+                # forbliver hvor de er, kun nye oprettes i den nye mappe.
+
+            new_db_dir.mkdir(parents=True, exist_ok=True)
+            get_store().set("databases.dir", str(new_db_dir))
+            QMessageBox.information(
+                self,
+                tr("restart_required"),
+                tr("settings_db_dir_changed_message"),
+            )
 
         new_lang = self._lang_combo.currentData()
         if new_lang != current_language():

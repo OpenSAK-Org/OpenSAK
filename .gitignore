@@ -54,6 +54,10 @@ gc_token.json
 # Planning docs (local only for now)
 docs/plans/
 
+# Reverse-geocoding boundary data — dev-only stand-in for the future
+# OpenSAK-Data release packs (see docs/reverse-geocoding-data.md).
+/data/
+
 # Local skill tooling (caveman skills)
 .agents/
 skills-lock.json

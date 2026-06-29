@@ -1,16 +1,16 @@
 """
-src/opensak/gui/settings.py — Application settings using QSettings.
+src/opensak/gui/settings.py — Application settings.
 
-Settings are stored in:
-  Linux:   ~/.config/OpenSAK Project/OpenSAK.ini
-  Windows: Registry or %APPDATA%/OpenSAK Project/OpenSAK.ini
+Fra 1.14.0 (issue #209): al state gemmes i opensak.json via settings_store
+i stedet for QSettings. API'et er identisk med det gamle for at undgå
+ændringer i alle de steder der kalder get_settings().
 """
 
 from __future__ import annotations
 import json
-from PySide6.QtCore import QSettings
-
-from opensak.utils.types import CoordFormat
+import base64
+from opensak.utils.types import CoordFormat, DateFormat, TextSize
+from opensak.settings_store import get_store
 
 
 # ── Hjemmepunkt dataklasse ────────────────────────────────────────────────────
@@ -35,61 +35,86 @@ class HomePoint:
 
 
 class AppSettings:
-    """Thin wrapper around QSettings with typed getters/setters."""
+    """
+    Typed getters/setters over settings_store.
 
-    def __init__(self):
-        self._s = QSettings("OpenSAK Project", "OpenSAK")
+    Drop-in erstatning for den gamle QSettings-baserede version.
+    Bruger prik-separerede nøgler: "user.gc_username", "display.theme" osv.
+    """
 
-    # ── Home location (per database) ──────────────────────────────────────────
+    # ── Per-database nøgle-prefix ─────────────────────────────────────────────
 
-    def _db_key(self, key: str) -> str:
-        """Returner en QSettings nøgle der er unik per aktiv database."""
+    def _db_prefix(self) -> str:
+        """Returner en unik prefix per aktiv database til per-db settings."""
         try:
             from opensak.db.manager import get_db_manager
             manager = get_db_manager()
             if manager.active:
                 safe = str(manager.active.path).replace("/", "_").replace("\\", "_")
-                return f"db_{safe}/{key}"
+                return f"db.{safe}"
         except Exception:
             pass
-        return f"location/{key}"
+        return "db.default"
+
+    def _db_key(self, key: str) -> str:
+        return f"{self._db_prefix()}.{key}"
+
+    # ── Home location (per database) ──────────────────────────────────────────
 
     @property
     def home_lat(self) -> float:
-        per_db_key = self._db_key("home_lat")
-        val = self._s.value(per_db_key, None)
-        if val is not None:
-            return float(val)
-        return float(self._s.value("location/home_lat", 55.6761))
+        s = get_store()
+        val = s.get(self._db_key("home_lat"))
+        if val is not None and val != "":
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return float(s.get("location.home_lat", 55.6761))
+        except (TypeError, ValueError):
+            return 55.6761
 
     @home_lat.setter
     def home_lat(self, value: float) -> None:
-        self._s.setValue(self._db_key("home_lat"), value)
-        self._s.setValue("location/home_lat", value)
+        s = get_store()
+        s.set_many({
+            self._db_key("home_lat"): value,
+            "location.home_lat":      value,
+        })
 
     @property
     def home_lon(self) -> float:
-        per_db_key = self._db_key("home_lon")
-        val = self._s.value(per_db_key, None)
-        if val is not None:
-            return float(val)
-        return float(self._s.value("location/home_lon", 12.5683))
+        s = get_store()
+        val = s.get(self._db_key("home_lon"))
+        if val is not None and val != "":
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return float(s.get("location.home_lon", 12.5683))
+        except (TypeError, ValueError):
+            return 12.5683
 
     @home_lon.setter
     def home_lon(self, value: float) -> None:
-        self._s.setValue(self._db_key("home_lon"), value)
-        self._s.setValue("location/home_lon", value)
+        s = get_store()
+        s.set_many({
+            self._db_key("home_lon"): value,
+            "location.home_lon":      value,
+        })
 
     # ── Globale hjemmepunkter (liste) ─────────────────────────────────────────
 
     @property
     def home_points(self) -> list[HomePoint]:
         """Global liste — ★ Home øverst, derefter User Locations."""
-        raw = self._s.value("homepoints/list", None)
+        raw = get_store().get("homepoints.list")
         user_points: list[HomePoint] = []
         if raw:
             try:
-                data = json.loads(raw)
+                data = json.loads(raw) if isinstance(raw, str) else raw
                 user_points = [HomePoint.from_dict(d) for d in data
                                if d.get("name") != "★ Home"]
             except Exception:
@@ -100,31 +125,30 @@ class AppSettings:
     @home_points.setter
     def home_points(self, points: list[HomePoint]) -> None:
         filtered = [p for p in points if p.name != "★ Home"]
-        self._s.setValue(
-            "homepoints/list",
-            json.dumps([p.to_dict() for p in filtered])
-        )
+        get_store().set("homepoints.list", [p.to_dict() for p in filtered])
 
     @property
     def active_home_name(self) -> str:
         """Navn på det aktive hjemmepunkt (per database, med global fallback)."""
-        per_db = self._s.value(self._db_key("active_home_name"), None)
+        s = get_store()
+        per_db = s.get(self._db_key("active_home_name"))
         if per_db is not None:
-            return per_db
-        return self._s.value("homepoints/active_name", "")
+            return str(per_db)
+        return str(s.get("homepoints.active_name", ""))
 
     @active_home_name.setter
     def active_home_name(self, value: str) -> None:
-        # Gem per database OG opdatér global fallback
-        self._s.setValue(self._db_key("active_home_name"), value)
-        self._s.setValue("homepoints/active_name", value)
+        s = get_store()
+        s.set_many({
+            self._db_key("active_home_name"): value,
+            "homepoints.active_name":         value,
+        })
 
     def set_active_home(self, point: HomePoint) -> None:
-        """Sæt aktivt hjemmepunkt — opdaterer både global navn og per-db koordinater."""
+        """Sæt aktivt hjemmepunkt."""
         self.active_home_name = point.name
         self.home_lat = point.lat
         self.home_lon = point.lon
-        self._s.sync()
 
     def get_active_home(self) -> HomePoint | None:
         """Returner det aktive hjemmepunkt fra listen, eller None."""
@@ -155,34 +179,27 @@ class AppSettings:
 
     @property
     def gc_username(self) -> str:
-        """Brugerens geocaching.com brugernavn (bruges til FTF-detektion m.m.)"""
-        return self._s.value("user/gc_username", "")
+        return str(get_store().get("user.gc_username", ""))
 
     @gc_username.setter
     def gc_username(self, value: str) -> None:
-        self._s.setValue("user/gc_username", value.strip())
+        get_store().set("user.gc_username", value.strip())
 
     @property
     def gc_finder_id(self) -> str:
-        """Brugerens numeriske Geocaching.com finder-ID.
-
-        Sættes automatisk ved første PQ-import når gc_username matcher en log.
-        Kan også sættes manuelt. Bruges til hurtig og sikker found-detektion.
-        """
-        return self._s.value("user/gc_finder_id", "")
+        return str(get_store().get("user.gc_finder_id", ""))
 
     @gc_finder_id.setter
     def gc_finder_id(self, value: str) -> None:
-        self._s.setValue("user/gc_finder_id", str(value).strip())
+        get_store().set("user.gc_finder_id", str(value).strip())
 
     @property
     def gc_home_location(self) -> str:
-        """Brugerens faste hjemkoordinat som rå streng."""
-        return self._s.value("user/gc_home_location", "")
+        return str(get_store().get("user.gc_home_location", ""))
 
     @gc_home_location.setter
     def gc_home_location(self, value: str) -> None:
-        self._s.setValue("user/gc_home_location", value.strip())
+        get_store().set("user.gc_home_location", value.strip())
 
     def get_gc_home_point(self) -> "HomePoint | None":
         """Parse gc_home_location til HomePoint, eller None."""
@@ -203,33 +220,44 @@ class AppSettings:
 
     @property
     def theme(self) -> str:
-        """
-        UI theme preference.  One of ``"auto"``, ``"light"``, ``"dark"``.
-
-        ``"auto"`` (the default) follows the OS dark-mode setting.
-        """
-        return self._s.value("display/theme", "auto")
+        return str(get_store().get("display.theme", "auto"))
 
     @theme.setter
     def theme(self, value: str) -> None:
-        self._s.setValue("display/theme", value)
+        get_store().set("display.theme", value)
 
     # ── Units ─────────────────────────────────────────────────────────────────
 
     @property
+    def distance_method(self) -> str:
+        """Distance calculation method — 'haversine' (default) or 'vincenty'.
+
+        Haversine matches Groundspeak's behaviour; Vincenty WGS84 is more
+        accurate (~0.3 % improvement for long distances).
+        """
+        val = get_store().get("computation.distance_method", "haversine")
+        return val if val in ("haversine", "vincenty") else "haversine"
+
+    @distance_method.setter
+    def distance_method(self, value: str) -> None:
+        get_store().set("computation.distance_method", value)
+
+    @property
     def use_miles(self) -> bool:
-        return self._s.value("display/use_miles", False, type=bool)
+        val = get_store().get("display.use_miles", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
 
     @use_miles.setter
     def use_miles(self, value: bool) -> None:
-        self._s.setValue("display/use_miles", value)
+        get_store().set("display.use_miles", bool(value))
 
     # ── Koordinatformat ───────────────────────────────────────────────────────
 
     @property
     def coord_format(self) -> CoordFormat:
-        """Coordinate display format — defaults to DMM."""
-        raw = self._s.value("display/coord_format", CoordFormat.DMM.value)
+        raw = get_store().get("display.coord_format", CoordFormat.DMM.value)
         try:
             return CoordFormat(raw)
         except ValueError:
@@ -237,17 +265,44 @@ class AppSettings:
 
     @coord_format.setter
     def coord_format(self, value: CoordFormat) -> None:
-        self._s.setValue("display/coord_format", CoordFormat(value).value)
+        get_store().set("display.coord_format", CoordFormat(value).value)
+
+    # ── Datoformat ────────────────────────────────────────────────────────────
+
+    @property
+    def date_format(self) -> DateFormat:
+        raw = get_store().get("display.date_format", DateFormat.LOCALE.value)
+        try:
+            return DateFormat(raw)
+        except ValueError:
+            return DateFormat.LOCALE
+
+    @date_format.setter
+    def date_format(self, value: DateFormat) -> None:
+        get_store().set("display.date_format", DateFormat(value).value)
+
+    @property
+    def text_size(self) -> TextSize:
+        raw = get_store().get("display.text_size", TextSize.MEDIUM.value)
+        try:
+            return TextSize(raw)
+        except ValueError:
+            return TextSize.MEDIUM
+
+    @text_size.setter
+    def text_size(self, value: TextSize) -> None:
+        get_store().set("display.text_size", TextSize(value).value)
 
     # ── Kort udbyder ──────────────────────────────────────────────────────────
 
+
     @property
     def map_provider(self) -> str:
-        return self._s.value("display/map_provider", "google")
+        return str(get_store().get("display.map_provider", "google"))
 
     @map_provider.setter
     def map_provider(self, value: str) -> None:
-        self._s.setValue("display/map_provider", value)
+        get_store().set("display.map_provider", value)
 
     def get_maps_url(self, lat: float, lon: float) -> str:
         if self.map_provider == "osm":
@@ -257,122 +312,210 @@ class AppSettings:
 
     # ── Display ───────────────────────────────────────────────────────────────
 
-    @property
-    def show_archived(self) -> bool:
-        return self._s.value("display/show_archived", False, type=bool)
-
-    @show_archived.setter
-    def show_archived(self, value: bool) -> None:
-        self._s.setValue("display/show_archived", value)
-
-    @property
-    def show_found(self) -> bool:
-        return self._s.value("display/show_found", True, type=bool)
-
-    @show_found.setter
-    def show_found(self, value: bool) -> None:
-        self._s.setValue("display/show_found", value)
-
     # ── Window state ──────────────────────────────────────────────────────────
 
     @property
     def window_geometry(self):
-        return self._s.value("window/geometry")
+        raw = get_store().get("window.geometry")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                return base64.b64decode(raw)
+            except Exception:
+                return None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        return None
 
     @window_geometry.setter
     def window_geometry(self, value) -> None:
-        self._s.setValue("window/geometry", value)
+        if value is None:
+            get_store().delete("window.geometry")
+        else:
+            try:
+                b = bytes(value)  # works for bytes, bytearray, QByteArray
+                get_store().set("window.geometry", base64.b64encode(b).decode())
+            except Exception:
+                pass
 
     @property
     def window_state(self):
-        return self._s.value("window/state")
+        raw = get_store().get("window.state")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                return base64.b64decode(raw)
+            except Exception:
+                return None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        return None
 
     @window_state.setter
     def window_state(self, value) -> None:
-        self._s.setValue("window/state", value)
+        if value is None:
+            get_store().delete("window.state")
+        else:
+            try:
+                b = bytes(value)
+                get_store().set("window.state", base64.b64encode(b).decode())
+            except Exception:
+                pass
 
     @property
     def splitter_state(self):
-        return self._s.value("window/splitter_state")
+        raw = get_store().get("window.splitter_state")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                return base64.b64decode(raw)
+            except Exception:
+                return None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        return None
 
     @splitter_state.setter
     def splitter_state(self, value) -> None:
-        self._s.setValue("window/splitter_state", value)
+        if value is None:
+            get_store().delete("window.splitter_state")
+        else:
+            try:
+                b = bytes(value)
+                get_store().set("window.splitter_state", base64.b64encode(b).decode())
+            except Exception:
+                pass
 
     @property
     def bottom_splitter_state(self):
-        return self._s.value("window/bottom_splitter_state")
+        raw = get_store().get("window.bottom_splitter_state")
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            try:
+                return base64.b64decode(raw)
+            except Exception:
+                return None
+        if isinstance(raw, (bytes, bytearray)):
+            return bytes(raw)
+        return None
 
     @bottom_splitter_state.setter
     def bottom_splitter_state(self, value) -> None:
-        self._s.setValue("window/bottom_splitter_state", value)
+        if value is None:
+            get_store().delete("window.bottom_splitter_state")
+        else:
+            try:
+                b = bytes(value)
+                get_store().set("window.bottom_splitter_state", base64.b64encode(b).decode())
+            except Exception:
+                pass
 
     @property
     def splitter_ratio_top(self) -> float:
-        """Top panes andel af den lodrette splitter (issue #62)."""
-        return float(self._s.value("window/splitter_ratio_top", 0.49))
+        val = get_store().get("window.splitter_ratio_top", 0.49)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.49
 
     @splitter_ratio_top.setter
     def splitter_ratio_top(self, value: float) -> None:
-        self._s.setValue("window/splitter_ratio_top", value)
+        get_store().set("window.splitter_ratio_top", float(value))
 
     @property
     def bottom_splitter_ratio_left(self) -> float:
-        """Venstre panes andel af den nederste splitter (issue #62)."""
-        return float(self._s.value("window/bottom_splitter_ratio_left", 0.51))
+        val = get_store().get("window.bottom_splitter_ratio_left", 0.51)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.51
 
     @bottom_splitter_ratio_left.setter
     def bottom_splitter_ratio_left(self, value: float) -> None:
-        self._s.setValue("window/bottom_splitter_ratio_left", value)
+        get_store().set("window.bottom_splitter_ratio_left", float(value))
 
-    # ── Search thresholds ──────────────────────────────────────────────────────
+    # ── Search thresholds ─────────────────────────────────────────────────────
 
     @property
     def search_min_chars(self) -> int:
-        """Minimum characters before search fires. 0 = adaptive based on DB size."""
-        return int(self._s.value("search/min_chars", 0))
+        val = get_store().get("search.min_chars", 0)
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return 0
 
     @search_min_chars.setter
     def search_min_chars(self, value: int) -> None:
-        self._s.setValue("search/min_chars", value)
+        get_store().set("search.min_chars", int(value))
 
     @property
     def search_debounce_ms(self) -> int:
-        """Debounce delay in milliseconds. 0 = adaptive based on DB size."""
-        return int(self._s.value("search/debounce_ms", 0))
+        val = get_store().get("search.debounce_ms", 0)
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return 0
 
     @search_debounce_ms.setter
     def search_debounce_ms(self, value: int) -> None:
-        self._s.setValue("search/debounce_ms", value)
+        get_store().set("search.debounce_ms", int(value))
 
     # ── Location refinement ───────────────────────────────────────────────────
 
     @property
     def nominatim_enabled(self) -> bool:
-        """Enable Nominatim online refinement after the fast offline pass."""
-        return self._s.value("location/nominatim_enabled", False, type=bool)
+        val = get_store().get("location.nominatim_enabled", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
 
     @nominatim_enabled.setter
     def nominatim_enabled(self, value: bool) -> None:
-        self._s.setValue("location/nominatim_enabled", value)
+        get_store().set("location.nominatim_enabled", bool(value))
 
     # ── Last used paths ───────────────────────────────────────────────────────
 
     @property
     def last_import_dir(self) -> str:
         from pathlib import Path
-        return self._s.value("paths/last_import_dir", str(Path.home()))
+        return str(get_store().get("paths.last_import_dir", str(Path.home())))
 
     @last_import_dir.setter
     def last_import_dir(self, value: str) -> None:
-        self._s.setValue("paths/last_import_dir", value)
+        get_store().set("paths.last_import_dir", value)
+
+    # ── Updates ───────────────────────────────────────────────────────────────
+
+    @property
+    def updates_check_enabled(self) -> bool:
+        val = get_store().get("updates.check_enabled", True)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @updates_check_enabled.setter
+    def updates_check_enabled(self, value: bool) -> None:
+        get_store().set("updates.check_enabled", bool(value))
+
+    @property
+    def updates_skipped_version(self) -> str:
+        return str(get_store().get("updates.skipped_version", ""))
+
+    @updates_skipped_version.setter
+    def updates_skipped_version(self, value: str) -> None:
+        get_store().set("updates.skipped_version", value)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def apply_default_center_for_new_db(self) -> None:
         """Sæt ★ Home som centerpoint for ny DB hvis tilgængeligt."""
         home = self.get_gc_home_point()
         if home:
             self.set_active_home(home)
-            self._s.sync()
 
     def is_setup_complete(self) -> bool:
         has_username = bool(self.gc_username.strip())
@@ -380,7 +523,8 @@ class AppSettings:
         return has_username and has_home
 
     def sync(self) -> None:
-        self._s.sync()
+        """Flush til disk — drop-in for QSettings.sync()."""
+        get_store().sync()
 
 
 # Module-level singleton

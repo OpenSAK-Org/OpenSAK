@@ -2,7 +2,8 @@
 src/opensak/db/manager.py — Database manager.
 
 Håndterer flere lokale SQLite databaser.
-Gemmer liste over kendte databaser i QSettings.
+Fra 1.14.0 (issue #209): gemmer liste over kendte databaser i opensak.json
+via settings_store i stedet for QSettings.
 """
 
 from __future__ import annotations
@@ -14,9 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QSettings
-
 from opensak.lang import tr
+from opensak.settings_store import get_store
 
 
 class DatabaseInfo:
@@ -58,11 +58,10 @@ class DatabaseManager:
     Håndterer liste over kendte databaser og aktiv database.
 
     Databaser gemmes som separate .db filer i app data mappen.
-    Listen over kendte databaser gemmes i QSettings.
+    Listen over kendte databaser gemmes i opensak.json via settings_store.
     """
 
     def __init__(self):
-        self._settings = QSettings("OpenSAK Project", "OpenSAK")
         self._databases: list[DatabaseInfo] = []
         self._active: Optional[DatabaseInfo] = None
         self._load_from_settings()
@@ -71,8 +70,8 @@ class DatabaseManager:
 
     def _default_db_path(self) -> Path:
         """Returner stien til standard databasen."""
-        from opensak.config import get_app_data_dir
-        return get_app_data_dir() / "Default.db"
+        from opensak.settings_store import get_db_dir
+        return get_db_dir() / "Default.db"
 
     @staticmethod
     def _migrate_path(path: Path) -> Path:
@@ -104,27 +103,28 @@ class DatabaseManager:
         return new_path
 
     def _load_from_settings(self) -> None:
-        """Indlæs liste over kendte databaser fra QSettings."""
-        count = self._settings.beginReadArray("databases")
-        for i in range(count):
-            self._settings.setArrayIndex(i)
-            name = self._settings.value("name")
-            path = self._settings.value("path")
-            if name and path:
-                migrated = self._migrate_path(Path(path))
-                info = DatabaseInfo(name, migrated)
-                self._databases.append(info)
-        self._settings.endArray()
+        """Indlæs liste over kendte databaser fra opensak.json."""
+        store = get_store()
+        db_list = store.get("databases.list", [])
+        if isinstance(db_list, list):
+            for entry in db_list:
+                if isinstance(entry, dict):
+                    name = entry.get("name")
+                    path = entry.get("path")
+                    if name and path:
+                        migrated = self._migrate_path(Path(path))
+                        info = DatabaseInfo(name, migrated)
+                        self._databases.append(info)
 
         # Aktiv database
-        active_path = self._settings.value("active_database")
+        active_path = store.get("databases.active")
         if active_path:
             migrated_active = self._migrate_path(Path(active_path))
             found = self._find_by_path(migrated_active)
             if found:
                 self._active = found
 
-        # Gem migrerede stier tilbage til QSettings (én gang)
+        # Gem migrerede stier tilbage (én gang)
         self._save_to_settings()
 
         # Hvis ingen databaser kendes, opret Default
@@ -140,18 +140,12 @@ class DatabaseManager:
             self._save_to_settings()
 
     def _save_to_settings(self) -> None:
-        """Gem liste over kendte databaser til QSettings."""
-        self._settings.beginWriteArray("databases")
-        for i, db in enumerate(self._databases):
-            self._settings.setArrayIndex(i)
-            self._settings.setValue("name", db.name)
-            self._settings.setValue("path", str(db.path))
-        self._settings.endArray()
-
-        if self._active:
-            self._settings.setValue("active_database", str(self._active.path))
-
-        self._settings.sync()
+        """Gem liste over kendte databaser til opensak.json."""
+        store = get_store()
+        store.set_many({
+            "databases.list": [db.to_dict() for db in self._databases],
+            "databases.active": str(self._active.path) if self._active else "",
+        })
 
     def _find_by_path(self, path: Path) -> Optional[DatabaseInfo]:
         for db in self._databases:
@@ -194,11 +188,11 @@ class DatabaseManager:
             raise ValueError(tr("db_err_name_exists", name=name))
 
         if path is None:
-            from opensak.config import get_app_data_dir
+            from opensak.settings_store import get_db_dir
             safe_name = "".join(
                 c if c.isalnum() or c in "-_ " else "_" for c in name
             ).strip()
-            path = get_app_data_dir() / f"{safe_name}.db"
+            path = get_db_dir() / f"{safe_name}.db"
 
         path = Path(path)
 
@@ -264,8 +258,8 @@ class DatabaseManager:
     def switch_to(self, db_info: "DatabaseInfo") -> None:
         """Skift aktiv database og initialiser den."""
         from opensak.db.database import init_db
-        self._active = db_info
-        init_db(db_path=db_info.path)
+        init_db(db_path=db_info.path)  # raises if the file is not a valid DB
+        self._active = db_info          # only update state after successful init
         self._save_to_settings()
 
     def rename(self, db_info: "DatabaseInfo", new_name: str) -> None:
@@ -282,17 +276,96 @@ class DatabaseManager:
             raise ValueError(tr("db_err_name_exists", name=new_name))
 
         if new_path is None:
-            from opensak.config import get_app_data_dir
+            from opensak.settings_store import get_db_dir
             safe_name = "".join(
                 c if c.isalnum() or c in "-_ " else "_" for c in new_name
             ).strip()
-            new_path = get_app_data_dir() / f"{safe_name}.db"
+            new_path = get_db_dir() / f"{safe_name}.db"
 
         shutil.copy2(db_info.path, new_path)
         info = DatabaseInfo(new_name, new_path)
         self._databases.append(info)
         self._save_to_settings()
         return info
+
+    def move_databases_to(
+        self, new_dir: Path, delete_originals: bool
+    ) -> list[str]:
+        """
+        Overfør alle kendte databaser (inkl. -shm/-wal sidecar-filer) til
+        en ny mappe og opdater deres stier i listen.
+
+        Bruges når brugeren ændrer database-mappen i Settings → Advanced
+        og vælger at flytte sine eksisterende databaser med (i stedet for
+        kun at lade nye databaser blive oprettet i den nye mappe).
+
+        Args:
+            new_dir: destinationsmappen — oprettes hvis den ikke findes.
+            delete_originals: hvis True slettes kilde-filerne efter
+                kopiering ("Flyt og slet"); hvis False bevares de
+                ("Flyt og behold").
+
+        Returnerer en liste af fejlbeskeder for databaser der ikke kunne
+        flyttes (fx fordi destinationen allerede har en fil med samme
+        navn) — tom liste hvis alt gik godt. Databaser der fejler bliver
+        IKKE rørt og forbliver på deres oprindelige sti.
+
+        Den aktive database håndteres sidst og kræver at dens engine er
+        disposed før filen kan flyttes/kopieres sikkert (samme mønster
+        som delete_database, for at undgå låste filer på Windows).
+        """
+        new_dir.mkdir(parents=True, exist_ok=True)
+        errors: list[str] = []
+        updated_any = False
+
+        from opensak.db.database import dispose_engine
+
+        for db_info in list(self._databases):
+            old_path = db_info.path
+            if old_path.parent == new_dir:
+                continue  # allerede i destinationen — intet at gøre
+
+            new_path = new_dir / old_path.name
+            if new_path.exists() and new_path != old_path:
+                errors.append(
+                    tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))
+                )
+                continue
+
+            # Luk engine FØR filoperationer — undgår låste filer på Windows
+            dispose_engine(old_path)
+            gc.collect()
+            time.sleep(0.05)
+
+            try:
+                shutil.copy2(old_path, new_path)
+                # Sidecar-filer (SQLite WAL-mode) — kopiér hvis de findes
+                for suffix in ("-shm", "-wal"):
+                    side = Path(str(old_path) + suffix)
+                    if side.exists():
+                        shutil.copy2(side, Path(str(new_path) + suffix))
+            except OSError as exc:
+                errors.append(
+                    tr("db_err_move_failed", name=db_info.name, error=str(exc))
+                )
+                continue
+
+            if delete_originals:
+                for suffix in ("", "-shm", "-wal"):
+                    f = Path(str(old_path) + suffix)
+                    try:
+                        if f.exists():
+                            f.unlink()
+                    except OSError:
+                        pass  # ikke kritisk — kopien findes allerede
+
+            db_info.path = new_path
+            updated_any = True
+
+        if updated_any:
+            self._save_to_settings()
+
+        return errors
 
     def remove_from_list(self, db_info: "DatabaseInfo") -> None:
         """Fjern database fra listen uden at slette filen."""

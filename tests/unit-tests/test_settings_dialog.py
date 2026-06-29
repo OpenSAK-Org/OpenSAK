@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 from opensak.gui.dialogs import settings_dialog as sd
@@ -20,25 +19,18 @@ _VALID = "N55 47.250 E012 25.000"
 
 
 @pytest.fixture
-def settings(tmp_path, monkeypatch):
-    # Redirect the real QSettings("OpenSAK Project", "OpenSAK") to a temp INI —
-    # no class patching, which would corrupt PySide's type system.
-    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path))
+def settings(monkeypatch):
+    # isolate_settings_store (autouse) har allerede sat en frisk store.
+    # Vi returnerer blot en AppSettings-instans og patcher get_settings.
+    from opensak.gui.settings import AppSettings
     s = AppSettings()
-    # setPath alone does not reliably redirect the 2-arg QSettings on macOS, so
-    # bind AppSettings to an explicit temp INI — keeps the real user settings clean.
-    s._s = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     monkeypatch.setattr(sd, "get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
 
-    def _no_manager():
-        raise RuntimeError("no manager in test")
-
-    monkeypatch.setattr("opensak.db.manager.get_db_manager", _no_manager)
+    monkeypatch.setattr("opensak.db.manager.get_db_manager",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no manager in test")))
     monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
-    yield s
-    QSettings.setDefaultFormat(QSettings.Format.NativeFormat)
+    return s
 
 
 @pytest.fixture
@@ -107,7 +99,7 @@ class TestConstruction:
         d = SettingsDialog()
         qtbot.addWidget(d)
         assert d._gc_username.text() == "preset"
-        assert d._miles_cb.isChecked() is True
+        assert d._unit_combo.currentData() is True
 
 
 # ── coordinate / home-location feedback ───────────────────────────────────────
@@ -308,7 +300,7 @@ class TestGeocaching:
 class TestSave:
     def test_save_persists_and_accepts(self, dlg, settings):
         dlg._gc_username.setText("tester")
-        dlg._miles_cb.setChecked(True)
+        dlg._unit_combo.setCurrentIndex(dlg._unit_combo.findData(True))
         dlg._save()
         assert settings.gc_username == "tester"
         assert settings.use_miles is True

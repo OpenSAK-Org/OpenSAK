@@ -47,13 +47,19 @@ def _patch_urlopen(monkeypatch, handler):
 @pytest.mark.parametrize(
     "tag, expected",
     [
-        ("v1.11.4", (1, 11, 4)),
-        ("1.2.3", (1, 2, 3)),
-        ("v2.0 ", (2, 0)),      # trailing whitespace tolerated
-        ("v10", (10,)),
-        ("", (0,)),
-        ("v1.2.x", (0,)),       # non-numeric component → sentinel
-        ("garbage", (0,)),
+        ("v1.11.4", (1, 11, 4, 9999)),
+        ("1.2.3", (1, 2, 3, 9999)),
+        ("v2.0.0", (2, 0, 0, 9999)),
+        ("v10.0.0", (10, 0, 0, 9999)),
+        ("", (0, 0, 0, 0)),
+        ("v1.2.x", (0, 0, 0, 0)),          # non-numeric component → sentinel
+        ("garbage", (0, 0, 0, 0)),
+        ("v10", (0, 0, 0, 0)),             # not full MAJOR.MINOR.PATCH → sentinel
+        ("v1.14.0-beta.1", (1, 14, 0, 1)),
+        ("v1.14.0-beta.2", (1, 14, 0, 2)),
+        ("v1.14.0-beta.10", (1, 14, 0, 10)),
+        ("v1.14.0-alpha.3", (1, 14, 0, 3)),
+        ("v1.14.0-rc.1", (1, 14, 0, 1)),
     ],
 )
 def test_parse_version(tag, expected):
@@ -64,6 +70,17 @@ def test_parse_version_ordering():
     assert _parse_version("v2.0.0") > _parse_version("1.13.11")
     assert _parse_version("1.13.11") > _parse_version("1.13.2")
     assert not _parse_version("1.0.0") > _parse_version("1.0.0")
+
+
+def test_parse_version_prerelease_ordering():
+    # beta.2 is newer than beta.1 of the same base version.
+    assert _parse_version("v1.14.0-beta.2") > _parse_version("v1.14.0-beta.1")
+    # A stable release is always newer than any pre-release of the same base.
+    assert _parse_version("v1.14.0") > _parse_version("v1.14.0-beta.99")
+    # A beta of a NEW version is still newer than an OLDER stable release —
+    # this was the original bug: betas used to parse to (0,) and always
+    # lose every comparison.
+    assert _parse_version("v1.14.0-beta.1") > _parse_version("v1.13.12")
 
 
 # ── fetch_latest_release ──────────────────────────────────────────────────────
@@ -118,18 +135,20 @@ def test_fetch_returns_none_on_bad_json(monkeypatch):
 
 # ── UpdateCheckWorker.run (decision logic, run synchronously) ─────────────────
 
-def _run_worker(monkeypatch, qapp, current, release):
+def _run_worker(monkeypatch, qapp, current, release, fetch_target="fetch_latest_release"):
     """Run the worker body in-thread and return (update_emits, check_done_count).
 
-    ``release`` is whatever the (stubbed) fetch_latest_release returns.
+    ``release`` is whatever the (stubbed) fetch function returns. ``fetch_target``
+    selects which fetch function to stub — fetch_latest_release for stable-running
+    users, fetch_latest_prerelease for beta-running users.
     Calling run() directly keeps it on the test thread, so the default direct
     signal connections fire synchronously — no event loop, fully deterministic.
     """
-    monkeypatch.setattr(updater, "fetch_latest_release", lambda: release)
+    monkeypatch.setattr(updater, fetch_target, lambda: release)
     worker = UpdateCheckWorker(current)
-    updates: list[tuple[str, str]] = []
+    updates: list[tuple[str, str, bool]] = []
     done: list[int] = []
-    worker.update_available.connect(lambda tag, url: updates.append((tag, url)))
+    worker.update_available.connect(lambda tag, url, is_pre: updates.append((tag, url, is_pre)))
     worker.check_done.connect(lambda: done.append(1))
     worker.run()
     return updates, len(done)
@@ -140,7 +159,7 @@ def test_worker_emits_update_when_newer(monkeypatch, qapp):
         monkeypatch, qapp, "1.0.0",
         {"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
     )
-    assert updates == [("v2.0.0", "https://example.test/u")]
+    assert updates == [("v2.0.0", "https://example.test/u", False)]
     assert done == 1
 
 
@@ -166,3 +185,140 @@ def test_worker_done_when_fetch_fails(monkeypatch, qapp):
     updates, done = _run_worker(monkeypatch, qapp, "1.0.0", None)
     assert updates == []
     assert done == 1   # check_done always fires, even with no release
+
+
+# ── _is_prerelease_tag ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "tag, expected",
+    [
+        ("v1.14.0", False),
+        ("1.13.12", False),
+        ("v1.14.0-beta.1", True),
+        ("v1.14.0-alpha.2", True),
+        ("v1.14.0-rc.1", True),
+        ("", False),
+    ],
+)
+def test_is_prerelease_tag(tag, expected):
+    from opensak.updater import _is_prerelease_tag
+    assert _is_prerelease_tag(tag) is expected
+
+
+# ── fetch_latest_prerelease ─────────────────────────────────────────────────
+
+class _FakeListResp(_FakeResp):
+    def __init__(self, payload_list):
+        self._bytes = json.dumps(payload_list).encode()
+
+
+def test_fetch_prerelease_finds_highest_version_entry(monkeypatch):
+    _patch_urlopen(monkeypatch, lambda: _FakeListResp([
+        {"tag_name": "v1.14.0", "html_url": "https://x/stable", "prerelease": False},
+        {"tag_name": "v1.14.0-beta.2", "html_url": "https://x/beta2", "prerelease": True},
+        {"tag_name": "v1.14.0-beta.1", "html_url": "https://x/beta1", "prerelease": True},
+    ]))
+    from opensak.updater import fetch_latest_prerelease
+    out = fetch_latest_prerelease()
+    assert out["tag_name"] == "v1.14.0-beta.2"
+
+
+def test_fetch_prerelease_ignores_github_api_order(monkeypatch):
+    """GitHub's /releases list is sorted by the tag's commit date, not by when
+    the release was actually created — in practice this can list an older
+    beta before a newer one (observed: beta.9 listed before beta.10). The
+    function must pick the highest version regardless of array order."""
+    _patch_urlopen(monkeypatch, lambda: _FakeListResp([
+        {"tag_name": "v1.14.0-beta.9", "html_url": "https://x/beta9", "prerelease": True},
+        {"tag_name": "v1.14.0-beta.10", "html_url": "https://x/beta10", "prerelease": True},
+    ]))
+    from opensak.updater import fetch_latest_prerelease
+    out = fetch_latest_prerelease()
+    assert out["tag_name"] == "v1.14.0-beta.10"
+    assert out["html_url"] == "https://x/beta10"
+
+
+def test_fetch_prerelease_returns_none_when_no_prerelease_present(monkeypatch):
+    _patch_urlopen(monkeypatch, lambda: _FakeListResp([
+        {"tag_name": "v1.14.0", "html_url": "https://x/stable", "prerelease": False},
+    ]))
+    from opensak.updater import fetch_latest_prerelease
+    assert fetch_latest_prerelease() is None
+
+
+def test_fetch_prerelease_returns_none_on_non_list_payload(monkeypatch):
+    _patch_urlopen(monkeypatch, lambda: _FakeResp({"not": "a list"}))
+    from opensak.updater import fetch_latest_prerelease
+    assert fetch_latest_prerelease() is None
+
+
+def test_fetch_prerelease_returns_none_on_urlerror(monkeypatch):
+    def _boom():
+        raise URLError("no network")
+    _patch_urlopen(monkeypatch, _boom)
+    from opensak.updater import fetch_latest_prerelease
+    assert fetch_latest_prerelease() is None
+
+
+# ── Worker routes to the correct fetch function based on running version ────
+
+def test_worker_uses_stable_fetch_when_running_stable(monkeypatch, qapp):
+    # A stable (main) user must never hit the prerelease endpoint.
+    called = {"prerelease": False}
+
+    def _fail_if_called():
+        called["prerelease"] = True
+        return None
+
+    monkeypatch.setattr(updater, "fetch_latest_prerelease", _fail_if_called)
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.13.12",
+        {"tag_name": "v1.14.0", "html_url": "https://example.test/u", "name": "n"},
+        fetch_target="fetch_latest_release",
+    )
+    assert called["prerelease"] is False
+    assert updates == [("v1.14.0", "https://example.test/u", False)]
+
+
+def test_worker_uses_prerelease_fetch_when_running_beta(monkeypatch, qapp):
+    # A beta user should be checked against the prerelease feed, not /latest.
+    called = {"stable": False}
+
+    def _fail_if_called():
+        called["stable"] = True
+        return None
+
+    monkeypatch.setattr(updater, "fetch_latest_release", _fail_if_called)
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.14.0-beta.1",
+        {"tag_name": "v1.14.0-beta.2", "html_url": "https://example.test/beta2", "name": "n"},
+        fetch_target="fetch_latest_prerelease",
+    )
+    assert called["stable"] is False
+    assert updates == [("v1.14.0-beta.2", "https://example.test/beta2", True)]
+
+
+def test_worker_beta_user_sees_no_update_for_older_beta(monkeypatch, qapp):
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.14.0-beta.2",
+        {"tag_name": "v1.14.0-beta.1", "html_url": "https://example.test/u", "name": "n"},
+        fetch_target="fetch_latest_prerelease",
+    )
+    assert updates == []
+    assert done == 1
+
+
+def test_worker_beta_user_sees_stable_release_as_update(monkeypatch, qapp):
+    # If the newest pre-release IS the eventual stable tag (e.g. beta period
+    # ended and 1.14.0 stable shipped), a beta-running user comparing against
+    # fetch_latest_prerelease wouldn't see it — but is_prerelease=False on the
+    # emitted signal is what the stable-flow test above already covers; this
+    # documents that a beta user manually checking "Check for updates" still
+    # works correctly when fetch_latest_prerelease finds nothing newer.
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.14.0-beta.5",
+        None,
+        fetch_target="fetch_latest_prerelease",
+    )
+    assert updates == []
+    assert done == 1

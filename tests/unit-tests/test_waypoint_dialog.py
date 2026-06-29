@@ -38,6 +38,7 @@ def _cache(gc_code="GC12345", cache_type="Traditional Cache"):
         latitude=55.0, longitude=12.0, placed_by="Owner", country="Denmark",
         state="Zealand", short_description="s", long_description="l",
         encoded_hints="hint", available=True, archived=False, premium_only=False,
+        locked=False,
         found=True, dnf=False, favorite_point=False, first_to_find=False,
     )
 
@@ -209,6 +210,28 @@ class TestGetData:
         assert data["found"] is True
         assert data["latitude"] is not None
         assert data["parent_gc_code"] is None
+
+    def test_locked_checkbox_populates_and_roundtrips(self, qtbot):
+        # Issue #202: editing an already-locked cache shows the checkbox
+        # checked, and toggling it off is reflected in get_data().
+        c = _cache()
+        c.locked = True
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        assert dlg._locked.isChecked() is True
+        data = dlg.get_data()
+        assert data["locked"] is True
+
+        dlg._locked.setChecked(False)
+        data = dlg.get_data()
+        assert data["locked"] is False
+
+    def test_locked_defaults_unchecked_for_new_cache(self, qtbot):
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        assert dlg._locked.isChecked() is False
+        data = dlg.get_data()
+        assert data["locked"] is False
 
     def test_custom_data(self, qtbot):
         dlg = WaypointDialog(next_cw_id="CW042")

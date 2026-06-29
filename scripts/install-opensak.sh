@@ -1,7 +1,7 @@
 #!/bin/bash
 # ==============================================================
 # OpenSAK — Linux installationsscript
-# Testet på: Ubuntu 20.04+, Linux Mint 20+, Debian 11+
+# Testet på: Ubuntu 20.04+, Linux Mint 20+, Debian 11+, openSUSE Tumbleweed
 #
 # Brug:
 #   chmod +x install-opensak.sh
@@ -16,6 +16,10 @@ GUL='\033[1;33m'
 ROED='\033[0;31m'
 BLA='\033[0;34m'
 NC='\033[0m'  # Ingen farve
+
+# ---- Linux Distributions ---
+DEBIAN="command -v apt"
+SUSE="command -v zypper"
 
 ok()   { echo -e "${GROEN}✓${NC} $1"; }
 info() { echo -e "${BLA}→${NC} $1"; }
@@ -50,15 +54,25 @@ MANGLER=()
 
 if ! command -v python3 &>/dev/null; then MANGLER+=("python3"); fi
 if ! command -v git &>/dev/null; then MANGLER+=("git"); fi
-if ! dpkg -l libxcb-cursor0 &>/dev/null 2>&1; then MANGLER+=("libxcb-cursor0"); fi
-if ! dpkg -l python3-venv &>/dev/null 2>&1; then MANGLER+=("python3-venv"); fi
-if ! dpkg -l python3-pip &>/dev/null 2>&1; then MANGLER+=("python3-pip"); fi
+if ! python3 -c "import venv" &>/dev/null 2>&1; then MANGLER+=("python3-venv"); fi
+if $DEBIAN &>/dev/null; then
+	if ! dpkg -l libxcb-cursor0 &>/dev/null 2>&1; then MANGLER+=("libxcb-cursor0"); fi
+	if ! dpkg -l python3-pip &>/dev/null 2>&1; then MANGLER+=("python3-pip"); fi
+elif $SUSE &>/dev/null; then
+	if ! rpm -q libxcb-cursor0 &>/dev/null 2>&1; then MANGLER+=("libxcb-cursor0"); fi
+	if ! rpm -q python3-pip &>/dev/null 2>&1; then MANGLER+=("python3-pip"); fi
+fi
 
 if [ ${#MANGLER[@]} -gt 0 ]; then
     advar "Følgende pakker mangler og installeres nu: ${MANGLER[*]}"
     echo "Dette kræver din adgangskode (sudo):"
-    sudo apt-get update -qq
-    sudo apt-get install -y "${MANGLER[@]}"
+    if $DEBIAN &>/dev/null; then
+	    sudo apt-get update -qq
+	    sudo apt-get install -y "${MANGLER[@]}"
+    elif $SUSE &>/dev/null; then 
+	    sudo zypper refresh 
+	    sudo zypper install -y "${MANGLER[@]}"
+    fi
     ok "System-pakker installeret"
 else
     ok "Alle system-afhængigheder er på plads"
@@ -107,7 +121,7 @@ source "$INSTALL_DIR/.venv/bin/activate"
 
 info "Installerer Python-pakker (kan tage et par minutter)..."
 pip install --upgrade pip -q
-pip install -r "$INSTALL_DIR/requirements.txt" -q
+pip install -e "$INSTALL_DIR" -q
 ok "Python-pakker installeret"
 
 # ==============================================================
@@ -198,7 +212,7 @@ if [ -n "$SKRIVEBORD" ] && [[ "$SVAR" =~ ^[JjYy]$ ]]; then
 echo "  Start fra skrivebordet: Dobbeltklik på OpenSAK ikonet"
 fi
 echo ""
-echo "  Opdater til ny version: cd ~/opensak && git pull && pip install -r requirements.txt"
+echo "  Opdater til ny version: cd ~/opensak && git pull && pip install -e ."
 echo ""
 echo "  Fejl og forslag:        https://github.com/AgreeDK/opensak/issues"
 echo ""
