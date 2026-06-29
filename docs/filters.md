@@ -22,15 +22,16 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across five tabs:
+The filter dialog is split across six tabs:
 
 | Tab | What's on it |
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, user flag, DNF, FTF, favourite points |
+| **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
 | **Attributes** | ~70 standard Groundspeak attributes |
-| **WHERE** | Raw SQL WHERE clause for advanced filtering |
+| **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
+| **Where** | Raw SQL WHERE clause for advanced filtering |
 
 ---
 
@@ -211,6 +212,17 @@ Filter by a minimum and/or maximum favourite point count. Available on the **Oth
 
 ---
 
+### Locked
+
+| Filter | Shows |
+|---|---|
+| Yes | Only caches that are locked against import overwrites |
+| No | Only caches that are not locked |
+
+Both are checked by default, so the filter has no effect until you uncheck one. Available on the **Other** tab. Lock or unlock a cache via its right-click menu, or the checkbox in **Edit cache…**
+
+---
+
 ## Date filters
 
 All date filters are on the **Dates** tab. Each can have an optional from-date, an optional to-date, or both.
@@ -233,9 +245,24 @@ Filter by the date of the most recent log entry for the cache.
 
 ---
 
-## WHERE clause filter
+## Text search filter
 
-The **WHERE** tab lets you enter a raw SQL `WHERE` clause that is applied directly against the cache database. This is intended for advanced users who need conditions not covered by the other filters.
+The **Text Search** tab searches free-text fields for a word or phrase, rather than an exact match like the *Name* or *GC code* filters.
+
+| Field | Searched by default |
+|---|---|
+| Description | ✓ |
+| Logs | ✓ |
+| Personal notes | ✓ |
+| Hint | ✗ (off — enable it explicitly if you want hint text included) |
+
+The search uses SQL `LIKE` pushdown rather than loading every cache into Python, so it stays fast even on large databases.
+
+---
+
+## Where clause filter
+
+The **Where** tab lets you enter a raw SQL `WHERE` clause that is applied directly against the cache database. This is intended for advanced users who need conditions not covered by the other filters.
 
 Example:
 ```sql
@@ -275,3 +302,5 @@ Click **View → Clear filter** or use the clear button (shown in red when activ
 | Mystery caches you have not solved yet | Type = Mystery + Not found |
 | Only unsolved puzzles | Type = Mystery + No corrected coordinates |
 | FTF caches | FTF = Yes |
+| Caches mentioning a specific trail or POI | Text search: [name], searching Description + Logs |
+| Caches you've protected from re-import overwrites | Locked = Yes |

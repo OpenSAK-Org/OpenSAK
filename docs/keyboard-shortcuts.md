@@ -2,6 +2,8 @@
 
 Quick reference for all keyboard shortcuts in OpenSAK.
 
+This same list is also available inside the app: **Help → Keyboard Shortcuts…** opens an editable table where you can customize any binding, with a "Reset all" button to restore the defaults below. Your overrides are remembered across restarts.
+
 ---
 
 ## File & Database

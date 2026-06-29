@@ -5,7 +5,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 ![Python](https://img.shields.io/badge/Python-3.11+-blue)
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
-![Status](https://img.shields.io/badge/Status-Beta-orange)
+![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
 
 ---
 
@@ -39,16 +39,19 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ### View & Navigation
 - 🗺️ **Interactive map** with OpenStreetMap and colour-coded cache pins with clustering
-- 🔍 **Advanced filter dialog** — 5 tabs: General, Dates, Other, Attributes (~70 Groundspeak attributes) and a raw SQL WHERE tab
+- 🔍 **Advanced filter dialog** — 6 tabs: General, Dates, Other, Attributes (~70 Groundspeak attributes), Text Search, and a raw SQL WHERE tab
 - 📊 **Configurable columns** — 17+ columns, toggle on/off
-- 🎨 **Status icons** in list — ✅ found, ❌ DNF, 🔒 archived, ⚠️ unavailable
+- 🎨 **Color-coded status** — found (yellow) and your own caches (green) in the GC Code column and info bar, archived/disabled caches in red; clickable info-bar counts filter the list instantly
 - 🔗 **Click GC code** → opens cache page on geocaching.com
 - 🗺️ **Click coordinates** → opens in Google Maps or OpenStreetMap
 
 ### Cache Details
-- 📋 **Cache details** — description, hints and logs
+- 📋 **Cache details** — description, hints, logs, attributes, personal notes, and child waypoints, each in their own tab
 - 🔓 **ROT13 hint decoding** — one click to decode / re-hide the hint
-- 🔍 **Search in logs** — real-time search with match highlighting
+- 🔍 **Search in logs** — real-time search with match highlighting; links in log text are clickable
+- 📝 **Personal notes** — your own free-text notes per cache, round-trippable with GSAK (`gsak:UserNote`)
+- 🧩 **Child waypoints** — parking spots, trail heads, and stages imported from GPX, shown on the map and in a dedicated tab; caches with waypoints show in **bold** in the list
+- 🔒 **Lock caches** — freeze a cache's core fields (name, type, coordinates, D/T, owner, status, descriptions, hint…) against being overwritten by a later re-import
 - 📍 **Corrected coordinates** — store solved puzzle coordinates per cache; used in GPS export and shown on map
 - ✏️ **Add / edit / delete** caches manually
 
@@ -57,6 +60,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 🗺️ Open in map app (Google Maps / OpenStreetMap)
 - 📋 Copy GC code / coordinates (in your chosen format)
 - ☑ Mark as found / not found
+- 🔒 Lock / unlock cache — protect against import overwrites
 - 📍 Add / edit / clear corrected coordinates
 - ⇄ Open coordinate converter directly from the cache list
 
@@ -79,7 +83,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ---
 
-## Known Limitations (Beta)
+## Known Limitations
 
 - Favourite points cannot be imported from GPX/PQ files (requires Geocaching.com API)
 - No Geocaching.com Live API integration
@@ -132,7 +136,14 @@ Please use [GitHub Issues](https://github.com/AgreeDK/opensak/issues) and includ
 - [ ] HTML/PDF reports and statistics
 - [ ] GPS export — improve auto-detection on all Linux distros
 - [ ] Favourite points (requires Geocaching.com API)
-- [ ] More languages (Dutch, Finnish, …)
+- [ ] GGZ export — Garmin's compressed GPX container format (lifts the 10,000-cache device limit)
+- [ ] More languages (Finnish, Polish, …)
+- [x] **Lock caches** — protect against being overwritten by a later import
+- [x] **Personal notes** — round-trippable with GSAK
+- [x] **Child waypoints** — visible in the cache list, detail panel, and on the map
+- [x] **Cache attributes tab** in the detail panel
+- [x] **Full-text search** across descriptions, logs, and notes
+- [x] **In-app Keyboard Shortcuts dialog** — customizable bindings, reset to defaults
 - [x] **Trip Planner** — radius and multi-point route corridor with map preview
 - [x] **Home points list** — named locations with toolbar quick-switch
 - [x] **Corrected coordinates** — store and use solved puzzle coordinates
