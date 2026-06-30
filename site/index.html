@@ -514,9 +514,17 @@
 
     /* ── RESPONSIVE ── */
     @media (max-width: 600px) {
-      nav ul { display: none; }
+      nav { padding: 0 1rem; height: auto; min-height: 56px; flex-wrap: wrap; }
+      nav ul {
+        gap: 0.9rem;
+        font-size: 0.78rem;
+      }
       .cta-group { flex-direction: column; align-items: center; }
       footer { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 420px) {
+      .nav-logo { font-size: 0.85rem; }
+      nav ul { gap: 0.6rem; font-size: 0.7rem; }
     }
   </style>
 </head>
@@ -531,7 +539,8 @@
     <li><a href="#features">Features</a></li>
     <li><a href="#compare">Compare</a></li>
     <li><a href="#download">Download</a></li>
-    <li><a href="https://github.com/OpenSAK-Org/opensak">GitHub</a></li>
+    <li><a href="/user-guide.html">User Guide</a></li>
+    <li><a href="https://github.com/OpenSAK-Org/OpenSAK">GitHub</a></li>
   </ul>
 </nav>
 
@@ -560,7 +569,7 @@
       <a href="#download" class="btn btn-primary">
         ↓ Download
       </a>
-      <a href="https://github.com/OpenSAK-Org/opensak" class="btn btn-secondary">
+      <a href="https://github.com/OpenSAK-Org/OpenSAK" class="btn btn-secondary">
         ★ View on GitHub
       </a>
     </div>
@@ -624,7 +633,7 @@
     <div class="feature-card">
       <div class="feature-icon">🌍</div>
       <h3>Multilingual</h3>
-      <p>Full interface in 7 languages: English, Danish, French, Portuguese, Czech, Swedish, and German. Community translations welcome.</p>
+      <p>Full interface in 8 languages: English, Danish, Dutch, French, Portuguese, Czech, Swedish, and German. Community translations welcome.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🗄️</div>
@@ -726,25 +735,25 @@
   <p class="section-intro">Pre-built packages for all platforms. No installation wizard, no license key, no nonsense.</p>
 
   <div class="download-grid fade-in">
-    <a href="https://github.com/OpenSAK-Org/opensak/releases/latest" class="download-card">
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🪟 Windows</span>
       <span class="dl-name">OpenSAK.exe</span>
       <span class="dl-format">Standalone installer · 64-bit</span>
       <span class="dl-arrow">↗</span>
     </a>
-    <a href="https://github.com/OpenSAK-Org/opensak/releases/latest" class="download-card">
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🐧 Linux</span>
       <span class="dl-name">OpenSAK.AppImage</span>
       <span class="dl-format">AppImage · No install needed</span>
       <span class="dl-arrow">↗</span>
     </a>
-    <a href="https://github.com/OpenSAK-Org/opensak/releases/latest" class="download-card">
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🍎 macOS (Apple Silicon)</span>
       <span class="dl-name">OpenSAK-arm64.dmg</span>
       <span class="dl-format">DMG · M1 / M2 / M3</span>
       <span class="dl-arrow">↗</span>
     </a>
-    <a href="https://github.com/OpenSAK-Org/opensak/releases/latest" class="download-card">
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🍎 macOS (Intel)</span>
       <span class="dl-name">OpenSAK-x86_64.dmg</span>
       <span class="dl-format">DMG · Intel Mac</span>
@@ -759,8 +768,8 @@
   <h2>Built in the open.</h2>
   <p>MIT licensed. Every line of code is on GitHub. Contributions, bug reports, and translations are all welcome.</p>
   <div class="cta-group">
-    <a href="https://github.com/OpenSAK-Org/opensak" class="btn btn-secondary">View Source on GitHub</a>
-    <a href="https://github.com/OpenSAK-Org/opensak/issues" class="btn btn-secondary">Report an Issue</a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK" class="btn btn-secondary">View Source on GitHub</a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/issues" class="btn btn-secondary">Report an Issue</a>
   </div>
 </div>
 
@@ -768,13 +777,13 @@
 <footer>
   <div class="footer-left">
     <strong>OpenSAK</strong> · Open Source Geocache Manager<br>
-    <a href="https://github.com/OpenSAK-Org/opensak/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a> · Made in Denmark 🇩🇰
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a> · Made in Denmark 🇩🇰
   </div>
   <div class="footer-links">
-    <a href="https://github.com/OpenSAK-Org/opensak">GitHub</a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK">GitHub</a>
     <a href="PRIVACY_POLICY.html">Privacy Policy</a>
-    <a href="https://github.com/OpenSAK-Org/opensak/releases">Releases</a>
-    <a href="https://github.com/OpenSAK-Org/opensak/issues">Support</a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases">Releases</a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/issues">Support</a>
   </div>
 </footer>
 
