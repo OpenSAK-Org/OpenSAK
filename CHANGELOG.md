@@ -8,6 +8,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.1] — 2026-07-01
+
+> **Beta release** — start of the 1.15.0 testing period. Feedback especially
+> welcome on the new GGZ export.
+
+### Added
+
+- **Export to Garmin GGZ format** (closes #348) — the GPS export dialog now
+  offers a GPX/GGZ format choice. GGZ packs the exported caches (unlimited
+  count, unlike GPX-based transfers) directly into a ZIP structure Garmin
+  devices read natively, matching GSAK's GGZ layout byte-for-byte.
+
+### Fixed
+
+- **Corrected Coordinates icon visibility** (closes #354) — the small red pin
+  emoji used to mark caches with corrected coordinates was hard to see or
+  missing entirely on some systems. Replaced everywhere (table column,
+  column header, right-click menu, and the cache detail panel) with a
+  consistent SVG warning-triangle icon, in the same style GSAK uses for the
+  same purpose.
+
+---
+
 ## [1.14.0] — 2026-06-29
 
 > First stable release of the 1.14.0 cycle. Replaces the run of
