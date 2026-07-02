@@ -16,6 +16,7 @@ from opensak.gui.cache_table import (
     CacheTableModel,
     CacheTableView,
     CacheTypeDelegate,
+    CorrectedCoordsDelegate,
     SizeBarDelegate,
     GcCodeDelegate,
     _bearing_deg,
@@ -753,6 +754,20 @@ class TestDelegates:
         GcCodeDelegate().paint(painter, opt, idx)
         painter.end()
 
+    def test_corrected_coords_delegate_centers_icon(self, model):
+        # Feedback: the per-row warning-triangle icon in the "corrected"
+        # column must be centered like the header icon, not left-aligned
+        # (Qt's default delegate behaviour for a decoration-only cell).
+        model.load([_cache(gc_code="GCFIX", user_note=_note())])
+        self._paint(CorrectedCoordsDelegate(), model, "corrected")
+        self._paint(CorrectedCoordsDelegate(), model, "corrected", selected=True)
+
+    def test_corrected_coords_delegate_falls_back_when_no_icon(self, model):
+        # No user_note / not corrected -> no decoration -> default paint path,
+        # must not crash.
+        model.load([_cache(gc_code="GCPLAIN")])
+        self._paint(CorrectedCoordsDelegate(), model, "corrected")
+
 
 # ── view ────────────────────────────────────────────────────────────────────────
 
@@ -775,6 +790,18 @@ class TestView:
                           GcCodeDelegate)
         assert isinstance(view.itemDelegateForColumn(ALL_COLUMNS.index("cache_type")),
                           CacheTypeDelegate)
+        assert isinstance(view.itemDelegateForColumn(ALL_COLUMNS.index("corrected")),
+                          CorrectedCoordsDelegate)
+
+    def test_header_sections_remain_clickable_for_sorting(self, view):
+        # Regression test: installing a custom QHeaderView (for centering the
+        # "corrected" column's icon + sort arrow) resets sectionsClickable to
+        # False, because a freshly constructed QHeaderView defaults to False
+        # while QTableView's own auto-created header starts out True.
+        # setSortingEnabled(True) does NOT set this on its own, so clicking a
+        # column header silently stopped sorting until this was set explicitly.
+        assert view.horizontalHeader().sectionsClickable() is True
+        assert view.isSortingEnabled() is True
 
     def test_load_and_counts(self, view):
         view.load_caches([_cache(gc_code="A"), _cache(gc_code="B", user_flag=True)])

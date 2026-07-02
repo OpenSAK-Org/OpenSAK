@@ -11,8 +11,11 @@ from datetime import datetime
 from PySide6.QtCore import (
     Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
 )
-from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication,
+    QStyle, QStyleOptionHeader,
+)
 
 from opensak.db.models import Cache
 from opensak.filters.engine import _haversine_km
@@ -284,6 +287,37 @@ class CacheTypeDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
 
+        raw = index.data(Qt.ItemDataRole.DecorationRole)
+        if not raw:
+            super().paint(painter, option, index)
+            return
+
+        from PySide6.QtWidgets import QStyle
+        from PySide6.QtGui import QIcon, QPixmap
+        if isinstance(raw, QPixmap):
+            icon = QIcon(raw)
+        elif isinstance(raw, QIcon):
+            icon = raw
+        else:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, option.widget)
+        icon.paint(painter, option.rect, Qt.AlignmentFlag.AlignCenter)
+        painter.restore()
+
+
+class CorrectedCoordsDelegate(QStyledItemDelegate):
+    """Centers the corrected-coordinates warning-triangle icon in the column.
+
+    Same rationale as CacheTypeDelegate: the "corrected" column is icon-only
+    (no text), and Qt's default delegate left-aligns the decoration inside
+    the content rect instead of centering it.
+    """
+
+    def paint(self, painter: QPainter, option, index) -> None:
         raw = index.data(Qt.ItemDataRole.DecorationRole)
         if not raw:
             super().paint(painter, option, index)
@@ -604,7 +638,7 @@ class CacheTableModel(QAbstractTableModel):
                     # den smalle 40px kolonne. col_corrected-nøglen holdes
                     # ikke-tom i sprogfilerne udelukkende for at bestå
                     # test_no_empty_values; den reelle tekst til Column Chooser
-                    # kommer fra col_corrected_label.
+                    # kommer fra det delte detail_corrected_coords-nøgle.
                     return ""
                 return get_column_defs().get(col_id, (col_id, 80))[0]
             if role == Qt.ItemDataRole.ToolTipRole:
@@ -968,6 +1002,87 @@ class CacheTableModel(QAbstractTableModel):
             self.dataChanged.emit(first, last)
 
 
+class _CacheTableHeaderView(QHeaderView):
+    """Horizontal header for the cache table.
+
+    Qt's default QHeaderView layout draws a section's decoration icon on one
+    side and the sort-indicator arrow pinned to the opposite edge. For an
+    icon-only column (no text) like "corrected", that means the icon and the
+    arrow drift apart as the column is widened, instead of staying together
+    as a pair (feedback on the Corrected coordinates column). This subclass
+    only changes painting for icon-only columns; every other column falls
+    back to the normal Qt painting untouched.
+    """
+
+    # Column ids that show only an icon in the header (no text) and should
+    # therefore have their icon + sort arrow centered together as a pair.
+    _ICON_ONLY_COLUMNS = {"corrected"}
+
+    def __init__(self, columns_provider, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._columns_provider = columns_provider
+        # A freshly constructed QHeaderView defaults to sectionsClickable=False.
+        # QTableView's own auto-created header starts out True, which is why
+        # swapping in this custom header silently broke click-to-sort until
+        # this was added explicitly (setSortingEnabled() does not set it).
+        self.setSectionsClickable(True)
+
+    def paintSection(self, painter, rect, logicalIndex) -> None:
+        columns = self._columns_provider()
+        if (
+            logicalIndex >= len(columns)
+            or columns[logicalIndex] not in self._ICON_ONLY_COLUMNS
+            or rect.width() <= 0 or rect.height() <= 0
+        ):
+            super().paintSection(painter, rect, logicalIndex)
+            return
+
+        painter.save()
+
+        # Draw the section background/border only — no text, no icon, and no
+        # native sort arrow (we position the icon and arrow ourselves below).
+        opt = QStyleOptionHeader()
+        self.initStyleOption(opt)
+        opt.rect = rect
+        opt.section = logicalIndex
+        opt.text = ""
+        opt.icon = QIcon()
+        opt.sortIndicator = QStyleOptionHeader.SortIndicator.None_
+        self.style().drawControl(QStyle.ControlElement.CE_Header, opt, painter, self)
+
+        icon = get_corrected_coords_icon(14).pixmap(14, 14)
+        is_sorted = self.sortIndicatorSection() == logicalIndex
+
+        arrow = None
+        if is_sorted:
+            arrow_size = 9
+            arrow = QPixmap(arrow_size, arrow_size)
+            arrow.fill(Qt.GlobalColor.transparent)
+            arrow_opt = QStyleOptionHeader()
+            self.initStyleOption(arrow_opt)
+            arrow_opt.rect = arrow.rect()
+            arrow_opt.sortIndicator = (
+                QStyleOptionHeader.SortIndicator.SortDown
+                if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+                else QStyleOptionHeader.SortIndicator.SortUp
+            )
+            arrow_painter = QPainter(arrow)
+            self.style().drawPrimitive(
+                QStyle.PrimitiveElement.PE_IndicatorHeaderArrow, arrow_opt, arrow_painter, self
+            )
+            arrow_painter.end()
+
+        spacing = 3
+        total_width = icon.width() + (spacing + arrow.width() if arrow else 0)
+        x = rect.x() + (rect.width() - total_width) // 2
+        painter.drawPixmap(x, rect.y() + (rect.height() - icon.height()) // 2, icon)
+        if arrow:
+            arrow_x = x + icon.width() + spacing
+            painter.drawPixmap(arrow_x, rect.y() + (rect.height() - arrow.height()) // 2, arrow)
+
+        painter.restore()
+
+
 class CacheTableView(QTableView):
     """The main cache list widget."""
 
@@ -992,6 +1107,7 @@ class CacheTableView(QTableView):
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
+        self.setHorizontalHeader(_CacheTableHeaderView(lambda: self._model._columns, self))
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
@@ -1061,6 +1177,9 @@ class CacheTableView(QTableView):
                 elif col_id == "gc_code":
                     self._gc_code_delegate = GcCodeDelegate(self)
                     self.setItemDelegateForColumn(i, self._gc_code_delegate)
+                elif col_id == "corrected":
+                    self._corrected_delegate = CorrectedCoordsDelegate(self)
+                    self.setItemDelegateForColumn(i, self._corrected_delegate)
                 else:
                     # None clears the column delegate (stub types it non-optional)
                     self.setItemDelegateForColumn(i, None)  # type: ignore[arg-type]

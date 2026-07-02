@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 from opensak.lang import tr
 from opensak.settings_store import get_store
+from opensak.gui.icon_provider import get_corrected_coords_icon
 
 # Alle tilgængelige kolonner: (felt_id, visningsnavn, bredde, standard_synlig)
 # Kolonnestruktur: (felt_id, tr_nøgle, bredde, standard_synlig)
@@ -32,7 +33,7 @@ _ALL_COLUMNS_DEF = [
     ("bearing",      "col_bearing",      70,  True),
     ("found",        "col_found",        36,  True),
     ("favorite",     "col_favorite",     36, False),
-    ("corrected",    "col_corrected_label",    36,  True),
+    ("corrected",    "detail_corrected_coords", 36,  True),
     # Ekstra kolonner (fra)
     ("country",      "col_country",      80, False),
     ("state",        "col_state",       120, False),
@@ -170,6 +171,11 @@ class ColumnChooserDialog(QDialog):
         self._list = QListWidget()
         for col_id, col_name, _, _ in get_all_columns():
             item = QListWidgetItem(col_name)
+            if col_id == "corrected":
+                # Issue #354: same SVG warning-triangle used in the column
+                # header/cells/context-menu/detail-panel, instead of the old
+                # "📍" emoji that used to be baked into the label text.
+                item.setIcon(get_corrected_coords_icon(16))
             item.setData(Qt.ItemDataRole.UserRole, col_id)
             item.setCheckState(
                 Qt.CheckState.Checked

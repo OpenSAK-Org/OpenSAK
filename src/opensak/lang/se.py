@@ -732,7 +732,6 @@ STRINGS: dict[str, str] = {
     "detail_corrected_add_btn":     "Lägg till korrigerade koordinater…",
 
     "col_corrected":                "CC",
-    "col_corrected_label":          "📍 Korrigerade koordinater",
     "col_corrected_header_tooltip": "Korrigerade koordinater — dubbelklicka för att redigera",
     "col_corrected_tooltip":        "Korrigerade koordinater: {coords}",
 

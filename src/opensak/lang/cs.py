@@ -733,7 +733,6 @@ STRINGS: dict[str, str] = {
     "detail_corrected_add_btn":     "Přidat opravené souřadnice…",
 
     "col_corrected":                "CC",
-    "col_corrected_label":          "📍 Opravené souřadnice",
     "col_corrected_header_tooltip": "Opravené souřadnice — poklepejte pro úpravu",
     "col_corrected_tooltip":        "Opravené souřadnice: {coords}",
 

@@ -734,7 +734,6 @@ STRINGS: dict[str, str] = {
     "detail_corrected_add_btn":     "Gecorrigeerde coördinaten toevoegen…",
 
     "col_corrected":                "CC",
-    "col_corrected_label":          "📍 Gecorrigeerde coördinaten",
     "col_corrected_header_tooltip": "Gecorrigeerde coördinaten — dubbelklik om te bewerken",
     "col_corrected_tooltip":        "Gecorrigeerde coördinaten: {coords}",
 
