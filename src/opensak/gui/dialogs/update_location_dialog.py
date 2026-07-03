@@ -73,7 +73,7 @@ class ReverseGeocodeWorker(QThread):
     def run(self) -> None:
         import os
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        from opensak.geo.store import BoundaryStore
+        from opensak.geo.store import BoundaryStore, ensure_baseline_seeded
         from opensak.geo.boundaries import TerritoryResolver
         from opensak.db.database import get_session
         from opensak.db.models import Cache
@@ -83,6 +83,13 @@ class ReverseGeocodeWorker(QThread):
         if self._cancel:
             self.cancelled.emit(result)
             return
+
+        # First-run baseline seed (copy from the PyInstaller bundle, or
+        # download from OpenSAK-Data if nothing's bundled) happens here rather
+        # than at app startup — this already runs on a QThread, per this
+        # feature's own "long work never blocks the main thread" rule, and
+        # the fallback download path can take a while over the network.
+        ensure_baseline_seeded()
 
         check = BoundaryStore()
         if not check.available():
