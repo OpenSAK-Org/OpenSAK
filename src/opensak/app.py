@@ -242,6 +242,12 @@ def main() -> None:
     splash_msg("Kontrollerer database...")
     _migrate_legacy_db()
 
+    # Seed reverse-geocoding baseline (country/state) on first run — no-op
+    # once boundaries.db exists in the app-data dir (issue #60)
+    splash_msg("Forbereder geografiske data...")
+    from opensak.geo.store import ensure_baseline_seeded
+    ensure_baseline_seeded()
+
     # Initialiser database manager — åbner samme DB som sidst
     splash_msg("Indlæser database...")
     from opensak.db.manager import get_db_manager
