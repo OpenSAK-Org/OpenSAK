@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
         wp_menu.addAction(act_clear_flags)
 
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             wp_menu.addSeparator()
 
             act_update_location = QAction(tr("action_update_location"), self)

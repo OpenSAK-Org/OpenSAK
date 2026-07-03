@@ -28,7 +28,6 @@ from pathlib import Path
 _FEATURES_FILE: Path = Path(__file__).parent.parent.parent.parent / "features.json"
 
 _RELEASE_DEFAULTS: dict[str, bool] = {
-    "update-location": False,
     "reverse-geocoding": False,
 }
 
@@ -70,5 +69,4 @@ _flags = _load()
 
 # ── Public flag attributes ────────────────────────────────────────────────────
 
-update_location: bool      = _flags["update-location"]
 reverse_geocoding: bool    = _flags["reverse-geocoding"]

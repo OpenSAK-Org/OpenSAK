@@ -194,7 +194,7 @@ The offline lookup uses the bundled [GeoNames](https://geonames.org/) database a
 
 For full details, see [Update Waypoint Locations](update-location.md).
 
-> **Note:** This feature requires the `update-location` feature flag to be enabled. It is on by default in developer builds and can be enabled with `--feature update-location=true`. See [Feature Flags](feature-flags.md).
+> **Note:** This feature requires the `reverse-geocoding` feature flag to be enabled. It can be enabled with `--feature reverse-geocoding=true`. See [Feature Flags](feature-flags.md).
 
 ---
 

@@ -416,9 +416,9 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(search_group)
 
-        # ── Location refinement (only shown when update-location flag is on) ──
+        # ── Location refinement (only shown when reverse-geocoding flag is on) ──
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             loc_ref_group = QGroupBox(tr("settings_group_nominatim"))
             loc_ref_layout = QVBoxLayout(loc_ref_group)
 

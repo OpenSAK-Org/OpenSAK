@@ -11,7 +11,7 @@ There are two ways to open the dialog, and both open the same window. The differ
 - **Waypoint menu → Update Waypoint Locations…** — opens with *Only waypoints with missing location data* selected by default.
 - **Right-click a waypoint → Update location data…** — opens with *Only this waypoint* selected by default.
 
-This option is only visible when the `update-location` feature flag is enabled. See [Feature Flags](feature-flags.md) for details.
+This option is only visible when the `reverse-geocoding` feature flag is enabled. See [Feature Flags](feature-flags.md) for details.
 
 ---
 

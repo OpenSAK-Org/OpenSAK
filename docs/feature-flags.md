@@ -109,5 +109,4 @@ if flags.my_new_flag:
 
 | Flag | Default | Description |
 |---|---|---|
-| `update-location` | `false` | Update County / State / Country via offline GeoNames lookup (Waypoint menu, right-click context menu, and auto-geocode on GPX import) |
-| `reverse-geocoding` | `false` | Offline boundary engine for County / State / Country (issue #60) — gates the phased work landing on `beta` |
+| `reverse-geocoding` | `false` | Offline boundary engine for County / State / Country (issue #60) — gates the Update Location menu action, its right-click context-menu entry, auto-geocode on GPX import, the boundary-packs download/update actions, and the related Settings section |

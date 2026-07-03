@@ -21,7 +21,9 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 ## Feature flag
 
-The whole feature stays behind `flags.reverse_geocoding` (`utils/flags.py`, default `False` in release builds — see `features.json` / `--feature reverse-geocoding=true` to enable locally). This gates more than the GUI: `geo.store.ensure_baseline_seeded()`, called from `app.py` startup, only runs when the flag is on — without this a disabled feature would still silently download/copy boundary data on every user's first run. Any new runtime side effect added to this feature (network calls, file writes, background work) needs the same explicit check; being reachable only through an already-flag-gated menu entry is not sufficient; startup-level code runs regardless of what menu items exist.
+A single flag, `flags.reverse_geocoding` (`utils/flags.py`, default `False` in release builds — see `features.json` / `--feature reverse-geocoding=true` to enable locally), gates the entire feature: the Update Location menu action, its right-click context-menu entry, auto-geocode on GPX import, the boundary-packs download/update actions, and the Settings section. There used to be a second flag, `update-location`, gating the same GUI surface for historical reasons (predating the boundary engine) — collapsed into one flag so enabling the feature for a release is a single toggle, not two that have to be kept in sync.
+
+`geo.store.ensure_baseline_seeded()` is called from `ReverseGeocodeWorker.run()` (a `QThread`, not app startup — see Phase 5), and is only reachable through the flag-gated menu/dialog, so no separate explicit flag check is needed there. If a *new* runtime side effect (network call, file write, background work) is ever added somewhere NOT reachable exclusively through that gated entry point — e.g. something wired into `app.py` startup again — it needs its own explicit `if flags.reverse_geocoding:` check. Being reachable only through an already-gated menu entry is not sufficient for code that runs regardless of what menu items exist.
 
 ## Out of scope (follow-ups)
 

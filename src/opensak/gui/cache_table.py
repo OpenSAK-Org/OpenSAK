@@ -1378,7 +1378,7 @@ class CacheTableView(QTableView):
             act_found.triggered.connect(lambda: self._toggle_found(cache, True))
 
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             menu.addSeparator()
 
             act_update_loc = menu.addAction(tr("ctx_update_location"))
