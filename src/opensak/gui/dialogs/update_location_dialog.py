@@ -387,6 +387,9 @@ class UpdateLocationDialog(QDialog):
         self._set_controls_enabled(True)
         if not self._from_context_menu:
             self._rb_this.setEnabled(False)
+        # The worker is about to delete itself (finished.connect(deleteLater));
+        # drop our reference now so closeEvent never touches a dangling C++ object.
+        self._worker = None
 
     def closeEvent(self, event) -> None:
         if self._worker and self._worker.isRunning():
