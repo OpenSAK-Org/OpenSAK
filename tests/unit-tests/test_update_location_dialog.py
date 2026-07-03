@@ -53,6 +53,7 @@ def geo_mocks(monkeypatch):
     resolver = _fake_resolver()
     monkeypatch.setattr("opensak.geo.store.BoundaryStore", lambda: store)
     monkeypatch.setattr("opensak.geo.boundaries.TerritoryResolver", lambda s: resolver)
+    monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: None)
     return store, resolver
 
 
@@ -91,9 +92,28 @@ class TestReverseGeocodeWorker:
         w.run()
         assert cancelled
 
+    def test_run_seeds_baseline_on_worker_thread(self, db, geo_mocks, monkeypatch):
+        # ensure_baseline_seeded runs here rather than at app startup, so any
+        # first-run network fallback happens on this QThread, never the main
+        # thread. See update_location_dialog.py's ReverseGeocodeWorker.run().
+        calls = []
+        monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: calls.append(None))
+        w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
+        w.run()
+        assert calls == [None]
+
+    def test_run_cancelled_before_start_skips_baseline_seed(self, db, monkeypatch):
+        calls = []
+        monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: calls.append(None))
+        w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
+        w.request_cancel()
+        w.run()
+        assert calls == []
+
     def test_run_no_boundaries_emits_error(self, db, monkeypatch):
         store = _fake_store(available=False)
         monkeypatch.setattr("opensak.geo.store.BoundaryStore", lambda: store)
+        monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: None)
         w = ReverseGeocodeWorker([_CacheRow("GC1", 55.0, 12.0)])
         done = []
         w.all_done.connect(done.append)

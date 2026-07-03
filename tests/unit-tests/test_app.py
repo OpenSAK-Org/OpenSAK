@@ -137,7 +137,6 @@ def test_main_smoke(qapp, monkeypatch):
                             hide=lambda: None,
                             show=lambda: None))
     monkeypatch.setattr(appmod, "_migrate_legacy_db", lambda: None)
-    monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: None)
     monkeypatch.setattr("opensak.settings_store.is_first_run", lambda: False)
     monkeypatch.setattr("opensak.gui.theme.apply_theme", lambda app: None)
     monkeypatch.setattr("opensak.config.get_language", lambda: "en")
@@ -162,47 +161,3 @@ def test_main_smoke(qapp, monkeypatch):
     finally:
         W.QApplication = real_qapp_cls
         C.QTimer.singleShot = real_single
-
-
-@pytest.mark.parametrize("flag_on", [True, False])
-def test_main_gates_baseline_seed_behind_flag(qapp, monkeypatch, flag_on):
-    import PySide6.QtWidgets as W
-    import PySide6.QtCore as C
-
-    calls: list[None] = []
-
-    monkeypatch.setattr(sys, "argv", ["opensak"])
-    monkeypatch.setattr(type(qapp), "exec", lambda self: 0)
-    monkeypatch.setattr(appmod, "_make_splash",
-                        lambda app: SimpleNamespace(
-                            showMessage=lambda *a, **k: None,
-                            finish=lambda w: None,
-                            hide=lambda: None,
-                            show=lambda: None))
-    monkeypatch.setattr(appmod, "_migrate_legacy_db", lambda: None)
-    monkeypatch.setattr("opensak.utils.flags.reverse_geocoding", flag_on)
-    monkeypatch.setattr("opensak.geo.store.ensure_baseline_seeded", lambda: calls.append(None))
-    monkeypatch.setattr("opensak.settings_store.is_first_run", lambda: False)
-    monkeypatch.setattr("opensak.gui.theme.apply_theme", lambda app: None)
-    monkeypatch.setattr("opensak.config.get_language", lambda: "en")
-    monkeypatch.setattr("opensak.lang.load_language", lambda lang: None)
-    monkeypatch.setattr("opensak.db.manager.get_db_manager",
-                        lambda: SimpleNamespace(ensure_active_initialised=lambda: None))
-
-    class FakeWindow:
-        def show(self):
-            pass
-    monkeypatch.setattr("opensak.gui.mainwindow.MainWindow", FakeWindow)
-
-    real_qapp_cls = W.QApplication
-    real_single = C.QTimer.singleShot
-    W.QApplication = lambda *a, **k: qapp
-    C.QTimer.singleShot = staticmethod(lambda ms, cb: cb())
-    try:
-        with pytest.raises(SystemExit):
-            appmod.main()
-    finally:
-        W.QApplication = real_qapp_cls
-        C.QTimer.singleShot = real_single
-
-    assert (len(calls) == 1) is flag_on
