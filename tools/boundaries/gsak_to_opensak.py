@@ -181,19 +181,26 @@ def _geometry(polygons: list[list[list[list[float]]]]) -> dict[str, object]:
 
 
 def _simplify(geom: dict[str, object], tolerance: float) -> dict[str, object]:
-    # Douglas-Peucker, degrees-based tolerance. Baseline layers only (country/state) —
-    # counties stay full-resolution since they're fetched on demand, not bundled.
-    if tolerance <= 0 or not geom.get("coordinates"):
+    # Douglas-Peucker (degrees-based tolerance) for the baseline layers
+    # (country/state) only — counties stay full-resolution since they're
+    # fetched on demand, not bundled. Called with tolerance=0 for counties to
+    # skip simplification but still get the validity repair below: the raw
+    # GSAK-derived rings are self-intersecting for ~6% of real counties (not
+    # something simplification introduces), and shapely's .contains() doesn't
+    # raise on an invalid geometry — it silently returns wrong answers.
+    if not geom.get("coordinates"):
         return geom
-    simplified = _shp_shape(geom).simplify(tolerance, preserve_topology=True)
-    if not simplified.is_valid:
+    shp = _shp_shape(geom)
+    if tolerance > 0:
+        shp = shp.simplify(tolerance, preserve_topology=True)
+    if not shp.is_valid:
         # preserve_topology doesn't fully guarantee validity on complex multi-ring
         # geometries (nearby-but-separate rings can end up crossing) — buffer(0)
-        # is the standard GEOS trick to repair minor self-intersections.
-        simplified = simplified.buffer(0)
-    if simplified.is_empty:
+        # is the standard GEOS trick to repair self-intersections.
+        shp = shp.buffer(0)
+    if shp.is_empty:
         return geom
-    return _shp_mapping(simplified)
+    return _shp_mapping(shp)
 
 
 def _feature(name: str, parent: str | None, geom: dict[str, object], version: int) -> dict[str, object]:
@@ -411,7 +418,8 @@ def _convert_counties(
                 if content is None:
                     continue
 
-                geom = _geometry(_parse_gsak_txt(content))
+                # tolerance=0: no simplification, but still validity-checked/repaired.
+                geom = _simplify(_geometry(_parse_gsak_txt(content)), 0.0)
                 feature_index = len(pack_features)
                 pack_features.append(_feature(cname, cc, geom, version))
 
