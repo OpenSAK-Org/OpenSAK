@@ -270,7 +270,7 @@ class TestImportDialog:
 
     def test_on_all_done_emits_completed(self, dlg, monkeypatch):
         from opensak.utils import flags
-        monkeypatch.setattr(flags, "update_location", False, raising=False)
+        monkeypatch.setattr(flags, "reverse_geocoding", False, raising=False)
         dlg.add_files([Path("/a.gpx")])
         dlg._any_success = True
         fired = []
@@ -281,7 +281,7 @@ class TestImportDialog:
 
     def test_on_all_done_triggers_geocoding(self, dlg, monkeypatch):
         from opensak.utils import flags
-        monkeypatch.setattr(flags, "update_location", True, raising=False)
+        monkeypatch.setattr(flags, "reverse_geocoding", True, raising=False)
         called = []
         monkeypatch.setattr(dlg, "_start_geocoding", lambda: called.append(True))
         dlg._any_success = True

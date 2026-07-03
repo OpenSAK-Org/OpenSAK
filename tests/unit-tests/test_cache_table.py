@@ -982,7 +982,7 @@ class TestView:
         monkeypatch.setattr(ct, "QMenu", _Menu)
         monkeypatch.setattr(ct.webbrowser, "open", lambda *a, **k: None)
         from opensak.utils import flags
-        monkeypatch.setattr(flags, "update_location", True, raising=False)
+        monkeypatch.setattr(flags, "reverse_geocoding", True, raising=False)
 
         c = _cache(gc_code="GCMENU", latitude=55.0, longitude=12.0)
         c.user_note = _note()  # corrected -> edit/clear branch

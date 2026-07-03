@@ -9,7 +9,6 @@ import opensak.utils.flags as flags_module
 class TestLoad:
     def test_absent_file_returns_release_defaults(self, no_features_file):
         assert flags_module._flags == {
-            "update-location": False,
             "reverse-geocoding": False,
         }
 
@@ -23,7 +22,6 @@ class TestLoad:
         monkeypatch.setattr(flags_module, "_FEATURES_FILE", f)
         result = flags_module._load()
         assert result == {
-            "update-location": False,
             "reverse-geocoding": False,
         }
 
@@ -33,7 +31,7 @@ class TestLoad:
 
     def test_partial_file_keeps_unset_flags_as_defaults(self, patch_features_file):
         patch_features_file({})
-        assert flags_module._flags["update-location"] is False
+        assert flags_module._flags["reverse-geocoding"] is False
 
 
 # ── Module-level attribute ────────────────────────────────────────────────────
