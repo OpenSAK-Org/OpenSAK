@@ -118,6 +118,34 @@ class TestFetchPack:
         packs.fetch_pack("prt.geojson", tmp_path)
         assert "prt.geojson" in seen_urls[0]
 
+    def test_url_percent_encodes_special_characters(self, tmp_path: Path, monkeypatch):
+        # Defense in depth: filenames should always be pre-sanitized by the
+        # generator, but a raw space in a URL raises http.client.InvalidURL
+        # (not an OSError/URLError) if it isn't encoded first.
+        seen_urls: list[str] = []
+
+        def _fake(url, **_k):
+            seen_urls.append(url)
+            return _FakeResp(b"{}")
+
+        monkeypatch.setattr("urllib.request.urlopen", _fake)
+        packs.fetch_pack("can_British Columbia.geojson", tmp_path)
+        assert " " not in seen_urls[0]
+        assert "British%20Columbia" in seen_urls[0]
+
+    def test_invalid_url_error_returns_false_instead_of_crashing(self, tmp_path: Path, monkeypatch):
+        # http.client.InvalidURL is not an OSError/URLError subclass — this is
+        # exactly the exception that used to crash the whole QThread instead
+        # of degrading gracefully to "this one file failed".
+        import http.client
+
+        def _raise(*_a, **_k):
+            raise http.client.InvalidURL("URL can't contain control characters")
+
+        monkeypatch.setattr("urllib.request.urlopen", _raise)
+        result = packs.fetch_pack("bad name.geojson", tmp_path)
+        assert result is False
+
 
 # ── fetch_all ─────────────────────────────────────────────────────────────────
 

@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
+import unicodedata
 import zipfile
 from pathlib import Path
 
@@ -253,6 +255,15 @@ def _read_zip_entry(zf: zipfile.ZipFile, entry: str) -> str | None:
         return raw.decode("latin-1")  # GSAK files pre-2020 often use Latin-1
 
 
+def _sanitize_filename_part(name: str) -> str:
+    # GSAK state/pack names can contain spaces and accents (e.g. Canada's
+    # "British Columbia", "Québec") — GitHub Release assets silently rewrite
+    # such characters on upload (spaces become dots), which would otherwise
+    # make manifest.json permanently diverge from the real asset names.
+    ascii_only = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "_", ascii_only).strip("_")
+
+
 # ── Version table ─────────────────────────────────────────────────────────────
 
 def _load_versions(bb: sqlite3.Connection) -> dict[tuple[str, str, str], int]:
@@ -411,10 +422,12 @@ def _convert_counties(
 
         # Counties from the same pack are flattened into a single release-asset
         # filename (cc_pack.geojson) — GitHub Release assets can't hold subdirectories,
-        # and packs.py fetches them by this exact flat name.
+        # and packs.py fetches them by this exact flat name. pack_name is sanitized
+        # here (not when locating the source zip above) since some GSAK state names
+        # contain spaces/accents (e.g. Canada's "British Columbia", "Québec").
         pack_features: list[dict[str, object]] = []
         pack_region_rows: list[tuple] = []
-        out_pack = f"{cc}_{pack_name}.geojson"
+        out_pack = f"{cc}_{_sanitize_filename_part(pack_name)}.geojson"
 
         with zipfile.ZipFile(zip_path) as zf:
             for row in by_cc_pack[(cc, pack_name)]:

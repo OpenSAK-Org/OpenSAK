@@ -146,6 +146,47 @@ def test_county_output_is_validity_repaired(tmp_path: Path) -> None:
     assert shape(fc["features"][0]["geometry"]).is_valid
 
 
+def test_sanitize_filename_part_strips_spaces_and_accents() -> None:
+    # GitHub Release assets silently rewrite spaces to dots on upload — a raw
+    # GSAK state name in the output filename would permanently diverge from
+    # the real asset name (found via Canada's "British Columbia", "Québec").
+    assert conv._sanitize_filename_part("British Columbia") == "British_Columbia"
+    assert conv._sanitize_filename_part("Québec") == "Quebec"
+    assert conv._sanitize_filename_part("Newfoundland and Labrador") == "Newfoundland_and_Labrador"
+    assert conv._sanitize_filename_part("Alberta") == "Alberta"
+
+
+def test_county_pack_filename_is_sanitized(tmp_path: Path) -> None:
+    bb_path = tmp_path / "bb.db3"
+    _write_bb_db3(bb_path)
+    _write_country_zip(tmp_path / "country_v1.zip", "1", "United States")
+    _write_county_zip(tmp_path / "counties" / "usa" / "california_v3.zip", "1", "Alpha County")
+    _write_county_zip(tmp_path / "counties" / "usa" / "texas_v5.zip", "2", "Beta County")
+
+    # Rename the "california" pack to something with a space, mirroring a
+    # real GSAK state name — bb.db3/Version rows drive the version lookup,
+    # the zip filename drives which file gets opened, so both need updating.
+    db = sqlite3.connect(bb_path)
+    db.execute("UPDATE bb_county SET State = 'New Brunswick' WHERE State = 'california'")
+    db.execute("UPDATE Version SET State = 'New Brunswick' WHERE State = 'california'")
+    db.commit()
+    db.close()
+    (tmp_path / "counties" / "usa" / "california_v3.zip").rename(
+        tmp_path / "counties" / "usa" / "New Brunswick_v3.zip"
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    _run(bb_path, tmp_path, out_dir)
+
+    packs = sorted(p.name for p in (out_dir / "counties").iterdir())
+    assert packs == ["usa_New_Brunswick.geojson", "usa_texas.geojson"]
+
+    manifest = json.loads((out_dir / "manifest.json").read_text())
+    assert "usa_New_Brunswick.geojson" in manifest["packs"]
+    assert " " not in "".join(manifest["packs"].keys())
+
+
 def _run(bb_path: Path, gsak_dir: Path, out_dir: Path) -> None:
     import sys
 

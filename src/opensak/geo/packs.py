@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import sqlite3
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -29,10 +31,19 @@ DOWNLOAD_TIMEOUT = 60
 # releases the GIL during the actual socket wait, so a higher worker count
 # than a CPU-bound pool (e.g. the resolver's min(4, cpu_count)) is fine here.
 BASELINE_FETCH_WORKERS = 16
+# http.client.HTTPException (e.g. InvalidURL) is not an OSError/URLError
+# subclass, so it isn't caught by a plain except (URLError, OSError) — a
+# malformed URL (bad characters in a filename) would otherwise crash the
+# whole download instead of degrading to "this one file failed".
+_FETCH_ERRORS = (URLError, OSError, http.client.HTTPException)
 
 
 def _asset_url(filename: str) -> str:
-    return f"{DATA_REPO_URL}/{filename}"
+    # Filenames should always be pre-sanitized by the generator (no spaces or
+    # other characters GitHub would rewrite on upload) — quote() defensively
+    # anyway so a stray character degrades to a 404, not an unhandled
+    # http.client.InvalidURL crashing the whole download.
+    return f"{DATA_REPO_URL}/{urllib.parse.quote(filename)}"
 
 
 def fetch_manifest(timeout: int = REQUEST_TIMEOUT) -> dict | None:
@@ -40,7 +51,7 @@ def fetch_manifest(timeout: int = REQUEST_TIMEOUT) -> dict | None:
     try:
         with urllib.request.urlopen(_asset_url(MANIFEST_FILENAME), timeout=timeout) as resp:
             return json.load(resp)  # type: ignore[no-any-return]
-    except (URLError, OSError, json.JSONDecodeError) as exc:
+    except (*_FETCH_ERRORS, json.JSONDecodeError) as exc:
         log.debug("manifest fetch failed: %s", exc)
         return None
 
@@ -54,7 +65,7 @@ def fetch_pack(filename: str, dest_dir: Path, timeout: int = DOWNLOAD_TIMEOUT) -
     try:
         with urllib.request.urlopen(_asset_url(filename), timeout=timeout) as resp:
             data = resp.read()
-    except (URLError, OSError) as exc:
+    except _FETCH_ERRORS as exc:
         log.debug("pack fetch failed (%s): %s", filename, exc)
         return False
     return _atomic_write(dest_dir, filename, data)
@@ -191,7 +202,7 @@ def _fetch_file_atomic(filename: str, dest_dir: Path) -> bool:
     try:
         with urllib.request.urlopen(_asset_url(filename), timeout=DOWNLOAD_TIMEOUT) as resp:
             data = resp.read()
-    except (URLError, OSError) as exc:
+    except _FETCH_ERRORS as exc:
         log.debug("file fetch failed (%s): %s", filename, exc)
         return False
     return _atomic_write(dest_dir, filename, data)
