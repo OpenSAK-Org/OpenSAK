@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 # tools/boundaries/gsak_to_opensak.py — convert GSAK boundary data to OpenSAK format.
 #
-# Run from the repo root:
-#   python tools/boundaries/gsak_to_opensak.py [--gsak-dir DATA] [--out-dir DATA]
+# Run with the project's own venv (3.11+), not a bare system python3 — older
+# zipfile implementations (e.g. 3.8) fall back to legacy CP437 decoding for
+# zip entries that don't set the UTF-8 flag bit (several GSAK county zips
+# don't), silently mangling non-ASCII filenames and dropping those rows with
+# no warning:
+#   .venv/bin/python3 tools/boundaries/gsak_to_opensak.py [--gsak-dir DATA] [--out-dir DATA]
 #
 # Reads:  <gsak-dir>/bb.db3
 #          <gsak-dir>/country_v<N>.zip          (N from bb.db3 Version table)
@@ -11,9 +15,9 @@
 #
 # Writes: <out-dir>/boundaries.db              (OpenSAK schema)
 #          <out-dir>/manifest.json              (dataset + per-pack versions)
-#          <out-dir>/countries/world.geojson
-#          <out-dir>/states/<cc>.geojson        (one per country code)
-#          <out-dir>/counties/<cc>_<pack>.geojson (one per pack, flat — release-asset name)
+#          <out-dir>/countries/world.geojson         simplified baseline (--simplify-tolerance)
+#          <out-dir>/states/<cc>.geojson             simplified baseline, one per country code
+#          <out-dir>/counties/<cc>_<pack>.geojson    full-resolution, on-demand (one per pack, flat)
 #
 # After this script finishes, BoundaryStore(Path("<out-dir>")) resolves
 # coordinates offline using the engine in src/opensak/geo/.
@@ -25,6 +29,9 @@ import json
 import sqlite3
 import zipfile
 from pathlib import Path
+
+from shapely.geometry import mapping as _shp_mapping
+from shapely.geometry import shape as _shp_shape
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DATA = _REPO_ROOT / "data"
@@ -173,6 +180,22 @@ def _geometry(polygons: list[list[list[list[float]]]]) -> dict[str, object]:
     return {"type": "MultiPolygon", "coordinates": all_polys}
 
 
+def _simplify(geom: dict[str, object], tolerance: float) -> dict[str, object]:
+    # Douglas-Peucker, degrees-based tolerance. Baseline layers only (country/state) —
+    # counties stay full-resolution since they're fetched on demand, not bundled.
+    if tolerance <= 0 or not geom.get("coordinates"):
+        return geom
+    simplified = _shp_shape(geom).simplify(tolerance, preserve_topology=True)
+    if not simplified.is_valid:
+        # preserve_topology doesn't fully guarantee validity on complex multi-ring
+        # geometries (nearby-but-separate rings can end up crossing) — buffer(0)
+        # is the standard GEOS trick to repair minor self-intersections.
+        simplified = simplified.buffer(0)
+    if simplified.is_empty:
+        return geom
+    return _shp_mapping(simplified)
+
+
 def _feature(name: str, parent: str | None, geom: dict[str, object], version: int) -> dict[str, object]:
     return {
         "type": "Feature",
@@ -240,6 +263,7 @@ def _convert_countries(
     out_dir: Path,
     conn: sqlite3.Connection,
     versions: dict[tuple[str, str, str], int],
+    simplify_tolerance: float = 0.0,
 ) -> None:
     version = versions.get(("c", "", ""), 46)
     zip_path = gsak_dir / f"country_v{version}.zip"
@@ -262,7 +286,7 @@ def _convert_countries(
                 skipped += 1
                 continue
 
-            geom = _geometry(_parse_gsak_txt(content))
+            geom = _simplify(_geometry(_parse_gsak_txt(content)), simplify_tolerance)
             feature_index = len(features)
             features.append(_feature(country_name, None, geom, version))
 
@@ -290,6 +314,7 @@ def _convert_states(
     out_dir: Path,
     conn: sqlite3.Connection,
     versions: dict[tuple[str, str, str], int],
+    simplify_tolerance: float = 0.0,
 ) -> None:
     rows = bb.execute(
         "SELECT rowid, Country, File, MaxLat, MinLat, MaxLon, MinLon, Sname FROM bb_state"
@@ -319,7 +344,7 @@ def _convert_states(
                 if content is None:
                     continue
 
-                geom = _geometry(_parse_gsak_txt(content))
+                geom = _simplify(_geometry(_parse_gsak_txt(content)), simplify_tolerance)
                 feature_index = len(features)
                 features.append(_feature(sname, cc, geom, version))
 
@@ -455,9 +480,20 @@ def main() -> None:
         help="Output directory for boundaries.db and GeoJSON packs "
              "(default: same as --gsak-dir)",
     )
+    parser.add_argument(
+        "--simplify-tolerance",
+        type=float,
+        default=0.0005,
+        metavar="DEGREES",
+        help="Douglas-Peucker tolerance applied to the country/state baseline "
+             "only (shipped in every install) — counties stay full-resolution "
+             "since they're fetched on demand. 0 disables simplification "
+             "(default: %(default)s, ~55m at the equator)",
+    )
     args = parser.parse_args()
     gsak_dir: Path = args.gsak_dir
     out_dir: Path = args.out_dir
+    simplify_tolerance: float = args.simplify_tolerance
 
     bb_path: Path = args.bb_path
     if not bb_path.exists():
@@ -477,11 +513,11 @@ def main() -> None:
     country_version = versions.get(("c", "", ""), 0)
 
     print("Converting countries…")
-    _convert_countries(bb, gsak_dir, out_dir, conn, versions)
+    _convert_countries(bb, gsak_dir, out_dir, conn, versions, simplify_tolerance)
     conn.commit()
 
     print("Converting states…")
-    _convert_states(bb, gsak_dir, out_dir, conn, versions)
+    _convert_states(bb, gsak_dir, out_dir, conn, versions, simplify_tolerance)
     conn.commit()
 
     print("Converting counties…")
