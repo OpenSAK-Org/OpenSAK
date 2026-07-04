@@ -609,7 +609,6 @@ STRINGS: dict[str, str] = {
     "col_dnf":          "DNF",
     "col_premium":      "Premium",
     "col_archived":     "Arkiverad",
-    "col_favorite":     "Favorit",
     "col_latitude":               "Latitud",
     "col_longitude":              "Longitud",
     "col_coord_tooltip_original": "Ursprungliga koordinater",
@@ -674,7 +673,6 @@ STRINGS: dict[str, str] = {
     "wp_cb_locked":                 "Lås (förhindrar att import skriver över data)",
     "wp_cb_found":                  "Hittad av mig",
     "wp_cb_dnf":                    "DNF (Did Not Find)",
-    "wp_cb_favorite":               "Favorit ★",
     "wp_cb_ftf":                    "FTF (First to Find)",
 
     # ── Filter dialog — GC code placeholder ──────────────────────────────────

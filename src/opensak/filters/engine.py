@@ -1267,7 +1267,6 @@ SORT_FIELDS: dict[str, Any] = {
     "dnf":             lambda c: int(c.dnf),
     "dnf_date":        lambda c: c.dnf_date or 0,
     "premium_only":    lambda c: int(c.premium_only),
-    "favorite":        lambda c: int(c.favorite_point),
     "favorite_points": lambda c: c.favorite_points or 0,
     "corrected":       lambda c: 0,   # placeholder — model.sort() håndterer det
     "first_to_find":   lambda c: int(c.first_to_find or False),
@@ -1304,7 +1303,6 @@ def _sql_order_expr(field: str):
         "archived":        Cache.archived,
         "dnf":             Cache.dnf,
         "premium_only":    Cache.premium_only,
-        "favorite":        Cache.favorite_point,
         "first_to_find":   func.coalesce(Cache.first_to_find, 0),
         "user_flag":       func.coalesce(Cache.user_flag, 0),
         "locked":          func.coalesce(Cache.locked, 0),

@@ -8,6 +8,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.1] — 2026-07-04
+
+> Hotfix release. Four bugs found and fixed on the `beta` branch turned out to
+> already be present in the shipped `v1.14.0` stable release, two of which
+> could crash the app for existing users. This release cherry-picks only
+> those fixes onto `main` — the ongoing `v1.15.0` beta work (GGZ export,
+> corrected-coords icon fixes, org-migration cleanup) is untouched and
+> continues on `beta` as normal.
+
+### Fixed
+
+- **Removed `favorite_point` field — crashed on existing databases**
+  (closes #488) — this field shipped in v1.14.0 without a corresponding
+  migration and had no GSAK parity to begin with. Existing databases hit
+  `no such column` errors the moment it was touched. The field, its column
+  entry, and all related UI/filter references have been removed. As a
+  follow-up, previously persisted column-visibility settings that still
+  referenced the now-removed column are filtered out automatically, so
+  upgrading users don't see a stray/broken column entry.
+
+- **Trackables table missing its migration — crashed on existing databases**
+  (closes #491) — the Trackable model (travel bugs / geocoins) has shipped
+  since v1.14.0 with no migration to actually create its table. Any existing
+  database crashed with `no such table: trackables` as soon as anything
+  queried it — including the already-shipped "Has trackables" filter. A
+  migration now creates the table on upgrade.
+
+- **Map didn't refresh when corrected coordinates were set via the context
+  menu** (closes #474) — setting corrected coordinates from the cache list's
+  right-click menu now refreshes the map, reveals the pin if it was hidden
+  inside a cluster, and preserves the current selection — matching the
+  behaviour already present when setting corrected coordinates from the
+  cache detail panel.
+
+- **Small text-size setting silently ignored on some systems** (closes #490)
+  — Qt derives the cache table's minimum row height from platform/font
+  metrics, which on some systems exceeded OpenSAK's own "Small" row height
+  setting and silently clamped it back up. The minimum is now pinned
+  explicitly so the configured text size always applies.
+
 ## [1.14.0] — 2026-06-29
 
 > First stable release of the 1.14.0 cycle. Replaces the run of

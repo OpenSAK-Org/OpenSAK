@@ -297,9 +297,6 @@ class WaypointDialog(QDialog):
         self._dnf = QCheckBox(tr("wp_cb_dnf"))
         form.addRow("", self._dnf)
 
-        self._favorite = QCheckBox(tr("wp_cb_favorite"))
-        form.addRow("", self._favorite)
-
         self._ftf = QCheckBox(tr("wp_cb_ftf"))
         form.addRow("", self._ftf)
 
@@ -428,7 +425,6 @@ class WaypointDialog(QDialog):
             self._locked.setChecked(cache.locked if cache.locked is not None else False)
             self._found.setChecked(cache.found if cache.found is not None else False)
             self._dnf.setChecked(cache.dnf if cache.dnf is not None else False)
-            self._favorite.setChecked(cache.favorite_point if cache.favorite_point is not None else False)
             self._ftf.setChecked(cache.first_to_find if cache.first_to_find is not None else False)
 
     # ── Validation & accept ───────────────────────────────────────────────────
@@ -506,7 +502,6 @@ class WaypointDialog(QDialog):
             "locked":            self._locked.isChecked(),
             "found":             self._found.isChecked(),
             "dnf":               self._dnf.isChecked(),
-            "favorite_point":    self._favorite.isChecked(),
             "first_to_find":     self._ftf.isChecked(),
             "parent_gc_code":    None,
         }
@@ -533,6 +528,5 @@ class WaypointDialog(QDialog):
             "premium_only":      False,
             "found":             False,
             "dnf":               False,
-            "favorite_point":    False,
             "parent_gc_code":    parent,
         }

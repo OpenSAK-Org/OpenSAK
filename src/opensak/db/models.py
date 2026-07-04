@@ -95,7 +95,6 @@ class Cache(Base):
     found: Mapped[bool] = mapped_column(Boolean, default=False)
     found_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
     dnf: Mapped[bool] = mapped_column(Boolean, default=False)   # Did Not Find
-    favorite_point: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # ── Issue #33: GSAK-compatible user fields ────────────────────────────────
 

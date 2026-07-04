@@ -17,25 +17,25 @@ from opensak.filters.engine import apply_filters, SortSpec, SORT_FIELDS, _sql_or
 @pytest.fixture(scope="module", autouse=True)
 def seed(tmp_db):
     rows = [
-        # gc_code, difficulty, terrain, found, archived, premium, fav, ftf,
+        # gc_code, difficulty, terrain, found, archived, premium, ftf,
         #          user_flag, fav_points, user_sort, hidden, found_date
         dict(gc_code="GCS001", difficulty=1.5, terrain=2.0, found=True,  archived=False,
-             premium_only=False, favorite_point=True,  first_to_find=False, user_flag=True,
+             premium_only=False,  first_to_find=False, user_flag=True,
              favorite_points=10, user_sort=5,    hidden_date=datetime(2020, 1, 1)),
         dict(gc_code="GCS002", difficulty=1.5, terrain=2.0, found=True,  archived=False,
-             premium_only=True,  favorite_point=False, first_to_find=None,  user_flag=None,
+             premium_only=True, first_to_find=None,  user_flag=None,
              favorite_points=10, user_sort=None, hidden_date=datetime(2020, 1, 1)),
         dict(gc_code="GCS003", difficulty=None, terrain=None, found=False, archived=True,
-             premium_only=False, favorite_point=False, first_to_find=True,  user_flag=False,
+             premium_only=False, first_to_find=True,  user_flag=False,
              favorite_points=None, user_sort=5,  hidden_date=None),
         dict(gc_code="GCS004", difficulty=5.0, terrain=1.0, found=False, archived=False,
-             premium_only=False, favorite_point=True,  first_to_find=False, user_flag=True,
+             premium_only=False,  first_to_find=False, user_flag=True,
              favorite_points=3,  user_sort=1,    hidden_date=datetime(2022, 6, 15)),
         dict(gc_code="GCS005", difficulty=3.0, terrain=3.0, found=True,  archived=True,
-             premium_only=True,  favorite_point=False, first_to_find=None,  user_flag=None,
+             premium_only=True, first_to_find=None,  user_flag=None,
              favorite_points=0,  user_sort=None, hidden_date=datetime(2019, 3, 3)),
         dict(gc_code="GCS006", difficulty=3.0, terrain=3.0, found=False, archived=False,
-             premium_only=False, favorite_point=False, first_to_find=True,  user_flag=True,
+             premium_only=False, first_to_find=True,  user_flag=True,
              favorite_points=None, user_sort=1,  hidden_date=datetime(2022, 6, 15)),
     ]
     s = make_session()
@@ -73,7 +73,7 @@ def test_filter_sort_indexes_created(tmp_db):
 
 NUMERIC_BOOL_FIELDS = [
     "difficulty", "terrain", "favorite_points", "user_sort",
-    "found", "archived", "dnf", "premium_only", "favorite",
+    "found", "archived", "dnf", "premium_only",
     "first_to_find", "user_flag",
 ]
 DATE_FIELDS = ["hidden_date", "found_date", "dnf_date"]

@@ -31,7 +31,6 @@ _ALL_COLUMNS_DEF = [
     ("distance",     "col_distance",     75,  True),
     ("bearing",      "col_bearing",      70,  True),
     ("found",        "col_found",        36,  True),
-    ("favorite",     "col_favorite",     36, False),
     ("corrected",    "col_corrected_label",    36,  True),
     # Ekstra kolonner (fra)
     ("country",      "col_country",      80, False),

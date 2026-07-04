@@ -39,7 +39,7 @@ def _cache(gc_code="GC12345", cache_type="Traditional Cache"):
         state="Zealand", short_description="s", long_description="l",
         encoded_hints="hint", available=True, archived=False, premium_only=False,
         locked=False,
-        found=True, dnf=False, favorite_point=False, first_to_find=False,
+        found=True, dnf=False, first_to_find=False,
     )
 
 

@@ -376,7 +376,12 @@ function updateCacheMarker(cacheJson) {
 
     markers[c.gc_code] = marker;
     clusterGroup.addLayer(marker);
-    map.panTo([lat, lon]);
+    // Issue #474: a plain map.panTo() here only moves the view centre —
+    // if the (possibly far-away) new location sits inside an unopened
+    // cluster at the current zoom, the pin stays invisible. Reuse
+    // panToCache()'s clusterGroup.zoomToShowLayer() reveal so the marker
+    // is actually visible, exactly as when selecting a cache in the table.
+    panToCache(c.gc_code);
 }
 </script>
 </body>

@@ -610,7 +610,6 @@ STRINGS: dict[str, str] = {
     "col_dnf":          "DNF",
     "col_premium":      "Premium",
     "col_archived":     "Archivováno",
-    "col_favorite":     "Oblíbené",
     "col_latitude":               "Zeměpisná šířka",
     "col_longitude":              "Zeměpisná délka",
     "col_coord_tooltip_original": "Původní souřadnice",
@@ -675,7 +674,6 @@ STRINGS: dict[str, str] = {
     "wp_cb_locked":                 "Zamknout (zabrání importu přepsat data)",
     "wp_cb_found":                  "Nalezeno mnou",
     "wp_cb_dnf":                    "DNF (Nenalezeno)",
-    "wp_cb_favorite":               "Oblíbené ★",
     "wp_cb_ftf":                    "FTF (První u keše)",
 
     # ── Filter dialog — GC code placeholder ──────────────────────────────────

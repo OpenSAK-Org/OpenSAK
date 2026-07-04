@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
         self._cache_table.sort_changed.connect(self._on_sort_changed)
         self._cache_table.location_updated.connect(self._refresh_cache_list)
         self._cache_table.edit_requested.connect(self._edit_waypoint_from_cache)
+        self._cache_table.corrected_coords_changed.connect(self._on_corrected_coords_changed)
         self._splitter.addWidget(self._cache_table)
 
         # Bottom container: info bar (fixed) + horisontal splitter (resizable)

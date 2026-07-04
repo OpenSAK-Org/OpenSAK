@@ -62,7 +62,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -471,6 +471,37 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.commit()
             print("Migration: tilføjede caches.locked")
+
+        # ── Migration 16: trackables table (issue #491) ───────────────────────
+        # The Trackable model (travel bugs / geocoins seen in a cache) has
+        # shipped since v1.14.0 with no corresponding migration to create its
+        # table. Any existing database crashes with "no such table:
+        # trackables" the instant anything queries Cache.trackables — e.g.
+        # the already-shipped "Has trackables" filter in the Filter dialog,
+        # or the importer's re-import cleanup step.
+        existing_tables = {
+            row[0]
+            for row in conn.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )).fetchall()
+        }
+        if "trackables" not in existing_tables:
+            conn.execute(text("""
+                CREATE TABLE trackables (
+                    id INTEGER NOT NULL,
+                    cache_id INTEGER NOT NULL,
+                    tracking_code VARCHAR(64),
+                    name VARCHAR(256),
+                    ref VARCHAR(64),
+                    PRIMARY KEY (id),
+                    FOREIGN KEY(cache_id) REFERENCES caches (id)
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX ix_trackables_cache_id ON trackables (cache_id)"
+            ))
+            conn.commit()
+            print("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

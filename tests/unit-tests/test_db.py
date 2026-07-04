@@ -489,3 +489,91 @@ class TestLocationProvenanceColumns:
             assert "waypoint_count" in cache_cols, "migration 14 did not add caches.waypoint_count"
             cnt = con.execute("SELECT waypoint_count FROM caches WHERE gc_code='GCWPT01'").fetchone()[0]
             assert cnt == 1, f"back-fill failed: got {cnt!r}"
+
+
+class TestTrackablesTable:
+    # Issue #491: the Trackable model (travel bugs / geocoins) has shipped
+    # since v1.14.0 with no migration to create its table. Any existing
+    # database crashes with "no such table: trackables" the moment
+    # anything queries Cache.trackables (e.g. the already-shipped "Has
+    # trackables" filter). Migration 16 creates the table on such databases.
+
+    def test_fresh_db_has_trackables_table(self, tmp_path):
+        import sqlite3 as _sql
+        init_db(db_path=tmp_path / "fresh_trackables.db")
+        with _sql.connect(tmp_path / "fresh_trackables.db") as con:
+            tables = {
+                row[0] for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert "trackables" in tables
+
+    def test_trackables_are_queryable_and_writable(self, tmp_path):
+        init_db(db_path=tmp_path / "trackables_rw.db")
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCTB01", name="Trackable test",
+                cache_type="Traditional Cache", latitude=55.0, longitude=12.0,
+            )
+            s.add(cache)
+            s.flush()
+            s.add(Trackable(cache_id=cache.id, ref="TB1234", name="Test Bug"))
+            s.commit()
+
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GCTB01").one()
+            assert len(c.trackables) == 1
+            assert c.trackables[0].ref == "TB1234"
+            assert c.trackables[0].name == "Test Bug"
+
+    def test_migration_creates_table_on_old_schema(self, tmp_path):
+        # Create a v15 DB (pre-trackables), drop the table entirely, rewind
+        # to v15, then re-run init_db() — migration 16 must recreate it.
+        import sqlite3 as _sql
+        from opensak.db.database import _migrated_paths
+
+        db_file = tmp_path / "old_schema_trackables.db"
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with _sql.connect(db_file) as con:
+            con.execute("DROP TABLE trackables")
+            con.execute("PRAGMA user_version = 15")
+
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with _sql.connect(db_file) as con:
+            tables = {
+                row[0] for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert "trackables" in tables, "migration 16 did not recreate trackables"
+
+        # And it must actually be usable afterward, not just present.
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCTB02", name="Post-migration test",
+                cache_type="Traditional Cache", latitude=55.0, longitude=12.0,
+            )
+            s.add(cache)
+            s.flush()
+            s.add(Trackable(cache_id=cache.id, ref="TB5678", name="Post Bug"))
+            s.commit()
+
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GCTB02").one()
+            assert len(c.trackables) == 1
+            assert c.trackables[0].ref == "TB5678"
+
+    def test_migration_is_idempotent_when_table_already_exists(self, tmp_path):
+        # Running init_db() again on an already-migrated DB must not error
+        # (e.g. from a stray CREATE TABLE without IF NOT EXISTS semantics).
+        from opensak.db.database import _migrated_paths
+
+        db_file = tmp_path / "idempotent_trackables.db"
+        init_db(db_path=db_file)
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)  # must not raise
