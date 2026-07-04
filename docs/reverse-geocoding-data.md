@@ -34,7 +34,8 @@ the tree.
 data/
 ├── boundaries.db        # SQLite: per-layer R-Trees + region metadata
 ├── manifest.json        # dataset version; "baseline" (world.geojson + state packs)
-│                         # and "packs" (county, on-demand) sections
+│                         # and "packs" (county, on-demand) sections; every entry
+│                         # also carries a sha256 + size for integrity checks
 ├── countries/
 │   └── world.geojson    # baseline — one country FeatureCollection
 ├── states/
@@ -102,3 +103,15 @@ boundary, any further rings are holes.
 but complete `data/` directory (three counties, one state, one country) in a
 temp dir via `_build_boundaries()`. It is the authoritative, executable example
 of this contract — copy its output into `data/` for a working hand-made dataset.
+
+## Verifying a release
+
+[`tools/boundaries/verify_release.py`](../tools/boundaries/verify_release.py)
+checks a boundary dataset end to end: every asset's `sha256`/`size` against
+the manifest, `boundaries.db`'s row counts against its GeoJSON packs, every
+pack's JSON/geometry validity, and a resolver smoke test against known
+real-world coordinates. Run it against the published release
+(`python tools/boundaries/verify_release.py`) or against a local pre-publish
+directory before cutting a new release (`--data-dir <out-dir>`). A scheduled
+run (`.github/workflows/data-integrity.yml`) verifies the published release
+weekly and files a GitHub issue if it fails.

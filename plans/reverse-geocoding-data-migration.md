@@ -58,6 +58,18 @@ here as one migration story so the cut-over from `data/` is explicit.
    resolver via `OPENSAK_BOUNDARIES_DIR`. A real, unmocked end-to-end run was
    also done once, against the live release, to prove the mocks weren't lying.
 
+7. **Publisher-side integrity check. ✓ DONE.** Steps 1-6 cover the *client*
+   consuming the release; nothing previously verified that what's actually
+   published stays intact. `tools/boundaries/verify_release.py` validates
+   manifest checksums, `boundaries.db` structure, GeoJSON/geometry validity,
+   and a resolver smoke test — run on a weekly schedule
+   (`.github/workflows/data-integrity.yml`) against the live release, filing
+   a GitHub issue on failure. See
+   [`docs/reverse-geocoding-data.md`](../docs/reverse-geocoding-data.md#verifying-a-release).
+   Regenerating the dataset itself from a fresh source (e.g. pulling updated
+   polygons from OSM directly, instead of another manual `bb.db3` handoff)
+   is a separate, unbuilt follow-up.
+
 ## Acceptance
 
 - ✓ A fresh install resolves country/state offline from the bundled (or
