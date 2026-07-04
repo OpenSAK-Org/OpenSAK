@@ -976,6 +976,15 @@ class CacheTableView(QTableView):
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
         text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        # Issue #490: Qt derives QHeaderView's minimumSectionSize from the
+        # header font's metrics, which varies by platform/font/DPI. If that
+        # computed minimum exceeds our smallest configured row_height (20px
+        # for TextSize.SMALL), setDefaultSectionSize() below gets silently
+        # clamped up — the SMALL setting would then not actually apply.
+        # Pin the minimum to our own smallest row_height so it never wins.
+        self.verticalHeader().setMinimumSectionSize(
+            min(v["row_height"] for v in TEXT_SIZE_MAP.values())
+        )
         self.verticalHeader().setDefaultSectionSize(TEXT_SIZE_MAP[text_size]["row_height"])
         self._applying_widths = False
         self._apply_column_widths()
@@ -1416,6 +1425,11 @@ class CacheTableView(QTableView):
         sizes = TEXT_SIZE_MAP[text_size]
         if hasattr(self, "_size_bar_delegate"):
             self._size_bar_delegate.set_icon_size(sizes["icon"])
+        # Issue #490: see _setup_ui() — keep the minimum pinned below our
+        # smallest row_height so a platform-derived minimum can't clamp it.
+        self.verticalHeader().setMinimumSectionSize(
+            min(v["row_height"] for v in TEXT_SIZE_MAP.values())
+        )
         self.verticalHeader().setDefaultSectionSize(sizes["row_height"])
         self._model.refresh_visuals()
 

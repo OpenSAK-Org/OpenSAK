@@ -1041,3 +1041,15 @@ class TestView:
             view.refresh_visuals()
             assert view.verticalHeader().defaultSectionSize() == TEXT_SIZE_MAP[size]["row_height"]
 
+    def test_minimum_section_size_pinned_below_smallest_row_height(self, view, fake_settings):
+        # Issue #490: Qt derives QHeaderView's minimumSectionSize from the
+        # header font's metrics, which varies by platform/font/DPI (seen
+        # clamping SMALL's 20px row_height up to 22px on some machines,
+        # silently defeating the setting). This must stay pinned at/below
+        # our smallest configured row_height regardless of platform, so
+        # setDefaultSectionSize() is never silently overridden.
+        smallest = min(v["row_height"] for v in TEXT_SIZE_MAP.values())
+        assert view.verticalHeader().minimumSectionSize() <= smallest
+        view.refresh_visuals()
+        assert view.verticalHeader().minimumSectionSize() <= smallest
+
