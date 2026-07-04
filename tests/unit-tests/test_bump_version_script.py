@@ -133,6 +133,38 @@ class TestMainCLI:
         assert exc.value.code == 0
         assert "Already at" in capsys.readouterr().out
 
+    def test_manually_bumped_init_still_fixes_stale_user_guide(self, bv, monkeypatch, capsys):
+        # Regression: this is exactly what happened releasing v1.15.0-beta.4
+        # — a permission hiccup led to __init__.py being edited by hand
+        # instead of via this script, so old_version == new_version from the
+        # script's point of view, but user-guide.html was never touched and
+        # still pointed at the previous release. The early "nothing to do"
+        # exit must not skip fixing that.
+        bv.set_init_version("1.0.0-beta.2")  # simulates the manual edit
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", "1.0.0-beta.2"])
+        with pytest.raises(SystemExit) as exc:
+            bv.main()
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "stale version" in out
+        assert "1.0.0-beta.1" in out
+        text = bv.USER_GUIDE.read_text(encoding="utf-8")
+        assert "1.0.0-beta.1" not in text
+        assert text.count("1.0.0-beta.2") == 3
+        assert bv.check_consistency() is True
+
+    def test_noop_stays_a_noop_when_user_guide_has_no_stale_version(self, bv, monkeypatch, capsys):
+        # If __init__.py is already at the target AND user-guide.html is
+        # already fully consistent (no stale version at all), nothing
+        # should be rewritten and the plain "nothing to do" message stays.
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", "1.0.0-beta.1"])
+        before = bv.USER_GUIDE.read_text(encoding="utf-8")
+        with pytest.raises(SystemExit) as exc:
+            bv.main()
+        assert exc.value.code == 0
+        assert "Already at" in capsys.readouterr().out
+        assert bv.USER_GUIDE.read_text(encoding="utf-8") == before
+
     def test_no_args_prints_usage_and_exits_nonzero(self, bv, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["bump_version.py"])
         with pytest.raises(SystemExit) as exc:
