@@ -1095,6 +1095,9 @@ class CacheTableView(QTableView):
     sort_changed = Signal(str, bool)  # (col_id, ascending) videresendes fra model
     location_updated = Signal()       # emitted after right-click location update
     edit_requested = Signal(object)   # emitted when user requests edit of a cache
+    corrected_coords_changed = Signal(str)  # gc_code — emitted after Add/Edit/Clear
+                                             # corrected coordinates via the context menu
+                                             # (issue #474: map wasn't refreshed until now)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1451,8 +1454,12 @@ class CacheTableView(QTableView):
                 caches[i] = fresh
                 break
 
-        self._model.beginResetModel()
-        self._model.endResetModel()
+        self._reset_model_preserving_selection()
+        # Issue #474: map wasn't refreshed when corrected coords were set/cleared
+        # via this (context menu) path — only the "Add corrected coordinates..."
+        # button in the cache detail panel emitted a change signal. Emit here too
+        # so mainwindow can update the map pin the same way for both entry points.
+        self.corrected_coords_changed.emit(cache.gc_code)
 
     def _open_converter(self, lat: float, lon: float) -> None:
         """Åbn koordinatkonverter popup."""
@@ -1499,6 +1506,28 @@ class CacheTableView(QTableView):
                 self.scrollTo(index, self.ScrollHint.PositionAtCenter)
                 return
 
+    def _reset_model_preserving_selection(self) -> None:
+        """Kør beginResetModel()/endResetModel() uden at forstyrre brugerens
+        aktuelle rækkevalg eller uventet trigge cache_selected.
+
+        Issue #474: Qt sætter 'current index' til række 0 efter en
+        model-reset (samme kvirk load_caches() allerede beskytter mod —
+        se kommentaren der). For en enkelt-række-genindlæsning (fx efter
+        at korrigerede koordinater er sat via context-menuen) må dette
+        IKKE ændre hvilken cache der er valgt/vist i detaljepanelet —
+        kun selve rækkens data skal opdateres.
+        """
+        current = self._model.cache_at(self.currentIndex().row())
+        selected_gc = current.gc_code if current else None
+        self.selectionModel().blockSignals(True)
+        self._model.beginResetModel()
+        self._model.endResetModel()
+        if selected_gc:
+            self.select_by_gc_code(selected_gc)
+        else:
+            self.setCurrentIndex(self._model.index(-1, -1))
+        self.selectionModel().blockSignals(False)
+
     def refresh_cache_row(self, gc_code: str) -> None:
         """Genindlæs ét cache-objekt fra DB og opdatér rækken i modellen.
 
@@ -1526,8 +1555,7 @@ class CacheTableView(QTableView):
         else:
             return  # cachen er ikke i den aktuelle visning — intet at opdatere
 
-        self._model.beginResetModel()
-        self._model.endResetModel()
+        self._reset_model_preserving_selection()
 
     def refresh_visuals(self) -> None:
         """Re-paint all visible cells after UI size change (font-size, etc.)."""
