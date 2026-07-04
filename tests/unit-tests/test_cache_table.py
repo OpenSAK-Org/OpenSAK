@@ -881,6 +881,69 @@ class TestView:
         view.load_caches([cache])
         view._save_corrected(cache, 1.0, 2.0)  # not in DB -> early return, no crash
 
+    def test_save_corrected_emits_signal_for_map_refresh(self, view, db_session, make_cache):
+        # Issue #474: the context menu path didn't tell mainwindow to refresh
+        # the map (unlike the "Add corrected coordinates..." button in the
+        # cache detail panel, which already emitted a signal). Without this,
+        # the map pin only updated after a manual Refresh.
+        db_session.add(make_cache(gc_code="GCCC"))
+        db_session.commit()
+        cache = _cache(gc_code="GCCC", latitude=55.0, longitude=12.0)
+        view.load_caches([cache])
+        received = []
+        view.corrected_coords_changed.connect(received.append)
+        view._save_corrected(cache, 56.0, 13.0)
+        assert received == ["GCCC"]
+
+    def test_save_corrected_missing_cache_does_not_emit_signal(self, view, db_session):
+        # The early-return path (cache not found in DB) must not falsely
+        # signal a successful change.
+        cache = _cache(gc_code="GCNONE")
+        view.load_caches([cache])
+        received = []
+        view.corrected_coords_changed.connect(received.append)
+        view._save_corrected(cache, 1.0, 2.0)
+        assert received == []
+
+    def test_save_corrected_on_other_row_preserves_current_selection(
+        self, view, db_session, make_cache
+    ):
+        # Issue #474: correcting coordinates via the context menu on a row
+        # OTHER than the currently selected one must not shift the
+        # selection/detail-panel focus to a different (wrong) cache. Qt
+        # jumps "current index" to row 0 after beginResetModel()/
+        # endResetModel() (see load_caches()'s comment on the same quirk) —
+        # _save_corrected()/refresh_cache_row() must guard against this,
+        # the same way load_caches() already does.
+        db_session.add(make_cache(gc_code="GCA"))
+        db_session.add(make_cache(gc_code="GCB"))
+        db_session.commit()
+        cache_a = _cache(gc_code="GCA", latitude=55.0, longitude=12.0)
+        cache_b = _cache(gc_code="GCB", latitude=56.0, longitude=13.0)
+        view.load_caches([cache_a, cache_b])
+
+        # Simulate the user having GCA selected (shown in the detail panel).
+        # Use select_by_gc_code rather than assuming insertion order == row
+        # order: setSortingEnabled(True) means Qt may already have
+        # re-sorted the rows via the (default) header sort indicator.
+        view.select_by_gc_code("GCA")
+        assert view._model.cache_at(view.currentIndex().row()).gc_code == "GCA"
+
+        selected_events = []
+        view.cache_selected.connect(selected_events.append)
+
+        # Correct coordinates on GCB (row 1) via the context-menu path —
+        # GCA remains the selected/focused row throughout.
+        view._save_corrected(cache_b, 60.0, 20.0)
+
+        assert selected_events == [], (
+            "correcting a non-selected row must not emit cache_selected "
+            "for another cache"
+        )
+        assert view._model.cache_at(view.currentIndex().row()).gc_code == "GCA", (
+            "selection/focus must stay on GCA, not jump to row 0 or GCB"
+        )
+
     # ── dialog openers (dialogs faked) ───────────────────────────────────────
 
     def test_edit_corrected_saves_on_accept(self, view, monkeypatch):
@@ -977,3 +1040,4 @@ class TestView:
             fake_settings.text_size = size
             view.refresh_visuals()
             assert view.verticalHeader().defaultSectionSize() == TEXT_SIZE_MAP[size]["row_height"]
+

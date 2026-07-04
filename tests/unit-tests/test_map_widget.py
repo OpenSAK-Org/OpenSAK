@@ -174,6 +174,19 @@ class TestJsMethods:
         w.update_cache(_cache(user_note=_note(corrected=True)))
         assert any("updateCacheMarker" in js for js in w._page.js)
 
+    def test_update_cache_marker_reveals_from_cluster(self):
+        # Issue #474: a plain map.panTo() inside updateCacheMarker left the
+        # pin invisible if the (possibly far-away) new corrected location
+        # fell inside an unopened cluster. updateCacheMarker() must reuse
+        # panToCache()'s clusterGroup.zoomToShowLayer() reveal instead of a
+        # bare map.panTo(), so a far-away corrected location is actually
+        # brought into view — same as when selecting a cache in the table.
+        start = mw_mod.MAP_HTML.index("function updateCacheMarker")
+        end = mw_mod.MAP_HTML.index("\n}", start)
+        body = mw_mod.MAP_HTML[start:end]
+        assert "panToCache(c.gc_code)" in body
+        assert "map.panTo([lat, lon])" not in body
+
     def test_pan_to_location(self, w):
         w.pan_to_location(1.0, 2.0, "Spot")
         assert any("setHomeLocation" in js for js in w._page.js)
