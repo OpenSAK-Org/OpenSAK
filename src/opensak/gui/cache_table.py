@@ -108,7 +108,14 @@ def get_column_defs() -> dict:
 
 def _get_active_columns() -> list[str]:
     from opensak.gui.dialogs.column_dialog import get_visible_columns
-    return get_visible_columns()
+    # Issue #488: persisted per-database column visibility (opensak.json,
+    # "columns.<db>.visible") can contain stale column IDs left over from a
+    # column that was later removed from the codebase (e.g. "favorite").
+    # Filter against the current column defs so such orphaned IDs silently
+    # disappear instead of rendering as an empty column with an untranslated
+    # raw-ID header.
+    known = set(get_column_defs().keys())
+    return [col_id for col_id in get_visible_columns() if col_id in known]
 
 
 def _format_date(d: datetime) -> str:

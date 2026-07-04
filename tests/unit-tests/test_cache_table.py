@@ -74,6 +74,27 @@ def model(monkeypatch):
 
 # ── pure helpers ────────────────────────────────────────────────────────────────
 
+class TestActiveColumns:
+    def test_orphaned_saved_column_id_filtered_out(self, monkeypatch):
+        # Issue #488: get_visible_columns() persists raw column IDs per
+        # database in opensak.json. If a column is later removed from the
+        # codebase (e.g. "favorite"), a stale ID could linger in an existing
+        # user's settings file. _get_active_columns() must filter such IDs
+        # out rather than render an orphaned, untranslated column.
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.column_dialog.get_visible_columns",
+            lambda: ["gc_code", "favorite", "name", "not_a_real_column"],
+        )
+        assert ct._get_active_columns() == ["gc_code", "name"]
+
+    def test_known_saved_columns_all_kept(self, monkeypatch):
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.column_dialog.get_visible_columns",
+            lambda: ["gc_code", "name", "favorite_points"],
+        )
+        assert ct._get_active_columns() == ["gc_code", "name", "favorite_points"]
+
+
 class TestHelpers:
     def test_bearing_deg_cardinal(self):
         # due north -> ~0, due east -> ~90
