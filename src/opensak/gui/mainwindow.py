@@ -1616,7 +1616,18 @@ class MainWindow(QMainWindow):
         field = str(s.get(f"{key}.field", "name"))
         asc_raw = s.get(f"{key}.ascending", True)
         ascending = asc_raw if isinstance(asc_raw, bool) else str(asc_raw).lower() in ("true", "1", "yes")
-        self._current_sort = SortSpec(field, ascending=ascending)
+        try:
+            self._current_sort = SortSpec(field, ascending=ascending)
+        except ValueError as e:
+            # Ukendt sort-felt — kan opstå hvis opensak.json (delt på tværs af
+            # installerede versioner) er blevet skrevet af en nyere version med
+            # et sort-felt denne version ikke kender endnu (fixes crash on
+            # startup, se #501). Falder tilbage til default og retter den
+            # gemte værdi, så det ikke gentager sig ved næste opstart.
+            print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
+            field = "name"
+            self._current_sort = SortSpec(field, ascending=ascending)
+            get_store().set(f"{key}.field", field)
         # Genanvend sort-indikatoren i tabellen hvis den allerede er loaded
         if hasattr(self, "_cache_table"):
             self._cache_table.apply_sort(field, ascending)

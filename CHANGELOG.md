@@ -8,6 +8,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.14.2] — 2026-07-04
+
+> Hotfix release. Fixes a startup crash affecting any installed version of
+> OpenSAK (stable and beta alike) that predates the "sort by Trackables"
+> feature.
+
+### Fixed
+
+- **Unknown sort field in shared settings crashed the app on startup**
+  (closes #501) — `opensak.json` (which stores UI state such as the active
+  sort column) is shared across every OpenSAK version installed on a
+  machine, not just the one currently running. If a newer version saved a
+  sort field this version doesn't know yet (e.g. `trackables`, added for
+  column-header sorting in the v1.15.0 beta line), starting this version
+  raised an unhandled `ValueError` before the main window could even open.
+  Restoring the saved sort now falls back to the default (`name`) and
+  repairs the stored value if the field isn't recognised, instead of
+  crashing.
+
+---
+
 ## [1.14.1] — 2026-07-04
 
 > Hotfix release. Four bugs found and fixed on the `beta` branch turned out to

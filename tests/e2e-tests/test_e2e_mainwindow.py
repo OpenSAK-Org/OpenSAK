@@ -599,6 +599,19 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
         assert seeded_window._active_filter_name == "MyProfile"
 
+    def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
+        # Regression for #501: opensak.json deles på tværs af alle installerede
+        # versioner. Hvis en nyere version har gemt et sort-felt denne version
+        # ikke kender (fx "trackables"), må opstart IKKE crashe — den skal
+        # falde tilbage til "name" og rette den gemte værdi.
+        from opensak.db.manager import get_db_manager
+        from opensak.settings_store import get_store
+        key = f"sort.{get_db_manager().active.path}"
+        get_store().set(f"{key}.field", "trackables")
+        seeded_window._load_sort_for_active_db()
+        assert seeded_window._current_sort.field == "name"
+        assert get_store().get(f"{key}.field") == "name"
+
     def test_load_sort_profile_load_error(self, seeded_window, monkeypatch, iso_settings):
         from opensak.db.manager import get_db_manager
         from opensak.settings_store import get_store
