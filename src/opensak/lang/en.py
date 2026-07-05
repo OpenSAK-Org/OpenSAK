@@ -1020,7 +1020,6 @@ STRINGS: dict[str, str] = {
     "copy_caches_target_label":                "Copy to database:",
     "move_caches_current_db":                  "current",
     "move_caches_btn_move":                    "Move",
-    "copy_caches_btn_copy":                    "Copy",
     "move_caches_none_selected":               "No caches selected to move.",
     "move_caches_same_db":                     "The target database is the same as the current database.\nPlease select a different database.",
     "move_caches_confirm":                     "Move {count} cache(s) to {target}?\n\nThe caches will be removed from the current database.",

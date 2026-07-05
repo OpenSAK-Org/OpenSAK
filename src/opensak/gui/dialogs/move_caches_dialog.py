@@ -319,7 +319,7 @@ class MoveCachesDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
 
-        btn_key = "copy_caches_btn_copy" if self._copy_only else "move_caches_btn_move"
+        btn_key = "coord_conv_copy_btn" if self._copy_only else "move_caches_btn_move"
         self._move_btn = QPushButton(tr(btn_key))
         self._move_btn.clicked.connect(self._start_move)
         btn_row.addWidget(self._move_btn)
