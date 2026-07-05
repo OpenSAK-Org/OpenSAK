@@ -6,7 +6,7 @@ Thank you for your interest in contributing! Here is how to get involved.
 
 ## Reporting Bugs
 
-Please use [GitHub Issues](https://github.com/AgreeDK/opensak/issues) and include:
+Please use [GitHub Issues](https://github.com/OpenSAK-Org/opensak/issues) and include:
 
 - Platform and version (e.g. "Linux Mint 21.3" or "Windows 11")
 - Python version (`python3 --version`)
@@ -23,15 +23,41 @@ Open a GitHub Issue with the label **enhancement** and describe what you would l
 
 ---
 
+## Before You Start — Please Open an Issue First
+
+**Before submitting a pull request, please open a GitHub Issue describing what you'd like to contribute** — even for small changes. This lets us:
+
+- Confirm the change fits the project's direction and current roadmap
+- Avoid duplicate or overlapping work (check existing issues and milestones first — it might already be planned or in progress)
+- Agree on scope and approach before you invest time in an implementation
+
+If an issue already exists for what you want to work on, leave a comment saying you'd like to pick it up, and wait for a maintainer to confirm before starting.
+
+Pull requests opened without a linked issue may be asked to have one created retroactively before review begins.
+
+---
+
+## Branch Workflow
+
+OpenSAK uses a **two-branch workflow**:
+
+- **`beta`** — active development branch. **All pull requests should target this branch.**
+- **`main`** — stable release branch only. Changes land here exclusively through maintainer-managed release merges, never directly from external PRs.
+
+Note that `main` is GitHub's default branch for this repo, so a plain `git clone` or fork will check out `main` unless you explicitly select `beta`. Please make sure both your local branch and your pull request's base branch are set to `beta` — PRs opened against `main` will fail our version/changelog CI checks and will need to be retargeted before review.
+
+---
+
 ## Contributing Code
 
 1. Fork the repository
-2. Create a branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run the test suite: `pytest -v tests/`
-5. Commit with a clear message: `git commit -m "Add: description of change"`
-6. Push: `git push origin feature/my-feature`
-7. Open a Pull Request
+2. Clone your fork and check out `beta`: `git clone --branch beta https://github.com/YOUR_USERNAME/opensak.git`
+3. Create a branch off `beta`: `git checkout -b feature/my-feature`
+4. Make your changes
+5. Run the test suite: `pytest -v tests/`
+6. Commit with a clear message: `git commit -m "Add: description of change"`
+7. Push: `git push origin feature/my-feature`
+8. Open a Pull Request — double-check the base branch is set to `beta`, not `main`
 
 Please keep pull requests focused — one feature or fix per PR makes review much easier.
 
@@ -40,7 +66,7 @@ Please keep pull requests focused — one feature or fix per PR makes review muc
 ## Development Setup
 
 ```bash
-git clone https://github.com/AgreeDK/opensak.git
+git clone --branch beta https://github.com/OpenSAK-Org/opensak.git
 cd opensak
 python3 -m venv .venv
 source .venv/bin/activate          # Linux / macOS
@@ -103,20 +129,20 @@ The repository belongs to the maintainer — nobody else has write access. The c
 
 **Step by step:**
 
-1. Go to https://github.com/AgreeDK/opensak and click **Fork** (top-right corner). GitHub creates a copy at `https://github.com/YOUR_USERNAME/opensak`.
+1. Go to https://github.com/OpenSAK-Org/opensak and click **Fork** (top-right corner). GitHub creates a copy at `https://github.com/YOUR_USERNAME/opensak`.
 
-2. Clone your fork:
+2. Clone your fork and check out `beta` (development happens on `beta`, not `main` — see [Branch Workflow](#branch-workflow) above):
    ```bash
-   git clone https://github.com/YOUR_USERNAME/opensak.git
+   git clone --branch beta https://github.com/YOUR_USERNAME/opensak.git
    cd opensak
    ```
 
 3. (Optional but recommended) Add the original as `upstream` so you can sync later:
    ```bash
-   git remote add upstream https://github.com/AgreeDK/opensak.git
+   git remote add upstream https://github.com/OpenSAK-Org/opensak.git
    ```
 
-4. Create a branch:
+4. Create a branch off `beta`:
    ```bash
    git checkout -b update-french-translation
    ```
@@ -132,9 +158,9 @@ The repository belongs to the maintainer — nobody else has write access. The c
 
 **Keeping your fork up to date for future contributions:**
 ```bash
-git checkout main
-git pull upstream main
-git push origin main
+git checkout beta
+git pull upstream beta
+git push origin beta
 ```
 
 ---
