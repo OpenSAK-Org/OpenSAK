@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QLineEdit, QTextEdit,
     QProgressBar, QGroupBox, QRadioButton,
     QFileDialog, QButtonGroup, QSpinBox,
-    QCheckBox, QMessageBox
+    QCheckBox, QMessageBox, QInputDialog
 )
 
 
@@ -339,6 +339,22 @@ class GpsExportDialog(QDialog):
 
         filename   = self._filename.text().strip() or "opensak"
         max_caches = self._max_caches.value()
+
+        # Issue #501: file-mode export silently overwrote an existing file
+        # with the same name — most likely to bite users who never touch the
+        # default "opensak" filename. Device-mode exports intentionally keep
+        # writing to the same canonical Garmin/GPX path each time (that's a
+        # sync, not a save), so this only applies to plain file exports.
+        if self._rb_file.isChecked():
+            ext = self._export_format
+            target = dest / f"{filename}.{ext}"
+            while target.exists():
+                filename, ok = self._prompt_new_filename(target)
+                if not ok:
+                    return  # bruger fortrød / annullerede
+                target = dest / f"{filename}.{ext}"
+            self._filename.setText(filename)
+
         do_delete  = (
             self._cb_delete_gpx.isChecked()
             and self._rb_device.isChecked()
@@ -395,6 +411,31 @@ class GpsExportDialog(QDialog):
             str(delete_result) + "\n\nEksporterer caches…"
         )
         self._run_export(dest, filename, max_caches)
+
+    def _prompt_new_filename(self, target: Path) -> tuple[str, bool]:
+        """Bed brugeren om et nyt filnavn fordi 'target' allerede findes (issue #501).
+
+        Foreslår automatisk næste ledige "navn1", "navn2", ... som udgangspunkt,
+        så brugeren normalt bare kan trykke OK i stedet for selv at opfinde et
+        nyt navn hver gang.
+        """
+        ext = target.suffix.lstrip(".")
+        stem = target.stem
+        suggestion = stem
+        n = 1
+        while (target.parent / f"{suggestion}.{ext}").exists():
+            suggestion = f"{stem}{n}"
+            n += 1
+        name, ok = QInputDialog.getText(
+            self,
+            tr("gps_file_exists_title"),
+            tr("gps_file_exists_prompt", filename=f"{stem}.{ext}"),
+            text=suggestion,
+        )
+        name = name.strip()
+        if not ok or not name:
+            return "", False
+        return name, True
 
     def _run_export(self, dest: Path, filename: str, max_caches: int) -> None:
         """Start selve export-arbejderen."""

@@ -248,6 +248,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Nenhum ficheiro GPX existente encontrado no dispositivo.\nDeseja continuar com a transferência?",
     "gps_delete_file_list":         "Ficheiros a serem eliminados:\n{files}",
     "gps_no_dest":                  "Por favor, selecione um destino primeiro.",
+    "gps_file_exists_title":        "O ficheiro já existe",
+    "gps_file_exists_prompt":       "\"{filename}\" já existe neste local. Introduza um nome de ficheiro diferente:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Configurações",

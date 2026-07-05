@@ -248,6 +248,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Na zařízení nebyly nalezeny žádné GPX soubory.\\nChcete pokračovat s nahráváním?",
     "gps_delete_file_list":         "Soubory ke smazání:\\n{files}",
     "gps_no_dest":                  "Nejprve prosím vyberte cíl.",
+    "gps_file_exists_title":        "Soubor již existuje",
+    "gps_file_exists_prompt":       "\"{filename}\" na tomto místě již existuje. Zadejte jiný název souboru:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Nastavení",

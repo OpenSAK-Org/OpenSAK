@@ -251,6 +251,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Geen bestaande GPX-bestanden op het apparaat gevonden.\nWil je doorgaan met de upload?",
     "gps_delete_file_list":         "Te verwijderen bestanden:\n{files}",
     "gps_no_dest":                  "Selecteer eerst een bestemming.",
+    "gps_file_exists_title":        "Bestand bestaat al",
+    "gps_file_exists_prompt":       "\"{filename}\" bestaat al op deze locatie. Voer een andere bestandsnaam in:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Instellingen",
