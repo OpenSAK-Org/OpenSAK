@@ -175,6 +175,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ All {count} files processed.",
     "import_geocode_running":       "📍  Looking up missing location data (offline)…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Import from GSAK Database…",
+    "gsak_import_dialog_title":     "Import from GSAK Database",
+    "gsak_import_select_file_label": "Select a GSAK backup (.zip) or database file (.db3):",
+    "gsak_import_browse_title":     "Select GSAK backup or database file",
+    "gsak_import_file_filter":      "GSAK backup or database (*.zip *.db3);;All files (*)",
+    "gsak_import_extracting":       "Extracting {name}…",
+    "gsak_import_running":          "Importing {name}…",
+    "gsak_import_attributes":       "Attributes:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Notes:",
+    "gsak_import_note_images":      "Note images → placeholders:",
+    "gsak_import_warnings_header":  "Warnings ({count}):",
+    "gsak_import_no_db3_found":     "No sqlite.db3 file found inside {name}",
+    "gsak_import_done":             "✓ Import finished.",
+    "gsak_prescan_title":           "Some personal notes contain images",
+    "gsak_prescan_body":            "{notes} of your personal notes contain {images} image(s) that GSAK downloaded to your old computer. These can't be copied automatically, so OpenSAK will show a placeholder like [image: filename.jpg] in their place. The note text itself will still be imported normally.\n\nContinue with import?",
+    "gsak_prescan_continue":        "Continue Import",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Set filter",
     "filter_tab_dates":             "Dates",

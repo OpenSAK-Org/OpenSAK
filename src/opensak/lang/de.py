@@ -175,6 +175,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Alle {count} Dateien verarbeitet.",
     "import_geocode_running":       "📍  Fehlende Standortdaten werden ermittelt…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Aus GSAK-Datenbank importieren…",
+    "gsak_import_dialog_title":     "Aus GSAK-Datenbank importieren",
+    "gsak_import_select_file_label": "Wählen Sie eine GSAK-Sicherung (.zip) oder Datenbankdatei (.db3):",
+    "gsak_import_browse_title":     "GSAK-Sicherung oder Datenbankdatei auswählen",
+    "gsak_import_file_filter":      "GSAK-Sicherung oder Datenbank (*.zip *.db3);;Alle Dateien (*)",
+    "gsak_import_extracting":       "{name} wird entpackt…",
+    "gsak_import_running":          "{name} wird importiert…",
+    "gsak_import_attributes":       "Attribute:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Notizen:",
+    "gsak_import_note_images":      "Bilder in Notizen → Platzhalter:",
+    "gsak_import_warnings_header":  "Warnungen ({count}):",
+    "gsak_import_no_db3_found":     "Keine sqlite.db3-Datei in {name} gefunden",
+    "gsak_import_done":             "✓ Import abgeschlossen.",
+    "gsak_prescan_title":           "Einige persönliche Notizen enthalten Bilder",
+    "gsak_prescan_body":            "{notes} Ihrer persönlichen Notizen enthalten {images} Bild(er), die GSAK auf Ihren alten Computer heruntergeladen hat. Diese können nicht automatisch kopiert werden, daher zeigt OpenSAK stattdessen einen Platzhalter wie [image: filename.jpg] an. Der eigentliche Notiztext wird weiterhin normal importiert.\n\nMit dem Import fortfahren?",
+    "gsak_prescan_continue":        "Import fortsetzen",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Filter einstellen",
     "filter_tab_dates":             "Datum",

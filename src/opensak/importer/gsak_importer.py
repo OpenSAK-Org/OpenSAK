@@ -260,6 +260,33 @@ class GsakImportResult(ImportResult):
                 f"\n  Note images -> placeholders: {self.note_images_replaced}")
 
 
+def find_gsak_db3_in_zip(path: Path) -> Path:
+    """If *path* is a .zip, extract it to a temp dir and locate the
+    ``sqlite.db3`` inside (GSAK backups store it in a named subdirectory,
+    not at the zip root — e.g. ``Sommerhus/sqlite.db3``). If *path* is
+    already a ``.db3``/other file, it's returned unchanged.
+
+    Raises ``ValueError`` if a .zip is given but contains no sqlite.db3.
+    Shared by ``scripts/import_gsak.py`` and the GSAK import dialog so both
+    behave identically.
+    """
+    path = Path(path)
+    if path.suffix.lower() != ".zip":
+        return path
+
+    import tempfile
+    import zipfile
+
+    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_extract_"))
+    with zipfile.ZipFile(path) as zf:
+        zf.extractall(extract_dir)
+
+    matches = list(extract_dir.rglob("sqlite.db3"))
+    if not matches:
+        raise ValueError(f"No sqlite.db3 file found inside {path.name}")
+    return matches[0]
+
+
 def _open_readonly(db_path: Path) -> sqlite3.Connection:
     """Open the GSAK database strictly read-only (we never write to it)."""
     uri = f"file:{Path(db_path).as_posix()}?mode=ro"

@@ -175,6 +175,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Alla {count} filer har bearbetats.",
     "import_geocode_running":       "📍  Geokoderar saknade platsdata…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importera från GSAK-databas…",
+    "gsak_import_dialog_title":     "Importera från GSAK-databas",
+    "gsak_import_select_file_label": "Välj en GSAK-säkerhetskopia (.zip) eller databasfil (.db3):",
+    "gsak_import_browse_title":     "Välj GSAK-säkerhetskopia eller databasfil",
+    "gsak_import_file_filter":      "GSAK-säkerhetskopia eller databas (*.zip *.db3);;Alla filer (*)",
+    "gsak_import_extracting":       "Packar upp {name}…",
+    "gsak_import_running":          "Importerar {name}…",
+    "gsak_import_attributes":       "Attribut:",
+    "gsak_import_logs":             "Loggar:",
+    "gsak_import_notes":            "Anteckningar:",
+    "gsak_import_note_images":      "Bilder i anteckningar → platshållare:",
+    "gsak_import_warnings_header":  "Varningar ({count}):",
+    "gsak_import_no_db3_found":     "Ingen sqlite.db3-fil hittades i {name}",
+    "gsak_import_done":             "✓ Import klar.",
+    "gsak_prescan_title":           "Vissa personliga anteckningar innehåller bilder",
+    "gsak_prescan_body":            "{notes} av dina personliga anteckningar innehåller {images} bild(er) som GSAK laddade ner till din gamla dator. Dessa kan inte kopieras automatiskt, så OpenSAK visar istället en platshållare som [image: filename.jpg]. Själva anteckningstexten importeras fortfarande normalt.\n\nFortsätta med importen?",
+    "gsak_prescan_continue":        "Fortsätt import",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Sätt filter",
     "filter_tab_dates":             "Datum",

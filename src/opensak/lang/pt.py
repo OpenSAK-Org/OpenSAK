@@ -175,6 +175,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Todos os {count} ficheiros foram processados.",
     "import_geocode_running":       "📍  A geocodificar dados de localização em falta…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importar de base de dados GSAK…",
+    "gsak_import_dialog_title":     "Importar de base de dados GSAK",
+    "gsak_import_select_file_label": "Selecione uma cópia de segurança GSAK (.zip) ou ficheiro de base de dados (.db3):",
+    "gsak_import_browse_title":     "Selecionar cópia de segurança ou ficheiro GSAK",
+    "gsak_import_file_filter":      "Cópia de segurança ou base de dados GSAK (*.zip *.db3);;Todos os ficheiros (*)",
+    "gsak_import_extracting":       "A extrair {name}…",
+    "gsak_import_running":          "A importar {name}…",
+    "gsak_import_attributes":       "Atributos:",
+    "gsak_import_logs":             "Registos:",
+    "gsak_import_notes":            "Notas:",
+    "gsak_import_note_images":      "Imagens de notas → marcadores:",
+    "gsak_import_warnings_header":  "Avisos ({count}):",
+    "gsak_import_no_db3_found":     "Nenhum ficheiro sqlite.db3 encontrado em {name}",
+    "gsak_import_done":             "✓ Importação concluída.",
+    "gsak_prescan_title":           "Algumas notas pessoais contêm imagens",
+    "gsak_prescan_body":            "{notes} das suas notas pessoais contêm {images} imagem(ns) que o GSAK descarregou para o seu computador antigo. Estas não podem ser copiadas automaticamente, pelo que o OpenSAK irá mostrar um marcador como [image: filename.jpg] no seu lugar. O texto da nota em si será importado normalmente.\n\nContinuar com a importação?",
+    "gsak_prescan_continue":        "Continuar importação",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Definir filtro",
     "filter_tab_dates":             "Datas",

@@ -178,6 +178,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":              "✓ Alle {count} bestanden verwerkt.",
     "import_geocode_running":       "📍  Ontbrekende locatiegegevens opzoeken (offline)…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importeren uit GSAK-database…",
+    "gsak_import_dialog_title":     "Importeren uit GSAK-database",
+    "gsak_import_select_file_label": "Selecteer een GSAK-back-up (.zip) of databasebestand (.db3):",
+    "gsak_import_browse_title":     "Selecteer GSAK-back-up of databasebestand",
+    "gsak_import_file_filter":      "GSAK-back-up of database (*.zip *.db3);;Alle bestanden (*)",
+    "gsak_import_extracting":       "Bezig met uitpakken van {name}…",
+    "gsak_import_running":          "Bezig met importeren van {name}…",
+    "gsak_import_attributes":       "Attributen:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Notities:",
+    "gsak_import_note_images":      "Afbeeldingen in notities → placeholders:",
+    "gsak_import_warnings_header":  "Waarschuwingen ({count}):",
+    "gsak_import_no_db3_found":     "Geen sqlite.db3-bestand gevonden in {name}",
+    "gsak_import_done":             "✓ Importeren voltooid.",
+    "gsak_prescan_title":           "Sommige persoonlijke notities bevatten afbeeldingen",
+    "gsak_prescan_body":            "{notes} van je persoonlijke notities bevatten {images} afbeelding(en) die GSAK naar je oude computer had gedownload. Deze kunnen niet automatisch worden gekopieerd, dus OpenSAK toont in plaats daarvan een placeholder zoals [image: filename.jpg]. De tekst van de notitie zelf wordt gewoon normaal geïmporteerd.\n\nDoorgaan met importeren?",
+    "gsak_prescan_continue":        "Doorgaan met importeren",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Filter instellen",
     "filter_tab_dates":             "Datums",

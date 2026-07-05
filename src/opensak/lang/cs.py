@@ -174,6 +174,25 @@ STRINGS: dict[str, str] = {
     "import_log_placeholder":       "Výsledky importu se zobrazí zde…",
     "import_all_done":            "✓ Všech {count} souborů bylo zpracováno.",
     "import_geocode_running":       "📍  Geokóduji chybějící údaje o poloze…",
+
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importovat z databáze GSAK…",
+    "gsak_import_dialog_title":     "Import z databáze GSAK",
+    "gsak_import_select_file_label": "Vyberte zálohu GSAK (.zip) nebo soubor databáze (.db3):",
+    "gsak_import_browse_title":     "Vybrat zálohu nebo soubor GSAK",
+    "gsak_import_file_filter":      "Záloha nebo databáze GSAK (*.zip *.db3);;Všechny soubory (*)",
+    "gsak_import_extracting":       "Rozbaluji {name}…",
+    "gsak_import_running":          "Importuji {name}…",
+    "gsak_import_attributes":       "Atributy:",
+    "gsak_import_logs":             "Logy:",
+    "gsak_import_notes":            "Poznámky:",
+    "gsak_import_note_images":      "Obrázky v poznámkách → zástupné texty:",
+    "gsak_import_warnings_header":  "Upozornění ({count}):",
+    "gsak_import_no_db3_found":     "V souboru {name} nebyl nalezen žádný sqlite.db3",
+    "gsak_import_done":             "✓ Import dokončen.",
+    "gsak_prescan_title":           "Některé osobní poznámky obsahují obrázky",
+    "gsak_prescan_body":            "{notes} vašich osobních poznámek obsahuje {images} obrázek/obrázky, které GSAK stáhl do vašeho starého počítače. Ty nelze automaticky zkopírovat, takže OpenSAK místo nich zobrazí zástupný text jako [image: filename.jpg]. Samotný text poznámky bude importován normálně.\n\nPokračovat v importu?",
+    "gsak_prescan_continue":        "Pokračovat v importu",
     
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Nastavit filtr",

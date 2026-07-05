@@ -300,6 +300,10 @@ class MainWindow(QMainWindow):
         self._act_import.triggered.connect(self._open_import_dialog)
         file_menu.addAction(self._act_import)
 
+        self._act_gsak_import = QAction(tr("action_gsak_import"), self)
+        self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
+        file_menu.addAction(self._act_gsak_import)
+
         file_menu.addSeparator()
 
         # ── Export ──────────────────────────────────────────────────────────────
@@ -1179,6 +1183,15 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.import_dialog import ImportDialog
         dlg = ImportDialog(self)
+        dlg.import_completed.connect(self._refresh_after_import)
+        dlg.exec()
+
+    def _open_gsak_import_dialog(self) -> None:
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.gui.dialogs.gsak_import_dialog import GsakImportDialog
+        dlg = GsakImportDialog(self)
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 

@@ -23,34 +23,24 @@ Usage:
 import argparse
 import sys
 import tempfile
-import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from opensak.db.database import init_db, get_session
 from opensak.db.models import Attribute, Cache, UserNote, Waypoint
-from opensak.importer.gsak_importer import import_gsak_db
+from opensak.importer.gsak_importer import import_gsak_db, find_gsak_db3_in_zip, scan_gsak_notes_for_embedded_images
 
 
 def _find_gsak_db3(path: Path) -> Path:
-    """If *path* is a .zip, extract it and locate the sqlite.db3 inside
-    (GSAK backups store it in a named subdirectory, not at the zip root)."""
-    if path.suffix.lower() != ".zip":
-        return path
-
-    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_extract_"))
-    print(f"Unzipping {path.name} -> {extract_dir} ...")
-    with zipfile.ZipFile(path) as zf:
-        zf.extractall(extract_dir)
-
-    matches = list(extract_dir.rglob("sqlite.db3"))
-    if not matches:
-        print(f"Error: no sqlite.db3 found inside {path}")
+    """Thin wrapper printing progress around the shared extraction helper."""
+    if path.suffix.lower() == ".zip":
+        print(f"Unzipping {path.name} ...")
+    try:
+        return find_gsak_db3_in_zip(path)
+    except ValueError as e:
+        print(f"Error: {e}")
         sys.exit(1)
-    if len(matches) > 1:
-        print(f"Note: multiple sqlite.db3 files found, using the first: {matches[0]}")
-    return matches[0]
 
 
 def main() -> None:
@@ -77,12 +67,18 @@ def main() -> None:
         print(f"No --db given: using a SCRATCH database (not your real one): {target_db}")
 
     print("=" * 60)
-    print("  OpenSAK — GSAK Direct Database Import (sessions 1+2)")
+    print("  OpenSAK — GSAK Direct Database Import (sessions 1+2+3)")
     print("=" * 60)
     print(f"\nSource GSAK database : {db3_path}")
     print(f"Target OpenSAK database: {target_db}\n")
 
     init_db(db_path=target_db)
+
+    scan = scan_gsak_notes_for_embedded_images(db3_path)
+    if scan["affected_notes"]:
+        print(f"Note: {scan['affected_notes']} personal notes contain "
+              f"{scan['total_images']} embedded image(s) that will be replaced "
+              f"with [image: filename] placeholders.\n")
 
     print(f"Importing {db3_path.name} ...\n")
     with get_session() as session:

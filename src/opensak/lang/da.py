@@ -175,6 +175,25 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Alle {count} filer er behandlet.",
     "import_geocode_running":       "📍  Geokoder manglende lokationsdata…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importer fra GSAK-database…",
+    "gsak_import_dialog_title":     "Importer fra GSAK-database",
+    "gsak_import_select_file_label": "Vælg en GSAK-backup (.zip) eller databasefil (.db3):",
+    "gsak_import_browse_title":     "Vælg GSAK-backup eller databasefil",
+    "gsak_import_file_filter":      "GSAK-backup eller database (*.zip *.db3);;Alle filer (*)",
+    "gsak_import_extracting":       "Udpakker {name}…",
+    "gsak_import_running":          "Importerer {name}…",
+    "gsak_import_attributes":       "Attributter:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Noter:",
+    "gsak_import_note_images":      "Note-billeder → placeholders:",
+    "gsak_import_warnings_header":  "Advarsler ({count}):",
+    "gsak_import_no_db3_found":     "Ingen sqlite.db3-fil fundet i {name}",
+    "gsak_import_done":             "✓ Import færdig.",
+    "gsak_prescan_title":           "Nogle personlige noter indeholder billeder",
+    "gsak_prescan_body":            "{notes} af dine personlige noter indeholder {images} billede(r), som GSAK hentede ned til din gamle computer. Disse kan ikke kopieres automatisk, så OpenSAK viser i stedet en placeholder som [image: filename.jpg]. Selve note-teksten importeres stadig normalt.\n\nFortsæt med import?",
+    "gsak_prescan_continue":        "Fortsæt import",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Sæt filter",
     "filter_tab_dates":             "Datoer",
