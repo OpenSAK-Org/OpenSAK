@@ -62,7 +62,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -502,6 +502,20 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.commit()
             print("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
+
+        # ── Migration 17: Drop legacy favorite_point column (issue #488) ──────
+        # v1.14.0 shipped with a column called 'favorite_point' (singular,
+        # NOT NULL) that was later removed from the model but never dropped
+        # from existing databases. Its presence causes NOT NULL failures
+        # when inserting rows (e.g. moving caches between databases).
+        existing_caches_17 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "favorite_point" in existing_caches_17:
+            conn.execute(text("ALTER TABLE caches DROP COLUMN favorite_point"))
+            conn.commit()
+            print("Migration: droppede legacy-kolonnen caches.favorite_point")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
