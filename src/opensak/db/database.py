@@ -62,7 +62,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -591,6 +591,20 @@ def _run_migrations(engine: Engine) -> None:
         if added:
             conn.commit()
             print(f"Migration: tilføjede GSAK-import-felter til logs: {', '.join(added)}")
+
+        # ── Migration 19: find_count on caches (issue #517) ──────────────────
+        # GC API field prep. Also populated straight away by the GSAK
+        # importer from Caches.FoundCount (see #469 gsak_importer.py).
+        existing_caches_19 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "find_count" not in existing_caches_19:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN find_count INTEGER"
+            ))
+            conn.commit()
+            print("Migration: tilføjede caches.find_count")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

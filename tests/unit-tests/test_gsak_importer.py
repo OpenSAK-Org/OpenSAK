@@ -37,7 +37,7 @@ _SCHEMA = [
         FTF INTEGER, UserFlag INTEGER, UserSort INTEGER,
         UserData TEXT, User2 TEXT, User3 TEXT, User4 TEXT,
         FavPoints INTEGER, GcNote TEXT, Elevation REAL, Color TEXT,
-        Guid TEXT, Watch INTEGER, CacheId TEXT, Lock INTEGER
+        Guid TEXT, Watch INTEGER, CacheId TEXT, Lock INTEGER, FoundCount INTEGER
     )""",
     """CREATE TABLE CacheMemo (
         Code TEXT, LongDescription TEXT, ShortDescription TEXT,
@@ -68,7 +68,7 @@ _DEFAULT_CACHE = dict(
     Found=0, FoundByMeDate="", DNF=0, DNFDate="", FTF=0, UserFlag=0,
     UserSort=0, UserData="", User2="", User3="", User4="",
     FavPoints=3, GcNote="", Elevation=0.0, Color="", Guid="", Watch=0,
-    CacheId="9284799", Lock=0,
+    CacheId="9284799", Lock=0, FoundCount=30,
 )
 
 
@@ -144,6 +144,10 @@ def test_import_basic_cache_fields(db_session, tmp_path):
     assert cache.gc_cache_id == "9284799"
     assert cache.favorite_points == 3
     assert cache.url == "https://coord.info/GC1TEST"
+    # find_count (#517 prep) is deliberately left None by the GSAK importer —
+    # GSAK's own FoundCount is identical to Found (0/1), not a true find
+    # count, so there's no honest source for it here (see module docstring).
+    assert cache.find_count is None
 
 
 def test_elevation_zero_maps_to_none(db_session, tmp_path):

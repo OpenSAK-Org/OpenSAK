@@ -23,6 +23,12 @@ Deliberately NOT imported yet (later sessions per #469 plan):
     - UserNote.note         (session 3 — personal note *text*, needs the
       file:/// embedded-image placeholder pre-scan agreed in #472)
     - CacheMemo.TravelBugs, Custom/CustomLocal, Ignore (out of scope / #473)
+    - Cache.find_count (issue #517 prep column) — GSAK's own FoundCount
+      turned out (verified against a real 12,600-cache database) to be
+      identical to Found (0/1, "found by me"), not a true community find
+      count, so there is no honest GSAK source for it yet. A count of
+      "Found it" logs per cache is the closest approximation once Logs
+      are imported in session 2 — revisit find_count then.
 
 Because this is a *partial*-scope import, re-running it on a database that
 already has logs/trackables (e.g. from an earlier GPX import) must NEVER

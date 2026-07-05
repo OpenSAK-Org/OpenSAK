@@ -125,7 +125,7 @@ def test_old_schema_runs_every_migration(tmp_path):
     for col in ("county", "log_count", "parent_gc_code", "owner_name", "last_log_date",
                 "dnf_date", "favorite_points", "distance", "bearing", "waypoint_count",
                 "locked", "gc_note", "url", "elevation", "color", "guid", "watch",
-                "gc_cache_id"):
+                "gc_cache_id", "find_count"):
         assert col in cache_cols
     assert "is_corrected" in note_cols
     # The waypoints rebuild (migration 2) creates the named unique index

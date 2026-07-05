@@ -149,6 +149,15 @@ class Cache(Base):
     # GC.com's internal numeric cache ID (CacheId in GSAK).
     gc_cache_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
+    # ── Issue #517: GC API field prep ────────────────────────────────────────
+    # Total number of "Found it" logs on the cache (by anyone), as shown on
+    # the listing page — the API's `findCount`. Distinct from our own
+    # `log_count` (every log of every type). Also available directly from
+    # GSAK (Caches.FoundCount), so populated by the GSAK importer already —
+    # unlike premiumFavoriteScore/hasSolutionChecker/backgroundImageUrl,
+    # which have no data source until GC API access exists.
+    find_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # ── Issue #87: Cached log count ──────────────────────────────────────────
     # Number of logs in this cache, cached as a column so the UI can display
     # the count without loading the logs relationship (which is noload'ed
