@@ -17,6 +17,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   own county value is now read as a fallback whenever the official schema
   doesn't provide one — which, for county, is always.
 
+- **Distance column could show stale values after editing a home point** (#522)
+  — center points switched via the toolbar dropdown always recalculated
+  distances correctly, but editing a home point's own coordinates (or adding
+  a new one that becomes active) from Settings updates the active
+  coordinates via a different code path that never triggered a recalculation.
+  The persisted distance column then stayed stale until the next manual
+  center-point switch, which could make the Distance column and "sort by
+  distance" silently disagree with the actual active center point. Settings
+  now recalculates distances whenever the dialog is accepted.
+
 ---
 
 ## [1.15.0-beta.5] — 2026-07-05

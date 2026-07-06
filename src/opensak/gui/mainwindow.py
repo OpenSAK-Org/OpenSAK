@@ -1232,6 +1232,16 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             prev_cache = self._cache_table.selected_cache()
             self._reload_home_combo()
+            # Issue #522: editing the active home point's own coordinates (or
+            # adding a new point that becomes active) updates settings via
+            # _sync_active_home_coords() -> set_active_home(), which never
+            # goes through _on_home_changed() — so distances must be
+            # recalculated explicitly here, or the persisted Cache.distance
+            # column stays stale until the next manual home-point switch.
+            s = get_settings()
+            if s.home_lat and s.home_lon:
+                from opensak.db.database import recalculate_distances
+                recalculate_distances(s.home_lat, s.home_lon)
             self._map_widget.reload_map(self._refresh_cache_list)
             self._refresh_cache_list()
             self._cache_table.refresh_visuals()

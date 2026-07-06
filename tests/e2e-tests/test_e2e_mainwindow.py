@@ -400,6 +400,39 @@ class TestImportSettingsHome:
             fake_dialog(exec_result=0))
         seeded_window._open_settings()
 
+    def test_open_settings_accepted_recalculates_distances(self, seeded_window, monkeypatch):
+        # Issue #522: editing a home point's own coordinates (or adding a new
+        # one that becomes active) in Settings goes through
+        # _sync_active_home_coords() -> set_active_home(), which never fires
+        # _on_home_changed() — so _open_settings() must recalculate distances
+        # itself, or the persisted Cache.distance column goes stale until the
+        # next manual home-point switch (causing "distance" sort/column to
+        # silently show outdated values).
+        calls = []
+        monkeypatch.setattr(
+            "opensak.db.database.recalculate_distances",
+            lambda lat, lon: calls.append((lat, lon)),
+        )
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.settings_dialog.SettingsDialog",
+            fake_dialog(exec_result=1))
+        seeded_window._open_settings()
+        assert len(calls) == 1
+
+    def test_open_settings_rejected_skips_recalculation(self, seeded_window, monkeypatch):
+        # Counterpart to the above: cancelling Settings must NOT trigger a
+        # recalculation, since nothing changed.
+        calls = []
+        monkeypatch.setattr(
+            "opensak.db.database.recalculate_distances",
+            lambda lat, lon: calls.append((lat, lon)),
+        )
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.settings_dialog.SettingsDialog",
+            fake_dialog(exec_result=0))
+        seeded_window._open_settings()
+        assert calls == []
+
     def test_reload_home_combo_with_points(self, seeded_window):
         seeded_window._reload_home_combo()
         assert seeded_window._home_combo.count() >= 1
