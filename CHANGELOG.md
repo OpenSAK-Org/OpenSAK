@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **County not imported from GSAK-exported GPX files** (#521) — the official
+  Groundspeak GPX schema has no `<county>` element at all (only country and
+  state), so GSAK adds its own `<gsak:County>` inside `wptExtension` to fill
+  that gap when exporting with "Include GSAK fields" checked. The importer
+  only ever looked for county on the standard `groundspeak:cache` block, so
+  county was silently dropped even though it was present in the file. GSAK's
+  own county value is now read as a fallback whenever the official schema
+  doesn't provide one — which, for county, is always.
+
 ---
 
 ## [1.15.0-beta.5] — 2026-07-05

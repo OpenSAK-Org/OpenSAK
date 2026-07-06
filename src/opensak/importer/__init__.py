@@ -347,6 +347,12 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_fav_points: Optional[int] = None
     gsak_user_note: Optional[str] = None
 
+    # Issue #521: the official Groundspeak GPX schema has no <county> element
+    # at all (only country/state) — GSAK adds its own <gsak:County> inside
+    # wptExtension to fill that gap. Only present when the GPX was exported
+    # FROM GSAK with "Include GSAK fields" checked.
+    gsak_county: Optional[str] = None
+
     for gsak_uri in _GSAK_NAMESPACES:
         # Search descendants: gsak:wptExtension may be a direct <wpt> child (GSAK
         # format) or nested inside <extensions> (OpenSAK GPX 1.1 export).
@@ -400,6 +406,10 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             note_el = gsak_ext.find(f"{{{gsak_uri}}}UserNote")
             if note_el is not None and note_el.text and note_el.text.strip():
                 gsak_user_note = note_el.text.strip()
+
+            county_el = gsak_ext.find(f"{{{gsak_uri}}}County")
+            if county_el is not None and county_el.text and county_el.text.strip():
+                gsak_county = county_el.text.strip()
 
             # Format B: LatBeforeCorrect/LonBeforeCorrect (newer GSAK)
             # The mere PRESENCE of LatBeforeCorrect means CC has been set in GSAK —
@@ -455,7 +465,7 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "archived":          archived,
         "country":           country,
         "state":             state,
-        "county":            county,
+        "county":            county or gsak_county,
         "short_description": short_desc,
         "short_desc_html":   short_html,
         "long_description":  long_desc,
