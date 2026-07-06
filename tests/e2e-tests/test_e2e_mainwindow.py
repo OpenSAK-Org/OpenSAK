@@ -602,12 +602,12 @@ class TestSort:
     def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
         # Regression for #498: opensak.json deles på tværs af alle installerede
         # versioner. Hvis en nyere version har gemt et sort-felt denne version
-        # ikke kender (fx "trackables"), må opstart IKKE crashe — den skal
+        # ikke kender (fx "some_future_field"), må opstart IKKE crashe — den skal
         # falde tilbage til "name" og rette den gemte værdi.
         from opensak.db.manager import get_db_manager
         from opensak.settings_store import get_store
         key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.field", "trackables")
+        get_store().set(f"{key}.field", "some_future_field")
         seeded_window._load_sort_for_active_db()
         assert seeded_window._current_sort.field == "name"
         assert get_store().get(f"{key}.field") == "name"
