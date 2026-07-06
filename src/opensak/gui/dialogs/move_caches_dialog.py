@@ -398,9 +398,13 @@ class MoveCachesDialog(QDialog):
         self._close_btn.setEnabled(False)
         self._progress.setVisible(True)
 
+        source_path = manager.active_path
+        if source_path is None:
+            return
+
         self._worker = _MoveWorker(
             gc_codes=gc_codes,
-            source_db_path=manager.active_path,
+            source_db_path=source_path,
             target_db_path=Path(target_path),
             copy_only=self._copy_only,
         )
