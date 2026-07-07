@@ -12,6 +12,7 @@ Usage
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -62,7 +63,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -605,6 +606,40 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.commit()
             print("Migration: tilføjede caches.find_count")
+
+        # ── Migration 20: remove leftover favorite_point column (issue #530) ─
+        # `favorite_point` (singular, Boolean NOT NULL) was briefly introduced
+        # in v1.14.0 without a migration to add it to already-existing
+        # databases, which surfaced as "no such column" errors (#488). The fix
+        # for #488 removed the field from the model, filters, and UI entirely
+        # — but never added a migration to drop the physical column from
+        # databases that had already been created with it present during that
+        # window. On those databases, every insert into `caches` fails with
+        # `NOT NULL constraint failed: caches.favorite_point`, since current
+        # code has no knowledge of the column and never supplies a value for
+        # it. Reported by community tester Bob Long while testing the GSAK
+        # Database Import feature (#469).
+        existing_caches_20 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "favorite_point" in existing_caches_20:
+            # DROP COLUMN requires SQLite 3.35.0+ (March 2021). A full
+            # table-rebuild fallback is deliberately not attempted here: the
+            # caches table has ~50 columns and a dozen indexes, and hand-
+            # rewriting that whole schema to remove one leftover column would
+            # carry far more risk of a mistake than the near-zero chance of a
+            # bundled SQLite that old on a machine running Python 3.12.
+            if sqlite3.sqlite_version_info >= (3, 35, 0):
+                conn.execute(text("ALTER TABLE caches DROP COLUMN favorite_point"))
+                conn.commit()
+                print("Migration: fjernede efterladt caches.favorite_point kolonne")
+            else:
+                print(
+                    "Migration: kunne ikke fjerne efterladt caches.favorite_point "
+                    f"kolonne — SQLite {sqlite3.sqlite_version} understøtter ikke "
+                    "DROP COLUMN (kræver 3.35+). Kontakt hello@opensak.com."
+                )
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

@@ -140,3 +140,51 @@ def test_old_schema_runs_every_migration(tmp_path):
         assert col in log_cols
 
     assert version == SCHEMA_VERSION
+
+
+def test_leftover_favorite_point_column_removed(tmp_path):
+    # Simulate a database created during the narrow v1.14.0 window where
+    # `favorite_point` (singular, Boolean NOT NULL) briefly existed (#488,
+    # #530): a fresh, current-schema database that also happens to still
+    # carry the leftover column.
+    init_db(db_path=tmp_path / "legacy_fav.db")
+    engine = get_engine()
+
+    _insert_sql = (
+        "INSERT INTO caches (gc_code, name, cache_type, latitude, longitude, "
+        "available, archived, premium_only, short_desc_html, long_desc_html, "
+        "found, dnf, first_to_find, user_flag, watch, log_count, "
+        "trackable_count, waypoint_count, locked, imported_at) "
+        "VALUES ('{gc}', 'Test Cache', 'Traditional Cache', 1.0, 2.0, "
+        "1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '2026-01-01')"
+    )
+
+    # SQLite's ALTER TABLE ADD COLUMN requires a non-null default when the
+    # column is NOT NULL, so this fixture adds one (DEFAULT 0) — unlike the
+    # real leftover column, which has no default at all (see the reported
+    # PRAGMA table_info output on issue #530: dflt_value is blank). That
+    # difference doesn't matter here: the migration only cares whether the
+    # column exists, not whether it currently has a default.
+    with engine.connect() as c:
+        c.execute(text(
+            "ALTER TABLE caches ADD COLUMN favorite_point BOOLEAN NOT NULL DEFAULT 0"
+        ))
+        c.execute(text(_insert_sql.format(gc="GC1")))
+        c.execute(text("PRAGMA user_version = 0"))
+        c.commit()
+
+    _run_migrations(engine)
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        row = c.execute(text("SELECT gc_code FROM caches WHERE gc_code='GC1'")).first()
+        version = c.execute(text("PRAGMA user_version")).scalar()
+        # The insert that failed above must now succeed with the leftover
+        # column gone.
+        c.execute(text(_insert_sql.format(gc="GC2")))
+        c.commit()
+
+    assert "favorite_point" not in cache_cols
+    assert "favorite_points" in cache_cols  # the real, unrelated column stays
+    assert row == ("GC1",)  # existing data survived the column drop
+    assert version == SCHEMA_VERSION
