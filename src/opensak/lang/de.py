@@ -338,6 +338,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Datenbankordner:",
     "settings_folders_restart_hint": "Das Ändern des Datenbankordners erfordert einen Neustart von OpenSAK.",
     "settings_db_dir_changed_message": "Der Datenbankordner wurde geändert. Starten Sie OpenSAK neu, damit dies wirksam wird.",
+    "settings_icons_dir_label": "Ordner für eigene Symbole:",
+    "settings_open_icons_folder_button": "Symbolordner öffnen",
+    "settings_icons_dir_note": "Legen Sie hier eigene SVG-Dateien ab, um die Cache-Typ-, Smiley- und weitere UI-Symbole (korrigierte Koordinaten, Premium, Favoriten, Trackables) zu ersetzen — dieselben Dateinamen wie im OpenSAK Custom Icons Guide. Starten Sie OpenSAK neu, damit Änderungen wirksam werden.",
+    "settings_view_icon_guide_button": "Symbol-Namensleitfaden anzeigen",
 
     "settings_move_databases_title": "Vorhandene Datenbanken verschieben?",
     "settings_move_databases_msg": "Sie haben {count} vorhandene Datenbank(en). Möchten Sie diese ebenfalls in den neuen Ordner verschieben?",

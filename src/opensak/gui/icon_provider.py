@@ -34,6 +34,17 @@ _ASSETS_DIR = Path(__file__).parent.parent / "assets" / "icons"
 _CACHE_TYPES_DIR = _ASSETS_DIR / "cache_types"
 _CACHE_FOUND_DIR = _ASSETS_DIR / "cache_found"
 
+# Issue #519 follow-up: bundled offline HTML reference listing every custom
+# icon file name, recommended canvas size and tips (Inkscape, Plain SVG
+# export, etc.) — opened from Settings → Advanced via QDesktopServices, so
+# it must be a real file on disk rather than generated at runtime.
+_ICON_GUIDE_PATH = Path(__file__).parent.parent / "assets" / "icon_guide.html"
+
+
+def get_icon_guide_path() -> Path:
+    """Sti til den bundlede HTML icon-navngivnings-guide (issue #519 follow-up)."""
+    return _ICON_GUIDE_PATH
+
 
 # ── Mapping: intern nøgle → SVG filnavn (uden .svg) ──────────────────────────
 
@@ -127,18 +138,60 @@ def _read_svg_file(path: Path) -> str | None:
         return None
 
 
+def _user_icons_dir() -> Path:
+    """Sti til brugerens custom-icons mappe (issue #519), eller None ved fejl."""
+    try:
+        from opensak.config import get_icons_dir
+        return get_icons_dir()
+    except Exception:
+        return None
+
+
+def _read_svg_with_user_override(filename: str, bundled_dir: Path, user_subdir: str) -> str | None:
+    """
+    Læs en SVG fil, med brugerens custom-icons mappe (issue #519) tjekket
+    FØRST, og fald tilbage til det bundlede asset hvis filen mangler eller
+    ikke kan parses. Filnavnet matcher 1:1 den bundlede asset-struktur, så
+    det matcher OpenSAK Custom Icons Guide.
+    """
+    user_dir = _user_icons_dir()
+    if user_dir is not None:
+        svg = _read_svg_file(user_dir / user_subdir / f"{filename}.svg")
+        if svg:
+            return svg
+    return _read_svg_file(bundled_dir / f"{filename}.svg")
+
+
+def _get_ui_icon_svg(filename: str, default_svg: str) -> str:
+    """
+    Hent SVG for et af de faste, enkeltstående UI-ikoner (Corrected
+    coordinates, Premium, Fav. points, Trackables — issue #519 follow-up).
+
+    Disse har intet bundlet asset-fil at falde tilbage til — kun en
+    hardkodet SVG-streng i denne fil — så opslags-rækkefølgen er:
+    brugerens icons/ui/<filename>.svg, ellers default_svg.
+    """
+    user_dir = _user_icons_dir()
+    if user_dir is not None:
+        svg = _read_svg_file(user_dir / "ui" / f"{filename}.svg")
+        if svg:
+            return svg
+    return default_svg
+
+
 def _get_type_svg(key: str) -> str | None:
-    """Hent SVG streng for en cache type fra disk."""
+    """Hent SVG streng for en cache type fra disk (bruger-override først)."""
     filename = _TYPE_FILE_MAP.get(key)
     if not filename:
         return None
-    return _read_svg_file(_CACHE_TYPES_DIR / f"{filename}.svg")
+    return _read_svg_with_user_override(filename, _CACHE_TYPES_DIR, "cache_types")
 
 
 def _get_found_svg(key: str) -> str | None:
-    """Hent smiley SVG streng for en fundet cache type fra disk."""
+    """Hent smiley SVG streng for en fundet cache type fra disk (bruger-override først)."""
     color = _FOUND_COLOR_MAP.get(key, "green")
-    return _read_svg_file(_CACHE_FOUND_DIR / f"found_cache_smiley_{color}.svg")
+    filename = f"found_cache_smiley_{color}"
+    return _read_svg_with_user_override(filename, _CACHE_FOUND_DIR, "cache_found")
 
 
 # ── Internal helpers (fallback SVG strenge) ───────────────────────────────────
@@ -418,13 +471,13 @@ def _get_found_svg_for_key(key: str) -> str:
 
 def _get_found_overlay_svg() -> str:
     """Gold smiley used as the fixed overlay for found caches (all types)."""
-    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_gold.svg")
+    svg = _read_svg_with_user_override("found_cache_smiley_gold", _CACHE_FOUND_DIR, "cache_found")
     return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
 
 
 def _get_dnf_overlay_svg() -> str:
     """Dark-blue smiley used as the fixed overlay for DNF caches (all types)."""
-    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_dark_blue.svg")
+    svg = _read_svg_with_user_override("found_cache_smiley_dark_blue", _CACHE_FOUND_DIR, "cache_found")
     return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
 
 
@@ -669,8 +722,9 @@ _CORRECTED_COORDS_SVG = (
 
 @lru_cache(maxsize=8)
 def get_corrected_coords_icon(size: int = 16) -> QIcon:
-    """Amber warning-triangle QIcon shown in the 'corrected' column when set (issue #354)."""
-    return QIcon(_svg_to_pixmap(_CORRECTED_COORDS_SVG, size))
+    """Amber warning-triangle QIcon shown in the 'corrected' column when set (issue #354).
+    Overridable via icons/ui/corrected_coords.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("corrected_coords", _CORRECTED_COORDS_SVG), size))
 
 
 # ── Issue #489: GSAK-style icons for Found / Premium / Fav. points / Trackables columns ──
@@ -708,8 +762,9 @@ _PREMIUM_SVG = (
 @lru_cache(maxsize=8)
 def get_premium_icon(size: int = 16) -> QIcon:
     """Checkered circle with a small cache box — Premium-member-only marker
-    for the 'premium_only' column (issue #489)."""
-    return QIcon(_svg_to_pixmap(_PREMIUM_SVG, size))
+    for the 'premium_only' column (issue #489).
+    Overridable via icons/ui/premium.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("premium", _PREMIUM_SVG), size))
 
 
 _FAVORITE_POINTS_SVG = (
@@ -725,8 +780,9 @@ _FAVORITE_POINTS_SVG = (
 
 @lru_cache(maxsize=8)
 def get_favorite_points_icon(size: int = 14) -> QIcon:
-    """Gold star-medal emblem for the 'Fav. points' column header (issue #489)."""
-    return QIcon(_svg_to_pixmap(_FAVORITE_POINTS_SVG, size))
+    """Gold star-medal emblem for the 'Fav. points' column header (issue #489).
+    Overridable via icons/ui/favorite_points.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("favorite_points", _FAVORITE_POINTS_SVG), size))
 
 
 _TRACKABLE_SVG = (
@@ -747,5 +803,6 @@ _TRACKABLE_SVG = (
 
 @lru_cache(maxsize=8)
 def get_trackable_icon(size: int = 14) -> QIcon:
-    """Ladybug-style insect icon for the Trackables column header (issue #489/#491)."""
-    return QIcon(_svg_to_pixmap(_TRACKABLE_SVG, size))
+    """Ladybug-style insect icon for the Trackables column header (issue #489/#491).
+    Overridable via icons/ui/trackable.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("trackable", _TRACKABLE_SVG), size))

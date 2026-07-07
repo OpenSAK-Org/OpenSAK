@@ -338,6 +338,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Database folder:",
     "settings_folders_restart_hint": "Changing the database folder requires restarting OpenSAK to take effect.",
     "settings_db_dir_changed_message": "The database folder has been changed. Restart OpenSAK for this to take effect.",
+    "settings_icons_dir_label": "Custom icons folder:",
+    "settings_open_icons_folder_button": "Open icons folder",
+    "settings_icons_dir_note": "Drop your own SVG files here to replace the cache type, found-smiley and other UI icons (corrected coordinates, premium, favorites, trackables) — same file names as in the OpenSAK Custom Icons Guide. Restart OpenSAK for changes to take effect.",
+    "settings_view_icon_guide_button": "View icon naming guide",
 
     "settings_move_databases_title": "Move existing databases?",
     "settings_move_databases_msg": "You have {count} existing database(s). Do you want to move them to the new folder as well?",

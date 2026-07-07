@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenSAK Custom Icon Guide</title>
+<style>
+  :root {
+    --ink:        #1a1a2e;
+    --ink-light:  #4a4a6a;
+    --page:       #faf9f6;
+    --cream:      #f5f3ee;
+    --rule:       #ddd8cc;
+    --accent:     #2563a8;
+    --accent-bg:  #eef4fc;
+    --green:      #186a3b;
+    --green-bg:   #edfaf4;
+    --amber:      #92400e;
+    --amber-bg:   #fef9ec;
+    --code-bg:    #1e1e2e;
+    --code-fg:    #cdd6f4;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, "Segoe UI", Cantarell, Ubuntu, Roboto, Arial, sans-serif;
+    background: var(--page);
+    color: var(--ink);
+    line-height: 1.65;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 2.5rem 1.75rem 5rem;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .subtitle {
+    color: var(--ink-light);
+    margin-bottom: 1.75rem;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    margin: 2.4rem 0 0.9rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 2px solid var(--rule);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    margin: 1.4rem 0 0.5rem;
+    color: var(--ink);
+  }
+
+  p { margin-bottom: 0.9rem; }
+
+  ul, ol { margin: 0 0 1rem 1.4rem; }
+  li { margin-bottom: 0.35rem; }
+
+  code {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.88em;
+  }
+
+  .callout {
+    border-radius: 8px;
+    padding: 0.9rem 1.1rem;
+    margin: 1.1rem 0;
+    font-size: 0.95rem;
+  }
+  .callout.info    { background: var(--accent-bg); border-left: 4px solid var(--accent); }
+  .callout.tip     { background: var(--green-bg);  border-left: 4px solid var(--green); }
+  .callout.warning { background: var(--amber-bg);  border-left: 4px solid var(--amber); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.8rem 0 1.4rem;
+    font-size: 0.92rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.45rem 0.7rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  th {
+    background: var(--cream);
+    font-weight: 600;
+  }
+  td code { font-size: 0.85em; }
+
+  .path {
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--ink-light);
+    margin: -0.5rem 0 0.9rem;
+  }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-light);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+
+  <h1>OpenSAK Custom Icon Guide</h1>
+  <p class="subtitle">How to replace OpenSAK's icons with your own — no programming or repackaging required.</p>
+
+  <div class="callout info">
+    Drop replacement SVG files into your custom icons folder
+    (<strong>Settings → Advanced → Open icons folder</strong>), using the
+    exact file names listed below. Missing or invalid files automatically
+    fall back to OpenSAK's built-in icon — you can never break the app
+    by getting a file wrong.
+  </div>
+
+  <div class="callout warning">
+    <strong>Restart OpenSAK</strong> after adding, changing, or removing an
+    icon file for the change to take effect.
+  </div>
+
+  <h2>Getting started</h2>
+
+  <p>
+    Any SVG editor works, but <strong>Inkscape</strong> (free, open source) is
+    a good place to start and is available directly from your Linux
+    distribution's package manager, e.g.:
+  </p>
+  <pre style="background:var(--code-bg);color:var(--code-fg);padding:0.8rem 1rem;border-radius:6px;overflow-x:auto;"><code>sudo apt install inkscape</code></pre>
+
+  <h3>Tips for icons that actually render correctly</h3>
+  <ul>
+    <li>Save as <strong>Plain SVG</strong> (File → Save As → "Plain SVG"), not
+      Inkscape's default format — the default adds extra
+      <code>inkscape:</code>-namespaced metadata that just bloats the file
+      without adding anything OpenSAK uses.</li>
+    <li>Keep the background <strong>transparent</strong> — icons are drawn
+      onto a transparent canvas, so a solid background rectangle (unless
+      intentional, like the rounded-square style used by the built-in
+      cache-type icons) will show as a visible box.</li>
+    <li>Stick to basic shapes and paths (<code>&lt;rect&gt;</code>,
+      <code>&lt;circle&gt;</code>, <code>&lt;polygon&gt;</code>,
+      <code>&lt;path&gt;</code>) with simple <code>fill</code>/<code>stroke</code>.
+      Qt's SVG renderer does not support filters (drop shadows, blur) and
+      may not render them at all.</li>
+    <li>Avoid <code>&lt;text&gt;</code> elements that depend on a specific
+      font being installed on the user's system. If you use text in
+      Inkscape, convert it to a path first
+      (<strong>Path → Object to Path</strong>) so it always renders
+      identically everywhere.</li>
+    <li>Avoid embedding raster images (PNG/JPG) inside the SVG — it works,
+      but bloats the file and looks worse when scaled.</li>
+    <li><strong>Test at the real size.</strong> Most of these icons are
+      shown very small in practice (14–32 pixels) — zoom your canvas view
+      to 100% at that pixel size while designing, not just the large
+      editing canvas, so you can judge legibility honestly.</li>
+    <li>Keep your designs original. Colour conventions (e.g. green for
+      Traditional, orange for Multi) are fair game, but don't trace or
+      copy actual Geocaching.com or GSAK artwork or logos.</li>
+  </ul>
+
+  <h2>1. Cache type icons</h2>
+  <p class="path">icons/cache_types/&lt;name&gt;.svg — recommended canvas: 512×512 viewBox (matches OpenSAK's own built-in icons)</p>
+
+  <table>
+    <tr><th>Cache type</th><th>File name</th></tr>
+    <tr><td>Traditional Cache</td><td><code>traditional_cache.svg</code></td></tr>
+    <tr><td>Multi-cache</td><td><code>multi_cache.svg</code></td></tr>
+    <tr><td>Mystery/Unknown Cache</td><td><code>mystery_cache.svg</code></td></tr>
+    <tr><td>Letterbox Hybrid</td><td><code>letterbox_hybrid.svg</code></td></tr>
+    <tr><td>Wherigo Cache</td><td><code>wherigo_cache.svg</code></td></tr>
+    <tr><td>Earthcache</td><td><code>earthcache.svg</code></td></tr>
+    <tr><td>Virtual Cache</td><td><code>virtual_cache.svg</code></td></tr>
+    <tr><td>Webcam Cache</td><td><code>webcam_cache.svg</code></td></tr>
+    <tr><td>Event Cache</td><td><code>event_cache.svg</code></td></tr>
+    <tr><td>Cache In Trash Out Event</td><td><code>cache_in_trash_out_event.svg</code></td></tr>
+    <tr><td>Mega-Event Cache</td><td><code>mega_event_cache.svg</code></td></tr>
+    <tr><td>Giga-Event Cache</td><td><code>giga_event_cache.svg</code></td></tr>
+    <tr><td>Adventure Lab / Lab Cache</td><td><code>adventure_lab.svg</code></td></tr>
+    <tr><td>GPS Adventures Maze / Exhibit</td><td><code>gps_adventures_maze.svg</code></td></tr>
+    <tr><td>Community Celebration Event</td><td><code>community_celebration_event.svg</code></td></tr>
+    <tr><td>Locationless (Reverse) Cache</td><td><code>locationless_cache.svg</code></td></tr>
+    <tr><td>Project A.P.E. Cache</td><td><code>project_ape_cache.svg</code></td></tr>
+    <tr><td>Geocaching HQ Cache</td><td><code>geocaching_hq_cache.svg</code></td></tr>
+    <tr><td>Geocaching HQ Celebration</td><td><code>geocaching_hq_celebration.svg</code></td></tr>
+    <tr><td>Geocaching HQ Block Party</td><td><code>geocaching_hq_block_party.svg</code></td></tr>
+  </table>
+
+  <h2>2. Found-smiley icons</h2>
+  <p class="path">icons/cache_found/&lt;name&gt;.svg — recommended canvas: 512×512 viewBox</p>
+  <p>
+    Shown as a small overlay badge on cache-type icons and map pins once a
+    cache is marked Found. Each cache type has its own smiley colour;
+    <code>gold</code> is also the fixed icon used for the "Found" column,
+    and <code>dark_blue</code> is the fixed icon used for the "DNF" overlay.
+  </p>
+
+  <table>
+    <tr><th>Colour</th><th>File name</th></tr>
+    <tr><td>Green</td><td><code>found_cache_smiley_green.svg</code></td></tr>
+    <tr><td>Orange</td><td><code>found_cache_smiley_orange.svg</code></td></tr>
+    <tr><td>Dark blue <em>(also used for DNF overlay)</em></td><td><code>found_cache_smiley_dark_blue.svg</code></td></tr>
+    <tr><td>Brown</td><td><code>found_cache_smiley_brown.svg</code></td></tr>
+    <tr><td>Teal</td><td><code>found_cache_smiley_teal.svg</code></td></tr>
+    <tr><td>Dark green</td><td><code>found_cache_smiley_dark_green.svg</code></td></tr>
+    <tr><td>Purple</td><td><code>found_cache_smiley_purple.svg</code></td></tr>
+    <tr><td>Gray</td><td><code>found_cache_smiley_gray.svg</code></td></tr>
+    <tr><td>Red</td><td><code>found_cache_smiley_red.svg</code></td></tr>
+    <tr><td>Gold <em>(also used for the "Found" column)</em></td><td><code>found_cache_smiley_gold.svg</code></td></tr>
+    <tr><td>Light blue</td><td><code>found_cache_smiley_light_blue.svg</code></td></tr>
+    <tr><td>Navy blue</td><td><code>found_cache_smiley_navy_blue.svg</code></td></tr>
+    <tr><td>Maroon</td><td><code>found_cache_smiley_maroon.svg</code></td></tr>
+    <tr><td>Black</td><td><code>found_cache_smiley_black.svg</code></td></tr>
+  </table>
+
+  <h2>3. UI icons</h2>
+  <p class="path">icons/ui/&lt;name&gt;.svg — recommended canvas: 16×16 viewBox (can be drawn larger, e.g. 64×64, since SVG scales — just keep it square and simple)</p>
+  <p>
+    These four have no built-in asset file of their own — the default is a
+    small hand-drawn shape, generated directly in OpenSAK's code. They are
+    all rendered very small (14–16 pixels), as icon-only column headers or
+    cells, so keep designs bold and simple.
+  </p>
+
+  <table>
+    <tr><th>Icon</th><th>File name</th><th>Shown where</th></tr>
+    <tr><td>Corrected coordinates</td><td><code>corrected_coords.svg</code></td><td>"Corrected" column, when a cache has manually corrected coordinates</td></tr>
+    <tr><td>Premium</td><td><code>premium.svg</code></td><td>"Premium" column, for Premium-member-only caches</td></tr>
+    <tr><td>Favourite points</td><td><code>favorite_points.svg</code></td><td>"Fav. points" column header</td></tr>
+    <tr><td>Trackables</td><td><code>trackable.svg</code></td><td>"Trackables" column header</td></tr>
+  </table>
+
+  <footer>
+    OpenSAK is free, open source software — an independent, community-built
+    successor to GSAK. This guide is bundled with the app and updates
+    alongside it, so file names here always match your installed version.
+  </footer>
+
+</body>
+</html>

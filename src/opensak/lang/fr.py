@@ -338,6 +338,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Dossier des bases de données :",
     "settings_folders_restart_hint": "La modification du dossier des bases de données nécessite un redémarrage d'OpenSAK.",
     "settings_db_dir_changed_message": "Le dossier des bases de données a été modifié. Redémarrez OpenSAK pour appliquer ce changement.",
+    "settings_icons_dir_label": "Dossier des icônes personnalisées :",
+    "settings_open_icons_folder_button": "Ouvrir le dossier des icônes",
+    "settings_icons_dir_note": "Déposez vos propres fichiers SVG ici pour remplacer les icônes de type de cache, les smileys et d'autres icônes d'interface (coordonnées corrigées, premium, favoris, trackables) — mêmes noms de fichiers que dans le OpenSAK Custom Icons Guide. Redémarrez OpenSAK pour appliquer les changements.",
+    "settings_view_icon_guide_button": "Voir le guide de nommage des icônes",
 
     "settings_move_databases_title": "Déplacer les bases de données existantes ?",
     "settings_move_databases_msg": "Vous avez {count} base(s) de données existante(s). Voulez-vous aussi les déplacer vers le nouveau dossier ?",

@@ -49,6 +49,16 @@ a = Analysis(
         ("assets/icons/opensak.ico",  "assets/icons/"),
         ("assets/icons/opensak.icns", "assets/icons/"),
         ("src/opensak/lang/",          "opensak/lang/"),
+        # Issue #519: bundled cache-type / found-smiley icon assets and the
+        # icon-naming guide. These were previously NOT listed here at all —
+        # meaning packaged builds (Windows/macOS/AppImage) silently fell
+        # back to the hand-coded fallback SVGs for every cache type/smiley,
+        # since _ASSETS_DIR only ever resolved correctly when running from
+        # a source checkout. Discovered while wiring up the icon guide
+        # button, fixed here rather than left for a future report.
+        ("src/opensak/assets/icons/cache_types", "opensak/assets/icons/cache_types"),
+        ("src/opensak/assets/icons/cache_found", "opensak/assets/icons/cache_found"),
+        ("src/opensak/assets/icon_guide.html",   "opensak/assets/icon_guide.html"),
     ] + certifi_datas + boundary_datas,
     hiddenimports=[
         "PySide6.QtWebEngineWidgets",

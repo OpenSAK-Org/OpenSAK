@@ -338,6 +338,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Databasmapp:",
     "settings_folders_restart_hint": "Att ändra databasmappen kräver att OpenSAK startas om.",
     "settings_db_dir_changed_message": "Databasmappen har ändrats. Starta om OpenSAK för att detta ska träda i kraft.",
+    "settings_icons_dir_label": "Mapp för egna ikoner:",
+    "settings_open_icons_folder_button": "Öppna ikonmapp",
+    "settings_icons_dir_note": "Lägg dina egna SVG-filer här för att ersätta cache-typ-, smiley- och andra UI-ikoner (korrigerade koordinater, premium, favoriter, trackables) — samma filnamn som i OpenSAK Custom Icons Guide. Starta om OpenSAK för att ändringarna ska träda i kraft.",
+    "settings_view_icon_guide_button": "Visa namnguide för ikoner",
 
     "settings_move_databases_title": "Flytta befintliga databaser?",
     "settings_move_databases_msg": "Du har {count} befintliga databas(er). Vill du också flytta dem till den nya mappen?",

@@ -6,6 +6,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Direct GSAK database import** (#469) — import an entire GSAK
+  `sqlite.db3` file straight into an OpenSAK database, without going via
+  GPX first. New "Import GSAK Database" dialog (mirrors the existing GPX
+  import dialog's background-worker/progress-bar pattern) reads caches,
+  waypoints, attributes, logs (full history, not capped like GPX/PQ
+  exports), corrected coordinates, and personal notes directly from the
+  GSAK schema. Confirmed against two independent real-world GSAK
+  databases (one 12,600 caches, one 1.1M log rows) during development.
+  Notes containing GSAK's embedded local image references (from GSAK's
+  "GrabImages" macro) are replaced with `[image: filename.ext]`
+  placeholders, since the referenced local files aren't portable between
+  machines. GSAK's `FoundCount` field was confirmed to be identical to
+  `Found` (a personal 0/1 flag) rather than a true community find count,
+  so it is deliberately *not* imported into `find_count` — importing it
+  would silently show a wrong number rather than the real GC.com count.
+  GSAK custom fields, the Ignore list, and Travel Bugs are out of scope
+  for this first pass (tracked separately in #473).
+
+- **User-replaceable icon packs** (#519) — custom cache-type and found-
+  smiley icons can now be dropped into a new `icons/` folder (Settings →
+  Advanced → "Open icons folder") without touching any code or rebuilding
+  the app. The folder lives alongside `opensak.json`, so it survives app
+  updates/reinstalls — unlike files placed inside the install directory
+  itself, which get wiped on every new release. File names match the
+  bundled assets 1:1 (e.g. `cache_types/traditional_cache.svg`,
+  `cache_found/found_cache_smiley_green.svg`), matching the community's
+  OpenSAK Custom Icons Guide. Also covers the fixed, single-instance UI
+  icons that have no bundled asset file of their own — Corrected
+  coordinates, Premium, Fav. points and Trackables — via a new
+  `icons/ui/` subfolder (`corrected_coords.svg`, `premium.svg`,
+  `favorite_points.svg`, `trackable.svg`). Missing or invalid custom
+  files fall back to the bundled/default icon automatically — never a
+  crash. A new bundled, offline "View icon naming guide" button
+  (Settings → Advanced) lists every file name, recommended canvas size
+  and practical tips (Inkscape, Plain SVG export, avoiding unsupported
+  SVG features) in one place.
+
+  While wiring up the guide, found and fixed a packaging gap:
+  `opensak.spec` never listed `assets/icons/cache_types/` or
+  `assets/icons/cache_found/` in PyInstaller's `datas`, so packaged
+  builds (Windows/macOS/AppImage) were silently falling back to the
+  hand-coded placeholder SVGs for every cache type and found-smiley
+  instead of the real bundled artwork — only source checkouts had the
+  actual icons. Both folders (and the new guide file) are now bundled
+  correctly.
+
 ### Fixed
 
 - **County not imported from GSAK-exported GPX files** (#521) — the official

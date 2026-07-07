@@ -341,6 +341,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Databasemap:",
     "settings_folders_restart_hint": "Het wijzigen van de databasemap vereist het opnieuw starten van OpenSAK.",
     "settings_db_dir_changed_message": "De databasemap is gewijzigd. Start OpenSAK opnieuw om dit door te voeren.",
+    "settings_icons_dir_label": "Map voor aangepaste iconen:",
+    "settings_open_icons_folder_button": "Open iconenmap",
+    "settings_icons_dir_note": "Plaats hier je eigen SVG-bestanden om de cache-type-, smiley- en andere UI-iconen (gecorrigeerde coördinaten, premium, favorieten, trackables) te vervangen — dezelfde bestandsnamen als in de OpenSAK Custom Icons Guide. Start OpenSAK opnieuw om wijzigingen door te voeren.",
+    "settings_view_icon_guide_button": "Naamgevingsgids voor iconen bekijken",
 
     "settings_move_databases_title": "Bestaande databases verplaatsen?",
     "settings_move_databases_msg": "U heeft {count} bestaande database(s). Wilt u deze ook naar de nieuwe map verplaatsen?",

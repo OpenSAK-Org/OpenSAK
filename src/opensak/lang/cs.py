@@ -338,6 +338,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Složka databáze:",
     "settings_folders_restart_hint": "Změna složky databáze vyžaduje restart OpenSAK.",
     "settings_db_dir_changed_message": "Složka databáze byla změněna. Restartujte OpenSAK, aby se změna projevila.",
+    "settings_icons_dir_label": "Složka vlastních ikon:",
+    "settings_open_icons_folder_button": "Otevřít složku ikon",
+    "settings_icons_dir_note": "Sem vložte vlastní SVG soubory pro nahrazení ikon typů cache, smajlíků a dalších UI ikon (opravené souřadnice, premium, oblíbené, trackables) — stejné názvy souborů jako v OpenSAK Custom Icons Guide. Restartujte OpenSAK, aby se změny projevily.",
+    "settings_view_icon_guide_button": "Zobrazit průvodce názvy ikon",
 
     "settings_move_databases_title": "Přesunout existující databáze?",
     "settings_move_databases_msg": "Máte {count} existujících databází. Chcete je také přesunout do nové složky?",

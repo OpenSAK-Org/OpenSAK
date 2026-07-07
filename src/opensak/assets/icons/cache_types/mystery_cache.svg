@@ -1,7 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Mystery Cache">
-  <rect x="32" y="32" width="448" height="448" rx="72" fill="#06426E"/>
-  <g fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
-
-    <path d="M190 156 H238 C238 126 276 126 276 156 H322 V212 C354 212 354 252 322 252 V306 H276 C276 338 238 338 238 306 H190 V252 C158 252 158 212 190 212 Z" fill="#FFFFFF" stroke="none"/>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="512"
+   height="512"
+   viewBox="0 0 512 512"
+   role="img"
+   aria-label="Mystery Cache"
+   version="1.1"
+   id="svg68"
+   sodipodi:docname="mystery_cache.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs72" />
+  <sodipodi:namedview
+     id="namedview70"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="1.6835938"
+     inkscape:cx="256"
+     inkscape:cy="256"
+     inkscape:window-width="1920"
+     inkscape:window-height="1008"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg68" />
+  <rect
+     x="32"
+     y="32"
+     width="448"
+     height="448"
+     rx="72"
+     fill="#06426E"
+     id="rect62" />
+  <g
+     fill="none"
+     stroke="#FFFFFF"
+     stroke-width="24"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     id="g66"
+     style="fill:#f2f2f2">
+    <path
+       d="M190 156 H238 C238 126 276 126 276 156 H322 V212 C354 212 354 252 322 252 V306 H276 C276 338 238 338 238 306 H190 V252 C158 252 158 212 190 212 Z"
+       fill="#FFFFFF"
+       stroke="none"
+       id="path64"
+       style="fill:#f2f2f2" />
   </g>
+  <path
+     style="fill:#f2f2f2"
+     d="m 204.75421,312.21494 -23.59267,-5.28955"
+     id="path421" />
+  <path
+     style="fill:#f2f2f2"
+     d="m 202.3228,215.81022 c 5.16041,-0.56261 9.82057,0.85147 14.60687,2.46864 1.20654,1.34648 2.82962,0.15125 4.15777,0.59396 0.67723,0.22575 1.12576,0.90674 1.7819,1.18794 2.57409,1.10318 2.41866,0.0108 4.72956,0.59397 1.12825,0.28472 4.18896,3.88238 5.30916,4.72254 2.76077,2.07057 5.10792,2.40595 5.93968,6.53364 0.32154,1.5957 0,3.69229 0,5.32348 0,6.97183 -4.19884,7.39785 -7.12036,12.45862 -0.51931,0.89956 0,6.12116 0,7.43221 0,2.52782 -1.1216,5.93967 2.05873,5.93967 8.55979,0 17.11958,0 25.67938,0 0.92852,0 5.80116,0.69111 6.42401,-0.56852 1.0844,-2.19303 0.56845,-4.72067 0.56845,-7.07667 0,-2.67216 0.29493,-5.66111 0,-8.31555 -0.5786,-5.20732 -1.35131,-11.3297 -0.59397,-16.63109 0.41647,-2.91527 4.32973,-5.90335 5.95621,-8.34306 0.73672,-1.10509 1.3619,-2.30381 1.7819,-3.5638 0.25238,-0.75716 0.35817,-8.35636 0,-9.43076 -0.42692,-1.28063 -1.85138,-2.78072 -2.94185,-3.5077 -1.94421,-1.29614 -5.53343,-2.9762 -7.72158,-3.56381 -1.40023,-0.37602 -2.89964,-0.25826 -4.30699,-0.60669 -4.67452,-1.15733 -1.23732,-1.20371 -5.36789,-1.79301 -0.58802,-0.0839 -1.21842,0.18782 -1.78191,0 -0.67722,-0.22575 -1.11349,-0.93729 -1.7819,-1.18794 -3.40308,-1.27615 -17.81645,-1.35302 -20.59614,0.55514 -1.19285,0.81885 -3.71264,4.05121 -4.66764,5.25158 -0.27562,0.34645 -0.23979,0.9223 -0.59396,1.18793 -0.50088,0.37566 -1.24503,0.27185 -1.78191,0.59397 -0.48019,0.28812 -0.70774,0.89982 -1.18793,1.18794 -1.96599,1.17959 -6.03542,3.01771 -8.31555,4.15777 -0.4758,0.2379 -2.04208,0.35008 -2.37587,1.18793 -0.29842,0.74909 -0.18032,2.83001 0.33991,3.3503"
+     id="path423" />
+  <path
+     style="fill:#ff0000"
+     d="M 394.89704,279.71407 145.70693,351.00076"
+     id="path425" />
+  <path
+     style="fill:#ff0000"
+     d="M 260.37805,422.54825 147.00015,367.56493"
+     id="path427" />
 </svg>

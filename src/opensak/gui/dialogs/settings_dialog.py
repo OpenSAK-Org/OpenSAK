@@ -382,6 +382,32 @@ class SettingsDialog(QDialog):
         folders_hint.setStyleSheet("color: gray; font-size: 10px;")
         folders_layout.addWidget(folders_hint)
 
+        # Issue #519: custom icons folder — read-only path (not user-browsable,
+        # it's always <install_dir>/icons) plus an "Open folder" button so
+        # users can drop in replacement SVGs without knowing the path.
+        from opensak.config import get_icons_dir
+
+        folders_layout.addSpacing(8)
+        folders_layout.addWidget(QLabel(tr("settings_icons_dir_label")))
+        icons_dir_row = QHBoxLayout()
+        self._icons_dir_row = DirRow(get_icons_dir(), browsable=False)
+        icons_dir_row.addWidget(self._icons_dir_row)
+        open_icons_btn = QPushButton(tr("settings_open_icons_folder_button"))
+        open_icons_btn.clicked.connect(self._on_open_icons_folder)
+        icons_dir_row.addWidget(open_icons_btn)
+        folders_layout.addLayout(icons_dir_row)
+        icons_note = QLabel(tr("settings_icons_dir_note"))
+        icons_note.setWordWrap(True)
+        icons_note.setStyleSheet("color: gray; font-size: 10px;")
+        folders_layout.addWidget(icons_note)
+
+        icon_guide_row = QHBoxLayout()
+        icon_guide_btn = QPushButton(tr("settings_view_icon_guide_button"))
+        icon_guide_btn.clicked.connect(self._on_open_icon_guide)
+        icon_guide_row.addWidget(icon_guide_btn)
+        icon_guide_row.addStretch()
+        folders_layout.addLayout(icon_guide_row)
+
         layout.addWidget(folders_group)
 
         # ── Search behaviour ──────────────────────────────────────────────────
@@ -465,6 +491,22 @@ class SettingsDialog(QDialog):
 
         layout.addStretch()
         return tab
+
+    def _on_open_icon_guide(self) -> None:
+        """Åbn den bundlede icon-navngivnings-guide i systemets standard browser (issue #519 follow-up)."""
+        from opensak.gui.icon_provider import get_icon_guide_path
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_icon_guide_path())))
+
+    def _on_open_icons_folder(self) -> None:
+        """Åbn brugerens custom-icons mappe i systemets filhåndtering (issue #519)."""
+        from opensak.config import get_icons_dir
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_icons_dir())))
 
     def _on_run_wizard_again(self) -> None:
         """
