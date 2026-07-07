@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.15.0-beta.6] — 2026-07-07
+
+> **Beta release** — GSAK Database Import and user-replaceable icon packs,
+> plus two fixes found during beta.5 testing.
+
 ### Added
 
 - **Direct GSAK database import** (#469) — import an entire GSAK
