@@ -94,6 +94,22 @@ from opensak.utils.constants import ATTRIBUTES
 # real distribution in both test databases (Sommerhus.zip: T/U/R only;
 # GSAK_Database_Backup.zip: all 12 codes below, matching real-world type
 # frequency — e.g. T=9984, U=1575, M=512, R=111 out of 12,600 caches).
+#
+# Issue #532: the 13 codes above don't cover GSAK's full $d_CacheType list
+# (gsak.net/help/hs21040.htm), which also documents A/D/F/H/J/P/Q/X/Y/Z.
+# Any code missing from this map falls through to the "Unknown Cache"
+# default in _row_to_cache_data() — which silently turned every imported
+# Adventure Lab cache (code Q) into a Mystery cache, reported independently
+# by two users (Véé X Péé on Facebook, and visible in C3GPS's #530 GSAK
+# import log: LB-prefixed Lab caches showing cache_type "Unknown Cache").
+#
+# Added below: six more codes with an unambiguous, already-existing
+# OpenSAK CACHE_TYPES equivalent (utils/constants.py). Deliberately NOT
+# added: D ("Groundspeak Lost and Found Celebration") and F ("Lost and
+# Found Event") — two distinct legacy event variants with no clear 1:1
+# match to our single "Community Celebration Event" entry — and Y
+# (Waymark), which has no OpenSAK equivalent at all. These three keep
+# falling back to "Unknown Cache" rather than risk a wrong mapping.
 GSAK_CACHE_TYPE_MAP: dict[str, str] = {
     "T": "Traditional Cache",
     "M": "Multi-cache",
@@ -108,6 +124,13 @@ GSAK_CACHE_TYPE_MAP: dict[str, str] = {
     "L": "Locationless (Reverse) Cache",
     "O": "Other",
     "G": "Benchmark",
+    "Q": "Lab Cache",
+    "A": "Project A.P.E. Cache",
+    "H": "Geocaching HQ Cache",
+    "J": "Giga-Event Cache",
+    "P": "Geocaching HQ Block Party",
+    "X": "GPS Adventures Maze",
+    "Z": "Mega-Event Cache",
 }
 
 # GSAK's Container field already matches OpenSAK's CONTAINER_SIZES strings

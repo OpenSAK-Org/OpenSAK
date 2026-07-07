@@ -8,6 +8,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.7] — 2026-07-07
+
+> **Beta release** — three fixes for the GSAK Database Import feature (#469),
+> found during beta.6 real-world testing.
+
+### Fixed
+
+- **Leftover `favorite_point` column crashed inserts on some databases** (#530)
+  — `favorite_point` (singular, Boolean NOT NULL) briefly existed in v1.14.0
+  without a migration to add it to already-existing databases (#488). The fix
+  for #488 removed the field from the model, filters, and UI entirely, but
+  never added a migration to drop the physical column from databases that had
+  already been created with it present during that window. On those
+  databases, every insert into `caches` failed with `NOT NULL constraint
+  failed: caches.favorite_point`, since current code has no knowledge of the
+  column and never supplies a value for it. A new migration now detects and
+  removes the leftover column. Reported independently by Bob Long and C3GPS.
+
+- **GSAK databases with non-UTF-8 text fields aborted the entire import**
+  — GSAK is a Windows desktop app and doesn't guarantee its `sqlite.db3`
+  stores text as UTF-8; older or rarely-touched fields (e.g. `SmartName`,
+  part of GSAK's "Smart Names" macro feature) may still hold whatever system
+  codepage the row was written under, commonly Windows-1252 for Western
+  European installs. The GSAK connection now falls back from UTF-8 to
+  cp1252, then to a replacement-character decode as a last resort, so one
+  oddly-encoded legacy field can no longer abort an otherwise-healthy
+  import. Reported by Thomas Bang Christensen.
+
+- **Adventure Lab caches imported as "Unknown Cache" instead of "Lab Cache"**
+  (#532) — GSAK's own `CacheType` field uses single-letter codes; the
+  importer's mapping table only covered 13 of the ~19 codes GSAK documents,
+  and Adventure Lab caches (code `Q`) fell through to the "Unknown Cache"
+  default. Six more codes with an unambiguous OpenSAK equivalent (Project
+  A.P.E., Geocaching HQ Cache/Block Party, Giga-/Mega-Event, GPS Adventures
+  Maze) are now mapped too. Reported by Véé X Péé on Facebook, and visible
+  independently in C3GPS's #530 GSAK import log.
+
+---
+
 ## [1.15.0-beta.6] — 2026-07-07
 
 > **Beta release** — GSAK Database Import and user-replaceable icon packs,

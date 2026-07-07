@@ -223,6 +223,20 @@ def test_cache_type_mapping(db_session, tmp_path, gsak_code, expected):
     assert cache.cache_type == expected
 
 
+@pytest.mark.parametrize("gsak_code", ["D", "F", "Y"])
+def test_cache_type_intentionally_unmapped_codes_fall_back(db_session, tmp_path, gsak_code):
+    # Issue #532: D ("Groundspeak Lost and Found Celebration"), F ("Lost and
+    # Found Event") and Y (Waymark) are deliberately left out of
+    # GSAK_CACHE_TYPE_MAP — D/F have no unambiguous match to our single
+    # "Community Celebration Event" entry, and Y has no OpenSAK equivalent
+    # at all. This locks in the safe fallback rather than risking a wrong
+    # mapping being silently reinstated later.
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"CacheType": gsak_code}])
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.cache_type == "Unknown Cache"
+
+
 @pytest.mark.parametrize("gsak_container,expected", sorted(GSAK_CONTAINER_MAP.items()))
 def test_container_mapping(db_session, tmp_path, gsak_container, expected):
     db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"Container": gsak_container}])
