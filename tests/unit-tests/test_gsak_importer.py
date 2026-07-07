@@ -145,6 +145,33 @@ def _make_gsak_db(
 
 # ── Basic import ──────────────────────────────────────────────────────────────
 
+def test_non_utf8_field_does_not_abort_import(db_session, tmp_path):
+    # GSAK databases aren't guaranteed to store text as UTF-8 (issue #529
+    # follow-up, reported by Thomas Bang Christensen). `SmartName` isn't a
+    # field OpenSAK reads at all, but it's swept in unused by `SELECT c.*`
+    # and must not abort the whole import just because it holds
+    # Windows-1252 bytes instead.
+    db_path = tmp_path / "gsak.db3"
+    _make_gsak_db(db_path)  # base schema + default cache row
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("ALTER TABLE Caches ADD COLUMN SmartName TEXT")
+    # "Værktøj" encoded as Windows-1252 (0x56 0xE6 0x72 0x6B 0x74 0xF8 0x6A) —
+    # invalid as UTF-8, the same shape of field that crashed the real import.
+    conn.execute(
+        "UPDATE Caches SET SmartName = CAST(x'56E6726B74F86A' AS TEXT) "
+        "WHERE Code = 'GC1TEST'"
+    )
+    conn.commit()
+    conn.close()
+
+    result = import_gsak_db(db_path, db_session)
+
+    assert result.errors == []
+    assert result.created == 1
+    assert result.encoding_fallbacks == 1
+
+
 def test_import_basic_cache_fields(db_session, tmp_path):
     db = _make_gsak_db(tmp_path / "gsak.db3")
     result = import_gsak_db(db, db_session)

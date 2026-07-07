@@ -250,6 +250,7 @@ class GsakImportResult(ImportResult):
         self.logs: int = 0
         self.notes: int = 0
         self.note_images_replaced: int = 0
+        self.encoding_fallbacks: int = 0
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -257,7 +258,8 @@ class GsakImportResult(ImportResult):
                 f"\n  Corrected coords: {self.corrected}"
                 f"\n  Logs           : {self.logs}"
                 f"\n  Notes          : {self.notes}"
-                f"\n  Note images -> placeholders: {self.note_images_replaced}")
+                f"\n  Note images -> placeholders: {self.note_images_replaced}"
+                f"\n  Encoding fallbacks (non-UTF-8 fields): {self.encoding_fallbacks}")
 
 
 def find_gsak_db3_in_zip(path: Path) -> Path:
@@ -287,10 +289,39 @@ def find_gsak_db3_in_zip(path: Path) -> Path:
     return matches[0]
 
 
-def _open_readonly(db_path: Path) -> sqlite3.Connection:
-    """Open the GSAK database strictly read-only (we never write to it)."""
+def _open_readonly(
+    db_path: Path, fallback_counter: Optional[list[int]] = None
+) -> sqlite3.Connection:
+    """Open the GSAK database strictly read-only (we never write to it).
+
+    GSAK databases are Windows desktop files and aren't guaranteed to store
+    text as UTF-8 — older or rarely-touched fields (e.g. ``SmartName``, part
+    of GSAK's "Smart Names" macro feature) may still hold whatever system
+    codepage the row was written under, commonly Windows-1252 for Western
+    European installs. Python's sqlite3 default text_factory assumes strict
+    UTF-8 and raises ``OperationalError`` the moment it hits a byte sequence
+    that isn't valid UTF-8 — aborting the *entire* import over a single
+    unrelated field OpenSAK doesn't even use, swept in by ``SELECT c.*``
+    (issue #529 follow-up, reported by Thomas Bang Christensen).
+
+    We try UTF-8 first (the common, correct case), fall back to cp1252, and
+    finally fall back to a replacement-character decode so one oddly-encoded
+    legacy field can never abort an otherwise-healthy import.
+    """
+    def _lenient_text_factory(data: bytes) -> str:
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            if fallback_counter is not None:
+                fallback_counter[0] += 1
+            try:
+                return data.decode("cp1252")
+            except UnicodeDecodeError:
+                return data.decode("utf-8", errors="replace")
+
     uri = f"file:{Path(db_path).as_posix()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
+    conn.text_factory = _lenient_text_factory
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -805,7 +836,8 @@ def import_gsak_db(
         return result
 
     try:
-        conn = _open_readonly(db_path)
+        fallback_counter = [0]
+        conn = _open_readonly(db_path, fallback_counter)
     except sqlite3.Error as e:
         result.errors.append(f"Could not open GSAK database: {e}")
         return result
@@ -857,4 +889,5 @@ def import_gsak_db(
         _exit_bulk_import_pragmas(session)
         conn.close()
 
+    result.encoding_fallbacks = fallback_counter[0]
     return result
