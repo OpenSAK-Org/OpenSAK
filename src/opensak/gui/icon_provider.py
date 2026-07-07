@@ -138,7 +138,7 @@ def _read_svg_file(path: Path) -> str | None:
         return None
 
 
-def _user_icons_dir() -> Path:
+def _user_icons_dir() -> Path | None:
     """Sti til brugerens custom-icons mappe (issue #519), eller None ved fejl."""
     try:
         from opensak.config import get_icons_dir
