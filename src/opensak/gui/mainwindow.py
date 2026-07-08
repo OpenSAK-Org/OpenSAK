@@ -358,6 +358,16 @@ class MainWindow(QMainWindow):
         act_clear_flags.triggered.connect(self._clear_all_flags)
         wp_menu.addAction(act_clear_flags)
 
+        wp_menu.addSeparator()
+
+        act_move_caches = QAction(tr("action_move_caches"), self)
+        act_move_caches.triggered.connect(self._open_move_caches_dialog)
+        wp_menu.addAction(act_move_caches)
+
+        act_copy_caches = QAction(tr("action_copy_caches"), self)
+        act_copy_caches.triggered.connect(self._open_copy_caches_dialog)
+        wp_menu.addAction(act_copy_caches)
+
         from opensak.utils import flags
         if flags.reverse_geocoding:
             wp_menu.addSeparator()
@@ -1609,6 +1619,40 @@ class MainWindow(QMainWindow):
             self._refresh_cache_list()
             self._statusbar.showMessage(tr("status_flags_cleared"), 3000)
 
+    def _open_move_caches_dialog(self) -> None:
+        """Open the Move Caches dialog."""
+        self._open_move_or_copy_dialog(copy_only=False)
+
+    def _open_copy_caches_dialog(self) -> None:
+        """Open the Copy Caches dialog."""
+        self._open_move_or_copy_dialog(copy_only=True)
+
+    def _open_move_or_copy_dialog(self, copy_only: bool) -> None:
+        """Open the Move/Copy Caches dialog."""
+        from opensak.gui.dialogs.move_caches_dialog import MoveCachesDialog
+
+        selected = self._cache_table.selected_cache()
+        selected_gc = selected.gc_code if selected else None
+        flagged = [c.gc_code for c in self._cache_table.get_flagged_caches()]
+        all_codes = [c.gc_code for c in self._cache_table.get_all_caches()]
+
+        dlg = MoveCachesDialog(
+            self,
+            selected_gc_code=selected_gc,
+            flagged_gc_codes=flagged,
+            all_gc_codes=all_codes,
+            copy_only=copy_only,
+        )
+        dlg.caches_moved.connect(self._on_caches_moved)
+        dlg.exec()
+
+    def _on_caches_moved(self) -> None:
+        """Refresh UI after caches were moved/copied to another database."""
+        self._detail_panel.clear()
+        self._act_wp_edit.setEnabled(False)
+        self._act_wp_delete.setEnabled(False)
+        self._refresh_cache_list()
+
     def _on_flags_changed(self) -> None:
         """Opdatér statuslinjen når et flag toggler."""
         flagged = len(self._cache_table.get_flagged_caches())
@@ -1653,7 +1697,18 @@ class MainWindow(QMainWindow):
         field = str(s.get(f"{key}.field", "name"))
         asc_raw = s.get(f"{key}.ascending", True)
         ascending = asc_raw if isinstance(asc_raw, bool) else str(asc_raw).lower() in ("true", "1", "yes")
-        self._current_sort = SortSpec(field, ascending=ascending)
+        try:
+            self._current_sort = SortSpec(field, ascending=ascending)
+        except ValueError as e:
+            # Ukendt sort-felt — kan opstå hvis opensak.json (delt på tværs af
+            # installerede versioner) er blevet skrevet af en nyere version med
+            # et sort-felt denne version ikke kender endnu (fixes crash on
+            # startup, se #498). Falder tilbage til default og retter den
+            # gemte værdi, så det ikke gentager sig ved næste opstart.
+            print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
+            field = "name"
+            self._current_sort = SortSpec(field, ascending=ascending)
+            get_store().set(f"{key}.field", field)
         # Genanvend sort-indikatoren i tabellen hvis den allerede er loaded
         if hasattr(self, "_cache_table"):
             self._cache_table.apply_sort(field, ascending)
