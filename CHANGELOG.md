@@ -8,7 +8,66 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.15.0-beta.7] — 2026-07-07
+## [1.15.0-beta.8] — 2026-07-08
+
+> **Beta release** — one critical performance fix plus three GSAK Database
+> Import fixes found during beta.7 real-world testing.
+
+### Added
+
+- **Trackables now imported from GSAK databases, with a new Trackables tab**
+  (#538) — `CacheMemo.TravelBugs` was previously deliberately out of scope
+  for the GSAK importer. Parses GSAK's one-line-per-trackable format
+  (`Name (id = TrackableID, ref = Trackable Reference)`) into the same
+  Trackable model already used by GPX import. Like Waypoints/Attributes/Logs,
+  Trackables are now rebuilt on every re-import of a given cache, rather than
+  being left untouched — a deliberate change from the previous behaviour,
+  consistent with the importer's one-time-migration philosophy. The cache
+  detail window also gets a new Trackables tab (between Attributes and
+  Notes) listing each trackable with a clickable `coord.info` link, mirroring
+  GSAK's own Trackables list. Reported by nagisml.
+
+### Fixed
+
+- **Critical: severe UI freeze switching to or filtering a large database**
+  (#540) — every single icon lookup (cache-type icon + found-smiley, per
+  cache row) resolved the user-replaceable icon-override folder (#519) from
+  scratch: a file-existence check, a JSON read, and four `mkdir()` calls,
+  every time. On a ~19,000-cache database that added up to 38,000+ avoidable
+  filesystem calls per table refresh (switching databases, changing a
+  filter, or plain Refresh) — individually fast, but each one commonly
+  intercepted synchronously by antivirus real-time protection on Windows,
+  compounding into a 45-60 second "Not Responding" freeze that scaled with
+  the number of rows rendered rather than database size. The icon-override
+  folder is now resolved once per app session instead of once per icon
+  lookup per row. Reported via issue #540, confirmed against
+  `v1.15.0-beta.5` (unaffected, predates #519) vs `beta.7` (affected).
+
+- **GSAK Import: waypoints with the same name but different codes were
+  silently dropped** (#536) — the unique constraint on waypoints was
+  `(cache_id, prefix, name)`, but GSAK's own per-cache waypoint identity is
+  its own code (`cCode`, stored as `wp_code`), not the name — real GSAK
+  databases can have distinct waypoints on one cache sharing a name (e.g.
+  several stages a user happened to name identically), and the second one
+  was being treated as a duplicate and dropped. The constraint is now
+  `(cache_id, wp_code)`; GPX-imported waypoints (which never set `wp_code`)
+  are unaffected, since SQL treats multiple NULLs as distinct for
+  uniqueness. Reported by nagisml.
+
+- **Renaming a database didn't move the underlying file** (#539) — only the
+  display name was updated; the physical `.db` file (and any `-shm`/`-wal`
+  sidecars) stayed at its original path. Creating a new database under the
+  now-freed old name silently reused that same never-moved file and "came
+  back" with all its old content and column layout intact. Renaming now
+  moves the actual file, rejects the rename if a file already exists at the
+  target path, and migrates the saved column visibility/width settings
+  (#199) to the new name. The toolbar dropdown and window title — which
+  previously only refreshed on a database *switch*, not a rename — now
+  update immediately too. Reported by GeePa67.
+
+---
+
+
 
 > **Beta release** — three fixes for the GSAK Database Import feature (#469),
 > found during beta.6 real-world testing.
