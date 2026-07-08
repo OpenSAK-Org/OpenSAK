@@ -16,10 +16,11 @@ from pathlib import Path
 
 import pytest
 
-from opensak.db.models import Attribute, Cache, Log, UserNote, Waypoint
+from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
 from opensak.importer.gsak_importer import (
     GSAK_CACHE_TYPE_MAP,
     GSAK_CONTAINER_MAP,
+    _parse_gsak_trackables,
     _replace_embedded_images_with_placeholders,
     import_gsak_db,
     scan_gsak_notes_for_embedded_images,
@@ -388,13 +389,92 @@ def test_reimport_updates_not_duplicates(db_session, tmp_path):
     assert db_session.query(Cache).count() == 1
 
 
-def test_reimport_does_not_touch_trackables(db_session, tmp_path):
-    # Trackables remain entirely out of scope (no GSAK source table maps to
-    # our Trackable model — see module docstring) — a prior GPX import's
-    # trackables must survive a GSAK re-import untouched, unlike Logs, which
-    # are legitimately rebuilt every time as of session 2.
-    from opensak.db.models import Trackable
+# ── Issue #538: trackables ────────────────────────────────────────────────────
 
+def test_parse_gsak_trackables_single_line():
+    assert _parse_gsak_trackables("Best TB ever (id = 1234567, ref = TBAB12CD)") == [
+        {"name": "Best TB ever", "ref": "TBAB12CD", "tracking_code": "1234567"},
+    ]
+
+
+def test_parse_gsak_trackables_multiple_lines():
+    raw = (
+        "Best TB ever (id = 1234567, ref = TBAB12CD)\n"
+        "Another Bug (id = 42, ref = TB999X)\n"
+    )
+    parsed = _parse_gsak_trackables(raw)
+    assert parsed == [
+        {"name": "Best TB ever", "ref": "TBAB12CD", "tracking_code": "1234567"},
+        {"name": "Another Bug", "ref": "TB999X", "tracking_code": "42"},
+    ]
+
+
+def test_parse_gsak_trackables_empty_or_none():
+    assert _parse_gsak_trackables(None) == []
+    assert _parse_gsak_trackables("") == []
+    assert _parse_gsak_trackables("   \n   ") == []
+
+
+def test_parse_gsak_trackables_skips_unmatched_lines_without_crashing():
+    # A line that doesn't match the expected "(id = ..., ref = ...)" suffix
+    # (e.g. free-text GSAK "Custom" trackable entries) is skipped rather than
+    # aborting the whole cache's trackable list.
+    raw = (
+        "Best TB ever (id = 1234567, ref = TBAB12CD)\n"
+        "some unrelated free-text line\n"
+        "Another Bug (id = 42, ref = TB999X)\n"
+    )
+    parsed = _parse_gsak_trackables(raw)
+    assert [p["ref"] for p in parsed] == ["TBAB12CD", "TB999X"]
+
+
+def test_trackable_mapping_via_import(db_session, tmp_path):
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        memos=[{
+            "Code": "GC1TEST",
+            "TravelBugs": "Best TB ever (id = 1234567, ref = TBAB12CD)",
+        }],
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+
+    trackables = db_session.query(Trackable).filter_by(cache_id=cache.id).all()
+    assert len(trackables) == 1
+    assert trackables[0].name == "Best TB ever"
+    assert trackables[0].ref == "TBAB12CD"
+    assert trackables[0].tracking_code == "1234567"
+    assert cache.trackable_count == 1
+
+
+def test_no_travelbugs_field_creates_no_trackables(db_session, tmp_path):
+    db = _make_gsak_db(tmp_path / "gsak.db3")  # default memo has no TravelBugs
+    import_gsak_db(db, db_session)
+    assert db_session.query(Trackable).count() == 0
+
+
+def test_reimport_rebuilds_trackables_not_duplicates(db_session, tmp_path):
+    # Same rebuild-on-reimport pattern as Waypoints/Attributes/Logs (#538):
+    # importing the same GSAK database twice must not duplicate trackables.
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        memos=[{
+            "Code": "GC1TEST",
+            "TravelBugs": "Best TB ever (id = 1234567, ref = TBAB12CD)",
+        }],
+    )
+    import_gsak_db(db, db_session)
+    import_gsak_db(db, db_session)
+    assert db_session.query(Trackable).count() == 1
+
+
+def test_reimport_overwrites_trackables_from_earlier_gpx_import(db_session, tmp_path):
+    # Deliberate #538 behaviour change: unlike the earlier "leave Trackables
+    # completely untouched" design, a GSAK re-import now rebuilds Trackables
+    # the same way it rebuilds Waypoints/Attributes/Logs — so a trackable
+    # that came from an earlier *GPX* import of the same cache is replaced
+    # by whatever the GSAK source currently has (here: nothing, since this
+    # GSAK memo has no TravelBugs data).
     db = _make_gsak_db(tmp_path / "gsak.db3")
     import_gsak_db(db, db_session)
     cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
@@ -402,7 +482,7 @@ def test_reimport_does_not_touch_trackables(db_session, tmp_path):
     db_session.commit()
 
     import_gsak_db(db, db_session)
-    assert db_session.query(Trackable).count() == 1
+    assert db_session.query(Trackable).count() == 0
 
 
 def test_locked_cache_is_not_overwritten(db_session, tmp_path):

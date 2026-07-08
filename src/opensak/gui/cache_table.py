@@ -1513,6 +1513,7 @@ class CacheTableView(QTableView):
                 joinedload(CacheModel.user_note),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             ).filter_by(gc_code=cache.gc_code).first()
             if fresh is None:
                 return
@@ -1613,6 +1614,7 @@ class CacheTableView(QTableView):
                 joinedload(CacheModel.user_note),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             ).filter_by(gc_code=gc_code).first()
             if fresh is None:
                 return

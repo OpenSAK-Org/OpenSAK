@@ -251,6 +251,7 @@ class GsakImportDialog(QDialog):
             f"  {tr('gsak_import_logs'):<28} {result.logs}",
             f"  {tr('gsak_import_notes'):<28} {result.notes}",
             f"  {tr('gsak_import_note_images'):<28} {result.note_images_replaced}",
+            f"  {tr('gsak_import_trackables'):<28} {result.trackables}",
             f"  {tr('corrected_dialog_corrected'):<28} {result.corrected}",
             f"  {tr('import_skipped'):<28} {result.skipped}",
         ]

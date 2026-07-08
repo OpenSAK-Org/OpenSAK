@@ -254,11 +254,18 @@ def test_attrs_tab_exists_at_index_4(monkeypatch, qapp):
     assert panel._tabs.tabText(4) == tr("filter_tab_attributes")
 
 
-def test_notes_tab_exists_at_index_5(monkeypatch, qapp):
-    # Notes tab shifted to index 5 when Attributes tab was added (#417).
+def test_trackables_tab_exists_at_index_5(monkeypatch, qapp):
+    # Issue #538/#546: Trackables tab inserted between Attributes and Notes.
     monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
     panel = CacheDetailPanel()
-    assert panel._tabs.tabText(5) == tr("detail_tab_notes")
+    assert panel._tabs.tabText(5) == tr("col_trackables")
+
+
+def test_notes_tab_exists_at_index_6(monkeypatch, qapp):
+    # Notes tab shifted to index 6 when the Trackables tab was added (#538/#546).
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    assert panel._tabs.tabText(6) == tr("detail_tab_notes")
 
 
 def test_notes_tab_loads_existing_note(monkeypatch, tmp_path, qapp):
@@ -283,6 +290,7 @@ def test_notes_tab_loads_existing_note(monkeypatch, tmp_path, qapp):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -311,6 +319,7 @@ def test_notes_tab_save_roundtrip(monkeypatch, tmp_path, qapp):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -357,6 +366,7 @@ def _load_cache(tmp_path, db_suffix="icon"):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -446,3 +456,63 @@ def test_attrs_tab_cleared_on_clear(monkeypatch, qapp):
     panel.clear()
     assert panel._attr_browser.toPlainText() == ""
     assert panel._tabs.tabText(4) == tr("filter_tab_attributes")
+
+
+# ── Trackables tab tests (issue #538/#546) ───────────────────────────────────
+
+def _fake_trackable(name, ref=None, tracking_code=None):
+    return SimpleNamespace(name=name, ref=ref, tracking_code=tracking_code)
+
+
+def test_trackables_tab_empty(monkeypatch, qapp):
+    # Cache with no trackables shows the empty message and base tab title.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[]))
+    assert tr("detail_no_trackables") in panel._tb_browser.toPlainText()
+    assert panel._tabs.tabText(5) == tr("col_trackables")
+
+
+def test_trackables_tab_count_in_title(monkeypatch, qapp):
+    # Tab title shows count when trackables are present.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[
+        _fake_trackable("Best TB ever", ref="TBAB12CD"),
+        _fake_trackable("Another Bug", ref="TB999X"),
+    ]))
+    assert panel._tabs.tabText(5) == tr("detail_tab_trackables_count", count=2)
+
+
+def test_trackables_tab_renders_name_and_geocaching_link(monkeypatch, qapp):
+    # Each trackable is shown with its name and a clickable coord.info link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[
+        _fake_trackable("Best TB ever", ref="TBAB12CD"),
+    ]))
+    html = panel._tb_browser.toHtml()
+    assert "Best TB ever" in html
+    assert "https://coord.info/TBAB12CD" in html
+
+
+def test_trackables_tab_renders_without_ref(monkeypatch, qapp):
+    # A trackable with no ref (shouldn't normally happen, but the parser
+    # allows it) is shown without a broken/empty link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable("No Ref Bug", ref=None)]))
+    html = panel._tb_browser.toHtml()
+    assert "No Ref Bug" in html
+    assert "coord.info" not in html
+
+
+def test_trackables_tab_cleared_on_clear(monkeypatch, qapp):
+    # clear() resets the trackables browser and tab title.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable("Best TB ever", ref="TBAB12CD")]))
+    assert panel._tabs.tabText(5) == tr("detail_tab_trackables_count", count=1)
+    panel.clear()
+    assert panel._tb_browser.toPlainText() == ""
+    assert panel._tabs.tabText(5) == tr("col_trackables")

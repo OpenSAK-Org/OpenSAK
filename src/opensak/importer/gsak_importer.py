@@ -47,8 +47,27 @@ SQLAlchemy models, without going via GPX.
       per Allan's call that this is mostly a one-time GSAK-to-OpenSAK
       migration rather than a repeated two-way sync.
 
+── Session 4 (this addition, issue #538) ─────────────────────────────────────
+    - CacheMemo.TravelBugs -> Trackable (name, ref, tracking_code). GSAK
+      stores one line per trackable in a single text field, format
+      ``<Name> (id = <TrackableID>, ref = <Trackable Reference>)`` (one
+      trackable per line — confirmed by #538 reporter's example:
+      ``Best TB ever (id = 1234567, ref = TBAB12CD)``). Parsed with
+      ``_parse_gsak_trackables()``; a line that doesn't match the pattern is
+      skipped rather than aborting the whole cache (GSAK's own free-text
+      "Custom" trackable entries, if any, would not match and are silently
+      dropped rather than imported as garbage).
+      Like Waypoints/Attributes/Logs, Trackables are now unconditionally
+      rebuilt (delete + recreate) on every import of a given cache — this is
+      a deliberate change from the previous "leave Trackables completely
+      untouched" behaviour (see git history), made consistent with the rest
+      of the importer's one-time-migration philosophy (#472). One
+      consequence worth knowing: re-importing a GSAK database now overwrites
+      any Trackables a cache already had from an earlier *GPX* import with
+      whatever GSAK currently has for that cache.
+
 Deliberately NOT imported yet (later sessions per #469 plan):
-    - CacheMemo.TravelBugs, Custom/CustomLocal, Ignore (out of scope / #473)
+    - Custom/CustomLocal, Ignore (out of scope / #473)
     - Cache.find_count (issue #517 prep column) — GSAK's own FoundCount
       turned out (verified against a real 12,600-cache database) to be
       identical to Found (0/1, "found by me"), not a true community find
@@ -59,11 +78,10 @@ Deliberately NOT imported yet (later sessions per #469 plan):
       caches with partial/capped log history, and it's better to make that
       a conscious choice with Allan than a silent approximation.
 
-Because this is a *partial*-scope import, re-running it on a database that
-already has trackables (e.g. from an earlier GPX import) must NEVER touch
-that table — only Waypoints, Attributes and (as of session 2) Logs are
-rebuilt on re-import here, unlike the GPX importer's ``_upsert_cache``
-which rebuilds everything every time.
+This is still a *partial*-scope import (Custom fields / Ignore list remain
+out of scope, see #473) — but as of session 4, Waypoints, Attributes, Logs
+and Trackables are all rebuilt (delete + recreate) on every re-import here,
+same as the GPX importer's ``_upsert_cache``.
 """
 
 from __future__ import annotations
@@ -76,7 +94,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Attribute, Cache, Log, UserNote, Waypoint
+from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
 from opensak.importer import (
     ImportResult,
     _enter_bulk_import_pragmas,
@@ -163,6 +181,44 @@ _STATUS_AVAILABLE = "A"
 # the image's base filename — not the full local path, which could reveal
 # the source computer's username/folder structure.
 _EMBEDDED_IMG_PATTERN = re.compile(r'<img src="file:///([^"]+)"[^>]*>')
+
+
+# ── Issue #538: CacheMemo.TravelBugs (one line per trackable) ───────────────
+# Format confirmed by the #538 reporter (nagisml): one trackable per line,
+# ``<Name> (id = <TrackableID>, ref = <Trackable Reference>)``, e.g.
+# ``Best TB ever (id = 1234567, ref = TBAB12CD)``. The name itself may
+# legitimately contain parentheses, so the pattern anchors on the specific
+# ``(id = ..., ref = ...)`` suffix rather than a bare ``(...)`` group, and
+# takes everything before it as the name.
+_TRAVELBUG_LINE_PATTERN = re.compile(
+    r"^(?P<name>.*?)\s*\(id\s*=\s*(?P<id>\d+)\s*,\s*ref\s*=\s*(?P<ref>[A-Za-z0-9]+)\)\s*$"
+)
+
+
+def _parse_gsak_trackables(raw: Optional[str]) -> list[dict]:
+    """Parse GSAK's ``CacheMemo.TravelBugs`` free-text field into a list of
+    ``{"name", "ref", "tracking_code"}`` dicts, one per matched line.
+
+    A line that doesn't match the expected pattern is skipped rather than
+    aborting the whole cache import — better to import the trackables we
+    can parse than to drop them all over one unexpected line.
+    """
+    if not raw:
+        return []
+    trackables: list[dict] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _TRAVELBUG_LINE_PATTERN.match(line)
+        if m is None:
+            continue
+        trackables.append({
+            "name":           _s(m.group("name")),
+            "ref":            _s(m.group("ref")),
+            "tracking_code":  _s(m.group("id")),
+        })
+    return trackables
 
 
 def _replace_embedded_images_with_placeholders(note_text: str) -> tuple[str, int]:
@@ -273,6 +329,7 @@ class GsakImportResult(ImportResult):
         self.logs: int = 0
         self.notes: int = 0
         self.note_images_replaced: int = 0
+        self.trackables: int = 0
         self.encoding_fallbacks: int = 0
 
     def __str__(self) -> str:
@@ -282,6 +339,7 @@ class GsakImportResult(ImportResult):
                 f"\n  Logs           : {self.logs}"
                 f"\n  Notes          : {self.notes}"
                 f"\n  Note images -> placeholders: {self.note_images_replaced}"
+                f"\n  Trackables     : {self.trackables}"
                 f"\n  Encoding fallbacks (non-UTF-8 fields): {self.encoding_fallbacks}")
 
 
@@ -489,6 +547,9 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
     if raw_note is not None:
         note_text, note_images_replaced = _replace_embedded_images_with_placeholders(raw_note)
 
+    # ── Issue #538: trackables ────────────────────────────────────────────
+    trackables = _parse_gsak_trackables(row["TravelBugs"])
+
     return {
         "gc_code":     gc_code,
         "name":        _s(row["Name"]) or gc_code,
@@ -550,11 +611,15 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
         # ── Issue #472 ────────────────────────────────────────────────────
         "note_text":            note_text,
         "note_images_replaced": note_images_replaced,
+
+        # ── Issue #538 ────────────────────────────────────────────────────
+        "trackables": trackables,
     }
 
 
 _CACHE_JOIN_SQL = """
-    SELECT c.*, m.LongDescription, m.ShortDescription, m.Url, m.Hints, m.UserNote
+    SELECT c.*, m.LongDescription, m.ShortDescription, m.Url, m.Hints, m.UserNote,
+           m.TravelBugs
     FROM Caches c
     LEFT JOIN CacheMemo m ON c.Code = m.Code
 """
@@ -573,12 +638,11 @@ def _upsert_cache_from_gsak(
     warnings: Optional[list[str]] = None,
 ) -> tuple[Cache, bool]:
     """
-    Insert or update a Cache row from parsed GSAK data (sessions 1+2 scope).
+    Insert or update a Cache row from parsed GSAK data.
 
-    Unlike the GPX importer's ``_upsert_cache``, this only rebuilds
-    Waypoints, Attributes and Logs on re-import — Trackables are left
-    completely untouched, since they are out of scope for now and may
-    already hold real data from an earlier GPX import.
+    Same as the GPX importer's ``_upsert_cache``: Waypoints, Attributes,
+    Logs and (as of #538) Trackables are all rebuilt (delete + recreate) on
+    every re-import of a given cache.
     """
     gc_code = data["gc_code"]
     cid = existing_ids.get(gc_code)
@@ -595,6 +659,7 @@ def _upsert_cache_from_gsak(
         session.query(Waypoint).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         session.query(Attribute).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         session.query(Log).filter_by(cache_id=cache.id).delete(synchronize_session=False)
+        session.query(Trackable).filter_by(cache_id=cache.id).delete(synchronize_session=False)
         cache.waypoint_count = 0
         session.flush()
 
@@ -670,6 +735,17 @@ def _upsert_cache_from_gsak(
             wp_flag=w["wp_flag"],
         ))
     cache.waypoint_count = len(seen_wpt_keys)
+
+    # ── Issue #538: Trackables ──────────────────────────────────────────────
+    trackable_rows = data.get("trackables", [])
+    for t in trackable_rows:
+        session.add(Trackable(
+            cache=cache,
+            name=t["name"],
+            ref=t["ref"],
+            tracking_code=t["tracking_code"],
+        ))
+    cache.trackable_count = len(trackable_rows)
 
     # bulk_insert_mappings below needs a real cache.id — guaranteed for
     # existing caches, but a brand-new cache only gets one on flush.
@@ -787,6 +863,7 @@ def _flush_gsak_batch(
         result.waypoints += cache.waypoint_count
         result.attributes += n_attrs
         result.logs += cache.log_count
+        result.trackables += cache.trackable_count
         if had_corrected:
             result.corrected += 1
         if had_note:
@@ -819,6 +896,7 @@ def _flush_gsak_batch_isolated(
             result.waypoints += cache.waypoint_count
             result.attributes += len(attr_rows)
             result.logs += cache.log_count
+            result.trackables += cache.trackable_count
             if corrected is not None:
                 result.corrected += 1
             if data.get("note_text") is not None:
@@ -837,8 +915,8 @@ def import_gsak_db(
     batch_size: int = 200,
 ) -> GsakImportResult:
     """
-    Import a GSAK ``sqlite.db3`` file directly into OpenSAK (sessions 1+2
-    scope: Caches/CacheMemo/Corrected/Waypoints/WayMemo/Attributes/Logs).
+    Import a GSAK ``sqlite.db3`` file directly into OpenSAK (scope:
+    Caches/CacheMemo/Corrected/Waypoints/WayMemo/Attributes/Logs/Trackables).
 
     Parameters
     ----------

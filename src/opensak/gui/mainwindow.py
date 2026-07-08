@@ -1035,6 +1035,7 @@ class MainWindow(QMainWindow):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.attributes),
                 joinedload(CacheModel.waypoints),
+                joinedload(CacheModel.trackables),
                 joinedload(CacheModel.user_note),
             ).filter_by(gc_code=gc_code).first()
 

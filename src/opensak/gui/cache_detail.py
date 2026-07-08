@@ -299,6 +299,15 @@ class CacheDetailPanel(QWidget):
         attr_layout.addWidget(self._attr_browser)
         self._tabs.addTab(attr_widget, tr("filter_tab_attributes"))
 
+        # ── Issue #538/#546: Trackables tab (name + clickable geocaching.com link) ──
+        tb_widget = QWidget()
+        tb_layout = QVBoxLayout(tb_widget)
+        tb_layout.setContentsMargins(0, 4, 0, 0)
+        self._tb_browser = QTextBrowser()
+        self._tb_browser.setOpenExternalLinks(True)
+        tb_layout.addWidget(self._tb_browser)
+        self._tabs.addTab(tb_widget, tr("col_trackables"))
+
         note_widget = QWidget()
         note_layout = QVBoxLayout(note_widget)
         note_layout.setContentsMargins(0, 4, 0, 0)
@@ -520,7 +529,9 @@ class CacheDetailPanel(QWidget):
         self._add_corrected_btn.setVisible(False)
         self._current_waypoints: list = []
         self._attr_browser.setPlainText("")
-        self._tabs.setTabVisible(5, False)
+        self._tb_browser.setPlainText("")
+        self._tabs.setTabText(5, tr("col_trackables"))
+        self._tabs.setTabVisible(6, False)
         self.waypoints_tab_hidden.emit()
 
     def show_cache(self, cache: Cache) -> None:
@@ -624,7 +635,7 @@ class CacheDetailPanel(QWidget):
         )
 
         # Personal note
-        self._tabs.setTabVisible(5, True)
+        self._tabs.setTabVisible(6, True)
         self._note_editor.setPlainText(
             (cache.user_note.note or "") if cache.user_note else ""
         )
@@ -637,6 +648,9 @@ class CacheDetailPanel(QWidget):
 
         # Attributes
         self._render_attributes(cache)
+
+        # Trackables
+        self._render_trackables(cache)
 
     def _render_logs(self, cache: Cache) -> None:
         logs = sorted(
@@ -719,6 +733,29 @@ class CacheDetailPanel(QWidget):
                 f'<p><span style="color:{colour};font-weight:bold">{symbol}</span> {name}</p>'
             )
         self._attr_browser.setHtml("".join(html))
+
+    def _render_trackables(self, cache: Cache) -> None:
+        # Issue #538/#546: trackables imported via GSAK/GPX, shown with a
+        # clickable coord.info link — same short-link redirect already used
+        # for the GC-code link at the top of this panel.
+        trackables = sorted(cache.trackables, key=lambda t: t.name or "")
+        tab_idx = 5
+        if not trackables:
+            self._tabs.setTabText(tab_idx, tr("col_trackables"))
+            self._tb_browser.setPlainText(tr("detail_no_trackables"))
+            return
+        self._tabs.setTabText(
+            tab_idx, tr("detail_tab_trackables_count", count=len(trackables))
+        )
+        html = []
+        for t in trackables:
+            name = t.name or "?"
+            if t.ref:
+                link = f'<a href="https://coord.info/{t.ref}">{t.ref}</a>'
+                html.append(f'<p>🐛 {name} ({link})</p>')
+            else:
+                html.append(f'<p>🐛 {name}</p>')
+        self._tb_browser.setHtml("".join(html))
 
     def _on_tab_changed(self, idx: int) -> None:
         if idx == 3:

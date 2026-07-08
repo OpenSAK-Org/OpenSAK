@@ -14,10 +14,12 @@ from opensak.gui.dialogs.gsak_import_dialog import GsakImportWorker, GsakImportD
 
 
 def _result(created=1, updated=0, waypoints=0, attributes=0, logs=0, notes=0,
-            note_images_replaced=0, corrected=0, skipped=0, warnings=None, errors=None):
+            note_images_replaced=0, trackables=0, corrected=0, skipped=0,
+            warnings=None, errors=None):
     return SimpleNamespace(
         created=created, updated=updated, waypoints=waypoints, attributes=attributes,
         logs=logs, notes=notes, note_images_replaced=note_images_replaced,
+        trackables=trackables,
         corrected=corrected, skipped=skipped, warnings=warnings or [], errors=errors or [],
     )
 
