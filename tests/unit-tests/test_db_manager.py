@@ -83,14 +83,22 @@ class TestNewDatabase:
 # ── rename ────────────────────────────────────────────────────────────────────
 
 class TestRename:
-    def test_renames_database(self, manager):
-        db = manager.databases[0]
-        manager.rename(db, "NewName")
+    def test_renames_database(self, manager, tmp_path):
+        db_path = tmp_path / "Original.db"
+        db_path.touch()
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", db_path)
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "NewName")
         assert db.name == "NewName"
 
-    def test_renamed_entry_visible_in_list(self, manager):
-        db = manager.databases[0]
-        manager.rename(db, "Visible")
+    def test_renamed_entry_visible_in_list(self, manager, tmp_path):
+        db_path = tmp_path / "Original.db"
+        db_path.touch()
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", db_path)
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "Visible")
         assert any(d.name == "Visible" for d in manager.databases)
 
     def test_rejects_name_already_taken_by_another(self, manager, tmp_path):
@@ -104,6 +112,103 @@ class TestRename:
         original = db.name
         manager.rename(db, original)
         assert db.name == original
+
+    # ── Issue #539 ──────────────────────────────────────────────────────────
+
+    def test_rename_moves_the_physical_file(self, manager, tmp_path):
+        old_path = tmp_path / "Original.db"
+        old_path.write_text("db contents")
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", old_path)
+
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "Renamed")
+
+        assert db.path != old_path
+        assert db.path.exists()
+        assert not old_path.exists()
+        assert db.path.read_text() == "db contents"
+        assert db.path.name == "Renamed.db"
+
+    def test_rename_moves_shm_and_wal_sidecar_files(self, manager, tmp_path):
+        old_path = tmp_path / "Original.db"
+        old_path.touch()
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", old_path)
+
+        shm = Path(str(old_path) + "-shm")
+        wal = Path(str(old_path) + "-wal")
+        shm.write_text("shm")
+        wal.write_text("wal")
+
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "WithSidecars")
+
+        new_shm = Path(str(db.path) + "-shm")
+        new_wal = Path(str(db.path) + "-wal")
+        assert new_shm.exists() and new_shm.read_text() == "shm"
+        assert new_wal.exists() and new_wal.read_text() == "wal"
+        assert not shm.exists()
+        assert not wal.exists()
+
+    def test_rename_rejects_when_target_file_already_exists(self, manager, tmp_path):
+        old_path = tmp_path / "Original.db"
+        old_path.touch()
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", old_path)
+
+        # A stray file already sitting at the path the new name would map to
+        # (e.g. left over from an earlier, unrelated database).
+        (tmp_path / "Taken.db").write_text("someone else's data")
+
+        with pytest.raises(ValueError):
+            manager.rename(db, "Taken")
+        # Original file and name are untouched after the rejected rename.
+        assert db.name == "Original"
+        assert db.path.exists()
+
+    def test_renamed_database_frees_up_old_name_without_reviving_old_content(
+        self, manager, tmp_path
+    ):
+        # The exact #539 repro: rename a database away, then create a brand
+        # new one under the freed-up old name — it must NOT silently reuse
+        # the original (now-moved) file and "come back" with old content.
+        old_path = tmp_path / "MyCaches.db"
+        old_path.write_text("original caches")
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("MyCaches", old_path)
+
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "RenamedAway")
+
+        with patch("opensak.db.database.init_db") as mock_init:
+            def _fake_init_db(db_path):
+                Path(db_path).write_text("")  # simulate a genuinely empty new DB
+            mock_init.side_effect = _fake_init_db
+            new_db = manager.new_database("MyCaches", tmp_path / "MyCaches.db")
+
+        assert new_db.path != db.path
+        assert new_db.path.read_text() == ""
+
+    def test_rename_migrates_column_settings(self, manager, tmp_path):
+        from opensak.gui.dialogs import column_dialog as cd
+
+        old_path = tmp_path / "Original.db"
+        old_path.touch()
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", old_path)
+        manager._active = db  # gør db aktiv så _col_key() bruger dens navn
+
+        with patch("opensak.db.manager.get_db_manager", return_value=manager):
+            cd.set_visible_columns(["gc_code", "name"])
+            cd.set_column_widths({"gc_code": 90})
+
+        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+            manager.rename(db, "RenamedForColumns")
+
+        with patch("opensak.db.manager.get_db_manager", return_value=manager):
+            assert cd.get_visible_columns() == ["gc_code", "name"]
+            assert cd.get_column_widths() == {"gc_code": 90}
 
 
 # ── remove_from_list ──────────────────────────────────────────────────────────

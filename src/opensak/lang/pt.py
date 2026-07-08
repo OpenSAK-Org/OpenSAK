@@ -519,6 +519,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Não é possível mover '{name}': já existe um ficheiro em {path}.",
     "db_err_move_failed": "Não foi possível mover '{name}': {error}",
+    "db_err_target_path_exists": "Já existe um ficheiro para '{name}' em {path}.",
+    "db_err_rename_failed": "Não foi possível renomear '{name}': {error}",
     "db_err_mkdir_failed":          "Não foi possível criar a pasta:\n{path}",
     "db_err_dir_not_found":         "A pasta não existe:\n{path}",
     "db_err_no_write_permission":   "Sem permissão de escrita na pasta:\n{path}",

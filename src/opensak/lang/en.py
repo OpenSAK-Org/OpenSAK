@@ -518,6 +518,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Cannot move '{name}': a file already exists at {path}.",
     "db_err_move_failed": "Could not move '{name}': {error}",
+    "db_err_target_path_exists": "A file for '{name}' already exists at {path}.",
+    "db_err_rename_failed": "Could not rename '{name}': {error}",
     "db_err_mkdir_failed":          "Cannot create folder:\n{path}",
     "db_err_dir_not_found":         "Folder does not exist:\n{path}",
     "db_err_no_write_permission":   "No write permission for folder:\n{path}",

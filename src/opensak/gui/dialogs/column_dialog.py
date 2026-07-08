@@ -72,6 +72,37 @@ ALL_COLUMNS = property(lambda self: get_all_columns()) if False else None  # se 
 ALWAYS_VISIBLE = {"gc_code", "name"}
 
 
+def _safe_db_key(name: str) -> str:
+    """Samme sanitisering som _col_key() bruger til at bygge nøgle-suffixet."""
+    return name.replace(".", "_").replace(" ", "_")
+
+
+def migrate_column_settings_for_rename(old_name: str, new_name: str) -> None:
+    """
+    Flyt gemte kolonneindstillinger (#199) fra den gamle til den nye
+    database-navne-nøgle, når en database omdøbes (#539).
+
+    Uden dette ville et rename få kolonneopsætningen til at "nulstille"
+    (fordi den nu peger på en tom nøgle for det nye navn), mens de gamle
+    indstillinger blev hængende forældreløse under det gamle navns nøgle.
+    """
+    if old_name == new_name:
+        return
+    old_safe = _safe_db_key(old_name)
+    new_safe = _safe_db_key(new_name)
+    if old_safe == new_safe:
+        return  # sanitiseringen gør nøglerne ens selvom navnene ikke er
+
+    store = get_store()
+    for suffix in ("visible", "widths"):
+        old_key = f"columns.{old_safe}.{suffix}"
+        new_key = f"columns.{new_safe}.{suffix}"
+        value = store.get(old_key)
+        if value is not None:
+            store.set(new_key, value)
+            store.delete(old_key)
+
+
 def _col_key(suffix: str) -> str:
     """
     Returner en settings-nøgle der er unik per aktiv database.

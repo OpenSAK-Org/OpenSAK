@@ -519,6 +519,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Kan ikke flytte '{name}': en fil findes allerede på {path}.",
     "db_err_move_failed": "Kunne ikke flytte '{name}': {error}",
+    "db_err_target_path_exists": "Der findes allerede en fil for '{name}' på {path}.",
+    "db_err_rename_failed": "Kunne ikke omdøbe '{name}': {error}",
     "db_err_mkdir_failed":          "Kan ikke oprette mappen:\n{path}",
     "db_err_dir_not_found":         "Mappen eksisterer ikke:\n{path}",
     "db_err_no_write_permission":   "Ingen skriverettigheder til mappen:\n{path}",

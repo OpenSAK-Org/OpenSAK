@@ -522,6 +522,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Kan '{name}' niet verplaatsen: er bestaat al een bestand op {path}.",
     "db_err_move_failed": "Kan '{name}' niet verplaatsen: {error}",
+    "db_err_target_path_exists": "Er bestaat al een bestand voor '{name}' op {path}.",
+    "db_err_rename_failed": "Kan '{name}' niet hernoemen: {error}",
     "db_err_mkdir_failed":          "Kan map niet aanmaken:\n{path}",
     "db_err_dir_not_found":         "Map bestaat niet:\n{path}",
     "db_err_no_write_permission":   "Geen schrijfrechten voor map:\n{path}",

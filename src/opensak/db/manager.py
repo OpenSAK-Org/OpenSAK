@@ -263,9 +263,73 @@ class DatabaseManager:
         self._save_to_settings()
 
     def rename(self, db_info: "DatabaseInfo", new_name: str) -> None:
-        """Omdøb en database (kun navnet)."""
-        if self._find_by_name(new_name) and new_name != db_info.name:
+        """
+        Omdøb en database — både label og den fysiske .db-fil (+ evt.
+        -shm/-wal sidecar-filer).
+
+        Issue #539: rename() opdaterede tidligere KUN db_info.name (label'en
+        i listen) — den fysiske fil blev aldrig flyttet/omdøbt. Det gav to
+        sammenhængende fejl: (a) kolonneopsætning, som gemmes pr. database-
+        navn (#199), pegede pludselig på en tom nøgle og så ud til at være
+        nulstillet, og (b) new_database() udleder filstien deterministisk
+        fra navnet — så en efterfølgende "Ny database" med det gamle (nu
+        "ledige") navn genbrugte uden varsel den samme fysiske fil, som
+        aldrig var blevet flyttet, og "genopstod" med alt det gamle indhold
+        (caches, kolonneopsætning) intakt.
+        """
+        if new_name == db_info.name:
+            return  # ingen ændring
+        if self._find_by_name(new_name):
             raise ValueError(tr("db_err_name_exists", name=new_name))
+
+        old_name = db_info.name
+        old_path = db_info.path
+
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_ " else "_" for c in new_name
+        ).strip()
+        new_path = old_path.parent / f"{safe_name}.db"
+
+        if new_path != old_path:
+            if new_path.exists():
+                raise ValueError(
+                    tr("db_err_target_path_exists", name=new_name, path=str(new_path))
+                )
+
+            # Luk engine FØR filoperationer — undgår låste filer på Windows
+            # (samme mønster som delete_database/move_databases_to).
+            from opensak.db.database import dispose_engine, init_db
+            was_active = (db_info == self._active)
+            dispose_engine(old_path)
+            gc.collect()
+            time.sleep(0.05)
+
+            try:
+                old_path.rename(new_path)
+                for suffix in ("-shm", "-wal"):
+                    side = Path(str(old_path) + suffix)
+                    if side.exists():
+                        side.rename(Path(str(new_path) + suffix))
+            except OSError as e:
+                raise ValueError(
+                    tr("db_err_rename_failed", name=old_name) + f"\n{e}"
+                )
+
+            db_info.path = new_path
+
+            if was_active:
+                # Genåbn på den nye sti så aktiv-tilstanden forbliver konsistent.
+                init_db(db_path=new_path)
+
+        # Flyt evt. gemte kolonneindstillinger (#199) til det nye navn, så
+        # brugeren ikke mister sin kolonneopsætning ved omdøbning. Best-
+        # effort — en fejl her må ikke forhindre selve omdøbningen.
+        try:
+            from opensak.gui.dialogs.column_dialog import migrate_column_settings_for_rename
+            migrate_column_settings_for_rename(old_name, new_name)
+        except Exception:
+            pass
+
         db_info.name = new_name
         self._save_to_settings()
 

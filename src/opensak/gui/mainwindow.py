@@ -747,7 +747,20 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.database_dialog import DatabaseManagerDialog
         dlg = DatabaseManagerDialog(self)
         dlg.database_switched.connect(self._on_database_switched)
+        dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+
+    def _on_database_renamed(self, db_info) -> None:
+        """
+        Kaldes når en database omdøbes i Manage Databases-dialogen (#539).
+
+        En omdøbning skifter ikke hvilken database der vises/redigeres —
+        kun dens navn — så vi genindlæser bevidst kun toolbar-dropdown'en
+        og vinduestitlen (begge viser database-navnet), i modsætning til
+        _on_database_switched som også nulstiller detaljepanel, kort m.v.
+        """
+        self._reload_db_combo()
+        self._update_title()
 
     def _on_database_switched(self, db_info) -> None:
         """Kaldes når brugeren skifter aktiv database."""

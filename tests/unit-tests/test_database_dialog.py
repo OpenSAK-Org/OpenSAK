@@ -266,6 +266,26 @@ class TestManagerDialog:
         dlg._rename_database()
         warn.assert_called_once()
 
+    def test_rename_database_emits_database_renamed(self, dlg, manager, monkeypatch):
+        # Issue #539: toolbar/window title need notifying about a rename
+        # too, not just a switch — otherwise they keep showing the old name.
+        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Renamed", True))
+        emitted = []
+        dlg.database_renamed.connect(lambda db: emitted.append(db))
+        _select(dlg, "Other")
+        dlg._rename_database()
+        assert len(emitted) == 1
+
+    def test_rename_database_value_error_does_not_emit_renamed(self, dlg, manager, monkeypatch):
+        manager.rename.side_effect = ValueError("exists")
+        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Renamed", True))
+        monkeypatch.setattr(dd.QMessageBox, "warning", MagicMock())
+        emitted = []
+        dlg.database_renamed.connect(lambda db: emitted.append(db))
+        _select(dlg, "Other")
+        dlg._rename_database()
+        assert emitted == []
+
     def test_remove_from_list(self, dlg, manager, monkeypatch):
         monkeypatch.setattr(dd.QMessageBox, "question",
                             lambda *a, **k: dd.QMessageBox.StandardButton.Yes)

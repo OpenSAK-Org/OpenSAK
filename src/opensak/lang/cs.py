@@ -519,6 +519,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Nelze přesunout '{name}': soubor na {path} již existuje.",
     "db_err_move_failed": "Nelze přesunout '{name}': {error}",
+    "db_err_target_path_exists": "Soubor pro '{name}' už existuje na {path}.",
+    "db_err_rename_failed": "Nelze přejmenovat '{name}': {error}",
     "db_err_mkdir_failed":          "Nelze vytvořit složku:\n{path}",
     "db_err_dir_not_found":         "Složka neexistuje:\n{path}",
     "db_err_no_write_permission":   "Nemáte oprávnění k zápisu do složky:\n{path}",

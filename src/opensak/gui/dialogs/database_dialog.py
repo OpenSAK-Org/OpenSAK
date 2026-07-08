@@ -117,6 +117,7 @@ class DatabaseManagerDialog(QDialog):
     """
 
     database_switched = Signal(object)   # emits DatabaseInfo
+    database_renamed = Signal(object)    # emits DatabaseInfo — issue #539
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -339,6 +340,11 @@ class DatabaseManagerDialog(QDialog):
             try:
                 self._manager.rename(db, name)
                 self._refresh_list()
+                # Issue #539: toolbar dropdown + window title show the active
+                # database's name and don't otherwise get notified of a
+                # rename (only of a switch) — without this they kept showing
+                # the old name until the user switched databases.
+                self.database_renamed.emit(db)
             except ValueError as e:
                 QMessageBox.warning(self, tr("warning"), str(e))
 
