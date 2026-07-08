@@ -40,7 +40,8 @@ _SCHEMA = [
         FTF INTEGER, UserFlag INTEGER, UserSort INTEGER,
         UserData TEXT, User2 TEXT, User3 TEXT, User4 TEXT,
         FavPoints INTEGER, GcNote TEXT, Elevation REAL, Color TEXT,
-        Guid TEXT, Watch INTEGER, CacheId TEXT, Lock INTEGER, FoundCount INTEGER
+        Guid TEXT, Watch INTEGER, CacheId TEXT, Lock INTEGER, FoundCount INTEGER,
+        IsPremium INTEGER
     )""",
     """CREATE TABLE CacheMemo (
         Code TEXT, LongDescription TEXT, ShortDescription TEXT,
@@ -79,7 +80,7 @@ _DEFAULT_CACHE = dict(
     Found=0, FoundByMeDate="", DNF=0, DNFDate="", FTF=0, UserFlag=0,
     UserSort=0, UserData="", User2="", User3="", User4="",
     FavPoints=3, GcNote="", Elevation=0.0, Color="", Guid="", Watch=0,
-    CacheId="9284799", Lock=0, FoundCount=30,
+    CacheId="9284799", Lock=0, FoundCount=30, IsPremium=0,
 )
 
 
@@ -509,6 +510,37 @@ def test_reimport_overwrites_trackables_from_earlier_gpx_import(db_session, tmp_
 
     import_gsak_db(db, db_session)
     assert db_session.query(Trackable).count() == 0
+
+
+def test_premium_flag_imported_from_gsak_db(db_session, tmp_path):
+    # Issue #541: GSAK's own $d_IsPremium column ("Geocaching.com member
+    # only cache status") was never read by the direct-DB importer, so
+    # premium caches always came in as premium_only=False regardless of
+    # what the source GSAK database said.
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"IsPremium": 1}])
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.premium_only is True
+
+
+def test_non_premium_cache_imported_as_not_premium(db_session, tmp_path):
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"IsPremium": 0}])
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.premium_only is False
+
+
+def test_reimport_updates_premium_flag_not_locked(db_session, tmp_path):
+    # premium_only is a personal/status field (mirrors the GPX importer's
+    # treatment of gsak:IsPremium) — it must update on re-import even
+    # though it isn't in the locked-listing-data field group.
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"IsPremium": 0}])
+    import_gsak_db(db, db_session)
+
+    db2 = _make_gsak_db(tmp_path / "gsak2.db3", caches=[{"IsPremium": 1}])
+    import_gsak_db(db2, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.premium_only is True
 
 
 def test_locked_cache_is_not_overwritten(db_session, tmp_path):

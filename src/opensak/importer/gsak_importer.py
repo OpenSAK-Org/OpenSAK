@@ -587,6 +587,12 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
         "dnf_date":       _d(row["DNFDate"]),
         "first_to_find":  _b(row["FTF"]),
         "user_flag":      _b(row["UserFlag"]),
+        # Issue #541: GSAK's own $d_IsPremium column ("Geocaching.com member
+        # only cache status") was never read here — the GPX importer already
+        # handled the equivalent gsak:IsPremium extension element, but the
+        # direct-DB path silently dropped it, so every GSAK-DB-imported
+        # cache came in as non-premium regardless of the source data.
+        "premium_only":   _b(row["IsPremium"]),
         "user_sort":      row["UserSort"] if row["UserSort"] not in (None, "") else None,
         "user_data_1":    _s(row["UserData"]),
         "user_data_2":    _s(row["User2"]),
@@ -684,7 +690,7 @@ def _upsert_cache_from_gsak(
     # found/DNF/favourite-points state without unlocking the listing data.
     for field in (
         "found", "found_date", "dnf", "dnf_date", "first_to_find",
-        "user_flag", "user_sort",
+        "user_flag", "user_sort", "premium_only",
         "user_data_1", "user_data_2", "user_data_3", "user_data_4",
         "favorite_points",
     ):
