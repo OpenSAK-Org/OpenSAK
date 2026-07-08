@@ -127,7 +127,7 @@ class TestDbCombo:
     def test_open_db_manager(self, seeded_window, monkeypatch):
         monkeypatch.setattr(
             "opensak.gui.dialogs.database_dialog.DatabaseManagerDialog",
-            fake_dialog(signals=("database_switched",)))
+            fake_dialog(signals=("database_switched", "database_renamed")))
         seeded_window._open_db_manager()
 
     def test_open_db_manager_blocked_by_trip(self, seeded_window, monkeypatch):
@@ -143,6 +143,13 @@ class TestDbCombo:
     def test_on_database_switched(self, seeded_window):
         info = SimpleNamespace(name="OtherDB")
         seeded_window._on_database_switched(info)
+
+    def test_on_database_renamed(self, seeded_window):
+        # Issue #539 follow-up: a rename must refresh the db combo/title
+        # without touching detail panel, map, etc. (unlike a real switch).
+        info = SimpleNamespace(name="RenamedDB")
+        seeded_window._on_database_renamed(info)
+        assert "v" in seeded_window.windowTitle()
 
     def test_reload_db_combo(self, seeded_window):
         seeded_window._reload_db_combo()
