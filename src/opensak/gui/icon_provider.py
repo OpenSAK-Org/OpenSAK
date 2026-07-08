@@ -138,8 +138,29 @@ def _read_svg_file(path: Path) -> str | None:
         return None
 
 
+@lru_cache(maxsize=1)
 def _user_icons_dir() -> Path | None:
-    """Sti til brugerens custom-icons mappe (issue #519), eller None ved fejl."""
+    """
+    Sti til brugerens custom-icons mappe (issue #519), eller None ved fejl.
+
+    Issue #540: denne kaldes fra hvert eneste ikon-opslag (cache-type-ikon +
+    found-smiley pr. cache-række, plus de faste UI-ikoner) — dvs. potentielt
+    titusindvis af gange pr. tabel-refresh på en stor database. Uden caching
+    udløser hvert kald hele get_icons_dir() -> get_app_data_dir() ->
+    get_install_dir()-kæden, som laver en fil-eksistens-tjek, en JSON-læsning
+    OG fire separate mkdir()-kald PR. KALD. Det er normalt hurtigt på et
+    almindeligt filsystem, men bliver katastrofalt langsomt når hvert enkelt
+    filsystem-kald bliver opsnappet synkront af en antivirus-minifilter-driver
+    (meget almindeligt for netop mkdir/fil-læsning på Windows) — titusindvis
+    af kald á få millisekunder giver samlet set titusindvis af millisekunder,
+    uden at CPU eller diskaktivitet nogensinde ser høj ud i Task Manager
+    (matcher rapportøren i #540 præcist: lav CPU, lav disk, men alligevel
+    45-60 sekunders "Not Responding" ved skift til/filtrering af en stor
+    database — introduceret med #519, findes ikke i beta.5).
+
+    Mappen ændrer sig ikke i løbet af en kørende session, så det er sikkert
+    at cache resultatet — ligesom _read_svg_file() allerede gør nedenfor.
+    """
     try:
         from opensak.config import get_icons_dir
         return get_icons_dir()
