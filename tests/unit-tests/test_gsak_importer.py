@@ -290,10 +290,10 @@ def test_waypoint_mapping(db_session, tmp_path):
     assert wp.parent_gc_code == "GC1TEST"
 
 
-def test_waypoint_duplicate_prefix_name_is_dropped_not_fatal(db_session, tmp_path):
-    # Real-world edge case found during #469 testing: two waypoints under one
-    # cache sharing prefix+name but distinct cCode. Must not crash the whole
-    # cache's import — the second is dropped with a warning instead.
+def test_waypoint_same_prefix_name_distinct_wp_code_both_imported(db_session, tmp_path):
+    # Issue #536: two waypoints under one cache sharing prefix+name but
+    # distinct cCode must BOTH be imported now (they were previously
+    # incorrectly treated as duplicates and one silently dropped).
     db = _make_gsak_db(
         tmp_path / "gsak.db3",
         waypoints=[
@@ -308,12 +308,38 @@ def test_waypoint_duplicate_prefix_name_is_dropped_not_fatal(db_session, tmp_pat
     result = import_gsak_db(db, db_session)
     assert result.created == 1
     assert result.errors == []
+    assert result.waypoints == 2
+    assert result.warnings == []
+
+    wps = db_session.query(Waypoint).order_by(Waypoint.wp_code).all()
+    assert [w.wp_code for w in wps] == ["RP1TEST", "RP1TEST-2"]
+    assert all(w.prefix == "RP" and w.name == "Right turn" for w in wps)
+
+
+def test_waypoint_duplicate_wp_code_is_dropped_not_fatal(db_session, tmp_path):
+    # A genuine repeated wp_code on one cache (shouldn't normally happen in a
+    # real GSAK database, but defensively handled) is still dropped rather
+    # than crashing the cache's import or violating the DB constraint.
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        waypoints=[
+            {"cParent": "GC1TEST", "cCode": "PK1TEST", "cPrefix": "PK",
+             "cName": "Parking", "cType": "Parking Area",
+             "cLat": "55.58", "cLon": "11.17", "cByuser": 0, "cDate": "", "cFlag": 0},
+            {"cParent": "GC1TEST", "cCode": "PK1TEST", "cPrefix": "PK",
+             "cName": "Parking (alt)", "cType": "Parking Area",
+             "cLat": "55.582", "cLon": "11.172", "cByuser": 0, "cDate": "", "cFlag": 0},
+        ],
+    )
+    result = import_gsak_db(db, db_session)
+    assert result.created == 1
+    assert result.errors == []
     assert result.waypoints == 1
     assert any("dropped duplicate waypoint" in w for w in result.warnings)
 
     wps = db_session.query(Waypoint).all()
     assert len(wps) == 1
-    assert wps[0].wp_code == "RP1TEST"  # first one (by cCode order) wins
+    assert wps[0].name == "Parking"  # first one (by cCode order) wins
 
 
 def test_waymemo_missing_row_does_not_drop_waypoint(db_session, tmp_path):

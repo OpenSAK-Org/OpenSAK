@@ -128,9 +128,11 @@ def test_old_schema_runs_every_migration(tmp_path):
                 "gc_cache_id", "find_count"):
         assert col in cache_cols
     assert "is_corrected" in note_cols
-    # The waypoints rebuild (migration 2) creates the named unique index
-    # (matching the model's constraint name) plus the cache_id index.
-    assert "uq_waypoint_cache_prefix_name" in idx_names
+    # The waypoints rebuild (migration 2, later replaced by migration 21)
+    # creates the named unique index (matching the model's constraint name)
+    # plus the cache_id index.
+    assert "uq_waypoint_cache_wp_code" in idx_names
+    assert "uq_waypoint_cache_prefix_name" not in idx_names
     assert "ix_waypoints_cache_id" in idx_names
     assert row == ("GPS Adventures Maze", "Micro")  # migration 5 + 7 normalisation
 
@@ -140,6 +142,59 @@ def test_old_schema_runs_every_migration(tmp_path):
         assert col in log_cols
 
     assert version == SCHEMA_VERSION
+
+
+def test_waypoint_unique_constraint_wp_code_behaviour(tmp_path):
+    # Issue #536: the (cache_id, wp_code) constraint replacing
+    # (cache_id, prefix, name) — exercised directly on a fresh, current-
+    # schema database (via init_db, so this doesn't depend on the migration
+    # rebuild path, which test_old_schema_runs_every_migration already
+    # covers end-to-end).
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    init_db(db_path=tmp_path / "wp_constraint.db")
+    with get_session() as s:
+        s.add(Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                     latitude=55.5, longitude=11.1))
+        s.commit()
+        cache_id = s.query(Cache).filter_by(gc_code="GC1TEST").one().id
+
+    engine = get_engine()
+    with engine.connect() as c:
+        # Same prefix+name, distinct wp_code — must both be storable (the
+        # #536 scenario itself).
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+            "VALUES (:cid, 'RP', 'Right turn', 'RP1TEST')"
+        ), {"cid": cache_id})
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+            "VALUES (:cid, 'RP', 'Right turn', 'RP1TEST-2')"
+        ), {"cid": cache_id})
+        c.commit()
+
+        # Multiple NULL wp_codes (the GPX-import case) — also fine.
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name) VALUES (:cid, 'PK', 'Parking')"
+        ), {"cid": cache_id})
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name) VALUES (:cid, 'PK', 'Parking')"
+        ), {"cid": cache_id})
+        c.commit()
+
+        count = c.execute(text(
+            "SELECT COUNT(*) FROM waypoints WHERE cache_id=:cid"
+        ), {"cid": cache_id}).scalar()
+        assert count == 4
+
+        # A genuine duplicate wp_code on the same cache is still rejected.
+        with pytest.raises(Exception):
+            c.execute(text(
+                "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+                "VALUES (:cid, 'RP', 'Another name', 'RP1TEST')"
+            ), {"cid": cache_id})
+            c.commit()
 
 
 def test_leftover_favorite_point_column_removed(tmp_path):

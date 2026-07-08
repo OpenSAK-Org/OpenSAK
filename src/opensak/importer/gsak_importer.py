@@ -702,23 +702,28 @@ def _upsert_cache_from_gsak(
         ))
 
     # Waypoints
-    # GSAK data can (rarely) contain two waypoints under one cache sharing
-    # the same prefix+name but a distinct cCode (seen once in 12,600 caches
-    # during #469 testing — two "RP"/"Right turn" reference points). Our
-    # uq_waypoint_cache_prefix_name constraint is (cache_id, prefix, name),
-    # so the second one is dropped here (query is ORDER BY cCode, so this
-    # is deterministic) rather than failing the whole cache's import.
-    seen_wpt_keys: set[tuple[str, Optional[str]]] = set()
+    # Issue #536: dedup by wp_code (GSAK's own per-cache waypoint code,
+    # cCode), matching the uq_waypoint_cache_wp_code constraint — not by
+    # prefix+name, which real GSAK databases can legitimately repeat across
+    # distinct waypoints on the same cache (e.g. several stages a user
+    # happened to name identically). A waypoint with no wp_code is never
+    # treated as a duplicate of another (mirrors SQL's own NULL-is-distinct
+    # behaviour for the unique index) — only a genuine repeated non-empty
+    # wp_code is dropped here (query is ORDER BY cCode, so this is
+    # deterministic) rather than failing the whole cache's import.
+    seen_wpt_codes: set[str] = set()
+    added_wpt_count = 0
     for w in wpt_rows:
-        key = (w["prefix"], w["name"])
-        if key in seen_wpt_keys:
-            if warnings is not None:
-                warnings.append(
-                    f"{gc_code}: dropped duplicate waypoint {w['wp_code']!r} "
-                    f"(prefix+name already used by another waypoint on this cache)"
-                )
-            continue
-        seen_wpt_keys.add(key)
+        code = w["wp_code"]
+        if code is not None:
+            if code in seen_wpt_codes:
+                if warnings is not None:
+                    warnings.append(
+                        f"{gc_code}: dropped duplicate waypoint {code!r} "
+                        f"(wp_code already used by another waypoint on this cache)"
+                    )
+                continue
+            seen_wpt_codes.add(code)
         session.add(Waypoint(
             cache=cache,
             prefix=w["prefix"],
@@ -734,7 +739,8 @@ def _upsert_cache_from_gsak(
             created_by_user=w["created_by_user"],
             wp_flag=w["wp_flag"],
         ))
-    cache.waypoint_count = len(seen_wpt_keys)
+        added_wpt_count += 1
+    cache.waypoint_count = added_wpt_count
 
     # ── Issue #538: Trackables ──────────────────────────────────────────────
     trackable_rows = data.get("trackables", [])

@@ -63,7 +63,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -640,6 +640,78 @@ def _run_migrations(engine: Engine) -> None:
                     f"kolonne — SQLite {sqlite3.sqlite_version} understøtter ikke "
                     "DROP COLUMN (kræver 3.35+). Kontakt hello@opensak.com."
                 )
+
+        # ── Migration 21: waypoints unique constraint on wp_code, not name (#536) ─
+        # GSAK's own uniqueness for a waypoint is per-cache by its own code
+        # (cCode, stored here as wp_code) — not by prefix+name. The
+        # (cache_id, prefix, name) constraint added in Migration 2 was too
+        # strict: real GSAK databases can legitimately have two distinct
+        # waypoints on one cache sharing the same prefix+name (e.g. several
+        # stages a user happened to name identically) but with different
+        # cCode, and those were being silently dropped as "duplicates" on
+        # import (reported by nagisml, #536).
+        #
+        # wp_code is NULL for every GPX-imported waypoint (only the GSAK
+        # importer populates it) — SQLite/SQL treats each NULL as distinct
+        # for UNIQUE purposes, so this constraint imposes no restriction at
+        # all on GPX-sourced waypoints, only on GSAK-sourced ones where
+        # wp_code is genuinely GSAK's own per-cache unique waypoint code.
+        idx_rows_21 = conn.execute(text(
+            "SELECT name, sql FROM sqlite_master "
+            "WHERE type='index' AND tbl_name='waypoints' AND name NOT LIKE 'sqlite_%'"
+        )).fetchall()
+        idx_names_21 = [r[0] for r in idx_rows_21]
+
+        if "uq_waypoint_cache_wp_code" not in idx_names_21:
+            # Preserve every existing index except the old, too-strict unique
+            # constraint we're replacing — rather than hardcoding an assumed
+            # index list, so this is safe even if a database has picked up
+            # extra indexes some other way.
+            keep_indexes = [
+                (name, sql) for name, sql in idx_rows_21
+                if name != "uq_waypoint_cache_prefix_name" and sql
+            ]
+
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            conn.execute(text("""
+                CREATE TABLE waypoints_new (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_id         INTEGER NOT NULL REFERENCES caches(id),
+                    prefix           TEXT,
+                    wp_type          TEXT,
+                    name             TEXT,
+                    description      TEXT,
+                    comment          TEXT,
+                    latitude         REAL,
+                    longitude        REAL,
+                    parent_gc_code   VARCHAR(16),
+                    wp_code          VARCHAR(16),
+                    url              VARCHAR(512),
+                    wp_date          DATETIME,
+                    created_by_user  BOOLEAN NOT NULL DEFAULT 0,
+                    wp_flag          BOOLEAN NOT NULL DEFAULT 0
+                )
+            """))
+            conn.execute(text(
+                "INSERT INTO waypoints_new "
+                "SELECT id, cache_id, prefix, wp_type, name, description, comment, "
+                "latitude, longitude, parent_gc_code, wp_code, url, wp_date, "
+                "created_by_user, wp_flag FROM waypoints"
+            ))
+            conn.execute(text("DROP TABLE waypoints"))
+            conn.execute(text("ALTER TABLE waypoints_new RENAME TO waypoints"))
+            for name, sql in keep_indexes:
+                conn.execute(text(sql))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_waypoint_cache_wp_code "
+                "ON waypoints (cache_id, wp_code)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_waypoints_cache_id ON waypoints (cache_id)"
+            ))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+            conn.commit()
+            print("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

@@ -238,10 +238,17 @@ class Waypoint(Base):
     """
     Additional waypoints belonging to a cache — parking areas, trailheads,
     multi-cache stages, final coordinates, etc.
+
+    Issue #536: unique per (cache_id, wp_code), not (cache_id, prefix, name).
+    wp_code is GSAK's own per-cache waypoint code (cCode) — the real unique
+    identifier — whereas prefix+name can legitimately repeat across distinct
+    waypoints on the same cache. wp_code is only populated by the GSAK
+    importer; GPX-sourced waypoints leave it NULL, which SQL treats as
+    distinct for uniqueness purposes, so this imposes no constraint on them.
     """
     __tablename__ = "waypoints"
     __table_args__ = (
-        UniqueConstraint("cache_id", "prefix", "name", name="uq_waypoint_cache_prefix_name"),
+        UniqueConstraint("cache_id", "wp_code", name="uq_waypoint_cache_wp_code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
