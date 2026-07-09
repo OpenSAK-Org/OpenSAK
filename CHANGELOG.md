@@ -8,6 +8,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.9] — 2026-07-09
+
+> **Beta release** — five fixes: three new bugs plus two carried over from
+> beta.8 real-world testing.
+
+### Fixed
+
+- **Found count under the grid counted found caches, not found logs** (#552)
+  — the footer's yellow "Found" count summed `Cache.found` (a boolean), so a
+  relocatable/multi-visit cache found several times only ever contributed 1.
+  Verified against Mike Wood's real 5,505-cache GSAK database: his own
+  found-type logs (`Found it` + `Attended` + `Webcam Photo Taken`) total
+  5,556, matching GSAK/geocaching.com exactly once the count switched to
+  logs. A new cached `found_log_count` column (computed on import, migration
+  backfills existing databases) drives the total; a `max(count, 1)` safety
+  net means the total never regresses below the old behaviour for users
+  without a configured GC username. Reported by Mike Wood.
+
+- **Filter couldn't be cleared via the toolbar "None" dropdown or Escape**
+  (#553) — a status-bar-triggered filter (e.g. clicking the yellow "Found"
+  count) applies with a UI label that doesn't match any saved profile, so
+  the toolbar dropdown fell back to showing "None" while the filter was
+  still active behind the scenes. Re-selecting "None" from the dropdown
+  didn't change its index, so the clearing signal never fired. Also adds a
+  configurable Escape shortcut to clear the active filter, matching GSAK
+  muscle memory. Reported by Mike Wood.
+
+- **Large Text setting not applied consistently — GC Code column stood out**
+  (#547) — cells coloured for found/owned/archived caches drew their text
+  directly, bypassing the mechanism that applies the "Large" text-size
+  setting, so those GC codes silently rendered at the wrong size while
+  every other cell (and every other column) respected it. Reported by
+  CheminerWill.
+
+- **`new_database()` could silently reopen an orphaned file at the same
+  path** (#539) — residual beta.8 feedback: creating a new database with a
+  previously-used name could silently reopen the old file's caches and
+  column settings instead of starting empty, since the guard rename()
+  already had wasn't applied to database creation. Reported by GeePa67.
+
+- **Premium status (`IsPremium`) not imported from GSAK DB files** (#541) —
+  the direct-DB importer never read GSAK's `Caches.IsPremium` column, so
+  every GSAK-DB-imported cache came in as non-premium regardless of source
+  data; the GPX importer already handled this correctly.
+
+---
+
 ## [1.15.0-beta.8] — 2026-07-08
 
 > **Beta release** — one critical performance fix plus three GSAK Database
