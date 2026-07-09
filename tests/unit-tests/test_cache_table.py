@@ -24,6 +24,7 @@ from opensak.gui.cache_table import (
     _bearing_compass,
     _gc_sort_key,
     _CacheTableHeaderView,
+    get_column_defs,
 )
 from opensak.db.models import Cache, UserNote
 from opensak.utils.types import CoordFormat, DateFormat, TextSize, TEXT_SIZE_MAP
@@ -933,6 +934,83 @@ class TestIconOnlyHeaderView:
                 header.paintSection(painter, QRect(0, 0, width, 24), i)
         painter.end()
 
+    # Issue #556: the icon-only column headers (Corrected/Found/Premium/
+    # Fav. points/Trackables) were hardcoded to 14px regardless of the
+    # user's Text Size setting, making them hard to read at Medium/Large —
+    # feedback from Mike Wood. They now scale with the same "grid_icon"
+    # sizes already used for the type icon in the grid rows.
+    @pytest.mark.parametrize("text_size", [TextSize.SMALL, TextSize.MEDIUM, TextSize.LARGE])
+    def test_header_data_icon_scales_with_text_size(self, model, fake_settings, text_size):
+        fake_settings.text_size = text_size
+        expected = TEXT_SIZE_MAP[text_size]["grid_icon"]
+        for col_id in ("corrected", "found", "premium_only", "favorite_points", "trackables"):
+            section = ALL_COLUMNS.index(col_id)
+            icon = model.headerData(section, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole)
+            sizes = icon.availableSizes()
+            assert sizes, f"{col_id} header icon has no rendered pixmap"
+            assert sizes[0].width() == expected
+            assert sizes[0].height() == expected
+
+    def test_header_data_icon_grows_from_small_to_large(self, model, fake_settings):
+        # Sanity-check the three levels are actually distinct, not just that
+        # each matches TEXT_SIZE_MAP (which would also pass if the map itself
+        # were flattened to one value by mistake).
+        section = ALL_COLUMNS.index("corrected")
+        got = []
+        for text_size in (TextSize.SMALL, TextSize.MEDIUM, TextSize.LARGE):
+            fake_settings.text_size = text_size
+            icon = model.headerData(section, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole)
+            got.append(icon.availableSizes()[0].width())
+        assert got[0] < got[1] < got[2]
+
+    def test_paint_section_scales_icon_with_text_size(self, qtbot, fake_settings):
+        # Smoke-test paintSection() itself (not just headerData()) at each
+        # text size, since it independently reads get_settings().text_size
+        # to size both the icon and the sort arrow.
+        from PySide6.QtGui import QPixmap, QPainter
+        from PySide6.QtCore import QRect
+
+        columns = ["found", "premium_only", "favorite_points", "trackables", "corrected"]
+        header = _CacheTableHeaderView(lambda: columns)
+        header.setSortIndicator(0, Qt.SortOrder.AscendingOrder)  # exercise the arrow path too
+        canvas = QPixmap(400, 40)
+        for text_size in (TextSize.SMALL, TextSize.MEDIUM, TextSize.LARGE):
+            fake_settings.text_size = text_size
+            canvas.fill()
+            painter = QPainter(canvas)
+            for i, col_id in enumerate(columns):
+                header.paintSection(painter, QRect(0, 0, 80, 40), i)
+            painter.end()
+
+    def test_corrected_column_default_width_fits_large_icon_and_arrow(self):
+        # Issue #556: bumped from 40 -> 48px so the Large text-size icon
+        # (26px) plus the scaled sort arrow don't get clipped when the
+        # "corrected" column is sorted at its default width.
+        default_width = get_column_defs()["corrected"][1]
+        icon_size = TEXT_SIZE_MAP[TextSize.LARGE]["grid_icon"]
+        arrow_size = max(7, round(icon_size * 0.64))
+        spacing = 3
+        assert default_width >= icon_size + spacing + arrow_size
+
+
+class TestRefreshVisualsUpdatesHeader:
+    # Issue #556: refresh_visuals() must tell the header its DecorationRole
+    # data changed, or the icon-only headers would keep their old size until
+    # the app was restarted after the user changed the Text Size setting.
+    def test_refresh_visuals_emits_header_data_changed(self, view, fake_settings):
+        view.load_caches([_cache(gc_code="A")])
+        received = []
+        view._model.headerDataChanged.connect(
+            lambda orientation, first, last: received.append((orientation, first, last))
+        )
+        fake_settings.text_size = TextSize.LARGE
+        view.refresh_visuals()
+        assert received, "refresh_visuals() did not emit headerDataChanged"
+        orientation, first, last = received[-1]
+        assert orientation == Qt.Orientation.Horizontal
+        assert first == 0
+        assert last == view._model.columnCount() - 1
+
 
 # ── view ────────────────────────────────────────────────────────────────────────
 
@@ -1248,4 +1326,70 @@ class TestView:
         assert view.verticalHeader().minimumSectionSize() <= smallest
         view.refresh_visuals()
         assert view.verticalHeader().minimumSectionSize() <= smallest
+
+    # Issue #557: at TextSize.LARGE, the icon-only column headers (Corrected/
+    # Found/Premium/Fav. points/Trackables) were visibly clipped — Qt does
+    # not grow a QHeaderView's own height just because headerData() returns
+    # a bigger DecorationRole icon, so the header stayed at its old fixed
+    # height while the icon inside it grew past it. Separately, the cell-
+    # level icons for Corrected/Found/Premium (in the grid, not the header)
+    # were hardcoded to 16px and never followed the Text Size setting at
+    # all — at TextSize.SMALL that made them visibly *bigger* than the
+    # (correctly scaled) 14px header icon above them. Reported by Mike Wood.
+    def test_header_height_grows_with_text_size_and_matches_helper(self, view, fake_settings):
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            assert view.horizontalHeader().height() == ct._header_height_for(size)
+
+    def test_header_height_never_shrinks_below_the_icon_it_contains(self, view, fake_settings):
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            icon_size = TEXT_SIZE_MAP[size]["grid_icon"]
+            assert view.horizontalHeader().height() >= icon_size
+
+    def test_small_header_height_unchanged_from_pre_557_default(self, view, fake_settings):
+        # SMALL's icon size (14px) was already the flat size used everywhere
+        # before #556/#557 — SMALL users should see no header-height change.
+        fake_settings.text_size = TextSize.SMALL
+        view.refresh_visuals()
+        assert view.horizontalHeader().height() == 20
+
+    def test_cell_icons_for_corrected_found_premium_scale_with_text_size(self, view, fake_settings):
+        c = _cache(gc_code="GCFIX", found=True, premium_only=True)
+        c.user_note = _note()  # is_corrected=True by default
+        view.load_caches([c])
+        cols = {col: ALL_COLUMNS.index(col) for col in ("corrected", "found", "premium_only")}
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            expected = TEXT_SIZE_MAP[size]["grid_icon"]
+            for col, col_i in cols.items():
+                idx = view._model.index(0, col_i)
+                icon = view._model.data(idx, Qt.ItemDataRole.DecorationRole)
+                assert icon is not None, f"{col} should have an icon for this cache"
+                got = icon.availableSizes()[0].width()
+                assert got == expected, f"{col} cell icon is {got}px, expected {expected}px at {size}"
+
+    def test_cell_and_header_icons_match_at_every_text_size(self, view, fake_settings):
+        # The concrete symptom reported: at SMALL, the header icon (now
+        # correctly scaled down) looked smaller than the still-fixed-16px
+        # cell icon in the grid below it. Header and cell icon for the same
+        # column must always agree.
+        c = _cache(gc_code="GCFIX2", found=True, premium_only=True)
+        c.user_note = _note()
+        view.load_caches([c])
+        for size in TextSize:
+            fake_settings.text_size = size
+            view.refresh_visuals()
+            for col in ("found", "premium_only", "corrected"):
+                col_i = ALL_COLUMNS.index(col)
+                header_icon = view._model.headerData(
+                    col_i, Qt.Orientation.Horizontal, Qt.ItemDataRole.DecorationRole
+                )
+                cell_icon = view._model.data(
+                    view._model.index(0, col_i), Qt.ItemDataRole.DecorationRole
+                )
+                assert header_icon.availableSizes()[0].width() == cell_icon.availableSizes()[0].width()
 

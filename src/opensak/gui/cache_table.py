@@ -100,7 +100,7 @@ def get_column_defs() -> dict:
         "dnf":          (tr("col_dnf"),               45),
         "premium_only": (tr("col_premium"),           65),
         "archived":     (tr("col_archived"),          70),
-        "corrected":    (tr("col_corrected"),         40),
+        "corrected":    (tr("col_corrected"),         48),
         # ── Issue #84: Latitude og Longitude ──────────────────────────────
         "latitude":     (tr("col_latitude"),         110),
         "longitude":    (tr("col_longitude"),        110),
@@ -692,17 +692,25 @@ class CacheTableModel(QAbstractTableModel):
                 return Qt.AlignmentFlag.AlignCenter
             if role == Qt.ItemDataRole.DecorationRole:
                 col_id = self._columns[section]
+                # Issue #556: header icons for these icon-only columns were
+                # hardcoded to 14px regardless of the user's Text Size setting
+                # (Settings → Appearance), making them hard to read even at
+                # Medium/Large — feedback from Mike Wood. Now scaled with the
+                # same "grid_icon" sizes already used for the type icon in
+                # the grid rows, so header and row icons stay visually
+                # consistent and both respond to the existing setting.
+                icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
                 if col_id == "corrected":
                     # Issue #354: ikon-only header, samme SVG-trekant som kolonnens celler
-                    return get_corrected_coords_icon(14)
+                    return get_corrected_coords_icon(icon_size)
                 if col_id == "found":
-                    return get_found_icon(14)
+                    return get_found_icon(icon_size)
                 if col_id == "premium_only":
-                    return get_premium_icon(14)
+                    return get_premium_icon(icon_size)
                 if col_id == "favorite_points":
-                    return get_favorite_points_icon(14)
+                    return get_favorite_points_icon(icon_size)
                 if col_id == "trackables":
-                    return get_trackable_icon(14)
+                    return get_trackable_icon(icon_size)
         return None
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role=Qt.ItemDataRole.DisplayRole):
@@ -830,12 +838,24 @@ class CacheTableModel(QAbstractTableModel):
         if col == "corrected":
             note = cache.user_note
             if note and note.is_corrected:
-                return get_corrected_coords_icon(16)
+                # Issue #557: was hardcoded to 16px — didn't follow the Text
+                # Size setting at all, so at TextSize.SMALL this cell icon
+                # ended up visibly *bigger* than the (now correctly scaled)
+                # header icon above it. Matches the "grid_icon" size used
+                # for the cache-type icon in the same row.
+                icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+                return get_corrected_coords_icon(icon_size)
             return None
         if col == "found":
-            return get_found_icon(16) if cache.found else None
+            if not cache.found:
+                return None
+            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+            return get_found_icon(icon_size)
         if col == "premium_only":
-            return get_premium_icon(16) if cache.premium_only else None
+            if not cache.premium_only:
+                return None
+            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+            return get_premium_icon(icon_size)
         return None
 
     @staticmethod
@@ -1064,6 +1084,21 @@ class CacheTableModel(QAbstractTableModel):
             self.dataChanged.emit(first, last)
 
 
+# Issue #557: vertical padding added around the header icon to get the
+# horizontal header's fixed height (see _header_height_for() below). 20px
+# for TextSize.SMALL (14px icon) matches the pre-#556 default header height,
+# so SMALL users see no visual change; MEDIUM/LARGE grow from there.
+_HEADER_ICON_VPAD = 6
+
+
+def _header_height_for(text_size: TextSize) -> int:
+    """Fixed horizontal-header height that comfortably fits the icon-only
+    column headers at the given TextSize (issue #557 — Qt does not grow the
+    header's own height just because headerData() returns a bigger icon;
+    the previous flat height clipped the icon at TextSize.LARGE)."""
+    return TEXT_SIZE_MAP[text_size]["grid_icon"] + _HEADER_ICON_VPAD
+
+
 class _CacheTableHeaderView(QHeaderView):
     """Horizontal header for the cache table.
 
@@ -1125,12 +1160,18 @@ class _CacheTableHeaderView(QHeaderView):
 
         col_id = columns[logicalIndex]
         icon_getter = self._HEADER_ICON_GETTERS.get(col_id, get_corrected_coords_icon)
-        icon = icon_getter(14).pixmap(14, 14)
+        # Issue #556: icon size now follows the Text Size setting (same
+        # "grid_icon" scale as the type icon in the grid) instead of a fixed
+        # 14px — the flat size was reported as hard to read. The sort arrow
+        # is scaled proportionally so it stays balanced against the icon at
+        # every size instead of looking oversized/undersized next to it.
+        icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+        icon = icon_getter(icon_size).pixmap(icon_size, icon_size)
         is_sorted = self.sortIndicatorSection() == logicalIndex
 
         arrow = None
         if is_sorted:
-            arrow_size = 9
+            arrow_size = max(7, round(icon_size * 0.64))
             arrow = QPixmap(arrow_size, arrow_size)
             arrow.fill(Qt.GlobalColor.transparent)
             arrow_opt = QStyleOptionHeader()
@@ -1200,6 +1241,7 @@ class CacheTableView(QTableView):
             min(v["row_height"] for v in TEXT_SIZE_MAP.values())
         )
         self.verticalHeader().setDefaultSectionSize(TEXT_SIZE_MAP[text_size]["row_height"])
+        self._apply_header_height()
         self._applying_widths = False
         self._apply_column_widths()
         self.horizontalHeader().setSortIndicatorShown(True)
@@ -1237,6 +1279,14 @@ class CacheTableView(QTableView):
             cache = self._model.cache_at(index.row())
             if cache:
                 self._edit_corrected(cache)
+
+    def _apply_header_height(self) -> None:
+        # Issue #557: see _header_height_for() — Qt's own sizeHint for the
+        # header does not grow just because a section's DecorationRole icon
+        # got bigger, so without this the icon-only headers clip at
+        # TextSize.LARGE. Explicitly fixing the height keeps it in sync.
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        self.horizontalHeader().setFixedHeight(_header_height_for(text_size))
 
     def _apply_column_widths(self) -> None:
         self._applying_widths = True
@@ -1654,7 +1704,15 @@ class CacheTableView(QTableView):
             min(v["row_height"] for v in TEXT_SIZE_MAP.values())
         )
         self.verticalHeader().setDefaultSectionSize(sizes["row_height"])
+        self._apply_header_height()
         self._model.refresh_visuals()
+        # Issue #556: headerData()'s DecorationRole icons are now sized from
+        # TEXT_SIZE_MAP too — tell the header its data changed so Qt
+        # recomputes each icon-only column's sizeHint (and repaints) right
+        # away, instead of only picking up the new size after a restart.
+        last_col = self._model.columnCount() - 1
+        if last_col >= 0:
+            self._model.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, last_col)
 
     def row_count(self) -> int:
         return self._model.rowCount()
