@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Cache verwijderen",
     "shortcut_refresh":             "Lijst vernieuwen",
     "shortcut_filter":              "Filter instellen",
+    "shortcut_clear_filter":        "Filter resetten",
     "shortcut_settings":            "Instellingen",
     "shortcut_gps_export":          "Naar GPS sturen",
     "shortcut_trip_planner":        "Routeplanner",

@@ -401,9 +401,10 @@ class MainWindow(QMainWindow):
         self._act_filter_menu.triggered.connect(self._open_filter_dialog)
         view_menu.addAction(self._act_filter_menu)
 
-        act_clear = QAction(tr("action_clear_filter"), self)
-        act_clear.triggered.connect(self._clear_filter)
-        view_menu.addAction(act_clear)
+        self._act_clear_filter = QAction(tr("action_clear_filter"), self)
+        self._act_clear_filter.setShortcut(QKeySequence("Escape"))
+        self._act_clear_filter.triggered.connect(self._clear_filter)
+        view_menu.addAction(self._act_clear_filter)
 
         view_menu.addSeparator()
 
@@ -598,7 +599,18 @@ class MainWindow(QMainWindow):
         filter_combo_action = QWidgetAction(self)
         filter_combo_action.setDefaultWidget(self._filter_profile_combo)
         tb.addAction(filter_combo_action)
-        self._filter_profile_combo.currentIndexChanged.connect(
+        # issue #553: use activated() rather than currentIndexChanged(). A
+        # status-bar click (_filter_by_status) sets a filter whose label
+        # doesn't match any saved profile, so _populate_filter_profile_combo()
+        # falls back to visually showing "None" (index 0) while a filter is
+        # still active behind the scenes. If the user then explicitly picks
+        # "None" from the dropdown, the index doesn't change (it's already 0),
+        # so currentIndexChanged never fires and the filter is never cleared.
+        # activated() fires on every user selection regardless of whether the
+        # index actually changed, and — unlike currentIndexChanged — it is
+        # never emitted by our own programmatic setCurrentIndex() calls, so
+        # no blockSignals() workaround is needed here.
+        self._filter_profile_combo.activated.connect(
             self._on_filter_profile_combo_changed
         )
         self._populate_filter_profile_combo()
@@ -1288,6 +1300,7 @@ class MainWindow(QMainWindow):
             ("delete_cache",      "shortcut_delete_cache",      [self._act_wp_delete]),
             ("refresh",           "shortcut_refresh",           [self._act_refresh]),
             ("filter",            "shortcut_filter",            [self._act_filter_menu, self._act_filter]),
+            ("clear_filter",      "shortcut_clear_filter",      [self._act_clear_filter]),
             ("settings",          "shortcut_settings",          [self._act_settings]),
             ("gps_export",        "shortcut_gps_export",        [self._act_gps_export]),
             ("trip_planner",      "shortcut_trip_planner",      [self._act_trip_planner]),

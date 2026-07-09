@@ -100,6 +100,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Smazat kešku",
     "shortcut_refresh":             "Obnovit seznam",
     "shortcut_filter":              "Nastavit filtr",
+    "shortcut_clear_filter":        "Zrušit filtr",
     "shortcut_settings":            "Nastavení",
     "shortcut_gps_export":          "Odeslat do GPS",
     "shortcut_trip_planner":        "Plánování trasy",

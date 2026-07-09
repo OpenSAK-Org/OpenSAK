@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtGui import QKeySequence
 
 pytest.importorskip("pytestqt")
 
@@ -747,6 +748,55 @@ class TestFilters:
         seeded_window._filter_profile_combo.addItem("P", userData=Path("/x/p.json"))
         idx = seeded_window._filter_profile_combo.count() - 1
         seeded_window._on_filter_profile_combo_changed(idx)
+
+    def test_status_filter_leaves_combo_showing_none(self, seeded_window):
+        # Regression for #553: a status-bar-triggered filter (e.g. clicking
+        # the yellow "Found" count) applies via _on_filter_applied() with a
+        # translated UI label ("Found") rather than a saved profile name.
+        # _populate_filter_profile_combo() can't find "Found" among the
+        # saved profiles, so it falls back to index 0 ("None") even though a
+        # filter is actively applied behind the scenes.
+        from opensak.filters.engine import FilterSet, GcCodeFilter, SortSpec
+        fs = FilterSet(mode="AND")
+        fs.add(GcCodeFilter("GC12345"))
+        seeded_window._on_filter_applied(fs, SortSpec("name"), "Found")
+        assert seeded_window._filter_profile_combo.currentIndex() == 0
+        assert len(seeded_window._current_filterset) > 0
+
+    def test_filter_profile_combo_uses_activated_not_current_index_changed(
+        self, seeded_window
+    ):
+        # Regression for #553: after a status filter leaves the combo showing
+        # "None" (see test above), the user re-selecting "None" from the
+        # dropdown does not change its index (it's already 0), so
+        # currentIndexChanged never fires and the filter used to stay stuck.
+        # activated() fires on every user selection regardless of whether the
+        # index changed, so it must be the signal driving
+        # _on_filter_profile_combo_changed.
+        from opensak.filters.engine import FilterSet, GcCodeFilter, SortSpec
+        fs = FilterSet(mode="AND")
+        fs.add(GcCodeFilter("GC12345"))
+        seeded_window._on_filter_applied(fs, SortSpec("name"), "Found")
+        assert len(seeded_window._current_filterset) > 0
+        seeded_window._filter_profile_combo.activated.emit(0)
+        assert len(seeded_window._current_filterset) == 0
+        assert seeded_window._active_filter_name == ""
+
+    def test_clear_filter_action_has_escape_shortcut(self, seeded_window):
+        # Regression for #553: Escape should clear the active filter,
+        # matching GSAK muscle memory (Mike Wood's request).
+        assert seeded_window._act_clear_filter.shortcut() == QKeySequence("Escape")
+
+    def test_clear_filter_shortcut_is_registered_and_configurable(self, seeded_window):
+        # The Escape shortcut must go through the same configurable
+        # shortcut-registry as every other shortcut, so it shows up in the
+        # Keyboard Shortcuts dialog and can be remapped by the user.
+        entry = next(
+            e for e in seeded_window._shortcut_registry if e[0] == "clear_filter"
+        )
+        _key, label_key, actions = entry
+        assert label_key == "shortcut_clear_filter"
+        assert seeded_window._act_clear_filter in actions
 
 
 # ── tool/export dialogs ───────────────────────────────────────────────────────

@@ -100,6 +100,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Ta bort cache",
     "shortcut_refresh":             "Uppdatera lista",
     "shortcut_filter":              "Ange filter",
+    "shortcut_clear_filter":        "Återställ filter",
     "shortcut_settings":            "Inställningar",
     "shortcut_gps_export":          "Skicka till GPS",
     "shortcut_trip_planner":        "Reseplanerare",
