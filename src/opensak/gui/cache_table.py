@@ -510,6 +510,18 @@ class GcCodeDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option, index) -> None:
         from PySide6.QtWidgets import QStyle
+        # Issue #547: initStyleOption() populates option.font from the
+        # model's Qt.ItemDataRole.FontRole (see CacheTableModel.data() —
+        # this is where the text-size setting's per-row font, incl. the
+        # "Large" grid point size, comes from). The plain super().paint()
+        # branch below gets this for free, but our custom drawText() branch
+        # for coloured cells (archived/placed/found) does NOT — without this
+        # call, that branch draws with whatever default font the painter
+        # already had, so archived/placed/found GC codes silently ignored
+        # the text-size setting while every other coloured/uncoloured cell
+        # respected it. Safe to call unconditionally: it only enriches
+        # `option` in place and doesn't affect option.rect/state used below.
+        self.initStyleOption(option, index)
         is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
         painter.save()
@@ -536,6 +548,7 @@ class GcCodeDelegate(QStyledItemDelegate):
         else:
             text_color = option.palette.text().color()
 
+        painter.setFont(option.font)
         painter.setPen(text_color)
         painter.drawText(
             text_rect,

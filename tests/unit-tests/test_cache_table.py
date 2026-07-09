@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("pytestqt")
 
 from PySide6.QtCore import Qt, QModelIndex
-from PySide6.QtGui import QPixmap, QPainter
+from PySide6.QtGui import QPixmap, QPainter, QFont
 
 from opensak.gui import cache_table as ct
 from opensak.gui.cache_table import (
@@ -780,6 +780,59 @@ class TestDelegates:
         d = GcCodeDelegate()
         idx = model.index(0, ALL_COLUMNS.index("gc_code"))
         assert d._bg_color(idx) == GcCodeDelegate._COLOR_PLACED
+
+    def test_gc_code_delegate_uses_font_role_for_colored_cells(self, model, fake_settings):
+        """Issue #547: archived/placed/found GC codes were drawn with
+        painter.drawText() using whatever font the painter already had,
+        instead of the model's Qt.ItemDataRole.FontRole (where the "Large"
+        text-size setting's point size comes from — see
+        CacheTableModel.data()). Every other cell got the right size via
+        the default QStyledItemDelegate.paint() path; only the coloured
+        GC Code branch silently ignored the setting."""
+        from PySide6.QtCore import Qt
+        from opensak.utils.types import TextSize
+
+        fake_settings.text_size = TextSize.LARGE
+        c = _cache(gc_code="GCLARGE", found=True, available=True, archived=False)
+        model.load([c])
+        idx = model.index(0, ALL_COLUMNS.index("gc_code"))
+        expected_font = idx.data(Qt.ItemDataRole.FontRole)
+
+        from PySide6.QtWidgets import QStyleOptionViewItem, QStyle
+        from PySide6.QtCore import QRect
+
+        class _RecordingPainter(QPainter):
+            """Records the font point size in effect at each drawText() call.
+
+            A plain assertion on painter.font() *after* paint() returns
+            wouldn't catch a regression here: paint() brackets everything in
+            save()/restore(), which reverts the font back to whatever it was
+            *before* paint() ran — regardless of what was actually used for
+            drawText() internally. Recording at call-time sidesteps that.
+            """
+            def __init__(self, device):
+                super().__init__(device)
+                self.font_sizes_at_draw: list[int] = []
+
+            def drawText(self, *args, **kwargs):
+                self.font_sizes_at_draw.append(self.font().pointSize())
+                return super().drawText(*args, **kwargs)
+
+        pm = QPixmap(80, 24)
+        painter = _RecordingPainter(pm)
+        # Seed the painter with a deliberately wrong/default font, mirroring
+        # what it would have going into paint() in the real table — the bug
+        # was that this default leaked straight through to drawText().
+        wrong_font = QFont()
+        wrong_font.setPointSize(6)
+        painter.setFont(wrong_font)
+        opt = QStyleOptionViewItem()
+        opt.rect = QRect(0, 0, 80, 24)
+
+        GcCodeDelegate().paint(painter, opt, idx)
+        painter.end()
+
+        assert painter.font_sizes_at_draw == [TEXT_SIZE_MAP[TextSize.LARGE]["grid"]]
 
     def test_gc_code_bg_none_when_no_cache(self, model):
         d = GcCodeDelegate()
