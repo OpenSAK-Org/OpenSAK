@@ -79,24 +79,69 @@ class TestNewDatabase:
             b = manager.new_database("B", tmp_path / "B.db")
         assert a.name != b.name
 
+    # ── Issue #539 (follow-up) ────────────────────────────────────────────────
+    # GeePa67's beta.8 feedback: after several rename/remove/delete
+    # experiments, a "New database" could silently reopen an orphaned file
+    # left behind at the derived path — reappearing with old caches and old
+    # column settings under a name the user believes is brand new.
+
+    def test_rejects_when_stray_file_already_exists_at_derived_path(
+        self, manager, tmp_path
+    ):
+        # Simulate an orphaned file left behind by e.g. remove_from_list()
+        # (which intentionally does not delete the physical file) or a
+        # previous rename during testing.
+        stray = tmp_path / "test1.db"
+        stray.write_text("OLD CACHE DATA FROM A PREVIOUS TEST DATABASE")
+
+        with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):
+            with pytest.raises(ValueError):
+                manager.new_database("test1", None)
+
+        # The orphaned file must be left completely untouched.
+        assert stray.read_text() == "OLD CACHE DATA FROM A PREVIOUS TEST DATABASE"
+        assert not any(db.name == "test1" for db in manager.databases)
+
+    def test_rejects_when_explicit_path_already_has_a_file(self, manager, tmp_path):
+        stray = tmp_path / "Reused.db"
+        stray.write_text("someone else's data")
+        with pytest.raises(ValueError):
+            manager.new_database("Reused", stray)
+        assert stray.read_text() == "someone else's data"
+
+    def test_new_database_still_works_after_removing_one_with_same_name(
+        self, manager, tmp_path
+    ):
+        # remove_from_list() deliberately leaves the file on disk, so the
+        # freed-up name must map to a *different* physical file next time.
+        first_path = tmp_path / "Recreate.db"
+        with patch("opensak.db.database.init_db"):
+            first = manager.new_database("Recreate", first_path)
+        first_path.touch()
+        with patch("opensak.db.database.dispose_engine"):
+            manager.remove_from_list(first)
+
+        with pytest.raises(ValueError):
+            manager.new_database("Recreate", first_path)
+
 
 # ── rename ────────────────────────────────────────────────────────────────────
 
 class TestRename:
     def test_renames_database(self, manager, tmp_path):
         db_path = tmp_path / "Original.db"
-        db_path.touch()
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", db_path)
+        db_path.touch()  # simulate init_db() having created the file
         with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
             manager.rename(db, "NewName")
         assert db.name == "NewName"
 
     def test_renamed_entry_visible_in_list(self, manager, tmp_path):
         db_path = tmp_path / "Original.db"
-        db_path.touch()
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", db_path)
+        db_path.touch()  # simulate init_db() having created the file
         with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
             manager.rename(db, "Visible")
         assert any(d.name == "Visible" for d in manager.databases)
@@ -117,9 +162,9 @@ class TestRename:
 
     def test_rename_moves_the_physical_file(self, manager, tmp_path):
         old_path = tmp_path / "Original.db"
-        old_path.write_text("db contents")
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", old_path)
+        old_path.write_text("db contents")  # simulate init_db() writing content
 
         with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
             manager.rename(db, "Renamed")
@@ -132,9 +177,9 @@ class TestRename:
 
     def test_rename_moves_shm_and_wal_sidecar_files(self, manager, tmp_path):
         old_path = tmp_path / "Original.db"
-        old_path.touch()
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", old_path)
+        old_path.touch()  # simulate init_db() having created the file
 
         shm = Path(str(old_path) + "-shm")
         wal = Path(str(old_path) + "-wal")
@@ -153,9 +198,9 @@ class TestRename:
 
     def test_rename_rejects_when_target_file_already_exists(self, manager, tmp_path):
         old_path = tmp_path / "Original.db"
-        old_path.touch()
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", old_path)
+        old_path.touch()  # simulate init_db() having created the file
 
         # A stray file already sitting at the path the new name would map to
         # (e.g. left over from an earlier, unrelated database).
@@ -174,9 +219,9 @@ class TestRename:
         # new one under the freed-up old name — it must NOT silently reuse
         # the original (now-moved) file and "come back" with old content.
         old_path = tmp_path / "MyCaches.db"
-        old_path.write_text("original caches")
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("MyCaches", old_path)
+        old_path.write_text("original caches")  # simulate init_db() writing content
 
         with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
             manager.rename(db, "RenamedAway")
@@ -194,9 +239,9 @@ class TestRename:
         from opensak.gui.dialogs import column_dialog as cd
 
         old_path = tmp_path / "Original.db"
-        old_path.touch()
         with patch("opensak.db.database.init_db"):
             db = manager.new_database("Original", old_path)
+        old_path.touch()  # simulate init_db() having created the file
         manager._active = db  # gør db aktiv så _col_key() bruger dens navn
 
         with patch("opensak.db.manager.get_db_manager", return_value=manager):
@@ -209,6 +254,33 @@ class TestRename:
         with patch("opensak.db.manager.get_db_manager", return_value=manager):
             assert cd.get_visible_columns() == ["gc_code", "name"]
             assert cd.get_column_widths() == {"gc_code": 90}
+
+    def test_rename_logs_warning_when_column_migration_fails(
+        self, manager, tmp_path, caplog
+    ):
+        # #539 follow-up: a failure here must not be swallowed silently —
+        # the rename itself should still succeed, but the failure must be
+        # discoverable in the logs.
+        old_path = tmp_path / "Original.db"
+        with patch("opensak.db.database.init_db"):
+            db = manager.new_database("Original", old_path)
+        old_path.touch()
+
+        with (
+            patch("opensak.db.database.dispose_engine"),
+            patch("opensak.db.database.init_db"),
+            patch(
+                "opensak.gui.dialogs.column_dialog.migrate_column_settings_for_rename",
+                side_effect=RuntimeError("boom"),
+            ),
+            caplog.at_level("WARNING", logger="opensak.db.manager"),
+        ):
+            manager.rename(db, "StillRenamed")
+
+        assert db.name == "StillRenamed"  # rename itself must still succeed
+        assert any(
+            "kunne ikke migrere" in rec.message.lower() for rec in caplog.records
+        )
 
 
 # ── remove_from_list ──────────────────────────────────────────────────────────
@@ -223,9 +295,9 @@ class TestRemoveFromList:
 
     def test_file_is_not_deleted(self, manager, tmp_path):
         db_file = tmp_path / "Keep.db"
-        db_file.touch()
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("Keep", db_file)
+        db_file.touch()  # simulate init_db() having created the file
         with patch("opensak.db.database.dispose_engine"):
             manager.remove_from_list(extra)
         assert db_file.exists()
@@ -241,18 +313,18 @@ class TestRemoveFromList:
 class TestDeleteDatabase:
     def test_removes_entry_from_list(self, manager, tmp_path):
         db_file = tmp_path / "Del.db"
-        db_file.touch()
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("Del", db_file)
+        db_file.touch()  # simulate init_db() having created the file
         with patch("opensak.db.database.dispose_engine"):
             manager.delete_database(extra)
         assert extra not in manager.databases
 
     def test_deletes_file_from_disk(self, manager, tmp_path):
         db_file = tmp_path / "Gone.db"
-        db_file.touch()
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("Gone", db_file)
+        db_file.touch()  # simulate init_db() having created the file
         with patch("opensak.db.database.dispose_engine"):
             manager.delete_database(extra)
         assert not db_file.exists()
@@ -317,9 +389,9 @@ class TestSwitchTo:
 class TestCopyDatabase:
     def test_copies_file_and_adds_entry(self, manager, tmp_path):
         src = tmp_path / "Src.db"
-        src.touch()
         with patch("opensak.db.database.init_db"):
             manager.new_database("Src", src)
+        src.touch()  # simulate init_db() having created the file
         src_info = manager.databases[-1]
         dst = tmp_path / "Dst.db"
         copy = manager.copy_database(src_info, "Dst", dst)
@@ -328,9 +400,9 @@ class TestCopyDatabase:
 
     def test_default_path_uses_app_data_dir(self, manager, tmp_path):
         src = tmp_path / "Src2.db"
-        src.touch()
         with patch("opensak.db.database.init_db"):
             manager.new_database("Src2", src)
+        src.touch()  # simulate init_db() having created the file
         src_info = manager.databases[-1]
         with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):
             copy = manager.copy_database(src_info, "DstDefault")
@@ -338,9 +410,9 @@ class TestCopyDatabase:
 
     def test_rejects_duplicate_name(self, manager, tmp_path):
         src = tmp_path / "CopySrc.db"
-        src.touch()
         with patch("opensak.db.database.init_db"):
             manager.new_database("CopySrc", src)
+        src.touch()  # simulate init_db() having created the file
         src_info = manager.databases[-1]
         with pytest.raises(ValueError):
             manager.copy_database(src_info, "CopySrc")

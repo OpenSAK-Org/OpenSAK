@@ -9,6 +9,7 @@ via settings_store i stedet for QSettings.
 from __future__ import annotations
 
 import gc
+import logging
 import shutil
 import time
 from datetime import datetime
@@ -17,6 +18,8 @@ from typing import Optional
 
 from opensak.lang import tr
 from opensak.settings_store import get_store
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseInfo:
@@ -196,6 +199,19 @@ class DatabaseManager:
 
         path = Path(path)
 
+        # Issue #539 (opfølgning): stien udledes deterministisk af navnet, så
+        # uden dette tjek kunne "New database" stille genbruge en efterladt/
+        # forældreløs fil på samme sti — fx en fil "remove_from_list()"
+        # bevidst har ladet ligge, eller en rest fra en tidligere
+        # rename/delete under test. init_db() bruger CREATE TABLE IF NOT
+        # EXISTS, så en genbrugt fil ville dukke op med sit gamle indhold og
+        # (via navnet) sine gamle kolonneindstillinger, selvom brugeren
+        # forventer en tom database. Afvis eksplicit i stedet for at gætte.
+        if self._find_by_path(path) or path.exists():
+            raise ValueError(
+                tr("db_err_target_path_exists", name=name, path=str(path))
+            )
+
         # Sørg for at mappen eksisterer og er skrivbar
         parent = path.parent
         try:
@@ -323,12 +339,18 @@ class DatabaseManager:
 
         # Flyt evt. gemte kolonneindstillinger (#199) til det nye navn, så
         # brugeren ikke mister sin kolonneopsætning ved omdøbning. Best-
-        # effort — en fejl her må ikke forhindre selve omdøbningen.
+        # effort — en fejl her må ikke forhindre selve omdøbningen, men skal
+        # ikke fejle helt lydløst (#539: gjorde det svært at diagnosticere
+        # om kolonner "gik tabt" pga. denne fejlende, eller slet ikke blev
+        # forsøgt migreret).
         try:
             from opensak.gui.dialogs.column_dialog import migrate_column_settings_for_rename
             migrate_column_settings_for_rename(old_name, new_name)
         except Exception:
-            pass
+            logger.warning(
+                "Kunne ikke migrere kolonneindstillinger ved rename %r -> %r",
+                old_name, new_name, exc_info=True,
+            )
 
         db_info.name = new_name
         self._save_to_settings()
