@@ -163,6 +163,15 @@ class BaseFilter(ABC):
     # Human-readable name used for serialisation and display
     filter_type: str = "base"
 
+    # Whether this filter instance should be counted in the "N active"
+    # badge shown to the user. Defaults to True for every filter; set to
+    # False on a specific instance when it represents baseline app
+    # behaviour the user didn't consciously choose (see AvailabilityFilter
+    # usage in filter_dialog.py._build_filterset() for the motivating case:
+    # hiding archived caches by default). This only affects the display
+    # count — the filter still fully participates in matches()/apply_to_query().
+    counts_as_filter: bool = True
+
     @abstractmethod
     def matches(self, cache: Cache) -> bool:
         """Return True if *cache* passes this filter."""
@@ -1183,6 +1192,22 @@ class FilterSet:
 
     def __len__(self) -> int:
         return len(self._filters)
+
+    def active_count(self) -> int:
+        """Count filters for the "N active" UI badge.
+
+        Like __len__, but skips filters flagged with counts_as_filter=False
+        (baseline app behaviour the user didn't consciously set, e.g. the
+        default "hide archived caches" state — see filter_dialog.py). Nested
+        FilterSets are counted recursively.
+        """
+        total = 0
+        for f in self._filters:
+            if isinstance(f, FilterSet):
+                total += f.active_count()
+            elif getattr(f, "counts_as_filter", True):
+                total += 1
+        return total
 
     def matches(self, cache: Cache) -> bool:
         if not self._filters:

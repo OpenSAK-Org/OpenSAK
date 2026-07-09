@@ -940,8 +940,8 @@ class MainWindow(QMainWindow):
         # Filter name: named profile > generic "Active" > empty (shows None)
         if self._active_filter_name:
             filter_name = self._active_filter_name
-        elif len(self._current_filterset) > 0:
-            filter_name = tr("infobar_filter_active", count=len(self._current_filterset))
+        elif self._current_filterset.active_count() > 0:
+            filter_name = tr("infobar_filter_active", count=self._current_filterset.active_count())
         else:
             filter_name = ""
 
@@ -1154,6 +1154,7 @@ class MainWindow(QMainWindow):
             self._set_clear_filter_active(True)
         elif not self._active_filter_name:
             self._set_clear_filter_active(False)
+        self._update_filter_combo_placeholder()
         min_chars, debounce_ms = self._search_thresholds()
         if text == "":
             # Clearing always fires immediately
@@ -1183,6 +1184,7 @@ class MainWindow(QMainWindow):
         return min_chars, debounce_ms
 
     def _on_quick_filter_changed(self, index: int) -> None:
+        self._update_filter_combo_placeholder()
         self._refresh_cache_list()
 
     # ── Drag & drop ───────────────────────────────────────────────────────────
@@ -1886,6 +1888,48 @@ class MainWindow(QMainWindow):
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
 
+    def _has_unsaved_active_filter(self) -> bool:
+        """True if a filter is currently in effect that isn't a saved profile.
+
+        Covers the three ways a filter can end up applied without going
+        through "select a saved profile": an unsaved Set-filter dialog
+        result, a status-bar count click (issue #270), and the quick GC
+        code / name search boxes or the "Vis" quick-filter dropdown — none
+        of which set _active_filter_name. Used to decide whether the
+        toolbar dropdown's first entry should read "None" or "Active
+        (unsaved)" (Allan/Mike: seeing "None" while a filter is visibly
+        applied — red Clear button, fewer rows — was confusing).
+        """
+        if self._active_filter_name:
+            return False  # a saved profile is selected — not "unsaved"
+        if self._current_filterset.active_count() > 0:
+            return True
+        if hasattr(self, "_search_gc") and hasattr(self, "_search_box"):
+            if self._search_gc.text().strip() or self._search_box.text().strip():
+                return True
+        if hasattr(self, "_quick_filter") and self._quick_filter.currentIndex() != 0:
+            return True
+        return False
+
+    def _update_filter_combo_placeholder(self) -> None:
+        """Refresh only the dropdown's first entry ('None' / 'Active (unsaved)').
+
+        Cheap alternative to _populate_filter_profile_combo() for callers
+        (quick search box, quick-filter dropdown) that fire on every
+        keystroke/selection and shouldn't re-read every saved profile from
+        disk each time. No-op while a saved profile is actually selected —
+        its name stays put.
+        """
+        if not hasattr(self, "_filter_profile_combo"):
+            return
+        if self._filter_profile_combo.currentIndex() != 0:
+            return
+        text = (tr("toolbar_filter_combo_active") if self._has_unsaved_active_filter()
+                else tr("toolbar_filter_combo_none"))
+        self._filter_profile_combo.blockSignals(True)
+        self._filter_profile_combo.setItemText(0, text)
+        self._filter_profile_combo.blockSignals(False)
+
     def _populate_filter_profile_combo(self, select_name: str | None = None) -> None:
         """Genindlæs alle gemte filter-profiler i toolbar-dropdown.
 
@@ -1895,7 +1939,9 @@ class MainWindow(QMainWindow):
         from opensak.filters.engine import FilterProfile
         self._filter_profile_combo.blockSignals(True)
         self._filter_profile_combo.clear()
-        self._filter_profile_combo.addItem(tr("toolbar_filter_combo_none"), userData=None)
+        none_text = (tr("toolbar_filter_combo_active") if self._has_unsaved_active_filter()
+                     else tr("toolbar_filter_combo_none"))
+        self._filter_profile_combo.addItem(none_text, userData=None)
         paths = FilterProfile.list_profiles()
         for path in paths:
             try:

@@ -120,6 +120,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Effacer le filtre",
     "toolbar_filter_combo_tooltip":  "Sélectionner un filtre enregistré",
     "toolbar_filter_combo_none":     "Aucun",
+    "toolbar_filter_combo_active":   "Actif (non enregistré)",
     "toolbar_refresh":              "Rafraîchir",
 
     # ── Status bar ────────────────────────────────────────────────────────────

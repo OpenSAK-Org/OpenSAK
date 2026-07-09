@@ -122,6 +122,118 @@ def test_gc_search_partial_without_gc_prefix(seeded_window, qtbot):
     assert window._cache_table.row_count() == 2
 
 
+# ── Toolbar profile dropdown: "None" vs "Active (unsaved)" ────────────────────
+# Reported by Allan/Mike: the dropdown said "None" while a filter was clearly
+# applied (red Clear button, fewer rows) because it was set via a quick search
+# box / status click rather than a saved profile.
+
+
+def test_dropdown_shows_none_with_no_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+    assert window._filter_profile_combo.currentIndex() == 0
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
+def test_dropdown_shows_active_for_gc_search(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_gc.setText("GC12345")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 1, timeout=1_000)
+
+    assert window._filter_profile_combo.currentIndex() == 0
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_active_for_name_search(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_box.setText("Mystery Cache")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 2, timeout=1_000)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_active_for_quick_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._quick_filter.setCurrentIndex(2)  # Found → not the "All" default
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_reverts_to_none_when_search_cleared(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_gc.setText("GC12345")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 1, timeout=1_000)
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+    window._search_gc.setText("")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == TOTAL, timeout=1_000)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
+def test_dropdown_shows_active_for_unsaved_advanced_filter(seeded_window, qtbot):
+    # An advanced filter applied via the Set-filter dialog without saving it
+    # as a named profile — profile_name == "" reaches _on_filter_applied.
+    from opensak.lang import tr
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_profile_name_for_saved_filter(seeded_window, qtbot, tmp_path, monkeypatch):
+    # A genuinely saved/named profile still shows its own name, not "Active".
+    # (Passing an arbitrary label to _on_filter_applied — as the status-bar
+    # quick filters do — is *not* the same as a saved profile; see the
+    # comment on the combo's `activated` wiring in mainwindow.py.)
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter, FilterProfile
+
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    FilterProfile("Traditional only", fs, SortSpec("name", ascending=True)).save(profiles_dir=tmp_path)
+    monkeypatch.setattr(
+        FilterProfile, "list_profiles",
+        staticmethod(lambda profiles_dir=None: sorted(tmp_path.glob("*.json")))
+    )
+
+    window = seeded_window
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == "Traditional only"
+
+
+def test_dropdown_shows_none_after_clear_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
+    qtbot.wait(50)
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+    window._clear_filter()
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
 # ── FilterDialog (Ctrl+F path) ─────────────────────────────────────────────────
 
 

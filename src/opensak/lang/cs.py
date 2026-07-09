@@ -120,6 +120,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Zrušit filtr",
     "toolbar_filter_combo_tooltip":  "Vybrat uložený filtr",
     "toolbar_filter_combo_none":     "Žádný",
+    "toolbar_filter_combo_active":   "Aktivní (neuloženo)",
     "toolbar_refresh":              "Obnovit",
 
     # ── Status bar ────────────────────────────────────────────────────────────

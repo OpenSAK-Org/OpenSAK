@@ -1085,11 +1085,21 @@ class FilterDialog(QDialog):
 
         if not (avail and unavail and archived):
             # Mindst én er fravalgt — tilføj filter
-            fs.add(AvailabilityFilter(
+            af = AvailabilityFilter(
                 show_avail=avail,
                 show_unavail=unavail,
                 show_archived=archived,
-            ))
+            )
+            if avail and unavail and not archived:
+                # This is exactly the dialog's factory-default state (hide
+                # archived caches, show everything else). It's baseline app
+                # behaviour the user didn't consciously opt into — unlike
+                # every other tab above, where a filter is only added once
+                # the user moves away from a neutral default — so don't let
+                # it inflate the "N active" badge (issue reported by Mike:
+                # setting only a distance filter showed "2 active").
+                af.counts_as_filter = False
+            fs.add(af)
 
         # Afstand
         if self._dist_enabled.isChecked():

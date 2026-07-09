@@ -128,6 +128,35 @@ class TestBuildFilterset:
         dlg._dist_enabled.setChecked(True)
         assert "distance" in _types(dlg._build_filterset())
 
+    def test_default_availability_state_does_not_count(self, dlg):
+        # Mike's report: setting only a distance filter (leaving Available/
+        # Unavailable checked and Archived unchecked, i.e. all defaults)
+        # showed "2 active" instead of "1 active". The default availability
+        # state still adds a real AvailabilityFilter (archived caches must
+        # stay hidden), but it must not count toward the active badge.
+        dlg._dist_enabled.setChecked(True)
+        fs = dlg._build_filterset()
+        assert set(_types(fs)) == {"distance", "availability"}
+        assert len(fs) == 2
+        assert fs.active_count() == 1
+
+    def test_default_availability_state_alone_counts_zero(self, dlg):
+        # Opening the dialog and applying with no changes at all should not
+        # register as "1 active" even though an AvailabilityFilter is
+        # silently present to keep archived caches hidden.
+        fs = dlg._build_filterset()
+        assert _types(fs) == ["availability"]
+        assert fs.active_count() == 0
+
+    def test_explicit_availability_change_still_counts(self, dlg):
+        # A deliberate availability change (e.g. also showing archived
+        # caches) is a real, user-chosen filter and must still count.
+        dlg._archived_cb.setChecked(True)
+        dlg._unavail_cb.setChecked(False)
+        fs = dlg._build_filterset()
+        assert "availability" in _types(fs)
+        assert fs.active_count() == 1
+
     def test_premium_and_trackable_and_corrected(self, dlg):
         dlg._prem_no.setChecked(False)
         dlg._tb_no.setChecked(False)

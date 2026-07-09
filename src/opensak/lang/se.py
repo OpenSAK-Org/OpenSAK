@@ -120,6 +120,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Rensa filter",
     "toolbar_filter_combo_tooltip":  "Välj sparat filter",
     "toolbar_filter_combo_none":     "Inget",
+    "toolbar_filter_combo_active":   "Aktivt (ej sparat)",
     "toolbar_refresh":              "Uppdatera",
 
     # ── Status bar ────────────────────────────────────────────────────────────
