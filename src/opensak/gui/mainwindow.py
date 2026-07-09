@@ -952,7 +952,16 @@ class MainWindow(QMainWindow):
         center_name = s.active_home_name or ""
 
         # Color-coded counts (from filtered caches)
-        found = sum(1 for c in caches if c.found)
+        # Issue #552 (Mike Wood): geocaching.com and GSAK both count found
+        # LOGS in this total, not found CACHES — a relocatable/multi-visit
+        # cache the user has found N times contributes N, not 1. found_log_count
+        # is cached at import time (see count_own_found_logs() in
+        # utils/utils.py). max(..., 1) is a safety net for found=True caches
+        # where found_log_count is 0 — e.g. no gc_username/gc_finder_id
+        # configured, or a PQ import whose 5-log window didn't include the
+        # user's own log — so the count never regresses below the old
+        # cache-counting behaviour.
+        found = sum(max(c.found_log_count, 1) for c in caches if c.found)
         all_in_filter = len(caches)
         inactive = sum(1 for c in caches if c.archived or not c.available)
 

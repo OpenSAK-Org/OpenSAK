@@ -808,6 +808,18 @@ def _upsert_cache_from_gsak(
     cache.log_count = len(seen_log_ids)
     cache.last_log_date = max(log_dates) if log_dates else None
 
+    # ── Issue #552: cached count of the user's own found-type logs ──────────
+    # GSAK databases hold the full log history (unlike a PQ's 5-log window),
+    # so this is the most reliable source for the "found N times" count on
+    # relocatable/multi-visit caches. See count_own_found_logs() for the
+    # finder_id/username matching rules (mirrors found_date/FTF derivation).
+    from opensak.gui.settings import get_settings
+    from opensak.utils.utils import count_own_found_logs
+    _sett = get_settings()
+    cache.found_log_count = count_own_found_logs(
+        log_rows, _sett.gc_finder_id, _sett.gc_username
+    )
+
     # UserNote: corrected coordinates + personal note text (#469 + #472).
     # Always overwritten on import — same rebuild-every-time policy as
     # Waypoints/Attributes/Logs, per Allan's call that a merge/protect-

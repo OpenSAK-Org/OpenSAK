@@ -817,3 +817,129 @@ def test_reimport_overwrites_note_text(db_session, tmp_path):
 
     note = db_session.query(UserNote).one()
     assert note.note == "New note text."
+
+
+# ── found_log_count (issue #552) ──────────────────────────────────────────────
+# Reproduces Mike Wood's report: GCCF79, a relocatable cache he found 25 times,
+# only counted as 1 in the footer's Found total because Cache.found is a
+# boolean. GSAK databases hold full log history (unlike a PQ's 5-log window),
+# so this is the most reliable source for the "found N times" count.
+
+def test_gsak_import_found_log_count_counts_relocatable_cache(db_session, tmp_path):
+    from opensak.gui.settings import get_settings
+    get_settings().gc_finder_id = "1768915"  # matches _DEFAULT_CACHE's OwnerId,
+    # reused here purely as a realistic-looking numeric id for the finder.
+
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+            {"lParent": "GC1TEST", "lLogId": 2, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2021-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+            {"lParent": "GC1TEST", "lLogId": 3, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2022-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.found is True
+    assert cache.found_log_count == 3
+
+
+def test_gsak_import_found_log_count_ignores_other_finders_logs(db_session, tmp_path):
+    from opensak.gui.settings import get_settings
+    get_settings().gc_finder_id = "1768915"
+
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+            {"lParent": "GC1TEST", "lLogId": 2, "lType": "Found it",
+             "lBy": "Some Other Cacher", "lDate": "2020-06-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 99999, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.found_log_count == 1
+
+
+def test_gsak_import_found_log_count_matches_by_username_fallback(db_session, tmp_path):
+    # No gc_finder_id configured — falls back to a normalized username match
+    # (same fallback order as found_date/FTF derivation on the GPX path).
+    from opensak.gui.settings import get_settings
+    get_settings().gc_username = "AB Green"
+
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.found_log_count == 1
+
+
+def test_gsak_import_found_log_count_zero_without_username_configured(db_session, tmp_path):
+    # No gc_username/gc_finder_id configured at all — found_log_count stays
+    # at its default 0. mainwindow.py's footer count falls back to counting
+    # the cache itself (found=True) in this case.
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.found is True
+    assert cache.found_log_count == 0
+
+
+def test_gsak_reimport_updates_found_log_count(db_session, tmp_path):
+    # Re-import must recompute found_log_count, not just accumulate/keep it
+    # stale (mirrors log_count/trackable_count re-import behaviour).
+    from opensak.gui.settings import get_settings
+    get_settings().gc_finder_id = "1768915"
+
+    db1 = _make_gsak_db(
+        tmp_path / "gsak1.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db1, db_session)
+    assert db_session.query(Cache).filter_by(gc_code="GC1TEST").one().found_log_count == 1
+
+    db2 = _make_gsak_db(
+        tmp_path / "gsak2.db3",
+        caches=[{"Found": 1}],
+        logs=[
+            {"lParent": "GC1TEST", "lLogId": 1, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2020-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+            {"lParent": "GC1TEST", "lLogId": 2, "lType": "Found it",
+             "lBy": "AB Green", "lDate": "2022-01-01", "lTime": "", "lLat": "", "lLon": "",
+             "lEncoded": 0, "lownerid": 1768915, "lHasHtml": 0, "lIsowner": 0},
+        ],
+    )
+    import_gsak_db(db2, db_session)
+    assert db_session.query(Cache).filter_by(gc_code="GC1TEST").one().found_log_count == 2

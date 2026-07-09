@@ -923,9 +923,18 @@ def _upsert_cache(
     if found_by_me:
         cache.found = True
         from opensak.gui.settings import get_settings
+        from opensak.utils.utils import count_own_found_logs
         _sett = get_settings()
         gc_username  = (_sett.gc_username  or "").strip().lower()
         gc_finder_id = (_sett.gc_finder_id or "").strip()
+
+        # Issue #552: count of the user's own found-type logs on this cache
+        # (not just whether it's been found at least once) — see
+        # count_own_found_logs() for the matching rules. Only updated
+        # when found_by_me is True, mirroring the found=True-only-not-False
+        # re-import rule above so a PQ re-import that doesn't include this
+        # cache's found logs can't silently reset a known count to 0.
+        cache.found_log_count = count_own_found_logs(logs_data, gc_finder_id, gc_username)
 
         found_log = None
 

@@ -63,7 +63,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -712,6 +712,66 @@ def _run_migrations(engine: Engine) -> None:
             conn.execute(text("PRAGMA foreign_keys=ON"))
             conn.commit()
             print("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
+
+        # ── Migration 22: found_log_count kolonne (issue #552) ───────────────
+        # Cache.found is a boolean ("have I found this cache at least once"),
+        # which undercounts relocatable/multi-visit caches where the same
+        # user can legitimately log a found-type entry more than once —
+        # geocaching.com and GSAK both count found LOGS in the footer total,
+        # not found CACHES. We add the column AND backfill it from existing
+        # logs so users don't have to re-import for the count to appear.
+        #
+        # Backfill matches the same way found_date/FTF are derived elsewhere
+        # (see count_own_found_logs() in utils/utils.py): numeric finder_id
+        # first, falling back to a case-insensitive username comparison
+        # (SQL TRIM only strips leading/trailing whitespace here — the fuller
+        # normalize_geocacher_name() whitespace/GSAK-stats-suffix handling
+        # only applies at import time, not in this one-off backfill). Only
+        # caches already marked found=1 are touched, since that's the only place found_log_count is read (mainwindow.py falls
+        # back to counting the cache itself if found_log_count is 0 but
+        # found=1 — e.g. no username configured, or the matching log simply
+        # isn't present in this database).
+        existing_caches_22 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "found_log_count" not in existing_caches_22:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN found_log_count "
+                "INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+
+            from opensak.gui.settings import get_settings
+            _sett = get_settings()
+            gc_finder_id = (_sett.gc_finder_id or "").strip()
+            gc_username = (_sett.gc_username or "").strip().lower()
+
+            if gc_finder_id or gc_username:
+                result = conn.execute(text("""
+                    UPDATE caches
+                    SET found_log_count = (
+                        SELECT COUNT(*) FROM logs
+                        WHERE logs.cache_id = caches.id
+                          AND logs.log_type IN ('Found it', 'Attended', 'Webcam Photo Taken')
+                          AND (
+                              (:gc_finder_id != '' AND logs.finder_id = :gc_finder_id)
+                              OR (:gc_username != ''
+                                  AND LOWER(TRIM(logs.finder)) = :gc_username)
+                          )
+                    )
+                    WHERE caches.found = 1
+                """), {"gc_finder_id": gc_finder_id, "gc_username": gc_username})
+                conn.commit()
+                print(
+                    "Migration: tilføjede caches.found_log_count og "
+                    f"opdaterede {result.rowcount} caches"
+                )
+            else:
+                print(
+                    "Migration: tilføjede caches.found_log_count "
+                    "(intet gc_username/gc_finder_id sat — springer backfill over)"
+                )
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

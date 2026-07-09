@@ -752,3 +752,87 @@ def test_reimport_updates_trackable_count(tmp_db, tmp_path):
         cache = s.query(Cache).filter_by(gc_code="GC12345").one()
         assert cache.trackable_count == 0
         assert list(cache.trackables) == []
+
+
+# ── found_log_count (issue #552) ──────────────────────────────────────────────
+# Cache.found is a boolean ("have I found this cache at least once"), which
+# undercounts relocatable/multi-visit caches where the same user can
+# legitimately log multiple found-type entries — geocaching.com and GSAK both
+# count found LOGS, not found CACHES, in their totals (Mike Wood's report).
+
+def test_import_found_log_count_counts_relocatable_cache(tmp_db, tmp_path, ftf_username):
+    # A relocatable cache (e.g. GCCF79 in the issue report) the user found
+    # 3 separate times must contribute 3, not 1.
+    gpx = build_gpx(cache_wpt(
+        "GCRELOC1", cache_type="Traditional Cache", sym="Geocache Found", gs_id=45901,
+        logs=[
+            {"id": "45901001", "type": "Found it", "date": "2020-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+            {"id": "45901002", "type": "Found it", "date": "2021-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+            {"id": "45901003", "type": "Found it", "date": "2022-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+        ],
+    ))
+    f = write_gpx(tmp_path, "reloc.gpx", gpx)
+    with get_session() as s:
+        import_gpx(f, s)
+        cache = s.query(Cache).filter_by(gc_code="GCRELOC1").one()
+        assert cache.found is True
+        assert cache.found_log_count == 3
+
+
+def test_import_found_log_count_ignores_other_finders_logs(tmp_db, tmp_path, ftf_username):
+    # Only the current user's own found-type logs count — other finders'
+    # logs on the same (possibly relocatable) cache must not inflate the total.
+    gpx = build_gpx(cache_wpt(
+        "GCRELOC2", cache_type="Traditional Cache", sym="Geocache Found", gs_id=45902,
+        logs=[
+            {"id": "45902001", "type": "Found it", "date": "2020-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+            {"id": "45902002", "type": "Found it", "date": "2020-06-01T00:00:00Z",
+             "finder": "Some Other Cacher", "finder_id": "99999"},
+        ],
+    ))
+    f = write_gpx(tmp_path, "reloc2.gpx", gpx)
+    with get_session() as s:
+        import_gpx(f, s)
+        cache = s.query(Cache).filter_by(gc_code="GCRELOC2").one()
+        assert cache.found_log_count == 1
+
+
+def test_import_found_log_count_counts_across_found_log_types(tmp_db, tmp_path, ftf_username):
+    # Mirrors the found_date fix (#457): webcam/event found-type logs must
+    # count too, not just "Found it".
+    gpx = build_gpx(cache_wpt(
+        "GCRELOC3", cache_type="Webcam Cache", sym="Geocache Found", gs_id=45903,
+        logs=[
+            {"id": "45903001", "type": "Webcam Photo Taken", "date": "2018-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+            {"id": "45903002", "type": "Webcam Photo Taken", "date": "2019-01-01T00:00:00Z",
+             "finder": "AB Green", "finder_id": "12345"},
+        ],
+    ))
+    f = write_gpx(tmp_path, "reloc3.gpx", gpx)
+    with get_session() as s:
+        import_gpx(f, s)
+        cache = s.query(Cache).filter_by(gc_code="GCRELOC3").one()
+        assert cache.found_log_count == 2
+
+
+def test_import_found_log_count_zero_without_username_configured(tmp_db, tmp_path):
+    # No gc_username/gc_finder_id configured — we can't identify the user's
+    # own logs, so found_log_count stays at its default 0 rather than
+    # guessing. mainwindow.py's footer count falls back to counting the
+    # cache itself (found=True) in this case, so nothing regresses.
+    gpx = build_gpx(cache_wpt(
+        "GCNOUSER", cache_type="Traditional Cache", sym="Geocache Found", gs_id=45904,
+        logs=[{"id": "45904001", "type": "Found it", "date": "2022-01-01T00:00:00Z",
+               "finder": "AB Green", "finder_id": "12345"}],
+    ))
+    f = write_gpx(tmp_path, "nouser.gpx", gpx)
+    with get_session() as s:
+        import_gpx(f, s)
+        cache = s.query(Cache).filter_by(gc_code="GCNOUSER").one()
+        assert cache.found is True
+        assert cache.found_log_count == 0

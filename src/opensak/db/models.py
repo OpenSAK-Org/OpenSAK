@@ -171,6 +171,18 @@ class Cache(Base):
     # log_count above). Updated automatically on import in _upsert_cache().
     trackable_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # ── Issue #552: Cached count of the CURRENT USER's own found-type logs ──
+    # `found` above is a boolean ("have I found this cache at least once"),
+    # which undercounts relocatable/multi-visit caches (Locationless-style
+    # moving caches) where the same user can legitimately log "Found it"
+    # more than once. geocaching.com and GSAK both count found LOGS, not
+    # found CACHES, in their totals. Matched the same way found_date/FTF
+    # are derived (finder_id -> gc_finder_id, falling back to finder ->
+    # gc_username), so a cache found N times by the user contributes N here.
+    # Cached as a column for the same noload()-performance reason as
+    # log_count/trackable_count above.
+    found_log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # ── Issue #186: Cached latest log date ───────────────────────────────────
     # Date of the most recent log entry, cached so the UI can display it
     # without loading the noload'ed logs relationship. Updated on import.

@@ -282,6 +282,68 @@ class TestCacheList:
         assert seeded_window._cache_table.row_count() == 1
         assert seeded_window._cache_table.get_all_caches()[0].gc_code == "GC12345"
 
+    def test_found_count_sums_found_log_count_not_found_caches(self, seeded_window):
+        # Regression for #552 (Mike Wood): a relocatable cache found multiple
+        # times must contribute its found_log_count, not just 1.
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+
+        with get_session() as session:
+            cache = session.query(Cache).filter_by(gc_code="GC12345").one()
+            cache.found = True
+            cache.found_log_count = 25  # GCCF79-style relocatable cache
+            session.commit()
+
+        seeded_window._refresh_cache_list()
+        assert seeded_window._info_bar._found_lbl.text() == "25"
+
+    def test_found_count_falls_back_to_one_when_found_log_count_zero(self, seeded_window):
+        # Safety net: found=True but found_log_count is 0 (e.g. no
+        # gc_username/gc_finder_id configured, or the matching log wasn't in
+        # this database) must still contribute 1, never 0 — the count must
+        # never regress below the old cache-counting behaviour.
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+
+        with get_session() as session:
+            cache = session.query(Cache).filter_by(gc_code="GC12345").one()
+            cache.found = True
+            cache.found_log_count = 0
+            session.commit()
+
+        seeded_window._refresh_cache_list()
+        found_text = seeded_window._info_bar._found_lbl.text()
+        assert int(found_text) >= 1
+
+    def test_found_count_ignores_not_found_caches_regardless_of_log_count(
+        self, seeded_window
+    ):
+        # found_log_count on a not-found cache (shouldn't normally happen,
+        # but defence in depth) must not be counted.
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+
+        with get_session() as session:
+            cache = session.query(Cache).filter_by(gc_code="GC12345").one()
+            cache.found = False
+            cache.found_log_count = 5
+            session.commit()
+
+        seeded_window._refresh_cache_list()
+        codes_found = [
+            c.found_log_count for c in seeded_window._cache_table.get_all_caches()
+            if c.gc_code == "GC12345"
+        ]
+        assert codes_found == [5]  # the stray value is still there...
+        # ...but must not have leaked into the footer total for this cache.
+        with get_session() as session:
+            total_found = sum(
+                max(c.found_log_count, 1)
+                for c in session.query(Cache).all()
+                if c.found
+            )
+        assert seeded_window._info_bar._found_lbl.text() == str(total_found)
+
 
 # ── selection slots ───────────────────────────────────────────────────────────
 

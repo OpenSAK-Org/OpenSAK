@@ -209,9 +209,9 @@ def test_leftover_favorite_point_column_removed(tmp_path):
         "INSERT INTO caches (gc_code, name, cache_type, latitude, longitude, "
         "available, archived, premium_only, short_desc_html, long_desc_html, "
         "found, dnf, first_to_find, user_flag, watch, log_count, "
-        "trackable_count, waypoint_count, locked, imported_at) "
+        "trackable_count, waypoint_count, locked, found_log_count, imported_at) "
         "VALUES ('{gc}', 'Test Cache', 'Traditional Cache', 1.0, 2.0, "
-        "1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '2026-01-01')"
+        "1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '2026-01-01')"
     )
 
     # SQLite's ALTER TABLE ADD COLUMN requires a non-null default when the
@@ -243,3 +243,89 @@ def test_leftover_favorite_point_column_removed(tmp_path):
     assert "favorite_points" in cache_cols  # the real, unrelated column stays
     assert row == ("GC1",)  # existing data survived the column drop
     assert version == SCHEMA_VERSION
+
+
+def test_found_log_count_column_added_and_backfilled(tmp_path):
+    # Issue #552: an existing pre-migration-22 database (real logs already
+    # present, just missing the found_log_count column) must get the column
+    # added AND correctly backfilled from existing logs, so users don't have
+    # to re-import for the relocatable-cache count to appear.
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache, Log
+    from opensak.gui.settings import get_settings
+
+    init_db(db_path=tmp_path / "found_log_count.db")
+    with get_session() as s:
+        cache = Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                       latitude=55.5, longitude=11.1, found=True)
+        s.add(cache)
+        s.flush()
+        # Two of the user's own found-type logs (relocatable-cache scenario)
+        # plus one from another finder, which must NOT be counted.
+        s.add(Log(cache_id=cache.id, log_id="L1", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.add(Log(cache_id=cache.id, log_id="L2", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.add(Log(cache_id=cache.id, log_id="L3", log_type="Found it",
+                   finder="Someone Else", finder_id="99999"))
+        s.commit()
+
+    engine = get_engine()
+    get_settings().gc_finder_id = "12345"
+
+    # Simulate a pre-migration-22 database: drop the column we're testing,
+    # then roll the stamped version back so migrations re-run.
+    with engine.connect() as c:
+        c.execute(text("ALTER TABLE caches DROP COLUMN found_log_count"))
+        c.execute(text("PRAGMA user_version = 21"))
+        c.commit()
+
+    _run_migrations(engine)
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        found_log_count = c.execute(text(
+            "SELECT found_log_count FROM caches WHERE gc_code='GC1TEST'"
+        )).scalar()
+        version = c.execute(text("PRAGMA user_version")).scalar()
+
+    assert "found_log_count" in cache_cols
+    assert found_log_count == 2
+    assert version == SCHEMA_VERSION
+
+
+def test_found_log_count_backfill_skipped_without_username_configured(tmp_path):
+    # No gc_username/gc_finder_id configured — the backfill query can't
+    # identify the user's own logs, so it's skipped entirely (rather than
+    # miscounting) and every cache's found_log_count stays at the column's
+    # default 0. mainwindow.py's footer count falls back to counting the
+    # cache itself (found=True) in this case.
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache, Log
+
+    init_db(db_path=tmp_path / "found_log_count_skip.db")
+    with get_session() as s:
+        cache = Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                       latitude=55.5, longitude=11.1, found=True)
+        s.add(cache)
+        s.flush()
+        s.add(Log(cache_id=cache.id, log_id="L1", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.commit()
+
+    engine = get_engine()
+    with engine.connect() as c:
+        c.execute(text("ALTER TABLE caches DROP COLUMN found_log_count"))
+        c.execute(text("PRAGMA user_version = 21"))
+        c.commit()
+
+    _run_migrations(engine)  # gc_username/gc_finder_id left unset
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        found_log_count = c.execute(text(
+            "SELECT found_log_count FROM caches WHERE gc_code='GC1TEST'"
+        )).scalar()
+
+    assert "found_log_count" in cache_cols
+    assert found_log_count == 0
