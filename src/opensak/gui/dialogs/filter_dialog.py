@@ -1085,7 +1085,7 @@ class FilterDialog(QDialog):
 
         if not (avail and unavail and archived):
             # Mindst én er fravalgt — tilføj filter
-            af = AvailabilityFilter(
+            avail_filter = AvailabilityFilter(
                 show_avail=avail,
                 show_unavail=unavail,
                 show_archived=archived,
@@ -1098,8 +1098,8 @@ class FilterDialog(QDialog):
                 # the user moves away from a neutral default — so don't let
                 # it inflate the "N active" badge (issue reported by Mike:
                 # setting only a distance filter showed "2 active").
-                af.counts_as_filter = False
-            fs.add(af)
+                avail_filter.counts_as_filter = False
+            fs.add(avail_filter)
 
         # Afstand
         if self._dist_enabled.isChecked():
