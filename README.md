@@ -6,6 +6,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 ![PySide6](https://img.shields.io/badge/GUI-PySide6-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 ![Status](https://img.shields.io/badge/Status-Stable-brightgreen)
+[![Open Collective backers](https://opencollective.com/opensak/backers/badge.svg)](https://opencollective.com/opensak)
 
 ---
 
@@ -111,7 +112,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ```bash
 # Linux / macOS (from source)
-git clone https://github.com/AgreeDK/opensak.git
+git clone https://github.com/OpenSAK-Org/opensak.git
 cd opensak
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -124,7 +125,7 @@ For Windows, macOS bundles, and AppImage downloads see [docs/installation.md](do
 
 ## Reporting Bugs
 
-Please use [GitHub Issues](https://github.com/AgreeDK/opensak/issues) and include:
+Please use [GitHub Issues](https://github.com/OpenSAK-Org/opensak/issues) and include:
 - Your platform (Linux / Windows / macOS + version)
 - Python version: `python3 --version`
 - The error message from the terminal (if any)
@@ -161,6 +162,17 @@ Please use [GitHub Issues](https://github.com/AgreeDK/opensak/issues) and includ
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+---
+
+## Support OpenSAK
+
+OpenSAK is free and open source, developed in spare time. If it's useful to you,
+consider supporting ongoing development — contributions help cover costs like
+Windows code signing and macOS notarization so releases can be trusted and
+installed without security warnings.
+
+👉 [Support OpenSAK on Open Collective](https://opencollective.com/opensak)
 
 ---
 
