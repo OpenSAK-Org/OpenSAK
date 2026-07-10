@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.10] — 2026-07-10
+
+> **Beta release** — adds a way to support OpenSAK's ongoing costs (code
+> signing, notarization) directly from the app, README, and website, now
+> that the project is fiscally hosted by Open Source Collective.
+
+### Added
+
+- **"Support OpenSAK" menu item** — a new entry in the Help menu opens
+  `opencollective.com/opensak` in the default browser, so donations are one
+  click away without leaving the app. Localized across all 8 languages.
+- **Open Collective links on README and opensak.com** — a backers badge and
+  Support section in the README, plus a Sponsor link in the site nav,
+  footer, and open-source section.
+
+---
+
 ## [1.15.0-beta.9] — 2026-07-09
 
 > **Beta release** — five fixes: three new bugs plus two carried over from
