@@ -495,6 +495,12 @@ class MainWindow(QMainWindow):
         act_open_log.triggered.connect(self._open_log_file)
         help_menu.addAction(act_open_log)
 
+        help_menu.addSeparator()
+
+        act_support = QAction(tr("action_support_opensak"), self)
+        act_support.triggered.connect(self._open_support_page)
+        help_menu.addAction(act_support)
+
         # ── Vis-dropdown i menulinjen ─────────────────────────────────────────
         menubar.addSeparator()
 
@@ -2183,6 +2189,12 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://opensak.com/user-guide.html"))
+
+    def _open_support_page(self) -> None:
+        """Open the Open Collective support/sponsor page in the default browser."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl("https://opencollective.com/opensak"))
 
     def _open_log_file(self) -> None:
         """Åbn logfilen i systemets standard tekstprogram (issue #232)."""

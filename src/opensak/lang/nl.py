@@ -88,6 +88,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Sneltoetsen…",
 
     "action_open_log_file": "Logbestand openen",
+    "action_support_opensak": "♥  OpenSAK steunen…",
     "log_file_not_found": "Logbestand nog niet gevonden: {path}",
 
     # ── Sneltoetsen-dialog ────────────────────────────────────────────────────

@@ -85,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Klávesové zkratky…",
 
     "action_open_log_file": "Otevřít soubor protokolu",
+    "action_support_opensak": "♥  Podpořit OpenSAK…",
     "log_file_not_found": "Soubor protokolu ještě nebyl nalezen: {path}",
 
     # ── Klávesové zkratky dialog ──────────────────────────────────────────────

@@ -85,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Atalhos de teclado…",
 
     "action_open_log_file": "Abrir ficheiro de registo",
+    "action_support_opensak": "♥  Apoiar o OpenSAK…",
     "log_file_not_found": "Ficheiro de registo ainda não encontrado: {path}",
 
     # ── Atalhos de teclado dialog ─────────────────────────────────────────────
