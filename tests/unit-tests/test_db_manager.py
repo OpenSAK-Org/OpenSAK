@@ -29,6 +29,35 @@ def manager(tmp_path, qapp, monkeypatch):
         yield DatabaseManager()
 
 
+@pytest.fixture
+def real_manager(tmp_path, qapp, monkeypatch):
+    """
+    Like `manager`, but init_db is only mocked for the DatabaseManager's own
+    construction (avoiding a real SQLite file for its default database) — not
+    for the whole test body, unlike the `manager` fixture above where the
+    patch stays active for the test's entire duration (it's a generator
+    fixture that yields *inside* the `with` block).
+
+    Needed for tests that must exercise the real SQLAlchemy engine lifecycle
+    (init_db / dispose_engine / get_session), e.g. the #562 regression test
+    below — with `manager`, init_db is a no-op MagicMock for the whole test,
+    so a "fixed" engine-reopen bug would silently pass for the wrong reason.
+    """
+    from opensak import settings_store as ss
+
+    fresh = ss.SettingsStore()
+    fresh._data = {"databases.dir": str(tmp_path)}
+    fresh._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(ss, "_store", fresh)
+
+    with (
+        patch("opensak.db.database.init_db"),
+        patch("opensak.config.get_app_data_dir", return_value=tmp_path),
+    ):
+        mgr = DatabaseManager()
+    return mgr
+
+
 # ── Initialisation ────────────────────────────────────────────────────────────
 
 class TestDatabaseManagerInit:
@@ -523,6 +552,64 @@ class TestMoveDatabasesTo:
         from opensak.settings_store import get_store
         saved_list = get_store().get("databases.list")
         assert any(d["path"] == str(manager.active.path) for d in saved_list)
+
+    def test_active_database_usable_immediately_after_move_no_restart_needed(
+        self, real_manager, tmp_path
+    ):
+        """
+        Regression test: moving the active database used to leave its
+        SQLAlchemy engine disposed but never reopened, so any DB access
+        before an app restart crashed with "Database not initialised — call
+        init_db() first." (hit in practice via mainwindow re-syncing
+        distances right after the Settings dialog closes).
+
+        Uses `real_manager` rather than `manager`: the latter keeps
+        opensak.db.database.init_db mocked out for the whole test (it's a
+        generator fixture that yields *inside* the patch context), so a
+        regression in the real reopen logic would go undetected — the mock
+        would happily "succeed" without ever touching _engine/_SessionLocal.
+        """
+        from opensak.db import database as dbmod
+
+        manager = real_manager
+        new_dir = tmp_path / "new_location"
+        try:
+            # Give the active database a real, valid SQLite file/engine
+            # first — a plain text stand-in wouldn't exercise the actual
+            # re-init path.
+            dbmod.init_db(db_path=manager.active.path)
+            dbmod.dispose_engine(manager.active.path)
+
+            manager.move_databases_to(new_dir, delete_originals=False)
+
+            assert manager.active.path.parent == new_dir
+            with dbmod.get_session():
+                pass  # must not raise RuntimeError("Database not initialised...")
+        finally:
+            # Real engine state is process-global — don't leak it into
+            # whichever test happens to run next.
+            dbmod.dispose_engine()
+
+    def test_move_failure_to_reopen_active_engine_does_not_raise(
+        self, manager, tmp_path
+    ):
+        """A failure to reopen the engine afterwards must not surface as if
+        the (already successful) file move itself had failed."""
+        new_dir = tmp_path / "new_location"
+        manager.active.path.write_text("db content")
+        expected_name = manager.active.path.name
+
+        with (
+            patch("opensak.db.database.dispose_engine"),
+            patch.object(
+                manager, "ensure_active_initialised",
+                side_effect=RuntimeError("simulated failure"),
+            ),
+        ):
+            errors = manager.move_databases_to(new_dir, delete_originals=False)
+
+        assert errors == []  # the move itself still succeeded
+        assert manager.active.path == new_dir / expected_name
 
 
 # ── ensure_active_initialised ─────────────────────────────────────────────────

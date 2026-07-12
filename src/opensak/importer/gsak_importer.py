@@ -92,6 +92,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
@@ -802,7 +803,7 @@ def _upsert_cache_from_gsak(
             log_dates.append(lg["log_date"])
 
     if log_mappings:
-        session.bulk_insert_mappings(Log, log_mappings)
+        session.bulk_insert_mappings(inspect(Log), log_mappings)
 
     # ── Issue #87/#186: cached log_count / last_log_date for fast UI display
     cache.log_count = len(seen_log_ids)

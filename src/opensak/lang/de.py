@@ -330,6 +330,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Fertig stellen",
     "wizard_skip": "Einrichtung überspringen",
     "wizard_step_of": "Schritt {current} von {total}",
+    "wizard_settings_file_exists_title": "Einstellungsdatei existiert bereits",
+    "wizard_settings_file_exists_msg": "Der Ordner \"{path}\" enthält bereits eine opensak.json-Datei, daher wurden Ihre aktuellen Einstellungen nicht dorthin verschoben. Die vorhandene Datei wurde nicht verändert — überprüfen Sie den Ordner bei Bedarf manuell.",
     "settings_group_nominatim":                    "Location refinement",
     "settings_nominatim_cb":                       "Enable online lookup for higher accuracy",
     "settings_nominatim_hint":                     "When enabled, county, state and country data is further refined using OpenStreetMap after the fast offline pass.\n\nNote: requires an internet connection and takes about 1 second per waypoint. A database of 10 000 waypoints takes around 3 hours to fully refine. Leave this off unless you need higher accuracy near administrative boundaries.",

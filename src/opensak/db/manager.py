@@ -403,6 +403,7 @@ class DatabaseManager:
         new_dir.mkdir(parents=True, exist_ok=True)
         errors: list[str] = []
         updated_any = False
+        active_engine_disposed = False
 
         from opensak.db.database import dispose_engine
 
@@ -419,6 +420,8 @@ class DatabaseManager:
                 continue
 
             # Luk engine FØR filoperationer — undgår låste filer på Windows
+            if db_info == self._active:
+                active_engine_disposed = True
             dispose_engine(old_path)
             gc.collect()
             time.sleep(0.05)
@@ -450,6 +453,29 @@ class DatabaseManager:
 
         if updated_any:
             self._save_to_settings()
+
+        if active_engine_disposed:
+            # The loop above disposes the active database's engine before
+            # copying its file (needed to release the file handle, notably
+            # on Windows), but never reopened it — leaving get_session() in
+            # a broken "Database not initialised" state until the app is
+            # restarted. Any code that touches the database before that
+            # restart (e.g. mainwindow re-syncing distances right after the
+            # Settings dialog closes) would crash. Reopen it immediately at
+            # its new path so the app stays usable without a restart.
+            #
+            # Best-effort: the file move itself already succeeded at this
+            # point regardless of what happens here, so a failure to reopen
+            # (e.g. a file handle not yet released) shouldn't be raised as
+            # if the move failed — the caller already shows a "restart
+            # required" notice that covers this case too.
+            try:
+                self.ensure_active_initialised()
+            except Exception:
+                logger.warning(
+                    "Could not reopen the active database engine after "
+                    "moving it — a restart will be required.", exc_info=True,
+                )
 
         return errors
 

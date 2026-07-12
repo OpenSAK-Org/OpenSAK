@@ -32,6 +32,11 @@ class _DB:
 @pytest.fixture(autouse=True)
 def app_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("opensak.config.get_app_data_dir", lambda: tmp_path)
+    # Issue #562: NewDatabaseDialog's default/browse folder is get_db_dir()
+    # (the configured database folder), not get_app_data_dir() (the install
+    # folder) — patch both so tests keep exercising a single, predictable
+    # tmp_path regardless of which one the dialog actually calls.
+    monkeypatch.setattr("opensak.settings_store.get_db_dir", lambda: tmp_path)
     return tmp_path
 
 

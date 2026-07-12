@@ -8,6 +8,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.11] — 2026-07-12
+
+> **Beta release** — fixes the install/database folder migration (#562):
+> changing folders via the setup wizard now actually moves your settings,
+> databases, and custom icons instead of leaving them behind.
+
+### Fixed
+
+- **Changing the install/database folder via the setup wizard didn't move
+  anything** (#562) — re-running the setup wizard (Settings → Advanced →
+  "Run setup wizard again") with a different install and/or database folder
+  only updated the stored *pointers*, never the actual files. Depending on
+  what changed, this could silently reset all settings (opensak.json,
+  including the database list, was left behind in the old install folder),
+  or leave existing databases behind in the old database folder while the
+  app pointed at an empty new one. Fixed:
+  - Settings (opensak.json) now move with the install folder; if the
+    destination already has one, a clear warning explains that nothing was
+    moved instead of failing silently.
+  - Changing the database folder now offers to move existing databases
+    along — same "Move and keep / Move and delete / Skip" choice already
+    used by Settings → Advanced's direct database-folder field.
+  - Moving and deleting the active database used to leave it disposed but
+    never reopened, crashing with "Database not initialised" the moment
+    anything touched the database before the next restart (e.g. closing
+    the Settings dialog). It's now reopened immediately at its new path.
+  - The "New Database" dialog's default/browse folder pointed at the
+    install folder instead of the configured database folder.
+  - Choosing "Move and delete" (or moving the install folder) now also
+    cleans up what's left behind: the old database folder, custom icon
+    packs (#519) and the Geocaching.com OAuth token are moved along, and
+    old folders (including nested ones, e.g. a "Data" folder inside the
+    install folder) are removed once genuinely empty — never forced if
+    anything couldn't be moved.
+
+---
+
 ## [1.15.0-beta.10] — 2026-07-10
 
 > **Beta release** — adds a way to support OpenSAK's ongoing costs (code

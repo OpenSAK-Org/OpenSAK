@@ -333,6 +333,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Voltooien",
     "wizard_skip": "Installatie overslaan",
     "wizard_step_of": "Stap {current} van {total}",
+    "wizard_settings_file_exists_title": "Instellingenbestand bestaat al",
+    "wizard_settings_file_exists_msg": "De map \"{path}\" bevat al een opensak.json-bestand, dus uw huidige instellingen zijn daar niet naartoe verplaatst. Het bestaande bestand is ongewijzigd gelaten — controleer die map eventueel handmatig.",
     "settings_group_nominatim":                    "Locatieverbetering",
     "settings_nominatim_cb":                       "Online opzoeken inschakelen voor hogere nauwkeurigheid",
     "settings_nominatim_hint":                     "Wanneer ingeschakeld, worden gemeente-, provincie- en landgegevens verder verfijnd via OpenStreetMap na de snelle offline stap.\n\nOpmerking: vereist een internetverbinding en duurt ongeveer 1 seconde per waypoint. Een database met 10.000 waypoints duurt ongeveer 3 uur om volledig te verfijnen. Laat dit uit tenzij je hogere nauwkeurigheid nodig hebt nabij administratieve grenzen.",
