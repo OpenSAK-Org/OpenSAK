@@ -626,13 +626,21 @@ class CacheDetailPanel(QWidget):
         # Hint — issue #329: geocaching.com leverer hints i klartekst i
         # moderne PQ'er, men ældre GSAK-eksporter kan stadig indeholde ægte
         # ROT13-kodet tekst. split_hint() gætter hvilken er hvilken og vi
-        # viser altid den skjulte udgave som standard (spoiler-beskyttelse).
+        # viser som standard den skjulte udgave (spoiler-beskyttelse) —
+        # medmindre brugeren har slået "vis hints decoded som standard" til
+        # under Settings (issue #499).
         self._hint_plain, self._hint_cipher = split_hint(cache.encoded_hints or "")
-        self._hint_decoded = False
-        self._decode_btn.setText(tr("detail_decode_btn"))
-        self._hint_browser.setPlainText(
-            self._hint_cipher if self._hint_cipher else tr("detail_no_hint")
-        )
+        self._hint_decoded = get_settings().default_decode_hints
+        if self._hint_decoded:
+            self._hint_browser.setPlainText(
+                self._hint_plain if self._hint_plain else tr("detail_no_hint")
+            )
+            self._decode_btn.setText(tr("detail_encode_btn"))
+        else:
+            self._hint_browser.setPlainText(
+                self._hint_cipher if self._hint_cipher else tr("detail_no_hint")
+            )
+            self._decode_btn.setText(tr("detail_decode_btn"))
 
         # Personal note
         self._tabs.setTabVisible(6, True)

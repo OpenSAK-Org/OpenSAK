@@ -756,7 +756,16 @@ class TestFilters:
 
     def test_set_clear_filter_active(self, seeded_window):
         seeded_window._set_clear_filter_active(True)
+        assert seeded_window._btn_clear_filter.isEnabled()
+        # Issue #559: the button previously had no visible hover feedback
+        # when active, making it look non-interactive compared to the rest
+        # of the toolbar. Assert the hover rule now exists.
+        assert ":hover" in seeded_window._btn_clear_filter.styleSheet()
+
         seeded_window._set_clear_filter_active(False)
+        assert not seeded_window._btn_clear_filter.isEnabled()
+        # No hover rule while inactive — it's deliberately non-interactive.
+        assert ":hover" not in seeded_window._btn_clear_filter.styleSheet()
 
     def test_clear_filter(self, seeded_window):
         seeded_window._clear_filter()

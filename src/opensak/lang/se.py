@@ -291,6 +291,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Liten",
     "settings_text_size_medium":    "Medel",
     "settings_text_size_large":     "Stor",
+    "settings_default_decode_hints_cb": "Visa tips avkodade som standard",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",
     "settings_language_label":      "Språk:",

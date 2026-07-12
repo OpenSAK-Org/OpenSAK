@@ -1872,9 +1872,17 @@ class MainWindow(QMainWindow):
         """Sæt klar-filter knappens farve og tilstand — rød når aktiv, grå når inaktiv."""
         self._btn_clear_filter.setEnabled(active)
         if active:
+            # Issue #559: knappen havde tidligere kun en diskret ændring i
+            # tekstfarve ved mouseover og intet baggrunds-/ramme-respons —
+            # i modsætning til alle andre aktive værktøjslinje-knapper, som
+            # viser en tydelig hover-highlight. Tilføjet en rødtonet
+            # baggrund + afrundede hjørner ved hover, så knappen ser
+            # klikbar ud på linje med resten. Ingen hover-regel i "inaktiv"
+            # grenen nedenfor — der er den bevidst ikke-interaktiv.
             self._btn_clear_filter.setStyleSheet(
-                "QPushButton { color: #d32f2f; font-size: 14px; font-weight: bold; border: none; }"
-                "QPushButton:hover { color: #b71c1c; }"
+                "QPushButton { color: #d32f2f; font-size: 14px; font-weight: bold; "
+                "border: none; border-radius: 4px; }"
+                "QPushButton:hover { color: #b71c1c; background-color: rgba(211, 47, 47, 0.12); }"
             )
         else:
             self._btn_clear_filter.setStyleSheet(

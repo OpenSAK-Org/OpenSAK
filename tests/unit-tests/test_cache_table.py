@@ -1097,16 +1097,41 @@ class TestView:
         view.load_caches([_cache(gc_code="A")])
         called = []
         monkeypatch.setattr(view, "_edit_corrected", lambda c: called.append(c.gc_code))
+        opened = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url: opened.append(url))
         idx = view._model.index(0, ALL_COLUMNS.index("corrected"))
         view._on_double_clicked(idx)
         assert called == ["A"]
+        assert opened == []  # corrected column keeps its own behaviour, not the browser
 
-    def test_double_click_other_column_noop(self, view, monkeypatch):
+    def test_double_click_other_column_opens_browser(self, view, monkeypatch):
+        # Issue #471: double-clicking anywhere on a cache row (except the
+        # corrected/flag columns) opens the cache on geocaching.com.
         view.load_caches([_cache(gc_code="A")])
-        called = []
-        monkeypatch.setattr(view, "_edit_corrected", lambda c: called.append(c))
+        edit_called = []
+        monkeypatch.setattr(view, "_edit_corrected", lambda c: edit_called.append(c))
+        opened = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url: opened.append(url))
         view._on_double_clicked(view._model.index(0, ALL_COLUMNS.index("name")))
-        assert called == []
+        assert edit_called == []
+        assert opened == ["https://coord.info/A"]
+
+    def test_double_click_flag_column_does_not_open_browser(self, view, monkeypatch):
+        # Flag/first-to-find/locked columns already toggle on a single
+        # click (mousePressEvent) — a double-click there must not also pop
+        # a browser window open, which would be surprising.
+        view.load_caches([_cache(gc_code="A")])
+        opened = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url: opened.append(url))
+        for col_id in ("user_flag", "first_to_find", "locked"):
+            view._on_double_clicked(view._model.index(0, ALL_COLUMNS.index(col_id)))
+        assert opened == []
+
+    def test_double_click_invalid_index_noop(self, view, monkeypatch):
+        opened = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url: opened.append(url))
+        view._on_double_clicked(view._model.index(-1, -1))  # must not raise
+        assert opened == []
 
     def test_copy_to_clipboard(self, view):
         view._copy_to_clipboard("hello")

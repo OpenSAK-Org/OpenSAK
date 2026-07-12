@@ -292,6 +292,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Lille",
     "settings_text_size_medium":    "Mellem",
     "settings_text_size_large":     "Stor",
+    "settings_default_decode_hints_cb": "Vis hints dekodet som standard",
     "settings_group_language":      "Sprog / Language",
     "settings_language_label":      "Sprog:",
     "settings_language_hint":       "Ændring træder i kraft ved næste opstart",

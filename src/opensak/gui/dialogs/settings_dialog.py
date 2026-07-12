@@ -243,6 +243,12 @@ class SettingsDialog(QDialog):
         text_size_row.addStretch()
         disp_layout.addLayout(text_size_row)
 
+        # Issue #499: default hints to their decoded (plain-text) state
+        # instead of always starting hidden behind the ROT13-style spoiler
+        # protection — some users always want to see the hint immediately.
+        self._decode_hints_cb = QCheckBox(tr("settings_default_decode_hints_cb"))
+        disp_layout.addWidget(self._decode_hints_cb)
+
         layout.addWidget(disp_group)
 
         # ── Udseende (tema) ───────────────────────────────────────────────────
@@ -976,6 +982,7 @@ class SettingsDialog(QDialog):
         self._date_format.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._text_size.findData(s.text_size)
         self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
+        self._decode_hints_cb.setChecked(s.default_decode_hints)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -1016,6 +1023,7 @@ class SettingsDialog(QDialog):
         s.coord_format      = self._coord_format.currentData()
         s.date_format       = self._date_format.currentData()
         s.text_size         = self._text_size.currentData()
+        s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()

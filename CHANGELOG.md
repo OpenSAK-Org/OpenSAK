@@ -8,6 +8,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.12] — 2026-07-13
+
+> **Beta release** — a handful of small quality-of-life improvements
+> (#471, #499, #546, #559).
+
+### Added
+
+- **Double-click a cache row to open it on geocaching.com** (#471) —
+  matches GSAK's behaviour. Double-clicking the corrected-coordinates
+  column still opens the coordinate editor as before; double-clicking the
+  flag/first-to-find/locked columns (which already toggle on a single
+  click) does not also open a browser window.
+- **Option to show hints decoded by default** (#499) — new checkbox under
+  Settings → Display. Off by default (hints still start hidden, unchanged
+  behaviour) — turn it on to skip the extra click every time.
+
+### Fixed
+
+- **Dynamic map zoomed out to show the whole world for caches with
+  hidden-coordinate waypoints** (#546) — waypoints with 0/0 coordinates
+  (e.g. a finale left hidden after a GSAK import) are now ignored when
+  auto-fitting the map to a cache's waypoints, instead of being included
+  in the zoom bounds.
+- **Clear-filter button (✕) didn't show a hover highlight** (#559) — it
+  looked non-interactive compared to the rest of the toolbar. It now
+  highlights on hover when active, same as before when inactive.
+
+---
+
 ## [1.15.0-beta.11] — 2026-07-12
 
 > **Beta release** — fixes the install/database folder migration (#562):

@@ -322,6 +322,12 @@ function showWaypointMarkers(waypointsJson) {
     clearWaypointMarkers();
     var wps = JSON.parse(waypointsJson);
     wps.forEach(function(wp) {
+        // Issue #546: hidden/unset coordinates come through as 0/0 (e.g.
+        // finale waypoints with hidden coords after a GSAK import) — a
+        // marker at null-island is never meaningful, and including it in
+        // the bounds below made the map zoom out to show the whole world
+        // instead of the cache's actual waypoints.
+        if (!wp.lat || !wp.lon) return;
         var icon = L.divIcon({
             className: '',
             html: '<div class="waypoint-marker">' + wp.prefix + '</div>',

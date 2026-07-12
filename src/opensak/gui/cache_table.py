@@ -1271,14 +1271,25 @@ class CacheTableView(QTableView):
         super().mousePressEvent(event)
 
     def _on_double_clicked(self, index) -> None:
-        """Dobbeltklik på corrected-kolonnen åbner koordinatdialogen direkte."""
+        """
+        Dobbeltklik på corrected-kolonnen åbner koordinatdialogen direkte.
+
+        Issue #471: dobbeltklik alle andre steder i en cache-række åbner nu
+        cachen på geocaching.com (samme adfærd som GSAK) — undtagen på
+        user_flag/first_to_find/locked-kolonnerne, som allerede har deres
+        egen single-click-toggle via mousePressEvent ovenfor; et
+        dobbeltklik der også åbnede browseren dér ville være overraskende.
+        """
         if not index.isValid():
             return
         col = self._model._columns[index.column()]
+        cache = self._model.cache_at(index.row())
+        if not cache:
+            return
         if col == "corrected":
-            cache = self._model.cache_at(index.row())
-            if cache:
-                self._edit_corrected(cache)
+            self._edit_corrected(cache)
+        elif col not in ("user_flag", "first_to_find", "locked"):
+            webbrowser.open(f"https://coord.info/{cache.gc_code}")
 
     def _apply_header_height(self) -> None:
         # Issue #557: see _header_height_for() — Qt's own sizeHint for the

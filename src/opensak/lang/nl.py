@@ -294,6 +294,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Klein",
     "settings_text_size_medium":    "Gemiddeld",
     "settings_text_size_large":     "Groot",
+    "settings_default_decode_hints_cb": "Hints standaard gedecodeerd tonen",
     "settings_date_format_locale":  "OS-landinstelling",
     "settings_group_language":      "Taal",
     "settings_language_label":      "Taal:",
