@@ -214,7 +214,16 @@ class FilterDialog(QDialog):
         self._attr_boxes: dict[int, tuple] = {}
         # Startsstørrelse: 70% af skærm, aldrig større end 1000x850
         from PySide6.QtWidgets import QApplication
-        screen = QApplication.primaryScreen()
+        # Issue #580: brugte tidligere altid QApplication.primaryScreen(),
+        # så filter-vinduet konsekvent åbnede på den primære skærm — også
+        # når selve OpenSAK-vinduet kørte på en sekundær skærm i en
+        # multi-monitor-opsætning. Brug i stedet skærmen forældrevinduet
+        # (hovedvinduet) rent faktisk er på, ligesom Settings-dialogen og
+        # de øvrige undervinduer allerede gør (de har ingen tilsvarende
+        # override og følger derfor naturligt forælderens skærm).
+        screen = parent.screen() if parent is not None else None
+        if screen is None:
+            screen = QApplication.primaryScreen()
         if screen:
             rect = screen.availableGeometry()
             w = min(1000, int(rect.width()  * 0.70))

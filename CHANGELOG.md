@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.13] — 2026-07-13
+
+> **Beta release** — fixes the Filter window ignoring which monitor
+> OpenSAK is on (#580).
+
+### Fixed
+
+- **Filter window always opened on the primary monitor** (#580), even
+  when OpenSAK itself was running on a secondary display — reported on
+  both macOS and Linux dual-monitor setups. The dialog centred itself
+  using `QApplication.primaryScreen()` unconditionally instead of the
+  screen its parent (the main window) was actually on. It now opens on
+  the same monitor as the main window, matching Settings and the other
+  sub-windows.
+
+---
+
 ## [1.15.0-beta.12] — 2026-07-13
 
 > **Beta release** — a handful of small quality-of-life improvements

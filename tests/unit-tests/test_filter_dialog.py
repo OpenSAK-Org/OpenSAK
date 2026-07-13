@@ -42,6 +42,50 @@ def dlg(qtbot):
     return d
 
 
+# ── multi-monitor positioning (#580) ─────────────────────────────────────────
+
+class TestScreenPositioning:
+    def test_uses_parent_screen_not_primary(self, qtbot, monkeypatch):
+        # Issue #580: on a multi-monitor setup, the filter dialog always
+        # opened on the primary screen instead of whichever screen the main
+        # window (its parent) was actually on.
+        from PySide6.QtCore import QRect
+        from PySide6.QtWidgets import QWidget
+
+        primary_screen = MagicMock()
+        primary_screen.availableGeometry.return_value = QRect(0, 0, 1920, 1080)
+        secondary_screen = MagicMock()
+        secondary_screen.availableGeometry.return_value = QRect(1920, 0, 1920, 1080)
+
+        import PySide6.QtWidgets as _qtw
+        monkeypatch.setattr(_qtw.QApplication, "primaryScreen", staticmethod(lambda: primary_screen))
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        parent.screen = lambda: secondary_screen  # PySide6 QWidget instances allow this
+
+        d = FilterDialog(parent=parent)
+        qtbot.addWidget(d)
+
+        assert not primary_screen.availableGeometry.called
+        assert secondary_screen.availableGeometry.called
+        # Centred within the secondary screen's bounds (x >= 1920), not the
+        # primary screen's (x in [0, 1920)).
+        assert d.pos().x() >= 1920
+
+    def test_falls_back_to_primary_screen_without_a_parent(self, qtbot, monkeypatch):
+        from PySide6.QtCore import QRect
+        primary_screen = MagicMock()
+        primary_screen.availableGeometry.return_value = QRect(0, 0, 1920, 1080)
+        import PySide6.QtWidgets as _qtw
+        monkeypatch.setattr(_qtw.QApplication, "primaryScreen", staticmethod(lambda: primary_screen))
+
+        d = FilterDialog(parent=None)
+        qtbot.addWidget(d)
+
+        assert primary_screen.availableGeometry.called
+
+
 # ── helper widgets ──────────────────────────────────────────────────────────────
 
 class TestHelperWidgets:
