@@ -8,6 +8,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.14] — 2026-07-13
+
+> **Beta release** — settings could fail to save with a Windows-only
+> "Access is denied" error right after boot or an update (#574).
+
+### Fixed
+
+- **"Access is denied" crash saving settings on Windows** (#574) —
+  reported happening the first time OpenSAK is opened after rebooting
+  Windows or updating to a new version; retrying (closing the error and
+  reopening OpenSAK) always worked. The atomic settings write
+  (opensak.json) renames a temp file into place; on Windows that rename
+  can transiently fail if something outside OpenSAK — antivirus
+  real-time scanning, Windows Search indexing, or roaming-profile/OneDrive
+  sync of `AppData\Roaming` — briefly holds the file open right after
+  it's written. The write now retries a few times with a short backoff
+  before giving up, instead of crashing on the very first attempt.
+
+---
+
 ## [1.15.0-beta.13] — 2026-07-13
 
 > **Beta release** — fixes the Filter window ignoring which monitor

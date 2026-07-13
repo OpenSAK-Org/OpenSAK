@@ -1,6 +1,7 @@
 # tests/unit-tests/test_settings_store.py — SettingsStore persistence tests.
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -350,3 +351,53 @@ class TestBootstrapAndInstallDir:
         data = json.loads(bootstrap.read_text(encoding="utf-8"))
         assert data["other"] == "value"
         assert "install_dir" in data
+
+
+# ── _atomic_write retry on transient Windows file-lock (#574) ──────────────
+
+class TestAtomicWriteRetry:
+    def test_succeeds_normally_without_any_retry(self, tmp_path):
+        path = tmp_path / "opensak.json"
+        ss._atomic_write(path, {"a": 1})
+        assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1}
+
+    def test_retries_and_succeeds_after_transient_lock(self, tmp_path, monkeypatch):
+        # Issue #574: WinError 5 (Access is denied) on the rename, e.g. from
+        # antivirus/indexer/roaming-profile-sync briefly holding the file
+        # open right after boot or an update. Simulate it failing twice,
+        # then succeeding on the third attempt.
+        path = tmp_path / "opensak.json"
+        real_replace = Path.replace
+        calls = {"n": 0}
+
+        def flaky_replace(self, target):
+            calls["n"] += 1
+            if calls["n"] <= 2:
+                raise PermissionError("[WinError 5] Access is denied")
+            return real_replace(self, target)
+
+        monkeypatch.setattr(Path, "replace", flaky_replace)
+        monkeypatch.setattr(ss.time, "sleep", lambda *_a: None)  # don't slow the test down
+
+        ss._atomic_write(path, {"a": 1})
+
+        assert calls["n"] == 3
+        assert json.loads(path.read_text(encoding="utf-8")) == {"a": 1}
+
+    def test_gives_up_after_all_retries_exhausted_and_cleans_up_temp_file(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "opensak.json"
+
+        def always_fails(self, target):
+            raise PermissionError("[WinError 5] Access is denied")
+
+        monkeypatch.setattr(Path, "replace", always_fails)
+        monkeypatch.setattr(ss.time, "sleep", lambda *_a: None)
+
+        with pytest.raises(PermissionError):
+            ss._atomic_write(path, {"a": 1})
+
+        assert not path.exists()
+        # The temp file must not be left behind after giving up.
+        assert list(tmp_path.iterdir()) == []
