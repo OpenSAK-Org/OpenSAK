@@ -2288,6 +2288,9 @@ class MainWindow(QMainWindow):
         )
         msg.setTextFormat(Qt.TextFormat.RichText)
         btn_open = msg.addButton(tr("update_open_releases"), QMessageBox.ButtonRole.AcceptRole)
+        # More visible spot for supporting the project than the Help menu
+        # alone, which users who never open Help would otherwise never see.
+        btn_support = msg.addButton(tr("action_support_opensak"), QMessageBox.ButtonRole.HelpRole)
         btn_skip = msg.addButton(tr("update_skip_version"), QMessageBox.ButtonRole.DestructiveRole)
         msg.addButton(tr("update_later"), QMessageBox.ButtonRole.RejectRole)
         msg.setIcon(QMessageBox.Icon.Information)
@@ -2300,4 +2303,6 @@ class MainWindow(QMainWindow):
         elif clicked == btn_skip:
             from opensak.gui.settings import get_settings
             get_settings().updates_skipped_version = latest_tag
+        elif clicked == btn_support:
+            self._open_support_page()
 

@@ -10,6 +10,7 @@ pytest.importorskip("pytestqt")
 
 import opensak.gui.icon as icon_mod
 from opensak.gui.mainwindow import MainWindow
+from opensak.lang import tr
 
 # Captured before conftest's autouse fixture no-ops them on the class.
 _REAL_INITIAL_LOAD = MainWindow._initial_load
@@ -1081,6 +1082,66 @@ class TestAboutUpdates:
         from opensak.gui.settings import get_settings
         get_settings().updates_skipped_version = "v1.2.3"
         seeded_window._on_update_available("v1.2.3", "http://x", manual=False)
+
+    def _click_update_dialog_button(self, monkeypatch, button_text):
+        """Simulate clicking a specific button by its (translated) text."""
+        def _clicked(self):
+            for btn in self.buttons():
+                if btn.text() == button_text:
+                    return btn
+            raise AssertionError(f"no button with text {button_text!r} found")
+
+        monkeypatch.setattr(icon_mod.QMessageBox, "exec", lambda self: None)
+        monkeypatch.setattr(icon_mod.QMessageBox, "clickedButton", _clicked)
+
+    def test_on_update_available_open_releases_opens_url(self, seeded_window, monkeypatch):
+        opened = []
+        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+        self._click_update_dialog_button(monkeypatch, tr("update_open_releases"))
+
+        seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
+
+        assert opened == ["http://example.com/release"]
+
+    def test_on_update_available_skip_sets_skipped_version(
+        self, seeded_window, monkeypatch, iso_settings
+    ):
+        from opensak.gui.settings import get_settings
+        self._click_update_dialog_button(monkeypatch, tr("update_skip_version"))
+
+        seeded_window._on_update_available("v9.9.9", "http://x", manual=True)
+
+        assert get_settings().updates_skipped_version == "v9.9.9"
+
+    def test_on_update_available_support_button_opens_support_page(
+        self, seeded_window, monkeypatch
+    ):
+        # New "Support OpenSAK" button on the update-available dialog:
+        # a more visible spot than the Help menu, which users who never
+        # open Help would otherwise never see.
+        calls = []
+        monkeypatch.setattr(seeded_window, "_open_support_page", lambda: calls.append(True))
+        self._click_update_dialog_button(monkeypatch, tr("action_support_opensak"))
+
+        seeded_window._on_update_available("v9.9.9", "http://x", manual=True)
+
+        assert calls == [True]
+
+    def test_on_update_available_support_button_does_not_skip_or_open_releases(
+        self, seeded_window, monkeypatch, iso_settings
+    ):
+        # Clicking Support must not also record a skipped version or open
+        # the release page — it's an independent, non-committal action.
+        from opensak.gui.settings import get_settings
+        opened = []
+        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+        monkeypatch.setattr(seeded_window, "_open_support_page", lambda: None)
+        self._click_update_dialog_button(monkeypatch, tr("action_support_opensak"))
+
+        seeded_window._on_update_available("v9.9.9", "http://x", manual=True)
+
+        assert opened == []
+        assert get_settings().updates_skipped_version != "v9.9.9"
 
     def test_on_update_available_changelog_link_uses_tag_not_branch(
         self, seeded_window, monkeypatch

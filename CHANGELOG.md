@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.15] — 2026-07-13
+
+> **Beta release** — the "Support OpenSAK" link is now also on the
+> update-available dialog, not just the Help menu.
+
+### Added
+
+- **"Support OpenSAK" button on the new-version dialog** — until now the
+  only way to find OpenSAK's Open Collective funding page was the Help
+  menu, which many users never open. It's now also offered right on the
+  "a new version is available" popup, alongside "Open Releases" and
+  "Skip this version". Clicking it opens the Open Collective page without
+  affecting the update decision — you can still choose to update, skip,
+  or decide later afterwards.
+
+---
+
 ## [1.15.0-beta.14] — 2026-07-13
 
 > **Beta release** — settings could fail to save with a Windows-only
