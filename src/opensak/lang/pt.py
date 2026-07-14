@@ -304,7 +304,7 @@ STRINGS: dict[str, str] = {
     "settings_gc_home_location_save":              "Guardar localização de casa",
     "settings_hp_home_protected_hint":             "A localização de casa só pode ser alterada em Perfil Geocaching",
     "setup_welcome_title":                         "Bem-vindo ao OpenSAK",
-    "setup_welcome_msg":                           "Por favor defina o seu nome e localização de casa.\\n\\nAbrir Definições agora?",
+    "setup_welcome_msg":                           "Por favor defina o seu nome e localização de casa.\n\nAbrir Definições agora?",
     "setup_open_settings":                         "Abrir Definições",
 
     "wizard_window_title": "Configuração do OpenSAK",

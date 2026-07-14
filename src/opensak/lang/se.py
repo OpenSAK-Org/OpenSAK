@@ -304,7 +304,7 @@ STRINGS: dict[str, str] = {
     "settings_gc_home_location_save":              "Spara hemort",
     "settings_hp_home_protected_hint":             "Hemorten kan bara ändras under Geocaching-profil",
     "setup_welcome_title":                         "Välkommen till OpenSAK",
-    "setup_welcome_msg":                           "Ange ditt användarnamn och hemort för bästa upplevelse.\\n\\nÖppna inställningar nu?",
+    "setup_welcome_msg":                           "Ange ditt användarnamn och hemort för bästa upplevelse.\n\nÖppna inställningar nu?",
     "setup_open_settings":                         "Öppna inställningar",
 
     "wizard_window_title": "OpenSAK-installation",

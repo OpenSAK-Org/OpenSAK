@@ -96,6 +96,23 @@ def test_no_duplicate_keys(lang_file):
     assert found_strings_dict, f"Could not find STRINGS dictionary in {lang_file.name}"
 
 
+@pytest.mark.parametrize("lang_file", [ref_file] + lang_files, ids=[REFERENCE_LANG] + lang_ids)
+def test_no_double_escaped_newlines(lang_file):
+    """
+    Regression test: writing "\\\\n" (a literal backslash followed by "n")
+    in a language file's source instead of "\\n" (an actual newline escape)
+    shows up in the UI as a raw "\n" instead of a line break. Reported on
+    Facebook for German; turned out to also affect Danish, French, Dutch,
+    Portuguese, Czech and Swedish — only English was unaffected.
+    """
+    strings = load_strings(lang_file)
+    offending = [k for k, v in strings.items() if isinstance(v, str) and "\\n" in v]
+    assert not offending, (
+        f"{lang_file.stem} has a literal backslash-n (double-escaped newline) "
+        f"in: {sorted(offending)}"
+    )
+
+
 def test_no_globally_redundant_values():
     """No two keys should share the same translation value across ALL supported languages.
 
