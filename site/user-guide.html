@@ -505,7 +505,7 @@
 
   <div class="nav-section-heading">Export</div>
   <a href="#gps">Send to GPS</a>
-  <a href="#file-export">File Export (GPX/LOC)</a>
+  <a href="#file-export">File Export (GPX/LOC/GGZ)</a>
   <a href="#kml">Export to Google Maps (KML)</a>
   <a href="#trip-planner">Trip Planner</a>
 
@@ -671,6 +671,11 @@ python run.py</code></pre>
         <tr><td>LOC</td><td><code>.loc</code></td><td>Lightweight coordinate-only format</td></tr>
       </tbody>
     </table>
+
+    <h3>Importing from a GSAK Database</h3>
+    <p>Switching from GSAK? You don't have to re-download everything as GPX first. <strong>File → Import from GSAK Database…</strong> reads a GSAK backup ZIP or a raw <code>sqlite.db3</code> file directly, bringing in caches, waypoints, attributes, corrected coordinates, personal notes, trackables, and your <strong>full log history</strong> — not capped the way a GPX/PQ export is.</p>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Re-importing the same GSAK database is safe — it works the same way as a GPX re-import. Notes containing GSAK's embedded local images are replaced with <code>[image: filename.ext]</code> placeholders, since those files live on your old machine and can't travel with the database.</div></div>
+
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -702,7 +707,7 @@ python run.py</code></pre>
     <div class="callout note"><div class="callout-icon">ℹ️</div><div>Cache names appear in <strong>bold</strong> when the cache has child waypoints — see the Waypoints tab in the <a href="#detail-panel">Cache Detail Panel</a>.</div></div>
 
     <h3>Clicking a Cache</h3>
-    <p>Clicking a row selects the cache: the detail panel updates to show its full information, and the map pans to its pin.</p>
+    <p>Clicking a row selects the cache: the detail panel updates to show its full information, and the map pans to its pin. <strong>Double-clicking</strong> a row opens the cache on geocaching.com in your browser — the same as GSAK.</p>
 
     <h3>Right-Click Context Menu</h3>
     <p>Right-clicking a cache in the list shows:</p>
@@ -731,6 +736,7 @@ python run.py</code></pre>
         <tr><td>Hidden date</td><td>Date cache was placed</td></tr>
         <tr><td>Placed by</td><td>Cache owner name</td></tr>
         <tr><td>Favorite pts</td><td>Community favorite points</td></tr>
+        <tr><td>Trackables 🐞</td><td>Number of trackables (travel bugs/geocoins) logged in the cache</td></tr>
         <tr><td>📍</td><td>Corrected coordinates set indicator</td></tr>
         <tr><td>FTF 🥇</td><td>First to Find indicator</td></tr>
         <tr><td>Flag 🚩</td><td>User flag for batch operations</td></tr>
@@ -751,6 +757,7 @@ python run.py</code></pre>
       <li><strong>Logs</strong> — recent logs from all finders; includes a search box to find specific entries. Links in log text are clickable.</li>
       <li><strong>Attributes</strong> — all Groundspeak attributes set on the cache (dogs, parking, etc.)</li>
       <li><strong>Notes</strong> — your own free-text notes for this cache, separate from the published description and logs. Round-trips with GSAK: a note survives export → GSAK → re-import.</li>
+      <li><strong>Trackables</strong> — travel bugs and geocoins logged in the cache, each with a clickable <code>coord.info</code> link.</li>
       <li><strong>Waypoints</strong> — child waypoints belonging to this cache (e.g. parking, stages), with prefix, type, name, coordinates, description and comment for each. Caches with waypoints show their name in <strong>bold</strong> in the cache list, and the waypoints appear as separate markers on the map when the cache is selected.</li>
     </ul>
 
@@ -761,7 +768,7 @@ python run.py</code></pre>
       <figcaption>The Hint tab after clicking decode — geocaching.com hints are ROT13-encoded by default.</figcaption>
     </figure>
 
-    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Some hints are stored as plain text rather than ROT13 — OpenSAK detects this automatically and shows the hint directly, without a decode step.</div></div>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Some hints are stored as plain text rather than ROT13 — OpenSAK detects this automatically and shows the hint directly, without a decode step. Prefer to always see hints decoded? Turn on <strong>Show hints decoded by default</strong> under <a href="#settings">Settings → Display</a>.</div></div>
 
     <h3>Locking a Cache</h3>
     <p>Right-click a cache → <strong>Lock cache</strong>, or check the box in <strong>Edit cache…</strong>. Locking freezes the cache's own fields — name, type, container, coordinates, D/T, owner, status, descriptions, hint, country/state/county — so a later GPX/PQ re-import can't overwrite them. Logs, attributes and waypoints still refresh normally on re-import. A 🔒 column in the cache list shows locked status at a glance, and you can filter on it (see <a href="#filter-types">All Filter Types</a>).</p>
@@ -1100,9 +1107,12 @@ python run.py</code></pre>
       <li>Select <em>Send directly to GPS device</em>.</li>
       <li>Click <strong>🔍 Scan</strong> to detect mounted Garmin devices.</li>
       <li>Select your device from the list.</li>
+      <li>Choose a format — <strong>GPX</strong> or <strong>GGZ</strong> (see below).</li>
       <li>Click <strong>Send</strong>.</li>
     </ol>
-    <p>Caches are written to the <code>Garmin/GPX/</code> folder on the device as a standard GPX file.</p>
+    <p>GPX caches are written to the <code>Garmin/GPX/</code> folder on the device; GGZ caches go to <code>Garmin/GGZ/</code>.</p>
+
+    <div class="callout tip"><div class="callout-icon">💡</div><div><strong>GPX vs. GGZ:</strong> GGZ is Garmin's compressed format and supports an <strong>unlimited</strong> number of caches in one export — GPX-based transfers are capped by the device. If you have a large database, GGZ is the better choice.</div></div>
 
     <h3>Saving as a GPX File</h3>
     <p>Select <em>Save as GPX file</em>, choose a location, and click <strong>Send</strong>. This is useful for devices that are not automatically detected, or for copying to another location.</p>
@@ -1111,6 +1121,7 @@ python run.py</code></pre>
 
     <h3>Export Options</h3>
     <ul>
+      <li>Choose GPX or GGZ format</li>
       <li>Choose how many logs per cache to include</li>
       <li>Corrected coordinates are exported as the primary coordinate (original stored separately)</li>
     </ul>
@@ -1118,7 +1129,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="file-export">
-    <h2><span class="section-num">21</span>File Export (GPX / LOC)</h2>
+    <h2><span class="section-num">21</span>File Export (GPX / LOC / GGZ)</h2>
     <p>Export your filtered caches to standard geocaching file formats via <strong>File → Export</strong>:</p>
 
     <table>
@@ -1126,12 +1137,11 @@ python run.py</code></pre>
       <tbody>
         <tr><td>GPX</td><td>Full export with descriptions, logs, and waypoints — compatible with most GPS apps</td></tr>
         <tr><td>LOC</td><td>Lightweight coordinate-only format for basic GPS devices</td></tr>
+        <tr><td>GGZ</td><td>Garmin's compressed format — unlimited caches per export, matches GSAK's GGZ layout byte-for-byte</td></tr>
       </tbody>
     </table>
 
-    <p>All exports use the caches currently visible in the list (respecting the active filter).</p>
-
-    <div class="callout note"><div class="callout-icon">ℹ️</div><div><strong>GGZ export (Garmin's native compressed format) is planned but not yet available</strong> — it isn't in this build. Follow <a href="https://github.com/OpenSAK-Org/opensak/issues/348">issue #348</a> on GitHub for progress.</div></div>
+    <p>All exports use the caches currently visible in the list (respecting the active filter). If a file with the chosen name already exists, you'll be prompted for a new one instead of silently overwriting it.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1258,6 +1268,7 @@ python run.py</code></pre>
         <tr><td>Coordinate format</td><td>DMM, DMS, or Decimal Degrees — used throughout the interface</td></tr>
         <tr><td>Date format</td><td>OS locale, dd.mm.yyyy, mm/dd/yyyy, or yyyy-mm-dd</td></tr>
         <tr><td>Text and icon size</td><td>Small, Medium, or Large — affects the cache list grid (font and row height), the detail panel, and the tab labels</td></tr>
+        <tr><td>Show hints decoded by default</td><td>Skip the decode-click and show hints already readable when you open a cache. Off by default (hints start hidden, as before).</td></tr>
         <tr><td>Theme</td><td>Automatic (follow OS), Light, or Dark</td></tr>
         <tr><td>Language</td><td>Choose UI language (restart required)</td></tr>
       </tbody>
@@ -1293,6 +1304,11 @@ python run.py</code></pre>
         <tr><td>Distance calculation method</td><td>Haversine (default) or Vincenty (WGS84) — Vincenty is up to ~0.3% more accurate over long ranges, at a small performance cost</td></tr>
       </tbody>
     </table>
+
+    <h4>Custom Icon Packs</h4>
+    <p>Want cache-type or found-smiley icons that look different from the bundled set? Click <strong>Open icons folder</strong> to reveal a folder alongside your settings file where you can drop replacement SVG files — no code changes or rebuilding required. File names must match the bundled assets exactly; click <strong>View icon naming guide</strong> for the full list of file names, recommended canvas sizes, and export tips. A missing or invalid custom file automatically falls back to the bundled default — it's never a crash. This folder lives alongside your settings, so it survives future OpenSAK updates.</p>
+
+    <div class="callout tip"><div class="callout-icon">💡</div><div>Enjoying OpenSAK? Look for the <strong>♥ Support OpenSAK…</strong> entry in the <a href="#help">Help menu</a> — it takes you straight to the project's Open Collective page, which covers costs like code signing so releases keep arriving safely.</div></div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1342,13 +1358,15 @@ python run.py</code></pre>
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="updates">
     <h2><span class="section-num">33</span>Updates</h2>
-    <p>OpenSAK checks for new versions automatically 5 seconds after startup (can be disabled in Settings). When a new version is found, a notification dialog offers three options:</p>
+    <p>OpenSAK checks for new versions automatically 5 seconds after startup (can be disabled in Settings). When a new version is found, a notification dialog offers:</p>
     <ul>
       <li><strong>Open releases page</strong> — go to GitHub to download</li>
+      <li><strong>♥ Support OpenSAK…</strong> — opens the project's Open Collective page; doesn't affect your update decision, you can still choose one of the other options afterwards</li>
       <li><strong>Skip this version</strong> — suppress notifications for this specific version</li>
       <li><strong>Later</strong> — dismiss until next launch</li>
     </ul>
     <p>You can also check manually via <strong>Help → Check for updates…</strong></p>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Running a beta version? You're checked against both the latest beta <em>and</em> the latest stable release, and offered whichever is newer — so you'll always hear about a stable release too, not just newer betas.</div></div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1427,6 +1445,7 @@ python run.py</code></pre>
         <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
         <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.15.0/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
         <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
+        <tr><td>Support the project</td><td><a href="https://opencollective.com/opensak">opencollective.com/opensak</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
       </tbody>
     </table>
@@ -1434,7 +1453,7 @@ python run.py</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.15.0). Last updated June 2026.
+      This guide was generated from the OpenSAK source code (v1.15.0). Last updated July 2026.
     </p>
   </section>
 
