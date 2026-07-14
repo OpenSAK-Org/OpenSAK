@@ -384,6 +384,7 @@ STRINGS: dict[str, str] = {
     "update_changelog":              "Zobrazit protokol změn",
     "settings_group_updates":        "Aktualizace",
     "settings_update_check_label":   "Automaticky kontrolovat nové verze při spuštění",
+    "settings_notify_betas_label": "Upozornit mě i na beta verze",
 
     "settings_group_distance":          "Distance Calculation",
     "settings_distance_method_label":   "Method:",

@@ -473,6 +473,13 @@ class SettingsDialog(QDialog):
         self._update_check_cb = QCheckBox(tr("settings_update_check_label"))
         update_layout.addWidget(self._update_check_cb)
 
+        # Only meaningful for users running a stable release — a beta user
+        # already gets checked against both stable and beta releases
+        # automatically (see UpdateCheckWorker). Shown regardless, so the
+        # choice is remembered if/when the user is back on stable.
+        self._notify_betas_cb = QCheckBox(tr("settings_notify_betas_label"))
+        update_layout.addWidget(self._notify_betas_cb)
+
         layout.addWidget(update_group)
 
         # ── Distance calculation ───────────────────────────────────────────────
@@ -995,6 +1002,7 @@ class SettingsDialog(QDialog):
         if self._nominatim_cb is not None:
             self._nominatim_cb.setChecked(s.nominatim_enabled)
         self._update_check_cb.setChecked(s.updates_check_enabled)
+        self._notify_betas_cb.setChecked(s.notify_about_betas)
         idx = self._distance_method_combo.findData(s.distance_method)
         self._distance_method_combo.setCurrentIndex(idx if idx >= 0 else 0)
         # Opdater GC-status
@@ -1038,6 +1046,7 @@ class SettingsDialog(QDialog):
         if self._nominatim_cb is not None:
             s.nominatim_enabled = self._nominatim_cb.isChecked()
         s.updates_check_enabled = self._update_check_cb.isChecked()
+        s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()
         s.sync()
 

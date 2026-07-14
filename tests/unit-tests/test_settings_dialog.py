@@ -316,6 +316,14 @@ class TestSave:
         dlg._save()
         assert settings.default_decode_hints is True
 
+    def test_notify_about_betas_round_trip(self, dlg, settings):
+        assert settings.notify_about_betas is False  # default
+        assert dlg._notify_betas_cb.isChecked() is False
+
+        dlg._notify_betas_cb.setChecked(True)
+        dlg._save()
+        assert settings.notify_about_betas is True
+
     def test_save_keeps_existing_home_when_invalid(self, dlg, settings):
         settings.gc_home_location = _VALID
         dlg._gc_home_location.setText("garbage")

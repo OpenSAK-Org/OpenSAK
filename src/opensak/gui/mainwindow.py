@@ -2236,14 +2236,21 @@ class MainWindow(QMainWindow):
         from opensak.gui.settings import get_settings
         if not get_settings().updates_check_enabled:
             return
-        self._update_worker = UpdateCheckWorker(__version__, parent=self)
+        self._update_worker = UpdateCheckWorker(
+            __version__, parent=self,
+            include_prereleases=get_settings().notify_about_betas,
+        )
         self._update_worker.update_available.connect(self._on_update_available)
         self._update_worker.start()
 
     def _check_update_manual(self) -> None:
         """Kald fra menuen — viser resultat uanset om der er opdatering."""
         from opensak import __version__
-        self._manual_update_worker = UpdateCheckWorker(__version__, parent=self)
+        from opensak.gui.settings import get_settings
+        self._manual_update_worker = UpdateCheckWorker(
+            __version__, parent=self,
+            include_prereleases=get_settings().notify_about_betas,
+        )
         self._manual_update_worker.update_available.connect(
             lambda tag, url, is_prerelease: self._on_update_available(
                 tag, url, is_prerelease, manual=True

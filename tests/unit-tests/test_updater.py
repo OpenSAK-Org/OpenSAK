@@ -135,18 +135,20 @@ def test_fetch_returns_none_on_bad_json(monkeypatch):
 
 # ── UpdateCheckWorker.run (decision logic, run synchronously) ─────────────────
 
-def _run_worker(monkeypatch, qapp, current, stable=None, prerelease=None):
+def _run_worker(monkeypatch, qapp, current, stable=None, prerelease=None, include_prereleases=False):
     """Run the worker body in-thread and return (update_emits, check_done_count).
 
     ``stable`` / ``prerelease`` stub what fetch_latest_release() /
     fetch_latest_prerelease() return respectively (each defaults to None,
-    i.e. "nothing found"). Calling run() directly keeps it on the test
-    thread, so the default direct signal connections fire synchronously —
-    no event loop, fully deterministic.
+    i.e. "nothing found"). ``include_prereleases`` mirrors the "Notify me
+    about beta releases too" setting for a stable-running user. Calling
+    run() directly keeps it on the test thread, so the default direct
+    signal connections fire synchronously — no event loop, fully
+    deterministic.
     """
     monkeypatch.setattr(updater, "fetch_latest_release", lambda: stable)
     monkeypatch.setattr(updater, "fetch_latest_prerelease", lambda: prerelease)
-    worker = UpdateCheckWorker(current)
+    worker = UpdateCheckWorker(current, include_prereleases=include_prereleases)
     updates: list[tuple[str, str, bool]] = []
     done: list[int] = []
     worker.update_available.connect(lambda tag, url, is_pre: updates.append((tag, url, is_pre)))
@@ -361,3 +363,59 @@ def test_worker_beta_user_still_works_when_stable_fetch_fails(monkeypatch, qapp)
         prerelease={"tag_name": "v1.14.0-beta.2", "html_url": "https://example.test/beta2", "name": "n"},
     )
     assert updates == [("v1.14.0-beta.2", "https://example.test/beta2", True)]
+
+
+# ── include_prereleases opt-in for stable-running users ─────────────────────
+
+def test_stable_user_without_opt_in_never_sees_a_beta(monkeypatch, qapp):
+    # Default behaviour, unchanged: a stable user isn't even checked
+    # against the prerelease feed unless they've opted in.
+    called = {"prerelease": False}
+
+    def _track():
+        called["prerelease"] = True
+        return {"tag_name": "v2.0.0-beta.1", "html_url": "https://example.test/beta1", "name": "n"}
+
+    monkeypatch.setattr(updater, "fetch_latest_release", lambda: None)
+    monkeypatch.setattr(updater, "fetch_latest_prerelease", _track)
+    worker = UpdateCheckWorker("1.0.0", include_prereleases=False)
+    updates: list[tuple[str, str, bool]] = []
+    worker.update_available.connect(lambda tag, url, is_pre: updates.append((tag, url, is_pre)))
+    worker.run()
+
+    assert called["prerelease"] is False
+    assert updates == []
+
+
+def test_stable_user_with_opt_in_sees_a_newer_beta(monkeypatch, qapp):
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.15.0",
+        stable=None,
+        prerelease={"tag_name": "v1.16.0-beta.1", "html_url": "https://example.test/beta1", "name": "n"},
+        include_prereleases=True,
+    )
+    assert updates == [("v1.16.0-beta.1", "https://example.test/beta1", True)]
+
+
+def test_stable_user_with_opt_in_prefers_newer_stable_over_older_beta(monkeypatch, qapp):
+    # If a beta of the *same or older* line exists (e.g. a stray beta.20
+    # left behind before that cycle went stable), the current stable
+    # release must still win.
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.14.0",
+        stable={"tag_name": "v1.15.0", "html_url": "https://example.test/stable", "name": "n"},
+        prerelease={"tag_name": "v1.14.0-beta.20", "html_url": "https://example.test/beta20", "name": "n"},
+        include_prereleases=True,
+    )
+    assert updates == [("v1.15.0", "https://example.test/stable", False)]
+
+
+def test_stable_user_with_opt_in_but_no_update_anywhere(monkeypatch, qapp):
+    updates, done = _run_worker(
+        monkeypatch, qapp, "2.0.0",
+        stable={"tag_name": "v2.0.0", "html_url": "https://example.test/stable", "name": "n"},
+        prerelease={"tag_name": "v2.0.0-beta.3", "html_url": "https://example.test/beta3", "name": "n"},
+        include_prereleases=True,
+    )
+    assert updates == []
+    assert done == 1

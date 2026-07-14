@@ -520,6 +520,17 @@ class AppSettings:
     def updates_skipped_version(self, value: str) -> None:
         get_store().set("updates.skipped_version", value)
 
+    @property
+    def notify_about_betas(self) -> bool:
+        val = get_store().get("updates.notify_about_betas", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @notify_about_betas.setter
+    def notify_about_betas(self, value: bool) -> None:
+        get_store().set("updates.notify_about_betas", bool(value))
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def apply_default_center_for_new_db(self) -> None:

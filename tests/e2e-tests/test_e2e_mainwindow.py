@@ -75,6 +75,28 @@ def fake_worker():
     return _W
 
 
+def fake_worker_capturing(captured: dict):
+    """Like fake_worker(), but also records the kwargs it was constructed with."""
+    class _W:
+        def __init__(self, *a, **k):
+            captured.update(k)
+            self.update_available = _Sig()
+            self.check_done = _Sig()
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return False
+
+        def quit(self):
+            pass
+
+        def wait(self, *a):
+            pass
+    return _W
+
+
 def _wp_data(gc_code="CW001"):
     return {
         "gc_code": gc_code, "name": "New WP", "cache_type": "Traditional Cache",
@@ -544,6 +566,32 @@ class TestStartup:
     def test_check_update_background(self, seeded_window, monkeypatch):
         monkeypatch.setattr("opensak.gui.mainwindow.UpdateCheckWorker", fake_worker())
         _REAL_CHECK_UPDATE_BG(seeded_window)
+
+    def test_check_update_background_forwards_notify_about_betas(
+        self, seeded_window, monkeypatch, iso_settings
+    ):
+        from opensak.gui.settings import get_settings
+        captured: dict = {}
+        monkeypatch.setattr(
+            "opensak.gui.mainwindow.UpdateCheckWorker", fake_worker_capturing(captured)
+        )
+        get_settings().notify_about_betas = True
+        _REAL_CHECK_UPDATE_BG(seeded_window)
+
+        assert captured.get("include_prereleases") is True
+
+    def test_check_update_manual_forwards_notify_about_betas(
+        self, seeded_window, monkeypatch, iso_settings
+    ):
+        from opensak.gui.settings import get_settings
+        captured: dict = {}
+        monkeypatch.setattr(
+            "opensak.gui.mainwindow.UpdateCheckWorker", fake_worker_capturing(captured)
+        )
+        get_settings().notify_about_betas = False
+        seeded_window._check_update_manual()
+
+        assert captured.get("include_prereleases") is False
 
 
 # ── waypoint CRUD ─────────────────────────────────────────────────────────────

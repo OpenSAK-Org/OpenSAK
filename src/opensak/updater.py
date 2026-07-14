@@ -189,10 +189,12 @@ class UpdateCheckWorker(QThread):
     Baggrundsthread der tjekker for nye versioner.
 
     Hvis den nuværende version selv er en pre-release (beta/alpha/rc),
+    ELLER hvis brugeren har slået "Notify me about beta releases" til i
+    Settings (kun relevant for main-brugere, se `include_prereleases`),
     tjekkes der BÅDE mod listen af alle releases (for en nyere beta) OG
     mod den seneste stabile release — og den objektivt højeste af de to
-    tilbydes. Main-brugere (stabile versioner) rammer aldrig denne sti og
-    ser kun stabile opdateringer, som hidtil.
+    tilbydes. En almindelig main-bruger uden dette slået til rammer aldrig
+    denne sti og ser kun stabile opdateringer, som hidtil.
 
     Signals:
         update_available(latest_tag, release_url, is_prerelease):
@@ -205,15 +207,16 @@ class UpdateCheckWorker(QThread):
     update_available = Signal(str, str, bool)   # (tag, url, is_prerelease)
     check_done       = Signal()
 
-    def __init__(self, current_version: str, parent=None):
+    def __init__(self, current_version: str, parent=None, *, include_prereleases: bool = False):
         super().__init__(parent)
         self._current = current_version
+        self._include_prereleases = include_prereleases
 
     def run(self) -> None:
         log.debug("Starter version-tjek (nuværende: %s)", self._current)
         try:
             running_prerelease = _is_prerelease_tag(self._current)
-            if running_prerelease:
+            if running_prerelease or self._include_prereleases:
                 # Tjek BÅDE for en nyere beta OG for en nyere stabil release
                 # og tilbyd hvad end der objektivt er den højeste version.
                 # Uden det tidligere kun kunne opdage en nyere beta —
@@ -221,7 +224,11 @@ class UpdateCheckWorker(QThread):
                 # per definition er nyere end enhver beta af samme eller
                 # ældre grundnummer. En beta-tester ville derfor aldrig få
                 # den venlige "der er kommet en stabil version"-besked.
-                log.debug("Kører en pre-release — tjekker for nyere beta og nyere stabil release")
+                #
+                # include_prereleases udvider dette til også at gælde
+                # main-brugere der eksplicit har bedt om at høre om betas
+                # (Settings → "Notify me about beta releases").
+                log.debug("Tjekker for nyere beta og nyere stabil release")
                 candidates = [
                     r for r in (fetch_latest_release(), fetch_latest_prerelease())
                     if r is not None

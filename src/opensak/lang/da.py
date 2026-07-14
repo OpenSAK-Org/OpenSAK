@@ -384,6 +384,7 @@ STRINGS: dict[str, str] = {
     "update_changelog":              "Se ændringslog",
     "settings_group_updates":        "Opdateringer",
     "settings_update_check_label":   "Tjek automatisk for nye versioner ved opstart",
+    "settings_notify_betas_label": "Giv også besked om beta-udgivelser",
 
     "settings_group_distance":          "Distance Calculation",
     "settings_distance_method_label":   "Method:",
