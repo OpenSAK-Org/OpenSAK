@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 pytest.importorskip("pytestqt")
 
@@ -32,6 +32,11 @@ class _DB:
 @pytest.fixture(autouse=True)
 def app_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("opensak.config.get_app_data_dir", lambda: tmp_path)
+    # Issue #562: NewDatabaseDialog's default/browse folder is get_db_dir()
+    # (the configured database folder), not get_app_data_dir() (the install
+    # folder) — patch both so tests keep exercising a single, predictable
+    # tmp_path regardless of which one the dialog actually calls.
+    monkeypatch.setattr("opensak.settings_store.get_db_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -266,6 +271,26 @@ class TestManagerDialog:
         dlg._rename_database()
         warn.assert_called_once()
 
+    def test_rename_database_emits_database_renamed(self, dlg, manager, monkeypatch):
+        # Issue #539: toolbar/window title need notifying about a rename
+        # too, not just a switch — otherwise they keep showing the old name.
+        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Renamed", True))
+        emitted = []
+        dlg.database_renamed.connect(lambda db: emitted.append(db))
+        _select(dlg, "Other")
+        dlg._rename_database()
+        assert len(emitted) == 1
+
+    def test_rename_database_value_error_does_not_emit_renamed(self, dlg, manager, monkeypatch):
+        manager.rename.side_effect = ValueError("exists")
+        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Renamed", True))
+        monkeypatch.setattr(dd.QMessageBox, "warning", MagicMock())
+        emitted = []
+        dlg.database_renamed.connect(lambda db: emitted.append(db))
+        _select(dlg, "Other")
+        dlg._rename_database()
+        assert emitted == []
+
     def test_remove_from_list(self, dlg, manager, monkeypatch):
         monkeypatch.setattr(dd.QMessageBox, "question",
                             lambda *a, **k: dd.QMessageBox.StandardButton.Yes)
@@ -304,3 +329,102 @@ class TestManagerDialog:
         monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("  typed  ", True))
         text, ok = dlg._simple_input("t", "l", "d")
         assert (text, ok) == ("typed", True)
+
+
+# ── Integration: real DatabaseManager + real dialog (#539 follow-up) ────────────
+#
+# The TestManagerDialog tests above use a MagicMock manager, which is great
+# for testing the dialog's own logic in isolation but can't catch bugs that
+# only surface from the *real* DatabaseManager's state (e.g. #539's
+# rename/new_database path handling). GeePa67's follow-up report on #539
+# described the delete-confirmation dialog naming the wrong database after
+# a rename — these tests wire up the real manager to catch that class of
+# bug end-to-end.
+
+@pytest.fixture
+def real_manager(tmp_path, qapp, monkeypatch):
+    from opensak import settings_store as ss
+    from opensak.db.manager import DatabaseManager
+    from opensak.lang import load_language
+
+    load_language("en")  # tr() needs a language loaded to interpolate text
+
+    fresh = ss.SettingsStore()
+    fresh._data = {"databases.dir": str(tmp_path)}
+    fresh._path = tmp_path / "opensak.json"
+    monkeypatch.setattr(ss, "_store", fresh)
+
+    with (
+        patch("opensak.db.database.init_db"),
+        patch("opensak.config.get_app_data_dir", return_value=tmp_path),
+    ):
+        mgr = DatabaseManager()
+    mgr.active.path.touch()  # give the initial "Default" db a real file
+    monkeypatch.setattr(dd, "get_db_manager", lambda: mgr)
+    return mgr
+
+
+@pytest.fixture
+def real_dlg(qtbot, real_manager):
+    d = DatabaseManagerDialog()
+    qtbot.addWidget(d)
+    return d
+
+
+class TestManagerDialogRealManager:
+    def test_delete_confirmation_names_the_selected_database_after_rename(
+        self, real_dlg, real_manager, monkeypatch, tmp_path
+    ):
+        # Mirrors GeePa67's exact #539 follow-up steps: rename the active
+        # database, then create a second ("test1"), then ask to delete the
+        # renamed one and check the confirmation dialog names the database
+        # the user actually selected — not some other one.
+        default_db = real_manager.databases[0]
+        with (
+            patch("opensak.db.database.dispose_engine"),
+            patch("opensak.db.database.init_db"),
+        ):
+            real_manager.rename(default_db, "RenamedDefault")
+
+        with patch("opensak.db.database.init_db"):
+            test1 = real_manager.new_database("test1", tmp_path / "test1.db")
+        test1.path.touch()
+
+        real_dlg._refresh_list()
+        _select(real_dlg, "test1")
+
+        captured = {}
+
+        def _fake_warning(self_, title, text, *a, **k):
+            captured["title"] = title
+            captured["text"] = text
+            return dd.QMessageBox.StandardButton.No  # cancel — don't actually delete
+
+        monkeypatch.setattr(dd.QMessageBox, "warning", _fake_warning)
+        real_dlg._delete_database()
+
+        assert "test1" in captured["text"]
+        assert "RenamedDefault" not in captured["text"]
+
+    def test_delete_confirmation_names_correctly_for_originally_named_db(
+        self, real_dlg, real_manager, monkeypatch, tmp_path
+    ):
+        # Same idea without the rename step, as a control: deleting the
+        # *other* (non-renamed) database must still name itself correctly.
+        with patch("opensak.db.database.init_db"):
+            other = real_manager.new_database("Other", tmp_path / "Other.db")
+        other.path.touch()
+
+        real_dlg._refresh_list()
+        _select(real_dlg, "Other")
+
+        captured = {}
+
+        def _fake_warning(self_, title, text, *a, **k):
+            captured["text"] = text
+            return dd.QMessageBox.StandardButton.No
+
+        monkeypatch.setattr(dd.QMessageBox, "warning", _fake_warning)
+        real_dlg._delete_database()
+
+        assert "Other" in captured["text"]

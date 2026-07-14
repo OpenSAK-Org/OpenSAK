@@ -312,6 +312,17 @@ class AppSettings:
 
     # ── Display ───────────────────────────────────────────────────────────────
 
+    @property
+    def default_decode_hints(self) -> bool:
+        val = get_store().get("display.default_decode_hints", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @default_decode_hints.setter
+    def default_decode_hints(self, value: bool) -> None:
+        get_store().set("display.default_decode_hints", bool(value))
+
     # ── Window state ──────────────────────────────────────────────────────────
 
     @property

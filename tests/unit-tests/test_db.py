@@ -577,3 +577,58 @@ class TestTrackablesTable:
         init_db(db_path=db_file)
         _migrated_paths.discard(db_file)
         init_db(db_path=db_file)  # must not raise
+
+
+class TestTrackableCountColumn:
+    # Issue #489/#491: trackable_count caches the trackable count on the
+    # caches row itself (mirroring log_count), so the new "Trackables"
+    # table column can display it without loading the trackables
+    # relationship for every row. Migration 17 adds and backfills it.
+
+    def test_fresh_db_has_trackable_count_column(self, tmp_path):
+        import sqlite3 as _sql
+        init_db(db_path=tmp_path / "fresh_tc.db")
+        with _sql.connect(tmp_path / "fresh_tc.db") as con:
+            cols = [row[1] for row in con.execute("PRAGMA table_info(caches)").fetchall()]
+            assert "trackable_count" in cols
+
+    def test_migration_backfills_count_from_existing_trackables(self, tmp_path):
+        # Simulate a v16 DB (has the trackables table, but not yet the
+        # trackable_count column) with existing trackable rows, then
+        # re-run init_db() — migration 17 must backfill the count.
+        import sqlite3 as _sql
+        from opensak.db.database import _migrated_paths
+
+        db_file = tmp_path / "old_schema_tc.db"
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCTC01", name="Backfill test",
+                cache_type="Traditional Cache", latitude=55.0, longitude=12.0,
+            )
+            s.add(cache)
+            s.flush()
+            s.add(Trackable(cache_id=cache.id, ref="TB0001", name="Bug One"))
+            s.add(Trackable(cache_id=cache.id, ref="TB0002", name="Bug Two"))
+            s.commit()
+
+        with _sql.connect(db_file) as con:
+            con.execute("ALTER TABLE caches DROP COLUMN trackable_count")
+            con.execute("PRAGMA user_version = 16")
+
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)
+
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GCTC01").one()
+            assert c.trackable_count == 2
+
+    def test_migration_is_idempotent_when_column_already_exists(self, tmp_path):
+        from opensak.db.database import _migrated_paths
+
+        db_file = tmp_path / "idempotent_tc.db"
+        init_db(db_path=db_file)
+        _migrated_paths.discard(db_file)
+        init_db(db_path=db_file)  # must not raise

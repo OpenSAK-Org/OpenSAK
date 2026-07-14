@@ -1,7 +1,10 @@
 # tests/data.py — synthetic GPX/.loc test data and programmatic builders.
 
+import json
+import sqlite3
 import zipfile
 from pathlib import Path
+from typing import Any
 
 
 # ── Hand-written GPX matching real Groundspeak/PQ format ─────────────────────
@@ -179,9 +182,12 @@ def cache_wpt(
     hint: str | None = None,
     logs: list[dict] | None = None,
     attributes: list[dict] | None = None,
+    sym: str | None = None,
 ) -> str:
     """One Groundspeak ``<wpt>`` block. logs keys: id/type/finder/finder_id/date/text;
-    attributes keys: id/inc/name. Wrap with build_gpx() for a full document."""
+    attributes keys: id/inc/name. sym: <sym> value — pass "Geocache Found" to mark
+    the cache as found by the PQ owner (see importer found_by_me detection).
+    Wrap with build_gpx() for a full document."""
     name = name or gc_code
     log_xml = "".join(
         f'<groundspeak:log id="{lg.get("id", i + 1)}">'
@@ -200,10 +206,12 @@ def cache_wpt(
     hint_xml = (
         f"<groundspeak:encoded_hints>{hint}</groundspeak:encoded_hints>" if hint else ""
     )
+    sym_xml = f"<sym>{sym}</sym>" if sym else ""
     return (
         f'<wpt lat="{lat}" lon="{lon}">'
         f"<n>{gc_code}</n>"
         f"<urlname>{name}</urlname>"
+        f"{sym_xml}"
         f"<type>Geocache|{cache_type}</type>"
         f'<groundspeak:cache id="{gs_id}" archived="{archived}" available="{available}" '
         'xmlns:groundspeak="http://www.groundspeak.com/cache/1/0/1">'
@@ -288,3 +296,86 @@ def make_fake_manager(db_path: Path, name: str = "E2ETest"):
             raise RuntimeError("new_database called during e2e test")
 
     return _FakeManager()
+
+
+# ── Synthetic reverse-geocoding boundary dataset ──────────────────────────────
+# Mirrors the real layout consumed by BoundaryStore/TerritoryResolver (see
+# docs/reverse-geocoding-data.md): lon/lat squares & triangles.
+#   county layer — two same-bbox triangles (forces Stage-2 PIP) + one far
+#                  square (single bbox hit) + one isolated border triangle;
+#   state/country layer — one big covering square.
+# The single authoritative reference for this data contract — reused by both
+# tests/unit-tests/test_geo.py and tests/e2e-tests/test_e2e_reverse_geocoding.py
+# (those dirs are hyphenated and can't be imported as packages, so it lives
+# here instead of in either suite).
+
+_GEO_TRI_LOWER = [[[0, 0], [2, 0], [0, 2], [0, 0]]]          # x + y <= 2
+_GEO_TRI_UPPER = [[[2, 2], [0, 2], [2, 0], [2, 2]]]          # x + y >= 2
+_GEO_FAR_SQUARE = [[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]]
+_GEO_BIG_SQUARE = [[[-1, -1], [13, -1], [13, 13], [-1, 13], [-1, -1]]]
+# Isolated triangle: bbox [20,20,22,22] but polygon only covers the lower-left
+# half. A point at (lat=21.5, lon=21.5) is inside the bbox but outside the
+# triangle — the border-crossing bug. lon+lat=43>42 puts it above the hypotenuse.
+_GEO_ISOLATED_TRI = [[[20, 20], [22, 20], [20, 22], [20, 20]]]
+
+
+def _geo_feature(layer: str, name: str, parent: str | None, polygon: Any, bbox: list[int]) -> dict[str, Any]:
+    return {
+        "type": "Feature",
+        "properties": {"layer": layer, "name": name, "parent": parent,
+                       "version": 1, "source": "test", "licence": "ODbL"},
+        "bbox": bbox,
+        "geometry": {"type": "Polygon", "coordinates": polygon},
+    }
+
+
+def _geo_write_pack(path: Path, features: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": features}), encoding="utf-8")
+
+
+def build_boundary_test_data(data_dir: Path) -> None:
+    """Build a tiny but complete synthetic boundaries/ directory.
+
+    Known resolvable points:
+      (1, 1)     -> Testland / Teststate / Alpha County  (x+y<=2)
+      (1.5, 1.5) -> Testland / Teststate / Beta County   (x+y>=2)
+      (11, 11)   -> Testland / Teststate / Gamma County  (far square, single hit)
+      (21, 21)   -> Testland / Teststate / Border County (inside bbox+triangle)
+      (21.5, 21.5) -> Testland / Teststate / None county (inside bbox, outside triangle)
+    """
+    _geo_write_pack(data_dir / "counties" / "test.geojson", [
+        _geo_feature("county", "Alpha County", "TL/TS", _GEO_TRI_LOWER, [0, 0, 2, 2]),
+        _geo_feature("county", "Beta County", "TL/TS", _GEO_TRI_UPPER, [0, 0, 2, 2]),
+        _geo_feature("county", "Gamma County", "TL/TS", _GEO_FAR_SQUARE, [10, 10, 12, 12]),
+        _geo_feature("county", "Border County", "TL/TS", _GEO_ISOLATED_TRI, [20, 20, 22, 22]),
+    ])
+    _geo_write_pack(data_dir / "states" / "test.geojson",
+                     [_geo_feature("state", "Teststate", "TL", _GEO_BIG_SQUARE, [-1, -1, 13, 13])])
+    _geo_write_pack(data_dir / "countries" / "test.geojson",
+                     [_geo_feature("country", "Testland", None, _GEO_BIG_SQUARE, [-1, -1, 13, 13])])
+
+    db = sqlite3.connect(data_dir / "boundaries.db")
+    for layer in ("country", "state", "county"):
+        db.execute(f"CREATE VIRTUAL TABLE rtree_{layer} USING rtree(id, min_lat, max_lat, min_lon, max_lon)")
+        db.execute(f"CREATE TABLE region_{layer} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+                   "parent TEXT, pack TEXT NOT NULL, feature_index INTEGER NOT NULL, "
+                   "poly_version INTEGER NOT NULL, is_bundled INTEGER NOT NULL)")
+    db.execute("CREATE TABLE file_version (layer TEXT, country TEXT, state TEXT, version INTEGER)")
+
+    # rtree rows are (id, min_lat, max_lat, min_lon, max_lon)
+    db.executemany("INSERT INTO rtree_county VALUES (?, ?, ?, ?, ?)",
+                    [(1, 0, 2, 0, 2), (2, 0, 2, 0, 2), (3, 10, 12, 10, 12), (4, 20, 22, 20, 22)])
+    db.executemany("INSERT INTO region_county VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        (1, "Alpha County", "TL/TS", "test.geojson", 0, 1, 1),
+        (2, "Beta County", "TL/TS", "test.geojson", 1, 1, 1),
+        (3, "Gamma County", "TL/TS", "test.geojson", 2, 1, 1),
+        (4, "Border County", "TL/TS", "test.geojson", 3, 1, 1),
+    ])
+    db.execute("INSERT INTO rtree_state VALUES (1, -1, 13, -1, 13)")
+    db.execute("INSERT INTO region_state VALUES (1, 'Teststate', 'TL', 'test.geojson', 0, 1, 1)")
+    db.execute("INSERT INTO rtree_country VALUES (1, -1, 13, -1, 13)")
+    db.execute("INSERT INTO region_country VALUES (1, 'Testland', NULL, 'test.geojson', 0, 1, 1)")
+    db.execute("INSERT INTO file_version VALUES ('dataset', NULL, NULL, 1)")
+    db.commit()
+    db.close()

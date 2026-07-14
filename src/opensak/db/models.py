@@ -120,11 +120,68 @@ class Cache(Base):
     # Community favourite points count (API-only — None until API available)
     favorite_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # ── Issue #469: GSAK database import — schema additions ─────────────────
+    # Added ahead of the GSAK importer so the mapping code can target the
+    # final schema directly. See schema PR description for full rationale.
+
+    # GC.com's own synced personal cache note (distinct from UserNote.note,
+    # which covers GSAK's/OpenSAK's *local* note).
+    gc_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Cache listing URL (not stored anywhere before this).
+    url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
+    # Elevation in meters. None = not yet computed (0m is a real, valid
+    # elevation at sea level, so it must stay distinguishable from "unknown").
+    # Filled in later by Fabio's reverse-geocoding elevation mechanism.
+    elevation: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+
+    # User-assigned color tag (hex, e.g. "#FF5733"). Column only for now —
+    # the set/display UI feature is tracked separately.
+    color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, default=None)
+
+    # GC.com listing GUID.
+    guid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    # Watchlist status.
+    watch: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # GC.com's internal numeric cache ID (CacheId in GSAK).
+    gc_cache_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    # ── Issue #517: GC API field prep ────────────────────────────────────────
+    # Total number of "Found it" logs on the cache (by anyone), as shown on
+    # the listing page — the API's `findCount`. Distinct from our own
+    # `log_count` (every log of every type). Also available directly from
+    # GSAK (Caches.FoundCount), so populated by the GSAK importer already —
+    # unlike premiumFavoriteScore/hasSolutionChecker/backgroundImageUrl,
+    # which have no data source until GC API access exists.
+    find_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # ── Issue #87: Cached log count ──────────────────────────────────────────
     # Number of logs in this cache, cached as a column so the UI can display
     # the count without loading the logs relationship (which is noload'ed
     # for performance). Updated automatically on import in _upsert_cache().
     log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # ── Issue #489/#491: Cached trackable count ──────────────────────────────
+    # Number of trackables (travel bugs / geocoins) in this cache, cached as
+    # a column so the "Trackables" table column can display the count
+    # without loading the trackables relationship for every row (mirrors
+    # log_count above). Updated automatically on import in _upsert_cache().
+    trackable_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # ── Issue #552: Cached count of the CURRENT USER's own found-type logs ──
+    # `found` above is a boolean ("have I found this cache at least once"),
+    # which undercounts relocatable/multi-visit caches (Locationless-style
+    # moving caches) where the same user can legitimately log "Found it"
+    # more than once. geocaching.com and GSAK both count found LOGS, not
+    # found CACHES, in their totals. Matched the same way found_date/FTF
+    # are derived (finder_id -> gc_finder_id, falling back to finder ->
+    # gc_username), so a cache found N times by the user contributes N here.
+    # Cached as a column for the same noload()-performance reason as
+    # log_count/trackable_count above.
+    found_log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # ── Issue #186: Cached latest log date ───────────────────────────────────
     # Date of the most recent log entry, cached so the UI can display it
@@ -193,10 +250,17 @@ class Waypoint(Base):
     """
     Additional waypoints belonging to a cache — parking areas, trailheads,
     multi-cache stages, final coordinates, etc.
+
+    Issue #536: unique per (cache_id, wp_code), not (cache_id, prefix, name).
+    wp_code is GSAK's own per-cache waypoint code (cCode) — the real unique
+    identifier — whereas prefix+name can legitimately repeat across distinct
+    waypoints on the same cache. wp_code is only populated by the GSAK
+    importer; GPX-sourced waypoints leave it NULL, which SQL treats as
+    distinct for uniqueness purposes, so this imposes no constraint on them.
     """
     __tablename__ = "waypoints"
     __table_args__ = (
-        UniqueConstraint("cache_id", "prefix", "name", name="uq_waypoint_cache_prefix_name"),
+        UniqueConstraint("cache_id", "wp_code", name="uq_waypoint_cache_wp_code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -213,6 +277,21 @@ class Waypoint(Base):
 
     # GC code of the parent cache (issue #376 — mirrors cParent in GSAK)
     parent_gc_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
+
+    # ── Issue #469: GSAK database import — schema additions ─────────────────
+
+    # The waypoint's own GC-style code (currently only prefix + name stored).
+    wp_code: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+
+    url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    wp_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # True if the user created this waypoint locally rather than it coming
+    # from a GPX/GSAK import.
+    created_by_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Generic user flag on the waypoint (mirrors GSAK's per-waypoint flag).
+    wp_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="waypoints")
@@ -237,6 +316,16 @@ class Log(Base):
     finder_id: Mapped[Optional[str]] = mapped_column(String(64))
     text: Mapped[Optional[str]] = mapped_column(Text)
     text_encoded: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # ── Issue #469: GSAK database import — schema additions ─────────────────
+    # Some logs (notably Earthcache logs) carry their own coordinates,
+    # distinct from the cache's coordinates.
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # True if this log was made by the cache owner (e.g. maintenance notes,
+    # "Enable Listing" logs) — mirrors GSAK's LogIsOwner-derived flag.
+    logged_by_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="logs")

@@ -243,6 +243,12 @@ class SettingsDialog(QDialog):
         text_size_row.addStretch()
         disp_layout.addLayout(text_size_row)
 
+        # Issue #499: default hints to their decoded (plain-text) state
+        # instead of always starting hidden behind the ROT13-style spoiler
+        # protection — some users always want to see the hint immediately.
+        self._decode_hints_cb = QCheckBox(tr("settings_default_decode_hints_cb"))
+        disp_layout.addWidget(self._decode_hints_cb)
+
         layout.addWidget(disp_group)
 
         # ── Udseende (tema) ───────────────────────────────────────────────────
@@ -382,6 +388,32 @@ class SettingsDialog(QDialog):
         folders_hint.setStyleSheet("color: gray; font-size: 10px;")
         folders_layout.addWidget(folders_hint)
 
+        # Issue #519: custom icons folder — read-only path (not user-browsable,
+        # it's always <install_dir>/icons) plus an "Open folder" button so
+        # users can drop in replacement SVGs without knowing the path.
+        from opensak.config import get_icons_dir
+
+        folders_layout.addSpacing(8)
+        folders_layout.addWidget(QLabel(tr("settings_icons_dir_label")))
+        icons_dir_row = QHBoxLayout()
+        self._icons_dir_row = DirRow(get_icons_dir(), browsable=False)
+        icons_dir_row.addWidget(self._icons_dir_row)
+        open_icons_btn = QPushButton(tr("settings_open_icons_folder_button"))
+        open_icons_btn.clicked.connect(self._on_open_icons_folder)
+        icons_dir_row.addWidget(open_icons_btn)
+        folders_layout.addLayout(icons_dir_row)
+        icons_note = QLabel(tr("settings_icons_dir_note"))
+        icons_note.setWordWrap(True)
+        icons_note.setStyleSheet("color: gray; font-size: 10px;")
+        folders_layout.addWidget(icons_note)
+
+        icon_guide_row = QHBoxLayout()
+        icon_guide_btn = QPushButton(tr("settings_view_icon_guide_button"))
+        icon_guide_btn.clicked.connect(self._on_open_icon_guide)
+        icon_guide_row.addWidget(icon_guide_btn)
+        icon_guide_row.addStretch()
+        folders_layout.addLayout(icon_guide_row)
+
         layout.addWidget(folders_group)
 
         # ── Search behaviour ──────────────────────────────────────────────────
@@ -416,9 +448,9 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(search_group)
 
-        # ── Location refinement (only shown when update-location flag is on) ──
+        # ── Location refinement (only shown when reverse-geocoding flag is on) ──
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             loc_ref_group = QGroupBox(tr("settings_group_nominatim"))
             loc_ref_layout = QVBoxLayout(loc_ref_group)
 
@@ -465,6 +497,22 @@ class SettingsDialog(QDialog):
 
         layout.addStretch()
         return tab
+
+    def _on_open_icon_guide(self) -> None:
+        """Åbn den bundlede icon-navngivnings-guide i systemets standard browser (issue #519 follow-up)."""
+        from opensak.gui.icon_provider import get_icon_guide_path
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_icon_guide_path())))
+
+    def _on_open_icons_folder(self) -> None:
+        """Åbn brugerens custom-icons mappe i systemets filhåndtering (issue #519)."""
+        from opensak.config import get_icons_dir
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_icons_dir())))
 
     def _on_run_wizard_again(self) -> None:
         """
@@ -934,6 +982,7 @@ class SettingsDialog(QDialog):
         self._date_format.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._text_size.findData(s.text_size)
         self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
+        self._decode_hints_cb.setChecked(s.default_decode_hints)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -974,6 +1023,7 @@ class SettingsDialog(QDialog):
         s.coord_format      = self._coord_format.currentData()
         s.date_format       = self._date_format.currentData()
         s.text_size         = self._text_size.currentData()
+        s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()

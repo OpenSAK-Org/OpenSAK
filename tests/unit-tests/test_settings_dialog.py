@@ -306,6 +306,16 @@ class TestSave:
         assert settings.use_miles is True
         assert dlg.result() == QDialog.DialogCode.Accepted
 
+    def test_default_decode_hints_round_trip(self, dlg, settings):
+        # Issue #499: checkbox loads existing settings on open, and its
+        # state is saved back on accept.
+        assert settings.default_decode_hints is False  # default
+        assert dlg._decode_hints_cb.isChecked() is False
+
+        dlg._decode_hints_cb.setChecked(True)
+        dlg._save()
+        assert settings.default_decode_hints is True
+
     def test_save_keeps_existing_home_when_invalid(self, dlg, settings):
         settings.gc_home_location = _VALID
         dlg._gc_home_location.setText("garbage")

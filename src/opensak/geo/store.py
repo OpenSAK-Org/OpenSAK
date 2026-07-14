@@ -23,14 +23,58 @@ _LAYER_DIR = {"country": "countries", "state": "states", "county": "counties"}
 
 
 def default_data_dir() -> Path:
-    # Overridable via env var (dev + CI). In a frozen bundle, data/ is extracted
-    # into sys._MEIPASS by PyInstaller (see opensak.spec).
+    # Overridable via env var (dev + CI). Otherwise the per-user app-data dir —
+    # writable, shared by the bundled-baseline seed and on-demand county
+    # fetches (see ensure_baseline_seeded below and geo/packs.py).
     override = os.environ.get("OPENSAK_BOUNDARIES_DIR")
     if override:
         return Path(override)
-    if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "data"  # type: ignore[attr-defined]
-    return Path(__file__).resolve().parents[3] / "data"
+    from opensak.config import get_app_data_dir
+    return get_app_data_dir() / "boundaries"
+
+
+def _frozen_bundle_dir() -> Path | None:
+    # Read-only baseline bundled by PyInstaller (see opensak.spec), if any.
+    # Frozen builds re-extract to sys._MEIPASS on every launch — never write here.
+    if not getattr(sys, "frozen", False):
+        return None
+    bundled = Path(sys._MEIPASS) / "data"  # type: ignore[attr-defined]
+    return bundled if (bundled / "boundaries.db").is_file() else None
+
+
+def ensure_baseline_seeded(data_dir: Path | None = None) -> None:
+    """
+    Seed boundaries.db + countries/ + states/ into data_dir on first run, if
+    not already present. Prefers the bundled baseline (frozen builds); falls
+    back to downloading from OpenSAK-Data when nothing is bundled (e.g. a pip
+    install, or a build that didn't have data/ available at package time).
+    Counties are never seeded here — always fetched on demand, per country.
+    """
+    data_dir = data_dir or default_data_dir()
+    if (data_dir / "boundaries.db").is_file():
+        return
+
+    bundled = _frozen_bundle_dir()
+    if bundled is not None:
+        _copy_baseline(bundled, data_dir)
+        return
+
+    from opensak.geo import packs
+    packs.fetch_baseline(data_dir)
+
+
+def _copy_baseline(src: Path, dst: Path) -> None:
+    import shutil
+    dst.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src / "boundaries.db", dst / "boundaries.db")
+    for sub in ("countries", "states"):
+        src_sub = src / sub
+        if not src_sub.is_dir():
+            continue
+        dst_sub = dst / sub
+        dst_sub.mkdir(exist_ok=True)
+        for f in src_sub.glob("*.geojson"):
+            shutil.copy2(f, dst_sub / f.name)
 
 
 @dataclass(frozen=True)

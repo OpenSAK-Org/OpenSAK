@@ -39,6 +39,8 @@ STRINGS: dict[str, str] = {
     "count_caches":                 "{count} caches",
     "count_cache_single":           "1 cache",
     "filter_active_label":          "🔍 Filtro ativo",
+    "filter_no_results_title":      "Nenhuma cache correspondente",
+    "filter_no_results_msg":        "Este filtro não corresponde a nenhuma cache, por isso não foi aplicado. Ajuste os critérios e tente novamente.",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Ficheiro",
@@ -83,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Atalhos de teclado…",
 
     "action_open_log_file": "Abrir ficheiro de registo",
+    "action_support_opensak": "♥  Apoiar o OpenSAK…",
     "log_file_not_found": "Ficheiro de registo ainda não encontrado: {path}",
 
     # ── Atalhos de teclado dialog ─────────────────────────────────────────────
@@ -98,6 +101,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Eliminar cache",
     "shortcut_refresh":             "Atualizar lista",
     "shortcut_filter":              "Definir filtro",
+    "shortcut_clear_filter":        "Redefinir filtro",
     "shortcut_settings":            "Definições",
     "shortcut_gps_export":          "Enviar para GPS",
     "shortcut_trip_planner":        "Planeador de percurso",
@@ -117,6 +121,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Limpar filtro",
     "toolbar_filter_combo_tooltip":  "Selecionar filtro guardado",
     "toolbar_filter_combo_none":     "Nenhum",
+    "toolbar_filter_combo_active":   "Ativo (não guardado)",
     "toolbar_refresh":              "Atualizar",
 
     # ── Status bar ────────────────────────────────────────────────────────────
@@ -173,6 +178,26 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Todos os {count} ficheiros foram processados.",
     "import_geocode_running":       "📍  A geocodificar dados de localização em falta…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importar de base de dados GSAK…",
+    "gsak_import_dialog_title":     "Importar de base de dados GSAK",
+    "gsak_import_select_file_label": "Selecione uma cópia de segurança GSAK (.zip) ou ficheiro de base de dados (.db3):",
+    "gsak_import_browse_title":     "Selecionar cópia de segurança ou ficheiro GSAK",
+    "gsak_import_file_filter":      "Cópia de segurança ou base de dados GSAK (*.zip *.db3);;Todos os ficheiros (*)",
+    "gsak_import_extracting":       "A extrair {name}…",
+    "gsak_import_running":          "A importar {name}…",
+    "gsak_import_attributes":       "Atributos:",
+    "gsak_import_logs":             "Registos:",
+    "gsak_import_notes":            "Notas:",
+    "gsak_import_note_images":      "Imagens de notas → marcadores:",
+    "gsak_import_trackables":       "Trackables:",
+    "gsak_import_warnings_header":  "Avisos ({count}):",
+    "gsak_import_no_db3_found":     "Nenhum ficheiro sqlite.db3 encontrado em {name}",
+    "gsak_import_done":             "✓ Importação concluída.",
+    "gsak_prescan_title":           "Algumas notas pessoais contêm imagens",
+    "gsak_prescan_body":            "{notes} das suas notas pessoais contêm {images} imagem(ns) que o GSAK descarregou para o seu computador antigo. Estas não podem ser copiadas automaticamente, pelo que o OpenSAK irá mostrar um marcador como [image: filename.jpg] no seu lugar. O texto da nota em si será importado normalmente.\n\nContinuar com a importação?",
+    "gsak_prescan_continue":        "Continuar importação",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Definir filtro",
     "filter_tab_dates":             "Datas",
@@ -223,12 +248,15 @@ STRINGS: dict[str, str] = {
     "gps_caches_ready":             "<b>{count} caches</b> prontas para exportação (caches atualmente filtradas/visíveis)",
     "gps_dest_group":               "Destino",
     "gps_rb_device":                "Enviar diretamente para o GPS:",
-    "gps_rb_file":                  "Salvar como arquivo GPX:",
+    "gps_rb_file":                  "Salvar como arquivo:",
     "gps_scan_btn":                 "🔍 Digitalizar",
     "gps_scan_scanning":            "⏳",
     "gps_devices_found":            "✓ {count} dispositivos(s) Garmin encontrados",
     "gps_no_device":                "(Nenhum dispositivo GPS encontrado)",
-    "gps_no_device_hint":           "Nenhum dispositivo Garmin encontrado — conecte o seu GPS e clique em Digitalizar novamente, ou use 'Guardar como arquivo GPX'",
+    "gps_no_device_hint":           "Nenhum dispositivo Garmin encontrado — conecte o seu GPS e clique em Digitalizar novamente, ou use 'Guardar como arquivo'",
+    "gps_format_group":             "Formato de exportação",
+    "gps_format_gpx":               "GPX  —  formato Garmin padrão (máx. ~5 000 caches)",
+    "gps_format_ggz":               "GGZ  —  formato Garmin comprimido (caches ilimitados)",
     "gps_browse":                   "Procurar…",
     "gps_file_placeholder":         "Escolher localização…",
     "gps_opt_group":                "Opções",
@@ -245,6 +273,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Nenhum ficheiro GPX existente encontrado no dispositivo.\nDeseja continuar com a transferência?",
     "gps_delete_file_list":         "Ficheiros a serem eliminados:\n{files}",
     "gps_no_dest":                  "Por favor, selecione um destino primeiro.",
+    "gps_file_exists_title":        "O ficheiro já existe",
+    "gps_file_exists_prompt":       "\"{filename}\" já existe neste local. Introduza um nome de ficheiro diferente:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Configurações",
@@ -261,6 +291,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Pequeno",
     "settings_text_size_medium":    "Médio",
     "settings_text_size_large":     "Grande",
+    "settings_default_decode_hints_cb": "Mostrar as dicas descodificadas por defeito",
     "settings_date_format_locale":  "Idioma do sistema",
     "settings_group_language":      "Idioma",
     "settings_language_label":      "Idioma:",
@@ -300,6 +331,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Concluir",
     "wizard_skip": "Ignorar configuração",
     "wizard_step_of": "Passo {current} de {total}",
+    "wizard_settings_file_exists_title": "O ficheiro de definições já existe",
+    "wizard_settings_file_exists_msg": "A pasta \"{path}\" já contém um ficheiro opensak.json, pelo que as suas definições atuais não foram movidas para lá. O ficheiro existente não foi alterado — pode ser útil verificar essa pasta manualmente.",
     "settings_group_nominatim":                    "Location refinement",
     "settings_nominatim_cb":                       "Enable online lookup for higher accuracy",
     "settings_nominatim_hint":                     "When enabled, county, state and country data is further refined using OpenStreetMap after the fast offline pass.\n\nNote: requires an internet connection and takes about 1 second per waypoint. A database of 10 000 waypoints takes around 3 hours to fully refine. Leave this off unless you need higher accuracy near administrative boundaries.",
@@ -312,6 +345,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Pasta de bases de dados:",
     "settings_folders_restart_hint": "Alterar a pasta de bases de dados requer reiniciar o OpenSAK.",
     "settings_db_dir_changed_message": "A pasta de bases de dados foi alterada. Reinicie o OpenSAK para que isto tenha efeito.",
+    "settings_icons_dir_label": "Pasta de ícones personalizados:",
+    "settings_open_icons_folder_button": "Abrir pasta de ícones",
+    "settings_icons_dir_note": "Coloque aqui os seus próprios ficheiros SVG para substituir os ícones de tipo de cache, smileys e outros ícones de interface (coordenadas corrigidas, premium, favoritos, trackables) — os mesmos nomes de ficheiro do OpenSAK Custom Icons Guide. Reinicie o OpenSAK para que as alterações tenham efeito.",
+    "settings_view_icon_guide_button": "Ver guia de nomenclatura de ícones",
 
     "settings_move_databases_title": "Mover bases de dados existentes?",
     "settings_move_databases_msg": "Tem {count} base(s) de dados existente(s). Deseja também movê-las para a nova pasta?",
@@ -488,6 +525,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Não é possível mover '{name}': já existe um ficheiro em {path}.",
     "db_err_move_failed": "Não foi possível mover '{name}': {error}",
+    "db_err_target_path_exists": "Já existe um ficheiro para '{name}' em {path}.",
+    "db_err_rename_failed": "Não foi possível renomear '{name}': {error}",
     "db_err_mkdir_failed":          "Não foi possível criar a pasta:\n{path}",
     "db_err_dir_not_found":         "A pasta não existe:\n{path}",
     "db_err_no_write_permission":   "Sem permissão de escrita na pasta:\n{path}",
@@ -577,6 +616,8 @@ STRINGS: dict[str, str] = {
     "detail_no_waypoints":          "(Sem waypoints filhos)",
     "detail_tab_attrs_count":       "Atributos ({count})",
     "detail_no_attrs":              "(Sem atributos)",
+    "detail_tab_trackables_count":   "Trackables ({count})",
+    "detail_no_trackables":          "(Sem trackables)",
     "detail_tab_notes":             "Notas",
     "detail_note_placeholder":      "Adicionar uma nota pessoal para este cache…",
     "detail_wp_no_coords":          "(Sem coordenadas)",
@@ -616,6 +657,7 @@ STRINGS: dict[str, str] = {
     "col_dnf_date":          "Data DNF",
     "col_found_date":       "Data encontrada",
     "col_first_to_find":     "FTF",
+    "col_first_to_find_header_tooltip": "O FTF só é detetado a partir de {FTF}, {*FTF*} ou [FTF] no seu próprio log — as mesmas tags exigidas pelo ProjectGC",
     "col_user_flag":         "🚩",
     "col_user_flag_label":   "🚩 Bandeira de utilizador",
     "col_user_flag_header_tooltip": "Bandeira de utilizador — clique para alternar",
@@ -634,6 +676,7 @@ STRINGS: dict[str, str] = {
     "col_user_data_3":       "Dados util. 3",
     "col_user_data_4":       "Dados util. 4",
     "col_favorite_points":   "Pts. favoritos",
+    "col_trackables":        "Trackables",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Abrir em geocaching.com",
@@ -727,13 +770,12 @@ STRINGS: dict[str, str] = {
     "detail_corrected_clear_tooltip":"Limpar coordenadas corrigidas",
     "detail_corrected_add_btn":     "Adicionar coordenadas corrigidas…",
 
-    "col_corrected":                "📍",
-    "col_corrected_label":          "📍 Coordenadas corrigidas",
+    "col_corrected":                "CC",
     "col_corrected_header_tooltip": "Coordenadas corrigidas — clique duplo para editar",
     "col_corrected_tooltip":        "Coordenadas corrigidas: {coords}",
 
-    "ctx_add_corrected":            "📍  Adicionar coordenadas corrigidas…",
-    "ctx_edit_corrected":           "📍  Editar coordenadas corrigidas…",
+    "ctx_add_corrected":            "Adicionar coordenadas corrigidas…",
+    "ctx_edit_corrected":           "Editar coordenadas corrigidas…",
     "ctx_clear_corrected":          "✕  Limpar coordenadas corrigidas",
 
     "corrected_dialog_title":       "Coordenadas Corrigidas",
@@ -994,7 +1036,7 @@ STRINGS: dict[str, str] = {
     "kml_dialog_done_msg":                     "{count} cache(s) exportados para:\n{path}\n\nImporte o ficheiro em maps.google.com/d.",
     "kml_dialog_error_title":                  "Erro de exportação",
     "kml_dialog_error_msg":                    "Exportação falhou:\n{message}",
-    "action_export":                 "&Exportar (GPX/LOC/...)",
+    "action_export":                 "&Exportar (GPX/LOC/GGZ)",
     "file_export_dialog_title":      "Exportar caches",
     "file_export_cache_count":       "{count} caches prontos para exportar",
     "file_export_format_label":      "Formato de ficheiro",
@@ -1008,4 +1050,25 @@ STRINGS: dict[str, str] = {
     "action_kml_export":                       "Exportar para Google Maps (KML)...",
     "kml_no_caches_title":                     "Sem caches",
     "kml_no_caches_msg":                       "Não há caches no filtro atual.\nAjuste o filtro e tente novamente.",
+
+    # ── Mover/copiar caches ─────────────────────────────────────────────
+    "action_move_caches":                      "📦  Mover caches para outra base de dados…",
+    "action_copy_caches":                      "📋  Copiar caches para outra base de dados…",
+    "move_caches_title":                       "Mover Caches",
+    "copy_caches_title":                       "Copiar Caches",
+    "move_caches_scope_label":                 "Quais caches mover:",
+    "move_caches_scope_selected":              "Cache selecionada ({gc_code})",
+    "move_caches_scope_flagged":               "Caches marcadas ({count})",
+    "move_caches_scope_all":                   "Todas as caches no filtro atual ({count})",
+    "move_caches_target_label":                "Mover para base de dados:",
+    "copy_caches_target_label":                "Copiar para base de dados:",
+    "move_caches_current_db":                  "atual",
+    "move_caches_btn_move":                    "Mover",
+    "move_caches_none_selected":               "Nenhuma cache selecionada para mover.",
+    "move_caches_same_db":                     "A base de dados de destino é a mesma que a atual.\nSelecione uma base de dados diferente.",
+    "move_caches_confirm":                     "Mover {count} cache(s) para {target}?\n\nSerão removidas da base de dados atual.",
+    "copy_caches_confirm":                     "Copiar {count} cache(s) para {target}?",
+    "move_caches_done":                        "{count} cache(s) movida(s) com sucesso.",
+    "copy_caches_done":                        "{count} cache(s) copiada(s) com sucesso.",
+    "move_caches_error":                       "Ocorreu um erro ao mover as caches:\n{message}",
 }

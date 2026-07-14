@@ -42,6 +42,8 @@ STRINGS: dict[str, str] = {
     "count_caches":                 "{count} caches",
     "count_cache_single":           "1 cache",
     "filter_active_label":          "🔍 Filter actief",
+    "filter_no_results_title":      "Geen overeenkomende caches",
+    "filter_no_results_msg":        "Dit filter komt met geen enkele cache overeen en is daarom niet toegepast. Pas de criteria aan en probeer opnieuw.",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Bestand",
@@ -86,6 +88,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Sneltoetsen…",
 
     "action_open_log_file": "Logbestand openen",
+    "action_support_opensak": "♥  OpenSAK steunen…",
     "log_file_not_found": "Logbestand nog niet gevonden: {path}",
 
     # ── Sneltoetsen-dialog ────────────────────────────────────────────────────
@@ -101,6 +104,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Cache verwijderen",
     "shortcut_refresh":             "Lijst vernieuwen",
     "shortcut_filter":              "Filter instellen",
+    "shortcut_clear_filter":        "Filter resetten",
     "shortcut_settings":            "Instellingen",
     "shortcut_gps_export":          "Naar GPS sturen",
     "shortcut_trip_planner":        "Routeplanner",
@@ -120,6 +124,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Filter wissen",
     "toolbar_filter_combo_tooltip":  "Opgeslagen filter selecteren",
     "toolbar_filter_combo_none":     "Geen",
+    "toolbar_filter_combo_active":   "Actief (niet opgeslagen)",
     "toolbar_refresh":              "Vernieuwen",
 
     # ── Status bar ────────────────────────────────────────────────────────────
@@ -176,6 +181,26 @@ STRINGS: dict[str, str] = {
     "import_all_done":              "✓ Alle {count} bestanden verwerkt.",
     "import_geocode_running":       "📍  Ontbrekende locatiegegevens opzoeken (offline)…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importeren uit GSAK-database…",
+    "gsak_import_dialog_title":     "Importeren uit GSAK-database",
+    "gsak_import_select_file_label": "Selecteer een GSAK-back-up (.zip) of databasebestand (.db3):",
+    "gsak_import_browse_title":     "Selecteer GSAK-back-up of databasebestand",
+    "gsak_import_file_filter":      "GSAK-back-up of database (*.zip *.db3);;Alle bestanden (*)",
+    "gsak_import_extracting":       "Bezig met uitpakken van {name}…",
+    "gsak_import_running":          "Bezig met importeren van {name}…",
+    "gsak_import_attributes":       "Attributen:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Notities:",
+    "gsak_import_note_images":      "Afbeeldingen in notities → placeholders:",
+    "gsak_import_trackables":       "Trackables:",
+    "gsak_import_warnings_header":  "Waarschuwingen ({count}):",
+    "gsak_import_no_db3_found":     "Geen sqlite.db3-bestand gevonden in {name}",
+    "gsak_import_done":             "✓ Importeren voltooid.",
+    "gsak_prescan_title":           "Sommige persoonlijke notities bevatten afbeeldingen",
+    "gsak_prescan_body":            "{notes} van je persoonlijke notities bevatten {images} afbeelding(en) die GSAK naar je oude computer had gedownload. Deze kunnen niet automatisch worden gekopieerd, dus OpenSAK toont in plaats daarvan een placeholder zoals [image: filename.jpg]. De tekst van de notitie zelf wordt gewoon normaal geïmporteerd.\n\nDoorgaan met importeren?",
+    "gsak_prescan_continue":        "Doorgaan met importeren",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Filter instellen",
     "filter_tab_dates":             "Datums",
@@ -226,12 +251,15 @@ STRINGS: dict[str, str] = {
     "gps_caches_ready":             "<b>{count} caches</b> klaar voor export (huidig gefilterde/zichtbare caches)",
     "gps_dest_group":               "Bestemming",
     "gps_rb_device":                "Rechtstreeks naar GPS-apparaat sturen:",
-    "gps_rb_file":                  "Opslaan als GPX-bestand:",
+    "gps_rb_file":                  "Opslaan als bestand:",
     "gps_scan_btn":                 "🔍 Scannen",
     "gps_scan_scanning":            "⏳",
     "gps_devices_found":            "✓ {count} Garmin-apparaat/apparaten gevonden",
     "gps_no_device":                "(Geen GPS-apparaat gevonden)",
-    "gps_no_device_hint":           "Geen Garmin-apparaat gevonden — verbind je GPS en klik opnieuw op Scannen, of gebruik 'Opslaan als GPX-bestand'",
+    "gps_no_device_hint":           "Geen Garmin-apparaat gevonden — verbind je GPS en klik opnieuw op Scannen, of gebruik 'Opslaan als bestand'",
+    "gps_format_group":             "Exportformaat",
+    "gps_format_gpx":               "GPX  —  standaard Garmin-formaat (max. ~5 000 caches)",
+    "gps_format_ggz":               "GGZ  —  gecomprimeerd Garmin-formaat (onbeperkt aantal caches)",
     "gps_browse":                   "Bladeren…",
     "gps_file_placeholder":         "Locatie kiezen…",
     "gps_opt_group":                "Opties",
@@ -248,6 +276,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Geen bestaande GPX-bestanden op het apparaat gevonden.\nWil je doorgaan met de upload?",
     "gps_delete_file_list":         "Te verwijderen bestanden:\n{files}",
     "gps_no_dest":                  "Selecteer eerst een bestemming.",
+    "gps_file_exists_title":        "Bestand bestaat al",
+    "gps_file_exists_prompt":       "\"{filename}\" bestaat al op deze locatie. Voer een andere bestandsnaam in:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Instellingen",
@@ -264,6 +294,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Klein",
     "settings_text_size_medium":    "Gemiddeld",
     "settings_text_size_large":     "Groot",
+    "settings_default_decode_hints_cb": "Hints standaard gedecodeerd tonen",
     "settings_date_format_locale":  "OS-landinstelling",
     "settings_group_language":      "Taal",
     "settings_language_label":      "Taal:",
@@ -303,6 +334,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Voltooien",
     "wizard_skip": "Installatie overslaan",
     "wizard_step_of": "Stap {current} van {total}",
+    "wizard_settings_file_exists_title": "Instellingenbestand bestaat al",
+    "wizard_settings_file_exists_msg": "De map \"{path}\" bevat al een opensak.json-bestand, dus uw huidige instellingen zijn daar niet naartoe verplaatst. Het bestaande bestand is ongewijzigd gelaten — controleer die map eventueel handmatig.",
     "settings_group_nominatim":                    "Locatieverbetering",
     "settings_nominatim_cb":                       "Online opzoeken inschakelen voor hogere nauwkeurigheid",
     "settings_nominatim_hint":                     "Wanneer ingeschakeld, worden gemeente-, provincie- en landgegevens verder verfijnd via OpenStreetMap na de snelle offline stap.\n\nOpmerking: vereist een internetverbinding en duurt ongeveer 1 seconde per waypoint. Een database met 10.000 waypoints duurt ongeveer 3 uur om volledig te verfijnen. Laat dit uit tenzij je hogere nauwkeurigheid nodig hebt nabij administratieve grenzen.",
@@ -315,6 +348,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Databasemap:",
     "settings_folders_restart_hint": "Het wijzigen van de databasemap vereist het opnieuw starten van OpenSAK.",
     "settings_db_dir_changed_message": "De databasemap is gewijzigd. Start OpenSAK opnieuw om dit door te voeren.",
+    "settings_icons_dir_label": "Map voor aangepaste iconen:",
+    "settings_open_icons_folder_button": "Open iconenmap",
+    "settings_icons_dir_note": "Plaats hier je eigen SVG-bestanden om de cache-type-, smiley- en andere UI-iconen (gecorrigeerde coördinaten, premium, favorieten, trackables) te vervangen — dezelfde bestandsnamen als in de OpenSAK Custom Icons Guide. Start OpenSAK opnieuw om wijzigingen door te voeren.",
+    "settings_view_icon_guide_button": "Naamgevingsgids voor iconen bekijken",
 
     "settings_move_databases_title": "Bestaande databases verplaatsen?",
     "settings_move_databases_msg": "U heeft {count} bestaande database(s). Wilt u deze ook naar de nieuwe map verplaatsen?",
@@ -491,6 +528,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Kan '{name}' niet verplaatsen: er bestaat al een bestand op {path}.",
     "db_err_move_failed": "Kan '{name}' niet verplaatsen: {error}",
+    "db_err_target_path_exists": "Er bestaat al een bestand voor '{name}' op {path}.",
+    "db_err_rename_failed": "Kan '{name}' niet hernoemen: {error}",
     "db_err_mkdir_failed":          "Kan map niet aanmaken:\n{path}",
     "db_err_dir_not_found":         "Map bestaat niet:\n{path}",
     "db_err_no_write_permission":   "Geen schrijfrechten voor map:\n{path}",
@@ -580,6 +619,8 @@ STRINGS: dict[str, str] = {
     "detail_no_waypoints":          "(Geen onderliggende waypoints)",
     "detail_tab_attrs_count":       "Attributen ({count})",
     "detail_no_attrs":              "(Geen attributen)",
+    "detail_tab_trackables_count":   "Trackables ({count})",
+    "detail_no_trackables":          "(Geen trackables)",
     "detail_tab_notes":             "Notities",
     "detail_note_placeholder":      "Voeg een persoonlijke notitie toe voor deze cache…",
     "detail_wp_no_coords":          "(Geen coördinaten)",
@@ -617,6 +658,7 @@ STRINGS: dict[str, str] = {
     "col_dnf_date":          "DNF-datum",
     "col_found_date":        "Datum gevonden",
     "col_first_to_find":     "FTF",
+    "col_first_to_find_header_tooltip": "FTF wordt alleen herkend via {FTF}, {*FTF*} of [FTF] in je eigen log — dezelfde tags die ProjectGC vereist",
     "col_user_flag":         "🚩",
     "col_user_flag_label":   "🚩 Gebruikersvlag",
     "col_user_flag_header_tooltip": "Gebruikersvlag — klik om te wisselen",
@@ -635,6 +677,7 @@ STRINGS: dict[str, str] = {
     "col_user_data_3":       "Gebruikersdata 3",
     "col_user_data_4":       "Gebruikersdata 4",
     "col_favorite_points":   "Fav. punten",
+    "col_trackables":        "Trackables",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Openen op geocaching.com",
@@ -728,13 +771,12 @@ STRINGS: dict[str, str] = {
     "detail_corrected_clear_tooltip":"Gecorrigeerde coördinaten wissen",
     "detail_corrected_add_btn":     "Gecorrigeerde coördinaten toevoegen…",
 
-    "col_corrected":                "📍",
-    "col_corrected_label":          "📍 Gecorrigeerde coördinaten",
+    "col_corrected":                "CC",
     "col_corrected_header_tooltip": "Gecorrigeerde coördinaten — dubbelklik om te bewerken",
     "col_corrected_tooltip":        "Gecorrigeerde coördinaten: {coords}",
 
-    "ctx_add_corrected":            "📍  Gecorrigeerde coördinaten toevoegen…",
-    "ctx_edit_corrected":           "📍  Gecorrigeerde coördinaten bewerken…",
+    "ctx_add_corrected":            "Gecorrigeerde coördinaten toevoegen…",
+    "ctx_edit_corrected":           "Gecorrigeerde coördinaten bewerken…",
     "ctx_clear_corrected":          "✕  Gecorrigeerde coördinaten wissen",
 
     "corrected_dialog_title":       "Gecorrigeerde coördinaten",
@@ -991,7 +1033,7 @@ STRINGS: dict[str, str] = {
     "kml_dialog_done_msg":                     "{count} cache(s) geëxporteerd naar:\n{path}\n\nImporteer het bestand op maps.google.com/d.",
     "kml_dialog_error_title":                  "Exportfout",
     "kml_dialog_error_msg":                    "Export mislukt:\n{message}",
-    "action_export":                 "&Exporteren (GPX/LOC/...)",
+    "action_export":                 "&Exporteren (GPX/LOC/GGZ)",
     "file_export_dialog_title":      "Caches exporteren",
     "file_export_cache_count":       "{count} caches klaar voor export",
     "file_export_format_label":      "Bestandsformaat",
@@ -1005,4 +1047,25 @@ STRINGS: dict[str, str] = {
     "action_kml_export":                       "Exporteren naar Google Maps (KML)...",
     "kml_no_caches_title":                     "Geen caches",
     "kml_no_caches_msg":                       "Er zijn geen caches in het huidige filter.\nPas het filter aan en probeer opnieuw.",
+
+    # ── Caches verplaatsen/kopiëren ─────────────────────────────────────
+    "action_move_caches":                      "📦  Caches naar andere database verplaatsen…",
+    "action_copy_caches":                      "📋  Caches naar andere database kopiëren…",
+    "move_caches_title":                       "Caches verplaatsen",
+    "copy_caches_title":                       "Caches kopiëren",
+    "move_caches_scope_label":                 "Welke caches verplaatsen:",
+    "move_caches_scope_selected":              "Geselecteerde cache ({gc_code})",
+    "move_caches_scope_flagged":               "Gemarkeerde caches ({count})",
+    "move_caches_scope_all":                   "Alle caches in huidig filter ({count})",
+    "move_caches_target_label":                "Verplaatsen naar database:",
+    "copy_caches_target_label":                "Kopiëren naar database:",
+    "move_caches_current_db":                  "huidig",
+    "move_caches_btn_move":                    "Verplaatsen",
+    "move_caches_none_selected":               "Geen caches geselecteerd om te verplaatsen.",
+    "move_caches_same_db":                     "De doeldatabase is dezelfde als de huidige database.\nSelecteer een andere database.",
+    "move_caches_confirm":                     "{count} cache(s) verplaatsen naar {target}?\n\nZe worden verwijderd uit de huidige database.",
+    "copy_caches_confirm":                     "{count} cache(s) kopiëren naar {target}?",
+    "move_caches_done":                        "{count} cache(s) succesvol verplaatst.",
+    "copy_caches_done":                        "{count} cache(s) succesvol gekopieerd.",
+    "move_caches_error":                       "Er is een fout opgetreden bij het verplaatsen:\n{message}",
 }

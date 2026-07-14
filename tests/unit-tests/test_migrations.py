@@ -114,6 +114,8 @@ def test_old_schema_runs_every_migration(tmp_path):
     with engine.connect() as c:
         cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
         note_cols = {r[1] for r in c.execute(text("PRAGMA table_info(user_notes)"))}
+        wpt_cols = {r[1] for r in c.execute(text("PRAGMA table_info(waypoints)"))}
+        log_cols = {r[1] for r in c.execute(text("PRAGMA table_info(logs)"))}
         idx_names = {r[0] for r in c.execute(text(
             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='waypoints'"
         ))}
@@ -122,12 +124,208 @@ def test_old_schema_runs_every_migration(tmp_path):
 
     for col in ("county", "log_count", "parent_gc_code", "owner_name", "last_log_date",
                 "dnf_date", "favorite_points", "distance", "bearing", "waypoint_count",
-                "locked"):
+                "locked", "gc_note", "url", "elevation", "color", "guid", "watch",
+                "gc_cache_id", "find_count"):
         assert col in cache_cols
     assert "is_corrected" in note_cols
-    # The waypoints rebuild (migration 2) creates the named unique index
-    # (matching the model's constraint name) plus the cache_id index.
-    assert "uq_waypoint_cache_prefix_name" in idx_names
+    # The waypoints rebuild (migration 2, later replaced by migration 21)
+    # creates the named unique index (matching the model's constraint name)
+    # plus the cache_id index.
+    assert "uq_waypoint_cache_wp_code" in idx_names
+    assert "uq_waypoint_cache_prefix_name" not in idx_names
     assert "ix_waypoints_cache_id" in idx_names
     assert row == ("GPS Adventures Maze", "Micro")  # migration 5 + 7 normalisation
+
+    for col in ("wp_code", "url", "wp_date", "created_by_user", "wp_flag"):
+        assert col in wpt_cols
+    for col in ("latitude", "longitude", "logged_by_owner"):
+        assert col in log_cols
+
     assert version == SCHEMA_VERSION
+
+
+def test_waypoint_unique_constraint_wp_code_behaviour(tmp_path):
+    # Issue #536: the (cache_id, wp_code) constraint replacing
+    # (cache_id, prefix, name) — exercised directly on a fresh, current-
+    # schema database (via init_db, so this doesn't depend on the migration
+    # rebuild path, which test_old_schema_runs_every_migration already
+    # covers end-to-end).
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    init_db(db_path=tmp_path / "wp_constraint.db")
+    with get_session() as s:
+        s.add(Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                     latitude=55.5, longitude=11.1))
+        s.commit()
+        cache_id = s.query(Cache).filter_by(gc_code="GC1TEST").one().id
+
+    engine = get_engine()
+    with engine.connect() as c:
+        # Same prefix+name, distinct wp_code — must both be storable (the
+        # #536 scenario itself).
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+            "VALUES (:cid, 'RP', 'Right turn', 'RP1TEST')"
+        ), {"cid": cache_id})
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+            "VALUES (:cid, 'RP', 'Right turn', 'RP1TEST-2')"
+        ), {"cid": cache_id})
+        c.commit()
+
+        # Multiple NULL wp_codes (the GPX-import case) — also fine.
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name) VALUES (:cid, 'PK', 'Parking')"
+        ), {"cid": cache_id})
+        c.execute(text(
+            "INSERT INTO waypoints (cache_id, prefix, name) VALUES (:cid, 'PK', 'Parking')"
+        ), {"cid": cache_id})
+        c.commit()
+
+        count = c.execute(text(
+            "SELECT COUNT(*) FROM waypoints WHERE cache_id=:cid"
+        ), {"cid": cache_id}).scalar()
+        assert count == 4
+
+        # A genuine duplicate wp_code on the same cache is still rejected.
+        with pytest.raises(Exception):
+            c.execute(text(
+                "INSERT INTO waypoints (cache_id, prefix, name, wp_code) "
+                "VALUES (:cid, 'RP', 'Another name', 'RP1TEST')"
+            ), {"cid": cache_id})
+            c.commit()
+
+
+def test_leftover_favorite_point_column_removed(tmp_path):
+    # Simulate a database created during the narrow v1.14.0 window where
+    # `favorite_point` (singular, Boolean NOT NULL) briefly existed (#488,
+    # #530): a fresh, current-schema database that also happens to still
+    # carry the leftover column.
+    init_db(db_path=tmp_path / "legacy_fav.db")
+    engine = get_engine()
+
+    _insert_sql = (
+        "INSERT INTO caches (gc_code, name, cache_type, latitude, longitude, "
+        "available, archived, premium_only, short_desc_html, long_desc_html, "
+        "found, dnf, first_to_find, user_flag, watch, log_count, "
+        "trackable_count, waypoint_count, locked, found_log_count, imported_at) "
+        "VALUES ('{gc}', 'Test Cache', 'Traditional Cache', 1.0, 2.0, "
+        "1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '2026-01-01')"
+    )
+
+    # SQLite's ALTER TABLE ADD COLUMN requires a non-null default when the
+    # column is NOT NULL, so this fixture adds one (DEFAULT 0) — unlike the
+    # real leftover column, which has no default at all (see the reported
+    # PRAGMA table_info output on issue #530: dflt_value is blank). That
+    # difference doesn't matter here: the migration only cares whether the
+    # column exists, not whether it currently has a default.
+    with engine.connect() as c:
+        c.execute(text(
+            "ALTER TABLE caches ADD COLUMN favorite_point BOOLEAN NOT NULL DEFAULT 0"
+        ))
+        c.execute(text(_insert_sql.format(gc="GC1")))
+        c.execute(text("PRAGMA user_version = 0"))
+        c.commit()
+
+    _run_migrations(engine)
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        row = c.execute(text("SELECT gc_code FROM caches WHERE gc_code='GC1'")).first()
+        version = c.execute(text("PRAGMA user_version")).scalar()
+        # The insert that failed above must now succeed with the leftover
+        # column gone.
+        c.execute(text(_insert_sql.format(gc="GC2")))
+        c.commit()
+
+    assert "favorite_point" not in cache_cols
+    assert "favorite_points" in cache_cols  # the real, unrelated column stays
+    assert row == ("GC1",)  # existing data survived the column drop
+    assert version == SCHEMA_VERSION
+
+
+def test_found_log_count_column_added_and_backfilled(tmp_path):
+    # Issue #552: an existing pre-migration-22 database (real logs already
+    # present, just missing the found_log_count column) must get the column
+    # added AND correctly backfilled from existing logs, so users don't have
+    # to re-import for the relocatable-cache count to appear.
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache, Log
+    from opensak.gui.settings import get_settings
+
+    init_db(db_path=tmp_path / "found_log_count.db")
+    with get_session() as s:
+        cache = Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                       latitude=55.5, longitude=11.1, found=True)
+        s.add(cache)
+        s.flush()
+        # Two of the user's own found-type logs (relocatable-cache scenario)
+        # plus one from another finder, which must NOT be counted.
+        s.add(Log(cache_id=cache.id, log_id="L1", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.add(Log(cache_id=cache.id, log_id="L2", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.add(Log(cache_id=cache.id, log_id="L3", log_type="Found it",
+                   finder="Someone Else", finder_id="99999"))
+        s.commit()
+
+    engine = get_engine()
+    get_settings().gc_finder_id = "12345"
+
+    # Simulate a pre-migration-22 database: drop the column we're testing,
+    # then roll the stamped version back so migrations re-run.
+    with engine.connect() as c:
+        c.execute(text("ALTER TABLE caches DROP COLUMN found_log_count"))
+        c.execute(text("PRAGMA user_version = 21"))
+        c.commit()
+
+    _run_migrations(engine)
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        found_log_count = c.execute(text(
+            "SELECT found_log_count FROM caches WHERE gc_code='GC1TEST'"
+        )).scalar()
+        version = c.execute(text("PRAGMA user_version")).scalar()
+
+    assert "found_log_count" in cache_cols
+    assert found_log_count == 2
+    assert version == SCHEMA_VERSION
+
+
+def test_found_log_count_backfill_skipped_without_username_configured(tmp_path):
+    # No gc_username/gc_finder_id configured — the backfill query can't
+    # identify the user's own logs, so it's skipped entirely (rather than
+    # miscounting) and every cache's found_log_count stays at the column's
+    # default 0. mainwindow.py's footer count falls back to counting the
+    # cache itself (found=True) in this case.
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache, Log
+
+    init_db(db_path=tmp_path / "found_log_count_skip.db")
+    with get_session() as s:
+        cache = Cache(gc_code="GC1TEST", name="Test Cache", cache_type="Traditional Cache",
+                       latitude=55.5, longitude=11.1, found=True)
+        s.add(cache)
+        s.flush()
+        s.add(Log(cache_id=cache.id, log_id="L1", log_type="Found it",
+                   finder="AB Green", finder_id="12345"))
+        s.commit()
+
+    engine = get_engine()
+    with engine.connect() as c:
+        c.execute(text("ALTER TABLE caches DROP COLUMN found_log_count"))
+        c.execute(text("PRAGMA user_version = 21"))
+        c.commit()
+
+    _run_migrations(engine)  # gc_username/gc_finder_id left unset
+
+    with engine.connect() as c:
+        cache_cols = {r[1] for r in c.execute(text("PRAGMA table_info(caches)"))}
+        found_log_count = c.execute(text(
+            "SELECT found_log_count FROM caches WHERE gc_code='GC1TEST'"
+        )).scalar()
+
+    assert "found_log_count" in cache_cols
+    assert found_log_count == 0

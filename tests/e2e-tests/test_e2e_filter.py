@@ -122,6 +122,118 @@ def test_gc_search_partial_without_gc_prefix(seeded_window, qtbot):
     assert window._cache_table.row_count() == 2
 
 
+# ── Toolbar profile dropdown: "None" vs "Active (unsaved)" ────────────────────
+# Reported by Allan/Mike: the dropdown said "None" while a filter was clearly
+# applied (red Clear button, fewer rows) because it was set via a quick search
+# box / status click rather than a saved profile.
+
+
+def test_dropdown_shows_none_with_no_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+    assert window._filter_profile_combo.currentIndex() == 0
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
+def test_dropdown_shows_active_for_gc_search(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_gc.setText("GC12345")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 1, timeout=1_000)
+
+    assert window._filter_profile_combo.currentIndex() == 0
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_active_for_name_search(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_box.setText("Mystery Cache")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 2, timeout=1_000)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_active_for_quick_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._quick_filter.setCurrentIndex(2)  # Found → not the "All" default
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_reverts_to_none_when_search_cleared(seeded_window, qtbot):
+    from opensak.lang import tr
+    window = seeded_window
+
+    window._search_gc.setText("GC12345")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 1, timeout=1_000)
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+    window._search_gc.setText("")
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == TOTAL, timeout=1_000)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
+def test_dropdown_shows_active_for_unsaved_advanced_filter(seeded_window, qtbot):
+    # An advanced filter applied via the Set-filter dialog without saving it
+    # as a named profile — profile_name == "" reaches _on_filter_applied.
+    from opensak.lang import tr
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+
+def test_dropdown_shows_profile_name_for_saved_filter(seeded_window, qtbot, tmp_path, monkeypatch):
+    # A genuinely saved/named profile still shows its own name, not "Active".
+    # (Passing an arbitrary label to _on_filter_applied — as the status-bar
+    # quick filters do — is *not* the same as a saved profile; see the
+    # comment on the combo's `activated` wiring in mainwindow.py.)
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter, FilterProfile
+
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    FilterProfile("Traditional only", fs, SortSpec("name", ascending=True)).save(profiles_dir=tmp_path)
+    monkeypatch.setattr(
+        FilterProfile, "list_profiles",
+        staticmethod(lambda profiles_dir=None: sorted(tmp_path.glob("*.json")))
+    )
+
+    window = seeded_window
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == "Traditional only"
+
+
+def test_dropdown_shows_none_after_clear_filter(seeded_window, qtbot):
+    from opensak.lang import tr
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
+    qtbot.wait(50)
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+    window._clear_filter()
+    qtbot.wait(50)
+
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+
+
 # ── FilterDialog (Ctrl+F path) ─────────────────────────────────────────────────
 
 
@@ -166,6 +278,71 @@ def test_clear_filter_removes_advanced_filter(seeded_window, qtbot):
     assert window._filter_lbl.text() == ""
 
 
+# ── Deleting the active saved filter profile (issue #491) ────────────────────
+
+
+def test_profile_deleted_clears_active_filter(seeded_window, qtbot):
+    # Deleting the profile that is currently active must clear the filter
+    # and restore the full row count, even though the FilterDialog itself
+    # was never applied/closed here (mirrors "Close without Apply" repro).
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+    assert window._cache_table.row_count() == 2
+    assert window._active_filter_name == "Traditional only"
+
+    window._on_profile_deleted("Traditional only")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == TOTAL
+    assert window._active_filter_name == ""
+    assert window._filter_lbl.text() == ""
+
+
+def test_profile_deleted_of_inactive_profile_leaves_active_filter(seeded_window, qtbot):
+    # Deleting a *different*, non-active profile must not touch the
+    # currently-applied filter or the cache table.
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+    assert window._cache_table.row_count() == 2
+
+    window._on_profile_deleted("Some other profile")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 2
+    assert window._active_filter_name == "Traditional only"
+
+
+def test_profile_deleted_preserves_quick_search_text(seeded_window, qtbot):
+    # Deleting the active advanced filter must not wipe unrelated quick
+    # search text (GC code / name) — only _clear_filter() should do that.
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter
+
+    window = seeded_window
+    window._search_gc.setText("GC")
+    qtbot.wait(50)
+
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+
+    window._on_profile_deleted("Traditional only")
+    qtbot.wait(50)
+
+    assert window._search_gc.text() == "GC"
+    assert window._active_filter_name == ""
+
+
 # ── WhereClauseFilter integration via _on_filter_applied ──────────────────────
 
 
@@ -188,18 +365,25 @@ def test_where_clause_filter_reduces_row_count(seeded_window, qtbot):
     assert window._cache_table.row_count() == 2
 
 
-def test_where_clause_invalid_sql_hides_all_rows(seeded_window, qtbot):
-    # Invalid SQL produces zero matches — the table empties without crashing.
+def test_where_clause_invalid_sql_hides_all_rows(seeded_window, qtbot, monkeypatch):
+    # Issue #444: invalid SQL still produces zero matches, but that no
+    # longer empties the table — the (rejected) filter warns and reopens
+    # "Set filter" instead, leaving the previous view untouched.
+    import opensak.gui.icon as icon_mod
     from opensak.filters.engine import FilterSet, SortSpec, WhereClauseFilter
 
     window = seeded_window
+    monkeypatch.setattr(icon_mod.QMessageBox, "exec",
+                         lambda self: icon_mod.QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(window, "_show_filter_dialog", lambda fs, name: None)
 
     fs = FilterSet()
     fs.add(WhereClauseFilter("NOT VALID SQL @@@"))
     window._on_filter_applied(fs, SortSpec("name"), "Bad SQL")
     qtbot.wait(50)
 
-    assert window._cache_table.row_count() == 0
+    assert window._cache_table.row_count() == TOTAL  # unchanged, not emptied
+    assert window._active_filter_name != "Bad SQL"
 
 
 def test_where_clause_clear_restores_full_count(seeded_window, qtbot):
@@ -345,17 +529,59 @@ def test_text_search_hint_narrows_rows(seeded_window, qtbot):
     assert window._cache_table.row_count() == 2
 
 
-def test_text_search_no_match_returns_zero(seeded_window, qtbot):
+def test_text_search_no_match_returns_zero(seeded_window, qtbot, monkeypatch):
+    # Issue #444: a filter matching zero caches must NOT be applied — the
+    # previous view stays as-is, a warning is shown, and "Set filter" is
+    # reopened with the same (rejected) criteria so the user can adjust them.
+    import opensak.gui.icon as icon_mod
     from opensak.filters.engine import FilterSet, SortSpec, TextSearchFilter
 
     window = seeded_window
+    assert window._cache_table.row_count() == TOTAL
+
+    warned = []
+    monkeypatch.setattr(icon_mod.QMessageBox, "exec",
+                         lambda self: warned.append(self.text()) or icon_mod.QMessageBox.StandardButton.Ok)
+    reopened = []
+    monkeypatch.setattr(window, "_show_filter_dialog",
+                         lambda fs, name: reopened.append((fs, name)))
 
     fs = FilterSet()
     fs.add(TextSearchFilter("zzznomatch"))
     window._on_filter_applied(fs, SortSpec("name"), "No match")
     qtbot.wait(50)
 
-    assert window._cache_table.row_count() == 0
+    assert warned  # the "no results" warning was shown
+    assert window._cache_table.row_count() == TOTAL  # previous view untouched
+    assert window._active_filter_name != "No match"  # filter was NOT committed
+    assert reopened and reopened[0][1] == "No match"  # dialog reopened with same criteria
+
+
+def test_filter_zero_results_leaves_existing_filter_active(seeded_window, qtbot, monkeypatch):
+    # Applying a second, zero-result filter must not clobber an already
+    # active filter — the view stays on the first filter's results.
+    import opensak.gui.icon as icon_mod
+    from opensak.filters.engine import FilterSet, SortSpec, CacheTypeFilter, TextSearchFilter
+
+    window = seeded_window
+    monkeypatch.setattr(icon_mod.QMessageBox, "exec",
+                         lambda self: icon_mod.QMessageBox.StandardButton.Ok)
+    monkeypatch.setattr(window, "_show_filter_dialog", lambda fs, name: None)
+
+    fs1 = FilterSet(mode="AND")
+    fs1.add(CacheTypeFilter(["Traditional Cache"]))
+    window._on_filter_applied(fs1, SortSpec("name", ascending=True), "Traditional only")
+    qtbot.wait(50)
+    assert window._cache_table.row_count() == 2
+    assert window._active_filter_name == "Traditional only"
+
+    fs2 = FilterSet()
+    fs2.add(TextSearchFilter("zzznomatch"))
+    window._on_filter_applied(fs2, SortSpec("name"), "No match")
+    qtbot.wait(50)
+
+    assert window._cache_table.row_count() == 2  # unchanged — still "Traditional only"
+    assert window._active_filter_name == "Traditional only"
 
 
 def test_where_exists_logs_narrows_rows(seeded_window, qtbot):

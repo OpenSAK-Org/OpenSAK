@@ -13,11 +13,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache
+from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.types import GcCode
 
 
@@ -41,11 +42,13 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
     """
     Hent alle GC koder fra reference databasen med den tilhørende fund-dato.
 
-    Fund-datoen er datoen på den ældste "Found it"-log i reference-databasen
-    (My Finds PQ indeholder typisk ét log per cache — brugerens eget fund-log).
+    Fund-datoen er datoen på den ældste "found"-log (se FOUND_LOG_TYPES i
+    opensak.utils.constants — dækker "Found it", "Attended" og "Webcam Photo
+    Taken") i reference-databasen (My Finds PQ indeholder typisk ét log per
+    cache — brugerens eget fund-log).
 
     Returnerer et dict {gc_code: found_date} — found_date kan være None
-    hvis ingen "Found it"-log findes for cachen.
+    hvis ingen "found"-log findes for cachen.
     """
     url = f"sqlite:///{reference_db_path}"
     engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
@@ -71,16 +74,22 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
             found_dates: dict[str, datetime | None] = {gc: None for gc in id_to_gc.values()}
 
             if has_logs:
-                # Hent ældste "Found it"-log per cache.
-                # log_type varierer mellem geocaching.com eksporter:
-                # "Found it", "Found It", "found it" — brug LOWER() for sikkerhed.
+                # Hent ældste "found"-log per cache (FOUND_LOG_TYPES: "Found it",
+                # "Attended", "Webcam Photo Taken" — se opensak.utils.constants).
+                # log_type varierer mellem geocaching.com eksporter i case
+                # ("Found it", "Found It", "found it") — brug LOWER() for sikkerhed.
                 # My Finds PQ har typisk kun ét log per cache (brugerens eget).
-                log_rows = conn.execute(text("""
+                #
+                # Bug #457: forespørgslen matchede tidligere kun 'found it',
+                # så webcam-caches og events aldrig fik en found_date herfra.
+                found_types_lower = [t.lower() for t in FOUND_LOG_TYPES]
+                query = text("""
                     SELECT cache_id, MIN(log_date)
                     FROM logs
-                    WHERE LOWER(log_type) = 'found it'
+                    WHERE LOWER(log_type) IN :found_types
                     GROUP BY cache_id
-                """)).fetchall()
+                """).bindparams(bindparam("found_types", expanding=True))
+                log_rows = conn.execute(query, {"found_types": found_types_lower}).fetchall()
 
                 for cache_id, log_date_raw in log_rows:
                     gc = id_to_gc.get(cache_id)

@@ -300,6 +300,10 @@ class MainWindow(QMainWindow):
         self._act_import.triggered.connect(self._open_import_dialog)
         file_menu.addAction(self._act_import)
 
+        self._act_gsak_import = QAction(tr("action_gsak_import"), self)
+        self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
+        file_menu.addAction(self._act_gsak_import)
+
         file_menu.addSeparator()
 
         # ── Export ──────────────────────────────────────────────────────────────
@@ -354,8 +358,18 @@ class MainWindow(QMainWindow):
         act_clear_flags.triggered.connect(self._clear_all_flags)
         wp_menu.addAction(act_clear_flags)
 
+        wp_menu.addSeparator()
+
+        act_move_caches = QAction(tr("action_move_caches"), self)
+        act_move_caches.triggered.connect(self._open_move_caches_dialog)
+        wp_menu.addAction(act_move_caches)
+
+        act_copy_caches = QAction(tr("action_copy_caches"), self)
+        act_copy_caches.triggered.connect(self._open_copy_caches_dialog)
+        wp_menu.addAction(act_copy_caches)
+
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             wp_menu.addSeparator()
 
             act_update_location = QAction(tr("action_update_location"), self)
@@ -387,9 +401,10 @@ class MainWindow(QMainWindow):
         self._act_filter_menu.triggered.connect(self._open_filter_dialog)
         view_menu.addAction(self._act_filter_menu)
 
-        act_clear = QAction(tr("action_clear_filter"), self)
-        act_clear.triggered.connect(self._clear_filter)
-        view_menu.addAction(act_clear)
+        self._act_clear_filter = QAction(tr("action_clear_filter"), self)
+        self._act_clear_filter.setShortcut(QKeySequence("Escape"))
+        self._act_clear_filter.triggered.connect(self._clear_filter)
+        view_menu.addAction(self._act_clear_filter)
 
         view_menu.addSeparator()
 
@@ -479,6 +494,12 @@ class MainWindow(QMainWindow):
         act_open_log = QAction(tr("action_open_log_file"), self)
         act_open_log.triggered.connect(self._open_log_file)
         help_menu.addAction(act_open_log)
+
+        help_menu.addSeparator()
+
+        act_support = QAction(tr("action_support_opensak"), self)
+        act_support.triggered.connect(self._open_support_page)
+        help_menu.addAction(act_support)
 
         # ── Vis-dropdown i menulinjen ─────────────────────────────────────────
         menubar.addSeparator()
@@ -584,7 +605,18 @@ class MainWindow(QMainWindow):
         filter_combo_action = QWidgetAction(self)
         filter_combo_action.setDefaultWidget(self._filter_profile_combo)
         tb.addAction(filter_combo_action)
-        self._filter_profile_combo.currentIndexChanged.connect(
+        # issue #553: use activated() rather than currentIndexChanged(). A
+        # status-bar click (_filter_by_status) sets a filter whose label
+        # doesn't match any saved profile, so _populate_filter_profile_combo()
+        # falls back to visually showing "None" (index 0) while a filter is
+        # still active behind the scenes. If the user then explicitly picks
+        # "None" from the dropdown, the index doesn't change (it's already 0),
+        # so currentIndexChanged never fires and the filter is never cleared.
+        # activated() fires on every user selection regardless of whether the
+        # index actually changed, and — unlike currentIndexChanged — it is
+        # never emitted by our own programmatic setCurrentIndex() calls, so
+        # no blockSignals() workaround is needed here.
+        self._filter_profile_combo.activated.connect(
             self._on_filter_profile_combo_changed
         )
         self._populate_filter_profile_combo()
@@ -743,7 +775,20 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.database_dialog import DatabaseManagerDialog
         dlg = DatabaseManagerDialog(self)
         dlg.database_switched.connect(self._on_database_switched)
+        dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+
+    def _on_database_renamed(self, db_info) -> None:
+        """
+        Kaldes når en database omdøbes i Manage Databases-dialogen (#539).
+
+        En omdøbning skifter ikke hvilken database der vises/redigeres —
+        kun dens navn — så vi genindlæser bevidst kun toolbar-dropdown'en
+        og vinduestitlen (begge viser database-navnet), i modsætning til
+        _on_database_switched som også nulstiller detaljepanel, kort m.v.
+        """
+        self._reload_db_combo()
+        self._update_title()
 
     def _on_database_switched(self, db_info) -> None:
         """Kaldes når brugeren skifter aktiv database."""
@@ -901,8 +946,8 @@ class MainWindow(QMainWindow):
         # Filter name: named profile > generic "Active" > empty (shows None)
         if self._active_filter_name:
             filter_name = self._active_filter_name
-        elif len(self._current_filterset) > 0:
-            filter_name = tr("infobar_filter_active", count=len(self._current_filterset))
+        elif self._current_filterset.active_count() > 0:
+            filter_name = tr("infobar_filter_active", count=self._current_filterset.active_count())
         else:
             filter_name = ""
 
@@ -913,7 +958,16 @@ class MainWindow(QMainWindow):
         center_name = s.active_home_name or ""
 
         # Color-coded counts (from filtered caches)
-        found = sum(1 for c in caches if c.found)
+        # Issue #552 (Mike Wood): geocaching.com and GSAK both count found
+        # LOGS in this total, not found CACHES — a relocatable/multi-visit
+        # cache the user has found N times contributes N, not 1. found_log_count
+        # is cached at import time (see count_own_found_logs() in
+        # utils/utils.py). max(..., 1) is a safety net for found=True caches
+        # where found_log_count is 0 — e.g. no gc_username/gc_finder_id
+        # configured, or a PQ import whose 5-log window didn't include the
+        # user's own log — so the count never regresses below the old
+        # cache-counting behaviour.
+        found = sum(max(c.found_log_count, 1) for c in caches if c.found)
         all_in_filter = len(caches)
         inactive = sum(1 for c in caches if c.archived or not c.available)
 
@@ -1031,6 +1085,7 @@ class MainWindow(QMainWindow):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.attributes),
                 joinedload(CacheModel.waypoints),
+                joinedload(CacheModel.trackables),
                 joinedload(CacheModel.user_note),
             ).filter_by(gc_code=gc_code).first()
 
@@ -1105,6 +1160,7 @@ class MainWindow(QMainWindow):
             self._set_clear_filter_active(True)
         elif not self._active_filter_name:
             self._set_clear_filter_active(False)
+        self._update_filter_combo_placeholder()
         min_chars, debounce_ms = self._search_thresholds()
         if text == "":
             # Clearing always fires immediately
@@ -1134,6 +1190,7 @@ class MainWindow(QMainWindow):
         return min_chars, debounce_ms
 
     def _on_quick_filter_changed(self, index: int) -> None:
+        self._update_filter_combo_placeholder()
         self._refresh_cache_list()
 
     # ── Drag & drop ───────────────────────────────────────────────────────────
@@ -1182,6 +1239,15 @@ class MainWindow(QMainWindow):
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
+    def _open_gsak_import_dialog(self) -> None:
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.gui.dialogs.gsak_import_dialog import GsakImportDialog
+        dlg = GsakImportDialog(self)
+        dlg.import_completed.connect(self._refresh_after_import)
+        dlg.exec()
+
     def _refresh_after_import(self) -> None:
         """Reload both cache table and map after a successful import."""
         from opensak.gui.settings import get_settings
@@ -1219,6 +1285,16 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             prev_cache = self._cache_table.selected_cache()
             self._reload_home_combo()
+            # Issue #522: editing the active home point's own coordinates (or
+            # adding a new point that becomes active) updates settings via
+            # _sync_active_home_coords() -> set_active_home(), which never
+            # goes through _on_home_changed() — so distances must be
+            # recalculated explicitly here, or the persisted Cache.distance
+            # column stays stale until the next manual home-point switch.
+            s = get_settings()
+            if s.home_lat and s.home_lon:
+                from opensak.db.database import recalculate_distances
+                recalculate_distances(s.home_lat, s.home_lon)
             self._map_widget.reload_map(self._refresh_cache_list)
             self._refresh_cache_list()
             self._cache_table.refresh_visuals()
@@ -1241,6 +1317,7 @@ class MainWindow(QMainWindow):
             ("delete_cache",      "shortcut_delete_cache",      [self._act_wp_delete]),
             ("refresh",           "shortcut_refresh",           [self._act_refresh]),
             ("filter",            "shortcut_filter",            [self._act_filter_menu, self._act_filter]),
+            ("clear_filter",      "shortcut_clear_filter",      [self._act_clear_filter]),
             ("settings",          "shortcut_settings",          [self._act_settings]),
             ("gps_export",        "shortcut_gps_export",        [self._act_gps_export]),
             ("trip_planner",      "shortcut_trip_planner",      [self._act_trip_planner]),
@@ -1572,6 +1649,40 @@ class MainWindow(QMainWindow):
             self._refresh_cache_list()
             self._statusbar.showMessage(tr("status_flags_cleared"), 3000)
 
+    def _open_move_caches_dialog(self) -> None:
+        """Open the Move Caches dialog."""
+        self._open_move_or_copy_dialog(copy_only=False)
+
+    def _open_copy_caches_dialog(self) -> None:
+        """Open the Copy Caches dialog."""
+        self._open_move_or_copy_dialog(copy_only=True)
+
+    def _open_move_or_copy_dialog(self, copy_only: bool) -> None:
+        """Open the Move/Copy Caches dialog."""
+        from opensak.gui.dialogs.move_caches_dialog import MoveCachesDialog
+
+        selected = self._cache_table.selected_cache()
+        selected_gc = selected.gc_code if selected else None
+        flagged = [c.gc_code for c in self._cache_table.get_flagged_caches()]
+        all_codes = [c.gc_code for c in self._cache_table.get_all_caches()]
+
+        dlg = MoveCachesDialog(
+            self,
+            selected_gc_code=selected_gc,
+            flagged_gc_codes=flagged,
+            all_gc_codes=all_codes,
+            copy_only=copy_only,
+        )
+        dlg.caches_moved.connect(self._on_caches_moved)
+        dlg.exec()
+
+    def _on_caches_moved(self) -> None:
+        """Refresh UI after caches were moved/copied to another database."""
+        self._detail_panel.clear()
+        self._act_wp_edit.setEnabled(False)
+        self._act_wp_delete.setEnabled(False)
+        self._refresh_cache_list()
+
     def _on_flags_changed(self) -> None:
         """Opdatér statuslinjen når et flag toggler."""
         flagged = len(self._cache_table.get_flagged_caches())
@@ -1682,12 +1793,38 @@ class MainWindow(QMainWindow):
         if self._trip_planner_active():
             self._warn_trip_planner_active()
             return
+        self._show_filter_dialog(self._current_filterset, self._active_filter_name)
+
+    def _show_filter_dialog(self, filterset, active_name: str) -> None:
+        """Åbn "Set filter"-dialogen forudfyldt med et givet filterset/navn.
+
+        Delt af den normale menu-indgang (_open_filter_dialog) og af
+        _on_filter_applied's "0 resultater"-genåbning (issue #444), så
+        brugerens netop indtastede — men afviste — kriterier ikke går tabt.
+        """
         from opensak.gui.dialogs.filter_dialog import FilterDialog
-        dlg = FilterDialog(self, self._current_filterset, self._active_filter_name)
+        dlg = FilterDialog(self, filterset, active_name)
         dlg.filter_applied.connect(self._on_filter_applied)
+        dlg.profile_deleted.connect(self._on_profile_deleted)
         dlg.exec()
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
+        with get_session() as session:
+            from opensak.filters.engine import apply_filters
+            caches = apply_filters(session, filterset, sort)
+
+        if not caches:
+            # Issue #444: match GSAK's behavior — warn instead of silently
+            # switching to an empty view, and reopen "Set filter" with the
+            # same (not-yet-applied) criteria still filled in so the user
+            # can adjust them, rather than committing to a filter that
+            # hides every cache. The current view/filter is left untouched.
+            QMessageBox.warning(
+                self, tr("filter_no_results_title"), tr("filter_no_results_msg")
+            )
+            QTimer.singleShot(0, lambda: self._show_filter_dialog(filterset, profile_name))
+            return
+
         self._current_filterset = filterset
         self._current_sort = sort
         self._active_filter_name = profile_name
@@ -1697,9 +1834,6 @@ class MainWindow(QMainWindow):
         self._filter_lbl.setText(f"🔍 {label}")
         self._quick_filter.setCurrentIndex(0)
         self._populate_filter_profile_combo(select_name=profile_name)
-        with get_session() as session:
-            from opensak.filters.engine import apply_filters
-            caches = apply_filters(session, filterset, sort)
         self._cache_table.load_caches(caches)
         self._map_widget.load_caches(caches)
         count = self._cache_table.row_count()
@@ -1710,13 +1844,45 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(tr("status_filter_result", count=count), 3000)
         self._update_info_bar()
 
+    def _on_profile_deleted(self, name: str) -> None:
+        """Reagér på at en gemt filter-profil er slettet i "Set filter"-dialogen.
+
+        Fires uanset om dialogen efterfølgende lukkes med Apply eller bare
+        Close/Escape (issue #491). Hvis den slettede profil var det aktive
+        filter i waypoint-listen, sættes filteret til None og cache-tabellen
+        opdateres. Rører IKKE quick-search-felterne (GC code / navn) — kun
+        det avancerede filter nulstilles, jf. _refresh_cache_list() som
+        allerede kombinerer korrekt med et evt. tomt _current_filterset.
+        Hvis en anden (ikke-aktiv) profil blev slettet, opdateres kun
+        toolbar-dropdownen så den døde profil forsvinder derfra.
+        """
+        if name and name == self._active_filter_name:
+            self._current_filterset = FilterSet()
+            self._active_filter_name = ""
+            has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
+            self._set_clear_filter_active(has_search)
+            self._filter_lbl.setText("")
+            self._populate_filter_profile_combo(select_name=None)
+            self._refresh_cache_list()
+            self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+        else:
+            self._populate_filter_profile_combo(select_name=self._active_filter_name or None)
+
     def _set_clear_filter_active(self, active: bool) -> None:
         """Sæt klar-filter knappens farve og tilstand — rød når aktiv, grå når inaktiv."""
         self._btn_clear_filter.setEnabled(active)
         if active:
+            # Issue #559: knappen havde tidligere kun en diskret ændring i
+            # tekstfarve ved mouseover og intet baggrunds-/ramme-respons —
+            # i modsætning til alle andre aktive værktøjslinje-knapper, som
+            # viser en tydelig hover-highlight. Tilføjet en rødtonet
+            # baggrund + afrundede hjørner ved hover, så knappen ser
+            # klikbar ud på linje med resten. Ingen hover-regel i "inaktiv"
+            # grenen nedenfor — der er den bevidst ikke-interaktiv.
             self._btn_clear_filter.setStyleSheet(
-                "QPushButton { color: #d32f2f; font-size: 14px; font-weight: bold; border: none; }"
-                "QPushButton:hover { color: #b71c1c; }"
+                "QPushButton { color: #d32f2f; font-size: 14px; font-weight: bold; "
+                "border: none; border-radius: 4px; }"
+                "QPushButton:hover { color: #b71c1c; background-color: rgba(211, 47, 47, 0.12); }"
             )
         else:
             self._btn_clear_filter.setStyleSheet(
@@ -1733,8 +1899,58 @@ class MainWindow(QMainWindow):
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
+        # Bug reported on Facebook: clearing the filter (red X / "None" in
+        # the dropdown / Escape / the status-bar "All" click) only reset it
+        # in the current view — the per-database saved profile reference in
+        # opensak.json was never updated, so switching away and back to the
+        # same database silently reapplied the filter that had just been
+        # cleared. Persist the cleared state immediately, same as selecting
+        # a saved profile already does in _on_filter_profile_combo_changed().
+        self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+
+    def _has_unsaved_active_filter(self) -> bool:
+        """True if a filter is currently in effect that isn't a saved profile.
+
+        Covers the three ways a filter can end up applied without going
+        through "select a saved profile": an unsaved Set-filter dialog
+        result, a status-bar count click (issue #270), and the quick GC
+        code / name search boxes or the "Vis" quick-filter dropdown — none
+        of which set _active_filter_name. Used to decide whether the
+        toolbar dropdown's first entry should read "None" or "Active
+        (unsaved)" (Allan/Mike: seeing "None" while a filter is visibly
+        applied — red Clear button, fewer rows — was confusing).
+        """
+        if self._active_filter_name:
+            return False  # a saved profile is selected — not "unsaved"
+        if self._current_filterset.active_count() > 0:
+            return True
+        if hasattr(self, "_search_gc") and hasattr(self, "_search_box"):
+            if self._search_gc.text().strip() or self._search_box.text().strip():
+                return True
+        if hasattr(self, "_quick_filter") and self._quick_filter.currentIndex() != 0:
+            return True
+        return False
+
+    def _update_filter_combo_placeholder(self) -> None:
+        """Refresh only the dropdown's first entry ('None' / 'Active (unsaved)').
+
+        Cheap alternative to _populate_filter_profile_combo() for callers
+        (quick search box, quick-filter dropdown) that fire on every
+        keystroke/selection and shouldn't re-read every saved profile from
+        disk each time. No-op while a saved profile is actually selected —
+        its name stays put.
+        """
+        if not hasattr(self, "_filter_profile_combo"):
+            return
+        if self._filter_profile_combo.currentIndex() != 0:
+            return
+        text = (tr("toolbar_filter_combo_active") if self._has_unsaved_active_filter()
+                else tr("toolbar_filter_combo_none"))
+        self._filter_profile_combo.blockSignals(True)
+        self._filter_profile_combo.setItemText(0, text)
+        self._filter_profile_combo.blockSignals(False)
 
     def _populate_filter_profile_combo(self, select_name: str | None = None) -> None:
         """Genindlæs alle gemte filter-profiler i toolbar-dropdown.
@@ -1745,7 +1961,9 @@ class MainWindow(QMainWindow):
         from opensak.filters.engine import FilterProfile
         self._filter_profile_combo.blockSignals(True)
         self._filter_profile_combo.clear()
-        self._filter_profile_combo.addItem(tr("toolbar_filter_combo_none"), userData=None)
+        none_text = (tr("toolbar_filter_combo_active") if self._has_unsaved_active_filter()
+                     else tr("toolbar_filter_combo_none"))
+        self._filter_profile_combo.addItem(none_text, userData=None)
         paths = FilterProfile.list_profiles()
         for path in paths:
             try:
@@ -1988,6 +2206,12 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://opensak.com/user-guide.html"))
 
+    def _open_support_page(self) -> None:
+        """Open the Open Collective support/sponsor page in the default browser."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl("https://opencollective.com/opensak"))
+
     def _open_log_file(self) -> None:
         """Åbn logfilen i systemets standard tekstprogram (issue #232)."""
         from opensak.config import get_log_path
@@ -2057,7 +2281,7 @@ class MainWindow(QMainWindow):
         # the `beta` branch and aren't merged to `main` until they go stable,
         # so a hardcoded main link showed the wrong (older) changelog entry
         # for anyone running a beta.
-        changelog_url = f"https://github.com/AgreeDK/opensak/blob/{latest_tag}/CHANGELOG.md"
+        changelog_url = f"https://github.com/OpenSAK-Org/opensak/blob/{latest_tag}/CHANGELOG.md"
 
         msg = QMessageBox(self)
         if is_prerelease:
@@ -2072,6 +2296,9 @@ class MainWindow(QMainWindow):
         )
         msg.setTextFormat(Qt.TextFormat.RichText)
         btn_open = msg.addButton(tr("update_open_releases"), QMessageBox.ButtonRole.AcceptRole)
+        # More visible spot for supporting the project than the Help menu
+        # alone, which users who never open Help would otherwise never see.
+        btn_support = msg.addButton(tr("action_support_opensak"), QMessageBox.ButtonRole.HelpRole)
         btn_skip = msg.addButton(tr("update_skip_version"), QMessageBox.ButtonRole.DestructiveRole)
         msg.addButton(tr("update_later"), QMessageBox.ButtonRole.RejectRole)
         msg.setIcon(QMessageBox.Icon.Information)
@@ -2084,4 +2311,6 @@ class MainWindow(QMainWindow):
         elif clicked == btn_skip:
             from opensak.gui.settings import get_settings
             get_settings().updates_skipped_version = latest_tag
+        elif clicked == btn_support:
+            self._open_support_page()
 

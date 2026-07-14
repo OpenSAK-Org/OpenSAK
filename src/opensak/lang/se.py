@@ -39,6 +39,8 @@ STRINGS: dict[str, str] = {
     "count_caches":                 "{count} cacher",
     "count_cache_single":           "1 cache",
     "filter_active_label":          "🔍 Filter aktivt",
+    "filter_no_results_title":      "Inga matchande caches",
+    "filter_no_results_msg":        "Det här filtret matchar inga caches och har därför inte tillämpats. Justera kriterierna och försök igen.",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Fil",
@@ -83,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Tangentbordsgenvägar…",
 
     "action_open_log_file": "Öppna loggfil",
+    "action_support_opensak": "♥  Stöd OpenSAK…",
     "log_file_not_found": "Loggfilen hittades inte än: {path}",
 
     # ── Tangentbordsgenvägar-dialog ───────────────────────────────────────────
@@ -98,6 +101,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Ta bort cache",
     "shortcut_refresh":             "Uppdatera lista",
     "shortcut_filter":              "Ange filter",
+    "shortcut_clear_filter":        "Återställ filter",
     "shortcut_settings":            "Inställningar",
     "shortcut_gps_export":          "Skicka till GPS",
     "shortcut_trip_planner":        "Reseplanerare",
@@ -117,6 +121,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Rensa filter",
     "toolbar_filter_combo_tooltip":  "Välj sparat filter",
     "toolbar_filter_combo_none":     "Inget",
+    "toolbar_filter_combo_active":   "Aktivt (ej sparat)",
     "toolbar_refresh":              "Uppdatera",
 
     # ── Status bar ────────────────────────────────────────────────────────────
@@ -173,6 +178,26 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Alla {count} filer har bearbetats.",
     "import_geocode_running":       "📍  Geokoderar saknade platsdata…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importera från GSAK-databas…",
+    "gsak_import_dialog_title":     "Importera från GSAK-databas",
+    "gsak_import_select_file_label": "Välj en GSAK-säkerhetskopia (.zip) eller databasfil (.db3):",
+    "gsak_import_browse_title":     "Välj GSAK-säkerhetskopia eller databasfil",
+    "gsak_import_file_filter":      "GSAK-säkerhetskopia eller databas (*.zip *.db3);;Alla filer (*)",
+    "gsak_import_extracting":       "Packar upp {name}…",
+    "gsak_import_running":          "Importerar {name}…",
+    "gsak_import_attributes":       "Attribut:",
+    "gsak_import_logs":             "Loggar:",
+    "gsak_import_notes":            "Anteckningar:",
+    "gsak_import_note_images":      "Bilder i anteckningar → platshållare:",
+    "gsak_import_trackables":       "Trackables:",
+    "gsak_import_warnings_header":  "Varningar ({count}):",
+    "gsak_import_no_db3_found":     "Ingen sqlite.db3-fil hittades i {name}",
+    "gsak_import_done":             "✓ Import klar.",
+    "gsak_prescan_title":           "Vissa personliga anteckningar innehåller bilder",
+    "gsak_prescan_body":            "{notes} av dina personliga anteckningar innehåller {images} bild(er) som GSAK laddade ner till din gamla dator. Dessa kan inte kopieras automatiskt, så OpenSAK visar istället en platshållare som [image: filename.jpg]. Själva anteckningstexten importeras fortfarande normalt.\n\nFortsätta med importen?",
+    "gsak_prescan_continue":        "Fortsätt import",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Sätt filter",
     "filter_tab_dates":             "Datum",
@@ -223,12 +248,15 @@ STRINGS: dict[str, str] = {
     "gps_caches_ready":             "<b>{count} cacher</b> klara för export (filtrerade/synbara cacher)",
     "gps_dest_group":               "Destination",
     "gps_rb_device":                "Skicka direkt till GPS enhet:",
-    "gps_rb_file":                  "Spara som GPX fil:",
+    "gps_rb_file":                  "Spara som fil:",
     "gps_scan_btn":                 "🔍 Skanna",
     "gps_scan_scanning":            "⏳",
     "gps_devices_found":            "✓ {count} Garmin enhet(r) hittade",
     "gps_no_device":                "(Ingen GPS enhet hittad)",
-    "gps_no_device_hint":           "Ingen GPS enhet hittad — anslut din GPS och klicka Skanna igen eller använd 'Spara som GPX fil'",
+    "gps_no_device_hint":           "Ingen GPS enhet hittad — anslut din GPS och klicka Skanna igen eller använd 'Spara som fil'",
+    "gps_format_group":             "Exportformat",
+    "gps_format_gpx":               "GPX  —  standard Garmin-format (max. ~5 000 cachar)",
+    "gps_format_ggz":               "GGZ  —  komprimerat Garmin-format (obegränsat antal cachar)",
     "gps_browse":                   "Bläddra…",
     "gps_file_placeholder":         "Välj plats…",
     "gps_opt_group":                "Alternativ",
@@ -245,6 +273,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Inga GPX filer hittades på enheten.\nVill du fortsätta uppladdning?",
     "gps_delete_file_list":         "Filer som tas bort:\n{files}",
     "gps_no_dest":                  "Välj en måldestination först.",
+    "gps_file_exists_title":        "Filen finns redan",
+    "gps_file_exists_prompt":       "\"{filename}\" finns redan på denna plats. Ange ett annat filnamn:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Inställningar",
@@ -261,6 +291,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Liten",
     "settings_text_size_medium":    "Medel",
     "settings_text_size_large":     "Stor",
+    "settings_default_decode_hints_cb": "Visa tips avkodade som standard",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",
     "settings_language_label":      "Språk:",
@@ -300,6 +331,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Slutför",
     "wizard_skip": "Hoppa över installation",
     "wizard_step_of": "Steg {current} av {total}",
+    "wizard_settings_file_exists_title": "Inställningsfilen finns redan",
+    "wizard_settings_file_exists_msg": "Mappen \"{path}\" innehåller redan en opensak.json-fil, så dina nuvarande inställningar flyttades inte dit. Den befintliga filen lämnades orörd — kontrollera gärna mappen manuellt.",
     "settings_group_nominatim":                    "Location refinement",
     "settings_nominatim_cb":                       "Enable online lookup for higher accuracy",
     "settings_nominatim_hint":                     "When enabled, county, state and country data is further refined using OpenStreetMap after the fast offline pass.\n\nNote: requires an internet connection and takes about 1 second per waypoint. A database of 10 000 waypoints takes around 3 hours to fully refine. Leave this off unless you need higher accuracy near administrative boundaries.",
@@ -312,6 +345,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Databasmapp:",
     "settings_folders_restart_hint": "Att ändra databasmappen kräver att OpenSAK startas om.",
     "settings_db_dir_changed_message": "Databasmappen har ändrats. Starta om OpenSAK för att detta ska träda i kraft.",
+    "settings_icons_dir_label": "Mapp för egna ikoner:",
+    "settings_open_icons_folder_button": "Öppna ikonmapp",
+    "settings_icons_dir_note": "Lägg dina egna SVG-filer här för att ersätta cache-typ-, smiley- och andra UI-ikoner (korrigerade koordinater, premium, favoriter, trackables) — samma filnamn som i OpenSAK Custom Icons Guide. Starta om OpenSAK för att ändringarna ska träda i kraft.",
+    "settings_view_icon_guide_button": "Visa namnguide för ikoner",
 
     "settings_move_databases_title": "Flytta befintliga databaser?",
     "settings_move_databases_msg": "Du har {count} befintliga databas(er). Vill du också flytta dem till den nya mappen?",
@@ -488,6 +525,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Kan inte flytta '{name}': en fil finns redan på {path}.",
     "db_err_move_failed": "Kunde inte flytta '{name}': {error}",
+    "db_err_target_path_exists": "Det finns redan en fil för '{name}' på {path}.",
+    "db_err_rename_failed": "Kunde inte byta namn på '{name}': {error}",
     "db_err_mkdir_failed":          "Kunde inte skapa mappen:\n{path}",
     "db_err_dir_not_found":         "Mappen finns inte:\n{path}",
     "db_err_no_write_permission":   "Ingen skrivbehörighet för mappen:\n{path}",
@@ -576,6 +615,8 @@ STRINGS: dict[str, str] = {
     "detail_no_waypoints":          "(Inga underordnade waypoints)",
     "detail_tab_attrs_count":       "Attribut ({count})",
     "detail_no_attrs":              "(Inga attribut)",
+    "detail_tab_trackables_count":   "Trackables ({count})",
+    "detail_no_trackables":          "(Inga trackables)",
     "detail_tab_notes":             "Anteckningar",
     "detail_note_placeholder":      "Lägg till en personlig anteckning för denna cache…",
     "detail_wp_no_coords":          "(Inga koordinater)",
@@ -615,6 +656,7 @@ STRINGS: dict[str, str] = {
     "col_dnf_date":          "DNF-datum",
     "col_found_date":       "Hittad datum",
     "col_first_to_find":     "FTF",
+    "col_first_to_find_header_tooltip": "FTF upptäcks endast från {FTF}, {*FTF*} eller [FTF] i din egen logg — samma taggar som ProjectGC kräver",
     "col_user_flag":         "🚩",
     "col_user_flag_label":   "🚩 Användarflagga",
     "col_user_flag_header_tooltip": "Användarflagga — klicka för att växla",
@@ -633,6 +675,7 @@ STRINGS: dict[str, str] = {
     "col_user_data_3":       "Användardata 3",
     "col_user_data_4":       "Användardata 4",
     "col_favorite_points":   "Fav.-poäng",
+    "col_trackables":        "Trackables",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Öppna hos geocaching.com",
@@ -726,13 +769,12 @@ STRINGS: dict[str, str] = {
     "detail_corrected_clear_tooltip":"Rensa korrigerade koordinater",
     "detail_corrected_add_btn":     "Lägg till korrigerade koordinater…",
 
-    "col_corrected":                "📍",
-    "col_corrected_label":          "📍 Korrigerade koordinater",
+    "col_corrected":                "CC",
     "col_corrected_header_tooltip": "Korrigerade koordinater — dubbelklicka för att redigera",
     "col_corrected_tooltip":        "Korrigerade koordinater: {coords}",
 
-    "ctx_add_corrected":            "📍  Ange korrigerade koordinater…",
-    "ctx_edit_corrected":           "📍  Editera korrigerade koordinater…",
+    "ctx_add_corrected":            "Ange korrigerade koordinater…",
+    "ctx_edit_corrected":           "Editera korrigerade koordinater…",
     "ctx_clear_corrected":          "✕  Rensa korrigerade koordinater",
 
     "corrected_dialog_title":       "Korrigerade koordinater",
@@ -993,7 +1035,7 @@ STRINGS: dict[str, str] = {
     "kml_dialog_done_msg":                     "{count} cache(r) exporterade till:\n{path}\n\nImportera filen på maps.google.com/d.",
     "kml_dialog_error_title":                  "Exportfel",
     "kml_dialog_error_msg":                    "Export misslyckades:\n{message}",
-    "action_export":                 "&Exportera (GPX/LOC/...)",
+    "action_export":                 "&Exportera (GPX/LOC/GGZ)",
     "file_export_dialog_title":      "Exportera cacher",
     "file_export_cache_count":       "{count} cacher redo för export",
     "file_export_format_label":      "Filformat",
@@ -1007,4 +1049,25 @@ STRINGS: dict[str, str] = {
     "action_kml_export":                       "Exportera till Google Maps (KML)...",
     "kml_no_caches_title":                     "Inga cacher",
     "kml_no_caches_msg":                       "Det finns inga cacher i det aktuella filtret.\nJustera filtret och försök igen.",
+
+    # ── Flytta/kopiera cacher ───────────────────────────────────────────
+    "action_move_caches":                      "📦  Flytta cacher till en annan databas…",
+    "action_copy_caches":                      "📋  Kopiera cacher till en annan databas…",
+    "move_caches_title":                       "Flytta cacher",
+    "copy_caches_title":                       "Kopiera cacher",
+    "move_caches_scope_label":                 "Vilka cacher ska flyttas:",
+    "move_caches_scope_selected":              "Vald cache ({gc_code})",
+    "move_caches_scope_flagged":               "Flaggade cacher ({count})",
+    "move_caches_scope_all":                   "Alla cacher i aktuellt filter ({count})",
+    "move_caches_target_label":                "Flytta till databas:",
+    "copy_caches_target_label":                "Kopiera till databas:",
+    "move_caches_current_db":                  "aktuell",
+    "move_caches_btn_move":                    "Flytta",
+    "move_caches_none_selected":               "Inga cacher valda att flytta.",
+    "move_caches_same_db":                     "Måldatabasen är samma som den aktuella databasen.\nVälj en annan databas.",
+    "move_caches_confirm":                     "Flytta {count} cache(r) till {target}?\n\nDe kommer att tas bort från den aktuella databasen.",
+    "copy_caches_confirm":                     "Kopiera {count} cache(r) till {target}?",
+    "move_caches_done":                        "{count} cache(r) har flyttats.",
+    "copy_caches_done":                        "{count} cache(r) har kopierats.",
+    "move_caches_error":                       "Ett fel uppstod vid flytt av cacher:\n{message}",
 }

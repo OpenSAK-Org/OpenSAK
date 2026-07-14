@@ -38,10 +38,15 @@ def _json_resp(obj: object) -> _FakeResp:
     return _FakeResp(json.dumps(obj).encode())
 
 
-def _manifest(version: str = "2", pack_names: list[str] | None = None) -> dict:
+def _manifest(
+    version: str = "2",
+    pack_names: list[str] | None = None,
+    baseline_names: list[str] | None = None,
+) -> dict:
     pack_list = pack_names or ["aa.geojson", "bb.geojson"]
     return {
         "dataset_version": version,
+        "baseline": {fn: {"version": version} for fn in (baseline_names or [])},
         "packs": {fn: {"version": version} for fn in pack_list},
     }
 
@@ -113,6 +118,34 @@ class TestFetchPack:
         packs.fetch_pack("prt.geojson", tmp_path)
         assert "prt.geojson" in seen_urls[0]
 
+    def test_url_percent_encodes_special_characters(self, tmp_path: Path, monkeypatch):
+        # Defense in depth: filenames should always be pre-sanitized by the
+        # generator, but a raw space in a URL raises http.client.InvalidURL
+        # (not an OSError/URLError) if it isn't encoded first.
+        seen_urls: list[str] = []
+
+        def _fake(url, **_k):
+            seen_urls.append(url)
+            return _FakeResp(b"{}")
+
+        monkeypatch.setattr("urllib.request.urlopen", _fake)
+        packs.fetch_pack("can_British Columbia.geojson", tmp_path)
+        assert " " not in seen_urls[0]
+        assert "British%20Columbia" in seen_urls[0]
+
+    def test_invalid_url_error_returns_false_instead_of_crashing(self, tmp_path: Path, monkeypatch):
+        # http.client.InvalidURL is not an OSError/URLError subclass — this is
+        # exactly the exception that used to crash the whole QThread instead
+        # of degrading gracefully to "this one file failed".
+        import http.client
+
+        def _raise(*_a, **_k):
+            raise http.client.InvalidURL("URL can't contain control characters")
+
+        monkeypatch.setattr("urllib.request.urlopen", _raise)
+        result = packs.fetch_pack("bad name.geojson", tmp_path)
+        assert result is False
+
 
 # ── fetch_all ─────────────────────────────────────────────────────────────────
 
@@ -145,6 +178,79 @@ class TestFetchAll:
     def test_no_manifest_returns_zero(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(packs, "fetch_manifest", lambda **_k: None)
         assert packs.fetch_all(tmp_path) == 0
+
+
+# ── fetch_baseline ────────────────────────────────────────────────────────────
+
+class TestFetchBaseline:
+    def test_creates_dest_dir_when_it_does_not_exist_yet(self, tmp_path: Path, monkeypatch):
+        # Real first-run scenario: the app-data boundaries/ dir doesn't exist
+        # at all yet. _fetch_file_atomic used to assume its caller already
+        # created dest_dir (true for apply_update, called on an
+        # already-initialized dir) — fetch_baseline is the first caller that
+        # can hit a genuinely nonexistent directory.
+        fresh_dir = tmp_path / "does" / "not" / "exist" / "yet"
+        monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _FakeResp(b"{}"))
+        manifest = _manifest("1", baseline_names=["world.geojson"])
+        assert packs.fetch_baseline(fresh_dir, manifest=manifest) is True
+        assert (fresh_dir / "boundaries.db").is_file()
+
+    def test_downloads_boundaries_db_and_baseline_packs(self, tmp_path: Path, monkeypatch):
+        calls: list[str] = []
+
+        def _fake(url, **_k):
+            calls.append(url)
+            return _FakeResp(b"{}")
+
+        manifest = _manifest("1", baseline_names=["world.geojson", "prt.geojson"])
+        monkeypatch.setattr("urllib.request.urlopen", _fake)
+        result = packs.fetch_baseline(tmp_path, manifest=manifest)
+
+        assert result is True
+        assert (tmp_path / "boundaries.db").is_file()
+        assert (tmp_path / "countries" / "world.geojson").is_file()
+        assert (tmp_path / "states" / "prt.geojson").is_file()
+        assert any("boundaries.db" in u for u in calls)
+        assert any("world.geojson" in u for u in calls)
+        assert any("prt.geojson" in u for u in calls)
+
+    def test_fetches_manifest_when_not_given(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _FakeResp(b"{}"))
+        monkeypatch.setattr(packs, "fetch_manifest", lambda **_k: _manifest("1", baseline_names=["world.geojson"]))
+        assert packs.fetch_baseline(tmp_path) is True
+
+    def test_no_manifest_returns_false(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(packs, "fetch_manifest", lambda **_k: None)
+        assert packs.fetch_baseline(tmp_path) is False
+        assert not (tmp_path / "boundaries.db").is_file()
+
+    def test_boundaries_db_failure_returns_false_without_fetching_packs(self, tmp_path: Path, monkeypatch):
+        calls: list[str] = []
+
+        def _fake(url, **_k):
+            calls.append(url)
+            if "boundaries.db" in url:
+                raise URLError("no")
+            return _FakeResp(b"{}")
+
+        manifest = _manifest("1", baseline_names=["world.geojson"])
+        monkeypatch.setattr("urllib.request.urlopen", _fake)
+        assert packs.fetch_baseline(tmp_path, manifest=manifest) is False
+        assert not any("world.geojson" in u for u in calls)
+
+    def test_state_pack_failure_does_not_fail_whole_call(self, tmp_path: Path, monkeypatch):
+        def _fake(url, **_k):
+            if "prt.geojson" in url:
+                raise URLError("no")
+            return _FakeResp(b"{}")
+
+        manifest = _manifest("1", baseline_names=["world.geojson", "prt.geojson"])
+        monkeypatch.setattr("urllib.request.urlopen", _fake)
+        result = packs.fetch_baseline(tmp_path, manifest=manifest)
+
+        assert result is True
+        assert (tmp_path / "countries" / "world.geojson").is_file()
+        assert not (tmp_path / "states" / "prt.geojson").is_file()
 
 
 # ── check_update ──────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 from opensak.lang import tr
 from opensak.settings_store import get_store
+from opensak.gui.icon_provider import get_corrected_coords_icon
 
 # Alle tilgængelige kolonner: (felt_id, visningsnavn, bredde, standard_synlig)
 # Kolonnestruktur: (felt_id, tr_nøgle, bredde, standard_synlig)
@@ -31,7 +32,7 @@ _ALL_COLUMNS_DEF = [
     ("distance",     "col_distance",     75,  True),
     ("bearing",      "col_bearing",      70,  True),
     ("found",        "col_found",        36,  True),
-    ("corrected",    "col_corrected_label",    36,  True),
+    ("corrected",    "detail_corrected_coords", 36,  True),
     # Ekstra kolonner (fra)
     ("country",      "col_country",      80, False),
     ("state",        "col_state",       120, False),
@@ -51,6 +52,7 @@ _ALL_COLUMNS_DEF = [
     ("dnf_date",       "col_dnf_date",      90, False),
     ("first_to_find",  "col_first_to_find", 36, False),
     ("favorite_points","col_favorite_points",55, False),
+    ("trackables",     "col_trackables",     55, False),
     ("user_sort",      "col_user_sort",     55, False),
     ("user_data_1",    "col_user_data_1",  100, False),
     ("user_data_2",    "col_user_data_2",  100, False),
@@ -68,6 +70,37 @@ ALL_COLUMNS = property(lambda self: get_all_columns()) if False else None  # se 
 
 # Kolonner der altid skal være synlige
 ALWAYS_VISIBLE = {"gc_code", "name"}
+
+
+def _safe_db_key(name: str) -> str:
+    """Samme sanitisering som _col_key() bruger til at bygge nøgle-suffixet."""
+    return name.replace(".", "_").replace(" ", "_")
+
+
+def migrate_column_settings_for_rename(old_name: str, new_name: str) -> None:
+    """
+    Flyt gemte kolonneindstillinger (#199) fra den gamle til den nye
+    database-navne-nøgle, når en database omdøbes (#539).
+
+    Uden dette ville et rename få kolonneopsætningen til at "nulstille"
+    (fordi den nu peger på en tom nøgle for det nye navn), mens de gamle
+    indstillinger blev hængende forældreløse under det gamle navns nøgle.
+    """
+    if old_name == new_name:
+        return
+    old_safe = _safe_db_key(old_name)
+    new_safe = _safe_db_key(new_name)
+    if old_safe == new_safe:
+        return  # sanitiseringen gør nøglerne ens selvom navnene ikke er
+
+    store = get_store()
+    for suffix in ("visible", "widths"):
+        old_key = f"columns.{old_safe}.{suffix}"
+        new_key = f"columns.{new_safe}.{suffix}"
+        value = store.get(old_key)
+        if value is not None:
+            store.set(new_key, value)
+            store.delete(old_key)
 
 
 def _col_key(suffix: str) -> str:
@@ -169,6 +202,11 @@ class ColumnChooserDialog(QDialog):
         self._list = QListWidget()
         for col_id, col_name, _, _ in get_all_columns():
             item = QListWidgetItem(col_name)
+            if col_id == "corrected":
+                # Issue #354: same SVG warning-triangle used in the column
+                # header/cells/context-menu/detail-panel, instead of the old
+                # "📍" emoji that used to be baked into the label text.
+                item.setIcon(get_corrected_coords_icon(16))
             item.setData(Qt.ItemDataRole.UserRole, col_id)
             item.setCheckState(
                 Qt.CheckState.Checked

@@ -163,6 +163,15 @@ class BaseFilter(ABC):
     # Human-readable name used for serialisation and display
     filter_type: str = "base"
 
+    # Whether this filter instance should be counted in the "N active"
+    # badge shown to the user. Defaults to True for every filter; set to
+    # False on a specific instance when it represents baseline app
+    # behaviour the user didn't consciously choose (see AvailabilityFilter
+    # usage in filter_dialog.py._build_filterset() for the motivating case:
+    # hiding archived caches by default). This only affects the display
+    # count — the filter still fully participates in matches()/apply_to_query().
+    counts_as_filter: bool = True
+
     @abstractmethod
     def matches(self, cache: Cache) -> bool:
         """Return True if *cache* passes this filter."""
@@ -1184,6 +1193,22 @@ class FilterSet:
     def __len__(self) -> int:
         return len(self._filters)
 
+    def active_count(self) -> int:
+        """Count filters for the "N active" UI badge.
+
+        Like __len__, but skips filters flagged with counts_as_filter=False
+        (baseline app behaviour the user didn't consciously set, e.g. the
+        default "hide archived caches" state — see filter_dialog.py). Nested
+        FilterSets are counted recursively.
+        """
+        total = 0
+        for f in self._filters:
+            if isinstance(f, FilterSet):
+                total += f.active_count()
+            elif getattr(f, "counts_as_filter", True):
+                total += 1
+        return total
+
     def matches(self, cache: Cache) -> bool:
         if not self._filters:
             return True  # empty filter set = show everything
@@ -1268,6 +1293,7 @@ SORT_FIELDS: dict[str, Any] = {
     "dnf_date":        lambda c: c.dnf_date or 0,
     "premium_only":    lambda c: int(c.premium_only),
     "favorite_points": lambda c: c.favorite_points or 0,
+    "trackables":      lambda c: c.trackable_count or 0,
     "corrected":       lambda c: 0,   # placeholder — model.sort() håndterer det
     "first_to_find":   lambda c: int(c.first_to_find or False),
     "user_flag":       lambda c: int(c.user_flag or False),
@@ -1297,6 +1323,7 @@ def _sql_order_expr(field: str):
         "difficulty":      func.coalesce(Cache.difficulty, 0.0),
         "terrain":         func.coalesce(Cache.terrain, 0.0),
         "favorite_points": func.coalesce(Cache.favorite_points, 0),
+        "trackables":      func.coalesce(Cache.trackable_count, 0),
         "user_sort":       func.coalesce(Cache.user_sort, 999999),
         # Boolean (mirror int(x) / int(x or False) → 0/1)
         "found":           Cache.found,

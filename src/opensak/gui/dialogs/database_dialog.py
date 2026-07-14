@@ -64,10 +64,15 @@ class NewDatabaseDialog(QDialog):
         self._update_path_preview()
 
     def _browse(self) -> None:
-        from opensak.config import get_app_data_dir
+        # Issue #562: brugte tidligere get_app_data_dir() (installations-
+        # mappen) som startpunkt for "Browse" i stedet for den mappe
+        # brugeren faktisk har konfigureret til databaser (Settings →
+        # Advanced / velkomst-wizarden), så dialogen åbnede det forkerte
+        # sted når de to mapper er forskellige.
+        from opensak.settings_store import get_db_dir
         folder = QFileDialog.getExistingDirectory(
             self, tr("db_browse_title"),
-            str(get_app_data_dir()),
+            str(get_db_dir()),
             QFileDialog.Option.ShowDirsOnly,
         )
         if folder:
@@ -76,9 +81,13 @@ class NewDatabaseDialog(QDialog):
 
     def _update_path_preview(self) -> None:
         """Vis filsti i sti-feltet: kun mappe som default, fuld sti når navn er tastet."""
-        from opensak.config import get_app_data_dir
+        # Issue #562: se _browse() ovenfor — samme rettelse for selve
+        # preview-teksten, så den viste standard-sti matcher det sted
+        # databasen faktisk oprettes (get_db_dir(), jf. manager.py's
+        # _default_db_path()), ikke installationsmappen.
+        from opensak.settings_store import get_db_dir
         name = self._name_edit.text().strip()
-        folder = self._custom_path or get_app_data_dir()
+        folder = self._custom_path or get_db_dir()
         if name:
             self._path_edit.setText(str(folder / f"{name}.db"))
         else:
@@ -117,6 +126,7 @@ class DatabaseManagerDialog(QDialog):
     """
 
     database_switched = Signal(object)   # emits DatabaseInfo
+    database_renamed = Signal(object)    # emits DatabaseInfo — issue #539
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -339,6 +349,11 @@ class DatabaseManagerDialog(QDialog):
             try:
                 self._manager.rename(db, name)
                 self._refresh_list()
+                # Issue #539: toolbar dropdown + window title show the active
+                # database's name and don't otherwise get notified of a
+                # rename (only of a switch) — without this they kept showing
+                # the old name until the user switched databases.
+                self.database_renamed.emit(db)
             except ValueError as e:
                 QMessageBox.warning(self, tr("warning"), str(e))
 

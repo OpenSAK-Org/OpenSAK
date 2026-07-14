@@ -15,6 +15,16 @@ def _app(qapp):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _clear_user_icons_dir_cache():
+    # _user_icons_dir() is lru_cache'd (issue #540) — clear before AND after
+    # every test so tests that monkeypatch get_icons_dir() don't leak a
+    # stale cached value into unrelated tests (or vice versa).
+    ip._user_icons_dir.cache_clear()
+    yield
+    ip._user_icons_dir.cache_clear()
+
+
 # ── disk SVG reading ──────────────────────────────────────────────────────────
 
 class TestReadSvg:
@@ -38,6 +48,76 @@ class TestReadSvg:
     def test_get_found_svg_unknown_uses_green(self):
         # unknown key → default color "green" file exists
         assert ip._get_found_svg("totally_unknown") is not None
+
+
+# ── Issue #540: _user_icons_dir() must be memoized ────────────────────────────
+# Un-cached, every single icon lookup (type icon + found-smiley, per cache row)
+# re-ran the full get_icons_dir() -> get_app_data_dir() -> get_install_dir()
+# chain: a file-exists check, a JSON read+parse, and four separate mkdir()
+# calls. On a normal filesystem that's fast, but with each individual
+# filesystem call intercepted synchronously by antivirus real-time protection
+# (common on Windows, especially for mkdir), tens of thousands of calls across
+# a large cache list added up to the reported 45-60s freeze — with low CPU and
+# low disk throughput the whole time, since each call is tiny but blocking.
+
+class TestUserIconsDirCaching:
+    def test_only_calls_get_icons_dir_once(self, monkeypatch, tmp_path):
+        calls = []
+
+        def fake_get_icons_dir():
+            calls.append(1)
+            return tmp_path
+
+        monkeypatch.setattr("opensak.config.get_icons_dir", fake_get_icons_dir)
+        ip._user_icons_dir()
+        ip._user_icons_dir()
+        ip._user_icons_dir()
+        assert len(calls) == 1
+
+    def test_icon_lookups_across_many_rows_only_resolve_dir_once(self, monkeypatch, tmp_path):
+        # Mirrors the real freeze scenario: rendering many cache rows' type
+        # and found-smiley icons must not re-resolve the icons dir per row.
+        calls = []
+
+        def fake_get_icons_dir():
+            calls.append(1)
+            return tmp_path
+
+        monkeypatch.setattr("opensak.config.get_icons_dir", fake_get_icons_dir)
+        for _ in range(500):
+            ip._get_type_svg("traditional")
+            ip._get_found_svg("traditional")
+        assert len(calls) == 1
+
+    def test_falls_back_to_none_and_stays_cached_on_error(self, monkeypatch):
+        calls = []
+
+        def raising_get_icons_dir():
+            calls.append(1)
+            raise OSError("disk full")
+
+        monkeypatch.setattr("opensak.config.get_icons_dir", raising_get_icons_dir)
+        assert ip._user_icons_dir() is None
+        assert ip._user_icons_dir() is None
+        assert len(calls) == 1
+
+
+# ── Issue #519: user icon override actually takes priority ──────────────────
+
+class TestUserIconOverride:
+    def test_user_override_takes_priority_over_bundled(self, monkeypatch, tmp_path):
+        (tmp_path / "cache_types").mkdir()
+        (tmp_path / "cache_types" / "traditional_cache.svg").write_text(
+            "<svg>CUSTOM</svg>", encoding="utf-8"
+        )
+        monkeypatch.setattr("opensak.config.get_icons_dir", lambda: tmp_path)
+        assert ip._get_type_svg("traditional") == "<svg>CUSTOM</svg>"
+
+    def test_falls_back_to_bundled_when_user_file_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("opensak.config.get_icons_dir", lambda: tmp_path)
+        svg = ip._get_type_svg("traditional")
+        assert svg is not None
+        assert "CUSTOM" not in svg
 
 
 # ── key normalization / db mapping ────────────────────────────────────────────

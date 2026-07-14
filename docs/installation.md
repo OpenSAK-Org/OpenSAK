@@ -21,7 +21,7 @@ OpenSAK runs on Linux, Windows and macOS. Choose the method that fits your platf
 The easiest way to install OpenSAK on Linux. The script installs all dependencies, downloads OpenSAK, and creates a shortcut in your application menu automatically.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AgreeDK/OpenSAK/main/scripts/install-opensak.sh | bash
+curl -fsSL https://raw.githubusercontent.com/OpenSAK-Org/OpenSAK/main/scripts/install-opensak.sh | bash
 ```
 
 The installer will:
@@ -34,7 +34,7 @@ The installer will:
 
 ### Linux — AppImage
 
-Alternatively, download the latest `.AppImage` from the [Releases page](https://github.com/AgreeDK/OpenSAK/releases):
+Alternatively, download the latest `.AppImage` from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases):
 
 ```bash
 chmod +x OpenSAK-*.AppImage
@@ -50,7 +50,7 @@ sudo apt update
 sudo apt install git python3 python3-venv python3-pip libxcb-cursor0
 
 cd ~
-git clone https://github.com/AgreeDK/opensak.git
+git clone https://github.com/OpenSAK-Org/opensak.git
 cd opensak
 
 python3 -m venv .venv
@@ -64,7 +64,7 @@ opensak  # or python run.py
 
 ## Windows — Standalone installer (recommended)
 
-Download the latest **OpenSAK-Windows.zip** from the [Releases page](https://github.com/AgreeDK/OpenSAK/releases), unzip it, and double-click `OpenSAK.exe` — no Python or Git required.
+Download the latest **OpenSAK-Windows.zip** from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases), unzip it, and double-click `OpenSAK.exe` — no Python or Git required.
 
 > Windows SmartScreen may warn you on first launch. Click **More info → Run anyway**.
 
@@ -76,7 +76,7 @@ Install **Git** from [git-scm.com](https://git-scm.com/download/win), then:
 
 ```powershell
 cd $env:USERPROFILE
-git clone https://github.com/AgreeDK/opensak.git
+git clone https://github.com/OpenSAK-Org/opensak.git
 cd opensak
 python -m venv .venv
 .venv\Scripts\activate
@@ -88,7 +88,7 @@ opensak  # or python run.py
 
 ## macOS — App bundle (recommended)
 
-Download the correct `.dmg` for your Mac from the [Releases page](https://github.com/AgreeDK/OpenSAK/releases):
+Download the correct `.dmg` for your Mac from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases):
 
 | Mac type | File to download |
 |----------|-----------------|
@@ -108,7 +108,7 @@ xcode-select --install   # if not already installed
 brew install python git
 
 cd ~
-git clone https://github.com/AgreeDK/opensak.git
+git clone https://github.com/OpenSAK-Org/opensak.git
 cd opensak
 python3 -m venv .venv
 source .venv/bin/activate
@@ -149,7 +149,7 @@ python run.py
 
 ### If you downloaded a release (.exe / .dmg / AppImage)
 
-Download the latest version from the [Releases page](https://github.com/AgreeDK/OpenSAK/releases) and replace your existing installation.
+Download the latest version from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases) and replace your existing installation.
 
 ---
 

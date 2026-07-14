@@ -135,16 +135,17 @@ def test_fetch_returns_none_on_bad_json(monkeypatch):
 
 # ── UpdateCheckWorker.run (decision logic, run synchronously) ─────────────────
 
-def _run_worker(monkeypatch, qapp, current, release, fetch_target="fetch_latest_release"):
+def _run_worker(monkeypatch, qapp, current, stable=None, prerelease=None):
     """Run the worker body in-thread and return (update_emits, check_done_count).
 
-    ``release`` is whatever the (stubbed) fetch function returns. ``fetch_target``
-    selects which fetch function to stub — fetch_latest_release for stable-running
-    users, fetch_latest_prerelease for beta-running users.
-    Calling run() directly keeps it on the test thread, so the default direct
-    signal connections fire synchronously — no event loop, fully deterministic.
+    ``stable`` / ``prerelease`` stub what fetch_latest_release() /
+    fetch_latest_prerelease() return respectively (each defaults to None,
+    i.e. "nothing found"). Calling run() directly keeps it on the test
+    thread, so the default direct signal connections fire synchronously —
+    no event loop, fully deterministic.
     """
-    monkeypatch.setattr(updater, fetch_target, lambda: release)
+    monkeypatch.setattr(updater, "fetch_latest_release", lambda: stable)
+    monkeypatch.setattr(updater, "fetch_latest_prerelease", lambda: prerelease)
     worker = UpdateCheckWorker(current)
     updates: list[tuple[str, str, bool]] = []
     done: list[int] = []
@@ -157,7 +158,7 @@ def _run_worker(monkeypatch, qapp, current, release, fetch_target="fetch_latest_
 def test_worker_emits_update_when_newer(monkeypatch, qapp):
     updates, done = _run_worker(
         monkeypatch, qapp, "1.0.0",
-        {"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
+        stable={"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
     )
     assert updates == [("v2.0.0", "https://example.test/u", False)]
     assert done == 1
@@ -166,7 +167,7 @@ def test_worker_emits_update_when_newer(monkeypatch, qapp):
 def test_worker_silent_when_same_version(monkeypatch, qapp):
     updates, done = _run_worker(
         monkeypatch, qapp, "2.0.0",
-        {"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
+        stable={"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
     )
     assert updates == []
     assert done == 1
@@ -175,14 +176,14 @@ def test_worker_silent_when_same_version(monkeypatch, qapp):
 def test_worker_silent_when_older(monkeypatch, qapp):
     updates, done = _run_worker(
         monkeypatch, qapp, "3.1.0",
-        {"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
+        stable={"tag_name": "v2.0.0", "html_url": "https://example.test/u", "name": "n"},
     )
     assert updates == []
     assert done == 1
 
 
 def test_worker_done_when_fetch_fails(monkeypatch, qapp):
-    updates, done = _run_worker(monkeypatch, qapp, "1.0.0", None)
+    updates, done = _run_worker(monkeypatch, qapp, "1.0.0")
     assert updates == []
     assert done == 1   # check_done always fires, even with no release
 
@@ -270,55 +271,93 @@ def test_worker_uses_stable_fetch_when_running_stable(monkeypatch, qapp):
         called["prerelease"] = True
         return None
 
+    monkeypatch.setattr(updater, "fetch_latest_release",
+                         lambda: {"tag_name": "v1.14.0", "html_url": "https://example.test/u", "name": "n"})
     monkeypatch.setattr(updater, "fetch_latest_prerelease", _fail_if_called)
-    updates, done = _run_worker(
-        monkeypatch, qapp, "1.13.12",
-        {"tag_name": "v1.14.0", "html_url": "https://example.test/u", "name": "n"},
-        fetch_target="fetch_latest_release",
-    )
+    worker = UpdateCheckWorker("1.13.12")
+    updates: list[tuple[str, str, bool]] = []
+    worker.update_available.connect(lambda tag, url, is_pre: updates.append((tag, url, is_pre)))
+    worker.run()
+
     assert called["prerelease"] is False
     assert updates == [("v1.14.0", "https://example.test/u", False)]
 
 
-def test_worker_uses_prerelease_fetch_when_running_beta(monkeypatch, qapp):
-    # A beta user should be checked against the prerelease feed, not /latest.
-    called = {"stable": False}
+def test_worker_beta_user_checks_both_stable_and_prerelease(monkeypatch, qapp):
+    # A beta user must be checked against BOTH feeds, not just the
+    # prerelease one — see test_worker_beta_user_sees_newer_stable_release
+    # below for why (a stable release is a real update for a beta user too).
+    called = {"stable": False, "prerelease": False}
+    real_stable = updater.fetch_latest_release
+    real_prerelease = updater.fetch_latest_prerelease
 
-    def _fail_if_called():
+    def _track_stable():
         called["stable"] = True
         return None
 
-    monkeypatch.setattr(updater, "fetch_latest_release", _fail_if_called)
-    updates, done = _run_worker(
-        monkeypatch, qapp, "1.14.0-beta.1",
-        {"tag_name": "v1.14.0-beta.2", "html_url": "https://example.test/beta2", "name": "n"},
-        fetch_target="fetch_latest_prerelease",
-    )
-    assert called["stable"] is False
+    def _track_prerelease():
+        called["prerelease"] = True
+        return {"tag_name": "v1.14.0-beta.2", "html_url": "https://example.test/beta2", "name": "n"}
+
+    monkeypatch.setattr(updater, "fetch_latest_release", _track_stable)
+    monkeypatch.setattr(updater, "fetch_latest_prerelease", _track_prerelease)
+    worker = UpdateCheckWorker("1.14.0-beta.1")
+    updates: list[tuple[str, str, bool]] = []
+    worker.update_available.connect(lambda tag, url, is_pre: updates.append((tag, url, is_pre)))
+    worker.run()
+
+    assert called == {"stable": True, "prerelease": True}
     assert updates == [("v1.14.0-beta.2", "https://example.test/beta2", True)]
 
 
 def test_worker_beta_user_sees_no_update_for_older_beta(monkeypatch, qapp):
     updates, done = _run_worker(
         monkeypatch, qapp, "1.14.0-beta.2",
-        {"tag_name": "v1.14.0-beta.1", "html_url": "https://example.test/u", "name": "n"},
-        fetch_target="fetch_latest_prerelease",
+        prerelease={"tag_name": "v1.14.0-beta.1", "html_url": "https://example.test/u", "name": "n"},
     )
     assert updates == []
     assert done == 1
 
 
-def test_worker_beta_user_sees_stable_release_as_update(monkeypatch, qapp):
-    # If the newest pre-release IS the eventual stable tag (e.g. beta period
-    # ended and 1.14.0 stable shipped), a beta-running user comparing against
-    # fetch_latest_prerelease wouldn't see it — but is_prerelease=False on the
-    # emitted signal is what the stable-flow test above already covers; this
-    # documents that a beta user manually checking "Check for updates" still
-    # works correctly when fetch_latest_prerelease finds nothing newer.
+def test_worker_beta_user_sees_newer_stable_release(monkeypatch, qapp):
+    # The bug this fixes: a beta-running user (e.g. on v1.15.0-beta.16)
+    # never learned that v1.15.0 stable had shipped, because the old code
+    # only ever compared against fetch_latest_prerelease() — which by
+    # definition never returns a non-prerelease entry. A stable release is
+    # a real, higher-priority update for a beta user too.
     updates, done = _run_worker(
-        monkeypatch, qapp, "1.14.0-beta.5",
-        None,
-        fetch_target="fetch_latest_prerelease",
+        monkeypatch, qapp, "1.15.0-beta.16",
+        stable={"tag_name": "v1.15.0", "html_url": "https://example.test/stable", "name": "n"},
+        prerelease=None,
     )
+    assert updates == [("v1.15.0", "https://example.test/stable", False)]
+    assert done == 1
+
+
+def test_worker_beta_user_prefers_newer_beta_over_older_stable(monkeypatch, qapp):
+    # If a newer beta cycle has already started (e.g. v1.16.0-beta.1) while
+    # the current stable is still the older v1.15.0, the beta must win —
+    # it's the objectively higher version.
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.15.0-beta.16",
+        stable={"tag_name": "v1.15.0", "html_url": "https://example.test/stable", "name": "n"},
+        prerelease={"tag_name": "v1.16.0-beta.1", "html_url": "https://example.test/beta1", "name": "n"},
+    )
+    assert updates == [("v1.16.0-beta.1", "https://example.test/beta1", True)]
+
+
+def test_worker_beta_user_silent_when_both_fetches_fail(monkeypatch, qapp):
+    updates, done = _run_worker(monkeypatch, qapp, "1.14.0-beta.5", stable=None, prerelease=None)
     assert updates == []
     assert done == 1
+
+
+def test_worker_beta_user_still_works_when_stable_fetch_fails(monkeypatch, qapp):
+    # A network hiccup fetching the stable feed shouldn't prevent a beta
+    # user from still being offered a newer beta.
+    updates, done = _run_worker(
+        monkeypatch, qapp, "1.14.0-beta.1",
+        stable=None,
+        prerelease={"tag_name": "v1.14.0-beta.2", "html_url": "https://example.test/beta2", "name": "n"},
+    )
+    assert updates == [("v1.14.0-beta.2", "https://example.test/beta2", True)]

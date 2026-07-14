@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Optional
 
 
-# ── Garmin GPX mappe på enheden ───────────────────────────────────────────────
+# ── Garmin GPX/GGZ mapper på enheden ──────────────────────────────────────────
 
 GARMIN_GPX_SUBPATH = Path("Garmin") / "GPX"
+GARMIN_GGZ_SUBPATH = Path("Garmin") / "GGZ"
 GARMIN_MARKERS = [
     Path("Garmin") / "GarminDevice.xml",
     Path("Garmin") / "GPX",
@@ -195,6 +196,11 @@ def get_garmin_gpx_path(device_root: Path) -> Path:
     return device_root / GARMIN_GPX_SUBPATH
 
 
+def get_garmin_ggz_path(device_root: Path) -> Path:
+    """Returner stien til GGZ mappen på en Garmin enhed."""
+    return device_root / GARMIN_GGZ_SUBPATH
+
+
 # ── Debug hjælper ─────────────────────────────────────────────────────────────
 
 def debug_scan() -> str:
@@ -341,9 +347,10 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
         # Logs (max 5)
         if cache.logs:
             gs_logs = SubElement(gs_cache, "groundspeak:logs")
+            _min_dt = datetime.min.replace(tzinfo=timezone.utc)
             for log in sorted(
                 cache.logs,
-                key=lambda l: l.log_date or 0,
+                key=lambda l: l.log_date or _min_dt,
                 reverse=True,
             )[:5]:
                 gs_log = SubElement(gs_logs, "groundspeak:log")
@@ -548,6 +555,33 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
     # Track byte offset into the GPX for each cache entry
     gpx_text = gpx_content.decode("utf-8")
 
+    # ── Precompute byte offsets for every waypoint in ONE linear pass ──────────
+    # Previously this ran a fresh `re.search()` over the ENTIRE gpx_text for
+    # EVERY cache, which is O(n²): with thousands of caches, each search had
+    # to scan further and further into the text, causing exports to start
+    # fast and then slow down dramatically (see #466). Instead, walk the text
+    # once with finditer() and build a gc_code -> (file_pos, file_len) map.
+    import re
+    _wpt_pattern  = re.compile(r'<wpt\b[^>]*>.*?</wpt>', re.DOTALL)
+    _name_pattern = re.compile(r'<name>([^<]*)</name>')
+
+    offsets_by_gc_code: dict = {}
+    _byte_pos  = 0
+    _prev_end  = 0
+    for _m in _wpt_pattern.finditer(gpx_text):
+        # Advance by the byte length of the gap since the previous match,
+        # so we never re-encode text we've already accounted for.
+        _byte_pos += len(gpx_text[_prev_end:_m.start()].encode("utf-8"))
+        _wpt_text  = _m.group(0)
+        _wpt_len   = len(_wpt_text.encode("utf-8"))
+        _name_m    = _name_pattern.search(_wpt_text)
+        if _name_m:
+            # First occurrence wins, matching the old re.search() behaviour
+            # for the (unlikely) case of a duplicate GC code in the export.
+            offsets_by_gc_code.setdefault(_name_m.group(1), (_byte_pos, _wpt_len))
+        _byte_pos += _wpt_len
+        _prev_end  = _m.end()
+
     total = len(caches)
     for i, cache in enumerate(caches, 1):
         if progress_cb:
@@ -558,22 +592,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
         export_lat, export_lon = _effective_coords(cache)
         gc_code = cache.gc_code or ""
 
-        # Find byte offset of this waypoint in the GPX
-        search_str = f'<name>{gc_code}</name>'
-        # Look for the <wpt ...> tag that contains this GC code
-        import re
-        pattern = rf'(<wpt\b[^>]*>(?:(?!</wpt>).)*?<name>{re.escape(gc_code)}</name>)'
-        m = re.search(pattern, gpx_text, re.DOTALL)
-        if m:
-            file_pos = gpx_text[:m.start()].encode("utf-8").__len__()
-            file_len = len(m.group(0).encode("utf-8"))
-            # Approximate: include the closing </wpt> tag
-            wpt_end = gpx_text.find("</wpt>", m.start())
-            if wpt_end >= 0:
-                file_len = len(gpx_text[m.start():wpt_end + 6].encode("utf-8"))
-        else:
-            file_pos = 0
-            file_len = 0
+        file_pos, file_len = offsets_by_gc_code.get(gc_code, (0, 0))
 
         gch_el = SubElement(file_el, "gch")
 
@@ -630,21 +649,102 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
     )
 
     # ── Pack into ZIP ─────────────────────────────────────────────────────────
+    # zipfile.ZipFile.mkdir() with a plain string defaults date_time to
+    # (1980, 1, 1, 0, 0, 0) — the earliest date the ZIP format supports —
+    # unlike writestr(), which defaults to the current time. That made every
+    # directory entry in the .ggz show up as "1980-01-01" / "1979-12-31 23:00"
+    # depending on timezone. Build explicit ZipInfo objects with the current
+    # time so directories get a sensible date too.
     buf = io.BytesIO()
+    _zip_date_time = datetime.now().timetuple()[:6]
+
+    def _dir_zipinfo(name: str) -> "zipfile.ZipInfo":
+        if not name.endswith("/"):
+            name += "/"
+        zi = zipfile.ZipInfo(name, date_time=_zip_date_time)
+        zi.compress_size = 0
+        zi.CRC = 0
+        zi.file_size = 0
+        zi.external_attr = (0o777 << 16) | 0x10
+        return zi
+
+    def _file_zipinfo(name: str) -> "zipfile.ZipInfo":
+        zi = zipfile.ZipInfo(name, date_time=_zip_date_time)
+        zi.compress_type = zipfile.ZIP_DEFLATED
+        return zi
+
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.mkdir("data/")
-        zf.writestr(f"data/{gpx_filename}", gpx_content)
-        zf.mkdir("index/")
-        zf.mkdir("index/com/")
-        zf.mkdir("index/com/garmin/")
-        zf.mkdir("index/com/garmin/geocaches/")
-        zf.mkdir("index/com/garmin/geocaches/v0/")
+        zf.mkdir(_dir_zipinfo("data/"))
+        zf.writestr(_file_zipinfo(f"data/{gpx_filename}"), gpx_content)
+        zf.mkdir(_dir_zipinfo("index/"))
+        zf.mkdir(_dir_zipinfo("index/com/"))
+        zf.mkdir(_dir_zipinfo("index/com/garmin/"))
+        zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/"))
+        zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/v0/"))
         zf.writestr(
-            "index/com/garmin/geocaches/v0/index.xml",
+            _file_zipinfo("index/com/garmin/geocaches/v0/index.xml"),
             index_xml.encode("utf-8"),
         )
 
     return buf.getvalue()
+
+
+def export_ggz_to_device(
+    caches: list,
+    device_root: Path,
+    filename: str = "opensak",
+    progress_cb=None,
+) -> ExportResult:
+    """
+    Eksportér caches som GGZ fil direkte til en Garmin GPS enhed.
+    GGZ-filen skrives til Garmin/GGZ mappen på enheden.
+    """
+    result = ExportResult()
+    result.device = device_root
+
+    try:
+        ggz_dir = get_garmin_ggz_path(device_root)
+        ggz_dir.mkdir(parents=True, exist_ok=True)
+
+        ggz_content = generate_ggz(caches, filename, progress_cb=progress_cb)
+
+        output_path = ggz_dir / f"{filename}.ggz"
+        output_path.write_bytes(ggz_content)
+
+        result.file_path   = output_path
+        result.cache_count = len([c for c in caches if c.latitude is not None])
+
+    except PermissionError:
+        result.error = "Adgang nægtet — er GPS enheden skrivebeskyttet?"
+    except OSError as e:
+        result.error = f"Fil fejl: {e}"
+    except Exception as e:
+        result.error = f"Uventet fejl: {e}"
+
+    return result
+
+
+def export_ggz_to_file(
+    caches: list,
+    output_path: Path,
+    progress_cb=None,
+) -> ExportResult:
+    """
+    Eksportér caches som GGZ fil til en valgfri placering.
+    Bruges når GPS ikke er tilsluttet direkte.
+    """
+    result = ExportResult()
+
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        ggz_content = generate_ggz(caches, output_path.stem, progress_cb=progress_cb)
+        output_path.write_bytes(ggz_content)
+        result.file_path   = output_path
+        result.cache_count = len([c for c in caches if c.latitude is not None])
+    except Exception as e:
+        result.error = str(e)
+
+    return result
 
 
 # ── Slet GPX filer fra enhed ──────────────────────────────────────────────────

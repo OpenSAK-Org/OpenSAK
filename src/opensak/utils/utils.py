@@ -8,6 +8,7 @@ Maps file system paths to the internal ImportType Enum for secure file processin
 import re
 from pathlib import Path
 from opensak.utils.types import GcCode, ImportType
+from opensak.utils.constants import FOUND_LOG_TYPES
 
 def validate_gc_code(gc_code: GcCode) -> None:
     """Validate geocache code format (GC prefix, 3-7 chars, restricted letters)."""
@@ -55,3 +56,35 @@ def normalize_geocacher_name(name: str | None) -> str:
         return ""
     cleaned = _GSAK_STATS_SUFFIX_RE.sub("", name)
     return re.sub(r"\s+", " ", cleaned).strip().lower()
+
+
+def count_own_found_logs(
+    logs_data: list[dict], gc_finder_id: str | None, gc_username: str | None
+) -> int:
+    """Count how many of the logs in *logs_data* are the CURRENT USER's own
+    found-type logs (issue #552).
+
+    `Cache.found` is a boolean ("have I found this cache at least once"),
+    which undercounts relocatable/multi-visit caches where the same user can
+    legitimately log a found-type entry more than once — geocaching.com and
+    GSAK both count found LOGS, not found CACHES.
+
+    Matches the same way found_date/FTF are already derived elsewhere
+    (importer/__init__.py): numeric finder_id first (fastest, most precise),
+    falling back to a normalized username comparison. A log counts if
+    EITHER signal matches, so relocatable caches are correctly counted once
+    per found-type log rather than once per cache.
+    """
+    gc_finder_id = (gc_finder_id or "").strip()
+    gc_username_norm = normalize_geocacher_name(gc_username)
+    if not gc_finder_id and not gc_username_norm:
+        return 0
+    count = 0
+    for lg in logs_data:
+        if lg.get("log_type") not in FOUND_LOG_TYPES:
+            continue
+        if gc_finder_id and str(lg.get("finder_id", "")).strip() == gc_finder_id:
+            count += 1
+        elif gc_username_norm and normalize_geocacher_name(lg.get("finder")) == gc_username_norm:
+            count += 1
+    return count

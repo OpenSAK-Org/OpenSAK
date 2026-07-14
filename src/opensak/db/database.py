@@ -12,6 +12,7 @@ Usage
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
@@ -62,7 +63,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 22
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -502,6 +503,275 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.commit()
             print("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
+
+        # ── Migration 17: trackable_count kolonne (issue #489/#491) ──────────
+        # Mirrors log_count (Migration 6): cache the trackable count on the
+        # caches row so the new "Trackables" table column can display it
+        # without loading the trackables relationship for every row. Depends
+        # on Migration 16 above having created the trackables table.
+        existing_caches_17 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "trackable_count" not in existing_caches_17:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN trackable_count INTEGER NOT NULL DEFAULT 0"
+            ))
+            result = conn.execute(text("""
+                UPDATE caches
+                SET trackable_count = (
+                    SELECT COUNT(*)
+                    FROM trackables
+                    WHERE trackables.cache_id = caches.id
+                )
+            """))
+            conn.commit()
+            print(f"Migration: tilføjede caches.trackable_count og opdaterede {result.rowcount} caches")
+
+        # ── Migration 18: GSAK database import schema additions (issue #469) ─
+        # Adds fields identified during the #469 field-by-field comparison
+        # against real GSAK databases, ahead of building the importer itself
+        # (session 1), so the mapping code can target the final schema
+        # directly instead of retrofitting columns afterwards.
+        existing_caches_18 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        gsak_import_cache_columns = [
+            ("gc_note",     "TEXT"),
+            ("url",         "VARCHAR(512)"),
+            ("elevation",   "FLOAT"),
+            ("color",       "VARCHAR(16)"),
+            ("guid",        "VARCHAR(64)"),
+            ("watch",       "BOOLEAN NOT NULL DEFAULT 0"),
+            ("gc_cache_id", "VARCHAR(32)"),
+        ]
+        added = []
+        for col_name, col_def in gsak_import_cache_columns:
+            if col_name not in existing_caches_18:
+                conn.execute(text(f"ALTER TABLE caches ADD COLUMN {col_name} {col_def}"))
+                added.append(col_name)
+        if added:
+            conn.commit()
+            print(f"Migration: tilføjede GSAK-import-felter til caches: {', '.join(added)}")
+
+        existing_wpts_18 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(waypoints)")).fetchall()
+        ]
+        gsak_import_waypoint_columns = [
+            ("wp_code",         "VARCHAR(16)"),
+            ("url",             "VARCHAR(512)"),
+            ("wp_date",         "DATETIME"),
+            ("created_by_user", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("wp_flag",         "BOOLEAN NOT NULL DEFAULT 0"),
+        ]
+        added = []
+        for col_name, col_def in gsak_import_waypoint_columns:
+            if col_name not in existing_wpts_18:
+                conn.execute(text(f"ALTER TABLE waypoints ADD COLUMN {col_name} {col_def}"))
+                added.append(col_name)
+        if added:
+            conn.commit()
+            print(f"Migration: tilføjede GSAK-import-felter til waypoints: {', '.join(added)}")
+
+        existing_logs_18 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(logs)")).fetchall()
+        ]
+        gsak_import_log_columns = [
+            ("latitude",        "FLOAT"),
+            ("longitude",       "FLOAT"),
+            ("logged_by_owner", "BOOLEAN NOT NULL DEFAULT 0"),
+        ]
+        added = []
+        for col_name, col_def in gsak_import_log_columns:
+            if col_name not in existing_logs_18:
+                conn.execute(text(f"ALTER TABLE logs ADD COLUMN {col_name} {col_def}"))
+                added.append(col_name)
+        if added:
+            conn.commit()
+            print(f"Migration: tilføjede GSAK-import-felter til logs: {', '.join(added)}")
+
+        # ── Migration 19: find_count on caches (issue #517) ──────────────────
+        # GC API field prep. Also populated straight away by the GSAK
+        # importer from Caches.FoundCount (see #469 gsak_importer.py).
+        existing_caches_19 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "find_count" not in existing_caches_19:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN find_count INTEGER"
+            ))
+            conn.commit()
+            print("Migration: tilføjede caches.find_count")
+
+        # ── Migration 20: remove leftover favorite_point column (issue #530) ─
+        # `favorite_point` (singular, Boolean NOT NULL) was briefly introduced
+        # in v1.14.0 without a migration to add it to already-existing
+        # databases, which surfaced as "no such column" errors (#488). The fix
+        # for #488 removed the field from the model, filters, and UI entirely
+        # — but never added a migration to drop the physical column from
+        # databases that had already been created with it present during that
+        # window. On those databases, every insert into `caches` fails with
+        # `NOT NULL constraint failed: caches.favorite_point`, since current
+        # code has no knowledge of the column and never supplies a value for
+        # it. Reported by community tester Bob Long while testing the GSAK
+        # Database Import feature (#469).
+        existing_caches_20 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "favorite_point" in existing_caches_20:
+            # DROP COLUMN requires SQLite 3.35.0+ (March 2021). A full
+            # table-rebuild fallback is deliberately not attempted here: the
+            # caches table has ~50 columns and a dozen indexes, and hand-
+            # rewriting that whole schema to remove one leftover column would
+            # carry far more risk of a mistake than the near-zero chance of a
+            # bundled SQLite that old on a machine running Python 3.12.
+            if sqlite3.sqlite_version_info >= (3, 35, 0):
+                conn.execute(text("ALTER TABLE caches DROP COLUMN favorite_point"))
+                conn.commit()
+                print("Migration: fjernede efterladt caches.favorite_point kolonne")
+            else:
+                print(
+                    "Migration: kunne ikke fjerne efterladt caches.favorite_point "
+                    f"kolonne — SQLite {sqlite3.sqlite_version} understøtter ikke "
+                    "DROP COLUMN (kræver 3.35+). Kontakt hello@opensak.com."
+                )
+
+        # ── Migration 21: waypoints unique constraint on wp_code, not name (#536) ─
+        # GSAK's own uniqueness for a waypoint is per-cache by its own code
+        # (cCode, stored here as wp_code) — not by prefix+name. The
+        # (cache_id, prefix, name) constraint added in Migration 2 was too
+        # strict: real GSAK databases can legitimately have two distinct
+        # waypoints on one cache sharing the same prefix+name (e.g. several
+        # stages a user happened to name identically) but with different
+        # cCode, and those were being silently dropped as "duplicates" on
+        # import (reported by nagisml, #536).
+        #
+        # wp_code is NULL for every GPX-imported waypoint (only the GSAK
+        # importer populates it) — SQLite/SQL treats each NULL as distinct
+        # for UNIQUE purposes, so this constraint imposes no restriction at
+        # all on GPX-sourced waypoints, only on GSAK-sourced ones where
+        # wp_code is genuinely GSAK's own per-cache unique waypoint code.
+        idx_rows_21 = conn.execute(text(
+            "SELECT name, sql FROM sqlite_master "
+            "WHERE type='index' AND tbl_name='waypoints' AND name NOT LIKE 'sqlite_%'"
+        )).fetchall()
+        idx_names_21 = [r[0] for r in idx_rows_21]
+
+        if "uq_waypoint_cache_wp_code" not in idx_names_21:
+            # Preserve every existing index except the old, too-strict unique
+            # constraint we're replacing — rather than hardcoding an assumed
+            # index list, so this is safe even if a database has picked up
+            # extra indexes some other way.
+            keep_indexes = [
+                (name, sql) for name, sql in idx_rows_21
+                if name != "uq_waypoint_cache_prefix_name" and sql
+            ]
+
+            conn.execute(text("PRAGMA foreign_keys=OFF"))
+            conn.execute(text("""
+                CREATE TABLE waypoints_new (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cache_id         INTEGER NOT NULL REFERENCES caches(id),
+                    prefix           TEXT,
+                    wp_type          TEXT,
+                    name             TEXT,
+                    description      TEXT,
+                    comment          TEXT,
+                    latitude         REAL,
+                    longitude        REAL,
+                    parent_gc_code   VARCHAR(16),
+                    wp_code          VARCHAR(16),
+                    url              VARCHAR(512),
+                    wp_date          DATETIME,
+                    created_by_user  BOOLEAN NOT NULL DEFAULT 0,
+                    wp_flag          BOOLEAN NOT NULL DEFAULT 0
+                )
+            """))
+            conn.execute(text(
+                "INSERT INTO waypoints_new "
+                "SELECT id, cache_id, prefix, wp_type, name, description, comment, "
+                "latitude, longitude, parent_gc_code, wp_code, url, wp_date, "
+                "created_by_user, wp_flag FROM waypoints"
+            ))
+            conn.execute(text("DROP TABLE waypoints"))
+            conn.execute(text("ALTER TABLE waypoints_new RENAME TO waypoints"))
+            for name, sql in keep_indexes:
+                conn.execute(text(sql))
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_waypoint_cache_wp_code "
+                "ON waypoints (cache_id, wp_code)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_waypoints_cache_id ON waypoints (cache_id)"
+            ))
+            conn.execute(text("PRAGMA foreign_keys=ON"))
+            conn.commit()
+            print("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
+
+        # ── Migration 22: found_log_count kolonne (issue #552) ───────────────
+        # Cache.found is a boolean ("have I found this cache at least once"),
+        # which undercounts relocatable/multi-visit caches where the same
+        # user can legitimately log a found-type entry more than once —
+        # geocaching.com and GSAK both count found LOGS in the footer total,
+        # not found CACHES. We add the column AND backfill it from existing
+        # logs so users don't have to re-import for the count to appear.
+        #
+        # Backfill matches the same way found_date/FTF are derived elsewhere
+        # (see count_own_found_logs() in utils/utils.py): numeric finder_id
+        # first, falling back to a case-insensitive username comparison
+        # (SQL TRIM only strips leading/trailing whitespace here — the fuller
+        # normalize_geocacher_name() whitespace/GSAK-stats-suffix handling
+        # only applies at import time, not in this one-off backfill). Only
+        # caches already marked found=1 are touched, since that's the only place found_log_count is read (mainwindow.py falls
+        # back to counting the cache itself if found_log_count is 0 but
+        # found=1 — e.g. no username configured, or the matching log simply
+        # isn't present in this database).
+        existing_caches_22 = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()
+        ]
+        if "found_log_count" not in existing_caches_22:
+            conn.execute(text(
+                "ALTER TABLE caches ADD COLUMN found_log_count "
+                "INTEGER NOT NULL DEFAULT 0"
+            ))
+            conn.commit()
+
+            from opensak.gui.settings import get_settings
+            _sett = get_settings()
+            gc_finder_id = (_sett.gc_finder_id or "").strip()
+            gc_username = (_sett.gc_username or "").strip().lower()
+
+            if gc_finder_id or gc_username:
+                result = conn.execute(text("""
+                    UPDATE caches
+                    SET found_log_count = (
+                        SELECT COUNT(*) FROM logs
+                        WHERE logs.cache_id = caches.id
+                          AND logs.log_type IN ('Found it', 'Attended', 'Webcam Photo Taken')
+                          AND (
+                              (:gc_finder_id != '' AND logs.finder_id = :gc_finder_id)
+                              OR (:gc_username != ''
+                                  AND LOWER(TRIM(logs.finder)) = :gc_username)
+                          )
+                    )
+                    WHERE caches.found = 1
+                """), {"gc_finder_id": gc_finder_id, "gc_username": gc_username})
+                conn.commit()
+                print(
+                    "Migration: tilføjede caches.found_log_count og "
+                    f"opdaterede {result.rowcount} caches"
+                )
+            else:
+                print(
+                    "Migration: tilføjede caches.found_log_count "
+                    "(intet gc_username/gc_finder_id sat — springer backfill over)"
+                )
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

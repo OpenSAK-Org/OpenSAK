@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 # tools/boundaries/gsak_to_opensak.py — convert GSAK boundary data to OpenSAK format.
 #
-# Run from the repo root:
-#   python tools/boundaries/gsak_to_opensak.py [--gsak-dir DATA] [--out-dir DATA]
+# Run with the project's own venv (3.11+), not a bare system python3 — older
+# zipfile implementations (e.g. 3.8) fall back to legacy CP437 decoding for
+# zip entries that don't set the UTF-8 flag bit (several GSAK county zips
+# don't), silently mangling non-ASCII filenames and dropping those rows with
+# no warning:
+#   .venv/bin/python3 tools/boundaries/gsak_to_opensak.py [--gsak-dir DATA] [--out-dir DATA]
 #
 # Reads:  <gsak-dir>/bb.db3
 #          <gsak-dir>/country_v<N>.zip          (N from bb.db3 Version table)
@@ -10,9 +14,12 @@
 #          <gsak-dir>/counties/<cc>/<pack>[_vN].zip
 #
 # Writes: <out-dir>/boundaries.db              (OpenSAK schema)
-#          <out-dir>/countries/world.geojson
-#          <out-dir>/states/<cc>.geojson        (one per country code)
-#          <out-dir>/counties/<cc>/<pack>.geojson (one per pack, mirrors GSAK zips)
+#          <out-dir>/manifest.json              (dataset version; "baseline" = world.geojson
+#                                                + state packs, fetched wholesale on first run;
+#                                                "packs" = county packs, fetched on demand)
+#          <out-dir>/countries/world.geojson         simplified baseline (--simplify-tolerance)
+#          <out-dir>/states/<cc>.geojson             simplified baseline, one per country code
+#          <out-dir>/counties/<cc>_<pack>.geojson    full-resolution, on-demand (one per pack, flat)
 #
 # After this script finishes, BoundaryStore(Path("<out-dir>")) resolves
 # coordinates offline using the engine in src/opensak/geo/.
@@ -20,10 +27,16 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import sqlite3
+import unicodedata
 import zipfile
 from pathlib import Path
+
+from shapely.geometry import mapping as _shp_mapping
+from shapely.geometry import shape as _shp_shape
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DATA = _REPO_ROOT / "data"
@@ -172,13 +185,36 @@ def _geometry(polygons: list[list[list[list[float]]]]) -> dict[str, object]:
     return {"type": "MultiPolygon", "coordinates": all_polys}
 
 
-def _feature(name: str, parent: str | None, geom: dict[str, object]) -> dict[str, object]:
+def _simplify(geom: dict[str, object], tolerance: float) -> dict[str, object]:
+    # Douglas-Peucker (degrees-based tolerance) for the baseline layers
+    # (country/state) only — counties stay full-resolution since they're
+    # fetched on demand, not bundled. Called with tolerance=0 for counties to
+    # skip simplification but still get the validity repair below: the raw
+    # GSAK-derived rings are self-intersecting for ~6% of real counties (not
+    # something simplification introduces), and shapely's .contains() doesn't
+    # raise on an invalid geometry — it silently returns wrong answers.
+    if not geom.get("coordinates"):
+        return geom
+    shp = _shp_shape(geom)
+    if tolerance > 0:
+        shp = shp.simplify(tolerance, preserve_topology=True)
+    if not shp.is_valid:
+        # preserve_topology doesn't fully guarantee validity on complex multi-ring
+        # geometries (nearby-but-separate rings can end up crossing) — buffer(0)
+        # is the standard GEOS trick to repair self-intersections.
+        shp = shp.buffer(0)
+    if shp.is_empty:
+        return geom
+    return _shp_mapping(shp)
+
+
+def _feature(name: str, parent: str | None, geom: dict[str, object], version: int) -> dict[str, object]:
     return {
         "type": "Feature",
         "properties": {
             "name": name,
             "parent": parent,
-            "version": 1,
+            "version": version,
             "source": "gsak",
             "licence": "ODbL",
         },
@@ -220,6 +256,15 @@ def _read_zip_entry(zf: zipfile.ZipFile, entry: str) -> str | None:
         return raw.decode("latin-1")  # GSAK files pre-2020 often use Latin-1
 
 
+def _sanitize_filename_part(name: str) -> str:
+    # GSAK state/pack names can contain spaces and accents (e.g. Canada's
+    # "British Columbia", "Québec") — GitHub Release assets silently rewrite
+    # such characters on upload (spaces become dots), which would otherwise
+    # make manifest.json permanently diverge from the real asset names.
+    ascii_only = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^A-Za-z0-9]+", "_", ascii_only).strip("_")
+
+
 # ── Version table ─────────────────────────────────────────────────────────────
 
 def _load_versions(bb: sqlite3.Connection) -> dict[tuple[str, str, str], int]:
@@ -239,6 +284,7 @@ def _convert_countries(
     out_dir: Path,
     conn: sqlite3.Connection,
     versions: dict[tuple[str, str, str], int],
+    simplify_tolerance: float = 0.0,
 ) -> None:
     version = versions.get(("c", "", ""), 46)
     zip_path = gsak_dir / f"country_v{version}.zip"
@@ -261,9 +307,9 @@ def _convert_countries(
                 skipped += 1
                 continue
 
-            geom = _geometry(_parse_gsak_txt(content))
+            geom = _simplify(_geometry(_parse_gsak_txt(content)), simplify_tolerance)
             feature_index = len(features)
-            features.append(_feature(country_name, None, geom))
+            features.append(_feature(country_name, None, geom, version))
 
             conn.execute(
                 "INSERT INTO rtree_country VALUES (?, ?, ?, ?, ?)",
@@ -289,7 +335,8 @@ def _convert_states(
     out_dir: Path,
     conn: sqlite3.Connection,
     versions: dict[tuple[str, str, str], int],
-) -> None:
+    simplify_tolerance: float = 0.0,
+) -> dict[str, int]:
     rows = bb.execute(
         "SELECT rowid, Country, File, MaxLat, MinLat, MaxLon, MinLon, Sname FROM bb_state"
     ).fetchall()
@@ -299,6 +346,7 @@ def _convert_states(
     for row in rows:
         by_cc.setdefault(str(row[1]), []).append(row)
 
+    pack_versions: dict[str, int] = {}
     total = 0
     missing = 0
     for cc in sorted(by_cc):
@@ -318,9 +366,9 @@ def _convert_states(
                 if content is None:
                     continue
 
-                geom = _geometry(_parse_gsak_txt(content))
+                geom = _simplify(_geometry(_parse_gsak_txt(content)), simplify_tolerance)
                 feature_index = len(features)
-                features.append(_feature(sname, cc, geom))
+                features.append(_feature(sname, cc, geom, version))
 
                 conn.execute(
                     "INSERT INTO rtree_state VALUES (?, ?, ?, ?, ?)",
@@ -339,8 +387,10 @@ def _convert_states(
                 encoding="utf-8",
             )
             total += len(features)
+            pack_versions[pack_name] = version
 
     print(f"  → {total} states across {len(by_cc)} codes ({missing} zip(s) missing)")
+    return pack_versions
 
 
 def _convert_counties(
@@ -349,7 +399,7 @@ def _convert_counties(
     out_dir: Path,
     conn: sqlite3.Connection,
     versions: dict[tuple[str, str, str], int],
-) -> None:
+) -> dict[str, int]:
     rows = bb.execute(
         "SELECT rowid, Country, State, File, MaxLat, MinLat, MaxLon, MinLon, Cname FROM bb_county"
     ).fetchall()
@@ -361,11 +411,7 @@ def _convert_counties(
         key = (str(row[1]), str(row[2]))
         by_cc_pack.setdefault(key, []).append(row)
 
-    # track next feature_index per country (counties from different packs go
-    # into the same country GeoJSON, so indices must not restart)
-    country_feature_index: dict[str, int] = {}
-    country_features: dict[str, list] = {}
-
+    pack_versions: dict[str, int] = {}
     total = 0
     missing = 0
     for (cc, pack_name) in sorted(by_cc_pack):
@@ -375,11 +421,14 @@ def _convert_counties(
             missing += 1
             continue
 
-        # Counties from the same pack go into counties/<cc>/<pack_name>.geojson
-        # This mirrors the GSAK zip structure and keeps individual files small.
+        # Counties from the same pack are flattened into a single release-asset
+        # filename (cc_pack.geojson) — GitHub Release assets can't hold subdirectories,
+        # and packs.py fetches them by this exact flat name. pack_name is sanitized
+        # here (not when locating the source zip above) since some GSAK state names
+        # contain spaces/accents (e.g. Canada's "British Columbia", "Québec").
         pack_features: list[dict[str, object]] = []
         pack_region_rows: list[tuple] = []
-        out_pack = f"{cc}/{pack_name}.geojson"
+        out_pack = f"{cc}_{_sanitize_filename_part(pack_name)}.geojson"
 
         with zipfile.ZipFile(zip_path) as zf:
             for row in by_cc_pack[(cc, pack_name)]:
@@ -388,9 +437,10 @@ def _convert_counties(
                 if content is None:
                     continue
 
-                geom = _geometry(_parse_gsak_txt(content))
+                # tolerance=0: no simplification, but still validity-checked/repaired.
+                geom = _simplify(_geometry(_parse_gsak_txt(content)), 0.0)
                 feature_index = len(pack_features)
-                pack_features.append(_feature(cname, cc, geom))
+                pack_features.append(_feature(cname, cc, geom, version))
 
                 conn.execute(
                     "INSERT INTO rtree_county VALUES (?, ?, ?, ?, ?)",
@@ -402,15 +452,50 @@ def _convert_counties(
                 )
 
         if pack_features:
-            out_path = out_dir / "counties" / cc / f"{pack_name}.geojson"
+            out_path = out_dir / "counties" / out_pack
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(
                 json.dumps({"type": "FeatureCollection", "features": pack_features}, ensure_ascii=False),
                 encoding="utf-8",
             )
             total += len(pack_features)
+            pack_versions[out_pack] = version
 
     print(f"  → {total} counties ({missing} zip(s) missing)")
+    return pack_versions
+
+
+def _file_digest(path: Path) -> dict[str, object]:
+    data = path.read_bytes()
+    return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+
+def _write_manifest(
+    out_dir: Path,
+    dataset_version: int,
+    baseline_versions: dict[str, int],
+    pack_versions: dict[str, int],
+) -> None:
+    # "baseline" (world.geojson + state packs) is bundled in every install and
+    # fetched wholesale on first run when not bundled (see geo/packs.py
+    # fetch_baseline). "packs" (county-level) stays on-demand, per-country.
+    # sha256/size let verify_release.py detect a corrupted or truncated
+    # release asset without needing to reprocess the whole dataset.
+    manifest = {
+        "dataset_version": str(dataset_version),
+        "boundaries_db": _file_digest(out_dir / "boundaries.db"),
+        "baseline": {
+            name: {"version": str(v), **_file_digest(
+                out_dir / ("countries" if name == "world.geojson" else "states") / name
+            )}
+            for name, v in sorted(baseline_versions.items())
+        },
+        "packs": {
+            name: {"version": str(v), **_file_digest(out_dir / "counties" / name)}
+            for name, v in sorted(pack_versions.items())
+        },
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -447,9 +532,20 @@ def main() -> None:
         help="Output directory for boundaries.db and GeoJSON packs "
              "(default: same as --gsak-dir)",
     )
+    parser.add_argument(
+        "--simplify-tolerance",
+        type=float,
+        default=0.0005,
+        metavar="DEGREES",
+        help="Douglas-Peucker tolerance applied to the country/state baseline "
+             "only (shipped in every install) — counties stay full-resolution "
+             "since they're fetched on demand. 0 disables simplification "
+             "(default: %(default)s, ~55m at the equator)",
+    )
     args = parser.parse_args()
     gsak_dir: Path = args.gsak_dir
     out_dir: Path = args.out_dir
+    simplify_tolerance: float = args.simplify_tolerance
 
     bb_path: Path = args.bb_path
     if not bb_path.exists():
@@ -469,15 +565,16 @@ def main() -> None:
     country_version = versions.get(("c", "", ""), 0)
 
     print("Converting countries…")
-    _convert_countries(bb, gsak_dir, out_dir, conn, versions)
+    _convert_countries(bb, gsak_dir, out_dir, conn, versions, simplify_tolerance)
     conn.commit()
 
     print("Converting states…")
-    _convert_states(bb, gsak_dir, out_dir, conn, versions)
+    state_versions = _convert_states(bb, gsak_dir, out_dir, conn, versions, simplify_tolerance)
     conn.commit()
+    baseline_versions = {"world.geojson": country_version, **state_versions}
 
     print("Converting counties…")
-    _convert_counties(bb, gsak_dir, out_dir, conn, versions)
+    pack_versions = _convert_counties(bb, gsak_dir, out_dir, conn, versions)
     conn.commit()
 
     conn.execute(
@@ -488,6 +585,9 @@ def main() -> None:
 
     bb.close()
     conn.close()
+
+    _write_manifest(out_dir, country_version, baseline_versions, pack_versions)
+
     print(f"\nDone → {out_dir}")
     print(f"  boundaries.db   {out_db.stat().st_size // 1024} KB")
 

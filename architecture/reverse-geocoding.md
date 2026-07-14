@@ -314,7 +314,7 @@ Building `boundaries.db` is mostly reading each feature's `bbox` — a quick, on
 There is **no project-run server**. Distribution uses only what an open-source project already has:
 
 - **Baseline** (`countries/`, `states/`, `boundaries.db`) ships as package data in the install, so country/state resolution works with no network from first launch.
-- **County packs** live as **GitHub Release assets** in a dedicated data repository, `AgreeDK/OpenSAK-Data`, each a per-country GeoJSON `FeatureCollection`. The first time a lookup needs a country's counties, `geo.packs` downloads that pack over its stable release URL (GitHub serves these via a CDN), writes it under `counties/`, and serves it locally thereafter.
+- **County packs** live as **GitHub Release assets** in a dedicated data repository, `OpenSAK-Org/OpenSAK-Data`, each a per-country GeoJSON `FeatureCollection`. The first time a lookup needs a country's counties, `geo.packs` downloads that pack over its stable release URL (GitHub serves these via a CDN), writes it under `counties/`, and serves it locally thereafter.
 - **"Download all"** is an optional one-click action that pre-fetches every pack, for users who want full offline coverage before heading into the field.
 
 So the network is involved **only** on the first fetch of a region's data, a "download all", or a deliberate refresh; steady-state operation is fully local.
@@ -368,7 +368,7 @@ What this means in practice:
 - **Added to the install (baseline = countries + states + index):** ~**60 MB** of GeoJSON. **Geometry simplification** (Douglas–Peucker) is the main lever and is recommended for the baseline: at the zoom these layers need it cuts size 2–5× with negligible accuracy loss, bringing the baseline to roughly **15–25 MB**. (GSAK's polygons are already simplified for the same reason.)
 - **A typical on-demand county download:** Portugal ~3,900 features ≈ **~14 MB** (~3.5 MB gzipped); a US state such as Texas (~250 counties) ≈ **~2.5 MB** (~0.7 MB gzipped); a small country well under 1 MB. A user who caches in a handful of countries downloads **single-digit to low-tens of MB, ever**.
 - **Disk cache.** Packs can be kept gzipped on disk and decompressed on read (cheap for `json`), so even a full "download all" footprint is ~**70 MB**, not 270 MB.
-- **What goes to GitHub.** The data lives in the dedicated `AgreeDK/OpenSAK-Data` repository and is published as **GitHub Release assets — never Git LFS**. The distinction is what keeps it free: for public repositories, Release-asset downloads are unmetered and do not count toward repository size, whereas Git LFS is billed beyond a small free tier. The full set is ~**70 MB per release** (gzipped); re-publishing only changed packs keeps most releases far smaller, and the 2 GB per-asset limit is never approached — comfortably within GitHub's free hosting.
+- **What goes to GitHub.** The data lives in the dedicated `OpenSAK-Org/OpenSAK-Data` repository and is published as **GitHub Release assets — never Git LFS**. The distinction is what keeps it free: for public repositories, Release-asset downloads are unmetered and do not count toward repository size, whereas Git LFS is billed beyond a small free tier. The full set is ~**70 MB per release** (gzipped); re-publishing only changed packs keeps most releases far smaller, and the 2 GB per-asset limit is never approached — comfortably within GitHub's free hosting.
 
 ---
 

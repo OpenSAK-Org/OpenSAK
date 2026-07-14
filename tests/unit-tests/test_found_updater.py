@@ -71,6 +71,43 @@ class TestGetFoundGcCodes:
         assert found["GC00001"] is not None
         assert found["GC00001"].year == 2020
 
+    def test_parses_attended_log_date(self, tmp_path, make_cache):
+        # Bug #457: events log a find as "Attended", not "Found it" — the
+        # reference-DB query must pick this up too.
+        ref_path = tmp_path / "ref.db"
+        init_db(db_path=ref_path)
+        with get_session() as s:
+            c = make_cache("GCEVENT1")
+            c.logs.append(Log(log_type="Attended", log_date=datetime(2010, 7, 31)))
+            s.add(c)
+        found = get_found_gc_codes(ref_path)
+        assert found["GCEVENT1"] is not None
+        assert found["GCEVENT1"].year == 2010
+
+    def test_parses_webcam_photo_taken_log_date(self, tmp_path, make_cache):
+        # Bug #457: webcam caches log a find as "Webcam Photo Taken", not
+        # "Found it" — the reference-DB query must pick this up too.
+        ref_path = tmp_path / "ref.db"
+        init_db(db_path=ref_path)
+        with get_session() as s:
+            c = make_cache("GCWEBCAM")
+            c.logs.append(Log(log_type="Webcam Photo Taken", log_date=datetime(2013, 12, 26)))
+            s.add(c)
+        found = get_found_gc_codes(ref_path)
+        assert found["GCWEBCAM"] is not None
+        assert found["GCWEBCAM"].year == 2013
+
+    def test_ignores_non_found_log_types(self, tmp_path, make_cache):
+        # A "Write note" log alone must not produce a found_date.
+        ref_path = tmp_path / "ref.db"
+        init_db(db_path=ref_path)
+        with get_session() as s:
+            c = make_cache("GC00099")
+            c.logs.append(Log(log_type="Write note", log_date=datetime(2020, 1, 1)))
+            s.add(c)
+        found = get_found_gc_codes(ref_path)
+        assert found["GC00099"] is None
+
 
 # ── update_found_from_reference ───────────────────────────────────────────────
 

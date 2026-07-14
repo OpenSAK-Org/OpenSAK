@@ -17,8 +17,12 @@ def _fake_settings(
     fmt: DateFormat = DateFormat.DMY,
     text_size: TextSize = TextSize.MEDIUM,
     coord_format: CoordFormat = CoordFormat.DMM,
+    default_decode_hints: bool = False,
 ) -> SimpleNamespace:
-    return SimpleNamespace(date_format=fmt, text_size=text_size, coord_format=coord_format)
+    return SimpleNamespace(
+        date_format=fmt, text_size=text_size, coord_format=coord_format,
+        default_decode_hints=default_decode_hints,
+    )
 
 
 @pytest.mark.parametrize("fmt, expected", [
@@ -68,6 +72,69 @@ def test_decode_no_hint_shows_no_hint_label(qapp):
 
     panel._toggle_hint_decode()  # encode back
     assert panel._hint_browser.toPlainText() != ""
+
+
+def _load_cache_with_hint(monkeypatch, tmp_path, hint: str, default_decode_hints: bool):
+    monkeypatch.setattr(
+        cd, "get_settings",
+        lambda: _fake_settings(default_decode_hints=default_decode_hints),
+    )
+    db_path = tmp_path / "hint.db"
+    init_db(db_path=db_path)
+    import_gpx(_write_gpx(tmp_path, _minimal_gpx(hint=hint)), db_path)
+
+    from opensak.db.models import Cache as CacheModel
+    from sqlalchemy.orm import joinedload
+    with get_session() as s:
+        cache = (
+            s.query(CacheModel)
+            .options(
+                joinedload(CacheModel.user_note),
+                joinedload(CacheModel.logs),
+                joinedload(CacheModel.waypoints),
+                joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
+            )
+            .filter_by(gc_code="GCNOTES1")
+            .one()
+        )
+        s.expunge_all()
+
+    panel = CacheDetailPanel()
+    panel.show_cache(cache)
+    return panel
+
+
+def test_hint_defaults_hidden_when_setting_off(monkeypatch, tmp_path, qapp):
+    # Issue #499: default (unchanged) behaviour — hints start hidden.
+    panel = _load_cache_with_hint(
+        monkeypatch, tmp_path,
+        hint="Under the big rock near the old oak tree by the river",
+        default_decode_hints=False,
+    )
+    assert panel._hint_decoded is False
+    assert panel._decode_btn.text() == tr("detail_decode_btn")
+    assert panel._hint_browser.toPlainText() == panel._hint_cipher
+
+def test_hint_defaults_decoded_when_setting_on(monkeypatch, tmp_path, qapp):
+    # Issue #499: with the preference enabled, hints start decoded.
+    panel = _load_cache_with_hint(
+        monkeypatch, tmp_path,
+        hint="Under the big rock near the old oak tree by the river",
+        default_decode_hints=True,
+    )
+    assert panel._hint_decoded is True
+    assert panel._decode_btn.text() == tr("detail_encode_btn")
+    assert panel._hint_browser.toPlainText() == panel._hint_plain
+
+
+def test_hint_default_decoded_with_no_hint_shows_no_hint_label(monkeypatch, tmp_path, qapp):
+    # Edge case: setting is on, but the cache has no hint at all.
+    panel = _load_cache_with_hint(
+        monkeypatch, tmp_path, hint="", default_decode_hints=True,
+    )
+    assert panel._hint_decoded is True
+    assert panel._hint_browser.toPlainText() == tr("detail_no_hint")
 
 
 def _fake_wp(prefix="PK", wp_type="Parking Area", name="Park here",
@@ -216,7 +283,7 @@ def _write_gpx(tmp_path, content: str):
     return p
 
 
-def _minimal_gpx(gsak_ext: str = "") -> str:
+def _minimal_gpx(gsak_ext: str = "", hint: str = "") -> str:
     return textwrap.dedent(f"""\
         <?xml version="1.0" encoding="utf-8"?>
         <gpx xmlns="http://www.topografix.com/GPX/1/0"
@@ -238,7 +305,7 @@ def _minimal_gpx(gsak_ext: str = "") -> str:
               <groundspeak:terrain>2.0</groundspeak:terrain>
               <groundspeak:country>Denmark</groundspeak:country>
               <groundspeak:state>Zealand</groundspeak:state>
-              <groundspeak:encoded_hints></groundspeak:encoded_hints>
+              <groundspeak:encoded_hints>{hint}</groundspeak:encoded_hints>
               <groundspeak:logs></groundspeak:logs>
             </groundspeak:cache>
             {gsak_ext}
@@ -254,11 +321,18 @@ def test_attrs_tab_exists_at_index_4(monkeypatch, qapp):
     assert panel._tabs.tabText(4) == tr("filter_tab_attributes")
 
 
-def test_notes_tab_exists_at_index_5(monkeypatch, qapp):
-    # Notes tab shifted to index 5 when Attributes tab was added (#417).
+def test_trackables_tab_exists_at_index_5(monkeypatch, qapp):
+    # Issue #538/#546: Trackables tab inserted between Attributes and Notes.
     monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
     panel = CacheDetailPanel()
-    assert panel._tabs.tabText(5) == tr("detail_tab_notes")
+    assert panel._tabs.tabText(5) == tr("col_trackables")
+
+
+def test_notes_tab_exists_at_index_6(monkeypatch, qapp):
+    # Notes tab shifted to index 6 when the Trackables tab was added (#538/#546).
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    assert panel._tabs.tabText(6) == tr("detail_tab_notes")
 
 
 def test_notes_tab_loads_existing_note(monkeypatch, tmp_path, qapp):
@@ -283,6 +357,7 @@ def test_notes_tab_loads_existing_note(monkeypatch, tmp_path, qapp):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -311,6 +386,7 @@ def test_notes_tab_save_roundtrip(monkeypatch, tmp_path, qapp):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -357,6 +433,7 @@ def _load_cache(tmp_path, db_suffix="icon"):
                 joinedload(CacheModel.logs),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             )
             .filter_by(gc_code="GCNOTES1")
             .one()
@@ -446,3 +523,63 @@ def test_attrs_tab_cleared_on_clear(monkeypatch, qapp):
     panel.clear()
     assert panel._attr_browser.toPlainText() == ""
     assert panel._tabs.tabText(4) == tr("filter_tab_attributes")
+
+
+# ── Trackables tab tests (issue #538/#546) ───────────────────────────────────
+
+def _fake_trackable(name, ref=None, tracking_code=None):
+    return SimpleNamespace(name=name, ref=ref, tracking_code=tracking_code)
+
+
+def test_trackables_tab_empty(monkeypatch, qapp):
+    # Cache with no trackables shows the empty message and base tab title.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[]))
+    assert tr("detail_no_trackables") in panel._tb_browser.toPlainText()
+    assert panel._tabs.tabText(5) == tr("col_trackables")
+
+
+def test_trackables_tab_count_in_title(monkeypatch, qapp):
+    # Tab title shows count when trackables are present.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[
+        _fake_trackable("Best TB ever", ref="TBAB12CD"),
+        _fake_trackable("Another Bug", ref="TB999X"),
+    ]))
+    assert panel._tabs.tabText(5) == tr("detail_tab_trackables_count", count=2)
+
+
+def test_trackables_tab_renders_name_and_geocaching_link(monkeypatch, qapp):
+    # Each trackable is shown with its name and a clickable coord.info link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[
+        _fake_trackable("Best TB ever", ref="TBAB12CD"),
+    ]))
+    html = panel._tb_browser.toHtml()
+    assert "Best TB ever" in html
+    assert "https://coord.info/TBAB12CD" in html
+
+
+def test_trackables_tab_renders_without_ref(monkeypatch, qapp):
+    # A trackable with no ref (shouldn't normally happen, but the parser
+    # allows it) is shown without a broken/empty link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable("No Ref Bug", ref=None)]))
+    html = panel._tb_browser.toHtml()
+    assert "No Ref Bug" in html
+    assert "coord.info" not in html
+
+
+def test_trackables_tab_cleared_on_clear(monkeypatch, qapp):
+    # clear() resets the trackables browser and tab title.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable("Best TB ever", ref="TBAB12CD")]))
+    assert panel._tabs.tabText(5) == tr("detail_tab_trackables_count", count=1)
+    panel.clear()
+    assert panel._tb_browser.toPlainText() == ""
+    assert panel._tabs.tabText(5) == tr("col_trackables")

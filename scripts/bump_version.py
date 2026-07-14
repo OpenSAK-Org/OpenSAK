@@ -90,6 +90,16 @@ def check_consistency() -> bool:
     return True
 
 
+def find_stale_user_guide_version(current: str) -> str | None:
+    """Return the single stale version string in user-guide.html that isn't
+    `current`, or None if there isn't exactly one (i.e. none, or several —
+    too ambiguous to auto-fix safely). Shares its detection logic with
+    check_consistency() above."""
+    text = USER_GUIDE.read_text(encoding="utf-8")
+    stale = sorted(set(re.findall(r"\d+\.\d+\.\d+(?:-[a-zA-Z]+\.\d+)?", text)) - {current})
+    return stale[0] if len(stale) == 1 else None
+
+
 def main() -> None:
     args = sys.argv[1:]
 
@@ -109,6 +119,26 @@ def main() -> None:
     old_version = get_init_version()
 
     if old_version == new_version:
+        # __init__.py is already at new_version — most likely someone edited
+        # it by hand instead of running this script (exactly what happened
+        # for v1.15.0-beta.4: a `chmod`/permission hiccup led to a manual
+        # edit of __init__.py, and user-guide.html was silently left behind
+        # until CI caught it). Don't just give up — check whether
+        # user-guide.html still has the *previous* version lingering, and
+        # fix that too, so this early-exit can't reintroduce the exact bug
+        # this script exists to prevent.
+        stale = find_stale_user_guide_version(new_version)
+        if stale:
+            print(f"__init__.py is already at {new_version}, but "
+                  f"{USER_GUIDE.relative_to(ROOT)} still references the "
+                  f"stale version '{stale}' — fixing that now.\n")
+            count = bump_user_guide(stale, new_version)
+            if count:
+                print(f"  \u2713 {USER_GUIDE.relative_to(ROOT)}: replaced "
+                      f"{count} occurrence(s) of '{stale}'")
+            else:
+                print(f"  ! replace failed unexpectedly — check manually")
+            sys.exit(0)
         print(f"Already at {new_version} — nothing to do.")
         sys.exit(0)
 

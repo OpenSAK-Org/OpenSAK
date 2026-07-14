@@ -12,7 +12,7 @@ from opensak.filters.engine import (
     FilterSet, SortSpec, FilterProfile, apply_filters, annotate_distances,
     # All filter classes
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
-    FoundFilter, NotFoundFilter, AvailableFilter, ArchivedFilter,
+    FoundFilter, NotFoundFilter, AvailableFilter, ArchivedFilter, AvailabilityFilter,
     CountryFilter, StateFilter, CountyFilter, NameFilter, GcCodeFilter, PlacedByFilter,
     DistanceFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
@@ -385,6 +385,50 @@ def test_filterset_nested(tmp_db):
         assert c.archived is False
     # GC00004 is Traditional but archived — should be excluded
     assert "GC00004" not in {c.gc_code for c in results}
+
+
+class TestActiveCount:
+    """FilterSet.active_count() — the 'N active' badge count (issue reported
+    by Mike: a single distance filter showed '2 active' because the default
+    archived-hiding AvailabilityFilter was silently counted too)."""
+
+    def test_matches_len_by_default(self):
+        fs = FilterSet()
+        fs.add(NameFilter("foo"))
+        fs.add(DistanceFilter(55.0, 12.0, 10.0))
+        assert fs.active_count() == len(fs) == 2
+
+    def test_excludes_filter_flagged_as_non_counting(self):
+        fs = FilterSet()
+        fs.add(DistanceFilter(55.0, 12.0, 10.0))
+        baseline = AvailabilityFilter(show_avail=True, show_unavail=True, show_archived=False)
+        baseline.counts_as_filter = False
+        fs.add(baseline)
+        # len() still reflects both filters (it's still applied to results) —
+        # only active_count(), used for the display badge, excludes it.
+        assert len(fs) == 2
+        assert fs.active_count() == 1
+
+    def test_recurses_into_nested_filtersets(self):
+        inner = FilterSet(mode="OR")
+        inner.add(CacheTypeFilter(["Traditional Cache"]))
+        baseline = AvailabilityFilter(show_avail=True, show_unavail=True, show_archived=False)
+        baseline.counts_as_filter = False
+        inner.add(baseline)
+
+        outer = FilterSet(mode="AND")
+        outer.add(inner)
+        outer.add(NameFilter("foo"))
+
+        assert outer.active_count() == 2  # CacheTypeFilter + NameFilter
+
+    def test_all_non_counting_gives_zero(self):
+        fs = FilterSet()
+        baseline = AvailabilityFilter(show_avail=True, show_unavail=True, show_archived=False)
+        baseline.counts_as_filter = False
+        fs.add(baseline)
+        assert fs.active_count() == 0
+        assert len(fs) == 1
 
 
 def test_empty_filterset_returns_all(tmp_db):

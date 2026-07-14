@@ -57,6 +57,8 @@ docs/plans/
 # Reverse-geocoding boundary data — dev-only stand-in for the future
 # OpenSAK-Data release packs (see docs/reverse-geocoding-data.md).
 /data/
+# Raw GSAK source (bb.db3 + polygon zips), never redistributed as-is.
+/bb.db3
 
 # Local skill tooling (caveman skills)
 .agents/

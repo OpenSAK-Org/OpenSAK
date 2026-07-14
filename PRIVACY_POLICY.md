@@ -17,7 +17,7 @@ This Privacy Policy explains what data OpenSAK collects, how it is stored, and w
 - OpenSAK does **not** contain any analytics, advertising, or tracking
 
 The full source code is publicly available and auditable at any time:
-**https://github.com/AgreeDK/opensak**
+**https://github.com/OpenSAK-Org/opensak**
 
 ---
 
@@ -141,11 +141,11 @@ OpenSAK is developed and maintained by Allan, Denmark.
 
 If you have questions about this Privacy Policy or how OpenSAK handles data, please reach out via:
 
-- **GitHub Issues:** https://github.com/AgreeDK/opensak/issues
+- **GitHub Issues:** https://github.com/OpenSAK-Org/opensak/issues
 - **Facebook community:** [OpenSAK — Open Source Geocache Manager](https://www.facebook.com/groups/opensak)
 - **Website:** https://opensak.com
 
 ---
 
 *OpenSAK is free, open source software licensed under the MIT License.*
-*https://github.com/AgreeDK/opensak*
+*https://github.com/OpenSAK-Org/opensak*

@@ -169,6 +169,71 @@ class TestNormalizeGeocacherName:
         assert normalize_geocacher_name("Team (Denmark)") == "team (denmark)"
 
 
+# ── count_own_found_logs (issue #552) ────────────────────────────────────────
+
+from opensak.utils.utils import count_own_found_logs
+
+
+class TestCountOwnFoundLogs:
+    def test_no_settings_configured_returns_zero(self):
+        logs = [{"log_type": "Found it", "finder": "AB Green", "finder_id": "1"}]
+        assert count_own_found_logs(logs, "", "") == 0
+        assert count_own_found_logs(logs, None, None) == 0
+
+    def test_counts_multiple_own_found_logs(self):
+        # Relocatable-cache scenario (issue #552, GCCF79): the same user's
+        # found-type logs on one cache must all count, not just the first.
+        logs = [
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+        ]
+        assert count_own_found_logs(logs, "1", "AB Green") == 3
+
+    def test_ignores_other_finders(self):
+        logs = [
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Found it", "finder": "Someone Else", "finder_id": "2"},
+        ]
+        assert count_own_found_logs(logs, "1", "AB Green") == 1
+
+    def test_ignores_non_found_log_types(self):
+        logs = [
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Write note", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Didn't find it", "finder": "AB Green", "finder_id": "1"},
+        ]
+        assert count_own_found_logs(logs, "1", "AB Green") == 1
+
+    def test_counts_across_all_found_log_types(self):
+        # Mirrors found_date's #457 fix — webcam/event logs count too.
+        logs = [
+            {"log_type": "Found it", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Attended", "finder": "AB Green", "finder_id": "1"},
+            {"log_type": "Webcam Photo Taken", "finder": "AB Green", "finder_id": "1"},
+        ]
+        assert count_own_found_logs(logs, "1", "AB Green") == 3
+
+    def test_finder_id_takes_priority_over_username(self):
+        # A log with a matching finder_id counts even if the username
+        # (deliberately) doesn't match — finder_id is the more precise signal.
+        logs = [{"log_type": "Found it", "finder": "Some Display Name", "finder_id": "1"}]
+        assert count_own_found_logs(logs, "1", "Different Username") == 1
+
+    def test_falls_back_to_username_when_no_finder_id_configured(self):
+        logs = [{"log_type": "Found it", "finder": "AB Green", "finder_id": "999"}]
+        assert count_own_found_logs(logs, "", "AB Green") == 1
+
+    def test_username_match_is_normalized(self):
+        # Reuses normalize_geocacher_name()'s case/whitespace handling —
+        # see TestNormalizeGeocacherName above for the full rule set.
+        logs = [{"log_type": "Found it", "finder": "ab\xa0green", "finder_id": ""}]
+        assert count_own_found_logs(logs, "", "AB Green") == 1
+
+    def test_empty_logs_list_returns_zero(self):
+        assert count_own_found_logs([], "1", "AB Green") == 0
+
+
 # ── norm_locale_date_fmt (issue #369) ────────────────────────────────────────
 
 from opensak.utils.types import norm_locale_date_fmt

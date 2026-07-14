@@ -204,6 +204,8 @@ class FilterDialog(QDialog):
     """Komplet filter dialog med tre faner."""
 
     filter_applied = Signal(object, object, str)  # FilterSet, SortSpec, profile_name
+    profile_deleted = Signal(str)  # profile_name — fires immediately on delete (issue #491),
+                                    # independent of whether the dialog is later applied or closed
 
     def __init__(self, parent=None, current_filterset: Optional[FilterSet] = None,
                  last_profile_name: str = ""):
@@ -212,7 +214,16 @@ class FilterDialog(QDialog):
         self._attr_boxes: dict[int, tuple] = {}
         # Startsstørrelse: 70% af skærm, aldrig større end 1000x850
         from PySide6.QtWidgets import QApplication
-        screen = QApplication.primaryScreen()
+        # Issue #580: brugte tidligere altid QApplication.primaryScreen(),
+        # så filter-vinduet konsekvent åbnede på den primære skærm — også
+        # når selve OpenSAK-vinduet kørte på en sekundær skærm i en
+        # multi-monitor-opsætning. Brug i stedet skærmen forældrevinduet
+        # (hovedvinduet) rent faktisk er på, ligesom Settings-dialogen og
+        # de øvrige undervinduer allerede gør (de har ingen tilsvarende
+        # override og følger derfor naturligt forælderens skærm).
+        screen = parent.screen() if parent is not None else None
+        if screen is None:
+            screen = QApplication.primaryScreen()
         if screen:
             rect = screen.availableGeometry()
             w = min(1000, int(rect.width()  * 0.70))
@@ -1083,11 +1094,21 @@ class FilterDialog(QDialog):
 
         if not (avail and unavail and archived):
             # Mindst én er fravalgt — tilføj filter
-            fs.add(AvailabilityFilter(
+            avail_filter = AvailabilityFilter(
                 show_avail=avail,
                 show_unavail=unavail,
                 show_archived=archived,
-            ))
+            )
+            if avail and unavail and not archived:
+                # This is exactly the dialog's factory-default state (hide
+                # archived caches, show everything else). It's baseline app
+                # behaviour the user didn't consciously opt into — unlike
+                # every other tab above, where a filter is only added once
+                # the user moves away from a neutral default — so don't let
+                # it inflate the "N active" badge (issue reported by Mike:
+                # setting only a distance filter showed "2 active").
+                avail_filter.counts_as_filter = False
+            fs.add(avail_filter)
 
         # Afstand
         if self._dist_enabled.isChecked():
@@ -1316,6 +1337,9 @@ class FilterDialog(QDialog):
             except Exception:
                 pass
             self._load_profiles_into_combo()
+            # issue #491: rapportér straks til MainWindow at profilen er væk, uanset
+            # om dialogen bagefter lukkes med Apply eller bare med Close/Escape.
+            self.profile_deleted.emit(name)
 
     def _load_filterset(self, fs: FilterSet) -> None:
         """Udfyld UI felter fra et eksisterende FilterSet.

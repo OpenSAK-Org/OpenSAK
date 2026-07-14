@@ -5,6 +5,8 @@ Single source of truth for cache types, container sizes, attribute IDs,
 waypoint prefixes, colour mappings, and shared numeric constants.
 """
 
+import re
+
 # ── Cache types (Groundspeak standard) ────────────────────────────────────────
 
 CACHE_TYPES: list[str] = [
@@ -239,6 +241,42 @@ LOG_COLOURS: dict[str, str] = {
     "Write note":        "#1565c0",
     "Owner Maintenance": "#6a1b9a",
 }
+
+# ── "Found" log types (issue #457) ────────────────────────────────────────────
+# Single source of truth for which Groundspeak log types count as evidence the
+# user actually found/attended a cache. Used when deriving Cache.found_date and
+# Cache.first_to_find from a cache's logs during import (importer/__init__.py)
+# and when syncing found status from a reference database (db/found_updater.py).
+#
+# "Found it"            — regular/multi/virtual/unknown/etc. caches
+# "Attended"            — Event Cache, Mega-Event, CITO, ... (no "Found it" log)
+# "Webcam Photo Taken"  — old-style Webcam Caches, before webcam logging was
+#                          switched over to "Found it". Still present in many
+#                          users' older My Finds history.
+#
+# Bug #457: found_date was previously derived from "Found it" logs only, so
+# webcam caches and events silently ended up with no found date on import.
+FOUND_LOG_TYPES: frozenset[str] = frozenset({
+    "Found it",
+    "Attended",
+    "Webcam Photo Taken",
+})
+
+# ── FTF (First to Find) tag pattern (issue #114 follow-up) ───────────────────
+# ProjectGC (the de-facto FTF stats provider most geocachers use) only credits
+# an FTF when the log contains one of these exact tags — see
+# https://project-gc.com/w/First_to_Find and https://project-gc.com/Home/FAQ:
+#   {FTF}   {*FTF*}   [FTF]
+#
+# The previous implementation matched free-text phrases ("ftf", "first to
+# find", "first finder", "første til at finde") anywhere in the user's own
+# found-log text. That produced false positives whenever a log merely
+# mentioned the concept without claiming it, e.g. "...forgæves forsøg på at
+# blive first finder..." (a log about NOT getting FTF) got flagged as FTF.
+#
+# FTF_TAG_PATTERN matches only the tags above, case-insensitively:
+#   {FTF} / {ftf}, {*FTF*} / {*ftf*}, [FTF] / [ftf]
+FTF_TAG_PATTERN = re.compile(r"\{\*?ftf\*?\}|\[ftf\]", re.IGNORECASE)
 
 # ── Shared numeric constants ──────────────────────────────────────────────────
 

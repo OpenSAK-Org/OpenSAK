@@ -206,6 +206,20 @@ class TestJsMethods:
         w.show_waypoint_markers(wps)
         assert any("showWaypointMarkers" in js for js in w._page.js)
 
+    def test_show_waypoint_markers_skips_zero_zero_coords(self):
+        # Issue #546: hidden-coordinate waypoints (e.g. finales after a GSAK
+        # import) come through as lat=0/lon=0 — a marker at null-island must
+        # never be created, or fitBounds() would zoom out to show the whole
+        # world instead of the cache's actual waypoints.
+        start = mw_mod.MAP_HTML.index("function showWaypointMarkers")
+        end = mw_mod.MAP_HTML.index("\n}", start)
+        body = mw_mod.MAP_HTML[start:end]
+        assert "if (!wp.lat || !wp.lon) return;" in body
+        # ...and that the skip happens before any marker is built/added.
+        skip_pos = body.index("if (!wp.lat || !wp.lon) return;")
+        marker_pos = body.index("L.marker([wp.lat, wp.lon]")
+        assert skip_pos < marker_pos
+
     def test_clear_waypoint_markers(self, w):
         w.clear_waypoint_markers()
         assert w._page.js == ["clearWaypointMarkers()"]

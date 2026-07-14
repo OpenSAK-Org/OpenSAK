@@ -39,6 +39,8 @@ STRINGS: dict[str, str] = {
     "count_caches":                 "{count} keší",
     "count_cache_single":           "1 keš",
     "filter_active_label":          "🔍 Filtr aktivní",
+    "filter_no_results_title":      "Žádné odpovídající keše",
+    "filter_no_results_msg":        "Tento filtr neodpovídá žádné keši, a proto nebyl použit. Upravte kritéria a zkuste to znovu.",
 
     # ── Menu bar ──────────────────────────────────────────────────────────────
     "menu_file":                    "&Soubor",
@@ -83,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Klávesové zkratky…",
 
     "action_open_log_file": "Otevřít soubor protokolu",
+    "action_support_opensak": "♥  Podpořit OpenSAK…",
     "log_file_not_found": "Soubor protokolu ještě nebyl nalezen: {path}",
 
     # ── Klávesové zkratky dialog ──────────────────────────────────────────────
@@ -98,6 +101,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Smazat kešku",
     "shortcut_refresh":             "Obnovit seznam",
     "shortcut_filter":              "Nastavit filtr",
+    "shortcut_clear_filter":        "Zrušit filtr",
     "shortcut_settings":            "Nastavení",
     "shortcut_gps_export":          "Odeslat do GPS",
     "shortcut_trip_planner":        "Plánování trasy",
@@ -117,6 +121,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Zrušit filtr",
     "toolbar_filter_combo_tooltip":  "Vybrat uložený filtr",
     "toolbar_filter_combo_none":     "Žádný",
+    "toolbar_filter_combo_active":   "Aktivní (neuloženo)",
     "toolbar_refresh":              "Obnovit",
 
     # ── Status bar ────────────────────────────────────────────────────────────
@@ -172,6 +177,26 @@ STRINGS: dict[str, str] = {
     "import_log_placeholder":       "Výsledky importu se zobrazí zde…",
     "import_all_done":            "✓ Všech {count} souborů bylo zpracováno.",
     "import_geocode_running":       "📍  Geokóduji chybějící údaje o poloze…",
+
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importovat z databáze GSAK…",
+    "gsak_import_dialog_title":     "Import z databáze GSAK",
+    "gsak_import_select_file_label": "Vyberte zálohu GSAK (.zip) nebo soubor databáze (.db3):",
+    "gsak_import_browse_title":     "Vybrat zálohu nebo soubor GSAK",
+    "gsak_import_file_filter":      "Záloha nebo databáze GSAK (*.zip *.db3);;Všechny soubory (*)",
+    "gsak_import_extracting":       "Rozbaluji {name}…",
+    "gsak_import_running":          "Importuji {name}…",
+    "gsak_import_attributes":       "Atributy:",
+    "gsak_import_logs":             "Logy:",
+    "gsak_import_notes":            "Poznámky:",
+    "gsak_import_note_images":      "Obrázky v poznámkách → zástupné texty:",
+    "gsak_import_trackables":       "Trackables:",
+    "gsak_import_warnings_header":  "Upozornění ({count}):",
+    "gsak_import_no_db3_found":     "V souboru {name} nebyl nalezen žádný sqlite.db3",
+    "gsak_import_done":             "✓ Import dokončen.",
+    "gsak_prescan_title":           "Některé osobní poznámky obsahují obrázky",
+    "gsak_prescan_body":            "{notes} vašich osobních poznámek obsahuje {images} obrázek/obrázky, které GSAK stáhl do vašeho starého počítače. Ty nelze automaticky zkopírovat, takže OpenSAK místo nich zobrazí zástupný text jako [image: filename.jpg]. Samotný text poznámky bude importován normálně.\n\nPokračovat v importu?",
+    "gsak_prescan_continue":        "Pokračovat v importu",
     
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Nastavit filtr",
@@ -223,12 +248,15 @@ STRINGS: dict[str, str] = {
     "gps_caches_ready":             "<b>{count} keší</b> připraveno k exportu (aktuálně filtrované/zobrazené keše)",
     "gps_dest_group":               "Cíl",
     "gps_rb_device":                "Odeslat přímo do GPS zařízení:",
-    "gps_rb_file":                  "Uložit jako GPX soubor:",
+    "gps_rb_file":                  "Uložit jako soubor:",
     "gps_scan_btn":                 "🔍 Hledat",
     "gps_scan_scanning":            "⏳",
     "gps_devices_found":            "✓ Nalezeno {count} Garmin zařízení",
     "gps_no_device":                "(Žádné GPS zařízení nenalezeno)",
-    "gps_no_device_hint":           "Žádné Garmin zařízení nenalezeno — připojte GPS a klikněte znovu na Hledat, nebo použijte 'Uložit jako GPX soubor'",
+    "gps_no_device_hint":           "Žádné Garmin zařízení nenalezeno — připojte GPS a klikněte znovu na Hledat, nebo použijte 'Uložit jako soubor'",
+    "gps_format_group":             "Formát exportu",
+    "gps_format_gpx":               "GPX  —  standardní formát Garmin (max. ~5 000 keší)",
+    "gps_format_ggz":               "GGZ  —  komprimovaný formát Garmin (neomezený počet keší)",
     "gps_browse":                   "Procházet…",
     "gps_file_placeholder":         "Vyberte umístění…",
     "gps_opt_group":                "Možnosti",
@@ -245,6 +273,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Na zařízení nebyly nalezeny žádné GPX soubory.\\nChcete pokračovat s nahráváním?",
     "gps_delete_file_list":         "Soubory ke smazání:\\n{files}",
     "gps_no_dest":                  "Nejprve prosím vyberte cíl.",
+    "gps_file_exists_title":        "Soubor již existuje",
+    "gps_file_exists_prompt":       "\"{filename}\" na tomto místě již existuje. Zadejte jiný název souboru:",
 
     # ── Settings dialog ───────────────────────────────────────────────────────
     "settings_dialog_title":        "Nastavení",
@@ -261,6 +291,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Malá",
     "settings_text_size_medium":    "Střední",
     "settings_text_size_large":     "Velká",
+    "settings_default_decode_hints_cb": "Zobrazovat nápovědy standardně dekódované",
     "settings_date_format_locale":  "Systémové prostředí",
     "settings_group_language":      "Jazyk",
     "settings_language_label":      "Jazyk:",
@@ -300,6 +331,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Dokončit",
     "wizard_skip": "Přeskočit nastavení",
     "wizard_step_of": "Krok {current} z {total}",
+    "wizard_settings_file_exists_title": "Soubor s nastavením již existuje",
+    "wizard_settings_file_exists_msg": "Složka „{path}“ již obsahuje soubor opensak.json, takže vaše aktuální nastavení tam nebylo přesunuto. Existující soubor zůstal nedotčen — složku byste měli případně zkontrolovat ručně.",
     "settings_group_nominatim":                    "Location refinement",
     "settings_nominatim_cb":                       "Enable online lookup for higher accuracy",
     "settings_nominatim_hint":                     "When enabled, county, state and country data is further refined using OpenStreetMap after the fast offline pass.\n\nNote: requires an internet connection and takes about 1 second per waypoint. A database of 10 000 waypoints takes around 3 hours to fully refine. Leave this off unless you need higher accuracy near administrative boundaries.",
@@ -312,6 +345,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Složka databáze:",
     "settings_folders_restart_hint": "Změna složky databáze vyžaduje restart OpenSAK.",
     "settings_db_dir_changed_message": "Složka databáze byla změněna. Restartujte OpenSAK, aby se změna projevila.",
+    "settings_icons_dir_label": "Složka vlastních ikon:",
+    "settings_open_icons_folder_button": "Otevřít složku ikon",
+    "settings_icons_dir_note": "Sem vložte vlastní SVG soubory pro nahrazení ikon typů cache, smajlíků a dalších UI ikon (opravené souřadnice, premium, oblíbené, trackables) — stejné názvy souborů jako v OpenSAK Custom Icons Guide. Restartujte OpenSAK, aby se změny projevily.",
+    "settings_view_icon_guide_button": "Zobrazit průvodce názvy ikon",
 
     "settings_move_databases_title": "Přesunout existující databáze?",
     "settings_move_databases_msg": "Máte {count} existujících databází. Chcete je také přesunout do nové složky?",
@@ -488,6 +525,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Nelze přesunout '{name}': soubor na {path} již existuje.",
     "db_err_move_failed": "Nelze přesunout '{name}': {error}",
+    "db_err_target_path_exists": "Soubor pro '{name}' už existuje na {path}.",
+    "db_err_rename_failed": "Nelze přejmenovat '{name}': {error}",
     "db_err_mkdir_failed":          "Nelze vytvořit složku:\n{path}",
     "db_err_dir_not_found":         "Složka neexistuje:\n{path}",
     "db_err_no_write_permission":   "Nemáte oprávnění k zápisu do složky:\n{path}",
@@ -577,6 +616,8 @@ STRINGS: dict[str, str] = {
     "detail_no_waypoints":          "(Žádné podřízené waypointy)",
     "detail_tab_attrs_count":       "Atributy ({count})",
     "detail_no_attrs":              "(Žádné atributy)",
+    "detail_tab_trackables_count":   "Trackables ({count})",
+    "detail_no_trackables":          "(Žádné trackables)",
     "detail_tab_notes":             "Poznámky",
     "detail_note_placeholder":      "Přidat osobní poznámku k tomuto cache…",
     "detail_wp_no_coords":          "(Žádné souřadnice)",
@@ -616,6 +657,7 @@ STRINGS: dict[str, str] = {
     "col_dnf_date":          "Datum DNF",
     "col_found_date":       "Datum nálezu",
     "col_first_to_find":     "FTF",
+    "col_first_to_find_header_tooltip": "FTF se rozpozná pouze z {FTF}, {*FTF*} nebo [FTF] ve vlastním logu — stejné tagy vyžaduje ProjectGC",
     "col_user_flag":         "🚩",
     "col_user_flag_label":   "🚩 Uživatelský příznak",
     "col_user_flag_header_tooltip": "Uživatelský příznak — klikněte pro přepnutí",
@@ -634,6 +676,7 @@ STRINGS: dict[str, str] = {
     "col_user_data_3":       "Uživatelská data 3",
     "col_user_data_4":       "Uživatelská data 4",
     "col_favorite_points":   "Obl. body",
+    "col_trackables":        "Trackables",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Otevřít na geocaching.com",
@@ -727,13 +770,12 @@ STRINGS: dict[str, str] = {
     "detail_corrected_clear_tooltip":"Vymazat opravené souřadnice",
     "detail_corrected_add_btn":     "Přidat opravené souřadnice…",
 
-    "col_corrected":                "📍",
-    "col_corrected_label":          "📍 Opravené souřadnice",
+    "col_corrected":                "CC",
     "col_corrected_header_tooltip": "Opravené souřadnice — poklepejte pro úpravu",
     "col_corrected_tooltip":        "Opravené souřadnice: {coords}",
 
-    "ctx_add_corrected":            "📍  Přidat opravené souřadnice…",
-    "ctx_edit_corrected":           "📍  Upravit opravené souřadnice…",
+    "ctx_add_corrected":            "Přidat opravené souřadnice…",
+    "ctx_edit_corrected":           "Upravit opravené souřadnice…",
     "ctx_clear_corrected":          "✕  Vymazat opravené souřadnice",
 
     "corrected_dialog_title":       "Opravené souřadnice",
@@ -989,7 +1031,7 @@ STRINGS: dict[str, str] = {
     "kml_dialog_done_msg":                     "{count} keš(í) exportováno do:\n{path}\n\nImportujte soubor na maps.google.com/d.",
     "kml_dialog_error_title":                  "Chyba exportu",
     "kml_dialog_error_msg":                    "Export selhal:\n{message}",
-    "action_export":                 "&Exportovat (GPX/LOC/...)",
+    "action_export":                 "&Exportovat (GPX/LOC/GGZ)",
     "file_export_dialog_title":      "Exportovat keše",
     "file_export_cache_count":       "{count} keší připraveno k exportu",
     "file_export_format_label":      "Formát souboru",
@@ -1003,4 +1045,25 @@ STRINGS: dict[str, str] = {
     "action_kml_export":                       "Exportovat do Google Maps (KML)...",
     "kml_no_caches_title":                     "Žádné keše",
     "kml_no_caches_msg":                       "V aktuálním filtru nejsou žádné keše.\nUpravte filtr a zkuste to znovu.",
+
+    # ── Přesunout/kopírovat keše ────────────────────────────────────────
+    "action_move_caches":                      "📦  Přesunout keše do jiné databáze…",
+    "action_copy_caches":                      "📋  Kopírovat keše do jiné databáze…",
+    "move_caches_title":                       "Přesunout keše",
+    "copy_caches_title":                       "Kopírovat keše",
+    "move_caches_scope_label":                 "Které keše přesunout:",
+    "move_caches_scope_selected":              "Vybraná keš ({gc_code})",
+    "move_caches_scope_flagged":               "Označené keše ({count})",
+    "move_caches_scope_all":                   "Všechny keše v aktuálním filtru ({count})",
+    "move_caches_target_label":                "Přesunout do databáze:",
+    "copy_caches_target_label":                "Kopírovat do databáze:",
+    "move_caches_current_db":                  "aktuální",
+    "move_caches_btn_move":                    "Přesunout",
+    "move_caches_none_selected":               "Nejsou vybrány žádné keše k přesunu.",
+    "move_caches_same_db":                     "Cílová databáze je stejná jako aktuální.\nVyberte prosím jinou databázi.",
+    "move_caches_confirm":                     "Přesunout {count} keš(í) do {target}?\n\nBudou odstraněny z aktuální databáze.",
+    "copy_caches_confirm":                     "Kopírovat {count} keš(í) do {target}?",
+    "move_caches_done":                        "{count} keš(í) úspěšně přesunuto.",
+    "copy_caches_done":                        "{count} keš(í) úspěšně zkopírováno.",
+    "move_caches_error":                       "Při přesouvání keší došlo k chybě:\n{message}",
 }

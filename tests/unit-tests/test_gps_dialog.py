@@ -260,3 +260,110 @@ class TestDialogInteraction:
         dlg._reset_progress()
         dlg._on_progress(0, 0)
         assert dlg._progress.maximum() == 0  # still indeterminate
+
+
+# ── Issue #501: file-mode export must not silently overwrite ───────────────────
+
+class _FakeExportWorker:
+    """Minimal ExportWorker stand-in — records that .start() was called."""
+    launched: list
+
+    def __init__(self, *a, **k):
+        self.finished = MagicMock()
+        self.error = MagicMock()
+        self.progress = MagicMock()
+
+    def start(self):
+        type(self).launched.append(True)
+
+    def isRunning(self):
+        return False
+
+    def wait(self):
+        pass
+
+
+class TestFilenameCollisionPrompt:
+    @pytest.fixture
+    def dlg(self, qtbot, with_device, tmp_path):
+        d = GpsExportDialog(caches=["c1", "c2"])
+        qtbot.addWidget(d)
+        d._rb_file.setChecked(True)
+        d._selected_file_path = tmp_path
+        d._export_format = "ggz"
+        return d
+
+    def _install_fake_export(self, monkeypatch):
+        launched: list = []
+        _FakeExportWorker.launched = launched
+        monkeypatch.setattr(gd, "ExportWorker", _FakeExportWorker)
+        return launched
+
+    def test_no_collision_runs_export_without_prompting(self, dlg, monkeypatch, tmp_path):
+        prompted = []
+        monkeypatch.setattr(gd.QInputDialog, "getText",
+                             lambda *a, **k: (prompted.append(True), ("x", True))[1])
+        launched = self._install_fake_export(monkeypatch)
+        dlg._filename.setText("myexport")
+        dlg._start_export()
+        assert launched == [True]
+        assert prompted == []  # no existing file → never prompted
+        assert dlg._filename.text() == "myexport"
+
+    def test_collision_prompts_and_uses_new_name(self, dlg, monkeypatch, tmp_path):
+        (tmp_path / "opensak.ggz").write_text("existing")
+        monkeypatch.setattr(gd.QInputDialog, "getText",
+                             lambda *a, **k: ("renamed", True))
+        launched = self._install_fake_export(monkeypatch)
+        dlg._filename.setText("opensak")
+        dlg._start_export()
+        assert launched == [True]
+        assert dlg._filename.text() == "renamed"
+
+    def test_collision_cancelled_does_not_export(self, dlg, monkeypatch, tmp_path):
+        (tmp_path / "opensak.ggz").write_text("existing")
+        monkeypatch.setattr(gd.QInputDialog, "getText",
+                             lambda *a, **k: ("", False))
+        launched = self._install_fake_export(monkeypatch)
+        dlg._filename.setText("opensak")
+        dlg._start_export()
+        assert launched == []
+
+    def test_collision_reprompts_if_new_name_also_exists(self, dlg, monkeypatch, tmp_path):
+        (tmp_path / "opensak.ggz").write_text("existing")
+        (tmp_path / "also_taken.ggz").write_text("existing too")
+        responses = iter([("also_taken", True), ("free_name", True)])
+        monkeypatch.setattr(gd.QInputDialog, "getText",
+                             lambda *a, **k: next(responses))
+        launched = self._install_fake_export(monkeypatch)
+        dlg._filename.setText("opensak")
+        dlg._start_export()
+        assert launched == [True]
+        assert dlg._filename.text() == "free_name"
+
+    def test_prompt_suggests_next_available_name(self, dlg, monkeypatch, tmp_path):
+        (tmp_path / "opensak.ggz").write_text("x")
+        (tmp_path / "opensak1.ggz").write_text("x")
+        captured = {}
+
+        def fake_get_text(parent, title, label, text=""):
+            captured["suggestion"] = text
+            return ("", False)  # cancel — we only care about the suggestion
+        monkeypatch.setattr(gd.QInputDialog, "getText", fake_get_text)
+        dlg._prompt_new_filename(tmp_path / "opensak.ggz")
+        assert captured["suggestion"] == "opensak2"
+
+    def test_device_mode_never_prompts(self, qtbot, with_device, tmp_path, monkeypatch):
+        # Device exports intentionally keep syncing to the same canonical
+        # Garmin/GPX path each time — the collision check must not apply.
+        d = GpsExportDialog(caches=["c1"])
+        qtbot.addWidget(d)
+        d._rb_device.setChecked(True)
+        d._cb_delete_gpx.setChecked(False)
+        prompted = []
+        monkeypatch.setattr(gd.QInputDialog, "getText",
+                             lambda *a, **k: (prompted.append(True), ("x", True))[1])
+        launched = self._install_fake_export(monkeypatch)
+        d._start_export()
+        assert launched == [True]
+        assert prompted == []

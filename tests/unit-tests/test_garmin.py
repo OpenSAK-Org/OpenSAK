@@ -1,6 +1,7 @@
 # tests/unit-tests/test_garmin.py — Garmin GPX/LOC/GGZ generation/export (no device needed).
 
 import io
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from opensak.gps.garmin import (
+    GARMIN_GGZ_SUBPATH,
     GARMIN_GPX_SUBPATH,
     DeleteResult,
     ExportResult,
@@ -19,12 +21,14 @@ from opensak.gps.garmin import (
     _macos_volumes,
     debug_scan,
     delete_gpx_files,
+    export_ggz_to_device,
     export_to_device,
     export_to_file,
     find_garmin_devices,
     generate_ggz,
     generate_gpx,
     generate_loc,
+    get_garmin_ggz_path,
     get_garmin_gpx_path,
 )
 
@@ -195,6 +199,23 @@ class TestGenerateGpx:
         assert "TestFinder" in result
         assert "Great cache!" in result
 
+    def test_logs_with_mixed_none_and_set_dates_does_not_crash(self):
+        # Regression test for #348: sorting logs where some have log_date=None
+        # and others have a real datetime used to raise
+        # "'<' not supported between instances of 'datetime.datetime' and 'int'"
+        # because None fell back to int 0 instead of a comparable datetime.
+        dated = SimpleNamespace(
+            log_id="1", log_type="Found it", finder="Alice", text="TFTC",
+            log_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        )
+        undated = SimpleNamespace(
+            log_id="2", log_type="Write note", finder="Bob", text="No date",
+            log_date=None,
+        )
+        result = generate_gpx([_cache(logs=[undated, dated])])
+        # Most recent (dated) log should be sorted first
+        assert result.index("Alice") < result.index("Bob")
+
     def test_corrected_coords_used_in_wpt(self):
         note = _note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0)
         c = _cache(latitude=55.0, longitude=12.0, user_note=note)
@@ -317,6 +338,35 @@ class TestExportToDevice:
         result = export_to_device([_cache()], device_root, filename="mycaches")
         expected = device_root / GARMIN_GPX_SUBPATH / "mycaches.gpx"
         assert result.file_path == expected
+
+
+class TestExportGgzToDevice:
+    # Regression tests for #348: GGZ files must land in Garmin/GGZ, not
+    # Garmin/GPX (the folder GSAK's GarminExport macro and Garmin devices
+    # themselves expect .ggz files to live in).
+    def test_creates_ggz_in_garmin_ggz_subdir(self, tmp_path):
+        device_root = tmp_path / "garmin_device"
+        result = export_ggz_to_device([_cache()], device_root, filename="test")
+        expected = device_root / GARMIN_GGZ_SUBPATH / "test.ggz"
+        assert expected.exists()
+        assert result.success
+
+    def test_does_not_write_to_gpx_subdir(self, tmp_path):
+        device_root = tmp_path / "garmin_device"
+        export_ggz_to_device([_cache()], device_root, filename="test")
+        wrong_path = device_root / GARMIN_GPX_SUBPATH / "test.ggz"
+        assert not wrong_path.exists()
+
+    def test_file_path_recorded(self, tmp_path):
+        device_root = tmp_path / "device"
+        result = export_ggz_to_device([_cache()], device_root, filename="mycaches")
+        expected = get_garmin_ggz_path(device_root) / "mycaches.ggz"
+        assert result.file_path == expected
+
+    def test_device_path_recorded(self, tmp_path):
+        device_root = tmp_path / "device"
+        result = export_ggz_to_device([_cache()], device_root)
+        assert result.device == device_root
 
 
 # ── delete_gpx_files ──────────────────────────────────────────────────────────
@@ -550,6 +600,61 @@ class TestGenerateGgz:
             "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
         assert "GCOK" in index
         assert "GCNULL" not in index
+
+    def test_directory_entries_are_not_epoch_date(self):
+        # Regression test: zipfile.ZipFile.mkdir("name") with a plain string
+        # used to default date_time to (1980, 1, 1, 0, 0, 0), showing up as
+        # 1979-12-31/1980-01-01 in file managers depending on timezone.
+        zf = zipfile.ZipFile(io.BytesIO(generate_ggz([_cache()])))
+        this_year = datetime.now().year
+        for info in zf.infolist():
+            assert info.date_time[0] == this_year, (
+                f"{info.filename} has suspicious date {info.date_time}"
+            )
+
+    def test_files_remain_compressed(self):
+        # Regression test: passing an explicit ZipInfo to writestr() without
+        # setting compress_type defaults to ZIP_STORED (uncompressed).
+        zf = zipfile.ZipFile(io.BytesIO(generate_ggz([_cache()], filename="c")))
+        gpx_info = zf.getinfo("data/c.gpx")
+        index_info = zf.getinfo("index/com/garmin/geocaches/v0/index.xml")
+        assert gpx_info.compress_type == zipfile.ZIP_DEFLATED
+        assert index_info.compress_type == zipfile.ZIP_DEFLATED
+
+    def test_file_pos_and_file_len_point_at_correct_wpt(self):
+        # Regression test for #466: byte-offset computation used to run a
+        # fresh regex search over the whole GPX text per cache (O(n²)). This
+        # confirms the single-pass replacement still points file_pos/file_len
+        # at the correct <wpt>...</wpt> block for each cache, in order.
+        caches = [_cache(gc_code=f"GC{i:03d}", cache_id=i) for i in range(5)]
+        entries = _ggz_entries(generate_ggz(caches))
+        gpx_bytes = entries["data/opensak_export.gpx"]
+        index_xml = entries["index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
+
+        root = ET.fromstring(index_xml)
+        for gch in root.iter("gch"):
+            code = gch.find("code").text
+            file_pos = int(gch.find("file_pos").text)
+            file_len = int(gch.find("file_len").text)
+            wpt_bytes = gpx_bytes[file_pos:file_pos + file_len]
+            assert wpt_bytes.startswith(b"<wpt")
+            assert wpt_bytes.endswith(b"</wpt>")
+            assert f"<name>{code}</name>".encode("utf-8") in wpt_bytes
+
+    def test_large_export_scales_linearly_not_quadratically(self):
+        # Regression test for #466: with the old O(n²) per-cache regex scan,
+        # 1500 caches took several seconds; the O(n) single-pass version
+        # should comfortably finish in well under a second. A generous
+        # threshold is used to avoid CI flakiness while still catching an
+        # accidental reintroduction of the quadratic behaviour.
+        caches = [_cache(gc_code=f"GC{i:05d}", cache_id=i) for i in range(1500)]
+        start = time.perf_counter()
+        generate_ggz(caches)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 5.0, (
+            f"generate_ggz took {elapsed:.2f}s for 1500 caches — "
+            "possible reintroduction of O(n²) byte-offset lookup"
+        )
 
 
 # ── device scanning ───────────────────────────────────────────────────────────

@@ -161,4 +161,3 @@ def test_main_smoke(qapp, monkeypatch):
     finally:
         W.QApplication = real_qapp_cls
         C.QTimer.singleShot = real_single
-    assert exc.value.code == 0

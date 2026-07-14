@@ -39,6 +39,8 @@ STRINGS: dict[str, str] = {
     "count_caches":                 "{count} caches",
     "count_cache_single":           "1 cache",
     "filter_active_label":          "🔍 Filter aktivt",
+    "filter_no_results_title":      "Ingen matchende caches",
+    "filter_no_results_msg":        "Dette filter matcher ingen caches og er derfor ikke blevet anvendt. Justér kriterierne og prøv igen.",
 
     # ── Menulinje ─────────────────────────────────────────────────────────────
     "menu_file":                    "&Fil",
@@ -83,6 +85,7 @@ STRINGS: dict[str, str] = {
     "action_shortcuts":             "⌨️  &Tastaturgenveje…",
 
     "action_open_log_file": "Åbn logfil",
+    "action_support_opensak": "♥  Støt OpenSAK…",
     "log_file_not_found": "Logfil ikke fundet endnu: {path}",
 
     # ── Tastaturgenveje-dialog ────────────────────────────────────────────────
@@ -98,6 +101,7 @@ STRINGS: dict[str, str] = {
     "shortcut_delete_cache":        "Slet cache",
     "shortcut_refresh":             "Opdater liste",
     "shortcut_filter":              "Indstil filter",
+    "shortcut_clear_filter":        "Ryd filter",
     "shortcut_settings":            "Indstillinger",
     "shortcut_gps_export":          "Send til GPS",
     "shortcut_trip_planner":        "Turplanlægger",
@@ -117,6 +121,7 @@ STRINGS: dict[str, str] = {
     "toolbar_clear_filter":         "Nulstil filter",
     "toolbar_filter_combo_tooltip":  "Vælg gemt filter",
     "toolbar_filter_combo_none":     "Ingen",
+    "toolbar_filter_combo_active":   "Aktivt (ikke gemt)",
     "toolbar_refresh":              "Opdater",
 
     # ── Statusbar ─────────────────────────────────────────────────────────────
@@ -173,6 +178,26 @@ STRINGS: dict[str, str] = {
     "import_all_done":            "✓ Alle {count} filer er behandlet.",
     "import_geocode_running":       "📍  Geokoder manglende lokationsdata…",
 
+    # ── GSAK Import dialog (#469) ─────────────────────────────────────────────
+    "action_gsak_import":           "&Importer fra GSAK-database…",
+    "gsak_import_dialog_title":     "Importer fra GSAK-database",
+    "gsak_import_select_file_label": "Vælg en GSAK-backup (.zip) eller databasefil (.db3):",
+    "gsak_import_browse_title":     "Vælg GSAK-backup eller databasefil",
+    "gsak_import_file_filter":      "GSAK-backup eller database (*.zip *.db3);;Alle filer (*)",
+    "gsak_import_extracting":       "Udpakker {name}…",
+    "gsak_import_running":          "Importerer {name}…",
+    "gsak_import_attributes":       "Attributter:",
+    "gsak_import_logs":             "Logs:",
+    "gsak_import_notes":            "Noter:",
+    "gsak_import_note_images":      "Note-billeder → placeholders:",
+    "gsak_import_trackables":       "Trackables:",
+    "gsak_import_warnings_header":  "Advarsler ({count}):",
+    "gsak_import_no_db3_found":     "Ingen sqlite.db3-fil fundet i {name}",
+    "gsak_import_done":             "✓ Import færdig.",
+    "gsak_prescan_title":           "Nogle personlige noter indeholder billeder",
+    "gsak_prescan_body":            "{notes} af dine personlige noter indeholder {images} billede(r), som GSAK hentede ned til din gamle computer. Disse kan ikke kopieres automatisk, så OpenSAK viser i stedet en placeholder som [image: filename.jpg]. Selve note-teksten importeres stadig normalt.\n\nFortsæt med import?",
+    "gsak_prescan_continue":        "Fortsæt import",
+
     # ── Filter dialog ─────────────────────────────────────────────────────────
     "filter_dialog_title":          "Sæt filter",
     "filter_tab_dates":             "Datoer",
@@ -223,12 +248,15 @@ STRINGS: dict[str, str] = {
     "gps_caches_ready":             "<b>{count} caches</b> klar til eksport (de aktuelt filtrerede/viste caches)",
     "gps_dest_group":               "Destination",
     "gps_rb_device":                "Send direkte til GPS enhed:",
-    "gps_rb_file":                  "Gem som GPX fil:",
+    "gps_rb_file":                  "Gem som fil:",
     "gps_scan_btn":                 "🔍 Scan",
     "gps_scan_scanning":            "⏳",
     "gps_devices_found":            "✓ {count} Garmin enhed(er) fundet",
     "gps_no_device":                "(Ingen GPS enhed fundet)",
-    "gps_no_device_hint":           "Ingen Garmin enhed fundet — tilslut din GPS og klik Scan igen, eller brug 'Gem som GPX fil'",
+    "gps_no_device_hint":           "Ingen Garmin enhed fundet — tilslut din GPS og klik Scan igen, eller brug 'Gem som fil'",
+    "gps_format_group":             "Eksport format",
+    "gps_format_gpx":               "GPX  —  standard Garmin format (maks. ~5 000 caches)",
+    "gps_format_ggz":               "GGZ  —  komprimeret Garmin format (ubegrænset antal caches)",
     "gps_browse":                   "Vælg…",
     "gps_file_placeholder":         "Vælg placering…",
     "gps_opt_group":                "Indstillinger",
@@ -245,6 +273,8 @@ STRINGS: dict[str, str] = {
     "gps_confirm_no_files_msg":     "Ingen eksisterende GPX filer fundet på enheden.\nVil du fortsætte med upload?",
     "gps_delete_file_list":         "Filer der slettes:\n{files}",
     "gps_no_dest":                  "Vælg en destination først.",
+    "gps_file_exists_title":        "Filen findes allerede",
+    "gps_file_exists_prompt":       "\"{filename}\" findes allerede på denne placering. Angiv et andet filnavn:",
 
     # ── Indstillinger dialog ──────────────────────────────────────────────────
     "settings_dialog_title":        "Indstillinger",
@@ -262,6 +292,7 @@ STRINGS: dict[str, str] = {
     "settings_text_size_small":     "Lille",
     "settings_text_size_medium":    "Mellem",
     "settings_text_size_large":     "Stor",
+    "settings_default_decode_hints_cb": "Vis hints dekodet som standard",
     "settings_group_language":      "Sprog / Language",
     "settings_language_label":      "Sprog:",
     "settings_language_hint":       "Ændring træder i kraft ved næste opstart",
@@ -300,6 +331,8 @@ STRINGS: dict[str, str] = {
     "wizard_finish": "Afslut",
     "wizard_skip": "Spring over",
     "wizard_step_of": "Trin {current} af {total}",
+    "wizard_settings_file_exists_title": "Settings-fil findes allerede",
+    "wizard_settings_file_exists_msg": "Mappen \"{path}\" indeholder allerede en opensak.json-fil, så dine nuværende settings blev ikke flyttet dertil. Den eksisterende fil er ikke rørt — tjek evt. mappen manuelt.",
     "settings_group_nominatim":                    "Location refinement",
     "settings_nominatim_cb":                       "Enable online lookup for higher accuracy",
     "settings_nominatim_hint":                     "When enabled, county, state and country data is further refined using OpenStreetMap after the fast offline pass.\n\nNote: requires an internet connection and takes about 1 second per waypoint. A database of 10 000 waypoints takes around 3 hours to fully refine. Leave this off unless you need higher accuracy near administrative boundaries.",
@@ -312,6 +345,10 @@ STRINGS: dict[str, str] = {
     "settings_db_dir_label": "Databasemappe:",
     "settings_folders_restart_hint": "Ændring af databasemappen kræver genstart af OpenSAK for at træde i kraft.",
     "settings_db_dir_changed_message": "Databasemappen er blevet ændret. Genstart OpenSAK for at ændringen træder i kraft.",
+    "settings_icons_dir_label": "Mappe til brugerdefinerede ikoner:",
+    "settings_open_icons_folder_button": "Åbn ikon-mappe",
+    "settings_icons_dir_note": "Læg dine egne SVG-filer her for at erstatte cache type-, smiley- og andre UI-ikoner (corrected coordinates, premium, favoritter, trackables) — samme filnavne som i OpenSAK Custom Icons Guide. Genstart OpenSAK for at ændringer træder i kraft.",
+    "settings_view_icon_guide_button": "Vis icon-navngivnings-guide",
 
     "settings_move_databases_title": "Flyt eksisterende databaser?",
     "settings_move_databases_msg": "Du har {count} eksisterende database(r). Vil du også flytte dem til den nye mappe?",
@@ -488,6 +525,8 @@ STRINGS: dict[str, str] = {
 
     "db_err_move_target_exists": "Kan ikke flytte '{name}': en fil findes allerede på {path}.",
     "db_err_move_failed": "Kunne ikke flytte '{name}': {error}",
+    "db_err_target_path_exists": "Der findes allerede en fil for '{name}' på {path}.",
+    "db_err_rename_failed": "Kunne ikke omdøbe '{name}': {error}",
     "db_err_mkdir_failed":          "Kan ikke oprette mappen:\n{path}",
     "db_err_dir_not_found":         "Mappen eksisterer ikke:\n{path}",
     "db_err_no_write_permission":   "Ingen skriverettigheder til mappen:\n{path}",
@@ -576,6 +615,8 @@ STRINGS: dict[str, str] = {
     "detail_no_waypoints":          "(Ingen underordnede waypoints)",
     "detail_tab_attrs_count":       "Attributter ({count})",
     "detail_no_attrs":              "(Ingen attributter)",
+    "detail_tab_trackables_count":   "Trackables ({count})",
+    "detail_no_trackables":          "(Ingen trackables)",
     "detail_tab_notes":             "Noter",
     "detail_note_placeholder":      "Tilføj en personlig note til denne cache…",
     "detail_wp_no_coords":          "(Ingen koordinater)",
@@ -615,6 +656,7 @@ STRINGS: dict[str, str] = {
     "col_dnf_date":          "DNF dato",
     "col_found_date":       "Fundet dato",
     "col_first_to_find":     "FTF",
+    "col_first_to_find_header_tooltip": "FTF genkendes kun fra {FTF}, {*FTF*} eller [FTF] i din egen log — samme tags som ProjectGC kræver",
     "col_user_flag":         "🚩",
     "col_user_flag_label":   "🚩 Brugerflag",
     "col_user_flag_header_tooltip": "Brugerflag — klik for at skifte",
@@ -633,6 +675,7 @@ STRINGS: dict[str, str] = {
     "col_user_data_3":       "Brugerdata 3",
     "col_user_data_4":       "Brugerdata 4",
     "col_favorite_points":   "Fav. point",
+    "col_trackables":        "Trackables",
 
     # ── Højreklik kontekstmenu ────────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Åbn på geocaching.com",
@@ -726,13 +769,12 @@ STRINGS: dict[str, str] = {
     "detail_corrected_clear_tooltip":"Slet korrigerede koordinater",
     "detail_corrected_add_btn":     "Tilføj korrigerede koordinater…",
 
-    "col_corrected":                "📍",
-    "col_corrected_label":          "📍 Korrigerede koordinater",
+    "col_corrected":                "CC",
     "col_corrected_header_tooltip": "Korrigerede koordinater — dobbeltklik for at redigere",
     "col_corrected_tooltip":        "Korrigerede koordinater: {coords}",
 
-    "ctx_add_corrected":            "📍  Tilføj korrigerede koordinater…",
-    "ctx_edit_corrected":           "📍  Rediger korrigerede koordinater…",
+    "ctx_add_corrected":            "Tilføj korrigerede koordinater…",
+    "ctx_edit_corrected":           "Rediger korrigerede koordinater…",
     "ctx_clear_corrected":          "✕  Slet korrigerede koordinater",
 
     "corrected_dialog_title":       "Korrigerede koordinater",
@@ -993,7 +1035,7 @@ STRINGS: dict[str, str] = {
     "kml_dialog_done_msg":                     "{count} cache(s) eksporteret til:\n{path}\n\nImporter filen på maps.google.com/d for at se dem på kortet.",
     "kml_dialog_error_title":                  "Eksportfejl",
     "kml_dialog_error_msg":                    "Eksport mislykkedes:\n{message}",
-    "action_export":                 "&Eksportér (GPX/LOC/...)",
+    "action_export":                 "&Eksportér (GPX/LOC/GGZ)",
     "file_export_dialog_title":      "Eksportér caches",
     "file_export_cache_count":       "{count} caches klar til eksport",
     "file_export_format_label":      "Filformat",
@@ -1007,4 +1049,25 @@ STRINGS: dict[str, str] = {
     "action_kml_export":                       "Eksportér til Google Maps (KML)...",
     "kml_no_caches_title":                     "Ingen caches",
     "kml_no_caches_msg":                       "Der er ingen caches i det aktuelle filter.\nJuster filteret og prøv igen.",
+
+    # ── Flyt/kopiér caches ──────────────────────────────────────────────
+    "action_move_caches":                      "📦  Flyt caches til en anden database…",
+    "action_copy_caches":                      "📋  Kopiér caches til en anden database…",
+    "move_caches_title":                       "Flyt caches",
+    "copy_caches_title":                       "Kopiér caches",
+    "move_caches_scope_label":                 "Hvilke caches skal flyttes:",
+    "move_caches_scope_selected":              "Valgt cache ({gc_code})",
+    "move_caches_scope_flagged":               "Flaggede caches ({count})",
+    "move_caches_scope_all":                   "Alle caches i aktivt filter ({count})",
+    "move_caches_target_label":                "Flyt til database:",
+    "copy_caches_target_label":                "Kopiér til database:",
+    "move_caches_current_db":                  "aktuel",
+    "move_caches_btn_move":                    "Flyt",
+    "move_caches_none_selected":               "Ingen caches valgt til flytning.",
+    "move_caches_same_db":                     "Måldatabasen er den samme som den aktuelle database.\nVælg venligst en anden database.",
+    "move_caches_confirm":                     "Flyt {count} cache(s) til {target}?\n\nDe vil blive fjernet fra den aktuelle database.",
+    "copy_caches_confirm":                     "Kopiér {count} cache(s) til {target}?",
+    "move_caches_done":                        "{count} cache(s) flyttet.",
+    "copy_caches_done":                        "{count} cache(s) kopieret.",
+    "move_caches_error":                       "Der opstod en fejl under flytning af caches:\n{message}",
 }

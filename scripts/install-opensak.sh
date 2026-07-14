@@ -100,7 +100,7 @@ if [ -d "$INSTALL_DIR/.git" ]; then
     ok "Opdateret til nyeste version"
 else
     info "Downloader OpenSAK fra GitHub..."
-    git clone https://github.com/AgreeDK/opensak.git "$INSTALL_DIR"
+    git clone https://github.com/OpenSAK-Org/opensak.git "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     ok "OpenSAK downloadet til $INSTALL_DIR"
 fi
@@ -214,7 +214,7 @@ fi
 echo ""
 echo "  Opdater til ny version: cd ~/opensak && git pull && pip install -e ."
 echo ""
-echo "  Fejl og forslag:        https://github.com/AgreeDK/opensak/issues"
+echo "  Fejl og forslag:        https://github.com/OpenSAK-Org/opensak/issues"
 echo ""
 
 # Tilbyd at starte nu

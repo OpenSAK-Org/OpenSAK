@@ -1,6 +1,6 @@
 # Development Plan — Offline Reverse Geocoding (County / State / Country)
 
-Status: Phase 0 + Phase 1 DONE (merged into beta). Phase 3 DONE (merged into beta). Phase 4 DONE (merged into beta). Phase 5 DONE (merged into beta). Phase 2 DONE (branch `60-phase-2-packs`, unpushed — awaiting OK). Phase Extra in progress (branch `60-phase-extra-speed`).
+Status: all phases DONE and merged into beta, including every item this doc previously listed as blocked on the `OpenSAK-Data` repo. The repo exists, hosts a real published release (`reverse-geocoding-v1`), and shipped builds now actually seed from it. Gated behind the `reverse-geocoding` feature flag (off by default in release builds) — see "Feature flag" below.
 Relates to: GitHub issue #60 · design in [`architecture/reverse-geocoding.md`](../architecture/reverse-geocoding.md)
 Scope: full implementation of the offline boundary engine — data pipeline, runtime engine, on-demand packs, schema, GUI, packaging/CI.
 
@@ -17,7 +17,13 @@ This plan turns the architecture document into shippable work. It is ordered **b
 ## Prerequisites
 
 - [x] Receive the full polygon-file set from Mike (*Lignumaqua*) — full `bb.db3` + all country/state/county zips are now in the worktree (gitignored). Phase 0 is unblocked and done.
-- [ ] Create the data repository **`AgreeDK/OpenSAK-Data`** (public) with its own `LICENSE` + attribution file (the polygons are ODbL, not public domain).
+- [x] Create the data repository **`OpenSAK-Org/OpenSAK-Data`** (public) with its own `LICENSE` + attribution file (the polygons are ODbL, not public domain). Docs live under `reverse-geocoding/` since the repo will host more datasets later (maps, altimetry).
+
+## Feature flag
+
+A single flag, `flags.reverse_geocoding` (`utils/flags.py`, default `False` in release builds — see `features.json` / `--feature reverse-geocoding=true` to enable locally), gates the entire feature: the Update Location menu action, its right-click context-menu entry, auto-geocode on GPX import, the boundary-packs download/update actions, and the Settings section. There used to be a second flag, `update-location`, gating the same GUI surface for historical reasons (predating the boundary engine) — collapsed into one flag so enabling the feature for a release is a single toggle, not two that have to be kept in sync.
+
+`geo.store.ensure_baseline_seeded()` is called from `ReverseGeocodeWorker.run()` (a `QThread`, not app startup — see Phase 5), and is only reachable through the flag-gated menu/dialog, so no separate explicit flag check is needed there. If a *new* runtime side effect (network call, file write, background work) is ever added somewhere NOT reachable exclusively through that gated entry point — e.g. something wired into `app.py` startup again — it needs its own explicit `if flags.reverse_geocoding:` check. Being reachable only through an already-gated menu entry is not sufficient for code that runs regardless of what menu items exist.
 
 ## Out of scope (follow-ups)
 
@@ -31,7 +37,7 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **Goal:** a reproducible pipeline that turns raw polygon files into the artefacts the app consumes.
 
-**What was built:** a single converter `tools/boundaries/gsak_to_opensak.py` (combines normalise + geojson + bbdb steps). Run: `python3 tools/boundaries/gsak_to_opensak.py --bb-path bb.db3`. `bb.db3` lives at **repo root**, not inside `data/`. Writes `data/boundaries.db` + `data/countries/world.geojson` + `data/states/<cc>.geojson` + `data/counties/<cc>/<pack>.geojson`. Output: 383 countries, 1931 states, 20026 counties.
+**What was built:** a single converter `tools/boundaries/gsak_to_opensak.py` (combines normalise + geojson + bbdb steps). Run: `.venv/bin/python3 tools/boundaries/gsak_to_opensak.py --bb-path bb.db3` (must be the project's own venv, see below). `bb.db3` lives at **repo root**, not inside `data/`. Writes `data/boundaries.db` + `data/manifest.json` + `data/countries/world.geojson` + `data/states/<cc>.geojson` + `data/counties/<cc>_<pack>.geojson` (flat). Output: 383 countries, 1931 states, 20026 counties.
 
 **Key fixes inside the converter:**
 - `_split_antimeridian()`: rings with |Δlon|>180° teleportation edges (Russia, Alaska, Fiji…) are split into independently-closed sub-rings → MultiPolygon. Also detects the synthetic implicit-closing-edge when ring[0] recurs mid-ring.
@@ -39,12 +45,16 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **Known data gaps (not bugs):** Portugal 0 states, Russia 0 counties — correct per GSAK's source data. 18 state zips + 8 county zips missing from dataset.
 
-**Remaining tasks (deferred to when `OpenSAK-Data` repo exists):**
-- [ ] Geometry simplification (Douglas–Peucker) for the baseline layer.
-- [ ] `manifest.json` generation and publishing as Release assets to `AgreeDK/OpenSAK-Data`.
-- [ ] Keep `tools/` out of the PyInstaller bundle.
+**Real bugs found running the full pipeline end to end (not caught until the actual publish attempt):**
+- County pack output was nested (`counties/<cc>/<pack>.geojson`, with `/` baked into the DB `pack` column) — incompatible with flat GitHub Release assets and `packs.py`'s fetch contract. Flattened to `counties/<cc>_<pack>.geojson` everywhere.
+- `manifest.json` was never generated at all; each feature's `version` property was hardcoded to `1` instead of the real per-pack GSAK version. Both fixed — `_write_manifest()` now writes real dataset + per-pack versions, split into `"baseline"` (world.geojson + state packs) and `"packs"` (county, on-demand).
+- Real GSAK county rings are self-intersecting for ~6% of counties (1168/20026) straight out of the raw parse — nothing to do with simplification. `shapely.contains()` doesn't raise on invalid geometry, it silently returns wrong answers, so this was a live resolver correctness bug. Fixed with a `buffer(0)` repair, applied unconditionally regardless of simplification tolerance.
+- Running the converter with system `python3` (3.8 here) instead of the project's own `.venv` (3.11+) silently undercounts counties — legacy `zipfile` CP437 filename decoding mangles non-ASCII names in zips that don't set the UTF-8 flag bit, with zero error output. **Always use `.venv/bin/python3`.**
+- 685MB dataset was far above the ~70MB estimate; the 227MB country+state baseline (bundled in every install) needed Douglas-Peucker simplification (tolerance 0.0005°≈55m via shapely) — cut to 57MB. Counties stay full-resolution, fetched on demand.
 
-**Acceptance:** ✓ pipeline runs reproducibly; `BoundaryStore` + `TerritoryResolver` resolve correctly against real data. `OpenSAK-Data` Release not yet created (blocked on repo creation).
+**Remaining tasks:** none — all done.
+
+**Acceptance:** ✓ pipeline runs reproducibly; `BoundaryStore` + `TerritoryResolver` resolve correctly against real data; 0/22340 invalid geometries across all layers. `OpenSAK-Data` release `reverse-geocoding-v1` is live with 242 assets.
 
 ---
 
@@ -52,10 +62,9 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **Goal:** an offline `TerritoryResolver` that returns `GeoLocation(country, state, county)`.
 
-**What was built:** `src/opensak/geo/store.py` (`BoundaryStore`) + `src/opensak/geo/boundaries.py` (`TerritoryResolver`). Pure-Python ray-cast PIP (shapely deferred). 14 unit tests in `test_geo.py`. mypy-clean. Nothing imports `geo` in production yet — that's Phase 4. `default_data_dir()` = `$OPENSAK_BOUNDARIES_DIR` or `<repo-root>/data` (parents[3]).
+**What was built:** `src/opensak/geo/store.py` (`BoundaryStore`) + `src/opensak/geo/boundaries.py` (`TerritoryResolver`). Pure-Python ray-cast PIP (shapely deferred). 14 unit tests in `test_geo.py`. mypy-clean. Nothing imports `geo` in production yet — that's Phase 4. `default_data_dir()` = `$OPENSAK_BOUNDARIES_DIR`, else `config.get_app_data_dir()/boundaries` — the real persistent per-user app-data dir (flipped from an earlier repo-root/ephemeral-frozen-path fallback, see Phase 5).
 
-**Remaining tasks:**
-- [ ] Seed `boundaries.db` + baseline GeoJSON into `<app-data>/opensak/boundaries/` on first run (Phase 5 packaging concern).
+**Remaining tasks:** none — first-run seeding landed as `ensure_baseline_seeded()`, see Phase 5.
 
 **Acceptance:** ✓ resolves correctly offline; 14 tests pass; mypy green.
 
@@ -67,11 +76,11 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **What was built:** `geo/packs.py` — `fetch_manifest`, `fetch_pack` (atomic temp+rename), `fetch_all` (downloads all missing packs with progress callback), `check_update` (throttled weekly by manifest.json mtime, bypass with `force=True`), `apply_update` (only re-downloads locally-cached packs that changed; skips uncached packs; saves manifest). `BoundaryStore._load_pack` now triggers `fetch_pack` on a county pack miss; `TerritoryResolver` skips a candidate gracefully when its pack cannot be fetched (returns `None` for county rather than crashing). Two new Waypoint menu actions under the `update_location` flag guard: "Download boundary packs…" and "Check for boundary data updates…", backed by `BoundaryDownloadDialog` and `BoundaryCheckDialog` workers. 19 i18n keys added to all 8 lang files. 23 unit tests with mocked network covering all code paths.
 
-**Remaining (blocked on AgreeDK/OpenSAK-Data repo):**
-- [ ] Verify release asset URL pattern once the repo and its first release exist.
-- [ ] Build pipeline step to publish `data/` as GitHub Release assets.
+**Also added:** `fetch_baseline()` — downloads `boundaries.db` + the country/state baseline (manifest's `"baseline"` list) for first-run seeding when nothing is bundled (see Phase 5). Real bug found+fixed here: `_fetch_file_atomic` assumed its destination directory already existed (true for its only prior caller, `apply_update`, always invoked on an already-initialized dir) — `fetch_baseline` is the first caller that can hit a genuinely nonexistent directory, the real first-run case, and crashed with `FileNotFoundError`.
 
-**Acceptance:** ✓ 23 tests pass; throttle, force, atomic write, selective re-download, graceful degradation all covered; 1385 unit tests pass.
+**Remaining tasks:** none — verified live against the real `reverse-geocoding-v1` release, not just mocked: `fetch_manifest`/`fetch_pack`/`fetch_baseline` all confirmed working end to end, including a full first-run simulation (empty local dir → on-demand county fetch → correct resolution).
+
+**Acceptance:** ✓ 23+ tests pass; throttle, force, atomic write, selective re-download, graceful degradation all covered.
 
 ---
 
@@ -91,9 +100,9 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **What was built:** `ReverseGeocodeWorker` now uses `TerritoryResolver` instead of the GeoNames KD-tree; writes all four provenance columns (`location_source="boundary"`, `location_basis`, `location_updated`, `location_dataset`) per cache. `_CacheRow` gained a `basis` field (default `"posted"`) so the import dialog and the manual dialog both record which coordinate type was used. `OnlineLookupWorker` and the Nominatim path removed entirely. "Use corrected coordinates" now defaults **off** (posted coordinates are the default). `geocoder.py` deleted; `reverse_geocoder` and `pycountry` removed from runtime deps and the PyInstaller spec. Lang files updated: GeoNames references replaced, online/ETA keys removed, `update_loc_no_boundaries` added. `BoundaryStore.dataset_version()` reads the version from `file_version` in `boundaries.db`.
 
-**Deferred to Phase 2 (blocked on `OpenSAK-Data` repo):**
-- Menu actions: **Download all boundary packs** and **Check for boundary updates**
-- Stale indicator when `location_dataset` trails the current dataset
+**Deferred:**
+- ~~Menu actions: **Download all boundary packs** and **Check for boundary updates**~~ — done, see Phase 2.
+- Stale indicator when `location_dataset` trails the current dataset — still genuinely open, not part of this round of work.
 
 **Acceptance:** ✓ dialog resolves via boundary engine; provenance columns written; import auto-fills with basis; `reverse_geocoder`/`pycountry` gone; all 1355 unit tests pass; all language key tests pass.
 **Risk:** medium (UI wiring + dep removal). Size: L.
@@ -106,16 +115,15 @@ This plan turns the architecture document into shippable work. It is ordered **b
 
 **What was built:**
 - `shapely>=2.0` added to runtime deps in `pyproject.toml`; `boundaries.py` uses `shapely.geometry.shape().contains(Point)` for the stage-2 PIP when shapely is present, pure-Python ray-cast as fallback.
-- `default_data_dir()` in `store.py` now checks `sys.frozen` first — frozen bundles resolve to `sys._MEIPASS/data/`.
-- `opensak.spec` bundles `data/boundaries.db` + `data/countries/` + `data/states/` + `data/counties/` conditionally (skipped if `data/boundaries.db` is absent at build time); shapely added to `hiddenimports`.
 - `tests/unit-tests/test_geo_deps.py` — 5 smoke tests: shapely importable, `_HAS_SHAPELY` is True, point-in-polygon (Polygon + MultiPolygon) via shapely path.
 - ODbL attribution added to `about_text` in all 8 lang files.
+- `default_data_dir()` in `store.py` flipped from a `sys.frozen`-then-`sys._MEIPASS/data` / repo-root fallback to the real persistent `config.get_app_data_dir()/boundaries` — neither prior fallback was a writable, persistent location a real install could use. New `ensure_baseline_seeded()`: copies `boundaries.db` + `countries/` + `states/` from the frozen PyInstaller bundle if present, else downloads them via `geo/packs.fetch_baseline()` (e.g. a pip install with nothing bundled). Counties are never seeded — always fetched on demand, per country. Wired into `app.py` startup, gated behind `flags.reverse_geocoding` (see "Feature flag" above — a review catch: this was initially wired unconditionally).
+- `opensak.spec` bundles `data/boundaries.db` + `data/countries/` + `data/states/` only — **not** `counties/`, which was being bundled unconditionally whenever present at build time (a few hundred MB, the opposite of the on-demand design). Fixed.
+- All 4 `build.yml` jobs run `scripts/fetch_boundary_baseline.py` (fetches the real published baseline via `fetch_baseline`) before invoking `pyinstaller` — best-effort, a failure just warns and lets the build continue since the app can self-seed at first run regardless.
 
-**Remaining (blocked on AgreeDK/OpenSAK-Data repo):**
-- [ ] Build pipeline step to fetch/generate `data/` before `pyinstaller opensak.spec` runs (currently converter must be run manually with the GSAK source files).
-- [ ] Verify install/footprint delta stays within Phase 0 budget.
+**Remaining tasks:** none.
 
-**Acceptance:** ✓ shapely integrated; frozen path correct; smoke tests pass; ODbL in About.
+**Acceptance:** ✓ shapely integrated; frozen-bundle-then-app-data-dir seeding verified for real (not just mocked) against the live release; smoke tests pass; ODbL in About; CI fetches real data before every build.
 **Risk:** medium (native wheels are the usual culprit). Size: M.
 
 ---

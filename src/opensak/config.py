@@ -35,6 +35,39 @@ def get_gpx_import_dir() -> Path:
     return d
 
 
+def get_icons_dir() -> Path:
+    """
+    Return (and create if needed) the user-writable custom icons directory.
+
+    Issue #519: users can drop replacement SVG files here to override the
+    bundled cache-type and found-smiley icons, using the same file names
+    documented in the OpenSAK Custom Icons Guide — no programming or
+    repackaging required. Lives under <install_dir>/icons, alongside
+    opensak.json, so custom icons survive app updates/reinstalls (unlike
+    files placed inside the install/application directory itself).
+
+    Mirrors the bundled asset layout so file names match 1:1:
+      icons/cache_types/<name>.svg   (e.g. traditional_cache.svg)
+      icons/cache_found/<name>.svg   (e.g. found_cache_smiley_green.svg)
+
+    Issue #519 follow-up: also covers the fixed, single-instance UI icons
+    that aren't per-cache-type (these have no bundled asset file to fall
+    back to — the default is a hardcoded SVG string in icon_provider.py):
+      icons/ui/corrected_coords.svg
+      icons/ui/premium.svg
+      icons/ui/favorite_points.svg
+      icons/ui/trackable.svg
+    (The "Found" column icon is already covered by
+    cache_found/found_cache_smiley_gold.svg — it reuses the same gold
+    smiley shown on map pins, so it doesn't need a separate override.)
+    """
+    d = get_app_data_dir() / "icons"
+    (d / "cache_types").mkdir(parents=True, exist_ok=True)
+    (d / "cache_found").mkdir(parents=True, exist_ok=True)
+    (d / "ui").mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_log_path() -> Path:
     """Return the path to the application log file."""
     return get_app_data_dir() / "opensak.log"

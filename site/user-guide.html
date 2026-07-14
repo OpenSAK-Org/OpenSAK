@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSAK User Guide — v1.14.2</title>
+<title>OpenSAK User Guide — v1.15.0</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -473,7 +473,7 @@
 <nav>
   <div class="nav-header">
     <span class="nav-logo">OpenSAK</span>
-    <div class="nav-version">User Guide · v1.14.2</div>
+    <div class="nav-version">User Guide · v1.15.0</div>
   </div>
 
   <div class="nav-section-heading">Getting Started</div>
@@ -535,7 +535,7 @@
     <div class="hero-eyebrow">Complete User Guide</div>
     <h1>OpenSAK</h1>
     <p class="hero-sub">The open-source geocache management tool for Windows, Linux, and macOS.</p>
-    <div class="hero-meta">Version 1.14.2 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/AgreeDK/opensak">github.com/AgreeDK/opensak</a></div>
+    <div class="hero-meta">Version 1.15.0 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
   </div>
 
   <figure class="screenshot" style="margin-top:-0.5rem;">
@@ -572,7 +572,7 @@
 
     <h3>Linux (Recommended: Automatic Installer)</h3>
     <p>Paste this single command into a terminal — it handles everything automatically:</p>
-    <pre><code>curl -fsSL https://raw.githubusercontent.com/AgreeDK/OpenSAK/main/scripts/install-opensak.sh | bash</code></pre>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/OpenSAK-Org/OpenSAK/main/scripts/install-opensak.sh | bash</code></pre>
     <p>The installer will check dependencies, clone the repository to <code>~/opensak</code>, create a virtual environment, and add an application menu entry.</p>
 
     <h4>Linux — AppImage</h4>
@@ -581,18 +581,18 @@
 
     <h4>Linux — Manual</h4>
     <pre><code>sudo apt install git python3 python3-venv python3-pip libxcb-cursor0
-git clone https://github.com/AgreeDK/opensak.git ~/opensak
+git clone https://github.com/OpenSAK-Org/opensak.git ~/opensak
 cd ~/opensak
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python run.py</code></pre>
 
     <h3>Windows</h3>
-    <p>Download <strong>OpenSAK-Windows.zip</strong> from the <a href="https://github.com/AgreeDK/opensak/releases">Releases page</a>, unzip, and run <code>OpenSAK.exe</code>. No Python installation required.</p>
+    <p>Download <strong>OpenSAK-Windows.zip</strong> from the <a href="https://github.com/OpenSAK-Org/opensak/releases">Releases page</a>, unzip, and run <code>OpenSAK.exe</code>. No Python installation required.</p>
     <div class="callout warn"><div class="callout-icon">⚠️</div><div>Windows SmartScreen may show a warning on first launch. Click <strong>More info → Run anyway</strong>. The source code is fully open on GitHub.</div></div>
 
     <h3>macOS</h3>
-    <p>Download the correct <code>.dmg</code> for your Mac from the <a href="https://github.com/AgreeDK/opensak/releases">Releases page</a>:</p>
+    <p>Download the correct <code>.dmg</code> for your Mac from the <a href="https://github.com/OpenSAK-Org/opensak/releases">Releases page</a>:</p>
     <table>
       <thead><tr><th>Mac type</th><th>File</th></tr></thead>
       <tbody>
@@ -1131,7 +1131,7 @@ python run.py</code></pre>
 
     <p>All exports use the caches currently visible in the list (respecting the active filter).</p>
 
-    <div class="callout note"><div class="callout-icon">ℹ️</div><div><strong>GGZ export (Garmin's native compressed format) is planned but not yet available</strong> — it isn't in this build. Follow <a href="https://github.com/AgreeDK/opensak/issues/348">issue #348</a> on GitHub for progress.</div></div>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div><strong>GGZ export (Garmin's native compressed format) is planned but not yet available</strong> — it isn't in this build. Follow <a href="https://github.com/OpenSAK-Org/opensak/issues/348">issue #348</a> on GitHub for progress.</div></div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1324,7 +1324,7 @@ python run.py</code></pre>
       <span class="chip">🇸🇪 Swedish</span>
       <span class="chip">🇳🇱 Dutch</span>
     </div>
-    <p>Want to help translate? See <a href="https://github.com/AgreeDK/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> — it only requires translating a single Python file.</p>
+    <p>Want to help translate? See <a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> — it only requires translating a single Python file.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1422,11 +1422,11 @@ python run.py</code></pre>
     <table>
       <thead><tr><th>Resource</th><th>Link</th></tr></thead>
       <tbody>
-        <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/AgreeDK/opensak/issues">github.com/AgreeDK/opensak/issues</a></td></tr>
+        <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/OpenSAK-Org/opensak/issues">github.com/OpenSAK-Org/opensak/issues</a></td></tr>
         <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/opensak">Facebook group: OpenSAK</a></td></tr>
-        <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/AgreeDK/opensak/releases">github.com/AgreeDK/opensak/releases</a></td></tr>
-        <tr><td>Changelog</td><td><a href="https://github.com/AgreeDK/opensak/blob/v1.14.2/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
-        <tr><td>Contributing</td><td><a href="https://github.com/AgreeDK/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
+        <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
+        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.15.0/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
+        <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
       </tbody>
     </table>
@@ -1434,7 +1434,7 @@ python run.py</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.14.2). Last updated June 2026.
+      This guide was generated from the OpenSAK source code (v1.15.0). Last updated June 2026.
     </p>
   </section>
 

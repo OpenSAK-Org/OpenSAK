@@ -1,0 +1,43 @@
+name: Data integrity
+
+# Verifies the published OpenSAK-Data boundary release (issue #60): checksums
+# match, boundaries.db is structurally sound, every GeoJSON pack is valid,
+# and the resolver actually returns a result for known real-world coordinates.
+on:
+  schedule:
+    # every 2 days, 06:00 UTC (cron has no exact "every N days" — day-of-month
+    # */2 drifts by a day across some month boundaries, close enough here)
+    - cron: '0 6 */2 * *'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Verify release data
+        run: python tools/boundaries/verify_release.py
+      - name: File an issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open_count=$(gh issue list --label data-integrity --state open --json number --jq 'length')
+          if [ "$open_count" -eq 0 ]; then
+            gh issue create \
+              --label data-integrity \
+              --title "Data integrity check failed ($(date -u +%F))" \
+              --body "The scheduled data-integrity workflow failed. See the run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            echo "An open data-integrity issue already exists, skipping."
+          fi

@@ -34,6 +34,17 @@ _ASSETS_DIR = Path(__file__).parent.parent / "assets" / "icons"
 _CACHE_TYPES_DIR = _ASSETS_DIR / "cache_types"
 _CACHE_FOUND_DIR = _ASSETS_DIR / "cache_found"
 
+# Issue #519 follow-up: bundled offline HTML reference listing every custom
+# icon file name, recommended canvas size and tips (Inkscape, Plain SVG
+# export, etc.) — opened from Settings → Advanced via QDesktopServices, so
+# it must be a real file on disk rather than generated at runtime.
+_ICON_GUIDE_PATH = Path(__file__).parent.parent / "assets" / "icon_guide.html"
+
+
+def get_icon_guide_path() -> Path:
+    """Sti til den bundlede HTML icon-navngivnings-guide (issue #519 follow-up)."""
+    return _ICON_GUIDE_PATH
+
 
 # ── Mapping: intern nøgle → SVG filnavn (uden .svg) ──────────────────────────
 
@@ -127,18 +138,81 @@ def _read_svg_file(path: Path) -> str | None:
         return None
 
 
+@lru_cache(maxsize=1)
+def _user_icons_dir() -> Path | None:
+    """
+    Sti til brugerens custom-icons mappe (issue #519), eller None ved fejl.
+
+    Issue #540: denne kaldes fra hvert eneste ikon-opslag (cache-type-ikon +
+    found-smiley pr. cache-række, plus de faste UI-ikoner) — dvs. potentielt
+    titusindvis af gange pr. tabel-refresh på en stor database. Uden caching
+    udløser hvert kald hele get_icons_dir() -> get_app_data_dir() ->
+    get_install_dir()-kæden, som laver en fil-eksistens-tjek, en JSON-læsning
+    OG fire separate mkdir()-kald PR. KALD. Det er normalt hurtigt på et
+    almindeligt filsystem, men bliver katastrofalt langsomt når hvert enkelt
+    filsystem-kald bliver opsnappet synkront af en antivirus-minifilter-driver
+    (meget almindeligt for netop mkdir/fil-læsning på Windows) — titusindvis
+    af kald á få millisekunder giver samlet set titusindvis af millisekunder,
+    uden at CPU eller diskaktivitet nogensinde ser høj ud i Task Manager
+    (matcher rapportøren i #540 præcist: lav CPU, lav disk, men alligevel
+    45-60 sekunders "Not Responding" ved skift til/filtrering af en stor
+    database — introduceret med #519, findes ikke i beta.5).
+
+    Mappen ændrer sig ikke i løbet af en kørende session, så det er sikkert
+    at cache resultatet — ligesom _read_svg_file() allerede gør nedenfor.
+    """
+    try:
+        from opensak.config import get_icons_dir
+        return get_icons_dir()
+    except Exception:
+        return None
+
+
+def _read_svg_with_user_override(filename: str, bundled_dir: Path, user_subdir: str) -> str | None:
+    """
+    Læs en SVG fil, med brugerens custom-icons mappe (issue #519) tjekket
+    FØRST, og fald tilbage til det bundlede asset hvis filen mangler eller
+    ikke kan parses. Filnavnet matcher 1:1 den bundlede asset-struktur, så
+    det matcher OpenSAK Custom Icons Guide.
+    """
+    user_dir = _user_icons_dir()
+    if user_dir is not None:
+        svg = _read_svg_file(user_dir / user_subdir / f"{filename}.svg")
+        if svg:
+            return svg
+    return _read_svg_file(bundled_dir / f"{filename}.svg")
+
+
+def _get_ui_icon_svg(filename: str, default_svg: str) -> str:
+    """
+    Hent SVG for et af de faste, enkeltstående UI-ikoner (Corrected
+    coordinates, Premium, Fav. points, Trackables — issue #519 follow-up).
+
+    Disse har intet bundlet asset-fil at falde tilbage til — kun en
+    hardkodet SVG-streng i denne fil — så opslags-rækkefølgen er:
+    brugerens icons/ui/<filename>.svg, ellers default_svg.
+    """
+    user_dir = _user_icons_dir()
+    if user_dir is not None:
+        svg = _read_svg_file(user_dir / "ui" / f"{filename}.svg")
+        if svg:
+            return svg
+    return default_svg
+
+
 def _get_type_svg(key: str) -> str | None:
-    """Hent SVG streng for en cache type fra disk."""
+    """Hent SVG streng for en cache type fra disk (bruger-override først)."""
     filename = _TYPE_FILE_MAP.get(key)
     if not filename:
         return None
-    return _read_svg_file(_CACHE_TYPES_DIR / f"{filename}.svg")
+    return _read_svg_with_user_override(filename, _CACHE_TYPES_DIR, "cache_types")
 
 
 def _get_found_svg(key: str) -> str | None:
-    """Hent smiley SVG streng for en fundet cache type fra disk."""
+    """Hent smiley SVG streng for en fundet cache type fra disk (bruger-override først)."""
     color = _FOUND_COLOR_MAP.get(key, "green")
-    return _read_svg_file(_CACHE_FOUND_DIR / f"found_cache_smiley_{color}.svg")
+    filename = f"found_cache_smiley_{color}"
+    return _read_svg_with_user_override(filename, _CACHE_FOUND_DIR, "cache_found")
 
 
 # ── Internal helpers (fallback SVG strenge) ───────────────────────────────────
@@ -418,13 +492,13 @@ def _get_found_svg_for_key(key: str) -> str:
 
 def _get_found_overlay_svg() -> str:
     """Gold smiley used as the fixed overlay for found caches (all types)."""
-    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_gold.svg")
+    svg = _read_svg_with_user_override("found_cache_smiley_gold", _CACHE_FOUND_DIR, "cache_found")
     return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
 
 
 def _get_dnf_overlay_svg() -> str:
     """Dark-blue smiley used as the fixed overlay for DNF caches (all types)."""
-    svg = _read_svg_file(_CACHE_FOUND_DIR / "found_cache_smiley_dark_blue.svg")
+    svg = _read_svg_with_user_override("found_cache_smiley_dark_blue", _CACHE_FOUND_DIR, "cache_found")
     return svg if svg else _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
 
 
@@ -592,7 +666,164 @@ def get_flag_placeholder_icon(size: int = 16) -> QIcon:
     return QIcon(_svg_to_pixmap(_FLAG_PLACEHOLDER_SVG, size))
 
 
+# Issue #509: solid red flag QIcon shown when user_flag is set.
+#
+# The column previously rendered a "🚩" emoji as plain DisplayRole text.
+# The cache_table FontRole handler italicizes every column for found caches
+# (cache.found), and emoji glyphs generally have no real italic glyph —
+# Qt/the OS font fallback synthesizes one by shearing the glyph box, which
+# on Windows' Segoe UI Emoji clips/distorts the flag. Same class of bug as
+# the old "📍"/"✓" text glyphs fixed in #354/#489: replaced with a proper
+# icon-only column (DecorationRole) so no font style is ever applied to it.
+_FLAG_SET_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<line x1="4" y1="2" x2="4" y2="14" stroke="#8a1c1c" stroke-width="1.5"'
+    ' stroke-linecap="round"/>'
+    '<polygon points="4,3 13,6 4,9" fill="#e53935" stroke="#8a1c1c" stroke-width="1"'
+    ' stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_flag_icon(size: int = 16) -> QIcon:
+    """Solid red flag QIcon shown in the user_flag column when flag is set (issue #509)."""
+    return QIcon(_svg_to_pixmap(_FLAG_SET_SVG, size))
+
+
 @lru_cache(maxsize=8)
 def get_lock_placeholder_icon(size: int = 16) -> QIcon:
     """Faint outlined open-padlock QIcon shown in the locked column when unset (issue #202)."""
     return QIcon(_svg_to_pixmap(_LOCK_PLACEHOLDER_SVG, size))
+
+
+# Issue #509 (follow-up): solid closed-padlock QIcon shown when locked is set.
+#
+# Same rationale as the flag fix above — the column previously rendered a
+# "🔒" emoji as plain DisplayRole text, which the FontRole handler could
+# italicize on found rows with the same synthetic-italic clipping risk on
+# platforms without a real italic emoji glyph (e.g. Windows). Replaced with
+# a proper icon-only column so no font style is ever applied to it.
+_LOCK_SET_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<rect x="3.5" y="7" width="9" height="6.5" rx="1" fill="#555555"'
+    ' stroke="#2b2b2b" stroke-width="1"/>'
+    '<path d="M5.5 7 V5 a2.5 2.5 0 0 1 5 0 V7" fill="none"'
+    ' stroke="#2b2b2b" stroke-width="1.3"/>'
+    '<circle cx="8" cy="9.8" r="1" fill="#eeeeee"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_lock_icon(size: int = 16) -> QIcon:
+    """Solid closed-padlock QIcon shown in the locked column when set (issue #509)."""
+    return QIcon(_svg_to_pixmap(_LOCK_SET_SVG, size))
+
+
+# ── Corrected-coordinates warning icon (issue #354) ────────────────────────────
+#
+# A generic amber warning-triangle with "!" — the universal caution symbol used
+# across road signage, operating systems and web standards. It is not unique to
+# any single application, so it carries no third-party IP concerns.
+#
+# Replaces the plain "📍" emoji previously used in the "corrected" table column,
+# which rendered too small / low-contrast on some platforms (missing or
+# monochrome emoji fonts on certain Linux distros in particular).
+
+_CORRECTED_COORDS_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<polygon points="8,1.3 15.3,14.5 0.7,14.5" '
+    'fill="#ffc107" stroke="#7a5200" stroke-width="1" stroke-linejoin="round"/>'
+    '<rect x="7.25" y="5.4" width="1.5" height="5.1" rx="0.65" fill="#3a2600"/>'
+    '<rect x="7.25" y="11.4" width="1.5" height="1.5" rx="0.65" fill="#3a2600"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_corrected_coords_icon(size: int = 16) -> QIcon:
+    """Amber warning-triangle QIcon shown in the 'corrected' column when set (issue #354).
+    Overridable via icons/ui/corrected_coords.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("corrected_coords", _CORRECTED_COORDS_SVG), size))
+
+
+# ── Issue #489: GSAK-style icons for Found / Premium / Fav. points / Trackables columns ──
+#
+# All four are icon-only column headers (matching the existing "corrected"
+# column pattern) with per-cell icons for Found/Premium (boolean toggles)
+# and plain numeric text for Fav. points/Trackables (counts) — see
+# cache_table.py's headerData()/_decoration_value() for how each is used.
+#
+# The Premium and Trackable icons below are original, generic designs (a
+# checkered circle and a ladybug-style insect silhouette respectively) —
+# they do not reproduce Geocaching.com's actual trademarked Premium badge
+# or Travel Bug dog-tag artwork.
+
+@lru_cache(maxsize=8)
+def get_found_icon(size: int = 16) -> QIcon:
+    """Gold smiley QIcon for the 'found' column — reuses the same smiley
+    asset already used for the map pin found-overlay, instead of a plain
+    checkmark (issue #489)."""
+    return QIcon(_svg_to_pixmap(_get_found_overlay_svg(), size))
+
+
+_PREMIUM_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<circle cx="8" cy="8" r="7" fill="#ffffff" stroke="#333333" stroke-width="1"/>'
+    '<path d="M 8 8 L 8 1 A 7 7 0 0 1 15 8 Z" fill="#222222"/>'
+    '<path d="M 8 8 L 8 15 A 7 7 0 0 1 1 8 Z" fill="#222222"/>'
+    '<rect x="4.7" y="6.2" width="6.6" height="4.6" rx="0.7" '
+    'fill="#c8860d" stroke="#5c3d00" stroke-width="0.6"/>'
+    '<rect x="4.7" y="5.2" width="6.6" height="1.9" rx="0.6" fill="#5c3d00"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_premium_icon(size: int = 16) -> QIcon:
+    """Checkered circle with a small cache box — Premium-member-only marker
+    for the 'premium_only' column (issue #489).
+    Overridable via icons/ui/premium.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("premium", _PREMIUM_SVG), size))
+
+
+_FAVORITE_POINTS_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<circle cx="8" cy="6.3" r="5.2" fill="#f5c400" stroke="#a67c00" stroke-width="1"/>'
+    '<path d="M8 3.2 L9.1 5.5 L11.6 5.9 L9.8 7.6 L10.2 10.1 L8 8.9 L5.8 10.1 '
+    'L6.2 7.6 L4.4 5.9 L6.9 5.5 Z" fill="#ffffff" stroke="#a67c00" stroke-width="0.4"/>'
+    '<path d="M5.4 10.6 L3.6 15 L8 13.2 L12.4 15 L10.6 10.6 Z" '
+    'fill="#c0392b" stroke="#7a2318" stroke-width="0.5"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_favorite_points_icon(size: int = 14) -> QIcon:
+    """Gold star-medal emblem for the 'Fav. points' column header (issue #489).
+    Overridable via icons/ui/favorite_points.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("favorite_points", _FAVORITE_POINTS_SVG), size))
+
+
+_TRACKABLE_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">'
+    '<ellipse cx="8" cy="9.2" rx="5.2" ry="5.8" fill="#c0392b" stroke="#7a2318" stroke-width="0.8"/>'
+    '<line x1="8" y1="3.6" x2="8" y2="14.8" stroke="#3a1a10" stroke-width="0.8"/>'
+    '<circle cx="6" cy="6.5" r="1" fill="#1a1a1a"/>'
+    '<circle cx="10" cy="6.5" r="1" fill="#1a1a1a"/>'
+    '<circle cx="5.5" cy="10.5" r="1" fill="#1a1a1a"/>'
+    '<circle cx="10.5" cy="10.5" r="1" fill="#1a1a1a"/>'
+    '<circle cx="8" cy="12.5" r="1" fill="#1a1a1a"/>'
+    '<circle cx="8" cy="4" r="2.6" fill="#2b1a12" stroke="#000000" stroke-width="0.4"/>'
+    '<path d="M6.5 2.5 L5 0.8" stroke="#2b1a12" stroke-width="0.7" stroke-linecap="round"/>'
+    '<path d="M9.5 2.5 L11 0.8" stroke="#2b1a12" stroke-width="0.7" stroke-linecap="round"/>'
+    '</svg>'
+)
+
+
+@lru_cache(maxsize=8)
+def get_trackable_icon(size: int = 14) -> QIcon:
+    """Ladybug-style insect icon for the Trackables column header (issue #489/#491).
+    Overridable via icons/ui/trackable.svg (issue #519 follow-up)."""
+    return QIcon(_svg_to_pixmap(_get_ui_icon_svg("trackable", _TRACKABLE_SVG), size))

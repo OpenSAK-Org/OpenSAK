@@ -11,8 +11,11 @@ from datetime import datetime
 from PySide6.QtCore import (
     Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
 )
-from PySide6.QtGui import QColor, QFont
-from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QTableView, QHeaderView, QAbstractItemView, QMenu, QApplication,
+    QStyle, QStyleOptionHeader,
+)
 
 from opensak.db.models import Cache
 from opensak.filters.engine import _haversine_km
@@ -21,7 +24,18 @@ from opensak.coords import format_coords, format_lat, format_lon, format_lat, fo
 from opensak.lang import tr
 from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
 from opensak.utils.utils import normalize_geocacher_name
-from opensak.gui.icon_provider import get_cache_type_icon, get_flag_placeholder_icon, get_lock_placeholder_icon
+from opensak.gui.icon_provider import (
+    get_cache_type_icon,
+    get_flag_icon,
+    get_flag_placeholder_icon,
+    get_lock_icon,
+    get_lock_placeholder_icon,
+    get_corrected_coords_icon,
+    get_found_icon,
+    get_premium_icon,
+    get_favorite_points_icon,
+    get_trackable_icon,
+)
 from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display, get_type_display
 import math
 
@@ -86,7 +100,7 @@ def get_column_defs() -> dict:
         "dnf":          (tr("col_dnf"),               45),
         "premium_only": (tr("col_premium"),           65),
         "archived":     (tr("col_archived"),          70),
-        "corrected":    (tr("col_corrected"),         40),
+        "corrected":    (tr("col_corrected"),         48),
         # ── Issue #84: Latitude og Longitude ──────────────────────────────
         "latitude":     (tr("col_latitude"),         110),
         "longitude":    (tr("col_longitude"),        110),
@@ -103,6 +117,8 @@ def get_column_defs() -> dict:
         "user_data_2":     (tr("col_user_data_2"),    100),
         "user_data_3":     (tr("col_user_data_3"),    100),
         "user_data_4":     (tr("col_user_data_4"),    100),
+        # ── Issue #489/#491: Trackables (travel bugs / geocoins) ──────────
+        "trackables":      (tr("col_trackables"),      55),
     }
 
 
@@ -307,6 +323,37 @@ class CacheTypeDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class CorrectedCoordsDelegate(QStyledItemDelegate):
+    """Centers the corrected-coordinates warning-triangle icon in the column.
+
+    Same rationale as CacheTypeDelegate: the "corrected" column is icon-only
+    (no text), and Qt's default delegate left-aligns the decoration inside
+    the content rect instead of centering it.
+    """
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        raw = index.data(Qt.ItemDataRole.DecorationRole)
+        if not raw:
+            super().paint(painter, option, index)
+            return
+
+        from PySide6.QtWidgets import QStyle
+        from PySide6.QtGui import QIcon, QPixmap
+        if isinstance(raw, QPixmap):
+            icon = QIcon(raw)
+        elif isinstance(raw, QIcon):
+            icon = raw
+        else:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        style = option.widget.style() if option.widget else QApplication.style()
+        style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, painter, option.widget)
+        icon.paint(painter, option.rect, Qt.AlignmentFlag.AlignCenter)
+        painter.restore()
+
+
 class SizeBarDelegate(QStyledItemDelegate):
     """Tegner GSAK-stil segmenteret størrelsesindikator for container-kolonnen.
 
@@ -463,6 +510,18 @@ class GcCodeDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option, index) -> None:
         from PySide6.QtWidgets import QStyle
+        # Issue #547: initStyleOption() populates option.font from the
+        # model's Qt.ItemDataRole.FontRole (see CacheTableModel.data() —
+        # this is where the text-size setting's per-row font, incl. the
+        # "Large" grid point size, comes from). The plain super().paint()
+        # branch below gets this for free, but our custom drawText() branch
+        # for coloured cells (archived/placed/found) does NOT — without this
+        # call, that branch draws with whatever default font the painter
+        # already had, so archived/placed/found GC codes silently ignored
+        # the text-size setting while every other coloured/uncoloured cell
+        # respected it. Safe to call unconditionally: it only enriches
+        # `option` in place and doesn't affect option.rect/state used below.
+        self.initStyleOption(option, index)
         is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
         painter.save()
@@ -489,6 +548,7 @@ class GcCodeDelegate(QStyledItemDelegate):
         else:
             text_color = option.palette.text().color()
 
+        painter.setFont(option.font)
         painter.setPen(text_color)
         painter.drawText(
             text_rect,
@@ -598,6 +658,21 @@ class CacheTableModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
                 col_id = self._columns[section]
+                if col_id == "corrected":
+                    # Issue #354: ikon-only header (DecorationRole nedenfor).
+                    # "CC"-teksten fra sprogfilerne bruges IKKE her — den ville
+                    # blive klemt sammen med Qt's indbyggede sorterings-pil i
+                    # den smalle 40px kolonne. col_corrected-nøglen holdes
+                    # ikke-tom i sprogfilerne udelukkende for at bestå
+                    # test_no_empty_values; den reelle tekst til Column Chooser
+                    # kommer fra det delte detail_corrected_coords-nøgle.
+                    return ""
+                if col_id in ("found", "premium_only", "favorite_points", "trackables"):
+                    # Issue #489: samme icon-only header-mønster som "corrected"
+                    # — GSAK-stil ikoner i stedet for tekst. Fuld tekst vises
+                    # stadig som tooltip (ToolTipRole nedenfor) og i Column
+                    # Chooser (via get_column_defs(), uændret).
+                    return ""
                 return get_column_defs().get(col_id, (col_id, 80))[0]
             if role == Qt.ItemDataRole.ToolTipRole:
                 col_id = self._columns[section]
@@ -607,8 +682,35 @@ class CacheTableModel(QAbstractTableModel):
                     return tr("col_user_flag_header_tooltip")
                 if col_id == "locked":
                     return tr("col_locked_header_tooltip")
+                if col_id == "first_to_find":
+                    return tr("col_first_to_find_header_tooltip")
+                if col_id in ("found", "premium_only", "favorite_points", "trackables"):
+                    # Issue #489: header blev icon-only — den oprindelige
+                    # kolonnetekst genbruges direkte som tooltip.
+                    return get_column_defs().get(col_id, (col_id, 80))[0]
             if role == Qt.ItemDataRole.TextAlignmentRole:
                 return Qt.AlignmentFlag.AlignCenter
+            if role == Qt.ItemDataRole.DecorationRole:
+                col_id = self._columns[section]
+                # Issue #556: header icons for these icon-only columns were
+                # hardcoded to 14px regardless of the user's Text Size setting
+                # (Settings → Appearance), making them hard to read even at
+                # Medium/Large — feedback from Mike Wood. Now scaled with the
+                # same "grid_icon" sizes already used for the type icon in
+                # the grid rows, so header and row icons stay visually
+                # consistent and both respond to the existing setting.
+                icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+                if col_id == "corrected":
+                    # Issue #354: ikon-only header, samme SVG-trekant som kolonnens celler
+                    return get_corrected_coords_icon(icon_size)
+                if col_id == "found":
+                    return get_found_icon(icon_size)
+                if col_id == "premium_only":
+                    return get_premium_icon(icon_size)
+                if col_id == "favorite_points":
+                    return get_favorite_points_icon(icon_size)
+                if col_id == "trackables":
+                    return get_trackable_icon(icon_size)
         return None
 
     def data(self, index: QModelIndex | QPersistentModelIndex, role=Qt.ItemDataRole.DisplayRole):
@@ -625,6 +727,7 @@ class CacheTableModel(QAbstractTableModel):
                        "distance", "found", "dnf", "premium_only", "archived",
                        "log_count", "corrected", "first_to_find", "user_flag",
                        "locked", "bearing", "user_sort", "favorite_points",
+                       "trackables",
                        "latitude", "longitude",
                        "hidden_date", "last_log", "found_date", "dnf_date",
                        "placed_by"):
@@ -728,10 +831,31 @@ class CacheTableModel(QAbstractTableModel):
             # segment, producing a visual artifact (issue #416).
             # "text" mode: display value is plain text, no decoration needed.
             return None
-        if col == "user_flag" and not cache.user_flag:
-            return get_flag_placeholder_icon(16)
-        if col == "locked" and not cache.locked:
-            return get_lock_placeholder_icon(16)
+        if col == "user_flag":
+            return get_flag_icon(16) if cache.user_flag else get_flag_placeholder_icon(16)
+        if col == "locked":
+            return get_lock_icon(16) if cache.locked else get_lock_placeholder_icon(16)
+        if col == "corrected":
+            note = cache.user_note
+            if note and note.is_corrected:
+                # Issue #557: was hardcoded to 16px — didn't follow the Text
+                # Size setting at all, so at TextSize.SMALL this cell icon
+                # ended up visibly *bigger* than the (now correctly scaled)
+                # header icon above it. Matches the "grid_icon" size used
+                # for the cache-type icon in the same row.
+                icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+                return get_corrected_coords_icon(icon_size)
+            return None
+        if col == "found":
+            if not cache.found:
+                return None
+            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+            return get_found_icon(icon_size)
+        if col == "premium_only":
+            if not cache.premium_only:
+                return None
+            icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+            return get_premium_icon(icon_size)
         return None
 
     @staticmethod
@@ -784,7 +908,8 @@ class CacheTableModel(QAbstractTableModel):
                 return "?"
             return _bearing_compass(deg)
         if col == "found":
-            return "✓" if cache.found else ""
+            # Issue #489: icon-only (DecorationRole) — smiley i stedet for "✓".
+            return ""
         if col == "placed_by":
             return cache.placed_by or ""
         if col == "hidden_date":
@@ -799,12 +924,14 @@ class CacheTableModel(QAbstractTableModel):
         if col == "dnf":
             return "DNF" if cache.dnf else ""
         if col == "premium_only":
-            return "P" if cache.premium_only else ""
+            # Issue #489: icon-only (DecorationRole) — checkered-circle-ikon i stedet for "P".
+            return ""
         if col == "archived":
             return "✓" if cache.archived else ""
         if col == "corrected":
-            note = cache.user_note
-            return "📍" if (note and note.is_corrected) else ""
+            # Issue #354: icon-only (DecorationRole) — the old "📍" emoji
+            # rendered too small / low-contrast on some platforms.
+            return ""
         # ── Issue #84: Latitude og Longitude (i brugerens valgte format) ──────
         if col == "latitude":
             lat, _ = self._effective_coords(cache)
@@ -827,10 +954,20 @@ class CacheTableModel(QAbstractTableModel):
             return "FTF" if cache.first_to_find else ""
         if col == "favorite_points":
             return str(cache.favorite_points) if cache.favorite_points is not None else ""
+        if col == "trackables":
+            # Issue #489/#491: blank when 0/None rather than always showing
+            # "0" (unlike log_count) — most caches have no trackables, and a
+            # column full of zeroes would be visual noise for little benefit.
+            return str(cache.trackable_count) if cache.trackable_count else ""
         if col == "user_flag":
-            return "🚩" if cache.user_flag else ""
+            # Issue #509: icon-only (DecorationRole) — the old "🚩" emoji got
+            # visually distorted on found rows, whose FontRole is italicized;
+            # emoji glyphs have no real italic form and some platforms
+            # (Windows' Segoe UI Emoji) synthesize/clip one instead.
+            return ""
         if col == "locked":
-            return "🔒" if cache.locked else ""
+            # Issue #509 (follow-up): icon-only, same reasoning as user_flag above.
+            return ""
         if col == "user_sort":
             return str(cache.user_sort) if cache.user_sort is not None else ""
         if col == "user_data_1":
@@ -902,6 +1039,8 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: c.user_sort if c.user_sort is not None else 999999, reverse=reverse)
         elif col == "favorite_points":
             self._caches.sort(key=lambda c: c.favorite_points or 0, reverse=reverse)
+        elif col == "trackables":
+            self._caches.sort(key=lambda c: c.trackable_count or 0, reverse=reverse)
         elif col == "container":
             # Issue #90: Sort by logical container size, not alphabetically
             self._caches.sort(
@@ -945,6 +1084,121 @@ class CacheTableModel(QAbstractTableModel):
             self.dataChanged.emit(first, last)
 
 
+# Issue #557: vertical padding added around the header icon to get the
+# horizontal header's fixed height (see _header_height_for() below). 20px
+# for TextSize.SMALL (14px icon) matches the pre-#556 default header height,
+# so SMALL users see no visual change; MEDIUM/LARGE grow from there.
+_HEADER_ICON_VPAD = 6
+
+
+def _header_height_for(text_size: TextSize) -> int:
+    """Fixed horizontal-header height that comfortably fits the icon-only
+    column headers at the given TextSize (issue #557 — Qt does not grow the
+    header's own height just because headerData() returns a bigger icon;
+    the previous flat height clipped the icon at TextSize.LARGE)."""
+    return TEXT_SIZE_MAP[text_size]["grid_icon"] + _HEADER_ICON_VPAD
+
+
+class _CacheTableHeaderView(QHeaderView):
+    """Horizontal header for the cache table.
+
+    Qt's default QHeaderView layout draws a section's decoration icon on one
+    side and the sort-indicator arrow pinned to the opposite edge. For an
+    icon-only column (no text) like "corrected", that means the icon and the
+    arrow drift apart as the column is widened, instead of staying together
+    as a pair (feedback on the Corrected coordinates column). This subclass
+    only changes painting for icon-only columns; every other column falls
+    back to the normal Qt painting untouched.
+    """
+
+    # Column ids that show only an icon in the header (no text) and should
+    # therefore have their icon + sort arrow centered together as a pair.
+    _ICON_ONLY_COLUMNS = {"corrected", "found", "premium_only", "favorite_points", "trackables"}
+
+    # Issue #489: each icon-only column's header icon getter (14px, matching
+    # the original "corrected" triangle). Looked up dynamically in
+    # paintSection() below instead of hardcoding a single icon.
+    _HEADER_ICON_GETTERS = {
+        "corrected":       get_corrected_coords_icon,
+        "found":           get_found_icon,
+        "premium_only":    get_premium_icon,
+        "favorite_points": get_favorite_points_icon,
+        "trackables":      get_trackable_icon,
+    }
+
+    def __init__(self, columns_provider, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._columns_provider = columns_provider
+        # A freshly constructed QHeaderView defaults to sectionsClickable=False.
+        # QTableView's own auto-created header starts out True, which is why
+        # swapping in this custom header silently broke click-to-sort until
+        # this was added explicitly (setSortingEnabled() does not set it).
+        self.setSectionsClickable(True)
+
+    def paintSection(self, painter, rect, logicalIndex) -> None:
+        columns = self._columns_provider()
+        if (
+            logicalIndex >= len(columns)
+            or columns[logicalIndex] not in self._ICON_ONLY_COLUMNS
+            or rect.width() <= 0 or rect.height() <= 0
+        ):
+            super().paintSection(painter, rect, logicalIndex)
+            return
+
+        painter.save()
+
+        # Draw the section background/border only — no text, no icon, and no
+        # native sort arrow (we position the icon and arrow ourselves below).
+        opt = QStyleOptionHeader()
+        self.initStyleOption(opt)
+        opt.rect = rect
+        opt.section = logicalIndex
+        opt.text = ""
+        opt.icon = QIcon()
+        opt.sortIndicator = QStyleOptionHeader.SortIndicator.None_
+        self.style().drawControl(QStyle.ControlElement.CE_Header, opt, painter, self)
+
+        col_id = columns[logicalIndex]
+        icon_getter = self._HEADER_ICON_GETTERS.get(col_id, get_corrected_coords_icon)
+        # Issue #556: icon size now follows the Text Size setting (same
+        # "grid_icon" scale as the type icon in the grid) instead of a fixed
+        # 14px — the flat size was reported as hard to read. The sort arrow
+        # is scaled proportionally so it stays balanced against the icon at
+        # every size instead of looking oversized/undersized next to it.
+        icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+        icon = icon_getter(icon_size).pixmap(icon_size, icon_size)
+        is_sorted = self.sortIndicatorSection() == logicalIndex
+
+        arrow = None
+        if is_sorted:
+            arrow_size = max(7, round(icon_size * 0.64))
+            arrow = QPixmap(arrow_size, arrow_size)
+            arrow.fill(Qt.GlobalColor.transparent)
+            arrow_opt = QStyleOptionHeader()
+            self.initStyleOption(arrow_opt)
+            arrow_opt.rect = arrow.rect()
+            arrow_opt.sortIndicator = (
+                QStyleOptionHeader.SortIndicator.SortDown
+                if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+                else QStyleOptionHeader.SortIndicator.SortUp
+            )
+            arrow_painter = QPainter(arrow)
+            self.style().drawPrimitive(
+                QStyle.PrimitiveElement.PE_IndicatorHeaderArrow, arrow_opt, arrow_painter, self
+            )
+            arrow_painter.end()
+
+        spacing = 3
+        total_width = icon.width() + (spacing + arrow.width() if arrow else 0)
+        x = rect.x() + (rect.width() - total_width) // 2
+        painter.drawPixmap(x, rect.y() + (rect.height() - icon.height()) // 2, icon)
+        if arrow:
+            arrow_x = x + icon.width() + spacing
+            painter.drawPixmap(arrow_x, rect.y() + (rect.height() - arrow.height()) // 2, arrow)
+
+        painter.restore()
+
+
 class CacheTableView(QTableView):
     """The main cache list widget."""
 
@@ -972,6 +1226,7 @@ class CacheTableView(QTableView):
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setAlternatingRowColors(True)
         self.setShowGrid(False)
+        self.setHorizontalHeader(_CacheTableHeaderView(lambda: self._model._columns, self))
         self.setSortingEnabled(True)
         self.verticalHeader().setVisible(False)
         self.setWordWrap(False)
@@ -986,6 +1241,7 @@ class CacheTableView(QTableView):
             min(v["row_height"] for v in TEXT_SIZE_MAP.values())
         )
         self.verticalHeader().setDefaultSectionSize(TEXT_SIZE_MAP[text_size]["row_height"])
+        self._apply_header_height()
         self._applying_widths = False
         self._apply_column_widths()
         self.horizontalHeader().setSortIndicatorShown(True)
@@ -1015,14 +1271,33 @@ class CacheTableView(QTableView):
         super().mousePressEvent(event)
 
     def _on_double_clicked(self, index) -> None:
-        """Dobbeltklik på corrected-kolonnen åbner koordinatdialogen direkte."""
+        """
+        Dobbeltklik på corrected-kolonnen åbner koordinatdialogen direkte.
+
+        Issue #471: dobbeltklik alle andre steder i en cache-række åbner nu
+        cachen på geocaching.com (samme adfærd som GSAK) — undtagen på
+        user_flag/first_to_find/locked-kolonnerne, som allerede har deres
+        egen single-click-toggle via mousePressEvent ovenfor; et
+        dobbeltklik der også åbnede browseren dér ville være overraskende.
+        """
         if not index.isValid():
             return
         col = self._model._columns[index.column()]
+        cache = self._model.cache_at(index.row())
+        if not cache:
+            return
         if col == "corrected":
-            cache = self._model.cache_at(index.row())
-            if cache:
-                self._edit_corrected(cache)
+            self._edit_corrected(cache)
+        elif col not in ("user_flag", "first_to_find", "locked"):
+            webbrowser.open(f"https://coord.info/{cache.gc_code}")
+
+    def _apply_header_height(self) -> None:
+        # Issue #557: see _header_height_for() — Qt's own sizeHint for the
+        # header does not grow just because a section's DecorationRole icon
+        # got bigger, so without this the icon-only headers clip at
+        # TextSize.LARGE. Explicitly fixing the height keeps it in sync.
+        text_size = getattr(get_settings(), "text_size", TextSize.MEDIUM)
+        self.horizontalHeader().setFixedHeight(_header_height_for(text_size))
 
     def _apply_column_widths(self) -> None:
         self._applying_widths = True
@@ -1050,6 +1325,12 @@ class CacheTableView(QTableView):
                 elif col_id == "gc_code":
                     self._gc_code_delegate = GcCodeDelegate(self)
                     self.setItemDelegateForColumn(i, self._gc_code_delegate)
+                elif col_id in ("corrected", "found", "premium_only"):
+                    # Issue #489: samme generiske centrerings-delegate som
+                    # "corrected" (#354) — den er stateless og læser blot
+                    # DecorationRole, så den genbruges uændret her.
+                    self._icon_only_delegate = CorrectedCoordsDelegate(self)
+                    self.setItemDelegateForColumn(i, self._icon_only_delegate)
                 else:
                     # None clears the column delegate (stub types it non-optional)
                     self.setItemDelegateForColumn(i, None)  # type: ignore[arg-type]
@@ -1217,6 +1498,7 @@ class CacheTableView(QTableView):
             act_edit_corrected = menu.addAction(tr("ctx_edit_corrected"))
         else:
             act_edit_corrected = menu.addAction(tr("ctx_add_corrected"))
+        act_edit_corrected.setIcon(get_corrected_coords_icon(16))
         act_edit_corrected.triggered.connect(
             lambda checked=False, c=cache: self._edit_corrected(c)
         )
@@ -1245,7 +1527,7 @@ class CacheTableView(QTableView):
             act_found.triggered.connect(lambda: self._toggle_found(cache, True))
 
         from opensak.utils import flags
-        if flags.update_location:
+        if flags.reverse_geocoding:
             menu.addSeparator()
 
             act_update_loc = menu.addAction(tr("ctx_update_location"))
@@ -1305,6 +1587,7 @@ class CacheTableView(QTableView):
                 joinedload(CacheModel.user_note),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             ).filter_by(gc_code=cache.gc_code).first()
             if fresh is None:
                 return
@@ -1405,6 +1688,7 @@ class CacheTableView(QTableView):
                 joinedload(CacheModel.user_note),
                 joinedload(CacheModel.waypoints),
                 joinedload(CacheModel.attributes),
+                joinedload(CacheModel.trackables),
             ).filter_by(gc_code=gc_code).first()
             if fresh is None:
                 return
@@ -1431,7 +1715,15 @@ class CacheTableView(QTableView):
             min(v["row_height"] for v in TEXT_SIZE_MAP.values())
         )
         self.verticalHeader().setDefaultSectionSize(sizes["row_height"])
+        self._apply_header_height()
         self._model.refresh_visuals()
+        # Issue #556: headerData()'s DecorationRole icons are now sized from
+        # TEXT_SIZE_MAP too — tell the header its data changed so Qt
+        # recomputes each icon-only column's sizeHint (and repaints) right
+        # away, instead of only picking up the new size after a restart.
+        last_col = self._model.columnCount() - 1
+        if last_col >= 0:
+            self._model.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, last_col)
 
     def row_count(self) -> int:
         return self._model.rowCount()

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -102,8 +103,29 @@ def _atomic_write(path: Path, data: dict) -> None:
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        # Atomisk rename — virker på alle platforme
-        Path(tmp_path).replace(path)
+        # Atomisk rename — virker på alle platforme.
+        #
+        # Issue #574: på Windows kan denne fejle med "WinError 5 Access is
+        # denied" hvis opensak.json et kort øjeblik holdes åben af noget
+        # udenfor OpenSAK selv — antivirus-realtidsscanning, Windows Search-
+        # indeksering, eller roaming-profil-/OneDrive-synkronisering af
+        # AppData\Roaming, hvor filen ligger. Set især lige efter en
+        # genstart eller en opdatering, hvor sådanne processer typisk griber
+        # fat i nye/ændrede filer først. Fejlen er forbigående — appen
+        # virkede fint igen ved simpelthen at prøve forfra — så et par
+        # korte retry-forsøg her er langt bedre end at lade HELE appen
+        # crashe på den allerførste settings-skrivning ved opstart.
+        last_err: OSError | None = None
+        for attempt in range(5):
+            try:
+                Path(tmp_path).replace(path)
+                return
+            except OSError as e:
+                last_err = e
+                if attempt < 4:
+                    time.sleep(0.1 * (attempt + 1))
+        assert last_err is not None
+        raise last_err
     except Exception:
         try:
             os.unlink(tmp_path)

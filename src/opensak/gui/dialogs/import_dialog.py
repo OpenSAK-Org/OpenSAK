@@ -388,7 +388,7 @@ class ImportDialog(QDialog):
             self.import_completed.emit()
 
         from opensak.utils import flags
-        if flags.update_location and self._any_success:
+        if flags.reverse_geocoding and self._any_success:
             self._start_geocoding()
         else:
             self._browse_btn.setEnabled(True)

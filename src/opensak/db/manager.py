@@ -9,6 +9,7 @@ via settings_store i stedet for QSettings.
 from __future__ import annotations
 
 import gc
+import logging
 import shutil
 import time
 from datetime import datetime
@@ -17,6 +18,8 @@ from typing import Optional
 
 from opensak.lang import tr
 from opensak.settings_store import get_store
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseInfo:
@@ -196,6 +199,19 @@ class DatabaseManager:
 
         path = Path(path)
 
+        # Issue #539 (opfølgning): stien udledes deterministisk af navnet, så
+        # uden dette tjek kunne "New database" stille genbruge en efterladt/
+        # forældreløs fil på samme sti — fx en fil "remove_from_list()"
+        # bevidst har ladet ligge, eller en rest fra en tidligere
+        # rename/delete under test. init_db() bruger CREATE TABLE IF NOT
+        # EXISTS, så en genbrugt fil ville dukke op med sit gamle indhold og
+        # (via navnet) sine gamle kolonneindstillinger, selvom brugeren
+        # forventer en tom database. Afvis eksplicit i stedet for at gætte.
+        if self._find_by_path(path) or path.exists():
+            raise ValueError(
+                tr("db_err_target_path_exists", name=name, path=str(path))
+            )
+
         # Sørg for at mappen eksisterer og er skrivbar
         parent = path.parent
         try:
@@ -263,9 +279,79 @@ class DatabaseManager:
         self._save_to_settings()
 
     def rename(self, db_info: "DatabaseInfo", new_name: str) -> None:
-        """Omdøb en database (kun navnet)."""
-        if self._find_by_name(new_name) and new_name != db_info.name:
+        """
+        Omdøb en database — både label og den fysiske .db-fil (+ evt.
+        -shm/-wal sidecar-filer).
+
+        Issue #539: rename() opdaterede tidligere KUN db_info.name (label'en
+        i listen) — den fysiske fil blev aldrig flyttet/omdøbt. Det gav to
+        sammenhængende fejl: (a) kolonneopsætning, som gemmes pr. database-
+        navn (#199), pegede pludselig på en tom nøgle og så ud til at være
+        nulstillet, og (b) new_database() udleder filstien deterministisk
+        fra navnet — så en efterfølgende "Ny database" med det gamle (nu
+        "ledige") navn genbrugte uden varsel den samme fysiske fil, som
+        aldrig var blevet flyttet, og "genopstod" med alt det gamle indhold
+        (caches, kolonneopsætning) intakt.
+        """
+        if new_name == db_info.name:
+            return  # ingen ændring
+        if self._find_by_name(new_name):
             raise ValueError(tr("db_err_name_exists", name=new_name))
+
+        old_name = db_info.name
+        old_path = db_info.path
+
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_ " else "_" for c in new_name
+        ).strip()
+        new_path = old_path.parent / f"{safe_name}.db"
+
+        if new_path != old_path:
+            if new_path.exists():
+                raise ValueError(
+                    tr("db_err_target_path_exists", name=new_name, path=str(new_path))
+                )
+
+            # Luk engine FØR filoperationer — undgår låste filer på Windows
+            # (samme mønster som delete_database/move_databases_to).
+            from opensak.db.database import dispose_engine, init_db
+            was_active = (db_info == self._active)
+            dispose_engine(old_path)
+            gc.collect()
+            time.sleep(0.05)
+
+            try:
+                old_path.rename(new_path)
+                for suffix in ("-shm", "-wal"):
+                    side = Path(str(old_path) + suffix)
+                    if side.exists():
+                        side.rename(Path(str(new_path) + suffix))
+            except OSError as e:
+                raise ValueError(
+                    tr("db_err_rename_failed", name=old_name) + f"\n{e}"
+                )
+
+            db_info.path = new_path
+
+            if was_active:
+                # Genåbn på den nye sti så aktiv-tilstanden forbliver konsistent.
+                init_db(db_path=new_path)
+
+        # Flyt evt. gemte kolonneindstillinger (#199) til det nye navn, så
+        # brugeren ikke mister sin kolonneopsætning ved omdøbning. Best-
+        # effort — en fejl her må ikke forhindre selve omdøbningen, men skal
+        # ikke fejle helt lydløst (#539: gjorde det svært at diagnosticere
+        # om kolonner "gik tabt" pga. denne fejlende, eller slet ikke blev
+        # forsøgt migreret).
+        try:
+            from opensak.gui.dialogs.column_dialog import migrate_column_settings_for_rename
+            migrate_column_settings_for_rename(old_name, new_name)
+        except Exception:
+            logger.warning(
+                "Kunne ikke migrere kolonneindstillinger ved rename %r -> %r",
+                old_name, new_name, exc_info=True,
+            )
+
         db_info.name = new_name
         self._save_to_settings()
 
@@ -317,6 +403,7 @@ class DatabaseManager:
         new_dir.mkdir(parents=True, exist_ok=True)
         errors: list[str] = []
         updated_any = False
+        active_engine_disposed = False
 
         from opensak.db.database import dispose_engine
 
@@ -333,6 +420,8 @@ class DatabaseManager:
                 continue
 
             # Luk engine FØR filoperationer — undgår låste filer på Windows
+            if db_info == self._active:
+                active_engine_disposed = True
             dispose_engine(old_path)
             gc.collect()
             time.sleep(0.05)
@@ -364,6 +453,29 @@ class DatabaseManager:
 
         if updated_any:
             self._save_to_settings()
+
+        if active_engine_disposed:
+            # The loop above disposes the active database's engine before
+            # copying its file (needed to release the file handle, notably
+            # on Windows), but never reopened it — leaving get_session() in
+            # a broken "Database not initialised" state until the app is
+            # restarted. Any code that touches the database before that
+            # restart (e.g. mainwindow re-syncing distances right after the
+            # Settings dialog closes) would crash. Reopen it immediately at
+            # its new path so the app stays usable without a restart.
+            #
+            # Best-effort: the file move itself already succeeded at this
+            # point regardless of what happens here, so a failure to reopen
+            # (e.g. a file handle not yet released) shouldn't be raised as
+            # if the move failed — the caller already shows a "restart
+            # required" notice that covers this case too.
+            try:
+                self.ensure_active_initialised()
+            except Exception:
+                logger.warning(
+                    "Could not reopen the active database engine after "
+                    "moving it — a restart will be required.", exc_info=True,
+                )
 
         return errors
 

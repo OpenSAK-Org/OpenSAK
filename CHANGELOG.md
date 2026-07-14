@@ -8,66 +8,142 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.14.2] — 2026-07-04
+## [1.15.0] — 2026-07-14
 
-> Hotfix release. Fixes a startup crash affecting any installed version of
-> OpenSAK (stable and beta alike) that predates the "sort by Trackables"
-> feature.
+> First stable release of the 1.15.0 cycle. Replaces the run of
+> `1.15.0-beta.1` … `1.15.0-beta.16` builds — see git history for the
+> detailed beta-by-beta log if needed.
+
+### Added
+
+- **Direct GSAK database import** (#469) — import an entire GSAK
+  `sqlite.db3` file straight into an OpenSAK database, without going via
+  GPX first. Reads caches, waypoints, attributes, logs (full history, not
+  capped like GPX/PQ exports), corrected coordinates, personal notes and
+  trackables directly from the GSAK schema. Confirmed against several
+  independent real-world GSAK databases during development, including a
+  1.1M-log-row one. GSAK custom fields, the Ignore list are out of scope
+  for this first pass (tracked separately in #473).
+- **Export to Garmin GGZ format** (#348) — the GPS export dialog now
+  offers a GPX/GGZ format choice. GGZ packs the exported caches (unlimited
+  count, unlike GPX-based transfers) directly into a ZIP structure Garmin
+  devices read natively, matching GSAK's GGZ layout byte-for-byte.
+- **User-replaceable icon packs** (#519) — custom cache-type and found-
+  smiley icons can now be dropped into a new `icons/` folder (Settings →
+  Advanced → "Open icons folder") without touching any code or rebuilding
+  the app. The folder lives alongside `opensak.json`, so it survives app
+  updates/reinstalls. Also covers the fixed, single-instance UI icons
+  (Corrected coordinates, Premium, Fav. points, Trackables) via an
+  `icons/ui/` subfolder. A bundled, offline "View icon naming guide"
+  button lists every file name and recommended canvas size.
+- **Trackables (travel bugs / geocoins) column and tab** (#489, #538) — an
+  opt-in column showing how many trackables are logged in each cache, and
+  a new Trackables tab on the cache detail panel listing each one with a
+  clickable `coord.info` link.
+- **GSAK-style icons for Found, Premium and Fav. points** (#489) — icons
+  instead of plain text/numbers in the cache list, matching GSAK's own
+  look.
+- **Double-click a cache row to open it on geocaching.com** (#471) —
+  matches GSAK's behaviour.
+- **Option to show hints decoded by default** (#499) — new checkbox under
+  Settings → Display. Off by default.
+- **"Support OpenSAK"** — now that the project is fiscally hosted by Open
+  Source Collective, a Help menu entry, README/website badges, and a
+  button right on the update-available dialog all link to
+  `opencollective.com/opensak`.
 
 ### Fixed
 
-- **Unknown sort field in shared settings crashed the app on startup**
-  (closes #498) — `opensak.json` (which stores UI state such as the active
-  sort column) is shared across every OpenSAK version installed on a
-  machine, not just the one currently running. If a newer version saved a
-  sort field this version doesn't know yet (e.g. `trackables`, added for
-  column-header sorting in the v1.15.0 beta line), starting this version
-  raised an unhandled `ValueError` before the main window could even open.
-  Restoring the saved sort now falls back to the default (`name`) and
-  repairs the stored value if the field isn't recognised, instead of
-  crashing.
+- **Changing the install/database folder via the setup wizard didn't
+  move anything** (#562) — re-running the setup wizard with a different
+  install and/or database folder only updated the stored *pointers*,
+  never the actual files, which could silently reset all settings or
+  leave existing databases behind. Settings, custom icon packs, and the
+  Geocaching.com OAuth token now move with the install folder (with a
+  clear warning on collision instead of failing silently); changing the
+  database folder now offers to move existing databases along; moving/
+  deleting the active database no longer crashes with "Database not
+  initialised"; the "New Database" dialog now defaults to the right
+  folder; and old, now-empty folders (including nested ones) are cleaned
+  up automatically.
+- **"Access is denied" crash saving settings on Windows** (#574) —
+  happened right after a reboot or update, when antivirus/indexing/
+  roaming-profile sync briefly held `opensak.json` open during the
+  atomic save. The write now retries a few times before giving up.
+- **Filter window always opened on the primary monitor** (#580) on
+  multi-monitor setups, regardless of which screen OpenSAK itself was
+  running on. Now opens on the same monitor as the main window.
+- **A cleared filter silently came back when returning to a database** —
+  clicking the red ✕, choosing "None" from the filter dropdown, pressing
+  Escape, or clicking "All" in the status bar reset the filter in the
+  current view but never persisted that per-database, so switching away
+  and back reapplied the filter you'd just cleared.
+- **Beta users never discovered a newer stable release** — the update
+  checker only ever compared a running beta against other betas, so
+  beta.16 users wouldn't have been notified that this stable release
+  existed.
+- **Critical: severe UI freeze switching to or filtering a large
+  database** (#540) — the icon-override folder was being resolved from
+  scratch (file check + JSON read + several `mkdir()` calls) for every
+  single icon lookup, per row — commonly intercepted synchronously by
+  antivirus on Windows, compounding into 45-60 second freezes on large
+  databases. Now resolved once per session.
+- **Dynamic map zoomed out to show the whole world** for caches with
+  hidden-coordinate (0/0) waypoints (#546), e.g. a finale left hidden
+  after a GSAK import.
+- **Clear-filter button (✕) had no hover highlight** (#559), looking
+  non-interactive compared to the rest of the toolbar.
+- A batch of GSAK Database Import fixes found during real-world testing:
+  waypoints sharing a name but not a code were silently dropped (#536);
+  renaming a database didn't move the underlying file, so a new database
+  under the freed name silently reopened the old one (#539); a leftover
+  `favorite_point` column crashed inserts on some databases (#530);
+  non-UTF-8 text fields aborted the entire import instead of falling
+  back gracefully; Adventure Lab and five other cache types imported as
+  "Unknown Cache" (#532); county wasn't imported from GSAK-exported GPX
+  (#521); trackables and premium status weren't imported (#538, #541);
+  and the "New Database" default folder pointed at the install folder
+  instead of the configured database folder.
+- **Distance column could show stale values after editing a home point**
+  (#522) — only switching center points via the toolbar recalculated
+  distances; editing a home point's coordinates in Settings didn't.
+- **"Has trackables" filter crashed** on any database created before
+  v1.14.0 (#491) — a missing table-creation migration.
+- **Map didn't update when correcting coordinates via the cache list's
+  right-click menu** (#474), unlike the same action from the detail panel.
+- **SMALL row-height setting silently ignored** on some systems (#490).
+- **Potential crash on databases with a "Favourite" (★) column enabled**
+  (#488) — removed; GSAK only tracks community Fav. points.
+- **Found date missing for webcam caches and events on import** (#457) —
+  `found_date` was derived only from "Found it" logs.
+- **FTF detection flagged logs that only mentioned "first to find" in
+  passing** (#458) — now matched exclusively against ProjectGC's official
+  tags.
+- Several GGZ export bugs (#348): a crash on databases with mixed dated/
+  undated logs; files written to the wrong device folder; wrong dates
+  inside the exported ZIP; and a severe slowdown on large exports (#466),
+  200-1000× faster after fixing an accidentally-quadratic offset
+  calculation.
+- **Corrected Coordinates icon inconsistency** (follow-up to #354) — a
+  consistent SVG warning-triangle icon everywhere, replacing a hard-to-see
+  emoji.
+- **Found count under the grid counted found caches, not found logs**
+  (#552) — a relocatable/multi-visit cache found several times only ever
+  contributed 1 to the total.
+- **Filter couldn't be cleared via the toolbar "None" dropdown**, plus a
+  new configurable Escape shortcut to clear the active filter (#553).
+- **Large Text setting not applied consistently** — the GC Code column
+  stood out at the wrong size (#547).
+- **Deleting the active saved filter left it applied** until the next
+  unrelated action (#491).
+- **Flag and locked column icons distorted on found-cache rows** (#509) —
+  emoji glyphs don't have a real italic form on some platforms.
+- **File-mode GPS export silently overwrote existing files** (#501) — now
+  prompts for a new filename if the target already exists.
+- **Filters with zero matches emptied the cache list** (#444) — now
+  rejected with a warning instead, matching GSAK's behaviour.
 
 ---
-
-## [1.14.1] — 2026-07-04
-
-> Hotfix release. Four bugs found and fixed on the `beta` branch turned out to
-> already be present in the shipped `v1.14.0` stable release, two of which
-> could crash the app for existing users. This release cherry-picks only
-> those fixes onto `main` — the ongoing `v1.15.0` beta work (GGZ export,
-> corrected-coords icon fixes, org-migration cleanup) is untouched and
-> continues on `beta` as normal.
-
-### Fixed
-
-- **Removed `favorite_point` field — crashed on existing databases**
-  (closes #488) — this field shipped in v1.14.0 without a corresponding
-  migration and had no GSAK parity to begin with. Existing databases hit
-  `no such column` errors the moment it was touched. The field, its column
-  entry, and all related UI/filter references have been removed. As a
-  follow-up, previously persisted column-visibility settings that still
-  referenced the now-removed column are filtered out automatically, so
-  upgrading users don't see a stray/broken column entry.
-
-- **Trackables table missing its migration — crashed on existing databases**
-  (closes #491) — the Trackable model (travel bugs / geocoins) has shipped
-  since v1.14.0 with no migration to actually create its table. Any existing
-  database crashed with `no such table: trackables` as soon as anything
-  queried it — including the already-shipped "Has trackables" filter. A
-  migration now creates the table on upgrade.
-
-- **Map didn't refresh when corrected coordinates were set via the context
-  menu** (closes #474) — setting corrected coordinates from the cache list's
-  right-click menu now refreshes the map, reveals the pin if it was hidden
-  inside a cluster, and preserves the current selection — matching the
-  behaviour already present when setting corrected coordinates from the
-  cache detail panel.
-
-- **Small text-size setting silently ignored on some systems** (closes #490)
-  — Qt derives the cache table's minimum row height from platform/font
-  metrics, which on some systems exceeded OpenSAK's own "Small" row height
-  setting and silently clamped it back up. The minimum is now pinned
-  explicitly so the configured text size always applies.
 
 ## [1.14.0] — 2026-06-29
 
@@ -224,7 +300,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   JSON settings store — existing corrupted values repair automatically on
   startup.
 
-For planned features and known issues see the [GitHub Issues list](https://github.com/AgreeDK/opensak/issues).
+For planned features and known issues see the [GitHub Issues list](https://github.com/OpenSAK-Org/opensak/issues).
 
 ---
 
@@ -258,7 +334,7 @@ For planned features and known issues see the [GitHub Issues list](https://githu
   `requirements.txt` is removed, the bundles ship the libraries' data files (GeoNames CSV, ISO
   tables), and a smoke test exercises the real lookup so a missing dependency fails CI.
 
-For planned features and known issues see the [GitHub Issues list](https://github.com/AgreeDK/opensak/issues).
+For planned features and known issues see the [GitHub Issues list](https://github.com/OpenSAK-Org/opensak/issues).
 
 ## [1.13.11] — 2026-05-29
 

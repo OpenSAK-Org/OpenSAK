@@ -42,6 +42,50 @@ def dlg(qtbot):
     return d
 
 
+# ── multi-monitor positioning (#580) ─────────────────────────────────────────
+
+class TestScreenPositioning:
+    def test_uses_parent_screen_not_primary(self, qtbot, monkeypatch):
+        # Issue #580: on a multi-monitor setup, the filter dialog always
+        # opened on the primary screen instead of whichever screen the main
+        # window (its parent) was actually on.
+        from PySide6.QtCore import QRect
+        from PySide6.QtWidgets import QWidget
+
+        primary_screen = MagicMock()
+        primary_screen.availableGeometry.return_value = QRect(0, 0, 1920, 1080)
+        secondary_screen = MagicMock()
+        secondary_screen.availableGeometry.return_value = QRect(1920, 0, 1920, 1080)
+
+        import PySide6.QtWidgets as _qtw
+        monkeypatch.setattr(_qtw.QApplication, "primaryScreen", staticmethod(lambda: primary_screen))
+
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        parent.screen = lambda: secondary_screen  # PySide6 QWidget instances allow this
+
+        d = FilterDialog(parent=parent)
+        qtbot.addWidget(d)
+
+        assert not primary_screen.availableGeometry.called
+        assert secondary_screen.availableGeometry.called
+        # Centred within the secondary screen's bounds (x >= 1920), not the
+        # primary screen's (x in [0, 1920)).
+        assert d.pos().x() >= 1920
+
+    def test_falls_back_to_primary_screen_without_a_parent(self, qtbot, monkeypatch):
+        from PySide6.QtCore import QRect
+        primary_screen = MagicMock()
+        primary_screen.availableGeometry.return_value = QRect(0, 0, 1920, 1080)
+        import PySide6.QtWidgets as _qtw
+        monkeypatch.setattr(_qtw.QApplication, "primaryScreen", staticmethod(lambda: primary_screen))
+
+        d = FilterDialog(parent=None)
+        qtbot.addWidget(d)
+
+        assert primary_screen.availableGeometry.called
+
+
 # ── helper widgets ──────────────────────────────────────────────────────────────
 
 class TestHelperWidgets:
@@ -127,6 +171,35 @@ class TestBuildFilterset:
     def test_distance_filter(self, dlg):
         dlg._dist_enabled.setChecked(True)
         assert "distance" in _types(dlg._build_filterset())
+
+    def test_default_availability_state_does_not_count(self, dlg):
+        # Mike's report: setting only a distance filter (leaving Available/
+        # Unavailable checked and Archived unchecked, i.e. all defaults)
+        # showed "2 active" instead of "1 active". The default availability
+        # state still adds a real AvailabilityFilter (archived caches must
+        # stay hidden), but it must not count toward the active badge.
+        dlg._dist_enabled.setChecked(True)
+        fs = dlg._build_filterset()
+        assert set(_types(fs)) == {"distance", "availability"}
+        assert len(fs) == 2
+        assert fs.active_count() == 1
+
+    def test_default_availability_state_alone_counts_zero(self, dlg):
+        # Opening the dialog and applying with no changes at all should not
+        # register as "1 active" even though an AvailabilityFilter is
+        # silently present to keep archived caches hidden.
+        fs = dlg._build_filterset()
+        assert _types(fs) == ["availability"]
+        assert fs.active_count() == 0
+
+    def test_explicit_availability_change_still_counts(self, dlg):
+        # A deliberate availability change (e.g. also showing archived
+        # caches) is a real, user-chosen filter and must still count.
+        dlg._archived_cb.setChecked(True)
+        dlg._unavail_cb.setChecked(False)
+        fs = dlg._build_filterset()
+        assert "availability" in _types(fs)
+        assert fs.active_count() == 1
 
     def test_premium_and_trackable_and_corrected(self, dlg):
         dlg._prem_no.setChecked(False)
@@ -415,6 +488,21 @@ class TestProfiles:
                             lambda *a, **k: fd.QMessageBox.StandardButton.Yes)
         dlg._delete_profile()
         assert not p.exists()
+
+    def test_delete_profile_emits_profile_deleted_signal(self, dlg, monkeypatch, tmp_path, qtbot):
+        # issue #491: deleting a profile must report the name immediately,
+        # regardless of whether the dialog is later applied or just closed.
+        p = tmp_path / "del.json"
+        p.write_text("{}")
+        dlg._profile_combo.blockSignals(True)
+        dlg._profile_combo.addItem("Del", p)
+        dlg._profile_combo.setCurrentIndex(dlg._profile_combo.count() - 1)
+        dlg._profile_combo.blockSignals(False)
+        monkeypatch.setattr(fd.QMessageBox, "question",
+                            lambda *a, **k: fd.QMessageBox.StandardButton.Yes)
+        with qtbot.waitSignal(dlg.profile_deleted, timeout=1000) as blocker:
+            dlg._delete_profile()
+        assert blocker.args == ["Del"]
 
 
 # ── default button / Enter key (#370) ──────────────────────────────────────────
