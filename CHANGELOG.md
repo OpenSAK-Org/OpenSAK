@@ -8,6 +8,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.0-beta.16] — 2026-07-14
+
+> **Beta release** — clearing a filter now actually stays cleared when
+> you switch away from and back to a database.
+
+### Fixed
+
+- **A cleared filter silently came back when returning to a database**
+  (reported on Facebook) — clicking the red ✕, choosing "None" from the
+  filter dropdown, pressing Escape, or clicking "All" in the status bar
+  all reset the filter in the current view, but never updated the
+  per-database saved filter reference in opensak.json. Switching to
+  another database and back would then silently reapply the filter you
+  had just cleared. The cleared state is now persisted immediately, the
+  same way selecting a saved filter profile already was.
+
+---
+
 ## [1.15.0-beta.15] — 2026-07-13
 
 > **Beta release** — the "Support OpenSAK" link is now also on the

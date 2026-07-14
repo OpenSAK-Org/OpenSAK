@@ -1899,6 +1899,14 @@ class MainWindow(QMainWindow):
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
+        # Bug reported on Facebook: clearing the filter (red X / "None" in
+        # the dropdown / Escape / the status-bar "All" click) only reset it
+        # in the current view — the per-database saved profile reference in
+        # opensak.json was never updated, so switching away and back to the
+        # same database silently reapplied the filter that had just been
+        # cleared. Persist the cleared state immediately, same as selecting
+        # a saved profile already does in _on_filter_profile_combo_changed().
+        self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
 
