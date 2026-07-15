@@ -8,6 +8,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0-beta.4] — 2026-07-15
+
+> **Beta release** — the database list/dropdown is now alphabetically
+> sorted, plus a small message cleanup.
+
+### Fixed
+
+- **Database list/dropdown was not sorted alphabetically** (#531, #601) —
+  the toolbar database dropdown, the Manage Databases dialog, and the
+  database picker in Move Caches, GSAK import, and GPX/PQ import all
+  listed databases in the order they were added/imported instead of
+  alphabetically. All of these now show databases sorted alphabetically
+  (case-insensitive) by name, matching GSAK's behaviour.
+- **"Database created" message told the user to manually activate it**
+  (#464) — creating a new database already switches to it automatically,
+  but the confirmation dialog still said to click "Switch to this" to
+  activate it. The message now simply confirms the database was created
+  and is active.
+
+---
+
 ## [1.16.0-beta.3] — 2026-07-15
 
 > **Beta release** — pick any cache, saved home point, or coordinate as the
