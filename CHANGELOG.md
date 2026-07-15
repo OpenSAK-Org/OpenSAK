@@ -8,6 +8,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0-beta.2] — 2026-07-15
+
+> **Beta release** — custom waypoint types get their own icons, and the
+> found-smiley icon set is simplified (#593).
+
+### Added
+
+- **Custom waypoint types now have their own icons** — Parking Area,
+  Trailhead, Stage, Final Location, Reference Point, Waypoint, Hotel/POI
+  and Custom each get a distinct icon in the table, map and detail panel,
+  instead of all sharing the generic "unknown" (?) icon. Overridable via
+  the same `icons/cache_types/` user-icon mechanism as #519.
+
+### Changed
+
+- **Simplified the found-smiley icon set** (#593) — removed the 12 unused
+  colour variants and the per-type colour-selection code behind them.
+  Only `gold` (Found overlay + "Found" column) and `dark_blue` (DNF
+  overlay) were ever actually shown in the app; the rest was dead
+  code/assets. Reported by a community member in the OpenSAK Facebook
+  group.
+
+---
+
 ## [1.15.0] — 2026-07-14
 
 > First stable release of the 1.15.0 cycle. Replaces the run of
