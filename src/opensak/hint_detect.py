@@ -36,10 +36,22 @@ forkert.
 
 from __future__ import annotations
 
+import re
+
 _ROT13_TABLE = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm",
 )
+
+# Splits on [bracketed] spans, keeping them as separate items in the result
+# (Python's re.split() with a capturing group includes the matched
+# delimiters themselves in the returned list).
+_BRACKET_RE = re.compile(r"(\[[^\[\]]*\])")
+
+# geocaching.com's [br] markup means "line break" and is never itself part
+# of the encoded/plain hint text (issue #595). Matched case-insensitively —
+# geocaching.com accepts [br], [BR], [Br], ...
+_LINEBREAK_RE = re.compile(r"\[br\]", re.IGNORECASE)
 
 # Bredt sæt af vokaler inkl. accenttegn for alle 8 understøttede sprog
 # (da, en, fr, nl, pt, cs, se, de). Bruges kun til klassificerings-
@@ -66,8 +78,34 @@ _MIN_MARGIN = 0.02
 
 def rot13(text: str) -> str:
     """ROT13-transformér en streng. Kun ASCII A-Z/a-z påvirkes (uændret
-    fra den oprindelige implementering i cache_detail.py)."""
-    return text.translate(_ROT13_TABLE)
+    fra den oprindelige implementering i cache_detail.py).
+
+    Issue #595: geocaching.com's hint-markup — [br] for linjeskift,
+    stednavne som [Étape]/[Finale] i franske hints osv. — står ukodet i
+    feltet, også når resten af teksten er ægte ROT13-ciffertekst. Indhold i
+    [firkantede parenteser] roteres derfor IKKE; kun teksten uden for
+    parenteserne påvirkes. Da transformationen er sin egen invers i begge
+    tilfælde, forbliver rot13(rot13(x)) == x uanset brackets.
+    """
+    return "".join(
+        part if part.startswith("[") and part.endswith("]")
+        else part.translate(_ROT13_TABLE)
+        for part in _BRACKET_RE.split(text)
+    )
+
+
+def render_hint_breaks(text: str, html: bool = False) -> str:
+    """Erstat geocaching.com's [br]-markup med et rigtigt linjeskift.
+
+    Kaldes efter split_hint() — split_hint()/rot13() bevarer [br] som
+    bogstavelig tekst (se rot13() ovenfor), men det skal vises som et
+    linjeskift, ikke som synlig "[br]"-tekst (issue #595).
+
+    html=True bruges til HTML-kontekster (fx KML-eksport) og indsætter
+    "<br/>" i stedet for "\\n" — kald det EFTER evt. HTML-escaping af
+    teksten, ellers bliver "<br/>" selv escapet væk.
+    """
+    return _LINEBREAK_RE.sub("<br/>" if html else "\n", text)
 
 
 def _vowel_density(text: str) -> tuple[float | None, int]:

@@ -8,6 +8,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0-beta.3] — 2026-07-15
+
+> **Beta release** — pick any cache, saved home point, or coordinate as the
+> distance filter's center (#511), plus two small bugfixes.
+
+### Added
+
+- **Center point picker for the distance filter** (#511) — the "Afstand"
+  filter no longer always centers on Home. Choose Home, any saved home
+  point, the currently selected cache, or a manually entered coordinate as
+  the center, and set an optional minimum distance alongside the existing
+  maximum (both were already supported by the filter engine; only the
+  maximum was previously exposed in the dialog). Built as a standalone,
+  reusable widget for future reuse (planned for #558).
+- **"Set as center point" (right-click)** (#511) — right-click any cache or
+  custom waypoint (e.g. a hotel added via Waypoint → Custom Waypoint) and
+  choose "Sæt som centerpunkt" to recompute the Distance column for every
+  cache from that point, exactly like switching Home. The chosen point's
+  GC code/name is shown in the info bar's "Centerpunkt" field and in the
+  Home dropdown until you pick a saved home point or another cache.
+
+### Fixed
+
+- **Hint markup was being ROT13-scrambled** (#595) — geocaching.com's own
+  hint markup (`[br]` for a line break, place-name tags like `[Étape]` in
+  French hints) was incorrectly rotated along with the rest of the hint
+  text, so `[br]` showed up as its ROT13'd form `[oe]` instead of a line
+  break. Bracketed markup is now left untouched by the ROT13
+  encode/decode, and `[br]` renders as an actual line break in both the
+  cache detail hint tab and KML export.
+- **Website: corrected GSAK's freeware date** (#589) — the landing page's
+  comparison table said GSAK became freeware in 2021; per research from a
+  long-time GSAK user (French GSAK user since 2011), the free v9.0.0
+  shipped in 2019, with the last forum-provided patch dating from 2022.
+
+---
+
 ## [1.16.0-beta.2] — 2026-07-15
 
 > **Beta release** — custom waypoint types get their own icons, and the

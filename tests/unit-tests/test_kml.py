@@ -110,6 +110,14 @@ class TestCacheDescription:
         text = _cache_description(_cache(encoded_hints=b"\xff\xfe"))
         assert "Hint:" in text
 
+    def test_hint_br_markup_rendered_as_html_line_break(self):
+        # Issue #595: [br] must become a real <br/> in the HTML popup, not
+        # show up literally (and definitely not as its ROT13'd "[oe]").
+        text = _cache_description(_cache(encoded_hints="Under a rock [br] second line"))
+        assert "<br/>" in text.split("Hint:")[1]
+        assert "[br]" not in text
+        assert "[oe]" not in text
+
     def test_gc_link_present(self):
         text = _cache_description(_cache(gc_code="GCABCDE"))
         assert "geocaching.com/geocache/GCABCDE" in text

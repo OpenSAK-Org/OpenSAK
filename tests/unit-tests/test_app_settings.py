@@ -116,6 +116,21 @@ class TestHomePoints:
         s.remove_home_point("A")
         assert s.active_home_name == ""
 
+    def test_set_active_home_with_ad_hoc_point(self, s):
+        # Issue #511: "set cache as center point" builds a HomePoint on the
+        # fly and never saves it via add_or_update_home_point(). It must
+        # still become the active center (home_lat/lon + active_home_name),
+        # while staying absent from the saved list and from get_active_home()
+        # (which only looks in home_points) — that's what lets the caller
+        # tell an ad-hoc center apart from a real saved one.
+        p = HomePoint("📍 GC1AB23 — Troll Bridge", 56.1, 10.2)
+        s.set_active_home(p)
+        assert s.active_home_name == "📍 GC1AB23 — Troll Bridge"
+        assert s.home_lat == pytest.approx(56.1)
+        assert s.home_lon == pytest.approx(10.2)
+        assert s.home_points == []
+        assert s.get_active_home() is None
+
 
 # ── geocaching user fields ────────────────────────────────────────────────────────
 

@@ -83,12 +83,15 @@ def _cache_description(cache: Cache) -> str:
         lines.append(f"<br/>{_esc(cache.short_description)}")
 
     if cache.encoded_hints:
-        from opensak.hint_detect import split_hint
+        from opensak.hint_detect import split_hint, render_hint_breaks
         try:
             plain, _cipher = split_hint(cache.encoded_hints)
         except Exception:
             plain = cache.encoded_hints or ""
-        lines.append(f"<br/><i>Hint: {_esc(plain)}</i>")
+        # render_hint_breaks() must run AFTER _esc() — otherwise the "<br/>"
+        # we insert here would itself get HTML-escaped away (issue #595).
+        hint_html = render_hint_breaks(_esc(plain), html=True)
+        lines.append(f"<br/><i>Hint: {hint_html}</i>")
 
     gc_url = f"https://www.geocaching.com/geocache/{_esc(cache.gc_code)}"
     lines.append(f"<br/><a href='{gc_url}'>{_esc(cache.gc_code)}</a>")

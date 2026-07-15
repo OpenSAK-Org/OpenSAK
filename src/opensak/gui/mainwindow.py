@@ -239,6 +239,7 @@ class MainWindow(QMainWindow):
         self._cache_table.sort_changed.connect(self._on_sort_changed)
         self._cache_table.location_updated.connect(self._refresh_cache_list)
         self._cache_table.edit_requested.connect(self._edit_waypoint_from_cache)
+        self._cache_table.center_point_requested.connect(self._set_cache_as_center)
         self._cache_table.corrected_coords_changed.connect(self._on_corrected_coords_changed)
         self._splitter.addWidget(self._cache_table)
 
@@ -1353,7 +1354,14 @@ class MainWindow(QMainWindow):
                     act.setShortcut(seq)
 
     def _reload_home_combo(self) -> None:
-        """Genindlæs hjemmepunkts-dropdown fra settings."""
+        """Genindlæs hjemmepunkts-dropdown fra settings.
+
+        Issue #511: hvis det aktive centerpunkt er en cache sat via
+        højreklik (dvs. dets navn ikke findes i de gemte hjemmepunkter),
+        indsættes det som en midlertidig ekstra post øverst, så den valgte
+        cache forbliver synlig som aktivt centrum indtil brugeren vælger et
+        gemt hjemmepunkt eller en ny cache.
+        """
         s = get_settings()
         points = s.home_points
         active = s.active_home_name
@@ -1364,11 +1372,16 @@ class MainWindow(QMainWindow):
         else:
             for p in points:
                 self._home_combo.addItem(p.name, p.name)
-            # Sæt aktiv
-            for i in range(self._home_combo.count()):
-                if self._home_combo.itemData(i) == active:
-                    self._home_combo.setCurrentIndex(i)
-                    break
+        if active and not any(
+            self._home_combo.itemData(i) == active
+            for i in range(self._home_combo.count())
+        ):
+            self._home_combo.insertItem(0, active, active)
+        # Sæt aktiv
+        for i in range(self._home_combo.count()):
+            if self._home_combo.itemData(i) == active:
+                self._home_combo.setCurrentIndex(i)
+                break
         self._home_combo.blockSignals(False)
         self._sync_active_home_coords()
 
@@ -1414,6 +1427,36 @@ class MainWindow(QMainWindow):
                     tr("status_home_changed", name=point.name), 3000
                 )
                 break
+
+    def _set_cache_as_center(self, cache) -> None:
+        """Sæt en cache som aktivt centerpunkt (issue #511 — GSAK's
+        CenterPoint > Current Cache, tilgået via højreklik i tabellen).
+
+        Genbruger nøjagtig samme mekanisme som skift af hjemmepunkt
+        (_on_home_changed): opdaterer home_lat/home_lon — hvilket driver
+        både Distance-kolonnen og info-barens "Centerpunkt"-visning — og
+        genberegner/persisterer afstand+bearing for alle caches. Punktet er
+        ikke et gemt hjemmepunkt, så det optræder ikke i Settings' liste,
+        men vises som et midlertidigt valg i hjem-dropdownen og info-baren
+        indtil brugeren vælger et andet punkt (gemt hjemmepunkt eller en ny
+        cache).
+        """
+        if cache.latitude is None or cache.longitude is None:
+            return
+        from opensak.gui.settings import get_settings, HomePoint
+        s = get_settings()
+        label = f"📍 {cache.gc_code} — {cache.name}".strip(" —")
+        point = HomePoint(label, cache.latitude, cache.longitude)
+        s.set_active_home(point)
+        self._reload_home_combo()
+        self._map_widget.pan_to_location(point.lat, point.lon, point.name)
+        from opensak.db.database import recalculate_distances
+        recalculate_distances(point.lat, point.lon)
+        self._refresh_cache_list()
+        self._update_info_bar()
+        self._statusbar.showMessage(
+            tr("status_home_changed", name=point.name), 3000
+        )
 
     def _initial_load(self) -> None:
         """Første load ved opstart — vent på kort hvis ikke klar."""
@@ -1803,7 +1846,10 @@ class MainWindow(QMainWindow):
         brugerens netop indtastede — men afviste — kriterier ikke går tabt.
         """
         from opensak.gui.dialogs.filter_dialog import FilterDialog
-        dlg = FilterDialog(self, filterset, active_name)
+        dlg = FilterDialog(
+            self, filterset, active_name,
+            current_cache=self._cache_table.selected_cache(),
+        )
         dlg.filter_applied.connect(self._on_filter_applied)
         dlg.profile_deleted.connect(self._on_profile_deleted)
         dlg.exec()

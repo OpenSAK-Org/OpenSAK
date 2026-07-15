@@ -304,6 +304,22 @@ def test_distance_filter_min_max(tmp_db):
     assert "GC00003" in codes      # ~155km
 
 
+def test_distance_filter_center_state_roundtrip():
+    # Issue #511: center_state is purely for re-populating the picker's combo
+    # box on reload — it must never affect matching (which always uses the
+    # frozen lat/lon snapshot), and must default to None for filters built
+    # without a picker (backward compatibility with pre-#511 saved profiles).
+    f = DistanceFilter(55.6, 12.5, 50.0, center_state={"kind": "point", "name": "Cabin"})
+    data = f.to_dict()
+    assert data["center_state"] == {"kind": "point", "name": "Cabin"}
+    restored = DistanceFilter.from_dict(data)
+    assert restored.center_state == {"kind": "point", "name": "Cabin"}
+    assert restored.lat == 55.6 and restored.lon == 12.5
+
+    legacy = DistanceFilter.from_dict({"lat": 55.6, "lon": 12.5, "max_km": 50.0})
+    assert legacy.center_state is None
+
+
 def test_attribute_filter(tmp_db):
     with get_session() as s:
         fs = FilterSet().add(AttributeFilter(attribute_id=6, is_on=True))

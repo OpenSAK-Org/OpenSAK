@@ -25,7 +25,7 @@ from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
 from opensak.gui.icon_provider import get_cache_type_pixmap_composite, get_corrected_coords_icon
 from opensak.utils.types import DateFormat, TEXT_SIZE_MAP, norm_locale_date_fmt
-from opensak.hint_detect import split_hint
+from opensak.hint_detect import split_hint, render_hint_breaks
 
 
 def _format_date(d: datetime) -> str:
@@ -630,6 +630,11 @@ class CacheDetailPanel(QWidget):
         # medmindre brugeren har slået "vis hints decoded som standard" til
         # under Settings (issue #499).
         self._hint_plain, self._hint_cipher = split_hint(cache.encoded_hints or "")
+        # Issue #595: [br] is geocaching.com's own "line break" markup, not
+        # part of the hint text itself — render it as one, in both the
+        # plain and the (still spoiler-hidden) cipher view.
+        self._hint_plain = render_hint_breaks(self._hint_plain)
+        self._hint_cipher = render_hint_breaks(self._hint_cipher)
         self._hint_decoded = get_settings().default_decode_hints
         if self._hint_decoded:
             self._hint_browser.setPlainText(

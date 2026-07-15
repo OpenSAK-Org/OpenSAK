@@ -1217,6 +1217,7 @@ class CacheTableView(QTableView):
     sort_changed = Signal(str, bool)  # (col_id, ascending) videresendes fra model
     location_updated = Signal()       # emitted after right-click location update
     edit_requested = Signal(object)   # emitted when user requests edit of a cache
+    center_point_requested = Signal(object)  # emitted with a Cache — "Sæt som centerpunkt" (#511)
     corrected_coords_changed = Signal(str)  # gc_code — emitted after Add/Edit/Clear
                                              # corrected coordinates via the context menu
                                              # (issue #474: map wasn't refreshed until now)
@@ -1475,6 +1476,14 @@ class CacheTableView(QTableView):
                 lambda checked=False, la=lat, lo=lon: webbrowser.open(
                     get_settings().get_maps_url(la, lo)
                 )
+            )
+
+            # Sæt som centerpunkt (issue #511 — GSAK's CenterPoint > Current
+            # Cache). Genberegner Distance-kolonnen for alle caches ud fra
+            # denne cache, indtil et andet punkt vælges.
+            act_set_center = menu.addAction(tr("ctx_set_as_center"))
+            act_set_center.triggered.connect(
+                lambda checked=False, c=cache: self.center_point_requested.emit(c)
             )
 
         menu.addSeparator()

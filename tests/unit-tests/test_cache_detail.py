@@ -128,6 +128,20 @@ def test_hint_defaults_decoded_when_setting_on(monkeypatch, tmp_path, qapp):
     assert panel._hint_browser.toPlainText() == panel._hint_plain
 
 
+def test_hint_br_markup_shown_as_line_break(monkeypatch, tmp_path, qapp):
+    # Issue #595: [br] must render as an actual line break, not literal
+    # "[br]" text and definitely not its ROT13'd form "[oe]".
+    panel = _load_cache_with_hint(
+        monkeypatch, tmp_path,
+        hint="Under the big rock near the old oak tree [br] by the river",
+        default_decode_hints=True,
+    )
+    shown = panel._hint_browser.toPlainText()
+    assert "[br]" not in shown
+    assert "[oe]" not in shown
+    assert "\n" in shown
+
+
 def test_hint_default_decoded_with_no_hint_shows_no_hint_label(monkeypatch, tmp_path, qapp):
     # Edge case: setting is on, but the cache has no hint at all.
     panel = _load_cache_with_hint(

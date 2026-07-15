@@ -29,10 +29,11 @@ from opensak.filters.engine import (
 def isolate(monkeypatch):
     # No real profiles on disk; deterministic home for DistanceFilter.
     monkeypatch.setattr(fd.FilterProfile, "list_profiles", staticmethod(lambda: []))
-    from opensak.utils.types import DateFormat
+    from opensak.utils.types import DateFormat, CoordFormat
     monkeypatch.setattr("opensak.gui.settings.get_settings",
                         lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=False,
-                                               date_format=DateFormat.YMD))
+                                               date_format=DateFormat.YMD,
+                                               coord_format=CoordFormat.DD, home_points=[]))
 
 
 @pytest.fixture
@@ -549,9 +550,11 @@ class TestApply:
 class TestDistanceUnitPref:
     @pytest.fixture
     def dlg_mi(self, qtbot, monkeypatch):
+        from opensak.utils.types import CoordFormat
         monkeypatch.setattr(
             "opensak.gui.settings.get_settings",
-            lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True),
+            lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True,
+                                     coord_format=CoordFormat.DD, home_points=[]),
         )
         d = FilterDialog()
         qtbot.addWidget(d)
@@ -596,3 +599,71 @@ class TestDistanceUnitPref:
         fs = dlg_mi._build_filterset()
         dlg_mi._load_filterset(fs)
         assert abs(dlg_mi._dist_max.value() - 50.0) < 0.1
+
+
+# ── center point picker integration (#511) ───────────────────────────────────
+
+class TestCenterPointIntegration:
+    def test_defaults_to_home(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        fs = dlg._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert (f.lat, f.lon) == (55.0, 12.0)
+        assert f.center_state == {"kind": "home"}
+
+    def test_selected_cache_as_center(self, qtbot):
+        cache = SimpleNamespace(gc_code="GC1AB23", name="Troll Bridge",
+                                 latitude=56.1, longitude=10.2)
+        d = FilterDialog(current_cache=cache)
+        qtbot.addWidget(d)
+        d._dist_enabled.setChecked(True)
+        d._center_picker.set_state({"kind": "cache"})
+        fs = d._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert (f.lat, f.lon) == (56.1, 10.2)
+        assert f.center_state == {"kind": "cache"}
+
+    def test_custom_coordinate_as_center(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        dlg._center_picker.set_state({"kind": "custom", "text": "56.5, 10.1"})
+        fs = dlg._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert (f.lat, f.lon) == (56.5, 10.1)
+
+    def test_invalid_center_skips_distance_filter_with_warning(self, dlg, monkeypatch):
+        warned = []
+        monkeypatch.setattr(fd.QMessageBox, "warning",
+                            staticmethod(lambda *a, **kw: warned.append(a)))
+        dlg._dist_enabled.setChecked(True)
+        dlg._center_picker.set_state({"kind": "custom", "text": "not a coordinate"})
+        fs = dlg._build_filterset()
+        assert "distance" not in _types(fs)
+        assert warned
+
+    def test_min_distance_included(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        dlg._dist_min.setValue(2.0)
+        dlg._dist_max.setValue(50.0)
+        fs = dlg._build_filterset()
+        f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
+        assert abs(f.min_km - 2.0) < 0.01
+
+    def test_load_restores_center_state(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DistanceFilter(60.0, 10.0, 30.0, center_state={"kind": "custom", "text": "60.0, 10.0"}))
+        dlg._load_filterset(fs)
+        assert dlg._center_picker.to_state() == {"kind": "custom", "text": "60.0, 10.0"}
+
+    def test_load_legacy_filter_without_center_state(self, dlg):
+        # Pre-#511 saved profile: no center_state at all. Should surface the
+        # stored lat/lon as an editable custom point rather than silently
+        # assuming Home.
+        fs = FilterSet(mode="AND")
+        fs.add(DistanceFilter(60.0, 10.0, 30.0))
+        dlg._load_filterset(fs)
+        assert dlg._center_picker.get_center() == (60.0, 10.0)
+
+    def test_reset_returns_center_to_home(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        dlg._reset_general()
+        assert dlg._center_picker.to_state() == {"kind": "home"}

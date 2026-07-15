@@ -635,11 +635,20 @@ class DistanceFilter(BaseFilter):
         lon: float,
         max_km: float,
         min_km: float = 0.0,
+        center_state: Optional[dict] = None,
     ):
         self.lat = lat
         self.lon = lon
         self.max_km = max_km
         self.min_km = min_km
+        # Serialized CenterPointPicker selection (issue #511) — e.g.
+        # {"kind": "point", "name": "Cabin"} or {"kind": "cache"}. Purely for
+        # re-populating the picker's combo box when a saved filter is
+        # reloaded into the dialog; matching/query logic below only ever
+        # uses lat/lon, which are always a frozen snapshot taken at the
+        # moment the filter was built (same as before this field existed).
+        # None for filters built before #511 or built without a picker.
+        self.center_state = center_state
 
     def apply_to_query(self, query):
         """Pre-narrow with a lat/lon bounding box that *contains* the circle.
@@ -679,11 +688,15 @@ class DistanceFilter(BaseFilter):
             "lon": self.lon,
             "max_km": self.max_km,
             "min_km": self.min_km,
+            "center_state": self.center_state,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DistanceFilter":
-        return cls(data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0))
+        return cls(
+            data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
+            data.get("center_state"),
+        )
 
 
 class AttributeFilter(BaseFilter):

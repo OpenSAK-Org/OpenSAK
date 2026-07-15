@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtCore import QDate
 
+from opensak.gui.widgets.center_point_picker import CenterPointPicker
 from opensak.lang import tr
 from opensak.filters.engine import (
     FilterSet, SortSpec,
@@ -208,10 +209,14 @@ class FilterDialog(QDialog):
                                     # independent of whether the dialog is later applied or closed
 
     def __init__(self, parent=None, current_filterset: Optional[FilterSet] = None,
-                 last_profile_name: str = ""):
+                 last_profile_name: str = "", current_cache=None):
         super().__init__(parent)
         self.setWindowTitle(tr("filter_dialog_title"))
         self._attr_boxes: dict[int, tuple] = {}
+        # Cache currently selected in the main window's table, if any — lets
+        # the "Afstand"-fanens center-punkt-vælger tilbyde "denne cache" som
+        # centrum (issue #511). None if nothing is selected.
+        self._current_cache = current_cache
         # Startsstørrelse: 70% af skærm, aldrig større end 1000x850
         from PySide6.QtWidgets import QApplication
         # Issue #580: brugte tidligere altid QApplication.primaryScreen(),
@@ -445,19 +450,41 @@ class FilterDialog(QDialog):
 
         # Afstand
         dist_group = QGroupBox(tr("filter_distance_group"))
-        dist_layout = QHBoxLayout(dist_group)
+        dist_outer = QVBoxLayout(dist_group)
+
+        dist_row = QHBoxLayout()
         self._dist_enabled = QCheckBox(tr("filter_enable"))
         self._dist_enabled.toggled.connect(self._on_dist_toggled)
-        dist_layout.addWidget(self._dist_enabled)
-        dist_layout.addWidget(QLabel(tr("filter_max")))
+        dist_row.addWidget(self._dist_enabled)
+        dist_row.addWidget(QLabel(tr("filter_min")))
+        self._dist_min = QDoubleSpinBox()
+        self._dist_min.setRange(0.0, 9999.0)
+        self._dist_min.setValue(0.0)
+        from opensak.gui.settings import get_settings as _gs
+        _unit = " mi" if _gs().use_miles else " km"
+        self._dist_min.setSuffix(_unit)
+        self._dist_min.setEnabled(False)
+        dist_row.addWidget(self._dist_min)
+        dist_row.addWidget(QLabel(tr("filter_max")))
         self._dist_max = QDoubleSpinBox()
         self._dist_max.setRange(0.1, 9999.0)
         self._dist_max.setValue(50.0)
-        from opensak.gui.settings import get_settings as _gs
-        self._dist_max.setSuffix(" mi" if _gs().use_miles else " km")
+        self._dist_max.setSuffix(_unit)
         self._dist_max.setEnabled(False)
-        dist_layout.addWidget(self._dist_max)
-        dist_layout.addStretch()
+        dist_row.addWidget(self._dist_max)
+        dist_row.addStretch()
+        dist_outer.addLayout(dist_row)
+
+        # Center-punkt (issue #511) — genbrugelig widget, delt med den
+        # planlagte quick "Where"-boks i toolbaren (#558).
+        center_row = QHBoxLayout()
+        center_row.addWidget(QLabel(tr("center_point_label")))
+        self._center_picker = CenterPointPicker(self)
+        self._center_picker.set_current_cache(self._current_cache)
+        self._center_picker.setEnabled(False)
+        center_row.addWidget(self._center_picker, 1)
+        dist_outer.addLayout(center_row)
+
         layout.addRow(dist_group)
 
         # Premium
@@ -935,6 +962,8 @@ class FilterDialog(QDialog):
 
     def _on_dist_toggled(self, checked: bool) -> None:
         self._dist_max.setEnabled(checked)
+        self._dist_min.setEnabled(checked)
+        self._center_picker.setEnabled(checked)
 
     def _on_fav_toggled(self, checked: bool) -> None:
         self._fav_min.setEnabled(checked)
@@ -967,6 +996,8 @@ class FilterDialog(QDialog):
         self._archived_cb.setChecked(False)
         self._dist_enabled.setChecked(False)
         self._dist_max.setValue(50.0)
+        self._dist_min.setValue(0.0)
+        self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
         self._tb_yes.setChecked(True)
@@ -1114,9 +1145,19 @@ class FilterDialog(QDialog):
         if self._dist_enabled.isChecked():
             from opensak.gui.settings import get_settings
             s = get_settings()
-            dist_val = self._dist_max.value()
-            max_km = dist_val * 1.60934 if s.use_miles else dist_val
-            fs.add(DistanceFilter(s.home_lat, s.home_lon, max_km))
+            center = self._center_picker.get_center()
+            if center is None:
+                QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
+            else:
+                lat, lon = center
+                dist_val = self._dist_max.value()
+                min_val = self._dist_min.value()
+                max_km = dist_val * 1.60934 if s.use_miles else dist_val
+                min_km = min_val * 1.60934 if s.use_miles else min_val
+                fs.add(DistanceFilter(
+                    lat, lon, max_km, min_km,
+                    center_state=self._center_picker.to_state(),
+                ))
 
         # Premium
         prem_yes = self._prem_yes.isChecked()
@@ -1414,9 +1455,22 @@ class FilterDialog(QDialog):
             elif ftype == "distance":
                 self._dist_enabled.setChecked(True)
                 from opensak.gui.settings import get_settings as _gs
+                _use_mi = _gs().use_miles
                 saved_km = getattr(f, "max_km", 10.0)
-                display = saved_km * 0.621371 if _gs().use_miles else saved_km
-                self._dist_max.setValue(display)
+                self._dist_max.setValue(saved_km * 0.621371 if _use_mi else saved_km)
+                saved_min_km = getattr(f, "min_km", 0.0)
+                self._dist_min.setValue(saved_min_km * 0.621371 if _use_mi else saved_min_km)
+                center_state = getattr(f, "center_state", None)
+                if center_state:
+                    self._center_picker.set_state(center_state)
+                else:
+                    # Filter gemt før #511 (eller uden center-punkt-info) —
+                    # vis det gemte punkt som et redigerbart custom-punkt i
+                    # stedet for stiltiende at antage Home.
+                    self._center_picker.set_state({
+                        "kind": "custom",
+                        "text": f"{f.lat:.6f}, {f.lon:.6f}",
+                    })
             elif ftype == "premium":
                 self._prem_yes.setChecked(True)
                 self._prem_no.setChecked(False)
