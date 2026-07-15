@@ -42,12 +42,13 @@ class TestReadSvg:
     def test_get_type_svg_unknown_key(self):
         assert ip._get_type_svg("found") is None  # status, not in type map
 
-    def test_get_found_svg_known(self):
-        assert ip._get_found_svg("traditional") is not None
+    def test_get_found_overlay_svg(self):
+        # Issue #593: found-smiley set simplified to gold (found) + dark_blue
+        # (dnf) only — no more per-type coloring.
+        assert ip._get_found_overlay_svg() is not None
 
-    def test_get_found_svg_unknown_uses_green(self):
-        # unknown key → default color "green" file exists
-        assert ip._get_found_svg("totally_unknown") is not None
+    def test_get_dnf_overlay_svg(self):
+        assert ip._get_dnf_overlay_svg() is not None
 
 
 # ── Issue #540: _user_icons_dir() must be memoized ────────────────────────────
@@ -86,7 +87,7 @@ class TestUserIconsDirCaching:
         monkeypatch.setattr("opensak.config.get_icons_dir", fake_get_icons_dir)
         for _ in range(500):
             ip._get_type_svg("traditional")
-            ip._get_found_svg("traditional")
+            ip._get_found_overlay_svg()
         assert len(calls) == 1
 
     def test_falls_back_to_none_and_stays_cached_on_error(self, monkeypatch):
@@ -158,13 +159,6 @@ class TestSvgForKey:
     def test_falls_back_to_unknown_for_garbage(self):
         assert ip._get_svg_for_key("zzz") == ip._FALLBACK_SVGS["unknown"]
 
-    def test_found_for_key_uses_file(self):
-        assert ip._get_found_svg_for_key("traditional") == ip._get_found_svg("traditional")
-
-    def test_found_for_key_fallback(self, monkeypatch):
-        monkeypatch.setattr(ip, "_get_found_svg", lambda key: None)
-        assert ip._get_found_svg_for_key("traditional") == ip._FALLBACK_SVGS["found"]
-
 
 # ── rendering ─────────────────────────────────────────────────────────────────
 
@@ -177,9 +171,6 @@ class TestRendering:
     def test_cache_type_icon(self):
         assert isinstance(ip.get_cache_type_icon("Traditional Cache"), QIcon)
 
-    def test_cache_type_icon_found(self):
-        assert isinstance(ip.get_cache_type_icon("Traditional Cache", found=True), QIcon)
-
     def test_cache_size_icon_known(self):
         assert isinstance(ip.get_cache_size_icon("micro"), QIcon)
 
@@ -188,9 +179,6 @@ class TestRendering:
 
     def test_cache_type_pixmap(self):
         assert isinstance(ip.get_cache_type_pixmap("Multi-cache"), QPixmap)
-
-    def test_cache_type_pixmap_found(self):
-        assert isinstance(ip.get_cache_type_pixmap("Multi-cache", found=True), QPixmap)
 
 
 # ── map pin HTML ──────────────────────────────────────────────────────────────
@@ -237,3 +225,83 @@ class TestCompositePixmap:
         pix = ip.get_cache_type_pixmap_composite("Multi-cache", 28, dnf=True)
         assert isinstance(pix, QPixmap)
         assert not pix.isNull()
+
+
+# ── Custom waypoint types (CUSTOM_WP_TYPES) get their own distinct icons ──────
+
+class TestCustomWaypointIcons:
+    # Raw strings as they appear in utils.constants.CUSTOM_WP_TYPES, and the
+    # internal icon key each one should resolve to.
+    _TYPES = {
+        "Parking Area":    "parking_area",
+        "Trailhead":       "trailhead",
+        "Stage":           "stage",
+        "Final Location":  "final_location",
+        "Reference Point": "reference_point",
+        "Waypoint":        "waypoint",
+        "Hotel/POI":       "hotel_poi",
+        "Custom":          "custom_wp",
+    }
+
+    def test_db_type_to_key_maps_each_custom_wp_type(self):
+        for raw, key in self._TYPES.items():
+            assert ip._db_type_to_key(raw) == key
+
+    def test_each_custom_wp_type_has_a_fallback_svg(self):
+        for key in self._TYPES.values():
+            assert key in ip._FALLBACK_SVGS
+
+    def test_each_custom_wp_type_has_a_file_map_entry(self):
+        # So users can override it via icons/cache_types/<name>.svg like any
+        # other cache type icon (issue #519 mechanism).
+        for key in self._TYPES.values():
+            assert key in ip._TYPE_FILE_MAP
+
+    def test_custom_wp_icons_are_distinct_from_each_other_and_from_unknown(self):
+        svgs = {key: ip._FALLBACK_SVGS[key] for key in self._TYPES.values()}
+        svgs["unknown"] = ip._FALLBACK_SVGS["unknown"]
+        assert len(set(svgs.values())) == len(svgs)
+
+    def test_get_cache_type_icon_for_custom_wp_types(self):
+        for raw in self._TYPES:
+            assert isinstance(ip.get_cache_type_icon(raw), QIcon)
+
+    def test_hotel_poi_slash_does_not_leak_into_key(self):
+        # "Hotel/POI".lower() would normalize to "hotel/poi" (only spaces and
+        # dashes are stripped) without an explicit _DB_TYPE_KEY_MAP entry.
+        assert ip._db_type_to_key("Hotel/POI") == "hotel_poi"
+
+
+# ── Issue #593: unused found-smiley colour variants removed ──────────────────
+# Only "gold" (Found overlay + "Found" column) and "dark_blue" (DNF overlay)
+# are ever actually rendered by the app — the other 12 colour variants and
+# the per-type colour-selection machinery (_FOUND_COLOR_MAP,
+# _get_found_svg/_get_found_svg_for_key, the `found=` param on
+# get_cache_type_icon/get_cache_type_pixmap) were dead code.
+
+class TestFoundIconSetSimplified:
+    def test_removed_helpers_are_gone(self):
+        assert not hasattr(ip, "_FOUND_COLOR_MAP")
+        assert not hasattr(ip, "_get_found_svg")
+        assert not hasattr(ip, "_get_found_svg_for_key")
+
+    def test_get_cache_type_icon_has_no_found_param(self):
+        import inspect
+        assert "found" not in inspect.signature(ip.get_cache_type_icon).parameters
+
+    def test_get_cache_type_pixmap_has_no_found_param(self):
+        import inspect
+        assert "found" not in inspect.signature(ip.get_cache_type_pixmap).parameters
+
+    def test_only_gold_and_dark_blue_bundled(self):
+        bundled = sorted(
+            f.stem for f in ip._CACHE_FOUND_DIR.glob("found_cache_smiley_*.svg")
+        )
+        assert bundled == ["found_cache_smiley_dark_blue", "found_cache_smiley_gold"]
+
+    def test_found_and_dnf_overlays_still_work(self):
+        # The two colours that ARE used (found column, map/detail overlays)
+        # must keep working after the cleanup.
+        assert ip._get_found_overlay_svg() is not None
+        assert ip._get_dnf_overlay_svg() is not None
+        assert ip._get_found_overlay_svg() != ip._get_dnf_overlay_svg()

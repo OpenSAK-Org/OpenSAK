@@ -511,6 +511,22 @@ class TestIconKeys:
         assert CacheTableModel._type_icon_key(_cache(cache_type="Multi-cache")) == "multi"
         assert CacheTableModel._type_icon_key(_cache(cache_type="Weird Type")) == "unknown"
 
+    def test_type_icon_custom_waypoint_types(self):
+        # Custom waypoint types (CUSTOM_WP_TYPES) must each resolve to their
+        # own icon key, not fall through to the generic "unknown" icon.
+        expected = {
+            "Parking Area":    "parking_area",
+            "Trailhead":       "trailhead",
+            "Stage":           "stage",
+            "Final Location":  "final_location",
+            "Reference Point": "reference_point",
+            "Waypoint":        "waypoint",
+            "Hotel/POI":       "hotel_poi",
+            "Custom":          "custom_wp",
+        }
+        for cache_type, key in expected.items():
+            assert CacheTableModel._type_icon_key(_cache(cache_type=cache_type)) == key
+
 
 # ── effective coords ────────────────────────────────────────────────────────────
 

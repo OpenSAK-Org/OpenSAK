@@ -48,7 +48,7 @@ def get_icons_dir() -> Path:
 
     Mirrors the bundled asset layout so file names match 1:1:
       icons/cache_types/<name>.svg   (e.g. traditional_cache.svg)
-      icons/cache_found/<name>.svg   (e.g. found_cache_smiley_green.svg)
+      icons/cache_found/<name>.svg   (e.g. found_cache_smiley_gold.svg)
 
     Issue #519 follow-up: also covers the fixed, single-instance UI icons
     that aren't per-cache-type (these have no bundled asset file to fall

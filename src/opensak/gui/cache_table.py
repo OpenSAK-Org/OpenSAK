@@ -815,6 +815,16 @@ class CacheTableModel(QAbstractTableModel):
             "locationless (reverse) cache": "locationless",
             "project a.p.e. cache":         "project_ape",
             "groundspeak hq":               "geocaching_hq",
+            # Custom waypoint types (CUSTOM_WP_TYPES) — see icon_provider.py
+            # _DB_TYPE_KEY_MAP / _TYPE_FILE_MAP for the matching icon assets.
+            "parking area":                 "parking_area",
+            "trailhead":                    "trailhead",
+            "stage":                        "stage",
+            "final location":               "final_location",
+            "reference point":              "reference_point",
+            "waypoint":                     "waypoint",
+            "hotel/poi":                    "hotel_poi",
+            "custom":                       "custom_wp",
         }
         return mapping.get(t, "unknown")
 

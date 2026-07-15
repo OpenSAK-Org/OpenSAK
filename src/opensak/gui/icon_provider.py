@@ -69,31 +69,19 @@ _TYPE_FILE_MAP: dict[str, str] = {
     "geocaching_hq":         "geocaching_hq_cache",
     "geocaching_hq_celebration": "geocaching_hq_celebration",
     "geocaching_hq_block_party": "geocaching_hq_block_party",
-}
-
-# Mapping: intern nøgle → smiley farvenavn (svarer til filnavne i cache_found/)
-_FOUND_COLOR_MAP: dict[str, str] = {
-    "traditional":           "green",
-    "multi":                 "orange",
-    "mystery":               "dark_blue",
-    "letterbox":             "brown",
-    "wherigo":               "teal",
-    "earthcache":            "dark_green",
-    "virtual":               "purple",
-    "webcam":                "gray",
-    "event":                 "red",
-    "cito":                  "red",
-    "mega_event":            "red",
-    "giga_event":            "gold",
-    "lab_cache":             "light_blue",
-    "gps_adventures":        "navy_blue",
-    "community_celebration": "maroon",
-    "locationless":          "brown",
-    "project_ape":           "dark_green",
-    "geocaching_hq":         "dark_green",
-    "geocaching_hq_celebration": "dark_green",
-    "geocaching_hq_block_party": "dark_green",
-    "unknown":               "gray",
+    # Custom waypoint-typer (CUSTOM_WP_TYPES i utils/constants.py). Disse er
+    # ikke Groundspeak cache-typer, men brugerens egne waypoints (parkering,
+    # hotel osv. til fx en biltur) — separate filnavne så de kan overskrives
+    # uafhængigt af cache-type-ikonerne via samme bruger-icons/cache_types/
+    # mekanisme som issue #519.
+    "parking_area":          "parking_area",
+    "trailhead":             "trailhead",
+    "stage":                 "stage_waypoint",
+    "final_location":        "final_location",
+    "reference_point":       "reference_point",
+    "waypoint":              "waypoint",
+    "hotel_poi":             "hotel_poi",
+    "custom_wp":             "custom_waypoint",
 }
 
 
@@ -124,6 +112,17 @@ _DB_TYPE_KEY_MAP: dict[str, str] = {
     "geocaching hq cache":           "geocaching_hq",
     "geocaching hq celebration":     "geocaching_hq_celebration",
     "geocaching hq block party":     "geocaching_hq_block_party",
+    # CUSTOM_WP_TYPES (utils/constants.py) — explicit entries so e.g.
+    # "Hotel/POI" doesn't fall through _normalize_key() with a stray "/"
+    # left in the key (it only strips spaces and dashes).
+    "parking area":                  "parking_area",
+    "trailhead":                     "trailhead",
+    "stage":                         "stage",
+    "final location":                "final_location",
+    "reference point":               "reference_point",
+    "waypoint":                      "waypoint",
+    "hotel/poi":                     "hotel_poi",
+    "custom":                        "custom_wp",
 }
 
 
@@ -206,13 +205,6 @@ def _get_type_svg(key: str) -> str | None:
     if not filename:
         return None
     return _read_svg_with_user_override(filename, _CACHE_TYPES_DIR, "cache_types")
-
-
-def _get_found_svg(key: str) -> str | None:
-    """Hent smiley SVG streng for en fundet cache type fra disk (bruger-override først)."""
-    color = _FOUND_COLOR_MAP.get(key, "green")
-    filename = f"found_cache_smiley_{color}"
-    return _read_svg_with_user_override(filename, _CACHE_FOUND_DIR, "cache_found")
 
 
 # ── Internal helpers (fallback SVG strenge) ───────────────────────────────────
@@ -391,6 +383,71 @@ _FALLBACK_SVGS: dict[str, str] = {
         'fill="#7f8c8d" font-family="sans-serif">?</text>'
         '</svg>'
     ),
+    # ── Custom waypoint types (CUSTOM_WP_TYPES) ──────────────────────────────
+    "parking_area": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<rect x="4" y="4" width="24" height="24" rx="4" fill="#2563a8" stroke="#1a4c85" stroke-width="1.5"/>'
+        '<text x="16" y="23" text-anchor="middle" font-size="16" font-weight="700" '
+        'fill="white" font-family="sans-serif">P</text>'
+        '</svg>'
+    ),
+    "trailhead": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<rect x="14.5" y="6" width="3" height="24" rx="1" fill="#7b5e3b"/>'
+        '<polygon points="17,10 29,10 26,14 29,18 17,18" fill="#2e8b57" stroke="#1e5f3a" stroke-width="1"/>'
+        '<polygon points="15,20 3,20 6,24 3,28 15,28" fill="#e67e22" stroke="#ca6f1e" stroke-width="1"/>'
+        '</svg>'
+    ),
+    "stage": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<path d="M16,3 C10,3 6,7.5 6,13 C6,20 16,29 16,29 C16,29 26,20 26,13 C26,7.5 22,3 16,3 Z" '
+        'fill="#8e44ad" stroke="#6c3483" stroke-width="1"/>'
+        '<circle cx="16" cy="13" r="7" fill="white"/>'
+        '<text x="16" y="17" text-anchor="middle" font-size="10" font-weight="700" '
+        'fill="#8e44ad" font-family="sans-serif">S</text>'
+        '</svg>'
+    ),
+    "final_location": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<circle cx="16" cy="16" r="13" fill="#c0392b" stroke="#8e2418" stroke-width="1"/>'
+        '<circle cx="16" cy="16" r="9" fill="white"/>'
+        '<circle cx="16" cy="16" r="5" fill="#c0392b"/>'
+        '<circle cx="16" cy="16" r="1.8" fill="white"/>'
+        '</svg>'
+    ),
+    "reference_point": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<path d="M16,3 C10,3 6,7.5 6,13 C6,20 16,29 16,29 C16,29 26,20 26,13 C26,7.5 22,3 16,3 Z" '
+        'fill="#17a589" stroke="#117864" stroke-width="1"/>'
+        '<circle cx="16" cy="13" r="7" fill="white"/>'
+        '<text x="16" y="17" text-anchor="middle" font-size="10" font-weight="700" '
+        'fill="#17a589" font-family="sans-serif">R</text>'
+        '</svg>'
+    ),
+    "waypoint": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<path d="M16,3 C10,3 6,7.5 6,13 C6,20 16,29 16,29 C16,29 26,20 26,13 C26,7.5 22,3 16,3 Z" '
+        'fill="#5d6d7e" stroke="#34495e" stroke-width="1"/>'
+        '<circle cx="16" cy="13" r="5" fill="white"/>'
+        '</svg>'
+    ),
+    "hotel_poi": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<polygon points="16,4 28,14 24,14 24,28 8,28 8,14 4,14" fill="#e67e22" stroke="#ca6f1e" stroke-width="1"/>'
+        '<rect x="13" y="19" width="6" height="9" fill="white" opacity="0.9"/>'
+        '<rect x="10" y="15" width="4" height="4" fill="white" opacity="0.85"/>'
+        '<rect x="18" y="15" width="4" height="4" fill="white" opacity="0.85"/>'
+        '</svg>'
+    ),
+    "custom_wp": (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">'
+        '<path d="M16,3 C10,3 6,7.5 6,13 C6,20 16,29 16,29 C16,29 26,20 26,13 C26,7.5 22,3 16,3 Z" '
+        'fill="#616a6b" stroke="#424949" stroke-width="1"/>'
+        '<circle cx="16" cy="13" r="7" fill="white"/>'
+        '<polygon points="16,8 17.5,11.5 21.2,12 18.5,14.3 19.3,18 16,16 12.7,18 13.5,14.3 10.8,12 14.5,11.5" '
+        'fill="#616a6b"/>'
+        '</svg>'
+    ),
 }
 
 _CACHE_SIZE_SVGS: dict[str, str] = {
@@ -482,14 +539,6 @@ def _get_svg_for_key(key: str) -> str:
     return _FALLBACK_SVGS.get(key, _FALLBACK_SVGS["unknown"])
 
 
-def _get_found_svg_for_key(key: str) -> str:
-    """Hent smiley SVG for en fundet cache type. Prøver fil først, derefter fallback."""
-    svg = _get_found_svg(key)
-    if svg:
-        return svg
-    return _FALLBACK_SVGS.get("found", _FALLBACK_SVGS["unknown"])
-
-
 def _get_found_overlay_svg() -> str:
     """Gold smiley used as the fixed overlay for found caches (all types)."""
     svg = _read_svg_with_user_override("found_cache_smiley_gold", _CACHE_FOUND_DIR, "cache_found")
@@ -504,7 +553,7 @@ def _get_dnf_overlay_svg() -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def get_cache_type_icon(cache_type: str, size: int = 32, found: bool = False) -> QIcon:
+def get_cache_type_icon(cache_type: str, size: int = 32) -> QIcon:
     """
     Return QIcon for en cache type.
 
@@ -512,14 +561,9 @@ def get_cache_type_icon(cache_type: str, size: int = 32, found: bool = False) ->
     - En database streng som "Traditional Cache", "Multi-cache" osv.
     - En intern nøgle som "traditional", "multi" osv.
     - En status som "found", "dnf", "disabled", "archived"
-
-    Hvis found=True returneres smiley-ikonet for typen.
     """
     key = _db_type_to_key(cache_type)
-    if found:
-        svg = _get_found_svg_for_key(key)
-    else:
-        svg = _get_svg_for_key(key)
+    svg = _get_svg_for_key(key)
     return QIcon(_svg_to_pixmap(svg, size))
 
 
@@ -534,13 +578,10 @@ def get_cache_size_icon(cache_size: str, size: int = 32) -> QIcon:
     return QIcon(_svg_to_pixmap(svg, size))
 
 
-def get_cache_type_pixmap(cache_type: str, size: int = 32, found: bool = False) -> QPixmap:
+def get_cache_type_pixmap(cache_type: str, size: int = 32) -> QPixmap:
     """Return QPixmap for en cache type — nyttigt til composite map overlays."""
     key = _db_type_to_key(cache_type)
-    if found:
-        svg = _get_found_svg_for_key(key)
-    else:
-        svg = _get_svg_for_key(key)
+    svg = _get_svg_for_key(key)
     return _svg_to_pixmap(svg, size)
 
 
