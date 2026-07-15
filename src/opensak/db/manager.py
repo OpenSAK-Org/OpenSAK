@@ -166,7 +166,13 @@ class DatabaseManager:
 
     @property
     def databases(self) -> list[DatabaseInfo]:
-        return list(self._databases)
+        """Kendte databaser, alfabetisk sorteret efter navn (case-insensitive).
+
+        Bemærk: rækkefølgen i selve `self._databases` (og dermed i
+        opensak.json) er stadig indsættelsesrækkefølgen — kun visningen
+        her sorteres. Se issue #531 / #601.
+        """
+        return sorted(self._databases, key=lambda db: db.name.lower())
 
     @property
     def active(self) -> Optional[DatabaseInfo]:

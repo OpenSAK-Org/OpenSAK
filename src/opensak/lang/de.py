@@ -506,7 +506,7 @@ STRINGS: dict[str, str] = {
     "db_switched_title":            "Datenbank gewechselt",
     "db_switched_msg":              "Aktive Datenbank ist:\n{name}",
     "db_created_title":             "Datenbank erstellt",
-    "db_created_msg":               "'{name}' wurde erstellt.\n\nNutze 'Wechsle hierzu' um sie zu aktivieren.",
+    "db_created_msg":               "'{name}' wurde erstellt und ist jetzt aktiv.",
     "db_opened_title":              "Datenbank geöffnet",
     "db_opened_msg":                "'{name}' wurde zur Liste hinzugefügt.",
     "db_copied_title":              "Kopie erstellt",

@@ -506,7 +506,7 @@ STRINGS: dict[str, str] = {
     "db_switched_title":            "Databáze přepnuta",
     "db_switched_msg":              "Aktivní databáze je nyní:\n{name}",
     "db_created_title":             "Databáze vytvořena",
-    "db_created_msg":               "'{name}' byla vytvořena.\n\nPoužijte 'Přepnout na tuto' k aktivaci.",
+    "db_created_msg":               "'{name}' byla vytvořena a je nyní aktivní.",
     "db_opened_title":              "Databáze otevřena",
     "db_opened_msg":                "'{name}' byla přidána do seznamu.",
     "db_copied_title":              "Kopie vytvořena",

@@ -506,7 +506,7 @@ STRINGS: dict[str, str] = {
     "db_switched_title":            "Base de données changée",
     "db_switched_msg":              "La base de données active est maintenant:\n{name}",
     "db_created_title":             "Base de données créée",
-    "db_created_msg":               "'{name}' a été créée.\n\nUtilisez 'Basculer vers celle-ci' pour l'activer.",
+    "db_created_msg":               "'{name}' a été créée et est maintenant active.",
     "db_opened_title":              "Base de données ouverte",
     "db_opened_msg":                "'{name}' a été ajoutée à la liste.",
     "db_copied_title":              "Copie créée",

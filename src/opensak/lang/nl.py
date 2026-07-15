@@ -509,7 +509,7 @@ STRINGS: dict[str, str] = {
     "db_switched_title":            "Database gewisseld",
     "db_switched_msg":              "Actieve database is nu:\n{name}",
     "db_created_title":             "Database aangemaakt",
-    "db_created_msg":               "'{name}' is aangemaakt.\n\nGebruik 'Overschakelen naar dit' om het te activeren.",
+    "db_created_msg":               "'{name}' is aangemaakt en is nu actief.",
     "db_opened_title":              "Database geopend",
     "db_opened_msg":                "'{name}' is aan de lijst toegevoegd.",
     "db_copied_title":              "Kopie aangemaakt",

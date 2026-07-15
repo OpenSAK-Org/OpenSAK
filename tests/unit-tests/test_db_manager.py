@@ -75,6 +75,15 @@ class TestDatabaseManagerInit:
         dbs.append(object())  # type: ignore
         assert len(manager.databases) == 1
 
+    def test_databases_are_alphabetically_sorted(self, manager, tmp_path):
+        """Issue #531 / #601: dropdown/list must not follow insertion order."""
+        with patch("opensak.db.database.init_db"):
+            manager.new_database("Norway", tmp_path / "Norway.db")
+            manager.new_database("albania", tmp_path / "albania.db")
+            manager.new_database("Bosnia", tmp_path / "Bosnia.db")
+        names = [db.name for db in manager.databases]
+        assert names == sorted(names, key=str.lower)
+
 
 # ── new_database ──────────────────────────────────────────────────────────────
 
@@ -421,7 +430,7 @@ class TestCopyDatabase:
         with patch("opensak.db.database.init_db"):
             manager.new_database("Src", src)
         src.touch()  # simulate init_db() having created the file
-        src_info = manager.databases[-1]
+        src_info = next(db for db in manager.databases if db.name == "Src")
         dst = tmp_path / "Dst.db"
         copy = manager.copy_database(src_info, "Dst", dst)
         assert copy.name == "Dst"
@@ -432,7 +441,7 @@ class TestCopyDatabase:
         with patch("opensak.db.database.init_db"):
             manager.new_database("Src2", src)
         src.touch()  # simulate init_db() having created the file
-        src_info = manager.databases[-1]
+        src_info = next(db for db in manager.databases if db.name == "Src2")
         with patch("opensak.settings_store.get_db_dir", return_value=tmp_path):
             copy = manager.copy_database(src_info, "DstDefault")
         assert copy.path.parent == tmp_path
@@ -442,7 +451,7 @@ class TestCopyDatabase:
         with patch("opensak.db.database.init_db"):
             manager.new_database("CopySrc", src)
         src.touch()  # simulate init_db() having created the file
-        src_info = manager.databases[-1]
+        src_info = next(db for db in manager.databases if db.name == "CopySrc")
         with pytest.raises(ValueError):
             manager.copy_database(src_info, "CopySrc")
 
