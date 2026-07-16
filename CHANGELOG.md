@@ -8,6 +8,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0-beta.5] — 2026-07-16
+
+> **Beta release** — startup no longer recalculates every cache's distance
+> unnecessarily, which should noticeably speed up launch on large databases.
+
+### Fixed
+
+- **Redundant distance recalculation on every startup** (#579) — the app
+  recalculated distance/bearing for every cache on every launch, even
+  though nothing about the database or home point had changed since the
+  last session. On large databases (100k+ caches) this made startup
+  noticeably slow with no visual indication of what was happening.
+  `recalculate_distances()` now persists the centre point and distance
+  method it was run with, and on startup the app checks this — plus a
+  cheap single-row spot-check against the database — before deciding
+  whether a full recalculation is actually needed. Normal startup now
+  skips it entirely; a database synced from another machine with a
+  different home point (or otherwise modified outside this OpenSAK
+  install) still triggers a full recalculation as before.
+
+---
+
 ## [1.16.0-beta.4] — 2026-07-15
 
 > **Beta release** — the database list/dropdown is now alphabetically
