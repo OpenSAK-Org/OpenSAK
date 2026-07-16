@@ -1459,11 +1459,22 @@ class MainWindow(QMainWindow):
         )
 
     def _initial_load(self) -> None:
-        """Første load ved opstart — vent på kort hvis ikke klar."""
+        """Første load ved opstart — vent på kort hvis ikke klar.
+
+        Issue #579: en fuld distance-genberegning er dyr på store databaser
+        (mange individuelle UPDATE-statements) og er redundant ved almindelig
+        opstart, da recalculate_distances() allerede køres ved import,
+        hjemmepunkt-skift og lukning af Settings — dvs. de persisterede
+        distance/bearing-værdier er i forvejen opdaterede. Vi genberegner
+        derfor kun hvis distances_up_to_date() ikke kan bekræfte det (fx en
+        database synkroniseret fra en anden maskine med et andet
+        hjemmepunkt).
+        """
         s = get_settings()
         if s.home_lat and s.home_lon:
-            from opensak.db.database import recalculate_distances
-            recalculate_distances(s.home_lat, s.home_lon)
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not distances_up_to_date(s.home_lat, s.home_lon):
+                recalculate_distances(s.home_lat, s.home_lon)
         if not self._map_widget.is_ready():
             self._map_widget.set_pending_refresh(self._refresh_cache_list)
         else:

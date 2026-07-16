@@ -948,7 +948,77 @@ def recalculate_distances(lat: float, lon: float) -> int:
             [{"d": float(dists[i]), "b": float(bears[i]), "id": ids[i]} for i in range(len(ids))],
         )
 
+    # Persist the center + method this recalculation used, so
+    # distances_up_to_date() can skip a redundant full recalc on next
+    # startup if nothing has changed (issue #579).
+    from opensak.gui.settings import get_settings
+    s = get_settings()
+    s.dist_calc_lat = lat
+    s.dist_calc_lon = lon
+    s.dist_calc_method = s.distance_method
+
     return len(ids)
+
+
+# Tolerance for comparing a freshly-calculated centre point / distance to a
+# previously persisted one. Anything above this is treated as "changed" and
+# triggers a full recalculation.
+_COORD_EPSILON = 1e-9
+_DISTANCE_EPSILON_KM = 0.01  # 10 m — generous enough to absorb float rounding
+
+
+def distances_up_to_date(lat: float, lon: float) -> bool:
+    """Check whether the persisted Cache.distance/bearing values are still
+    valid for the given centre point, so a full recalculate_distances() call
+    can be skipped on startup (issue #579).
+
+    Two checks must both pass:
+    1. The centre point and distance_method match what was used for the last
+       recalculation (persisted in settings, see recalculate_distances()).
+    2. A cheap spot-check: recompute the distance for a single cache and
+       compare it against the persisted value, to catch a database that was
+       modified outside this OpenSAK install (e.g. synced from another
+       machine with a different home point, or edited by another tool)
+       without a matching recalculation ever having run here.
+
+    Returns True if it's safe to skip the full recalculation.
+    """
+    from opensak.gui.settings import get_settings
+    from opensak.filters.engine import distance_km
+
+    # Deterministic spot-check row: lowest id with coordinates, regardless of
+    # whether it currently has a persisted distance. Checked first (and
+    # unconditionally) so an empty/coordinate-less database is always
+    # considered up to date — there is nothing to recalculate either way.
+    with get_session() as session:
+        row = session.execute(
+            text(
+                "SELECT latitude, longitude, distance FROM caches "
+                "WHERE latitude IS NOT NULL AND longitude IS NOT NULL "
+                "ORDER BY id LIMIT 1"
+            )
+        ).fetchone()
+
+    if row is None:
+        return True
+
+    s = get_settings()
+    calc_lat = s.dist_calc_lat
+    calc_lon = s.dist_calc_lon
+    calc_method = s.dist_calc_method
+
+    if calc_lat is None or calc_lon is None or calc_method is None:
+        return False
+    if calc_method != s.distance_method:
+        return False
+    if abs(calc_lat - lat) > _COORD_EPSILON or abs(calc_lon - lon) > _COORD_EPSILON:
+        return False
+
+    row_lat, row_lon, stored_distance = row
+    if stored_distance is None:
+        return False
+    fresh_distance = distance_km(lat, lon, row_lat, row_lon)
+    return abs(fresh_distance - stored_distance) <= _DISTANCE_EPSILON_KM
 
 
 # ── Health-check helper ───────────────────────────────────────────────────────

@@ -242,6 +242,49 @@ class AppSettings:
     def distance_method(self, value: str) -> None:
         get_store().set("computation.distance_method", value)
 
+    # ── Sidst beregnede center for distance/bearing (per database) ────────────
+    # Bruges af recalculate_distances()/distances_up_to_date() (issue #579) til
+    # at afgøre om en fuld genberegning kan springes over ved opstart. Gemmes
+    # per database (samme mønster som home_lat/home_lon), da forskellige
+    # databaser kan være sidst genberegnet mod forskellige centre.
+
+    @property
+    def dist_calc_lat(self) -> float | None:
+        val = get_store().get(self._db_key("dist_calc_lat"))
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    @dist_calc_lat.setter
+    def dist_calc_lat(self, value: float) -> None:
+        get_store().set(self._db_key("dist_calc_lat"), value)
+
+    @property
+    def dist_calc_lon(self) -> float | None:
+        val = get_store().get(self._db_key("dist_calc_lon"))
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    @dist_calc_lon.setter
+    def dist_calc_lon(self, value: float) -> None:
+        get_store().set(self._db_key("dist_calc_lon"), value)
+
+    @property
+    def dist_calc_method(self) -> str | None:
+        val = get_store().get(self._db_key("dist_calc_method"))
+        return val if val in ("haversine", "vincenty") else None
+
+    @dist_calc_method.setter
+    def dist_calc_method(self, value: str) -> None:
+        get_store().set(self._db_key("dist_calc_method"), value)
+
     @property
     def use_miles(self) -> bool:
         val = get_store().get("display.use_miles", False)

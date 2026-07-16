@@ -9,6 +9,7 @@ recalculate_distances() DB population.
 import math
 
 import pytest
+from sqlalchemy import text
 
 from opensak.db.database import get_session, make_session
 from opensak.db.models import Cache
@@ -245,3 +246,64 @@ def test_recalculate_distances_consistent_with_haversine(two_cache_db):
     # Default method is Haversine — stored value must match scalar exactly.
     expected = _haversine_km(home_lat, home_lon, 56.1629, 10.2039)
     assert caches["GCAAA2"].distance == pytest.approx(expected, rel=1e-4)
+
+
+# ── distances_up_to_date() — issue #579 startup skip-logic ───────────────────
+
+def test_distances_up_to_date_false_before_any_recalc(two_cache_db):
+    """Never recalculated for this DB yet -> must not skip."""
+    from opensak.db.database import distances_up_to_date
+    assert distances_up_to_date(55.6761, 12.5683) is False
+
+
+def test_distances_up_to_date_true_after_matching_recalc(two_cache_db):
+    """Same centre + same method as last recalc -> safe to skip."""
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    home_lat, home_lon = 55.6761, 12.5683
+    recalculate_distances(home_lat, home_lon)
+    assert distances_up_to_date(home_lat, home_lon) is True
+
+
+def test_distances_up_to_date_false_after_center_change(two_cache_db):
+    """Centre point moved since last recalc -> must not skip."""
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    recalculate_distances(55.6761, 12.5683)
+    # A different centre point (Berlin) — same DB, no recalc run against it.
+    assert distances_up_to_date(52.5200, 13.4050) is False
+
+
+def test_distances_up_to_date_false_after_method_change(two_cache_db):
+    """distance_method changed since last recalc -> must not skip."""
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    from opensak.gui.settings import get_settings
+    home_lat, home_lon = 55.6761, 12.5683
+    recalculate_distances(home_lat, home_lon)
+    get_settings().distance_method = "vincenty"
+    assert distances_up_to_date(home_lat, home_lon) is False
+
+
+def test_distances_up_to_date_false_on_externally_modified_db(two_cache_db):
+    """Spot-check must catch a DB whose distance column no longer matches
+    the persisted centre — e.g. synced from another machine/tool without a
+    matching recalculation ever having run here."""
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    home_lat, home_lon = 55.6761, 12.5683
+    recalculate_distances(home_lat, home_lon)
+
+    # Simulate an external edit: overwrite the persisted distance for the
+    # spot-check row (lowest id, GCAAA1) directly, bypassing
+    # recalculate_distances().
+    with get_session() as s:
+        s.execute(
+            text("UPDATE caches SET distance = 9999.0 WHERE gc_code = 'GCAAA1'")
+        )
+
+    assert distances_up_to_date(home_lat, home_lon) is False
+
+
+def test_distances_up_to_date_true_on_empty_db(tmp_path):
+    """No caches at all -> nothing to recalculate, safe to skip."""
+    from opensak.db.database import init_db, distances_up_to_date
+    db_path = tmp_path / "empty.db"
+    init_db(db_path=db_path)
+    assert distances_up_to_date(55.0, 12.0) is True
