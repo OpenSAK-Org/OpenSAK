@@ -519,6 +519,26 @@ class TestMoveDatabasesTo:
         # The unrelated existing file at the destination must not be overwritten.
         assert (new_dir / old_path.name).read_text() == "unrelated existing file"
 
+    def test_entry_without_physical_file_is_updated_without_error(self, manager, tmp_path):
+        """
+        Issue #609: a fresh install's auto-created "Default" entry has no
+        physical .db file on disk yet (it's created lazily by init_db(),
+        which happens after the welcome wizard runs). Offering to move it
+        must not fail with FileNotFoundError — there is simply nothing to
+        copy, so just update the recorded path.
+        """
+        new_dir = tmp_path / "new_location"
+        old_path = manager.active.path
+        old_path.unlink(missing_ok=True)  # ensure the #609 scenario: no file yet
+        assert not old_path.exists()
+
+        with patch("opensak.db.database.dispose_engine"):
+            errors = manager.move_databases_to(new_dir, delete_originals=True)
+
+        assert errors == []
+        assert manager.active.path == new_dir / old_path.name
+        assert not (new_dir / old_path.name).exists()  # still nothing to copy
+
     def test_moves_multiple_databases(self, manager, tmp_path):
         new_dir = tmp_path / "new_location"
         with patch("opensak.db.database.init_db"):

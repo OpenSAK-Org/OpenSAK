@@ -8,6 +8,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.15.1] — 2026-07-16
+
+> Hotfix release. Addresses a bug in the welcome wizard and Settings →
+> Advanced's "move databases" flow reported shortly after 1.15.0 shipped.
+
+### Fixed
+
+- **Database move fails with "No such file or directory" on a fresh install
+  (#609)** — on a brand-new installation, the auto-created "Default"
+  database entry only exists as an in-memory/metadata record until the app
+  actually opens it; no physical `.db` file exists yet at that point. If
+  the user chose a separate database folder during the welcome wizard and
+  asked to move existing databases, this looked like an existing database
+  ("You have 1 existing database(s)") but the move itself then failed,
+  since there was no file to copy. Database entries without a physical
+  file on disk are now recognized as such — they're no longer counted in
+  the "existing databases" prompt, and moving them simply updates the
+  recorded path instead of failing.
+- **Database/install folder pickers showed forward slashes on Windows
+  (#609)** — the folder chosen via the "Browse…" button in the welcome
+  wizard and Settings → Advanced is now normalized to the platform's
+  native path separator for display, instead of showing Qt's internal
+  forward-slash path verbatim (e.g. `E:/Users/...` instead of
+  `E:\Users\...`).
+
+---
+
 ## [1.15.0] — 2026-07-14
 
 > First stable release of the 1.15.0 cycle. Replaces the run of

@@ -1047,7 +1047,9 @@ class SettingsDialog(QDialog):
         if new_db_dir != get_db_dir():
             from opensak.db.manager import get_db_manager
             manager = get_db_manager()
-            existing_count = len(manager.databases)
+            # Issue #609: tæl kun databaser der rent faktisk har en fysisk
+            # fil på disk — se samme rettelse i welcome_wizard.py.
+            existing_count = sum(1 for db in manager.databases if db.exists)
 
             if existing_count > 0:
                 move_box = QMessageBox(self)
