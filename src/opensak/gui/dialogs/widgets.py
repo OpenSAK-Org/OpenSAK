@@ -44,7 +44,10 @@ class DirRow(QWidget):
             QFileDialog.Option.ShowDirsOnly,
         )
         if chosen:
-            self._edit.setText(chosen)
+            # Issue #609: QFileDialog returnerer altid stien med forward
+            # slashes, uanset platform — vis den native (backslash på
+            # Windows) i stedet for at sætte Qt-stien rå ind i feltet.
+            self._edit.setText(str(Path(chosen)))
 
     @property
     def path(self) -> Path:
