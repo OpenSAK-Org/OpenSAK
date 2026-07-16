@@ -419,6 +419,19 @@ class DatabaseManager:
                 continue  # allerede i destinationen — intet at gøre
 
             new_path = new_dir / old_path.name
+
+            # Issue #609: en "kendt" database har ikke nødvendigvis en
+            # fysisk .db-fil endnu — fx det auto-oprettede "Default"-metadata-
+            # objekt for en helt frisk installation, hvor SQLite-filen først
+            # bliver skabt når appen rent faktisk åbner den (init_db()),
+            # hvilket sker EFTER velkomst-wizarden. shutil.copy2() ville her
+            # fejle med "No such file or directory", selvom der reelt ikke
+            # er noget at flytte. Opdatér blot stien i metadata og fortsæt —
+            # ikke en fejl, bare intet arbejde at udføre.
+            if not old_path.exists():
+                db_info.path = new_path
+                updated_any = True
+                continue
             if new_path.exists() and new_path != old_path:
                 errors.append(
                     tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))

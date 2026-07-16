@@ -90,8 +90,9 @@ class TestMoveSettingsFile:
 # ── _offer_move_databases ───────────────────────────────────────────────────
 
 class _FakeDbInfo:
-    def __init__(self, name):
+    def __init__(self, name, exists=True):
         self.name = name
+        self.exists = exists
 
 
 class _FakeManager:
