@@ -506,16 +506,35 @@ def _load_attributes_by_code(conn: sqlite3.Connection) -> dict[str, list[dict]]:
 
 
 def _load_corrected_by_code(conn: sqlite3.Connection) -> dict[str, dict]:
-    """Return ``{gc_code: {corrected_lat, corrected_lon}}`` for solved caches."""
+    """Return ``{gc_code: {corrected_lat, corrected_lon, original_lat, original_lon}}``
+    for solved caches.
+
+    Issue #614: GSAK's own ``Caches.Latitude``/``Longitude`` reflect the
+    *corrected* position once a cache has been solved — the true original/
+    posted coordinates are only preserved in the ``Corrected`` table's
+    ``kBeforeLat``/``kBeforeLon`` columns. We deliberately do NOT use
+    ``Caches.LatOriginal``/``LonOriginal`` for this even though GSAK's own
+    docs describe them as kept "in sync" with kBefore*: a real GSAK test
+    database (two solved caches) showed LatOriginal/LonOriginal correctly
+    in sync for one cache but left equal to the corrected Latitude/Longitude
+    for the other. kBeforeLat/kBeforeLon were correct in both cases (and
+    matched the cache's own GSAK-exported GPX for the same cache), so the
+    Corrected table is the more reliable source.
+    """
     cur = conn.execute("""
-        SELECT kCode, kAfterLat, kAfterLon FROM Corrected
+        SELECT kCode, kBeforeLat, kBeforeLon, kAfterLat, kAfterLon FROM Corrected
     """)
     by_code: dict[str, dict] = {}
     for row in cur.fetchall():
-        lat, lon = _f(row["kAfterLat"]), _f(row["kAfterLon"])
-        if lat is None or lon is None:
+        after_lat, after_lon = _f(row["kAfterLat"]), _f(row["kAfterLon"])
+        if after_lat is None or after_lon is None:
             continue
-        by_code[row["kCode"]] = {"corrected_lat": lat, "corrected_lon": lon}
+        entry = {"corrected_lat": after_lat, "corrected_lon": after_lon}
+        before_lat, before_lon = _f(row["kBeforeLat"]), _f(row["kBeforeLon"])
+        if before_lat is not None and before_lon is not None:
+            entry["original_lat"] = before_lat
+            entry["original_lon"] = before_lon
+        by_code[row["kCode"]] = entry
     return by_code
 
 
@@ -685,6 +704,19 @@ def _upsert_cache_from_gsak(
             "gc_note", "elevation", "color", "guid", "watch", "gc_cache_id",
         ):
             setattr(cache, field, data.get(field))
+
+        # Issue #614: Caches.Latitude/Longitude reflect the *corrected*
+        # position for a solved cache — replace with the true original/
+        # posted coordinates from the Corrected table so the primary
+        # cache.latitude/longitude always matches the cache's listed
+        # location, mirroring how the GPX importer handles GSAK's own
+        # LatBeforeCorrect/LonBeforeCorrect extension fields.
+        if corrected is not None:
+            orig_lat = corrected.get("original_lat")
+            orig_lon = corrected.get("original_lon")
+            if orig_lat is not None and orig_lon is not None:
+                cache.latitude = orig_lat
+                cache.longitude = orig_lon
 
     # Personal/status fields are not subject to the lock — mirrors GPX
     # import behaviour, where a re-import can still bring in a newer
