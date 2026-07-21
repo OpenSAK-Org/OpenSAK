@@ -867,7 +867,6 @@ STRINGS: dict[str, str] = {
     "attr_hunting":            "Jaktområde",
     "attr_dangerous_area":     "Farligt område",
     "attr_thorns":             "Taggar",
-    "attr_first_aid":          "Första hjälpen i närheten",
     "attr_cow":                "Boskap i närheten",
     # Facilities
     "attr_wheelchair":         "Åtkommlig med rullstol",

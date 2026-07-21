@@ -404,6 +404,37 @@ def test_corrected_coordinates_populate_user_note(db_session, tmp_path):
     assert note.is_corrected is True
     assert note.note is None  # personal note text is session 3 scope
 
+    # Issue #614: the primary cache.latitude/longitude must reflect the
+    # true original/posted position (kBeforeLat/kBeforeLon), NOT GSAK's
+    # own Caches.Latitude/Longitude — which reflects the *corrected*
+    # position once a cache is solved (default fixture Latitude/Longitude
+    # is 55.5802/11.175917, deliberately different from kBeforeLat/Lon here
+    # to make sure the override is actually happening).
+    cache = db_session.query(Cache).one()
+    assert cache.latitude == pytest.approx(55.58)
+    assert cache.longitude == pytest.approx(11.17)
+
+
+def test_corrected_coordinates_without_kbefore_keeps_gsak_latitude(db_session, tmp_path):
+    """If a Corrected row has no usable kBeforeLat/kBeforeLon (e.g. blank,
+    matching a real-world GSAK inconsistency we found in testing), fall back
+    to whatever GSAK's own Caches.Latitude/Longitude holds rather than
+    dropping the coordinate entirely."""
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        corrected=[{
+            "kCode": "GC1TEST",
+            "kBeforeLat": "", "kBeforeLon": "",
+            "kAfterLat": "55.6001", "kAfterLon": "11.2002",
+        }],
+    )
+    result = import_gsak_db(db, db_session)
+    assert result.corrected == 1
+
+    cache = db_session.query(Cache).one()
+    assert cache.latitude == pytest.approx(55.5802)   # default fixture Latitude
+    assert cache.longitude == pytest.approx(11.175917)  # default fixture Longitude
+
 
 # ── Idempotency / re-import ───────────────────────────────────────────────────
 

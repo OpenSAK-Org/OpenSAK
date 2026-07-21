@@ -71,6 +71,33 @@ CONTAINER_SIZES: list[str] = [
 
 # ── Geocache attribute IDs (Groundspeak) ──────────────────────────────────────
 # Each tuple: (attribute_id, translation_key)
+#
+# Issue #615: the previous version of this table had 42 of 70 IDs mapped to the
+# wrong attribute (e.g. id 31 showed "Food nearby" instead of "Camping
+# available"). This directly broke attribute names on GSAK-database import
+# (gsak_importer.py resolves GSAK's numeric-only aId via this table) and — a
+# separate, wider-impact discovery — the attribute filter in filter_dialog.py,
+# which builds its checkbox rows and filter values from this same table for
+# *every* import source (GPX and GSAK alike).
+#
+# Rebuilt and verified July 2026 by cross-referencing real GPX exports from
+# geocaching.com (which embed the official id + English name directly in each
+# <groundspeak:attribute id="X">Name</groundspeak:attribute> element) against
+# opencaching.eu's community-maintained "GC reference" cross-reference table
+# (https://opencaching.eu/index.php/Cache_attributes), used for exactly this
+# kind of third-party GPX compatibility work.
+#
+# 63 of the 70 IDs below were confirmed directly against real GPX exports
+# (single-cache downloads plus several purpose-built test caches covering
+# 15-16 attributes each). The remaining 7 — marked UNVERIFIED — are mostly
+# HQ/program-controlled attributes (needs-maintenance flag, Lost & Found Tour,
+# Partnership, GeoTour) that can't be set via the normal attribute picker, or
+# require cache types we didn't build test caches for (Bonus, Challenge,
+# Solution checker). These 7 are taken from the opencaching.eu reference only.
+#
+# attr_first_aid (previously wrongly at id 38, which is actually Campfires)
+# has been dropped entirely: there is no "First Aid nearby" attribute in the
+# official Groundspeak list, in either source used here.
 
 ATTRIBUTES: list[tuple[int, str]] = [
     # Permissions
@@ -78,11 +105,11 @@ ATTRIBUTES: list[tuple[int, str]] = [
     (32, "attr_bicycles"),
     (33, "attr_motorcycles"),
     (34, "attr_atv"),                # Quads (ATV)
-    (46, "attr_jeeps"),              # Off-road vehicles / Jeeps
-    (35, "attr_snowmobile"),
-    (36, "attr_horses"),
-    (16, "attr_campfires"),
-    (65, "attr_trucks"),
+    (35, "attr_jeeps"),              # Off-road vehicles / Jeeps
+    (36, "attr_snowmobile"),
+    (37, "attr_horses"),
+    (38, "attr_campfires"),
+    (46, "attr_trucks"),             # Truck Driver/RV
 
     # Conditions
     (6,  "attr_kids"),
@@ -96,72 +123,64 @@ ATTRIBUTES: list[tuple[int, str]] = [
     (14, "attr_night"),
     (15, "attr_winter"),
     (40, "attr_stealth"),
-    (68, "attr_needs_maintenance"),
-    (39, "attr_cow"),                # Livestock nearby (Groundspeak: "cow" icon)
-    (49, "attr_field_puzzle"),
-    (37, "attr_nightcache"),
+    (42, "attr_needs_maintenance"),  # UNVERIFIED — HQ-set flag, not user-editable
+    (43, "attr_cow"),                # Livestock nearby (Groundspeak: "cow" icon)
+    (47, "attr_field_puzzle"),
+    (52, "attr_nightcache"),
     (53, "attr_park_and_grab"),
-    (57, "attr_abandoned_structure"),
-    (43, "attr_short_hike"),
-    (44, "attr_medium_hike"),
-    (45, "attr_long_hike"),
+    (54, "attr_abandoned_structure"),
+    (55, "attr_short_hike"),
+    (56, "attr_medium_hike"),
+    (57, "attr_long_hike"),
     (62, "attr_seasonal"),
-    (22, "attr_tourist"),
-    (76, "attr_private"),            # Yard / Private property
-    (60, "attr_teamwork"),
-    (71, "attr_challenge"),
-    (72, "attr_power_trail"),
-    (73, "attr_bonus"),
+    (63, "attr_tourist"),
+    (65, "attr_private"),            # Yard / Private property
+    (66, "attr_teamwork"),
+    (71, "attr_challenge"),          # UNVERIFIED — needs a Challenge Cache to confirm
+    (70, "attr_power_trail"),
+    (69, "attr_bonus"),              # UNVERIFIED — needs a Bonus cache to confirm
 
     # Special
-    (67, "attr_lost_found_tour"),
-    (69, "attr_partnership"),
-    (70, "attr_geotour"),
-    (74, "attr_solution_checker"),
+    (45, "attr_lost_found_tour"),    # UNVERIFIED — HQ program, not user-editable
+    (61, "attr_partnership"),        # UNVERIFIED — HQ program, not user-editable
+    (67, "attr_geotour"),            # UNVERIFIED — HQ program, not user-editable
+    (72, "attr_solution_checker"),   # UNVERIFIED — needs a configured GC Checker to confirm
 
     # Equipment
     (2,  "attr_fee"),
     (3,  "attr_rappelling"),
     (4,  "attr_boat"),
     (5,  "attr_scuba"),
-    (51, "attr_flashlight"),
-    (42, "attr_flashlight"),         # Flashlight (old GPX ID — same attribute)
-    (50, "attr_uv"),
-    (41, "attr_snowshoes"),
-    (58, "attr_ski"),
-    (25, "attr_special_tool"),
+    (44, "attr_flashlight"),
+    (48, "attr_uv"),
+    (49, "attr_snowshoes"),
+    (50, "attr_ski"),
+    (51, "attr_special_tool"),
     (64, "attr_tree_climbing"),
-    (56, "attr_wireless_beacon"),    # Wireless Beacon
+    (60, "attr_wireless_beacon"),
 
     # Hazards
     (17, "attr_poisonous_plants"),
-    (18, "attr_dangerous_animals"),  # Dangerous animals (moved from Conditions)
+    (18, "attr_dangerous_animals"),
     (19, "attr_ticks"),
     (20, "attr_mine"),
     (21, "attr_cliff"),
-    (52, "attr_hunting"),
-    (26, "attr_dangerous_area"),
-    (28, "attr_thorns"),
-    (38, "attr_first_aid"),          # First Aid nearby
+    (22, "attr_hunting"),
+    (23, "attr_dangerous_area"),
+    (39, "attr_thorns"),
 
     # Facilities
     (24, "attr_wheelchair"),
-    (23, "attr_parking"),
-    (27, "attr_public_transport"),
-    (29, "attr_restrooms"),
-    (30, "attr_telephone"),
-    (48, "attr_water"),              # Drinking water nearby
-    (75, "attr_picnic"),             # Picnic tables nearby
-    (47, "attr_camping"),
-    (63, "attr_stroller"),
-    (66, "attr_fuel"),
-    (54, "attr_fuel"),               # Fuel (old GPX ID — same attribute)
-    (31, "attr_food"),
-    (55, "attr_food"),               # Food (old GPX ID — same attribute)
-
-    # Conditions (legacy IDs mapping to existing attributes)
-    (59, "attr_hiking"),             # Significant Hike (old GPX ID — same as 9)
-    (61, "attr_tourist"),            # Tourist Friendly (old GPX ID — same as 22)
+    (25, "attr_parking"),
+    (26, "attr_public_transport"),
+    (27, "attr_water"),              # Drinking water nearby
+    (28, "attr_restrooms"),
+    (29, "attr_telephone"),
+    (30, "attr_picnic"),             # Picnic tables nearby
+    (31, "attr_camping"),
+    (41, "attr_stroller"),
+    (58, "attr_fuel"),
+    (59, "attr_food"),
 ]
 
 # ── Waypoint prefix registries ────────────────────────────────────────────────
