@@ -8,6 +8,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.16.0-beta.6] — 2026-07-21
+
+> **Beta release** — two data-integrity fixes for GSAK-database imports:
+> attribute names and the attribute filter were often wrong, and corrected
+> (solved-puzzle) caches lost their original coordinates on import.
+
+### Fixed
+
+- **Wrong attribute settings from GSAK database import** (#615) — 42 of the
+  70 Groundspeak attribute IDs in OpenSAK's internal attribute table were
+  mapped to the wrong attribute (e.g. id 31 resolved to "Food nearby"
+  instead of "Camping available"). Beyond GSAK-database imports, this also
+  affected the attribute filter, which built its checkbox labels and
+  underlying filter values from the same table — so filtering by attribute
+  could silently return the wrong caches regardless of import source.
+  Rebuilt and verified against real GPX exports from geocaching.com.
+
+- **Caches with corrected coordinates lose the original coordinates when
+  importing GSAK database** (#614) — GSAK's own `Latitude`/`Longitude`
+  columns reflect the *corrected* position once a cache has been solved,
+  not the original/posted coordinates. OpenSAK imported these directly as
+  the cache's primary position, silently discarding the true original
+  location on every GSAK-database import of a solved cache. The original
+  position is now read from GSAK's `Corrected` table instead.
+
+---
+
 ## [1.16.0-beta.5] — 2026-07-16
 
 > **Beta release** — startup no longer recalculates every cache's distance
