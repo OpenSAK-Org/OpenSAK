@@ -29,6 +29,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   fixes. Gated behind a new `lightweight-query-path` feature flag; **not
   yet wired into the table or map** — that's beta.10/beta.11.
 
+- **Wire the cache table to the lightweight query path** (#627 beta.10) —
+  `mainwindow.py`'s four `apply_filters()` call sites now go through a new
+  `apply_filters_auto()` dispatcher, which uses `apply_filters_lightweight()`
+  when the `lightweight-query-path` flag is on. An audit found
+  `CacheTableModel` (and, as a side effect, `map_widget.py` too — every
+  column/sort key/tooltip already only touches scalar fields or cached
+  count columns, never a relationship collection directly) needed **zero**
+  source changes to already support `LightweightCache` rows; row selection
+  already reloads a full `Cache` via the existing `_load_full_cache()`
+  pattern regardless of what's in the table. One real compatibility gap
+  was found and fixed along the way: `CacheTableModel.setData()`'s
+  flag/lock/FTF quick-toggle mutates the table's own row object in place
+  for instant UI feedback, which would have raised on the otherwise-immutable
+  `LightweightCache` — fixed with a small overrides mechanism scoped to
+  exactly those three fields. Benchmark (full fetch + `CacheTableModel.load()`
+  pipeline, 100,000 caches, no filter, via the real `apply_filters_auto()`
+  wiring): 5.06s → 1.87s (~63% faster). Still behind the feature flag,
+  default off.
+
 ---
 
 ## [1.16.0-beta.8] — 2026-07-22

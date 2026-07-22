@@ -17,7 +17,7 @@ from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
-    FilterSet, SortSpec, apply_filters,
+    FilterSet, SortSpec, apply_filters_auto,
     AvailableFilter, NotFoundFilter, CacheTypeFilter,
     DifficultyFilter, TerrainFilter
 )
@@ -923,7 +923,7 @@ class MainWindow(QMainWindow):
             fs = quick_fs
 
         with get_session() as session:
-            caches = apply_filters(session, fs, self._current_sort)
+            caches = apply_filters_auto(session, fs, self._current_sort)
 
         self._cache_table.load_caches(caches)
         self._map_widget.load_caches(caches)
@@ -1266,7 +1266,7 @@ class MainWindow(QMainWindow):
         """Reload cache-tabellen uden at opdatere kortet. Bruges efter import."""
         fs = self._build_current_filterset()
         with get_session() as session:
-            caches = apply_filters(session, fs, self._current_sort)
+            caches = apply_filters_auto(session, fs, self._current_sort)
         self._cache_table.load_caches(caches)
         count = self._cache_table.row_count()
         if count == 1:
@@ -1867,8 +1867,7 @@ class MainWindow(QMainWindow):
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
-            from opensak.filters.engine import apply_filters
-            caches = apply_filters(session, filterset, sort)
+            caches = apply_filters_auto(session, filterset, sort)
 
         if not caches:
             # Issue #444: match GSAK's behavior — warn instead of silently
@@ -2059,8 +2058,7 @@ class MainWindow(QMainWindow):
         self._filter_lbl.setText(f"🔍 {profile.name}")
         self._quick_filter.setCurrentIndex(0)
         with get_session() as session:
-            from opensak.filters.engine import apply_filters
-            caches = apply_filters(session, profile.filterset, profile.sort)
+            caches = apply_filters_auto(session, profile.filterset, profile.sort)
         self._cache_table.load_caches(caches)
         self._map_widget.load_caches(caches)
         count = self._cache_table.row_count()

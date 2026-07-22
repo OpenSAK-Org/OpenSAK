@@ -17,7 +17,7 @@ from opensak.filters.engine import (
     DistanceFilter, FilterSet, FoundFilter, HasTrackableFilter,
     LightweightCache, NonPremiumFilter, NotFoundFilter, PlacedByFilter,
     PremiumFilter, SortSpec, TerrainFilter, TextSearchFilter,
-    WhereClauseFilter, apply_filters, apply_filters_lightweight,
+    WhereClauseFilter, apply_filters, apply_filters_auto, apply_filters_lightweight,
 )
 
 
@@ -256,3 +256,98 @@ class TestLightweightCacheSafetyNet:
                      "short_description", "long_description", "encoded_hints"):
             with pytest.raises(AttributeError):
                 getattr(cache, attr)
+
+
+class TestLightweightCacheMutableFields:
+    # CacheTableModel.setData() (user_flag/locked/first_to_find quick-toggle)
+    # mutates the table's own cache object in place after persisting via a
+    # freshly-queried real Cache ORM object, purely so the UI reflects the
+    # change without a full table reload. LightweightCache must support
+    # exactly that for these three fields, and nothing else.
+
+    def test_user_flag_can_be_set_in_place(self):
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            cache = apply_filters_lightweight(s, fs)[0]
+        assert cache.user_flag is False
+        cache.user_flag = True
+        assert cache.user_flag is True
+
+    def test_locked_can_be_set_in_place(self):
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            cache = apply_filters_lightweight(s, fs)[0]
+        cache.locked = True
+        assert cache.locked is True
+
+    def test_first_to_find_can_be_set_in_place(self):
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            cache = apply_filters_lightweight(s, fs)[0]
+        cache.first_to_find = True
+        assert cache.first_to_find is True
+
+    def test_other_fields_remain_read_only(self):
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            cache = apply_filters_lightweight(s, fs)[0]
+        with pytest.raises(AttributeError):
+            cache.name = "Renamed"
+        with pytest.raises(AttributeError):
+            cache.archived = False
+
+    def test_override_does_not_leak_between_instances(self):
+        with get_session() as s:
+            fs = FilterSet().add(CacheTypeFilter(["Traditional Cache"]))
+            result = apply_filters_lightweight(s, fs)
+        assert len(result) >= 2
+        result[0].user_flag = True
+        assert result[1].user_flag is False
+
+
+# ── apply_filters_auto() — feature-flag dispatch (#627 beta.10) ──────────────
+#
+# mainwindow.py calls apply_filters_auto() exclusively (not apply_filters()
+# or apply_filters_lightweight() directly) so the flag check lives in one
+# place. These tests exercise that dispatch directly, since there's no
+# unit-testable MainWindow test suite to wire an integration test through
+# (only an e2e suite, which needs a real QtWebEngine).
+
+class TestApplyFiltersAutoDispatch:
+    def test_flag_off_returns_real_cache_objects(self, no_features_file):
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            result = apply_filters_auto(s, fs)
+        assert len(result) == 1
+        assert isinstance(result[0], Cache)
+        assert not isinstance(result[0], LightweightCache)
+
+    def test_flag_on_returns_lightweight_objects_when_safe(self, patch_features_file):
+        patch_features_file({"lightweight-query-path": True})
+        with get_session() as s:
+            fs = FilterSet().add(ArchivedFilter())
+            result = apply_filters_auto(s, fs)
+        assert len(result) == 1
+        assert isinstance(result[0], LightweightCache)
+
+    def test_flag_on_still_falls_back_for_relationship_filters(self, patch_features_file):
+        patch_features_file({"lightweight-query-path": True})
+        with get_session() as s:
+            fs = FilterSet().add(AttributeFilter(attribute_id=1, is_on=True))
+            result = apply_filters_auto(s, fs)
+        assert len(result) == 1
+        assert isinstance(result[0], Cache)
+        assert not isinstance(result[0], LightweightCache)
+
+    def test_flag_on_result_set_matches_flag_off(self, patch_features_file, no_features_file):
+        # The two paths must return the same caches (by gc_code) regardless
+        # of which one actually served the request.
+        with get_session() as s:
+            fs = FilterSet().add(CacheTypeFilter(["Traditional Cache"]))
+            off_codes = {c.gc_code for c in apply_filters_auto(s, fs)}
+
+        patch_features_file({"lightweight-query-path": True})
+        with get_session() as s:
+            on_codes = {c.gc_code for c in apply_filters_auto(s, fs)}
+
+        assert off_codes == on_codes

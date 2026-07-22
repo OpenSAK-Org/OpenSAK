@@ -1782,16 +1782,32 @@ class LightweightCache:
     result, not a silently wrong or empty value, and apply_filters_lightweight()
     should have fallen back to apply_filters() for that filterset/use case
     instead of returning LightweightCache rows at all.
+
+    Mostly immutable, with one deliberate exception: CacheTableModel.setData()
+    (user_flag/locked/first_to_find quick-toggle) persists the change via a
+    freshly-queried real Cache ORM object, then also sets the attribute
+    directly on whatever object the table row currently holds, purely so the
+    UI reflects the change without a full table reload. _MUTABLE_FIELDS
+    supports exactly that in-place-update pattern via a small overrides dict
+    — every other attribute stays read-only, preserving the AttributeError
+    safety net above for anything that was never meant to be writable here.
     """
-    __slots__ = ("_row", "user_note")
+    __slots__ = ("_row", "user_note", "_overrides")
+
+    _MUTABLE_FIELDS = frozenset({"user_flag", "locked", "first_to_find"})
 
     def __init__(self, row, user_note: Optional[LightweightUserNote]):
         object.__setattr__(self, "_row", row)
         object.__setattr__(self, "user_note", user_note)
+        object.__setattr__(self, "_overrides", {})
 
     def __getattr__(self, name: str):
         # __getattr__ only fires when normal (slot/instance) lookup fails,
-        # so this only ever runs for names delegated to the underlying Row.
+        # so this only ever runs for names delegated to the underlying Row
+        # (or an override set via __setattr__ below).
+        overrides = object.__getattribute__(self, "_overrides")
+        if name in overrides:
+            return overrides[name]
         try:
             return getattr(self._row, name)
         except AttributeError:
@@ -1800,6 +1816,17 @@ class LightweightCache:
                 "needs the full apply_filters() ORM path (relationship or "
                 "deferred text field)."
             ) from None
+
+    def __setattr__(self, name: str, value) -> None:
+        if name not in self._MUTABLE_FIELDS:
+            raise AttributeError(
+                f"LightweightCache is read-only for {name!r}. Only "
+                f"{sorted(self._MUTABLE_FIELDS)} can be set in place (matching "
+                "CacheTableModel.setData()'s quick-toggle columns) — mutate "
+                "the real Cache ORM object for anything else, the same way "
+                "setData() already re-fetches one by gc_code to persist."
+            )
+        self._overrides[name] = value
 
     def __repr__(self) -> str:
         gc_code = getattr(self._row, "gc_code", "?")
@@ -1904,6 +1931,31 @@ def apply_filters_lightweight(
         results = results[:limit]
 
     return results
+
+
+def apply_filters_auto(
+    session: Session,
+    filterset: Optional[FilterSet] = None,
+    sort: Optional[SortSpec] = None,
+    limit: Optional[int] = None,
+    distance_from: Optional[tuple[float, float]] = None,
+) -> list:
+    """Call apply_filters_lightweight() if the lightweight-query-path
+    feature flag is enabled (see utils/flags.py), else apply_filters().
+
+    Single place GUI code calls (#627 beta.10) so the flag check isn't
+    duplicated at every call site in mainwindow.py. Callers must treat the
+    return value as "a list of cache-like objects" — some entries may be
+    LightweightCache, some may be real Cache ORM objects (whenever the
+    lightweight path fell back), and with the flag off every entry is a
+    real Cache. Never assume a specific type; only touch attributes that
+    exist on both (see LightweightCache's docstring for exactly what that
+    is) unless you've separately confirmed the flag is off.
+    """
+    from opensak.utils import flags
+    if flags.lightweight_query_path:
+        return apply_filters_lightweight(session, filterset, sort, limit, distance_from)
+    return apply_filters(session, filterset, sort, limit, distance_from)
 
 
 # ── Saved filter profiles ─────────────────────────────────────────────────────
