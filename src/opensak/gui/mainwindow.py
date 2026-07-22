@@ -946,7 +946,7 @@ class MainWindow(QMainWindow):
 
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
-            self._map_widget.load_caches(caches)
+            self._map_widget.load_caches(self._fetch_map_caches(fs, caches))
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -1296,6 +1296,27 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(
             tr("import_table_loaded", count=count), 5000
         )
+
+    def _fetch_map_caches(self, fs, table_caches: list) -> list:
+        """Issue #639: the map shows the nearest N caches (from the active
+        home coordinate) of the current filtered set, independent of the
+        table's own sort order — not just a slice of whatever the table
+        happens to be sorted by. When map_max_caches is 0 (unlimited),
+        reuses the table's already-fetched result directly, same as
+        before #639 — no extra query, no behavior change. push_limit=True
+        pushes the limit into SQL itself (see apply_filters_lightweight()'s
+        docstring) rather than fetching every filtered row and slicing in
+        Python — measured directly (#639): ~3s Python-slice regardless of
+        limit size vs ~0.3-0.5s SQL LIMIT that actually scales with it.
+        """
+        max_caches = get_settings().map_max_caches
+        if not max_caches:
+            return table_caches
+        with get_session() as session:
+            return apply_filters_auto(
+                session, fs, SortSpec("distance", ascending=True),
+                limit=max_caches, push_limit=True,
+            )
 
     def _update_map_visibility(self) -> None:
         """Issue #638 follow-up: show the real map or the "disabled"
@@ -1925,7 +1946,7 @@ class MainWindow(QMainWindow):
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
-            self._map_widget.load_caches(caches)
+            self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -2095,7 +2116,7 @@ class MainWindow(QMainWindow):
             caches = apply_filters_auto(session, profile.filterset, profile.sort)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
-            self._map_widget.load_caches(caches)
+            self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))

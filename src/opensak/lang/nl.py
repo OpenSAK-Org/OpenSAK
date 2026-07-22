@@ -299,6 +299,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: kaart-tabblad ──────────────────────────────────────────────
     "settings_map_enabled_cb":          "Kaart tonen",
     "settings_map_enabled_note":        "Als de kaart is uitgeschakeld, worden de markeringsgegevens niet bij elke verversing opgebouwd en geladen — momenteel de grootste resterende kostenpost bij het tonen van een grote database. Schakel dit uit als u vooral de cachelijst gebruikt en de kaartweergave niet nodig heeft.",
+    "settings_group_map":               "Kaartweergave",
+    "settings_map_max_caches_label":    "Max. caches op kaart:",
+    "settings_map_unlimited":           "Onbeperkt",
+    "settings_map_max_caches_note":     "Beperkt de kaart tot de dichtstbijzijnde caches vanaf uw actieve thuiscoördinaat — veel sneller bij grote databases, en een kaart met honderdduizenden pinnen is bij normale zoom toch niet erg leesbaar. De cachelijst wordt nooit door deze limiet beïnvloed.",
     "map_disabled_placeholder":         "Kaart uitgeschakeld\n\nSchakel deze weer in bij Instellingen → Kaart.",
     "settings_date_format_locale":  "OS-landinstelling",
     "settings_group_language":      "Taal",

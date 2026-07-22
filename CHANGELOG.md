@@ -8,6 +8,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Limit map to nearest N caches from home coordinate** (#639) —
+  combines @nagisml's "max caches shown on the map" suggestion (on #638)
+  with sorting by distance from the active home coordinate, since a map
+  with hundreds of thousands of pins isn't very readable at normal zoom
+  anyway. New "Max caches shown on map" spinbox in the Map settings tab
+  (0 = unlimited), default 2000. The map now gets its **own** fetch,
+  independent of the table's — same active filterset, but sorted by
+  distance and limited — so the table's own result set and sort order
+  are completely unaffected either way.
+
+  Added `push_limit` to `apply_filters_lightweight()`/`apply_filters_auto()`
+  (default `False`, no behavior change for existing callers): when the
+  whole filterset is SQL-pushed *and* the sort field is SQL-sortable, the
+  limit is pushed into the SQL query itself (`LIMIT` after `ORDER BY`)
+  instead of fetching every filtered row and slicing in Python. Measured
+  directly (100,000-cache database, distance-sorted, no filter): the
+  existing Python-slice `limit` took ~3.0s regardless of requested size
+  (500 through 5000 all fetch and construct every row before slicing);
+  pushing a real SQL `LIMIT` took 0.31-0.56s, correctly scaling with the
+  requested size. Falls back to the existing (always-correct) Python-slice
+  behavior whenever those two conditions aren't both met — a SQL `LIMIT`
+  applied before a Python-only sort or Python-only filter pass would
+  silently return the wrong N rows, so this is deliberately conservative;
+  13 dedicated tests cover both the cases where it activates and the ones
+  where it correctly must not.
+
+  End-to-end confirmed (100,000-cache database, fetch + JSON payload
+  build): 4.65s (unlimited) → 0.46s (default limit of 2000) — ~10x
+  faster, with the JSON payload itself shrinking from ~195MB to ~3.9MB.
+
 - **Setting to disable the map panel** (#638) — new "Map" tab in the
   Settings dialog (split out from General, so future map-specific
   settings have a natural shared home) with a "Show map" checkbox,

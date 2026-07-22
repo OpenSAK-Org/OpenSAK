@@ -297,6 +297,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: kort-fane ──────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Vis kort",
     "settings_map_enabled_note":        "Deaktivering af kortet springer opbygning og indlæsning af kortets markørdata over ved hver opdatering — den enkeltstørste resterende omkostning ved visning af en stor database. Slå dette fra hvis du hovedsageligt bruger cache-listen og ikke har brug for kortvisningen.",
+    "settings_group_map":               "Kortvisning",
+    "settings_map_max_caches_label":    "Maks. caches vist på kort:",
+    "settings_map_unlimited":           "Ubegrænset",
+    "settings_map_max_caches_note":     "Begrænser kortet til de nærmeste caches fra dit aktive hjemmepunkt — meget hurtigere ved store databaser, og et kort med hundredtusindvis af nåle er alligevel ikke særlig læsbart ved normalt zoom. Cache-listen påvirkes aldrig af denne grænse.",
     "map_disabled_placeholder":         "Kort deaktiveret\n\nSlå det til igen under Indstillinger → Kort.",
     "settings_group_language":      "Sprog / Language",
     "settings_language_label":      "Sprog:",

@@ -119,6 +119,38 @@ class TestConstruction:
         d._save()
         assert settings.map_enabled is False
 
+    def test_map_max_caches_defaults_to_2000(self, dlg):
+        # #639 — benchmarked default, see settings.py's docstring.
+        assert dlg._map_max_caches.value() == 2000
+
+    def test_map_max_caches_loads_from_settings(self, qtbot, settings):
+        settings.map_max_caches = 500
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_max_caches.value() == 500
+
+    def test_map_max_caches_zero_shows_unlimited_text(self, qtbot, settings):
+        from opensak.lang import tr
+        settings.map_max_caches = 0
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_max_caches.value() == 0
+        assert d._map_max_caches.text() == tr("settings_map_unlimited")
+
+    def test_map_max_caches_saves_on_accept(self, qtbot, settings):
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        d._map_max_caches.setValue(1500)
+        d._save()
+        assert settings.map_max_caches == 1500
+
+    def test_map_max_caches_negative_input_clamped_to_zero(self, qtbot, settings):
+        # Settings.map_max_caches itself also clamps (defense in depth) —
+        # the spinbox's own setRange(0, ...) should already prevent this in
+        # practice, but confirm the setter is safe regardless.
+        settings.map_max_caches = -5
+        assert settings.map_max_caches == 0
+
 
 # ── coordinate / home-location feedback ───────────────────────────────────────
 

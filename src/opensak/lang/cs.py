@@ -296,6 +296,10 @@ STRINGS: dict[str, str] = {
     # -- Issue #638: karta mapy --
     "settings_map_enabled_cb":          "Zobrazit mapu",
     "settings_map_enabled_note":        "Vypnutí mapy přeskočí sestavení a načtení dat značek při každé aktualizaci — v současnosti největší zbývající náklad při zobrazování velké databáze. Vypněte to, pokud používáte hlavně seznam kešek a zobrazení mapy nepotřebujete.",
+    "settings_group_map":               "Zobrazení mapy",
+    "settings_map_max_caches_label":    "Max. kešek na mapě:",
+    "settings_map_unlimited":           "Neomezeno",
+    "settings_map_max_caches_note":     "Omezí mapu na nejbližší kešky od vašeho aktivního domovského bodu — mnohem rychlejší u velkých databází, a mapa se stovkami tisíc špendlíků stejně není při běžném přiblížení moc čitelná. Seznam kešek tímto omezením nikdy není ovlivněn.",
     "map_disabled_placeholder":         "Mapa vypnuta\n\nZapněte ji znovu v Nastavení → Mapa.",
     "settings_date_format_locale":  "Systémové prostředí",
     "settings_group_language":      "Jazyk",

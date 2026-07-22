@@ -469,6 +469,82 @@ class TestMapEnabledSetting:
 
         assert seeded_window._map_stack.currentWidget() is seeded_window._map_disabled_placeholder
 
+
+# ── issue #639: limit map to nearest N caches from home coordinate ───────────
+
+class TestMapMaxCaches:
+    def test_unlimited_reuses_table_caches_directly(self, seeded_window, monkeypatch):
+        # map_max_caches=0 (unlimited) must be a pure pass-through — same
+        # list object, no separate query, identical to pre-#639 behavior.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        get_settings().map_max_caches = 0
+
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        table_caches = seeded_window._cache_table.get_all_caches()
+        assert len(calls) == 1
+        assert calls[0] is table_caches or [c.gc_code for c in calls[0]] == [
+            c.gc_code for c in table_caches
+        ]
+
+    def test_limit_smaller_than_total_shrinks_map_set_only(self, seeded_window, monkeypatch):
+        from opensak.db.database import recalculate_distances
+        from opensak.gui.settings import get_settings
+
+        recalculate_distances(55.6761, 12.5683)
+        get_settings().map_enabled = True
+        get_settings().map_max_caches = 2
+
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+
+        table_codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+        assert len(table_codes) > 2  # table unaffected — still shows everything
+        assert len(calls) == 1
+        assert len(calls[0]) == 2  # map limited to the requested count
+
+    def test_limit_larger_than_total_returns_everything(self, seeded_window, monkeypatch):
+        from opensak.db.database import recalculate_distances
+        from opensak.gui.settings import get_settings
+
+        recalculate_distances(55.6761, 12.5683)
+        get_settings().map_enabled = True
+        get_settings().map_max_caches = 100000
+
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+
+        table_codes = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+        assert len(calls) == 1
+        assert len(calls[0]) == len(table_codes)
+
+    def test_map_disabled_never_calls_fetch_map_caches(self, seeded_window, monkeypatch):
+        # #638's guard must still short-circuit before #639's fetch even
+        # runs — no extra query when the map isn't shown at all.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        get_settings().map_max_caches = 2
+
+        fetch_calls = []
+        original = seeded_window._fetch_map_caches
+        monkeypatch.setattr(
+            seeded_window, "_fetch_map_caches",
+            lambda fs, caches: fetch_calls.append(1) or original(fs, caches),
+        )
+        seeded_window._refresh_cache_list()
+        assert fetch_calls == []
+
+
 class TestSelectionSlots:
     def test_on_cache_selected(self, seeded_window):
         cache = seeded_window._cache_table._model.cache_at(0)

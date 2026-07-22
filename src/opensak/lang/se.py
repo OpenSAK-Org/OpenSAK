@@ -296,6 +296,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: kartflik ───────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Visa karta",
     "settings_map_enabled_note":        "Om kartan inaktiveras hoppar appen över att bygga och läsa in dess markördata vid varje uppdatering — för närvarande den enskilt största kvarvarande kostnaden vid visning av en stor databas. Stäng av detta om du främst använder cache-listan och inte behöver kartvyn.",
+    "settings_group_map":               "Kartvisning",
+    "settings_map_max_caches_label":    "Max antal caches på kartan:",
+    "settings_map_unlimited":           "Obegränsat",
+    "settings_map_max_caches_note":     "Begränsar kartan till de närmaste cacherna från din aktiva hempunkt — mycket snabbare på stora databaser, och en karta med hundratusentals nålar är ändå inte särskilt läsbar vid normal zoom. Cache-listan påverkas aldrig av denna gräns.",
     "map_disabled_placeholder":         "Karta inaktiverad\n\nSlå på den igen under Inställningar → Karta.",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",

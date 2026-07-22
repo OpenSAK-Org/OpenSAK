@@ -296,6 +296,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: map settings tab ──────────────────────────────────────────
     "settings_map_enabled_cb":          "Show map",
     "settings_map_enabled_note":        "Disabling the map skips building and loading its marker data on every refresh — the single largest remaining cost when showing a large database. Turn this off if you mainly use the cache list and don't need the map view.",
+    "settings_group_map":               "Map display",
+    "settings_map_max_caches_label":    "Max caches shown on map:",
+    "settings_map_unlimited":           "Unlimited",
+    "settings_map_max_caches_note":     "Limits the map to the nearest caches from your active home coordinate — much faster on large databases, and a map with hundreds of thousands of pins isn't very readable at normal zoom anyway. The cache list is never affected by this limit.",
     "map_disabled_placeholder":         "Map disabled\n\nEnable it again in Settings → Map.",
     "settings_date_format_locale":  "OS locale",
     "settings_group_language":      "Language",

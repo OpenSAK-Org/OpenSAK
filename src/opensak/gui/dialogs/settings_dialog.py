@@ -351,25 +351,52 @@ class SettingsDialog(QDialog):
 
     def _build_map_tab(self) -> QWidget:
         # Issue #638: dedicated tab for map-related settings, split out of
-        # General so future map-specific settings (e.g. a max-caches-shown
-        # limit, discussed alongside #638) have a natural home together
-        # instead of accumulating in General. No QGroupBox wrapper yet —
-        # with only one setting so far, a group title would just duplicate
-        # the tab's own name (caught by test_no_globally_redundant_values);
-        # reintroduce one once a second setting joins this tab.
+        # General so map-specific settings have a natural shared home
+        # instead of accumulating in General. #639 added the second
+        # setting below, so a QGroupBox now makes sense (a single-setting
+        # group would have just duplicated the tab's own name — see the
+        # comment that used to be here, removed once this stopped applying).
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
 
+        group = QGroupBox(tr("settings_group_map"))
+        group_layout = QVBoxLayout(group)
+
         self._map_enabled_cb = QCheckBox(tr("settings_map_enabled_cb"))
-        layout.addWidget(self._map_enabled_cb)
+        group_layout.addWidget(self._map_enabled_cb)
 
         map_enabled_note = QLabel(tr("settings_map_enabled_note"))
         map_enabled_note.setWordWrap(True)
         map_enabled_note.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(map_enabled_note)
+        group_layout.addWidget(map_enabled_note)
 
+        group_layout.addSpacing(8)
+
+        # Issue #639: cap the map to the nearest N caches from home,
+        # rather than every filtered result — dramatically faster on large
+        # databases (SQL LIMIT push-down, see apply_filters_lightweight()'s
+        # push_limit parameter) and arguably more useful in practice too
+        # (a map with hundreds of thousands of pins isn't very readable at
+        # normal zoom anyway).
+        max_caches_row = QHBoxLayout()
+        max_caches_row.addWidget(QLabel(tr("settings_map_max_caches_label")))
+        self._map_max_caches = QSpinBox()
+        self._map_max_caches.setRange(0, 100000)
+        self._map_max_caches.setSingleStep(100)
+        self._map_max_caches.setSpecialValueText(tr("settings_map_unlimited"))
+        self._map_max_caches.setFixedWidth(100)
+        max_caches_row.addWidget(self._map_max_caches)
+        max_caches_row.addStretch()
+        group_layout.addLayout(max_caches_row)
+
+        max_caches_note = QLabel(tr("settings_map_max_caches_note"))
+        max_caches_note.setWordWrap(True)
+        max_caches_note.setStyleSheet("color: gray; font-size: 10px;")
+        group_layout.addWidget(max_caches_note)
+
+        layout.addWidget(group)
         layout.addStretch()
         return tab
 
@@ -1018,6 +1045,7 @@ class SettingsDialog(QDialog):
         self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
         self._decode_hints_cb.setChecked(s.default_decode_hints)
         self._map_enabled_cb.setChecked(s.map_enabled)
+        self._map_max_caches.setValue(s.map_max_caches)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -1061,6 +1089,7 @@ class SettingsDialog(QDialog):
         s.text_size         = self._text_size.currentData()
         s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.map_enabled = self._map_enabled_cb.isChecked()
+        s.map_max_caches = self._map_max_caches.value()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()

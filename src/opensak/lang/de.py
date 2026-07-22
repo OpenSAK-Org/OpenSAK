@@ -296,6 +296,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: Karte-Tab ──────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Karte anzeigen",
     "settings_map_enabled_note":        "Wenn die Karte deaktiviert ist, werden ihre Markierungsdaten bei jeder Aktualisierung nicht aufgebaut und geladen — derzeit die größte verbleibende Kostenstelle beim Anzeigen einer großen Datenbank. Schalten Sie dies aus, wenn Sie hauptsächlich die Cache-Liste nutzen und die Kartenansicht nicht benötigen.",
+    "settings_group_map":               "Kartenanzeige",
+    "settings_map_max_caches_label":    "Max. Caches auf der Karte:",
+    "settings_map_unlimited":           "Unbegrenzt",
+    "settings_map_max_caches_note":     "Begrenzt die Karte auf die nächstgelegenen Caches von Ihrem aktiven Heimatpunkt aus — bei großen Datenbanken deutlich schneller, und eine Karte mit Hunderttausenden von Markierungen ist bei normalem Zoom ohnehin nicht sehr lesbar. Die Cache-Liste wird von dieser Grenze nie beeinflusst.",
     "map_disabled_placeholder":         "Karte deaktiviert\n\nAktivieren Sie sie wieder unter Einstellungen → Karte.",
     "settings_date_format_locale":  "OS-Gebietsschema",
     "settings_group_language":      "Sprache",

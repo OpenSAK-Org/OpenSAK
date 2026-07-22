@@ -2030,6 +2030,7 @@ def apply_filters_lightweight(
     sort: Optional[SortSpec] = None,
     limit: Optional[int] = None,
     distance_from: Optional[tuple[float, float]] = None,
+    push_limit: bool = False,
 ) -> list:
     """Like apply_filters(), but returns LightweightCache rows instead of
     full Cache ORM objects when it safely can — see the module comment
@@ -2041,6 +2042,22 @@ def apply_filters_lightweight(
     return value as "a list of cache-like objects" without caring which
     path served the request — but MUST NOT assume every result is a
     LightweightCache, since a fallback returns real Cache objects instead.
+
+    push_limit (#639, default False — no behavior change for existing
+    callers): when True, pushes `limit` into the SQL query itself
+    (LIMIT after ORDER BY) instead of fetching every filtered row and
+    slicing in Python. Only takes effect when it's actually safe — the
+    whole filterset must be handled in SQL (no relationship filters, no
+    OR-subtree left to Python, see fully_sql_pushed) AND the sort field
+    must be SQL-sortable (sql_sorted) — a SQL LIMIT applied before a
+    Python-only sort or Python-only filter pass would silently return the
+    wrong N rows. Falls back to the existing Python-slice behavior
+    whenever those conditions aren't met, same as if push_limit were
+    False — always correct, just not always as fast. Measured directly
+    (#639, 100,000-cache database, distance-sorted, no filter): Python
+    slice ~3.0s regardless of limit size (500 through 5000 all fetch and
+    construct every row before slicing); SQL LIMIT 0.31s-0.56s, correctly
+    scaling with the requested limit.
     """
     _needs = _filterset_relationship_needs(filterset)
     if _needs.any:
@@ -2055,6 +2072,10 @@ def apply_filters_lightweight(
         .outerjoin(UserNote, UserNote.cache_id == Cache.id)
     )
     sel, fully_sql_pushed = _apply_sql_pushdown(sel, filterset)
+    # A filterset of None trivially has nothing left for Python to check —
+    # same nuance the final results-selection block below already relies on
+    # via `if filterset and not fully_sql_pushed`.
+    filter_fully_handled_in_sql = (not filterset) or fully_sql_pushed
 
     if sort is None:
         sort = SortSpec("name", ascending=True)
@@ -2065,6 +2086,11 @@ def apply_filters_lightweight(
         direction = order_expr.asc() if sort.ascending else order_expr.desc()
         sel = sel.order_by(direction, Cache.id.asc())
         sql_sorted = True
+
+    limit_pushed = False
+    if push_limit and limit and filter_fully_handled_in_sql and sql_sorted:
+        sel = sel.limit(limit)
+        limit_pushed = True
 
     rows = session.execute(sel).all()
 
@@ -2092,7 +2118,7 @@ def apply_filters_lightweight(
         if sort.field in SORT_FIELDS:
             results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
 
-    if limit:
+    if limit and not limit_pushed:
         results = results[:limit]
 
     return results
@@ -2104,6 +2130,7 @@ def apply_filters_auto(
     sort: Optional[SortSpec] = None,
     limit: Optional[int] = None,
     distance_from: Optional[tuple[float, float]] = None,
+    push_limit: bool = False,
 ) -> list:
     """Preferred entry point for GUI code (table, map) that only needs
     scalar display fields — always the fast path where it safely can be.
@@ -2124,8 +2151,12 @@ def apply_filters_auto(
     Both are now confirmed stable — full test suite, e2e suite, and a
     250,000-cache benchmark all green — so the flag has been removed and
     this is unconditional.
+
+    push_limit (#639): see apply_filters_lightweight()'s docstring —
+    passed straight through, default False (no behavior change unless a
+    caller opts in).
     """
-    return apply_filters_lightweight(session, filterset, sort, limit, distance_from)
+    return apply_filters_lightweight(session, filterset, sort, limit, distance_from, push_limit)
 
 
 # ── Saved filter profiles ─────────────────────────────────────────────────────

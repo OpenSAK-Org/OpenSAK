@@ -316,6 +316,27 @@ class AppSettings:
     def map_enabled(self, value: bool) -> None:
         get_store().set("display.map_enabled", bool(value))
 
+    @property
+    def map_max_caches(self) -> int:
+        """Issue #639: cap the map to the nearest N caches from the active
+        home coordinate, rather than every filtered result. 0 means
+        unlimited (map behaves exactly as before #639). Default 2000 —
+        benchmarked (#639): with the SQL LIMIT push-down active, this costs
+        ~0.3-0.4s even on a 100,000+ cache database, generous enough to
+        feel comprehensive for typical local-area use, and Leaflet
+        clustering handles crowding at that count without trouble. Global
+        (not per-database), matching map_enabled above.
+        """
+        val = get_store().get("display.map_max_caches", 2000)
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            return 2000
+
+    @map_max_caches.setter
+    def map_max_caches(self, value: int) -> None:
+        get_store().set("display.map_max_caches", max(0, int(value)))
+
     # ── Koordinatformat ───────────────────────────────────────────────────────
 
     @property

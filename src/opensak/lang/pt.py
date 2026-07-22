@@ -296,6 +296,10 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: separador do mapa ─────────────────────────────────────────
     "settings_map_enabled_cb":          "Mostrar mapa",
     "settings_map_enabled_note":        "Desativar o mapa evita construir e carregar os dados dos marcadores em cada atualização — o maior custo restante ao mostrar uma base de dados grande. Desative isto se utilizar principalmente a lista de caches e não precisar da vista de mapa.",
+    "settings_group_map":               "Visualização do mapa",
+    "settings_map_max_caches_label":    "Máx. de caches no mapa:",
+    "settings_map_unlimited":           "Ilimitado",
+    "settings_map_max_caches_note":     "Limita o mapa às caches mais próximas da sua coordenada de partida ativa — muito mais rápido em bases de dados grandes, e um mapa com centenas de milhares de marcadores não é muito legível com o zoom normal de qualquer forma. A lista de caches nunca é afetada por este limite.",
     "map_disabled_placeholder":         "Mapa desativado\n\nAtive-o novamente em Definições → Mapa.",
     "settings_date_format_locale":  "Idioma do sistema",
     "settings_group_language":      "Idioma",
