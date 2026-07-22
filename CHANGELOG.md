@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Boolean filters silently bypassed their indexes** (#628, part of #627)
+  — `FoundFilter`, `ArchivedFilter`, `AvailableFilter`, `AvailabilityFilter`,
+  `PremiumFilter`, and `NonPremiumFilter` used `Cache.<col>.is_(True)` /
+  `.is_(False)` in their SQL pushdown, which compiles to `<col> IS true` /
+  `IS false`. SQLite's query planner cannot use an index for that form —
+  verified directly against SQLite 3.45 with `EXPLAIN QUERY PLAN` — even
+  though the functionally identical `<col> = true` / `= false` (what
+  `== True`/`== False` compiles to) is index-usable and the relevant
+  indexes have existed since #214. `.is_(None)` (NULL checks, e.g.
+  `DifficultyFilter`'s unknown-difficulty handling) was never affected and
+  is unchanged. Real-world impact is small at current database sizes —
+  isolated A/B testing showed ~0.11s either way for a selective filter on
+  100,000 caches, since raw SQL execution is dwarfed by ORM row hydration
+  (same finding as #631) — but this restores the indexing intent from
+  #214 at zero cost and zero risk.
+
 ---
 
 ## [1.16.0-beta.7] — 2026-07-22

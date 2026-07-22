@@ -330,7 +330,13 @@ class FoundFilter(BaseFilter):
     filter_type = "found"
 
     def apply_to_query(self, query):
-        return query.filter(Cache.found.is_(True))
+        # Issue #628: Cache.found.is_(True) compiles to "found IS true", which
+        # SQLite's query planner cannot satisfy with ix_caches_found (falls
+        # back to a full table scan) even though the functionally identical
+        # "found = true" can. == compiles to the latter. Verified directly
+        # against SQLite 3.45: EXPLAIN QUERY PLAN shows SCAN for IS true vs
+        # SEARCH ... USING INDEX for = true on the same predicate.
+        return query.filter(Cache.found == True)  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return cache.found is True
@@ -347,7 +353,10 @@ class NotFoundFilter(BaseFilter):
     def apply_to_query(self, query):
         from sqlalchemy import or_
         # Mirror matches(): `not cache.found` treats NULL as not-found too.
-        return query.filter(or_(Cache.found.is_(False), Cache.found.is_(None)))
+        # See FoundFilter above for why == True/False is used instead of
+        # .is_(True/False) — .is_(None) for the NULL leg is unaffected and
+        # left as-is (SQLite uses the index fine for IS NULL).
+        return query.filter(or_(Cache.found == False, Cache.found.is_(None)))  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return not cache.found
@@ -363,7 +372,9 @@ class AvailableFilter(BaseFilter):
 
     def apply_to_query(self, query):
         from sqlalchemy import and_
-        return query.filter(and_(Cache.available.is_(True), Cache.archived.is_(False)))
+        # See FoundFilter above for why == True/False is used here instead
+        # of .is_(True/False).
+        return query.filter(and_(Cache.available == True, Cache.archived == False))  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return cache.available is True and cache.archived is False
@@ -378,7 +389,9 @@ class ArchivedFilter(BaseFilter):
     filter_type = "archived"
 
     def apply_to_query(self, query):
-        return query.filter(Cache.archived.is_(True))
+        # See FoundFilter above for why == True is used here instead of
+        # .is_(True).
+        return query.filter(Cache.archived == True)  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return cache.archived is True
@@ -412,13 +425,15 @@ class AvailabilityFilter(BaseFilter):
         from sqlalchemy import and_, false, or_
         # Mirror matches(): archived rows obey show_archived; among non-archived,
         # available rows obey show_avail and the rest obey show_unavail.
+        # See FoundFilter above for why == True/False is used here instead
+        # of .is_(True/False).
         clauses = []
         if self.show_archived:
-            clauses.append(Cache.archived.is_(True))
+            clauses.append(Cache.archived == True)  # noqa: E712
         if self.show_avail:
-            clauses.append(and_(Cache.archived.is_(False), Cache.available.is_(True)))
+            clauses.append(and_(Cache.archived == False, Cache.available == True))  # noqa: E712
         if self.show_unavail:
-            clauses.append(and_(Cache.archived.is_(False), Cache.available.is_(False)))
+            clauses.append(and_(Cache.archived == False, Cache.available == False))  # noqa: E712
         return query.filter(or_(*clauses) if clauses else false())
 
     def matches(self, cache: Cache) -> bool:
@@ -786,7 +801,11 @@ class PremiumFilter(BaseFilter):
     filter_type = "premium"
 
     def apply_to_query(self, query):
-        return query.filter(Cache.premium_only.is_(True))
+        # See FoundFilter above for why == True is used here instead of
+        # .is_(True). Note: premium_only has no index today (not in #214's
+        # migration list), so this doesn't change the query plan right now —
+        # kept consistent so it's already correct if one's added later.
+        return query.filter(Cache.premium_only == True)  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return cache.premium_only is True
@@ -801,7 +820,9 @@ class NonPremiumFilter(BaseFilter):
     filter_type = "non_premium"
 
     def apply_to_query(self, query):
-        return query.filter(Cache.premium_only.is_(False))
+        # See FoundFilter above for why == False is used here instead of
+        # .is_(False).
+        return query.filter(Cache.premium_only == False)  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return cache.premium_only is False
