@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.16.0-beta.10] — 2026-07-22
+
+> **Beta release** — SQL pushdown for the last group of filters that had
+> none at all, following up on #627's lightweight query path.
+
 ### Added
 
 - **SQL pushdown for remaining scalar-column filters** (#633) —
