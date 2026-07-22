@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.16.0-beta.8] — 2026-07-22
+
+> **Beta release** — a small, safe correctness fix in the filter engine's
+> SQL pushdown, spun off from the #627 large-database investigation.
+
 ### Fixed
 
 - **Boolean filters silently bypassed their indexes** (#628, part of #627)
