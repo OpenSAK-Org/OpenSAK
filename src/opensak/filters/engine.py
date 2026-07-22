@@ -172,6 +172,18 @@ class BaseFilter(ABC):
     # count — the filter still fully participates in matches()/apply_to_query().
     counts_as_filter: bool = True
 
+    # Issue #631: whether a non-None apply_to_query() result is a COMPLETE
+    # SQL translation of this filter (default), or merely a pre-narrowing
+    # optimization that still requires the Python matches() pass for an
+    # exact result (e.g. DistanceFilter's bounding-box pushdown — a
+    # conservative superset of the circle, not the circle itself). Only
+    # exact (sql_exact=True) filters count towards apply_filters()'s
+    # "was the whole filterset fully handled in SQL" check that decides
+    # whether the Python matches() re-scan can be skipped. A pre-narrowing
+    # filter must set this to False on the class, or results will silently
+    # include rows the pushdown query only approximately excluded.
+    sql_exact: bool = True
+
     @abstractmethod
     def matches(self, cache: Cache) -> bool:
         """Return True if *cache* passes this filter."""
@@ -181,7 +193,9 @@ class BaseFilter(ABC):
 
         Return the updated query if SQL-level filtering is possible, or None
         to fall back to Python-level matches(). When this returns a query the
-        filter must also return True from matches() to avoid double-filtering.
+        filter must also return True from matches() to avoid double-filtering
+        — unless sql_exact is False, in which case matches() is expected to
+        still narrow the SQL pushdown's result further (see sql_exact above).
         """
         return None
 
@@ -628,6 +642,12 @@ class DistanceFilter(BaseFilter):
     Optionally also enforce a *min_km* to exclude very nearby caches.
     """
     filter_type = "distance"
+
+    # apply_to_query() below only pushes a bounding-box pre-narrowing (a
+    # conservative superset of the max_km circle, and it doesn't account for
+    # min_km at all) — matches() is still required for an exact result. See
+    # BaseFilter.sql_exact.
+    sql_exact = False
 
     def __init__(
         self,
@@ -1551,11 +1571,32 @@ def apply_filters(
     # Anything left out (OR subtrees, relationship filters, apply_to_query()
     # returning None) is still enforced by the Python matches() pass below, so
     # the result is identical — SQL push-down is a pure performance shortcut.
+    #
+    # Issue #631: when EVERY leaf filter ends up pushed into the WHERE clause,
+    # every row query.all() returns already satisfies the filterset — the
+    # Python-level `[c for c in all_caches if filterset.matches(c)]` pass
+    # further down is then a redundant full re-scan of up to hundreds of
+    # thousands of already-hydrated ORM objects. fully_sql_pushed tracks this
+    # so that pass can be skipped safely. It requires BOTH that no OR-subtree
+    # was left out (candidates covers every leaf in _iter_filters) AND that
+    # every candidate's apply_to_query() actually returned a query (some
+    # filter types, e.g. WhereClauseFilter/HasTrackableFilter, have no SQL
+    # form and always fall back to Python matches() via the default
+    # BaseFilter.apply_to_query() returning None).
+    fully_sql_pushed = False
     if filterset:
-        for _f in _sql_pushdown_candidates(filterset):
+        _candidates = list(_sql_pushdown_candidates(filterset))
+        _total_leaves = sum(1 for _ in _iter_filters(filterset))
+        _pushed = 0
+        for _f in _candidates:
             updated = _f.apply_to_query(query)
             if updated is not None:
                 query = updated
+                if _f.sql_exact:
+                    _pushed += 1
+        fully_sql_pushed = (
+            len(_candidates) == _total_leaves and _pushed == _total_leaves
+        )
 
     # Resolve sort early so column-backed fields can be ordered in SQL.
     if sort is None:
@@ -1574,8 +1615,13 @@ def apply_filters(
 
     all_caches = query.all()
 
-    # Apply filters (order-preserving — keeps any SQL ORDER BY intact)
-    if filterset:
+    # Apply filters (order-preserving — keeps any SQL ORDER BY intact).
+    # Issue #631: skip this full Python re-scan when every filter was
+    # already pushed into the WHERE clause above — every row in all_caches
+    # already satisfies the filterset in that case, so re-checking it here
+    # would just be a redundant pass over up to hundreds of thousands of
+    # already-hydrated objects.
+    if filterset and not fully_sql_pushed:
         results = [c for c in all_caches if filterset.matches(c)]
     else:
         results = list(all_caches)

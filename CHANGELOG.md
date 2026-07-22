@@ -26,6 +26,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   added (via `chunkProgress`), so it still reflects the complete marker
   set instead of a partially-loaded one.
 
+- **Skip redundant Python filter pass when fully SQL-pushed** (#631, part
+  of #627) — `apply_filters()` now skips its Python-level
+  `filterset.matches()` re-scan when every filter in the filterset was
+  already pushed into the SQL `WHERE` clause, since every row `query.all()`
+  returns already satisfies it. Measured impact is modest — the Python pass
+  itself is only ~2% of `apply_filters()`'s time even on a 100,000-cache
+  database with a large result set (~6.8s total, ~0.13s of which was the
+  redundant pass); ORM hydration dominates and is unaffected by this
+  change. Still a safe, zero-cost win, and it required introducing a new
+  `BaseFilter.sql_exact` flag: while implementing this, testing surfaced
+  that `DistanceFilter`'s SQL pushdown is a bounding-box *pre-narrowing*
+  only (not an exact translation — it ignores `min_km` entirely and
+  doesn't have the true circle shape), so the naive "non-None
+  `apply_to_query()` == fully handled" assumption would have silently
+  dropped the `min_km` check for distance-filtered results. `sql_exact`
+  lets a filter opt out of counting toward the skip decision while still
+  contributing its SQL pre-narrowing; `DistanceFilter` is the only filter
+  that needs it.
+
 ---
 
 ## [1.16.0-beta.6] — 2026-07-21
