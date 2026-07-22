@@ -151,9 +151,58 @@ class TestLoadCaches:
         assert all("GC_NONE" not in js for js in w._page.js)
 
 
-# ── ready-guarded JS methods ──────────────────────────────────────────────────
+# ── loadCaches() JS: bulk marker loading (issue #630) ─────────────────────────
+
+class TestLoadCachesJsBulkLoading:
+    # Issue #630: loadCaches() previously called clusterGroup.addLayer(marker)
+    # once per cache inside the forEach loop. Leaflet.markercluster rebuilds
+    # its spatial index on every single addLayer() call, which is dramatically
+    # slower than the library's own bulk addLayers() API at large marker
+    # counts (250k+ caches) — and without chunkedLoading, even the bulk call
+    # blocks the browser's UI thread in one go.
+
+    def _load_caches_body(self):
+        start = mw_mod.MAP_HTML.index("function loadCaches")
+        end = mw_mod.MAP_HTML.index("\nfunction afterCachesLoaded", start)
+        return mw_mod.MAP_HTML[start:end]
+
+    def test_uses_bulk_addLayers_not_per_marker_addLayer(self):
+        body = self._load_caches_body()
+        assert "clusterGroup.addLayers(markerArray)" in body
+        # The forEach loop must build the array, not call addLayer() per marker.
+        assert "clusterGroup.addLayer(marker)" not in body
+
+    def test_marker_cluster_groups_use_chunked_loading(self):
+        # Both the module-level initial group and the one recreated inside
+        # loadCaches() need chunkedLoading, since loadCaches() always
+        # replaces the group before the bulk addLayers() call.
+        assert mw_mod.MAP_HTML.count("chunkedLoading: true") == 2
+
+    def test_pan_fit_bounds_deferred_to_chunk_completion(self):
+        # The post-load pan/fitBounds step must run from chunkProgress once
+        # every chunk has been processed, not synchronously right after
+        # addLayers() — chunked loading adds markers to the map in the
+        # background, so an immediate getBounds() call would miss markers
+        # from chunks that haven't been processed yet.
+        body = self._load_caches_body()
+        assert "chunkProgress: function(processed, total)" in body
+        assert "afterCachesLoaded()" in body
+        # The old synchronous pan/fitBounds logic must not still run inline
+        # right after the marker loop.
+        addlayers_pos = body.index("clusterGroup.addLayers(markerArray)")
+        assert "map.fitBounds(bounds" not in body[addlayers_pos:]
+
+    def test_empty_cache_list_still_runs_after_load_hook(self):
+        # chunkProgress never fires for an empty array (addLayers([]) has
+        # nothing to chunk), so the empty case must call the after-load hook
+        # directly or a stale/empty database would never pan to home.
+        body = self._load_caches_body()
+        assert "afterCachesLoaded();" in body
+        assert "markerArray.length > 0" in body
+
 
 class TestJsMethods:
+
     @pytest.fixture
     def w(self, qtbot, fake_settings):
         widget = MapWidget()

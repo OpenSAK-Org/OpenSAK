@@ -16,6 +16,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   database (see #628's `scripts/benchmark_large_db.py`), map load time
   dropped from ~10.1s to ~3.2s (~68%).
 
+- **Bulk-load map markers with chunked clustering** (#630, part of #627) —
+  the map's `loadCaches()` called Leaflet.markercluster's `addLayer()` once
+  per cache, which rebuilds the library's spatial index on every single
+  call. It now builds all markers first and adds them in one
+  `addLayers()` bulk call, with `chunkedLoading: true` so the browser's UI
+  thread stays responsive while a large marker set loads. The post-load
+  pan/fit-bounds step is deferred until every chunk has actually been
+  added (via `chunkProgress`), so it still reflects the complete marker
+  set instead of a partially-loaded one.
+
 ---
 
 ## [1.16.0-beta.6] — 2026-07-21
