@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache
+from opensak.db.models import Cache, UserNote
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1475,6 +1475,139 @@ def _sql_pushdown_candidates(filterset: "FilterSet"):
             yield f
 
 
+# ── Shared query-preparation helpers ────────────────────────────────────────
+# Extracted so apply_filters() and apply_filters_lightweight() (#627 beta.9)
+# share a single implementation of "which filters can be pushed to SQL, and
+# is the whole filterset fully handled that way" — the #631 DistanceFilter
+# bug happened because this exact logic is easy to get subtly wrong, so it
+# must not be duplicated between the two entry points.
+
+def _prepare_where_clause_filters(
+    session: Session,
+    filterset: Optional["FilterSet"],
+    distance_from: Optional[tuple[float, float]],
+) -> None:
+    """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
+    SQL directly against the database. Must run before any Python-level
+    matches() call touches a WhereClauseFilter. Mutates the filter objects
+    in place; returns nothing.
+    """
+    if not filterset:
+        return
+    from sqlalchemy import text as _sa_text
+    _where_filters = [
+        _f for _f in _iter_filters(filterset)
+        if isinstance(_f, WhereClauseFilter) and _f.sql
+    ]
+    _dist_udf_ready = False
+    if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
+        # The "distance" column in the caches table is never persisted — it
+        # is always NULL. Register a SQLite UDF so WHERE clauses can use
+        # "distance" as haversine distance from the home point. SQL
+        # references to "distance" are rewritten to the UDF call below.
+        _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
+        try:
+            from opensak.gui.settings import get_settings as _gs
+            _st = _gs()
+            _home_lat, _home_lon = _st.home_lat, _st.home_lon
+            _use_miles = _st.use_miles
+        except Exception:
+            pass
+        if distance_from:
+            _home_lat, _home_lon = distance_from
+        _factor = 0.621371 if _use_miles else 1.0
+        def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
+            if lat is None or lon is None:
+                return None
+            return _haversine_km(_h, _o, lat, lon) * _k
+        _dbapi = session.connection().connection.dbapi_connection
+        assert _dbapi is not None
+        _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+        _dist_udf_ready = True
+
+    for _f in _where_filters:
+        try:
+            _sql = (
+                _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", _f.sql)
+                if _dist_udf_ready
+                else _f.sql
+            )
+            _result = session.execute(
+                _sa_text(f"SELECT id FROM caches WHERE ({_sql})")
+            )
+            _f._matching_ids = {row[0] for row in _result}
+        except Exception:
+            _f._matching_ids = set()  # invalid SQL → no matches
+
+
+def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):
+    """Push every filter reachable via _sql_pushdown_candidates() into
+    *queryable* — an ORM Query (session.query(Cache)) or a Core Select
+    (select(Cache.col1, ...)) both work identically here, since every
+    apply_to_query() implementation calls queryable.filter(...), which both
+    object types support.
+
+    Returns (queryable, fully_sql_pushed) — see apply_filters()'s docstring
+    on fully_sql_pushed (#631) for exactly what that flag means and why
+    BaseFilter.sql_exact exists.
+    """
+    fully_sql_pushed = False
+    if filterset:
+        _candidates = list(_sql_pushdown_candidates(filterset))
+        _total_leaves = sum(1 for _ in _iter_filters(filterset))
+        _pushed = 0
+        for _f in _candidates:
+            updated = _f.apply_to_query(queryable)
+            if updated is not None:
+                queryable = updated
+                if _f.sql_exact:
+                    _pushed += 1
+        fully_sql_pushed = (
+            len(_candidates) == _total_leaves and _pushed == _total_leaves
+        )
+    return queryable, fully_sql_pushed
+
+
+@dataclass
+class _RelationshipNeeds:
+    """Which relationships/deferred fields a filterset actually touches.
+
+    apply_filters() uses this to decide what to joinedload/noload/defer.
+    apply_filters_lightweight() uses it to decide whether it can serve the
+    request at all — LightweightCache has none of these, so any True flag
+    means falling back to the full apply_filters() ORM path.
+    """
+    attributes: bool
+    trackables: bool
+    logs: bool
+    description: bool
+    hint: bool
+
+    @property
+    def any(self) -> bool:
+        return self.attributes or self.trackables or self.logs or self.description or self.hint
+
+
+def _filterset_relationship_needs(filterset: Optional["FilterSet"]) -> _RelationshipNeeds:
+    needs_attributes = filterset is not None and any(
+        isinstance(f, AttributeFilter) for f in _iter_filters(filterset)
+    )
+    needs_trackables = filterset is not None and any(
+        isinstance(f, HasTrackableFilter) for f in _iter_filters(filterset)
+    )
+    _text_filters = [
+        f for f in _iter_filters(filterset)
+        if isinstance(f, TextSearchFilter) and f.text
+    ] if filterset is not None else []
+    needs_description = any(f.search_description for f in _text_filters)
+    needs_hint = any(f.search_hint for f in _text_filters)
+    needs_logs = any(f.search_logs for f in _text_filters)
+    return _RelationshipNeeds(
+        attributes=needs_attributes, trackables=needs_trackables,
+        logs=needs_logs, description=needs_description, hint=needs_hint,
+    )
+
+
 # ── Main apply function ───────────────────────────────────────────────────────
 
 def apply_filters(
@@ -1502,85 +1635,29 @@ def apply_filters(
     """
     # Pre-populate WhereClauseFilter matching IDs by running the raw SQL against SQLite.
     # This must happen before the Python-level filter loop below.
-    if filterset:
-        from sqlalchemy import text as _sa_text
-        _where_filters = [
-            _f for _f in _iter_filters(filterset)
-            if isinstance(_f, WhereClauseFilter) and _f.sql
-        ]
-        _dist_udf_ready = False
-        if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
-            # The "distance" column in the caches table is never persisted — it
-            # is always NULL. Register a SQLite UDF so WHERE clauses can use
-            # "distance" as haversine distance from the home point. SQL
-            # references to "distance" are rewritten to the UDF call below.
-            _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
-            try:
-                from opensak.gui.settings import get_settings as _gs
-                _st = _gs()
-                _home_lat, _home_lon = _st.home_lat, _st.home_lon
-                _use_miles = _st.use_miles
-            except Exception:
-                pass
-            if distance_from:
-                _home_lat, _home_lon = distance_from
-            _factor = 0.621371 if _use_miles else 1.0
-            def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
-                if lat is None or lon is None:
-                    return None
-                return _haversine_km(_h, _o, lat, lon) * _k
-            _dbapi = session.connection().connection.dbapi_connection
-            assert _dbapi is not None
-            _dbapi.create_function("_opensak_dist", 2, _dist_udf)
-            _dist_udf_ready = True
-
-        for _f in _where_filters:
-            try:
-                _sql = (
-                    _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", _f.sql)
-                    if _dist_udf_ready
-                    else _f.sql
-                )
-                _result = session.execute(
-                    _sa_text(f"SELECT id FROM caches WHERE ({_sql})")
-                )
-                _f._matching_ids = {row[0] for row in _result}
-            except Exception:
-                _f._matching_ids = set()  # invalid SQL → no matches
+    _prepare_where_clause_filters(session, filterset, distance_from)
 
     # Determine which relationships are actually needed by the active filters.
     # Only joinedload what is required — avoids loading thousands of attribute
     # and trackable rows when the filterset contains only a NameFilter or a
     # simple quick-filter (the common case during live search).
-    needs_attributes  = filterset is not None and any(
-        isinstance(f, AttributeFilter)    for f in _iter_filters(filterset)
-    )
-    needs_trackables  = filterset is not None and any(
-        isinstance(f, HasTrackableFilter) for f in _iter_filters(filterset)
-    )
-    _text_filters = [
-        f for f in _iter_filters(filterset)
-        if isinstance(f, TextSearchFilter) and f.text
-    ] if filterset is not None else []
-    needs_description = any(f.search_description for f in _text_filters)
-    needs_hint        = any(f.search_hint        for f in _text_filters)
-    # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
-    # would pull all logs for all caches. Python matches() will lazy-load
-    # logs only for the already-filtered result set.
-    needs_logs        = any(f.search_logs        for f in _text_filters)
+    _needs = _filterset_relationship_needs(filterset)
 
     from sqlalchemy.orm import defer, joinedload, noload
     _opts: list = [
-        joinedload(Cache.attributes) if needs_attributes else noload(Cache.attributes),
-        joinedload(Cache.trackables) if needs_trackables else noload(Cache.trackables),
-        joinedload(Cache.logs)       if needs_logs        else noload(Cache.logs),
+        joinedload(Cache.attributes) if _needs.attributes else noload(Cache.attributes),
+        joinedload(Cache.trackables) if _needs.trackables else noload(Cache.trackables),
+        # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
+        # would pull all logs for all caches. Python matches() will lazy-load
+        # logs only for the already-filtered result set.
+        joinedload(Cache.logs)       if _needs.logs        else noload(Cache.logs),
         noload(Cache.waypoints),
         joinedload(Cache.user_note),
     ]
     # Defer the large free-text blobs unless text search needs them.
-    if not needs_description:
+    if not _needs.description:
         _opts += [defer(Cache.short_description), defer(Cache.long_description)]
-    if not needs_hint:
+    if not _needs.hint:
         _opts.append(defer(Cache.encoded_hints))
     query = session.query(Cache).options(*_opts)
 
@@ -1604,20 +1681,7 @@ def apply_filters(
     # filter types, e.g. WhereClauseFilter/HasTrackableFilter, have no SQL
     # form and always fall back to Python matches() via the default
     # BaseFilter.apply_to_query() returning None).
-    fully_sql_pushed = False
-    if filterset:
-        _candidates = list(_sql_pushdown_candidates(filterset))
-        _total_leaves = sum(1 for _ in _iter_filters(filterset))
-        _pushed = 0
-        for _f in _candidates:
-            updated = _f.apply_to_query(query)
-            if updated is not None:
-                query = updated
-                if _f.sql_exact:
-                    _pushed += 1
-        fully_sql_pushed = (
-            len(_candidates) == _total_leaves and _pushed == _total_leaves
-        )
+    query, fully_sql_pushed = _apply_sql_pushdown(query, filterset)
 
     # Resolve sort early so column-backed fields can be ordered in SQL.
     if sort is None:
@@ -1648,6 +1712,190 @@ def apply_filters(
         results = list(all_caches)
 
     # Sort in Python only for fields not handled by SQL.
+    if not sql_sorted:
+        if sort.field in SORT_FIELDS:
+            results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
+
+    if limit:
+        results = results[:limit]
+
+    return results
+
+
+# ── Lightweight query path (#627 beta.9) ────────────────────────────────────
+#
+# apply_filters()'s dominant cost at large database sizes is SQLAlchemy ORM
+# row hydration via query.all() — NOT SQL execution, and NOT the Python
+# matches() pass (#631's isolated benchmark: ~7s of a ~7s call was ORM
+# hydration of ~92,000 rows; the Python pass was ~2%). Hydrating a full
+# Cache ORM entity costs far more than fetching the same columns as a plain
+# row, because of identity-map registration, relationship-lazy-loader setup,
+# and instrumented-attribute bookkeeping done for every single object.
+#
+# apply_filters_lightweight() fetches the same scalar columns via a Core
+# select() instead of session.query(Cache) — SQLAlchemy Row objects support
+# named attribute access for every selected column but skip all of that ORM
+# machinery. Wrapped in LightweightCache so existing display code (table,
+# map) can keep using the same attribute names as a full Cache, unchanged.
+#
+# Deliberately excludes relationship collections (.logs/.attributes/
+# .trackables/.waypoints) and the two heavy deferred text fields
+# (short_description/long_description) — any filterset that needs those
+# transparently falls back to the full apply_filters() ORM path instead of
+# returning wrong/incomplete results. This is a fallback, not an error: the
+# lightweight path is a pure performance shortcut for the common case
+# (table/map display with simple filters), the same relationship the SQL
+# push-down in apply_filters() has to its own Python matches() fallback.
+#
+# NOT yet wired into the GUI (CacheTableModel/map_widget) — that is
+# beta.10/beta.11's job once this has been benchmarked and hardened in
+# isolation. Gated behind flags.lightweight_query_path so it can be
+# exercised (via --feature lightweight-query-path=true or features.json)
+# without affecting anyone who hasn't opted in.
+
+class LightweightUserNote:
+    """Minimal stand-in for Cache.user_note — enough for the display code
+    that currently does getattr(cache, "user_note", None) then reads
+    .is_corrected/.corrected_lat/.corrected_lon (map_widget.py,
+    gps/garmin.py's _effective_coords())."""
+    __slots__ = ("is_corrected", "corrected_lat", "corrected_lon")
+
+    def __init__(self, is_corrected: bool, corrected_lat: Optional[float], corrected_lon: Optional[float]):
+        self.is_corrected = is_corrected
+        self.corrected_lat = corrected_lat
+        self.corrected_lon = corrected_lon
+
+
+class LightweightCache:
+    """Duck-types as a read-only Cache for display purposes (table/map).
+
+    Wraps a SQLAlchemy Core Row of scalar Cache columns. Every column
+    apply_filters_lightweight() selects is reachable by attribute, exactly
+    like the corresponding attribute on a real Cache ORM instance — sort
+    keys (SORT_FIELDS), filter matches() implementations, and display code
+    that only touches scalar fields all work unchanged against this.
+
+    Deliberately does NOT carry .logs/.attributes/.trackables/.waypoints or
+    .short_description/.long_description/.encoded_hints — any code that
+    touches one of those raises AttributeError. That is the correct failure
+    mode: it means that code path needed the full apply_filters() ORM
+    result, not a silently wrong or empty value, and apply_filters_lightweight()
+    should have fallen back to apply_filters() for that filterset/use case
+    instead of returning LightweightCache rows at all.
+    """
+    __slots__ = ("_row", "user_note")
+
+    def __init__(self, row, user_note: Optional[LightweightUserNote]):
+        object.__setattr__(self, "_row", row)
+        object.__setattr__(self, "user_note", user_note)
+
+    def __getattr__(self, name: str):
+        # __getattr__ only fires when normal (slot/instance) lookup fails,
+        # so this only ever runs for names delegated to the underlying Row.
+        try:
+            return getattr(self._row, name)
+        except AttributeError:
+            raise AttributeError(
+                f"LightweightCache has no attribute {name!r} — this field "
+                "needs the full apply_filters() ORM path (relationship or "
+                "deferred text field)."
+            ) from None
+
+    def __repr__(self) -> str:
+        gc_code = getattr(self._row, "gc_code", "?")
+        return f"<LightweightCache {gc_code!r}>"
+
+
+# Every Cache column apply_filters_lightweight() selects — everything except
+# the relationship collections and the three heavy/deferred text fields
+# (short_description, long_description, encoded_hints). Kept as an explicit
+# list (not introspected from Cache.__table__) so it's obvious at a glance
+# exactly what LightweightCache does and doesn't carry.
+_LIGHTWEIGHT_COLUMNS = [
+    Cache.id, Cache.gc_code, Cache.name, Cache.cache_type, Cache.container,
+    Cache.latitude, Cache.longitude, Cache.difficulty, Cache.terrain,
+    Cache.placed_by, Cache.owner_name, Cache.owner_id, Cache.hidden_date,
+    Cache.last_updated, Cache.available, Cache.archived, Cache.premium_only,
+    Cache.short_desc_html, Cache.long_desc_html,
+    Cache.country, Cache.state, Cache.county,
+    Cache.found, Cache.found_date, Cache.dnf, Cache.dnf_date,
+    Cache.first_to_find, Cache.user_flag, Cache.user_sort,
+    Cache.user_data_1, Cache.user_data_2, Cache.user_data_3, Cache.user_data_4,
+    Cache.distance, Cache.bearing, Cache.favorite_points,
+    Cache.gc_note, Cache.url, Cache.elevation, Cache.color, Cache.guid,
+    Cache.watch, Cache.gc_cache_id, Cache.find_count,
+    Cache.log_count, Cache.trackable_count, Cache.found_log_count,
+    Cache.last_log_date, Cache.waypoint_count, Cache.parent_gc_code,
+    Cache.locked, Cache.location_source, Cache.location_basis,
+    Cache.location_updated, Cache.location_dataset, Cache.imported_at,
+    Cache.source_file,
+]
+
+
+def apply_filters_lightweight(
+    session: Session,
+    filterset: Optional[FilterSet] = None,
+    sort: Optional[SortSpec] = None,
+    limit: Optional[int] = None,
+    distance_from: Optional[tuple[float, float]] = None,
+) -> list:
+    """Like apply_filters(), but returns LightweightCache rows instead of
+    full Cache ORM objects when it safely can — see the module comment
+    above for why and when. Falls back to apply_filters() (returning real
+    Cache ORM objects, unchanged) whenever the filterset needs a
+    relationship or deferred text field this path doesn't carry.
+
+    Callers that only display scalar fields (table, map) can treat the
+    return value as "a list of cache-like objects" without caring which
+    path served the request — but MUST NOT assume every result is a
+    LightweightCache, since a fallback returns real Cache objects instead.
+    """
+    _needs = _filterset_relationship_needs(filterset)
+    if _needs.any:
+        return apply_filters(session, filterset, sort, limit, distance_from)
+
+    _prepare_where_clause_filters(session, filterset, distance_from)
+
+    from sqlalchemy import select
+    sel = (
+        select(*_LIGHTWEIGHT_COLUMNS, UserNote.is_corrected, UserNote.corrected_lat, UserNote.corrected_lon)
+        .select_from(Cache)
+        .outerjoin(UserNote, UserNote.cache_id == Cache.id)
+    )
+    sel, fully_sql_pushed = _apply_sql_pushdown(sel, filterset)
+
+    if sort is None:
+        sort = SortSpec("name", ascending=True)
+
+    sql_sorted = False
+    order_expr = _sql_order_expr(sort.field)
+    if order_expr is not None:
+        direction = order_expr.asc() if sort.ascending else order_expr.desc()
+        sel = sel.order_by(direction, Cache.id.asc())
+        sql_sorted = True
+
+    rows = session.execute(sel).all()
+
+    all_caches = []
+    for row in rows:
+        is_corrected, corrected_lat, corrected_lon = row[-3], row[-2], row[-1]
+        note = (
+            LightweightUserNote(bool(is_corrected), corrected_lat, corrected_lon)
+            if is_corrected is not None else None
+        )
+        all_caches.append(LightweightCache(row, note))
+
+    if filterset and not fully_sql_pushed:
+        # LightweightCache duck-types Cache for every attribute a filter's
+        # matches() could touch here — _filterset_relationship_needs()
+        # above already guaranteed nothing in this filterset needs a
+        # relationship or deferred text field LightweightCache doesn't
+        # carry. matches() is typed for Cache specifically since it's the
+        # common/default case everywhere else in the codebase.
+        results = [c for c in all_caches if filterset.matches(c)]  # type: ignore[arg-type]
+    else:
+        results = list(all_caches)
+
     if not sql_sorted:
         if sort.field in SORT_FIELDS:
             results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)

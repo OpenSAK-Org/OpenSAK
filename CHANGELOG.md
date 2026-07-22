@@ -6,6 +6,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Lightweight query path (`apply_filters_lightweight()`)** (#627 beta.9)
+  — new function in `filters/engine.py` alongside `apply_filters()`,
+  returning `LightweightCache` rows (backed by a SQLAlchemy Core `select()`)
+  instead of full `Cache` ORM objects, for filtersets that don't need a
+  relationship or deferred text field (falls back to the existing
+  `apply_filters()` ORM path automatically otherwise — never returns wrong
+  or incomplete results). Isolated benchmark on a 100,000-cache database:
+
+  | Scenario | `apply_filters` | `apply_filters_lightweight` | Speedup |
+  |---|---|---|---|
+  | No filter (100k rows) | 8.0s | 1.46s | ~5.5x faster |
+  | `AvailableFilter` (92k rows) | 5.9s | 1.30s | ~4.5x faster |
+  | `ArchivedFilter` (5k rows) | 0.20s | 0.08s | ~2.5x faster |
+
+  ORM row hydration was already identified as `apply_filters()`'s dominant
+  cost (#631) — this confirms it directly: bypassing ORM entity
+  construction for the common display case (table/map, simple filters)
+  is a genuine multi-x win, not a rounding error like #628/#631's smaller
+  fixes. Gated behind a new `lightweight-query-path` feature flag; **not
+  yet wired into the table or map** — that's beta.10/beta.11.
+
 ---
 
 ## [1.16.0-beta.8] — 2026-07-22

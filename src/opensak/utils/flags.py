@@ -29,6 +29,7 @@ _FEATURES_FILE: Path = Path(__file__).parent.parent.parent.parent / "features.js
 
 _RELEASE_DEFAULTS: dict[str, bool] = {
     "reverse-geocoding": False,
+    "lightweight-query-path": False,
 }
 
 
@@ -70,3 +71,4 @@ _flags = _load()
 # ── Public flag attributes ────────────────────────────────────────────────────
 
 reverse_geocoding: bool    = _flags["reverse-geocoding"]
+lightweight_query_path: bool = _flags["lightweight-query-path"]
