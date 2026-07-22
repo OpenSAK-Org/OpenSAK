@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.16.0-beta.11] — 2026-07-22
+
+> **Beta release** — a setting to disable the map panel entirely (and a
+> visible "disabled" placeholder instead of an empty-looking map), plus a
+> setting to cap the map to the nearest N caches from your home
+> coordinate. Both target the same thing #627 already identified: map
+> load is the largest remaining cost in "show me my caches" on a large
+> database.
+
 ### Added
 
 - **Limit map to nearest N caches from home coordinate** (#639) —
