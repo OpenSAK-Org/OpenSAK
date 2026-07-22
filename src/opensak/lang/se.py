@@ -296,6 +296,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: kartflik ───────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Visa karta",
     "settings_map_enabled_note":        "Om kartan inaktiveras hoppar appen över att bygga och läsa in dess markördata vid varje uppdatering — för närvarande den enskilt största kvarvarande kostnaden vid visning av en stor databas. Stäng av detta om du främst använder cache-listan och inte behöver kartvyn.",
+    "map_disabled_placeholder":         "Karta inaktiverad\n\nSlå på den igen under Inställningar → Karta.",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",
     "settings_language_label":      "Språk:",

@@ -296,6 +296,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: map settings tab ──────────────────────────────────────────
     "settings_map_enabled_cb":          "Show map",
     "settings_map_enabled_note":        "Disabling the map skips building and loading its marker data on every refresh — the single largest remaining cost when showing a large database. Turn this off if you mainly use the cache list and don't need the map view.",
+    "map_disabled_placeholder":         "Map disabled\n\nEnable it again in Settings → Map.",
     "settings_date_format_locale":  "OS locale",
     "settings_group_language":      "Language",
     "settings_language_label":      "Language:",

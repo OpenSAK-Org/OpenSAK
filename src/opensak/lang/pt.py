@@ -296,6 +296,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: separador do mapa ─────────────────────────────────────────
     "settings_map_enabled_cb":          "Mostrar mapa",
     "settings_map_enabled_note":        "Desativar o mapa evita construir e carregar os dados dos marcadores em cada atualização — o maior custo restante ao mostrar uma base de dados grande. Desative isto se utilizar principalmente a lista de caches e não precisar da vista de mapa.",
+    "map_disabled_placeholder":         "Mapa desativado\n\nAtive-o novamente em Definições → Mapa.",
     "settings_date_format_locale":  "Idioma do sistema",
     "settings_group_language":      "Idioma",
     "settings_language_label":      "Idioma:",

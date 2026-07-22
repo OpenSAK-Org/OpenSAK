@@ -296,6 +296,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638 : onglet carte ──────────────────────────────────────────────
     "settings_map_enabled_cb":          "Afficher la carte",
     "settings_map_enabled_note":        "Désactiver la carte évite de construire et charger ses données de marqueurs à chaque actualisation — le plus gros coût restant lors de l'affichage d'une grande base de données. Désactivez cette option si vous utilisez principalement la liste des caches et n'avez pas besoin de la vue carte.",
+    "map_disabled_placeholder":         "Carte désactivée\n\nRéactivez-la dans Paramètres → Carte.",
     "settings_date_format_locale":  "Paramètres régionaux",
     "settings_group_language":      "Langue",
     "settings_language_label":      "Langue :",

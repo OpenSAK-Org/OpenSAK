@@ -296,6 +296,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: Karte-Tab ──────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Karte anzeigen",
     "settings_map_enabled_note":        "Wenn die Karte deaktiviert ist, werden ihre Markierungsdaten bei jeder Aktualisierung nicht aufgebaut und geladen — derzeit die größte verbleibende Kostenstelle beim Anzeigen einer großen Datenbank. Schalten Sie dies aus, wenn Sie hauptsächlich die Cache-Liste nutzen und die Kartenansicht nicht benötigen.",
+    "map_disabled_placeholder":         "Karte deaktiviert\n\nAktivieren Sie sie wieder unter Einstellungen → Karte.",
     "settings_date_format_locale":  "OS-Gebietsschema",
     "settings_group_language":      "Sprache",
     "settings_language_label":      "Sprache:",

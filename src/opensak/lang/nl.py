@@ -299,6 +299,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #638: kaart-tabblad ──────────────────────────────────────────────
     "settings_map_enabled_cb":          "Kaart tonen",
     "settings_map_enabled_note":        "Als de kaart is uitgeschakeld, worden de markeringsgegevens niet bij elke verversing opgebouwd en geladen — momenteel de grootste resterende kostenpost bij het tonen van een grote database. Schakel dit uit als u vooral de cachelijst gebruikt en de kaartweergave niet nodig heeft.",
+    "map_disabled_placeholder":         "Kaart uitgeschakeld\n\nSchakel deze weer in bij Instellingen → Kaart.",
     "settings_date_format_locale":  "OS-landinstelling",
     "settings_group_language":      "Taal",
     "settings_language_label":      "Taal:",

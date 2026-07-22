@@ -258,61 +258,6 @@ class TestCacheList:
     def test_update_info_bar(self, seeded_window):
         seeded_window._update_info_bar()
 
-
-# ── issue #638: skip map data load when disabled ──────────────────────────────
-
-class TestMapEnabledSetting:
-    def test_map_load_skipped_when_disabled(self, seeded_window, monkeypatch):
-        from opensak.gui.settings import get_settings
-        get_settings().map_enabled = False
-        calls = []
-        monkeypatch.setattr(
-            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
-        )
-        seeded_window._refresh_cache_list()
-        assert calls == []
-
-    def test_map_load_runs_when_enabled(self, seeded_window, monkeypatch):
-        from opensak.gui.settings import get_settings
-        get_settings().map_enabled = True
-        calls = []
-        monkeypatch.setattr(
-            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
-        )
-        seeded_window._refresh_cache_list()
-        assert len(calls) == 1
-
-    def test_table_unaffected_when_map_disabled(self, seeded_window):
-        # #638 only guards the map — the table must show exactly the same
-        # rows either way.
-        from opensak.gui.settings import get_settings
-        get_settings().map_enabled = True
-        seeded_window._refresh_cache_list()
-        with_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
-
-        get_settings().map_enabled = False
-        seeded_window._refresh_cache_list()
-        without_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
-
-        assert with_map == without_map
-
-    def test_reenabling_mid_session_populates_map(self, seeded_window, monkeypatch):
-        # The existing _open_settings() flow already calls
-        # _refresh_cache_list() unconditionally after the dialog closes, so
-        # toggling map_enabled back on needs no special-case code — this
-        # test confirms that's actually true, not just assumed.
-        from opensak.gui.settings import get_settings
-        get_settings().map_enabled = False
-        seeded_window._refresh_cache_list()
-
-        get_settings().map_enabled = True
-        calls = []
-        monkeypatch.setattr(
-            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
-        )
-        seeded_window._refresh_cache_list()
-        assert len(calls) == 1
-
     def test_infobar_shows_filter_count(self, seeded_window):
         # regression for #373: infobar must show count, not generic "Active"
         from opensak.filters.engine import FilterSet, GcCodeFilter, CacheTypeFilter
@@ -423,7 +368,106 @@ class TestMapEnabledSetting:
         assert seeded_window._info_bar._found_lbl.text() == str(total_found)
 
 
-# ── selection slots ───────────────────────────────────────────────────────────
+
+# ── issue #638: skip map data load when disabled ──────────────────────────────
+
+class TestMapEnabledSetting:
+    def test_map_load_skipped_when_disabled(self, seeded_window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert calls == []
+
+    def test_map_load_runs_when_enabled(self, seeded_window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert len(calls) == 1
+
+    def test_table_unaffected_when_map_disabled(self, seeded_window):
+        # #638 only guards the map — the table must show exactly the same
+        # rows either way.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        seeded_window._refresh_cache_list()
+        with_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+
+        get_settings().map_enabled = False
+        seeded_window._refresh_cache_list()
+        without_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+
+        assert with_map == without_map
+
+    def test_reenabling_mid_session_populates_map(self, seeded_window, monkeypatch):
+        # The existing _open_settings() flow already calls
+        # _refresh_cache_list() unconditionally after the dialog closes, so
+        # toggling map_enabled back on needs no special-case code — this
+        # test confirms that's actually true, not just assumed.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        seeded_window._refresh_cache_list()
+
+        get_settings().map_enabled = True
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert len(calls) == 1
+
+    def test_placeholder_shown_when_disabled(self, seeded_window):
+        # Follow-up: disabling the map only ever skipped the marker data
+        # load — the map's own tiles/zoom controls rendered regardless,
+        # looking like a stuck/empty map rather than an intentional off
+        # state. A QStackedWidget now swaps in a plain placeholder page.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        seeded_window._update_map_visibility()
+        assert seeded_window._map_stack.currentWidget() is seeded_window._map_disabled_placeholder
+
+    def test_real_map_shown_when_enabled(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        seeded_window._update_map_visibility()
+        assert seeded_window._map_stack.currentWidget() is seeded_window._map_widget
+
+    def test_placeholder_swap_via_open_settings_flow(self, seeded_window, monkeypatch):
+        # _open_settings() calls _update_map_visibility() after the dialog
+        # closes — confirm the stack actually swaps through that real flow,
+        # not just via the helper method directly.
+        from opensak.gui.settings import get_settings
+
+        get_settings().map_enabled = True
+        seeded_window._update_map_visibility()
+        assert seeded_window._map_stack.currentWidget() is seeded_window._map_widget
+
+        class _FakeDialog:
+            def __init__(self, parent=None):
+                pass
+
+            def exec(self):
+                # Simulate the user unchecking "Show map" and clicking OK —
+                # the real dialog's _save() would set this.
+                get_settings().map_enabled = False
+                return True
+
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.settings_dialog.SettingsDialog", _FakeDialog
+        )
+        monkeypatch.setattr(seeded_window, "_reload_home_combo", lambda: None)
+        monkeypatch.setattr(seeded_window._map_widget, "reload_map", lambda cb: None)
+
+        seeded_window._open_settings()
+
+        assert seeded_window._map_stack.currentWidget() is seeded_window._map_disabled_placeholder
 
 class TestSelectionSlots:
     def test_on_cache_selected(self, seeded_window):

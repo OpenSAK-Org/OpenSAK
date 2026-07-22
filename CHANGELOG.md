@@ -25,6 +25,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every time. Table contents and sort order are completely unaffected
   either way.
 
+  **Follow-up:** the map's own base tiles/zoom controls rendered
+  regardless of the setting — only the cache markers were actually
+  skipped — which looked like a stuck or empty map rather than an
+  intentional off state (reported after testing the initial version).
+  A `QStackedWidget` now swaps in a plain "Map disabled" placeholder page
+  instead, so the off state is visually unambiguous. Also skips the
+  map's own page reload (`reload_map()`) while disabled, since there's
+  no point refreshing tiles nobody's looking at — it reloads normally
+  the next time the setting is re-enabled. Translated to all 8 languages.
+
 ---
 
 ## [1.16.0-beta.10] — 2026-07-22

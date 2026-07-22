@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QStatusBar,
     QToolBar, QPushButton, QComboBox,
-    QSizePolicy, QMessageBox, QWidgetAction
+    QSizePolicy, QMessageBox, QWidgetAction, QStackedWidget
 )
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
@@ -273,7 +273,26 @@ class MainWindow(QMainWindow):
         self._detail_panel.waypoints_tab_shown.connect(self._map_widget.show_waypoint_markers)
         self._detail_panel.waypoints_tab_hidden.connect(self._map_widget.clear_waypoint_markers)
         self._map_widget.setMinimumWidth(300)
-        self._bottom_splitter.addWidget(self._map_widget)
+
+        # Issue #638 follow-up: disabling the map only ever skipped the
+        # cache-marker data load — the map's own base tiles/zoom controls
+        # rendered regardless, which looked like a stuck/empty map rather
+        # than an intentional off state. A QStackedWidget swaps in a plain
+        # placeholder page instead, so "disabled" is visually unambiguous.
+        # self._map_widget itself is unchanged and still referenced
+        # directly everywhere else in this file (load_caches, pan_to_cache,
+        # etc.) — only which page of the stack is currently shown changes.
+        self._map_disabled_placeholder = QLabel(tr("map_disabled_placeholder"))
+        self._map_disabled_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._map_disabled_placeholder.setWordWrap(True)
+        self._map_disabled_placeholder.setStyleSheet("color: gray; font-size: 13px;")
+        self._map_disabled_placeholder.setMinimumWidth(300)
+
+        self._map_stack = QStackedWidget()
+        self._map_stack.addWidget(self._map_widget)             # index 0
+        self._map_stack.addWidget(self._map_disabled_placeholder)  # index 1
+        self._update_map_visibility()
+        self._bottom_splitter.addWidget(self._map_stack)
 
         self._bottom_splitter.setSizes([560, 540])
         bottom_layout.addWidget(self._bottom_splitter)
@@ -1278,6 +1297,15 @@ class MainWindow(QMainWindow):
             tr("import_table_loaded", count=count), 5000
         )
 
+    def _update_map_visibility(self) -> None:
+        """Issue #638 follow-up: show the real map or the "disabled"
+        placeholder page, matching the current map_enabled setting. Called
+        at startup and whenever the setting could have changed (Settings
+        dialog close). Cheap — just switches which already-constructed
+        widget the stack shows, no map reload involved.
+        """
+        self._map_stack.setCurrentIndex(0 if get_settings().map_enabled else 1)
+
     def _open_settings(self) -> None:
         if self._trip_planner_active():
             self._warn_trip_planner_active()
@@ -1297,7 +1325,11 @@ class MainWindow(QMainWindow):
             if s.home_lat and s.home_lon:
                 from opensak.db.database import recalculate_distances
                 recalculate_distances(s.home_lat, s.home_lon)
-            self._map_widget.reload_map(self._refresh_cache_list)
+            self._update_map_visibility()
+            if s.map_enabled:
+                # No point reloading the map page (tiles/JS) if it's not
+                # even being shown — same map_enabled guard as load_caches().
+                self._map_widget.reload_map(self._refresh_cache_list)
             self._refresh_cache_list()
             self._cache_table.refresh_visuals()
             full = self._load_full_cache(prev_cache.gc_code) if prev_cache else None
