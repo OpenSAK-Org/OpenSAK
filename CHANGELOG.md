@@ -48,6 +48,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   wiring): 5.06s → 1.87s (~63% faster). Still behind the feature flag,
   default off.
 
+- **Wire the map to the lightweight query path, and remove the feature
+  flag** (#627 beta.11) — a dedicated compatibility audit and test suite
+  (`tests/unit-tests/test_map_widget.py`, real `LightweightCache` rows
+  from `apply_filters_lightweight()` end to end into `MapWidget._do_load_caches()`)
+  confirmed what beta.10 found as a side effect: `map_widget.py` needed
+  zero source changes — `_effective_coords()`, `_cache_pin_html()`, and the
+  JSON payload build all already only touch scalar fields and
+  `.user_note.is_corrected`/`.corrected_lat`/`.corrected_lon`. With both
+  the table (beta.10) and map paths now confirmed stable across the full
+  unit-test suite, the full e2e suite, and a 250,000-cache benchmark, the
+  `lightweight-query-path` feature flag has been removed —
+  `apply_filters_auto()` (what `mainwindow.py` calls for every table/map
+  refresh) now unconditionally uses the lightweight path, still with its
+  existing automatic fallback to the full ORM path for filters that need
+  a relationship or deferred text field. This is a default-behavior
+  change for everyone, not opt-in. Confirmed final numbers (full fetch +
+  `CacheTableModel.load()` pipeline, 100,000 caches, no filter): 5.50s →
+  1.92s (~65% faster) — consistent with beta.10's measurement.
+
 ---
 
 ## [1.16.0-beta.8] — 2026-07-22

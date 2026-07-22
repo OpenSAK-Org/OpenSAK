@@ -1722,7 +1722,7 @@ def apply_filters(
     return results
 
 
-# ── Lightweight query path (#627 beta.9) ────────────────────────────────────
+# ── Lightweight query path (#627 beta.9-11) ─────────────────────────────────
 #
 # apply_filters()'s dominant cost at large database sizes is SQLAlchemy ORM
 # row hydration via query.all() — NOT SQL execution, and NOT the Python
@@ -1747,11 +1747,13 @@ def apply_filters(
 # (table/map display with simple filters), the same relationship the SQL
 # push-down in apply_filters() has to its own Python matches() fallback.
 #
-# NOT yet wired into the GUI (CacheTableModel/map_widget) — that is
-# beta.10/beta.11's job once this has been benchmarked and hardened in
-# isolation. Gated behind flags.lightweight_query_path so it can be
-# exercised (via --feature lightweight-query-path=true or features.json)
-# without affecting anyone who hasn't opted in.
+# mainwindow.py's table and map refresh call apply_filters_auto() (below),
+# which always attempts this path — wired in via beta.10 (table) and
+# beta.11 (map; needed zero source changes in map_widget.py, confirmed by
+# a dedicated compatibility audit and test suite). Was gated behind a
+# lightweight-query-path feature flag while beta.9-11 verified it in
+# isolation; the flag was removed once both consumers were confirmed
+# stable — see apply_filters_auto()'s docstring.
 
 class LightweightUserNote:
     """Minimal stand-in for Cache.user_note — enough for the display code
@@ -1940,22 +1942,27 @@ def apply_filters_auto(
     limit: Optional[int] = None,
     distance_from: Optional[tuple[float, float]] = None,
 ) -> list:
-    """Call apply_filters_lightweight() if the lightweight-query-path
-    feature flag is enabled (see utils/flags.py), else apply_filters().
+    """Preferred entry point for GUI code (table, map) that only needs
+    scalar display fields — always the fast path where it safely can be.
 
-    Single place GUI code calls (#627 beta.10) so the flag check isn't
-    duplicated at every call site in mainwindow.py. Callers must treat the
-    return value as "a list of cache-like objects" — some entries may be
-    LightweightCache, some may be real Cache ORM objects (whenever the
-    lightweight path fell back), and with the flag off every entry is a
-    real Cache. Never assume a specific type; only touch attributes that
-    exist on both (see LightweightCache's docstring for exactly what that
-    is) unless you've separately confirmed the flag is off.
+    Always calls apply_filters_lightweight(), which itself automatically
+    falls back to the full apply_filters() ORM path whenever the filterset
+    needs a relationship or deferred text field (see LightweightCache's
+    docstring for exactly what that is) — so this is always correct, just
+    faster when it safely can be. Callers must still treat the return
+    value as "a list of cache-like objects": some entries may be
+    LightweightCache, some may be real Cache ORM objects, depending on
+    whether a given call needed the fallback. Never assume a specific
+    type; only touch attributes documented as present on both.
+
+    #627 beta.9-11: this used to be gated behind a lightweight-query-path
+    feature flag while the lightweight path was verified in isolation
+    (beta.9), then wired into the table (beta.10) and map (beta.11).
+    Both are now confirmed stable — full test suite, e2e suite, and a
+    250,000-cache benchmark all green — so the flag has been removed and
+    this is unconditional.
     """
-    from opensak.utils import flags
-    if flags.lightweight_query_path:
-        return apply_filters_lightweight(session, filterset, sort, limit, distance_from)
-    return apply_filters(session, filterset, sort, limit, distance_from)
+    return apply_filters_lightweight(session, filterset, sort, limit, distance_from)
 
 
 # ── Saved filter profiles ─────────────────────────────────────────────────────

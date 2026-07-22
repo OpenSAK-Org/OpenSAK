@@ -314,24 +314,19 @@ class TestLightweightCacheMutableFields:
 # (only an e2e suite, which needs a real QtWebEngine).
 
 class TestApplyFiltersAutoDispatch:
-    def test_flag_off_returns_real_cache_objects(self, no_features_file):
-        with get_session() as s:
-            fs = FilterSet().add(ArchivedFilter())
-            result = apply_filters_auto(s, fs)
-        assert len(result) == 1
-        assert isinstance(result[0], Cache)
-        assert not isinstance(result[0], LightweightCache)
+    # #627 beta.11: apply_filters_auto() no longer checks a feature flag —
+    # both the lightweight and full-ORM paths are now confirmed stable, so
+    # it always attempts apply_filters_lightweight() (which itself falls
+    # back to apply_filters() automatically when needed).
 
-    def test_flag_on_returns_lightweight_objects_when_safe(self, patch_features_file):
-        patch_features_file({"lightweight-query-path": True})
+    def test_returns_lightweight_objects_when_safe(self):
         with get_session() as s:
             fs = FilterSet().add(ArchivedFilter())
             result = apply_filters_auto(s, fs)
         assert len(result) == 1
         assert isinstance(result[0], LightweightCache)
 
-    def test_flag_on_still_falls_back_for_relationship_filters(self, patch_features_file):
-        patch_features_file({"lightweight-query-path": True})
+    def test_falls_back_to_real_cache_for_relationship_filters(self):
         with get_session() as s:
             fs = FilterSet().add(AttributeFilter(attribute_id=1, is_on=True))
             result = apply_filters_auto(s, fs)
@@ -339,15 +334,11 @@ class TestApplyFiltersAutoDispatch:
         assert isinstance(result[0], Cache)
         assert not isinstance(result[0], LightweightCache)
 
-    def test_flag_on_result_set_matches_flag_off(self, patch_features_file, no_features_file):
-        # The two paths must return the same caches (by gc_code) regardless
-        # of which one actually served the request.
+    def test_result_matches_apply_filters(self):
+        # apply_filters_auto() must never diverge from apply_filters() —
+        # it's purely a faster path to the same answer.
         with get_session() as s:
             fs = FilterSet().add(CacheTypeFilter(["Traditional Cache"]))
-            off_codes = {c.gc_code for c in apply_filters_auto(s, fs)}
-
-        patch_features_file({"lightweight-query-path": True})
-        with get_session() as s:
-            on_codes = {c.gc_code for c in apply_filters_auto(s, fs)}
-
-        assert off_codes == on_codes
+            auto_codes = {c.gc_code for c in apply_filters_auto(s, fs)}
+            full_codes = {c.gc_code for c in apply_filters(s, fs)}
+        assert auto_codes == full_codes
