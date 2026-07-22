@@ -836,6 +836,31 @@ class HasCorrectedFilter(BaseFilter):
     """Keep only caches that have corrected coordinates set."""
     filter_type = "has_corrected"
 
+    def apply_to_query(self, query):
+        # #633: mirrors matches() exactly via a correlated EXISTS — no
+        # UserNote row at all, or one with is_corrected falsy, both
+        # correctly exclude the cache, same as `bool(note and note.is_corrected)`.
+        #
+        # .correlate(Cache) is required: apply_filters_lightweight()'s
+        # select() already outerjoins UserNote (for corrected-coords
+        # display), so without an explicit correlate(), SQLAlchemy's
+        # auto-correlation sees UserNote in both the outer query and this
+        # subquery and tries to correlate on it too — leaving the subquery
+        # with no FROM clause of its own and raising InvalidRequestError.
+        # apply_filters()'s plain session.query(Cache) has no such outer
+        # UserNote reference, so this only breaks on the lightweight path —
+        # caught by testing both, not just the ORM path (see #631's
+        # DistanceFilter for why testing only one path isn't enough here).
+        from sqlalchemy import exists
+
+        from opensak.db.models import UserNote
+        subq = (
+            exists()
+            .where(UserNote.cache_id == Cache.id, UserNote.is_corrected == True)  # noqa: E712
+            .correlate(Cache)
+        )
+        return query.filter(subq)
+
     def matches(self, cache: Cache) -> bool:
         note = cache.user_note
         return bool(note and note.is_corrected)
@@ -855,6 +880,21 @@ class NoCorrectedFilter(BaseFilter):
     """
     filter_type = "no_corrected"
 
+    def apply_to_query(self, query):
+        # #633: NOT EXISTS mirrors `not bool(note and note.is_corrected)` —
+        # includes both "no UserNote row" and "UserNote exists but not
+        # corrected", same as matches() below. .correlate(Cache) needed —
+        # see HasCorrectedFilter above for why.
+        from sqlalchemy import exists
+
+        from opensak.db.models import UserNote
+        subq = (
+            exists()
+            .where(UserNote.cache_id == Cache.id, UserNote.is_corrected == True)  # noqa: E712
+            .correlate(Cache)
+        )
+        return query.filter(~subq)
+
     def matches(self, cache: Cache) -> bool:
         note = cache.user_note
         return not bool(note and note.is_corrected)
@@ -870,6 +910,15 @@ class UserFlagFilter(BaseFilter):
 
     def __init__(self, flagged: bool):
         self.flagged = flagged
+
+    def apply_to_query(self, query):
+        # #633: mirror matches()'s `bool(cache.user_flag) == self.flagged` —
+        # NULL counts as falsy, same as bool(None). == True/False (not
+        # .is_(True/False) — see #628) so the index stays usable.
+        from sqlalchemy import or_
+        if self.flagged:
+            return query.filter(Cache.user_flag == True)  # noqa: E712
+        return query.filter(or_(Cache.user_flag == False, Cache.user_flag.is_(None)))  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return bool(cache.user_flag) == self.flagged
@@ -889,6 +938,13 @@ class LockedFilter(BaseFilter):
     def __init__(self, locked: bool):
         self.locked = locked
 
+    def apply_to_query(self, query):
+        # #633: same NULL-as-falsy mirror as UserFlagFilter above.
+        from sqlalchemy import or_
+        if self.locked:
+            return query.filter(Cache.locked == True)  # noqa: E712
+        return query.filter(or_(Cache.locked == False, Cache.locked.is_(None)))  # noqa: E712
+
     def matches(self, cache: Cache) -> bool:
         return bool(cache.locked) == self.locked
 
@@ -906,6 +962,13 @@ class DnfFilter(BaseFilter):
 
     def __init__(self, has_dnf: bool):
         self.has_dnf = has_dnf
+
+    def apply_to_query(self, query):
+        # #633: same NULL-as-falsy mirror as UserFlagFilter above.
+        from sqlalchemy import or_
+        if self.has_dnf:
+            return query.filter(Cache.dnf == True)  # noqa: E712
+        return query.filter(or_(Cache.dnf == False, Cache.dnf.is_(None)))  # noqa: E712
 
     def matches(self, cache: Cache) -> bool:
         return bool(cache.dnf) == self.has_dnf
@@ -925,6 +988,13 @@ class FtfFilter(BaseFilter):
     def __init__(self, has_ftf: bool):
         self.has_ftf = has_ftf
 
+    def apply_to_query(self, query):
+        # #633: same NULL-as-falsy mirror as UserFlagFilter above.
+        from sqlalchemy import or_
+        if self.has_ftf:
+            return query.filter(Cache.first_to_find == True)  # noqa: E712
+        return query.filter(or_(Cache.first_to_find == False, Cache.first_to_find.is_(None)))  # noqa: E712
+
     def matches(self, cache: Cache) -> bool:
         return bool(cache.first_to_find) == self.has_ftf
 
@@ -943,6 +1013,12 @@ class FavoritePointsFilter(BaseFilter):
     def __init__(self, min_pts: int = 0, max_pts: int = 9999):
         self.min_pts = min_pts
         self.max_pts = max_pts
+
+    def apply_to_query(self, query):
+        # #633: mirror matches()'s `cache.favorite_points or 0` (NULL treated
+        # as 0) via coalesce.
+        from sqlalchemy import func
+        return query.filter(func.coalesce(Cache.favorite_points, 0).between(self.min_pts, self.max_pts))
 
     def matches(self, cache: Cache) -> bool:
         pts = cache.favorite_points or 0
@@ -971,6 +1047,24 @@ class FoundByMeDateFilter(BaseFilter):
     ):
         self.from_date = from_date
         self.to_date = to_date
+
+    def apply_to_query(self, query):
+        # #633: mirrors matches() exactly — found must be true; if a date
+        # range is given, a NULL found_date still matches (found but no
+        # date — include), same as the `if fd is None: return True` branch
+        # below. With no range given, any found=True row matches
+        # regardless of found_date, same as matches() falling through to
+        # `return True` when both from_date/to_date are falsy.
+        from sqlalchemy import and_, or_
+        q = query.filter(Cache.found == True)  # noqa: E712
+        range_conditions = []
+        if self.from_date:
+            range_conditions.append(Cache.found_date >= self.from_date)
+        if self.to_date:
+            range_conditions.append(Cache.found_date <= self.to_date)
+        if range_conditions:
+            q = q.filter(or_(Cache.found_date.is_(None), and_(*range_conditions)))
+        return q
 
     def matches(self, cache: Cache) -> bool:
         if not cache.found:
@@ -1012,6 +1106,19 @@ class DnfDateFilter(BaseFilter):
         self.from_date = from_date
         self.to_date = to_date
 
+    def apply_to_query(self, query):
+        # #633: same pattern as FoundByMeDateFilter above, for dnf/dnf_date.
+        from sqlalchemy import and_, or_
+        q = query.filter(Cache.dnf == True)  # noqa: E712
+        range_conditions = []
+        if self.from_date:
+            range_conditions.append(Cache.dnf_date >= self.from_date)
+        if self.to_date:
+            range_conditions.append(Cache.dnf_date <= self.to_date)
+        if range_conditions:
+            q = q.filter(or_(Cache.dnf_date.is_(None), and_(*range_conditions)))
+        return q
+
     def matches(self, cache: Cache) -> bool:
         if not cache.dnf:
             return False
@@ -1051,6 +1158,19 @@ class LastLogDateFilter(BaseFilter):
     ):
         self.from_date = from_date
         self.to_date = to_date
+
+    def apply_to_query(self, query):
+        # #633: mirrors matches() exactly — unlike FoundByMeDateFilter/
+        # DnfDateFilter above, a NULL last_log_date EXCLUDES the cache here
+        # (matches() returns False for ld is None, not True), so no
+        # NULL-passthrough branch — just require non-NULL plus the range.
+        from sqlalchemy import and_
+        conditions = [Cache.last_log_date.is_not(None)]
+        if self.from_date:
+            conditions.append(Cache.last_log_date >= self.from_date)
+        if self.to_date:
+            conditions.append(Cache.last_log_date <= self.to_date)
+        return query.filter(and_(*conditions))
 
     def matches(self, cache: Cache) -> bool:
         ld = cache.last_log_date

@@ -6,6 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **SQL pushdown for remaining scalar-column filters** (#633) —
+  `UserFlagFilter`, `LockedFilter`, `DnfFilter`, `FtfFilter`,
+  `FavoritePointsFilter`, `HasCorrectedFilter`/`NoCorrectedFilter`,
+  `FoundByMeDateFilter`, `DnfDateFilter`, and `LastLogDateFilter`
+  previously had no `apply_to_query()` at all, always falling back to a
+  full Python `matches()` scan. Under the ORM path this barely mattered
+  (#631 found the Python pass was only ~2% of `apply_filters()`'s time —
+  ORM hydration dominated regardless of whether a filter narrowed the SQL
+  query or not). Under the lightweight query path (beta.9) the picture is
+  different: without SQL pushdown, `apply_filters_lightweight()` must
+  still construct a `LightweightCache` for every single row before
+  Python-filtering it down, so a highly selective filter with no pushdown
+  costs almost as much as fetching the whole table. Measured directly on
+  a 100,000-cache database: `FtfFilter` (0.6% selectivity) went from
+  2.42s to 0.05s (~48x faster); `UserFlagFilter` (~5%) from 2.49s to
+  0.16s (~15x); `DnfFilter` (~7%) from 2.39s to 0.20s (~12x).
+
+  Each `apply_to_query()` mirrors its `matches()` counterpart exactly,
+  including NULL handling — `FoundByMeDateFilter`/`DnfDateFilter` treat a
+  NULL date as "include" (found/DNF but undated), while
+  `LastLogDateFilter` treats NULL as "exclude", and both are preserved
+  precisely in SQL. `HasCorrectedFilter`/`NoCorrectedFilter` use a
+  correlated `EXISTS`/`NOT EXISTS` against `user_notes`, which needed an
+  explicit `.correlate(Cache)` — without it, `apply_filters_lightweight()`
+  raised `InvalidRequestError` because its `select()` already outerjoins
+  `user_notes` for corrected-coordinate display, confusing SQLAlchemy's
+  auto-correlation. Only broke on the lightweight path, not the full ORM
+  path — caught by testing both, not just one.
+
+  25 new parity tests (including NULL edge cases for every field
+  involved) confirm every filter's SQL and Python forms agree exactly;
+  full unit-test suite (2136 tests) green, mypy clean.
+
 ---
 
 ## [1.16.0-beta.9] — 2026-07-22
