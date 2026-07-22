@@ -23,6 +23,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `apply_filters — no filter` 11.42s vs `apply_filters_auto — no filter`
   1.97s (~5.8x faster), consistent with beta.10/11's isolated measurements.
 
+### Fixed
+
+- **`LightweightCache` table-load regression, found by the updated
+  benchmark harness** (#627 beta.9-11 follow-up) — running
+  `apply_filters_auto()`'s "no filter" result through `CacheTableModel`'s
+  new second measurement (added above) revealed table load was **slower**
+  with `LightweightCache` rows than with real `Cache` ORM objects (0.20s
+  vs 0.53s at 100,000 rows) — the opposite of the intended effect. Root
+  cause: `LightweightCache`'s original design delegated every attribute
+  access through a custom `__getattr__`, and `CacheTableModel.load()`
+  touches `.id`/`.distance`/`.bearing` on every single row via
+  `_update_distances()` — that per-access Python-level dispatch overhead
+  was costing more than the fetch-side win it was meant to complement. A
+  first fix (eagerly copying *all* ~52 selected columns into `__slots__`
+  at construction) fixed table load but overcorrected, making
+  `apply_filters_lightweight()`'s own fetch time roughly equal to full ORM
+  hydration — eagerly copying 52 fields per row, whether or not they're
+  ever read, cost about as much as the hydration it was meant to avoid.
+  Final fix: eagerly copy only `id`/`distance`/`bearing` (the fields
+  actually touched unconditionally by `_update_distances()`); everything
+  else stays lazily delegated, since Qt only calls `data()` for
+  currently-visible rows, not all of them. Both measurements now improve
+  together at 100,000 rows: fetch 6.04s → 2.24s (~2.7x faster), table load
+  0.20s → 0.027s (~7.5x faster, now genuinely faster than ORM as intended).
+
 - **Lightweight query path (`apply_filters_lightweight()`)** (#627 beta.9)
   — new function in `filters/engine.py` alongside `apply_filters()`,
   returning `LightweightCache` rows (backed by a SQLAlchemy Core `select()`)
