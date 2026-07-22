@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Performance
+
+- **Cache map pin HTML generation** (#629, part of #627) — `get_map_pin_html()`
+  now caches its output with `@lru_cache(maxsize=256)`. The HTML (including
+  base64-encoded SVG) only depends on `(cache_type, found, dnf)`, a small
+  bounded set of combinations, but was previously rebuilt from scratch for
+  every visible cache on every map load. On a 100,000-cache benchmark
+  database (see #628's `scripts/benchmark_large_db.py`), map load time
+  dropped from ~10.1s to ~3.2s (~68%).
+
 ---
 
 ## [1.16.0-beta.6] — 2026-07-21

@@ -585,12 +585,25 @@ def get_cache_type_pixmap(cache_type: str, size: int = 32) -> QPixmap:
     return _svg_to_pixmap(svg, size)
 
 
+@lru_cache(maxsize=256)
 def get_map_pin_html(cache_type: str, found: bool = False, dnf: bool = False) -> str:
     """
     Return HTML streng til en Leaflet divIcon map pin.
     Viser cache type ikon som base med smiley overlay i øverste højre hjørne:
       found=True → gold smiley; dnf=True (og ikke found) → dark-blue smiley.
     Bruger base64 <img> tag så SVG farver bevares korrekt i browser.
+
+    Issue #629: output afhænger udelukkende af (cache_type, found, dnf) —
+    et lille, begrænset antal kombinationer (reelt langt under 256 typer ×
+    2 statusflag). Uden caching gentages base64-encoding af den fulde SVG
+    for hver enkelt cache ved hver map-load, hvilket dominerer map-load-tid
+    på store databaser (se #627/#579-benchmark: ~38-40% af map-load-tiden).
+
+    Samme forudsætning som _read_svg_file()/_user_icons_dir() ovenfor:
+    ikon-filer ændrer sig ikke i løbet af en kørende session. Hvis
+    live-reload af brugerdefinerede ikoner (SVG icon editor, se roadmap)
+    nogensinde implementeres, skal ALLE disse lru_cache'ede funktioner
+    ryddes samlet (.cache_clear()) ved reload — ikke kun denne.
     """
     import base64
 
