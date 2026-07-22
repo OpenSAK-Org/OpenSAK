@@ -6,7 +6,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Performance
+---
+
+## [1.16.0-beta.7] — 2026-07-22
+
+> **Beta release** — large-database performance work (see #627): map load
+> is dramatically faster on big databases thanks to icon caching and bulk
+> marker loading, plus a small, safe win in the filter engine. Includes a
+> new benchmark harness so every step here — and future ones — can be
+> measured instead of guessed at.
+>
+> Measured on a 250,000-cache synthetic benchmark database
+> (`scripts/benchmark_large_db.py`): map load dropped from 11.34s to 4.45s
+> (-61%), total time to show all caches dropped from 37.58s to 30.42s
+> (-19%). Full before/after table in #628.
+
+### Added
+
+- **Large-database benchmark harness** (#628, part of #627) —
+  `scripts/benchmark_large_db.py` generates a synthetic database at a
+  configurable scale (default 250,000 caches) and measures distance
+  recalculation, `apply_filters()`, map load, table load, and info-bar
+  update, printing a table (optionally markdown) for pasting into GitHub
+  issues. Every performance change in #627 is now measured against this
+  harness rather than eyeballed.
+
+### Improved
 
 - **Cache map pin HTML generation** (#629, part of #627) — `get_map_pin_html()`
   now caches its output with `@lru_cache(maxsize=256)`. The HTML (including
