@@ -25,6 +25,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **GPX/LOC/GGZ, KML, GPS-device, and trip-planner export crashed with
+  `LightweightCache` table rows** (#627 beta.9-11 follow-up, caught by
+  `tests/e2e-tests/test_e2e_export_reload.py`) — `reload_caches_full()`
+  (the shared helper all four export/trip-planner code paths call to
+  reload full `Cache` ORM objects before generating output) checked
+  `isinstance(c, Cache)` to decide which caches to reload. Since
+  `LightweightCache` isn't a subclass of `Cache`, every table row was
+  silently filtered out of the reload — `ids` ended up empty, and the
+  function returned the original, un-reloaded `LightweightCache` objects
+  straight through. The export worker then crashed with `AttributeError`
+  the moment it touched `encoded_hints`, exactly the class of bug this
+  function exists to prevent (previously #207, against detached `Cache`
+  objects raising `DetachedInstanceError` instead). Fixed by recognizing
+  both `Cache` and `LightweightCache` as reloadable. Also updated
+  `test_e2e_export_reload.py`'s precondition test, which asserted the old
+  (`Cache`/`DetachedInstanceError`) failure mode specifically — updated to
+  assert the current (`LightweightCache`/`AttributeError`) one, with a
+  comment explaining the invariant (table caches never carry full hint/log
+  data without an explicit reload) hasn't changed, only which object type
+  enforces it.
+
 - **`LightweightCache` table-load regression, found by the updated
   benchmark harness** (#627 beta.9-11 follow-up) — running
   `apply_filters_auto()`'s "no filter" result through `CacheTableModel`'s

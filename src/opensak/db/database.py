@@ -853,22 +853,29 @@ def make_session():
 def reload_caches_full(caches: list) -> list:
     """Reload *caches* with everything an export needs eagerly loaded.
 
-    Table-model caches come from apply_filters(), which defers the text blobs
-    (hints/descriptions) and noloads logs/waypoints for speed. Once their
-    session closes they are detached, so an export worker that reads those
-    attributes raises DetachedInstanceError. Reloading here returns fully
-    populated, detached-safe objects (logs, waypoints, attributes, user_note
-    and the text blobs) in the original order.
+    Table-model caches come from apply_filters_auto() — either real Cache
+    ORM objects or, since #627 beta.9-11, LightweightCache rows (which defer
+    the text blobs and never carry logs/waypoints/attributes at all).
+    Either way, an export worker that reads those attributes needs the full
+    picture: a real Cache would raise DetachedInstanceError once its
+    session closes, and a LightweightCache raises AttributeError by design
+    (see its docstring) for exactly these fields. Reloading here returns
+    fully populated, detached-safe Cache objects (logs, waypoints,
+    attributes, user_note and the text blobs) in the original order,
+    regardless of which of the two types the caller is currently holding.
 
     Objects without a matching DB row (e.g. test stand-ins) pass through
     unchanged.
     """
     from opensak.db.models import Cache
+    from opensak.filters.engine import LightweightCache
     from sqlalchemy.orm import joinedload, selectinload, undefer
 
-    # Only persisted Cache rows can be reloaded; pass anything else through
-    # (e.g. SimpleNamespace stand-ins in tests).
-    ids = [c.id for c in caches if isinstance(c, Cache) and c.id is not None]
+    # Both Cache (full ORM) and LightweightCache (#627 beta.9-11) carry a
+    # real .id — anything else (e.g. SimpleNamespace stand-ins in tests)
+    # passes through unchanged.
+    reloadable = (Cache, LightweightCache)
+    ids = [c.id for c in caches if isinstance(c, reloadable) and c.id is not None]
     if not ids:
         return list(caches)
 
@@ -889,7 +896,7 @@ def reload_caches_full(caches: list) -> list:
         )
 
     by_id = {c.id: c for c in rows}
-    return [by_id.get(c.id, c) if isinstance(c, Cache) else c for c in caches]
+    return [by_id.get(c.id, c) if isinstance(c, reloadable) else c for c in caches]
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────

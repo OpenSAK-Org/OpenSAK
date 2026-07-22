@@ -355,6 +355,69 @@ class TestReloadCachesFull:
         ghost.id = 424242  # an id with no matching row
         assert reload_caches_full([ghost]) == [ghost]
 
+    def test_reloads_lightweight_cache_rows(self, tmp_path):
+        # #627 beta.9-11 follow-up: apply_filters_auto() (what mainwindow.py
+        # actually feeds the table since beta.10/11) normally returns
+        # LightweightCache rows, not real Cache ORM objects. The original
+        # isinstance(c, Cache) check here filtered every one of them out,
+        # so export/GPS-export/trip-planner/KML-export silently received
+        # unreloaded LightweightCache rows and crashed with AttributeError
+        # the moment they touched encoded_hints/logs/etc — caught by
+        # tests/e2e-tests/test_e2e_export_reload.py.
+        from opensak.filters.engine import apply_filters_auto
+
+        init_db(db_path=tmp_path / "reload_lightweight.db")
+        with get_session() as s:
+            cache = Cache(
+                gc_code="GCLWRELOAD", name="Lightweight reload me",
+                cache_type="Traditional Cache", latitude=55.0, longitude=12.0,
+                encoded_hints="Under a rock.",
+            )
+            cache.logs.append(Log(log_type="Found it", finder="T", text="TFTC! Great hide."))
+            s.add(cache)
+
+        with get_session() as s:
+            [lightweight] = apply_filters_auto(s, None, None)
+
+        from opensak.filters.engine import LightweightCache
+        assert isinstance(lightweight, LightweightCache)
+        with pytest.raises(AttributeError):
+            _ = lightweight.encoded_hints
+
+        [full] = reload_caches_full([lightweight])
+        assert isinstance(full, Cache)
+        assert full.encoded_hints == "Under a rock."
+        assert [lg.text for lg in full.logs] == ["TFTC! Great hide."]
+
+    def test_mixed_cache_and_lightweight_cache_both_reload(self, tmp_path):
+        # A batch could plausibly mix both types (e.g. one row manually
+        # reloaded earlier in the same session) — confirm both get handled
+        # and end up in the original order.
+        from opensak.filters.engine import LightweightCache, apply_filters_auto
+
+        init_db(db_path=tmp_path / "reload_mixed.db")
+        with get_session() as s:
+            s.add(Cache(gc_code="GCMIX1", name="One", cache_type="Traditional Cache",
+                        latitude=55.0, longitude=12.0, encoded_hints="Hint one."))
+            s.add(Cache(gc_code="GCMIX2", name="Two", cache_type="Traditional Cache",
+                        latitude=55.1, longitude=12.1, encoded_hints="Hint two."))
+
+        with get_session() as s:
+            lightweight_caches = apply_filters_auto(s, None, None)
+        with get_session() as s:
+            from opensak.db.models import Cache as CacheModel
+            from sqlalchemy.orm import defer
+            real_cache = (
+                s.query(CacheModel).options(defer(CacheModel.encoded_hints))
+                .filter_by(gc_code="GCMIX1").one()
+            )
+
+        mixed = [real_cache, lightweight_caches[1]]
+        reloaded = reload_caches_full(mixed)
+        assert [c.gc_code for c in reloaded] == ["GCMIX1", "GCMIX2"]
+        assert all(isinstance(c, Cache) for c in reloaded)
+        assert {c.encoded_hints for c in reloaded} == {"Hint one.", "Hint two."}
+
 
 # ── Location provenance columns (issue #60 phase 3) ──────────────────────────
 
