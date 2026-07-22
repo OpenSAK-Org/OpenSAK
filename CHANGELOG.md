@@ -8,6 +8,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Benchmark harness now measures the lightweight query path too** (#628,
+  part of #627) — `scripts/benchmark_large_db.py` now also runs its three
+  `apply_filters` scenarios through `apply_filters_auto()` (the now-current
+  path every table/map refresh uses since beta.10/11), and runs the map/
+  table-load steps against both result sets, so a single report shows the
+  full before/after picture instead of requiring a separate isolated A/B
+  script. Fixed a measurement-fairness bug found while adding this: the
+  icon HTML `@lru_cache` (#629) meant whichever "Map load" measurement ran
+  first in the script paid the one-time cache-warming cost and the second
+  one benefited "for free," making the two Map load numbers an artifact of
+  run order rather than a fair comparison — fixed with an explicit warmup
+  pass before either timed measurement. On a 100,000-cache database:
+  `apply_filters — no filter` 11.42s vs `apply_filters_auto — no filter`
+  1.97s (~5.8x faster), consistent with beta.10/11's isolated measurements.
+
 - **Lightweight query path (`apply_filters_lightweight()`)** (#627 beta.9)
   — new function in `filters/engine.py` alongside `apply_filters()`,
   returning `LightweightCache` rows (backed by a SQLAlchemy Core `select()`)

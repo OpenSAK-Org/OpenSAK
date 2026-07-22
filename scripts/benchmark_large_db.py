@@ -17,14 +17,22 @@ This script:
      250,000 caches, each with a random number of logs/attributes/
      trackables, scattered both near and far from a home point so
      distance-filtering scenarios are meaningful).
-  2. Measures the same steps as @nagisml's benchmark comment:
+  2. Measures the same steps as @nagisml's benchmark comment, PLUS the
+     lightweight query path added in #627 beta.9-11:
        - distance recalc (cold, full)
        - distance spot-check (warm — confirms #579's skip path is taken)
        - distance recalc (invalidated — home point changed, fallback path)
        - DB query / apply_filters, for three scenarios (None, exclude
          archived, distance-filtered)
-       - map load (Python-side payload build — JSON + pin-icon generation)
-       - table load (CacheTableModel)
+       - the same three scenarios again via apply_filters_auto() — what
+         mainwindow.py actually calls for every table/map refresh since
+         beta.10/11. Always attempts the lightweight query path (beta.9),
+         falling back to the apply_filters() path above automatically for
+         anything that needs a relationship or deferred text field.
+       - map load (Python-side payload build — JSON + pin-icon generation),
+         once against apply_filters()'s result and once against
+         apply_filters_auto()'s, so the report shows both paths directly
+       - table load (CacheTableModel), same before/after pairing
        - info-bar update
   3. Prints a table in the same format as the #579 benchmark comment, so
      results can be pasted directly into issue comments for before/after
@@ -309,6 +317,34 @@ def _timed(label: str, fn: Callable[..., _T], *args, **kwargs) -> tuple[StepResu
     return StepResult(label, dt), result
 
 
+def _warm_icon_cache() -> None:
+    """Pre-warm get_map_pin_html()'s @lru_cache (#629) before any timed map
+    load runs.
+
+    Without this, whichever "Map load" measurement happens to run FIRST in
+    the script pays the one-time cold-cache cost (SVG loading + base64
+    encoding for every distinct cache_type/found/dnf combination) and every
+    later map-load measurement in the same process benefits "for free" —
+    making a before/after comparison between two Map load steps an artifact
+    of run order, not of the actual difference between apply_filters() and
+    apply_filters_auto(). Warming the cache once up front, before either
+    measurement, keeps that comparison fair: both start from a warm cache,
+    same as the real app after its first-ever map render.
+    """
+    try:
+        from opensak.gui.map_widget import _cache_pin_html
+    except ImportError:
+        return
+    cache_types = [
+        "Traditional Cache", "Multi-cache", "Unknown Cache", "Earthcache",
+        "Letterbox Hybrid", "Wherigo Cache", "Virtual Cache", "Event Cache",
+    ]
+    for ct in cache_types:
+        for found in (True, False):
+            for dnf in (True, False):
+                _cache_pin_html(ct, found, dnf)
+
+
 def bench_distance_recalc() -> list[StepResult]:
     from opensak.db.database import distances_up_to_date, recalculate_distances
 
@@ -367,20 +403,59 @@ def bench_apply_filters() -> tuple[list[StepResult], list]:
     return results, caches  # last (smallest) result set reused by later steps
 
 
-def bench_map_load(caches: list) -> list[StepResult]:
+def bench_apply_filters_auto() -> tuple[list[StepResult], list]:
+    """Same three scenarios as bench_apply_filters(), but via
+    apply_filters_auto() — what mainwindow.py actually calls for every
+    table/map refresh since #627 beta.10/11. apply_filters_auto() always
+    attempts the lightweight query path (#627 beta.9), automatically
+    falling back to the same full-ORM apply_filters() path above for any
+    filterset that needs a relationship or deferred text field (none of
+    these three do). Run alongside bench_apply_filters() so a single
+    report shows both the old and the now-current path directly, instead
+    of requiring a separate isolated A/B script.
+    """
+    from opensak.db.database import get_session
+    from opensak.filters.engine import ArchivedFilter, DistanceFilter, FilterSet, WhereClauseFilter, apply_filters_auto
+
+    results = []
+
+    with get_session() as session:
+        r, caches = _timed("apply_filters_auto — no filter", apply_filters_auto, session, None, None)
+        r.detail = f"{len(caches)} caches"
+        results.append(r)
+
+    with get_session() as session:
+        fs = FilterSet(mode="AND")
+        fs.add(WhereClauseFilter("archived = 0"))
+        r, caches = _timed("apply_filters_auto — exclude archived", apply_filters_auto, session, fs, None)
+        r.detail = f"{len(caches)} caches"
+        results.append(r)
+
+    with get_session() as session:
+        fs = FilterSet(mode="AND")
+        fs.add(DistanceFilter(HOME_LAT, HOME_LON, max_km=50.0))
+        r, caches = _timed("apply_filters_auto — within 50km", apply_filters_auto, session, fs, None)
+        r.detail = f"{len(caches)} caches"
+        results.append(r)
+
+    return results, caches  # last (smallest) result set reused by later steps
+
+
+def bench_map_load(caches: list, label_suffix: str = "") -> list[StepResult]:
     """Measure the Python-side map payload build (JSON + pin icons).
 
     Reuses the exact production functions map_widget._do_load_caches() calls,
     without needing a live QWebEngineView. Does NOT measure JS-side Leaflet
     clustering time — see module docstring.
     """
+    label = f"Map load (Python-side payload){label_suffix}"
     try:
         import json as _json
 
         from opensak.gps.garmin import _effective_coords
         from opensak.gui.map_widget import _cache_pin_html
     except ImportError as exc:
-        return [StepResult("Map load (Python-side payload)", None, f"skipped — {exc}")]
+        return [StepResult(label, None, f"skipped — {exc}")]
 
     def _build_payload(caches):
         data = []
@@ -402,12 +477,13 @@ def bench_map_load(caches: list) -> list[StepResult]:
         json_str = json_str.replace("\\", "\\\\").replace("`", "\\`")
         return json_str
 
-    r, payload = _timed("Map load (Python-side payload)", _build_payload, caches)
+    r, payload = _timed(label, _build_payload, caches)
     r.detail = f"{len(caches)} caches, {len(payload) / 1024:.0f} KB JSON"
     return [r]
 
 
-def bench_table_load(caches: list) -> list[StepResult]:
+def bench_table_load(caches: list, label_suffix: str = "") -> list[StepResult]:
+    label = f"Table load (CacheTableModel){label_suffix}"
     try:
         import os
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -415,11 +491,11 @@ def bench_table_load(caches: list) -> list[StepResult]:
 
         from opensak.gui.cache_table import CacheTableModel
     except ImportError as exc:
-        return [StepResult("Table load (CacheTableModel)", None, f"skipped — {exc}")]
+        return [StepResult(label, None, f"skipped — {exc}")]
 
     app = QApplication.instance() or QApplication([])
     model = CacheTableModel()
-    r, _ = _timed("Table load (CacheTableModel)", model.load, caches)
+    r, _ = _timed(label, model.load, caches)
     r.detail = f"{len(caches)} caches"
     return [r]
 
@@ -510,16 +586,31 @@ def main() -> int:
     filter_results, smallest_caches = bench_apply_filters()
     all_results += filter_results
 
+    auto_filter_results, _ = bench_apply_filters_auto()
+    all_results += auto_filter_results
+
     # map/table/info-bar steps run against the largest (unfiltered) result set,
     # matching @nagisml's "Total to caches shown" methodology.
     from opensak.db.database import get_session
-    from opensak.filters.engine import apply_filters
+    from opensak.filters.engine import apply_filters, apply_filters_auto
     with get_session() as session:
         all_caches = apply_filters(session, None, None)
 
+    _warm_icon_cache()  # keep both Map load measurements below a fair A/B — see docstring
     all_results += bench_map_load(all_caches)
     all_results += bench_table_load(all_caches)
     all_results += bench_info_bar(all_caches)
+
+    # #627 beta.9-11: apply_filters_auto() (what mainwindow.py actually
+    # calls for every table/map refresh) is the now-current path — rerun
+    # map/table load against its result set too, so the report shows the
+    # full realistic before/after picture in one run instead of requiring
+    # a separate isolated A/B script.
+    with get_session() as session:
+        all_caches_auto = apply_filters_auto(session, None, None)
+
+    all_results += bench_map_load(all_caches_auto, label_suffix=" — apply_filters_auto")
+    all_results += bench_table_load(all_caches_auto, label_suffix=" — apply_filters_auto")
 
     print_results(all_results)
     if args.markdown:
