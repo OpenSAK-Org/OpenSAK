@@ -90,8 +90,9 @@ class TestWorkers:
 # ── construction (covers the three tab builders + _load) ──────────────────────
 
 class TestConstruction:
-    def test_builds_three_tabs(self, dlg):
-        assert dlg._tabs.count() == 3
+    def test_builds_four_tabs(self, dlg):
+        # General, Map (#638), Geocaching.com, Advanced.
+        assert dlg._tabs.count() == 4
 
     def test_load_reflects_settings(self, qtbot, settings):
         settings.gc_username = "preset"
@@ -100,6 +101,23 @@ class TestConstruction:
         qtbot.addWidget(d)
         assert d._gc_username.text() == "preset"
         assert d._unit_combo.currentData() is True
+
+    def test_map_enabled_defaults_to_checked(self, dlg):
+        # map_enabled defaults to True (opt-out, not opt-in) — see #638.
+        assert dlg._map_enabled_cb.isChecked() is True
+
+    def test_map_enabled_loads_false_from_settings(self, qtbot, settings):
+        settings.map_enabled = False
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_enabled_cb.isChecked() is False
+
+    def test_map_enabled_saves_on_accept(self, qtbot, settings):
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        d._map_enabled_cb.setChecked(False)
+        d._save()
+        assert settings.map_enabled is False
 
 
 # ── coordinate / home-location feedback ───────────────────────────────────────

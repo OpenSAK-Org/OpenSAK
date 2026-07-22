@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Medel",
     "settings_text_size_large":     "Stor",
     "settings_default_decode_hints_cb": "Visa tips avkodade som standard",
+
+    # ── Issue #638: kartflik ───────────────────────────────────────────────────
+    "settings_map_enabled_cb":          "Visa karta",
+    "settings_map_enabled_note":        "Om kartan inaktiveras hoppar appen över att bygga och läsa in dess markördata vid varje uppdatering — för närvarande den enskilt största kvarvarande kostnaden vid visning av en stor databas. Stäng av detta om du främst använder cache-listan och inte behöver kartvyn.",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",
     "settings_language_label":      "Språk:",
@@ -981,6 +985,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Allmänt",
+    "settings_tab_map":              "Karta",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Avancerat",
     "gc_not_logged_in":             "Inte inloggad",

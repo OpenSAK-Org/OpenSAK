@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Mittel",
     "settings_text_size_large":     "Groß",
     "settings_default_decode_hints_cb": "Hinweise standardmäßig entschlüsselt anzeigen",
+
+    # ── Issue #638: Karte-Tab ──────────────────────────────────────────────────
+    "settings_map_enabled_cb":          "Karte anzeigen",
+    "settings_map_enabled_note":        "Wenn die Karte deaktiviert ist, werden ihre Markierungsdaten bei jeder Aktualisierung nicht aufgebaut und geladen — derzeit die größte verbleibende Kostenstelle beim Anzeigen einer großen Datenbank. Schalten Sie dies aus, wenn Sie hauptsächlich die Cache-Liste nutzen und die Kartenansicht nicht benötigen.",
     "settings_date_format_locale":  "OS-Gebietsschema",
     "settings_group_language":      "Sprache",
     "settings_language_label":      "Sprache:",
@@ -981,6 +985,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Allgemein",
+    "settings_tab_map":              "Karte",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Erweitert",
     "gc_not_logged_in":             "Nicht eingeloggt",

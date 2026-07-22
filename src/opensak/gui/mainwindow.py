@@ -926,7 +926,8 @@ class MainWindow(QMainWindow):
             caches = apply_filters_auto(session, fs, self._current_sort)
 
         self._cache_table.load_caches(caches)
-        self._map_widget.load_caches(caches)
+        if get_settings().map_enabled:
+            self._map_widget.load_caches(caches)
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -1891,7 +1892,8 @@ class MainWindow(QMainWindow):
         self._quick_filter.setCurrentIndex(0)
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
-        self._map_widget.load_caches(caches)
+        if get_settings().map_enabled:
+            self._map_widget.load_caches(caches)
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -2060,7 +2062,8 @@ class MainWindow(QMainWindow):
         with get_session() as session:
             caches = apply_filters_auto(session, profile.filterset, profile.sort)
         self._cache_table.load_caches(caches)
-        self._map_widget.load_caches(caches)
+        if get_settings().map_enabled:
+            self._map_widget.load_caches(caches)
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))

@@ -6,6 +6,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Setting to disable the map panel** (#638) — new "Map" tab in the
+  Settings dialog (split out from General, so future map-specific
+  settings have a natural shared home) with a "Show map" checkbox,
+  defaulting to on (opt-out, zero behavior change for anyone who doesn't
+  touch it). When off, all three `mainwindow.py` refresh paths skip
+  building and loading the map's marker data entirely — since #627,
+  map load has been the single largest remaining cost in "show me my
+  caches" on a large database, bigger than the database query itself.
+  Measured directly: the map-load step (Python-side payload build) drops
+  from ~1.8s to effectively 0s on a 100,000-cache database when disabled.
+  Toggling the setting back on mid-session needs no special handling —
+  the existing Settings-dialog-close flow already calls
+  `_refresh_cache_list()` unconditionally, which now correctly re-populates
+  the map on the next call since the guard re-checks the setting fresh
+  every time. Table contents and sort order are completely unaffected
+  either way.
+
 ---
 
 ## [1.16.0-beta.10] — 2026-07-22

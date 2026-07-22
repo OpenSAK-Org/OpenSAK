@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Střední",
     "settings_text_size_large":     "Velká",
     "settings_default_decode_hints_cb": "Zobrazovat nápovědy standardně dekódované",
+
+    # -- Issue #638: karta mapy --
+    "settings_map_enabled_cb":          "Zobrazit mapu",
+    "settings_map_enabled_note":        "Vypnutí mapy přeskočí sestavení a načtení dat značek při každé aktualizaci — v současnosti největší zbývající náklad při zobrazování velké databáze. Vypněte to, pokud používáte hlavně seznam keší a zobrazení mapy nepotřebujete.",
     "settings_date_format_locale":  "Systémové prostředí",
     "settings_group_language":      "Jazyk",
     "settings_language_label":      "Jazyk:",
@@ -977,6 +981,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Obecné",
+    "settings_tab_map":              "Mapa",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Pokročilé",
     "gc_not_logged_in":             "Nepřihlášen",

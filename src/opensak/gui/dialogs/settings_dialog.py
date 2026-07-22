@@ -78,6 +78,7 @@ class SettingsDialog(QDialog):
         # Tab-widget med tre faner
         self._tabs = QTabWidget()
         self._tabs.addTab(self._build_general_tab(),   tr("settings_tab_general"))
+        self._tabs.addTab(self._build_map_tab(),        tr("settings_tab_map"))
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
 
@@ -346,7 +347,33 @@ class SettingsDialog(QDialog):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         return scroll
 
-    # ── Fane 3: Advanced ─────────────────────────────────────────────────────
+    # ── Fane: Kort ────────────────────────────────────────────────────────────
+
+    def _build_map_tab(self) -> QWidget:
+        # Issue #638: dedicated tab for map-related settings, split out of
+        # General so future map-specific settings (e.g. a max-caches-shown
+        # limit, discussed alongside #638) have a natural home together
+        # instead of accumulating in General. No QGroupBox wrapper yet —
+        # with only one setting so far, a group title would just duplicate
+        # the tab's own name (caught by test_no_globally_redundant_values);
+        # reintroduce one once a second setting joins this tab.
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        self._map_enabled_cb = QCheckBox(tr("settings_map_enabled_cb"))
+        layout.addWidget(self._map_enabled_cb)
+
+        map_enabled_note = QLabel(tr("settings_map_enabled_note"))
+        map_enabled_note.setWordWrap(True)
+        map_enabled_note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(map_enabled_note)
+
+        layout.addStretch()
+        return tab
+
+    # ── Fane: Avanceret ───────────────────────────────────────────────────────
 
     def _build_advanced_tab(self) -> QWidget:
         tab = QWidget()
@@ -990,6 +1017,7 @@ class SettingsDialog(QDialog):
         idx = self._text_size.findData(s.text_size)
         self._text_size.setCurrentIndex(idx if idx >= 0 else 0)
         self._decode_hints_cb.setChecked(s.default_decode_hints)
+        self._map_enabled_cb.setChecked(s.map_enabled)
         lang_idx = self._lang_combo.findData(current_language())
         self._lang_combo.setCurrentIndex(lang_idx if lang_idx >= 0 else 0)
         theme_idx = self._theme_combo.findData(s.theme)
@@ -1032,6 +1060,7 @@ class SettingsDialog(QDialog):
         s.date_format       = self._date_format.currentData()
         s.text_size         = self._text_size.currentData()
         s.default_decode_hints = self._decode_hints_cb.isChecked()
+        s.map_enabled = self._map_enabled_cb.isChecked()
         s.search_min_chars  = self._search_min_chars.value()
         s.search_debounce_ms = self._search_debounce_ms.value()
         new_theme = self._theme_combo.currentData()

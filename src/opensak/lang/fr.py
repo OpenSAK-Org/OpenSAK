@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Moyenne",
     "settings_text_size_large":     "Grande",
     "settings_default_decode_hints_cb": "Afficher les indices décodés par défaut",
+
+    # ── Issue #638 : onglet carte ──────────────────────────────────────────────
+    "settings_map_enabled_cb":          "Afficher la carte",
+    "settings_map_enabled_note":        "Désactiver la carte évite de construire et charger ses données de marqueurs à chaque actualisation — le plus gros coût restant lors de l'affichage d'une grande base de données. Désactivez cette option si vous utilisez principalement la liste des caches et n'avez pas besoin de la vue carte.",
     "settings_date_format_locale":  "Paramètres régionaux",
     "settings_group_language":      "Langue",
     "settings_language_label":      "Langue :",
@@ -982,6 +986,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Général",
+    "settings_tab_map":              "Carte",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Avancé",
     "gc_not_logged_in":             "Non connecté",

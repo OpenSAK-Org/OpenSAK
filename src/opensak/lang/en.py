@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Medium",
     "settings_text_size_large":     "Large",
     "settings_default_decode_hints_cb": "Show hints decoded by default",
+
+    # ── Issue #638: map settings tab ──────────────────────────────────────────
+    "settings_map_enabled_cb":          "Show map",
+    "settings_map_enabled_note":        "Disabling the map skips building and loading its marker data on every refresh — the single largest remaining cost when showing a large database. Turn this off if you mainly use the cache list and don't need the map view.",
     "settings_date_format_locale":  "OS locale",
     "settings_group_language":      "Language",
     "settings_language_label":      "Language:",
@@ -980,6 +984,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "General",
+    "settings_tab_map":              "Map",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Advanced",
     "gc_not_logged_in":             "Not logged in",

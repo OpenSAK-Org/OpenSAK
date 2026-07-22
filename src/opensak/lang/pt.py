@@ -292,6 +292,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Médio",
     "settings_text_size_large":     "Grande",
     "settings_default_decode_hints_cb": "Mostrar as dicas descodificadas por defeito",
+
+    # ── Issue #638: separador do mapa ─────────────────────────────────────────
+    "settings_map_enabled_cb":          "Mostrar mapa",
+    "settings_map_enabled_note":        "Desativar o mapa evita construir e carregar os dados dos marcadores em cada atualização — o maior custo restante ao mostrar uma base de dados grande. Desative isto se utilizar principalmente a lista de caches e não precisar da vista de mapa.",
     "settings_date_format_locale":  "Idioma do sistema",
     "settings_group_language":      "Idioma",
     "settings_language_label":      "Idioma:",
@@ -982,6 +986,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Geral",
+    "settings_tab_map":              "Mapa",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Avançado",
     "gc_not_logged_in":             "Sessão não iniciada",

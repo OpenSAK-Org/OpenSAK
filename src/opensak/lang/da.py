@@ -293,6 +293,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Mellem",
     "settings_text_size_large":     "Stor",
     "settings_default_decode_hints_cb": "Vis hints dekodet som standard",
+
+    # ── Issue #638: kort-fane ──────────────────────────────────────────────────
+    "settings_map_enabled_cb":          "Vis kort",
+    "settings_map_enabled_note":        "Deaktivering af kortet springer opbygning og indlæsning af kortets markørdata over ved hver opdatering — den enkeltstørste resterende omkostning ved visning af en stor database. Slå dette fra hvis du hovedsageligt bruger cache-listen og ikke har brug for kortvisningen.",
     "settings_group_language":      "Sprog / Language",
     "settings_language_label":      "Sprog:",
     "settings_language_hint":       "Ændring træder i kraft ved næste opstart",
@@ -981,6 +985,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Generelt",
+    "settings_tab_map":              "Kort",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Avanceret",
     "gc_not_logged_in":             "Ikke logget ind",

@@ -295,6 +295,10 @@ STRINGS: dict[str, str] = {
     "settings_text_size_medium":    "Gemiddeld",
     "settings_text_size_large":     "Groot",
     "settings_default_decode_hints_cb": "Hints standaard gedecodeerd tonen",
+
+    # ── Issue #638: kaart-tabblad ──────────────────────────────────────────────
+    "settings_map_enabled_cb":          "Kaart tonen",
+    "settings_map_enabled_note":        "Als de kaart is uitgeschakeld, worden de markeringsgegevens niet bij elke verversing opgebouwd en geladen — momenteel de grootste resterende kostenpost bij het tonen van een grote database. Schakel dit uit als u vooral de cachelijst gebruikt en de kaartweergave niet nodig heeft.",
     "settings_date_format_locale":  "OS-landinstelling",
     "settings_group_language":      "Taal",
     "settings_language_label":      "Taal:",
@@ -978,6 +982,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching.com integration ────────────────────────────────────────────
     "settings_tab_general":         "Algemeen",
+    "settings_tab_map":              "Kaart",
     "settings_tab_geocaching":      "Geocaching.com",
     "settings_tab_advanced":        "Geavanceerd",
     "gc_not_logged_in":             "Niet ingelogd",

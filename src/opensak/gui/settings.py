@@ -296,6 +296,26 @@ class AppSettings:
     def use_miles(self, value: bool) -> None:
         get_store().set("display.use_miles", bool(value))
 
+    # ── Kort ──────────────────────────────────────────────────────────────────
+
+    @property
+    def map_enabled(self) -> bool:
+        """Issue #638: skip building/loading the map's marker data on every
+        refresh when disabled — map load is the single largest remaining
+        cost in "show me my caches" on a large database (see #627's
+        benchmarks). Defaults to True (opt-out, not opt-in) so this is a
+        zero-behavior-change default for anyone who never touches it.
+        Global (not per-database), matching use_miles above.
+        """
+        val = get_store().get("display.map_enabled", True)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @map_enabled.setter
+    def map_enabled(self, value: bool) -> None:
+        get_store().set("display.map_enabled", bool(value))
+
     # ── Koordinatformat ───────────────────────────────────────────────────────
 
     @property

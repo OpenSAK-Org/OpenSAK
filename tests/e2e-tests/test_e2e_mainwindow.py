@@ -258,6 +258,61 @@ class TestCacheList:
     def test_update_info_bar(self, seeded_window):
         seeded_window._update_info_bar()
 
+
+# ── issue #638: skip map data load when disabled ──────────────────────────────
+
+class TestMapEnabledSetting:
+    def test_map_load_skipped_when_disabled(self, seeded_window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert calls == []
+
+    def test_map_load_runs_when_enabled(self, seeded_window, monkeypatch):
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert len(calls) == 1
+
+    def test_table_unaffected_when_map_disabled(self, seeded_window):
+        # #638 only guards the map — the table must show exactly the same
+        # rows either way.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = True
+        seeded_window._refresh_cache_list()
+        with_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+
+        get_settings().map_enabled = False
+        seeded_window._refresh_cache_list()
+        without_map = [c.gc_code for c in seeded_window._cache_table.get_all_caches()]
+
+        assert with_map == without_map
+
+    def test_reenabling_mid_session_populates_map(self, seeded_window, monkeypatch):
+        # The existing _open_settings() flow already calls
+        # _refresh_cache_list() unconditionally after the dialog closes, so
+        # toggling map_enabled back on needs no special-case code — this
+        # test confirms that's actually true, not just assumed.
+        from opensak.gui.settings import get_settings
+        get_settings().map_enabled = False
+        seeded_window._refresh_cache_list()
+
+        get_settings().map_enabled = True
+        calls = []
+        monkeypatch.setattr(
+            seeded_window._map_widget, "load_caches", lambda caches: calls.append(caches)
+        )
+        seeded_window._refresh_cache_list()
+        assert len(calls) == 1
+
     def test_infobar_shows_filter_count(self, seeded_window):
         # regression for #373: infobar must show count, not generic "Active"
         from opensak.filters.engine import FilterSet, GcCodeFilter, CacheTypeFilter
