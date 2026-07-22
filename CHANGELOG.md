@@ -6,127 +6,92 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.16.0-beta.9] — 2026-07-22
+
+> **Beta release** — the lightweight query path (#627): large databases
+> load dramatically faster in both the cache table and the map, on top of
+> #628-#631's smaller fixes from the last two betas. This is a
+> default-behavior change for every install, not opt-in — see below for
+> why that's safe.
+
 ### Added
 
-- **Benchmark harness now measures the lightweight query path too** (#628,
-  part of #627) — `scripts/benchmark_large_db.py` now also runs its three
-  `apply_filters` scenarios through `apply_filters_auto()` (the now-current
-  path every table/map refresh uses since beta.10/11), and runs the map/
-  table-load steps against both result sets, so a single report shows the
-  full before/after picture instead of requiring a separate isolated A/B
+- **Lightweight query path** (#627) — `apply_filters_lightweight()`, a new
+  function in `filters/engine.py` alongside `apply_filters()`, fetches
+  cache rows via a SQLAlchemy Core `select()` instead of
+  `session.query(Cache)`, avoiding the ORM row-hydration cost already
+  identified as `apply_filters()`'s dominant expense (#631). Results come
+  back as `LightweightCache` objects — duck-typed to expose the same
+  attribute names as a real `Cache` for every column the table and map
+  actually use — with an automatic, transparent fallback to the existing
+  `apply_filters()` ORM path whenever a filter needs a relationship or one
+  of the three heavy/deferred text fields (`short_description`,
+  `long_description`, `encoded_hints`). That fallback means this is always
+  correct, never returning wrong or incomplete results — only sometimes
+  slower than it could be.
+
+  `mainwindow.py`'s table and map refresh now go through a single
+  `apply_filters_auto()` entry point that always attempts the lightweight
+  path. A thorough compatibility audit (`CacheTableModel`'s every column,
+  sort key, and tooltip; `map_widget.py`'s `_do_load_caches()`,
+  `_effective_coords()`, and pin-icon generation) found **zero** source
+  changes were needed in either consumer — both already only touch scalar
+  fields, cached count columns, or `.user_note`'s three attributes, never
+  a relationship collection directly. Row selection already reloads a
+  full `Cache` via the established `_load_full_cache(gc_code)` pattern
+  regardless of what's currently in the table.
+
+  Confirmed final numbers (250,000-cache database, via the real
+  `apply_filters_auto()` wiring):
+
+  | Scenario | `apply_filters` | `apply_filters_auto` | Speedup |
+  |---|---|---|---|
+  | No filter | 8.05s | 3.10s | ~2.6x faster |
+  | Exclude archived | 11.02s | 3.81s | ~2.9x faster |
+  | Within 50km | 1.52s | 0.97s | ~1.6x faster |
+  | `CacheTableModel.load()` | 0.198s | 0.027s | ~7.3x faster |
+
+  **Two real bugs were found and fixed during testing, before release:**
+  a `LightweightCache` design that eagerly copied every one of its ~52
+  fields at construction time fixed a table-load regression (delegating
+  every attribute through `__getattr__` was costing more than the
+  fetch-side win it was meant to complement) but overcorrected, nearly
+  erasing the fetch-side win in the process — the final design only
+  eagerly copies the three fields `CacheTableModel` touches
+  unconditionally on every row (`id`, `distance`, `bearing`), leaving
+  everything else lazy. Separately, `reload_caches_full()` — the helper
+  GPX/LOC/GGZ export, KML export, GPS-device export, and the trip planner
+  all use to reload full cache data before generating output — checked
+  `isinstance(c, Cache)`, which silently excluded every `LightweightCache`
+  row from its reload and would have crashed all four export paths the
+  moment they touched a deferred field; fixed by recognizing both types as
+  reloadable. Both were caught by the project's own test suite (the
+  second one by the e2e suite specifically) before ever reaching a tagged
+  release.
+
+  Confidence for shipping this as default (not opt-in) behavior comes
+  from: the lightweight path's own automatic per-filterset fallback to the
+  exact same full-ORM code path used today; full parity test coverage
+  (`test_filter_sql_parity.py`, `test_filter_lightweight.py`) proving
+  `apply_filters_lightweight()` never diverges from `apply_filters()`'s
+  result set across every filter type, NULL edge case, and composition;
+  dedicated compatibility audits and test suites for both the table and
+  the map with zero source changes needed in either; and a full pass of
+  the unit suite (2111 tests), the e2e suite (244 tests), and a
+  250,000-cache benchmark, all green.
+
+- **Benchmark harness measures the lightweight query path** (#628) —
+  `scripts/benchmark_large_db.py` now also runs its three `apply_filters`
+  scenarios through `apply_filters_auto()`, and runs the map/table-load
+  steps against both result sets, so a single report shows the full
+  before/after picture instead of requiring a separate isolated A/B
   script. Fixed a measurement-fairness bug found while adding this: the
   icon HTML `@lru_cache` (#629) meant whichever "Map load" measurement ran
   first in the script paid the one-time cache-warming cost and the second
-  one benefited "for free," making the two Map load numbers an artifact of
-  run order rather than a fair comparison — fixed with an explicit warmup
-  pass before either timed measurement. On a 100,000-cache database:
-  `apply_filters — no filter` 11.42s vs `apply_filters_auto — no filter`
-  1.97s (~5.8x faster), consistent with beta.10/11's isolated measurements.
-
-### Fixed
-
-- **GPX/LOC/GGZ, KML, GPS-device, and trip-planner export crashed with
-  `LightweightCache` table rows** (#627 beta.9-11 follow-up, caught by
-  `tests/e2e-tests/test_e2e_export_reload.py`) — `reload_caches_full()`
-  (the shared helper all four export/trip-planner code paths call to
-  reload full `Cache` ORM objects before generating output) checked
-  `isinstance(c, Cache)` to decide which caches to reload. Since
-  `LightweightCache` isn't a subclass of `Cache`, every table row was
-  silently filtered out of the reload — `ids` ended up empty, and the
-  function returned the original, un-reloaded `LightweightCache` objects
-  straight through. The export worker then crashed with `AttributeError`
-  the moment it touched `encoded_hints`, exactly the class of bug this
-  function exists to prevent (previously #207, against detached `Cache`
-  objects raising `DetachedInstanceError` instead). Fixed by recognizing
-  both `Cache` and `LightweightCache` as reloadable. Also updated
-  `test_e2e_export_reload.py`'s precondition test, which asserted the old
-  (`Cache`/`DetachedInstanceError`) failure mode specifically — updated to
-  assert the current (`LightweightCache`/`AttributeError`) one, with a
-  comment explaining the invariant (table caches never carry full hint/log
-  data without an explicit reload) hasn't changed, only which object type
-  enforces it.
-
-- **`LightweightCache` table-load regression, found by the updated
-  benchmark harness** (#627 beta.9-11 follow-up) — running
-  `apply_filters_auto()`'s "no filter" result through `CacheTableModel`'s
-  new second measurement (added above) revealed table load was **slower**
-  with `LightweightCache` rows than with real `Cache` ORM objects (0.20s
-  vs 0.53s at 100,000 rows) — the opposite of the intended effect. Root
-  cause: `LightweightCache`'s original design delegated every attribute
-  access through a custom `__getattr__`, and `CacheTableModel.load()`
-  touches `.id`/`.distance`/`.bearing` on every single row via
-  `_update_distances()` — that per-access Python-level dispatch overhead
-  was costing more than the fetch-side win it was meant to complement. A
-  first fix (eagerly copying *all* ~52 selected columns into `__slots__`
-  at construction) fixed table load but overcorrected, making
-  `apply_filters_lightweight()`'s own fetch time roughly equal to full ORM
-  hydration — eagerly copying 52 fields per row, whether or not they're
-  ever read, cost about as much as the hydration it was meant to avoid.
-  Final fix: eagerly copy only `id`/`distance`/`bearing` (the fields
-  actually touched unconditionally by `_update_distances()`); everything
-  else stays lazily delegated, since Qt only calls `data()` for
-  currently-visible rows, not all of them. Both measurements now improve
-  together at 100,000 rows: fetch 6.04s → 2.24s (~2.7x faster), table load
-  0.20s → 0.027s (~7.5x faster, now genuinely faster than ORM as intended).
-
-- **Lightweight query path (`apply_filters_lightweight()`)** (#627 beta.9)
-  — new function in `filters/engine.py` alongside `apply_filters()`,
-  returning `LightweightCache` rows (backed by a SQLAlchemy Core `select()`)
-  instead of full `Cache` ORM objects, for filtersets that don't need a
-  relationship or deferred text field (falls back to the existing
-  `apply_filters()` ORM path automatically otherwise — never returns wrong
-  or incomplete results). Isolated benchmark on a 100,000-cache database:
-
-  | Scenario | `apply_filters` | `apply_filters_lightweight` | Speedup |
-  |---|---|---|---|
-  | No filter (100k rows) | 8.0s | 1.46s | ~5.5x faster |
-  | `AvailableFilter` (92k rows) | 5.9s | 1.30s | ~4.5x faster |
-  | `ArchivedFilter` (5k rows) | 0.20s | 0.08s | ~2.5x faster |
-
-  ORM row hydration was already identified as `apply_filters()`'s dominant
-  cost (#631) — this confirms it directly: bypassing ORM entity
-  construction for the common display case (table/map, simple filters)
-  is a genuine multi-x win, not a rounding error like #628/#631's smaller
-  fixes. Gated behind a new `lightweight-query-path` feature flag; **not
-  yet wired into the table or map** — that's beta.10/beta.11.
-
-- **Wire the cache table to the lightweight query path** (#627 beta.10) —
-  `mainwindow.py`'s four `apply_filters()` call sites now go through a new
-  `apply_filters_auto()` dispatcher, which uses `apply_filters_lightweight()`
-  when the `lightweight-query-path` flag is on. An audit found
-  `CacheTableModel` (and, as a side effect, `map_widget.py` too — every
-  column/sort key/tooltip already only touches scalar fields or cached
-  count columns, never a relationship collection directly) needed **zero**
-  source changes to already support `LightweightCache` rows; row selection
-  already reloads a full `Cache` via the existing `_load_full_cache()`
-  pattern regardless of what's in the table. One real compatibility gap
-  was found and fixed along the way: `CacheTableModel.setData()`'s
-  flag/lock/FTF quick-toggle mutates the table's own row object in place
-  for instant UI feedback, which would have raised on the otherwise-immutable
-  `LightweightCache` — fixed with a small overrides mechanism scoped to
-  exactly those three fields. Benchmark (full fetch + `CacheTableModel.load()`
-  pipeline, 100,000 caches, no filter, via the real `apply_filters_auto()`
-  wiring): 5.06s → 1.87s (~63% faster). Still behind the feature flag,
-  default off.
-
-- **Wire the map to the lightweight query path, and remove the feature
-  flag** (#627 beta.11) — a dedicated compatibility audit and test suite
-  (`tests/unit-tests/test_map_widget.py`, real `LightweightCache` rows
-  from `apply_filters_lightweight()` end to end into `MapWidget._do_load_caches()`)
-  confirmed what beta.10 found as a side effect: `map_widget.py` needed
-  zero source changes — `_effective_coords()`, `_cache_pin_html()`, and the
-  JSON payload build all already only touch scalar fields and
-  `.user_note.is_corrected`/`.corrected_lat`/`.corrected_lon`. With both
-  the table (beta.10) and map paths now confirmed stable across the full
-  unit-test suite, the full e2e suite, and a 250,000-cache benchmark, the
-  `lightweight-query-path` feature flag has been removed —
-  `apply_filters_auto()` (what `mainwindow.py` calls for every table/map
-  refresh) now unconditionally uses the lightweight path, still with its
-  existing automatic fallback to the full ORM path for filters that need
-  a relationship or deferred text field. This is a default-behavior
-  change for everyone, not opt-in. Confirmed final numbers (full fetch +
-  `CacheTableModel.load()` pipeline, 100,000 caches, no filter): 5.50s →
-  1.92s (~65% faster) — consistent with beta.10's measurement.
+  one benefited "for free" — fixed with an explicit warmup pass before
+  either timed measurement.
 
 ---
 
