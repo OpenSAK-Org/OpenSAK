@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -265,6 +267,69 @@ def _gio_remove(path: Path) -> bool:
         return result.returncode == 0
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return False
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _wait_until_missing(path: Path, timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _path_exists(path):
+            return True
+        time.sleep(0.2)
+    return not _path_exists(path)
+
+
+def _gio_remove_and_wait(path: Path, timeout: float = 10.0) -> bool:
+    if not _path_exists(path):
+        return True
+    return _gio_remove(path) and _wait_until_missing(path, timeout=timeout)
+
+
+def _gio_copy_with_replace(local_file: Path, dest_path: Path) -> None:
+    if _path_exists(dest_path) and not _gio_remove_and_wait(dest_path):
+        raise OSError(f"Could not remove existing MTP file: {dest_path.name}")
+    dest_folder = dest_path.parent
+    _ensure_mtp_space(local_file, dest_folder)
+    try:
+        _gio_copy(local_file, dest_folder)
+    except OSError as error:
+        if "Could not send object info" not in str(error):
+            raise
+        if _path_exists(dest_path) and not _gio_remove_and_wait(dest_path):
+            raise
+        time.sleep(1.0)
+        _gio_copy(local_file, dest_folder)
+    if not _path_exists(dest_path):
+        raise OSError(f"MTP copy did not create expected file: {dest_path.name}")
+
+
+def _format_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if value < 1024 or unit == "GiB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+
+
+def _ensure_mtp_space(local_file: Path, dest_folder: Path) -> None:
+    try:
+        needed = local_file.stat().st_size
+        free = shutil.disk_usage(dest_folder).free
+    except OSError:
+        return
+    if free < needed:
+        raise OSError(
+            f"Not enough free space on MTP device for {local_file.name}: "
+            f"need {_format_bytes(needed)}, available {_format_bytes(free)}"
+        )
 
 
 def _get_mount_points() -> list[Path]:
@@ -1144,15 +1209,10 @@ def export_ggz_to_device(
                     return result
                 ggz_dir = garmin / "GGZ"
             output_path = ggz_dir / f"{filename}.ggz"
-            with tempfile.NamedTemporaryFile(
-                suffix=".ggz", delete=False,
-            ) as tmp:
-                tmp.write(ggz_content)
-                tmp_path = Path(tmp.name)
-            try:
-                _gio_copy(tmp_path, output_path)
-            finally:
-                tmp_path.unlink(missing_ok=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir) / output_path.name
+                tmp_path.write_bytes(ggz_content)
+                _gio_copy_with_replace(tmp_path, output_path)
         else:
             ggz_dir = get_garmin_ggz_path(device_root)
             ggz_dir.mkdir(parents=True, exist_ok=True)
@@ -1264,7 +1324,7 @@ def delete_gpx_files(
                 continue
             try:
                 if use_gio:
-                    if _gio_remove(f):
+                    if _gio_remove_and_wait(f):
                         result.deleted_files.append(f)
                     else:
                         result.failed_files.append(f)
@@ -1333,15 +1393,10 @@ def export_to_device(
                 result.error = tr("gps_error_file", error="Garmin/GPX folder not found on MTP device")
                 return result
             output_path = gpx_dir / f"{filename}.gpx"
-            with tempfile.NamedTemporaryFile(
-                suffix=".gpx", mode="w", encoding="utf-8", delete=False,
-            ) as tmp:
-                tmp.write(gpx_content)
-                tmp_path = Path(tmp.name)
-            try:
-                _gio_copy(tmp_path, output_path)
-            finally:
-                tmp_path.unlink(missing_ok=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir) / output_path.name
+                tmp_path.write_text(gpx_content, encoding="utf-8")
+                _gio_copy_with_replace(tmp_path, output_path)
         else:
             gpx_dir = get_garmin_gpx_path(device_root)
             gpx_dir.mkdir(parents=True, exist_ok=True)
