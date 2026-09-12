@@ -4,6 +4,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0-beta.5] — 2026-09-12
+
+### Added
+
+- **Polish and Spanish UI languages** — OpenSAK now ships with `pl` and `es`
+  translations, bringing the total to 10 supported languages. Aimed at
+  reaching Poland and Spain, two of geocaching.com's largest user bases.
+  Both translations are a machine-translated first pass; community
+  review and corrections are welcome via the Facebook group or GitHub
+  Discussions before promotion to stable.
+
+---
+
 ## [1.19.0-beta.4] — 2026-09-11
 
 ### Added
