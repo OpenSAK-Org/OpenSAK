@@ -40,7 +40,9 @@ GARMIN_MARKERS = [
 
 # MTP Garmin devices use uppercase folder names and have a storage root
 # (e.g. "Internal Storage") between the GVFS mount and the GARMIN folder.
-_MTP_GARMIN_FOLDER_NAMES = {"garmin", "GARMIN", "Garmin"}
+# Tuple (not set) so iteration order is deterministic — "Garmin" first to
+# avoid returning a lowercase path on case-insensitive filesystems (macOS).
+_MTP_GARMIN_FOLDER_NAMES = ("Garmin", "GARMIN", "garmin")
 _MTP_GARMIN_MARKER_NAMES = {"GarminDevice.xml", "GPX"}
 
 
@@ -194,6 +196,22 @@ def is_mtp_device(path: Path) -> bool:
 _active_gio_proc: Optional[subprocess.Popen] = None
 
 
+def _gio_subprocess_env() -> dict[str, str]:
+    """Return an environment suitable for launching the host gio binary."""
+    env = os.environ.copy()
+    original_ld_library_path = env.get("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH")
+
+    # Packaged builds can prepend bundled GLib libraries to LD_LIBRARY_PATH.
+    # Host gio must use the matching host GLib, otherwise symbol lookup can fail.
+    env.pop("LD_LIBRARY_PATH", None)
+    if original_ld_library_path:
+        env["LD_LIBRARY_PATH"] = original_ld_library_path
+
+    for key in ("GI_TYPELIB_PATH", "GIO_EXTRA_MODULES", "GIO_MODULE_DIR"):
+        env.pop(key, None)
+    return env
+
+
 def cancel_mtp_transfer() -> None:
     """Afbryd en igangværende MTP-overførsel (gio copy)."""
     global _active_gio_proc
@@ -216,6 +234,7 @@ def _gio_copy(local_file: Path, dest_path: Path) -> None:
         ["gio", "copy", str(local_file), str(dest_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=_gio_subprocess_env(),
     )
     _active_gio_proc = proc
     try:
@@ -241,6 +260,7 @@ def _gio_remove(path: Path) -> bool:
             capture_output=True,
             text=True,
             timeout=15,
+            env=_gio_subprocess_env(),
         )
         return result.returncode == 0
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):

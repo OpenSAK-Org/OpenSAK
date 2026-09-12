@@ -1420,11 +1420,37 @@ class TestMtp:
 
     # ── _gio_copy (mocked) ────────────────────────────────────────────────
 
+    def test_gio_subprocess_env_strips_packaged_library_paths(self, monkeypatch):
+        from opensak.gps.garmin import _gio_subprocess_env
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setenv("GI_TYPELIB_PATH", "/tmp/app/usr/lib/girepository-1.0")
+        monkeypatch.setenv("GIO_EXTRA_MODULES", "/tmp/app/usr/lib/gio/modules")
+        monkeypatch.setenv("GIO_MODULE_DIR", "/tmp/app/usr/lib/gio/modules")
+
+        env = _gio_subprocess_env()
+
+        assert "LD_LIBRARY_PATH" not in env
+        assert "GI_TYPELIB_PATH" not in env
+        assert "GIO_EXTRA_MODULES" not in env
+        assert "GIO_MODULE_DIR" not in env
+
+    def test_gio_subprocess_env_restores_original_ld_library_path(self, monkeypatch):
+        from opensak.gps.garmin import _gio_subprocess_env
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setenv("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH", "/opt/custom/lib")
+
+        env = _gio_subprocess_env()
+
+        assert env["LD_LIBRARY_PATH"] == "/opt/custom/lib"
+
     def test_gio_copy_success(self, tmp_path, monkeypatch):
         from opensak.gps.garmin import _gio_copy
         src = tmp_path / "src.gpx"
         src.write_text("<gpx/>")
         dst = tmp_path / "dst.gpx"
+        captured = {}
 
         class FakeProc:
             returncode = 0
@@ -1432,8 +1458,14 @@ class TestMtp:
                 return b"", b""
             def kill(self): pass
 
-        monkeypatch.setattr("opensak.gps.garmin.subprocess.Popen", lambda *a, **k: FakeProc())
+        def fake_popen(*args, **kwargs):
+            captured.update(kwargs)
+            return FakeProc()
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.Popen", fake_popen)
         _gio_copy(src, dst)  # should not raise
+        assert "LD_LIBRARY_PATH" not in captured["env"]
 
     def test_gio_copy_failure(self, tmp_path, monkeypatch):
         from opensak.gps.garmin import _gio_copy
@@ -1474,10 +1506,16 @@ class TestMtp:
 
     def test_gio_remove_success(self, monkeypatch):
         from opensak.gps.garmin import _gio_remove
+        captured = {}
+
         def fake_run(*a, **k):
+            captured.update(k)
             return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
         monkeypatch.setattr("opensak.gps.garmin.subprocess.run", fake_run)
         assert _gio_remove(Path("/fake")) is True
+        assert "LD_LIBRARY_PATH" not in captured["env"]
 
     def test_gio_remove_failure(self, monkeypatch):
         from opensak.gps.garmin import _gio_remove
