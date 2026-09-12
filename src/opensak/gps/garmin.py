@@ -317,6 +317,7 @@ def _format_bytes(size: int) -> str:
                 return f"{int(value)} {unit}"
             return f"{value:.1f} {unit}"
         value /= 1024
+    return f"{value:.1f} GiB"
 
 
 def _ensure_mtp_space(local_file: Path, dest_folder: Path) -> None:
