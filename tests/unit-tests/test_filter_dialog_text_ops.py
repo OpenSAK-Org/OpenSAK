@@ -114,10 +114,24 @@ class TestLoadAndReset:
     def test_reset_restores_contains_and_clears_text(self, dlg):
         dlg._name_row.set_op("not_equals")
         dlg._name_filter.setText("me")
+        dlg._owner_row.set_op("equals")
+        dlg._owner_filter.setText("me")
         dlg._country_row.set_op("regex")
         dlg._country_filter.setText("^D")
         dlg._reset_all()
-        for row in (dlg._name_row, dlg._country_row):
+        for row in (dlg._name_row, dlg._owner_row, dlg._country_row):
+            assert row.op() == "contains"
+            assert row.edit.text() == ""
+
+    def test_reset_general_tab_resets_every_general_text_row(self, dlg):
+        # Guards against a row being left out of _reset_general() (#849).
+        rows = [row for row, _cls in dlg._general_text_rows()]
+        for row in rows:
+            row.set_op("not_equals")
+            row.edit.setText("x")
+        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._reset_current_tab()
+        for row in rows:
             assert row.op() == "contains"
             assert row.edit.text() == ""
 

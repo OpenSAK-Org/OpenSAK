@@ -1094,7 +1094,7 @@ class FilterDialog(QDialog):
             cb.setChecked(False)
 
     def _reset_general(self) -> None:
-        for row in (self._name_row, self._gc_row, self._placed_row):
+        for row, _cls in self._general_text_rows():
             row.reset()
         for cb in self._type_checks.values():
             cb.setChecked(True)
