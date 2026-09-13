@@ -560,6 +560,31 @@ class TestProfiles:
         dlg._save_profile()
         assert called == []
 
+    def test_save_profile_prefills_selected_profile_name(self, dlg, monkeypatch):
+        captured = {}
+        def fake_get_text(parent, title, label, text=""):
+            captured["text"] = text
+            return ("", False)  # cancel — we only care about the suggestion
+        monkeypatch.setattr(QInputDialog, "getText", fake_get_text)
+        dlg._profile_combo.blockSignals(True)
+        dlg._profile_combo.addItem("AATestFilter", "/fake/AATestFilter.json")
+        dlg._profile_combo.setCurrentIndex(dlg._profile_combo.count() - 1)
+        dlg._profile_combo.blockSignals(False)
+        dlg._save_profile()
+        assert captured["text"] == "AATestFilter"
+
+    def test_save_profile_no_prefill_when_no_profile_selected(self, dlg, monkeypatch):
+        captured = {}
+        def fake_get_text(parent, title, label, text=""):
+            captured["text"] = text
+            return ("", False)
+        monkeypatch.setattr(QInputDialog, "getText", fake_get_text)
+        dlg._profile_combo.blockSignals(True)
+        dlg._profile_combo.setCurrentIndex(0)  # "none" entry
+        dlg._profile_combo.blockSignals(False)
+        dlg._save_profile()
+        assert captured["text"] == ""
+
     def test_on_profile_selected_none(self, dlg):
         dlg._on_profile_selected(0)  # "none" entry -> del btn disabled
         assert dlg._del_btn.isEnabled() is False
