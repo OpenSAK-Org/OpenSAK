@@ -453,6 +453,14 @@ class TestReset:
         assert dlg._country_filter.text() == ""
         assert dlg._where_sql_general.toPlainText() == ""
 
+    def test_reset_general_clears_owner_name(self, dlg):
+        # "Reset tab" on General cleared name, GC code and placed by, but
+        # left the owner name filter in place.
+        dlg._owner_filter.setText("me")
+        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._reset_current_tab()
+        assert dlg._owner_filter.text() == ""
+
     def test_reset_current_tab_each(self, dlg):
         for i in range(dlg._tabs.count()):
             dlg._tabs.setCurrentIndex(i)
