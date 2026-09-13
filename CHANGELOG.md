@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0-beta.6] — 2026-09-13
+
+### Fixed
+
+- **GPX import failing on invalid XML character references** (fixes #845) — A cache
+  description containing a character reference to a code point XML 1.0 forbids (e.g.
+  `&#xFFFF;`), such as inline `font-family:&#xFFFF;` styling from text pasted out of
+  Word, made lxml reject the entire file and import zero caches. Illegal character
+  references and raw control characters are now stripped while streaming the file,
+  before parsing, for GPX, PQ ZIP, and .loc imports alike. Thanks to @nagismal for the
+  report and the fix (#846).
+
+---
+
 ## [1.19.0-beta.5] — 2026-09-12
 
 ### Added
