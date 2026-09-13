@@ -1232,6 +1232,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Vérifier les e-mails PQ",
     "pq_check_intro":                   "Vérifiez votre boîte mail configurée pour des pièces jointes zip de Pocket Query et importez-les dans la base de données correspondante.",
     "pq_check_delete_cb":               "Supprimer l'e-mail après un import réussi",
+    "pq_check_only_unseen_cb":       "Vérifier uniquement les nouveaux e-mails (non lus)",
     "pq_check_btn":                     "Vérifier maintenant",
     "pq_check_open_settings_btn":       "Configurer le compte e-mail…",
     "pq_check_not_configured":          "Aucun compte e-mail n'est encore configuré. Cliquez sur \"Configurer le compte e-mail…\" pour en ajouter un dans Paramètres → Email PQ.",

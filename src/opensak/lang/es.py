@@ -1232,6 +1232,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Buscar correo de PQ",
     "pq_check_intro":                   "Revisa tu cuenta de correo configurada en busca de archivos zip adjuntos de Pocket Query e impórtalos en la base de datos correspondiente.",
     "pq_check_delete_cb":               "Eliminar el correo tras una importación correcta",
+    "pq_check_only_unseen_cb":       "Comprobar solo correos nuevos (no leídos)",
     "pq_check_btn":                     "Buscar ahora",
     "pq_check_open_settings_btn":       "Configurar cuenta de correo…",
     "pq_check_not_configured":          "Aún no se ha configurado ninguna cuenta de correo. Haz clic en «Configurar cuenta de correo…» para añadir una en Ajustes → Correo de PQ.",

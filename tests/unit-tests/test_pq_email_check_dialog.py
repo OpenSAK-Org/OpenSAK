@@ -58,6 +58,16 @@ class TestConfiguredState:
         qtbot.addWidget(d)
         assert d._delete_cb.isChecked() is True
 
+    def test_only_unseen_checkbox_defaults_to_checked(self, dlg):
+        # Matches GSAK's "Only check new messages" default-checked behaviour.
+        assert dlg._only_unseen_cb.isChecked() is True
+
+    def test_only_unseen_checkbox_reflects_saved_setting(self, qtbot, settings):
+        settings.pq_email_only_unseen = False
+        d = PQEmailCheckDialog()
+        qtbot.addWidget(d)
+        assert d._only_unseen_cb.isChecked() is False
+
 
 class TestOpenSettings:
     def test_switches_to_pq_email_tab(self, dlg, monkeypatch):
@@ -132,6 +142,7 @@ class TestStartCheck:
             lambda self: started.append(self),
         )
         d._delete_cb.setChecked(True)
+        d._only_unseen_cb.setChecked(False)
         d._start_check()
         assert len(started) == 1
         worker = started[0]
@@ -139,6 +150,7 @@ class TestStartCheck:
         assert worker._config.username == "alice"
         assert worker._password == "s3cret"
         assert worker._delete_after_import is True
+        assert worker._only_unseen is False
         assert d._check_btn.isEnabled() is False
 
     def test_saves_delete_preference_on_start(self, qtbot, settings, monkeypatch):
@@ -154,6 +166,20 @@ class TestStartCheck:
         d._delete_cb.setChecked(True)
         d._start_check()
         assert settings.pq_email_delete_after_import is True
+
+    def test_saves_only_unseen_preference_on_start(self, qtbot, settings, monkeypatch):
+        settings.pq_email_host = "imap.example.com"
+        settings.pq_email_username = "alice"
+        d = PQEmailCheckDialog()
+        qtbot.addWidget(d)
+        monkeypatch.setattr("opensak.email.credentials.get_password", lambda u: "pw")
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.pq_email_check_dialog.PQEmailCheckWorker.start",
+            lambda self: None,
+        )
+        d._only_unseen_cb.setChecked(False)
+        d._start_check()
+        assert settings.pq_email_only_unseen is False
 
 
 class TestResultHandling:
@@ -215,7 +241,7 @@ class TestWorker:
             "opensak.email.service.scan_and_import", lambda *a, **kw: result
         )
         config = ImapConfig(host="imap.example.com", port=993, use_ssl=True, username="alice")
-        w = PQEmailCheckWorker(config, "pw", False)
+        w = PQEmailCheckWorker(config, "pw", False, True)
         got = []
         w.result_ready.connect(got.append)
         w.run()
@@ -226,7 +252,7 @@ class TestWorker:
             raise ImapAuthError("bad login")
         monkeypatch.setattr("opensak.email.service.scan_and_import", _raise)
         config = ImapConfig(host="imap.example.com", port=993, use_ssl=True, username="alice")
-        w = PQEmailCheckWorker(config, "wrong", False)
+        w = PQEmailCheckWorker(config, "wrong", False, True)
         errs = []
         w.error.connect(lambda kind, detail: errs.append((kind, detail)))
         w.run()
@@ -237,7 +263,7 @@ class TestWorker:
             raise ImapNetworkError("no route")
         monkeypatch.setattr("opensak.email.service.scan_and_import", _raise)
         config = ImapConfig(host="imap.example.com", port=993, use_ssl=True, username="alice")
-        w = PQEmailCheckWorker(config, "pw", False)
+        w = PQEmailCheckWorker(config, "pw", False, True)
         errs = []
         w.error.connect(lambda kind, detail: errs.append((kind, detail)))
         w.run()

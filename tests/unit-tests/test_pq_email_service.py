@@ -135,7 +135,8 @@ class TestScanAndImport:
         assert outcome.created == 3
         assert outcome.matched_db_name == "North"
         assert outcome.deleted_email is False
-        conn.store.assert_not_called()
+        assert outcome.marked_seen is True
+        conn.store.assert_called_once_with("1", "+FLAGS", "\\Seen")
         conn.expunge.assert_not_called()
 
     def test_successful_import_deleted_when_opted_in(self, monkeypatch):
@@ -170,6 +171,7 @@ class TestScanAndImport:
         outcome = result.outcomes[0]
         assert outcome.imported is False
         assert outcome.deleted_email is False
+        assert outcome.marked_seen is False
         conn.store.assert_not_called()
 
     def test_exception_during_import_recorded_as_failed_outcome(self, monkeypatch):
@@ -227,3 +229,71 @@ class TestScanAndImport:
             scan_and_import(_CONFIG, "pw")
 
         conn.logout.assert_called_once()
+
+
+class TestOnlyUnseen:
+    """Session 2 follow-up (Jimbo-DK feedback): GSAK's 'Only check new
+    messages' equivalent, using IMAP's native \\Seen flag instead of
+    separate on-disk bookkeeping."""
+
+    def _setup(self, monkeypatch, import_result=None):
+        north = DatabaseInfo("North", Path("/dbs/north.sqlite"))
+        manager = MagicMock()
+        manager.databases = [north]
+        manager.active = north
+        manager.active_path = north.path
+        monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
+        monkeypatch.setattr("opensak.db.database.get_session", _fake_get_session)
+        monkeypatch.setattr("opensak.db.database.init_db", lambda db_path=None: None)
+        monkeypatch.setattr(
+            "opensak.importer.import_zip",
+            lambda *a, **kw: import_result or FakeImportResult(created=1),
+        )
+        conn = MagicMock()
+        conn.search.return_value = ("OK", [b"1"])
+        conn.fetch.return_value = (
+            "OK", [(b"1 (BODY[] {n}", _zip_email_bytes("North.zip"))]
+        )
+        monkeypatch.setattr("opensak.email.service.connect", lambda *a, **kw: conn)
+        return conn
+
+    def test_default_searches_unseen_only(self, monkeypatch):
+        conn = self._setup(monkeypatch)
+        scan_and_import(_CONFIG, "pw")
+        conn.search.assert_called_once_with(None, "UNSEEN")
+
+    def test_only_unseen_false_searches_all(self, monkeypatch):
+        conn = self._setup(monkeypatch)
+        scan_and_import(_CONFIG, "pw", only_unseen=False)
+        conn.search.assert_called_once_with(None, "ALL")
+
+    def test_fetch_uses_body_peek_not_rfc822(self, monkeypatch):
+        # Plain RFC822 fetch marks a message \Seen as a side effect —
+        # BODY.PEEK[] does not, which is what lets us control exactly
+        # when a message becomes \Seen (see docstring in service.py).
+        conn = self._setup(monkeypatch)
+        scan_and_import(_CONFIG, "pw")
+        conn.fetch.assert_called_once_with("1", "(BODY.PEEK[])")
+
+    def test_successful_import_marks_seen_without_deleting(self, monkeypatch):
+        conn = self._setup(monkeypatch)
+        result = scan_and_import(_CONFIG, "pw", delete_after_import=False)
+        assert result.outcomes[0].marked_seen is True
+        conn.store.assert_called_once_with("1", "+FLAGS", "\\Seen")
+
+    def test_deleted_email_is_not_also_marked_seen(self, monkeypatch):
+        # No point marking \Seen on a message we just told the server
+        # to delete — one IMAP round-trip instead of two.
+        conn = self._setup(monkeypatch)
+        result = scan_and_import(_CONFIG, "pw", delete_after_import=True)
+        assert result.outcomes[0].deleted_email is True
+        seen_calls = [c for c in conn.store.call_args_list if c.args[2] == "\\Seen"]
+        assert seen_calls == []
+
+    def test_failed_import_is_not_marked_seen_so_it_is_retried(self, monkeypatch):
+        conn = self._setup(
+            monkeypatch, import_result=FakeImportResult(errors=["bad zip"])
+        )
+        result = scan_and_import(_CONFIG, "pw")
+        assert result.outcomes[0].marked_seen is False
+        conn.store.assert_not_called()

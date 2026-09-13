@@ -261,6 +261,14 @@ class AppSettings:
     def pq_email_delete_after_import(self, value: bool) -> None:
         get_store().set("pq_email.delete_after_import", bool(value))
 
+    @property
+    def pq_email_only_unseen(self) -> bool:
+        return bool(get_store().get("pq_email.only_unseen", True))
+
+    @pq_email_only_unseen.setter
+    def pq_email_only_unseen(self, value: bool) -> None:
+        get_store().set("pq_email.only_unseen", bool(value))
+
     # ── Theme / appearance ────────────────────────────────────────────────────
 
     @property

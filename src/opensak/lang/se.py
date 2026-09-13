@@ -1231,6 +1231,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Kontrollera PQ Email",
     "pq_check_intro":                   "Kontrollera din inställda brevlåda efter Pocket Query-zipbilagor och importera dem till rätt databas.",
     "pq_check_delete_cb":               "Ta bort e-posten efter en lyckad import",
+    "pq_check_only_unseen_cb":       "Kontrollera endast nya (olästa) e-postmeddelanden",
     "pq_check_btn":                     "Kontrollera nu",
     "pq_check_open_settings_btn":       "Konfigurera e-postkonto…",
     "pq_check_not_configured":          "Det finns inget e-postkonto konfigurerat ännu. Klicka på \"Konfigurera e-postkonto…\" för att lägga till ett under Inställningar → PQ Email.",

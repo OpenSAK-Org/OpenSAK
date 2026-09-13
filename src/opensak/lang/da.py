@@ -1231,6 +1231,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Tjek for PQ Email",
     "pq_check_intro":                   "Tjek den opsatte mailkonto for Pocket Query-zip-vedhæftninger og importér dem til den matchende database.",
     "pq_check_delete_cb":               "Slet mailen efter en vellykket import",
+    "pq_check_only_unseen_cb":       "Tjek kun nye (ulæste) mails",
     "pq_check_btn":                     "Tjek nu",
     "pq_check_open_settings_btn":       "Opsæt e-mail-konto…",
     "pq_check_not_configured":          "Der er ikke sat en e-mail-konto op endnu. Klik på \"Opsæt e-mail-konto…\" for at tilføje en under Indstillinger → PQ Email.",

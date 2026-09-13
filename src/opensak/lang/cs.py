@@ -1227,6 +1227,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Zkontrolovat PQ e-mail",
     "pq_check_intro":                   "Zkontrolujte nastavenou poštovní schránku ohledně zip příloh s Pocket Query a importujte je do odpovídající databáze.",
     "pq_check_delete_cb":               "Smazat e-mail po úspěšném importu",
+    "pq_check_only_unseen_cb":       "Kontrolovat pouze nové (nepřečtené) e-maily",
     "pq_check_btn":                     "Zkontrolovat nyní",
     "pq_check_open_settings_btn":       "Nastavit e-mailový účet…",
     "pq_check_not_configured":          "Zatím není nastaven žádný e-mailový účet. Klikněte na \"Nastavit e-mailový účet…\" a přidejte ho v Nastavení → PQ Email.",

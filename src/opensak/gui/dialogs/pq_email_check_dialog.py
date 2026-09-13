@@ -34,11 +34,12 @@ class PQEmailCheckWorker(QThread):
     # Se ImportWorker/GsakImportWorker for begrundelsen om ikke at emitte
     # et selvstændigt "done"-signal fra run() — QThread.finished bruges i stedet.
 
-    def __init__(self, config, password: str, delete_after_import: bool, parent=None):
+    def __init__(self, config, password: str, delete_after_import: bool, only_unseen: bool, parent=None):
         super().__init__(parent)
         self._config = config
         self._password = password
         self._delete_after_import = delete_after_import
+        self._only_unseen = only_unseen
 
     def run(self) -> None:
         from opensak.email.connection import ImapAuthError, ImapNetworkError
@@ -47,6 +48,7 @@ class PQEmailCheckWorker(QThread):
             result = scan_and_import(
                 self._config, self._password,
                 delete_after_import=self._delete_after_import,
+                only_unseen=self._only_unseen,
             )
             self.result_ready.emit(result)
         except ImapAuthError as exc:
@@ -94,6 +96,9 @@ class PQEmailCheckDialog(QDialog):
         self._delete_cb = QCheckBox(tr("pq_check_delete_cb"))
         layout.addWidget(self._delete_cb)
 
+        self._only_unseen_cb = QCheckBox(tr("pq_check_only_unseen_cb"))
+        layout.addWidget(self._only_unseen_cb)
+
         btn_row = QHBoxLayout()
         self._open_settings_btn = QPushButton(tr("pq_check_open_settings_btn"))
         self._open_settings_btn.clicked.connect(self._open_settings)
@@ -130,6 +135,7 @@ class PQEmailCheckDialog(QDialog):
         configured = self._is_configured()
         self._not_configured_label.setVisible(not configured)
         self._delete_cb.setChecked(get_settings().pq_email_delete_after_import)
+        self._only_unseen_cb.setChecked(get_settings().pq_email_only_unseen)
         self._check_btn.setEnabled(configured)
 
     def _open_settings(self) -> None:
@@ -155,6 +161,7 @@ class PQEmailCheckDialog(QDialog):
             return
 
         s.pq_email_delete_after_import = self._delete_cb.isChecked()
+        s.pq_email_only_unseen = self._only_unseen_cb.isChecked()
 
         config = ImapConfig(
             host=s.pq_email_host,
@@ -170,7 +177,8 @@ class PQEmailCheckDialog(QDialog):
         self._append_log(tr("pq_check_checking"))
 
         self._worker = PQEmailCheckWorker(
-            config, password, self._delete_cb.isChecked(), self
+            config, password, self._delete_cb.isChecked(),
+            self._only_unseen_cb.isChecked(), self,
         )
         self._worker.result_ready.connect(self._on_result)
         self._worker.error.connect(self._on_error)

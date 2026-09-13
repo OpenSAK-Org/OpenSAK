@@ -244,6 +244,8 @@ class TestPQEmailSettings:
         assert s.pq_email_port == 993
         assert s.pq_email_use_ssl is True
         assert s.pq_email_username == ""
+        assert s.pq_email_delete_after_import is False
+        assert s.pq_email_only_unseen is True
 
     def test_set_and_get_host(self, s):
         s.pq_email_host = "  imap.example.com  "
@@ -260,6 +262,14 @@ class TestPQEmailSettings:
     def test_set_and_get_username(self, s):
         s.pq_email_username = "  alice@example.com  "
         assert s.pq_email_username == "alice@example.com"
+
+    def test_set_and_get_delete_after_import(self, s):
+        s.pq_email_delete_after_import = True
+        assert s.pq_email_delete_after_import is True
+
+    def test_set_and_get_only_unseen(self, s):
+        s.pq_email_only_unseen = False
+        assert s.pq_email_only_unseen is False
 
     def test_password_is_not_stored_in_settings_store(self, s):
         # The password must never end up in opensak.json — only in the

@@ -1231,6 +1231,7 @@ STRINGS: dict[str, str] = {
     "pq_check_dialog_title":            "Nach PQ-E-Mail suchen",
     "pq_check_intro":                   "Durchsuche dein eingerichtetes Postfach nach Pocket-Query-Zip-Anhängen und importiere sie in die passende Datenbank.",
     "pq_check_delete_cb":               "E-Mail nach erfolgreichem Import löschen",
+    "pq_check_only_unseen_cb":       "Nur neue (ungelesene) E-Mails prüfen",
     "pq_check_btn":                     "Jetzt prüfen",
     "pq_check_open_settings_btn":       "E-Mail-Konto einrichten…",
     "pq_check_not_configured":          "Es ist noch kein E-Mail-Konto eingerichtet. Klicke auf „E-Mail-Konto einrichten…“, um eines unter Einstellungen → PQ Email hinzuzufügen.",
