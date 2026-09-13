@@ -1365,8 +1365,15 @@ class FilterDialog(QDialog):
             QMessageBox.warning(self, tr("error"), tr("filter_load_error", error=e))
 
     def _save_profile(self) -> None:
+        # Suggest a name for the selected profile so it can easily be overwritten.
+        current = (
+            self._profile_combo.currentText()
+            if self._profile_combo.currentData() is not None
+            else ""
+        )
         name, ok = QInputDialog.getText(
-            self, tr("filter_save_title"), tr("filter_profile_name_label")
+            self, tr("filter_save_title"), tr("filter_profile_name_label"),
+            text=current,
         )
         if not ok or not name.strip():
             return
