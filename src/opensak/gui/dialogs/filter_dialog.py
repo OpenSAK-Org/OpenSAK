@@ -40,6 +40,7 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter,
+    TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
@@ -199,6 +200,86 @@ class TriStateBox(QWidget):
         self._nej.setChecked(False)
 
 
+# ── Hjælper widget: tekstfilter med operator-vælger ───────────────────────────
+
+# (operator, oversættelsesnøgle) i dropdown-rækkefølge. Nøglerne står som
+# literals, så test_no_unused_keys kan finde dem.
+_TEXT_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("contains",     "filter_op_contains"),
+    ("not_contains", "filter_op_not_contains"),
+    ("equals",       "filter_op_equals"),
+    ("not_equals",   "filter_op_not_equals"),
+    ("starts_with",  "filter_op_starts_with"),
+    ("ends_with",    "filter_op_ends_with"),
+    ("in_list",      "filter_op_in_list"),
+    ("not_in_list",  "filter_op_not_in_list"),
+    ("empty",        "filter_op_empty"),
+    ("not_empty",    "filter_op_not_empty"),
+    ("regex",        "filter_op_regex"),
+    ("not_regex",    "filter_op_not_regex"),
+)
+
+
+class TextFilterRow(QWidget):
+    """Operator dropdown + value field for one text filter (name, owner, …).
+
+    *placeholder* is shown for "contains"; the list and regex operators show
+    their own hint, and "empty"/"not empty" disable the value field.
+    """
+
+    def __init__(self, label: str, placeholder: str, parent=None):
+        super().__init__(parent)
+        self.label = label
+        self._placeholder = placeholder
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.combo = QComboBox()
+        for op, key in _TEXT_OP_LABELS:
+            self.combo.addItem(tr(key), op)
+        self.edit = QLineEdit()
+        layout.addWidget(self.combo)
+        layout.addWidget(self.edit, 1)
+        self.combo.currentIndexChanged.connect(self._on_op_changed)
+        self._on_op_changed()
+
+    def op(self) -> str:
+        return self.combo.currentData()
+
+    def set_op(self, op: str) -> None:
+        index = self.combo.findData(op)
+        self.combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def reset(self) -> None:
+        self.set_op("contains")
+        self.edit.clear()
+
+    def build(self, cls: type[TextMatchFilter]) -> Optional[TextMatchFilter]:
+        """Filter for the current input, or None when the row is not set."""
+        op = self.op()
+        if op in TEXT_OPS_VALUELESS:
+            return cls("", op)
+        text = self.edit.text().strip()
+        return cls(text, op) if text else None
+
+    def load(self, f) -> None:
+        self.set_op(getattr(f, "op", "contains"))
+        self.edit.setText(getattr(f, "text", ""))
+
+    def _on_op_changed(self) -> None:
+        op = self.op()
+        self.edit.setEnabled(op not in TEXT_OPS_VALUELESS)
+        if op in ("in_list", "not_in_list"):
+            placeholder = tr("filter_in_list_placeholder")
+        elif op in ("regex", "not_regex"):
+            placeholder = tr("filter_regex_placeholder")
+        elif op == "contains":
+            placeholder = self._placeholder
+        else:
+            placeholder = ""
+        self.edit.setPlaceholderText(placeholder)
+
+
 # ── Filter dialog ─────────────────────────────────────────────────────────────
 
 class FilterDialog(QDialog):
@@ -341,25 +422,21 @@ class FilterDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Cachenavn
-        self._name_filter = QLineEdit()
-        self._name_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        layout.addRow(tr("filter_name_label"), self._name_filter)
-
-        # GC kode
-        self._gc_filter = QLineEdit()
-        self._gc_filter.setPlaceholderText(tr("filter_gc_placeholder"))
-        layout.addRow(tr("filter_gc_label"), self._gc_filter)
-
-        # Udlagt af
-        self._placed_filter = QLineEdit()
-        self._placed_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        layout.addRow(tr("filter_placed_by_label"), self._placed_filter)
-
-        # Owner name
-        self._owner_filter = QLineEdit()
-        self._owner_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        layout.addRow(tr("filter_owner_name_label"), self._owner_filter)
+        # Cachenavn / GC kode / Udlagt af / Owner name — hver med operator-
+        # vælger (Indeholder, Er lig med, RegEx, …). *_filter er selve
+        # tekstfeltet, som før.
+        self._name_row = TextFilterRow(tr("filter_name_label"), tr("filter_contains_placeholder"))
+        layout.addRow(self._name_row.label, self._name_row)
+        self._gc_row = TextFilterRow(tr("filter_gc_label"), tr("filter_gc_placeholder"))
+        layout.addRow(self._gc_row.label, self._gc_row)
+        self._placed_row = TextFilterRow(tr("filter_placed_by_label"), tr("filter_contains_placeholder"))
+        layout.addRow(self._placed_row.label, self._placed_row)
+        self._owner_row = TextFilterRow(tr("filter_owner_name_label"), tr("filter_contains_placeholder"))
+        layout.addRow(self._owner_row.label, self._owner_row)
+        self._name_filter = self._name_row.edit
+        self._gc_filter = self._gc_row.edit
+        self._placed_filter = self._placed_row.edit
+        self._owner_filter = self._owner_row.edit
 
         spacer = QWidget()
         spacer.setFixedHeight(6)
@@ -611,17 +688,15 @@ class FilterDialog(QDialog):
         geo_group = QGroupBox(tr("filter_geo_group"))
         geo_layout = QFormLayout(geo_group)
 
-        self._country_filter = QLineEdit()
-        self._country_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        geo_layout.addRow(tr("filter_country_label"), self._country_filter)
-
-        self._state_filter = QLineEdit()
-        self._state_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        geo_layout.addRow(tr("filter_state_label"), self._state_filter)
-
-        self._county_filter = QLineEdit()
-        self._county_filter.setPlaceholderText(tr("filter_contains_placeholder"))
-        geo_layout.addRow(tr("filter_county_label"), self._county_filter)
+        self._country_row = TextFilterRow(tr("filter_country_label"), tr("filter_contains_placeholder"))
+        geo_layout.addRow(self._country_row.label, self._country_row)
+        self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
+        geo_layout.addRow(self._state_row.label, self._state_row)
+        self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
+        geo_layout.addRow(self._county_row.label, self._county_row)
+        self._country_filter = self._country_row.edit
+        self._state_filter = self._state_row.edit
+        self._county_filter = self._county_row.edit
 
         layout.addRow(geo_group)
 
@@ -980,6 +1055,25 @@ class FilterDialog(QDialog):
         except Exception as exc:
             return str(exc)
 
+    def _validate_text_filters(self) -> bool:
+        """Warn about, and focus, the first text filter with an invalid regex."""
+        for row, cls in self._general_text_rows() + self._geo_text_rows():
+            text_filter = row.build(cls)
+            if text_filter is None or text_filter.regex_error is None:
+                continue
+            for i in range(self._tabs.count()):
+                tab = self._tabs.widget(i)
+                if tab is not None and tab.isAncestorOf(row):
+                    self._tabs.setCurrentIndex(i)
+            row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid", field=row.label.rstrip(":"),
+                   error=text_filter.regex_error),
+            )
+            return False
+        return True
+
     # ── Slots ─────────────────────────────────────────────────────────────────
 
     def _on_dist_toggled(self, checked: bool) -> None:
@@ -1000,10 +1094,8 @@ class FilterDialog(QDialog):
             cb.setChecked(False)
 
     def _reset_general(self) -> None:
-        self._name_filter.clear()
-        self._gc_filter.clear()
-        self._placed_filter.clear()
-        self._owner_filter.clear()
+        for row, _cls in self._general_text_rows():
+            row.reset()
         for cb in self._type_checks.values():
             cb.setChecked(True)
         for cb in self._cont_checks.values():
@@ -1039,9 +1131,8 @@ class FilterDialog(QDialog):
         self._log_to_enabled.setChecked(False)
 
     def _reset_misc(self) -> None:
-        self._country_filter.clear()
-        self._state_filter.clear()
-        self._county_filter.clear()
+        for row, _cls in self._geo_text_rows():
+            row.reset()
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
         self._locked_yes.setChecked(True)
@@ -1095,24 +1186,29 @@ class FilterDialog(QDialog):
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
 
+    def _general_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+        return [
+            (self._name_row, NameFilter),
+            (self._gc_row, GcCodeFilter),
+            (self._placed_row, PlacedByFilter),
+            (self._owner_row, OwnerFilter),
+        ]
+
+    def _geo_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+        return [
+            (self._country_row, CountryFilter),
+            (self._state_row, StateFilter),
+            (self._county_row, CountyFilter),
+        ]
+
     def _build_filterset(self) -> FilterSet:
         fs = FilterSet(mode="AND")
 
-        # Navn
-        if self._name_filter.text().strip():
-            fs.add(NameFilter(self._name_filter.text().strip()))
-
-        # GC kode
-        if self._gc_filter.text().strip():
-            fs.add(GcCodeFilter(self._gc_filter.text().strip()))
-
-        # Udlagt af
-        if self._placed_filter.text().strip():
-            fs.add(PlacedByFilter(self._placed_filter.text().strip()))
-
-        # Owner name
-        if self._owner_filter.text().strip():
-            fs.add(OwnerFilter(self._owner_filter.text().strip()))
+        # Navn / GC kode / Udlagt af / Owner name
+        for row, cls in self._general_text_rows():
+            text_filter = row.build(cls)
+            if text_filter is not None:
+                fs.add(text_filter)
 
         # Cache type — byg OR gruppe af valgte typer
         selected_types = [t for t, cb in self._type_checks.items() if cb.isChecked()]
@@ -1257,12 +1353,10 @@ class FilterDialog(QDialog):
             ))
 
         # Øvrigt — Land / Stat / Kommune
-        if self._country_filter.text().strip():
-            fs.add(CountryFilter(self._country_filter.text().strip()))
-        if self._state_filter.text().strip():
-            fs.add(StateFilter(self._state_filter.text().strip()))
-        if self._county_filter.text().strip():
-            fs.add(CountyFilter(self._county_filter.text().strip()))
+        for row, cls in self._geo_text_rows():
+            text_filter = row.build(cls)
+            if text_filter is not None:
+                fs.add(text_filter)
 
         # User Flag
         flag_yes = self._flag_yes.isChecked()
@@ -1440,17 +1534,15 @@ class FilterDialog(QDialog):
         # so unchecking it expresses ANY (avoids a crash on the missing widget).
         self._attr_mode_all.setChecked(not attr_mode_or_detected)
 
+        text_rows = {
+            cls.filter_type: row
+            for row, cls in self._general_text_rows() + self._geo_text_rows()
+        }
         for f in flat_filters:
             ftype = getattr(f, "filter_type", None)
 
-            if ftype == "name":
-                self._name_filter.setText(getattr(f, "text", ""))
-            elif ftype == "gc_code":
-                self._gc_filter.setText(getattr(f, "text", ""))
-            elif ftype == "placed_by":
-                self._placed_filter.setText(getattr(f, "text", ""))
-            elif ftype == "owner_name":
-                self._owner_filter.setText(getattr(f, "text", ""))
+            if ftype in text_rows:
+                text_rows[ftype].load(f)
             elif ftype == "cache_type":
                 types = getattr(f, "types", [])
                 for ct, cb in self._type_checks.items():
@@ -1536,12 +1628,6 @@ class FilterDialog(QDialog):
             elif ftype == "where_clause":
                 if self._where_tab is not None:
                     self._where_sql_general.setPlainText(getattr(f, "sql", ""))
-            elif ftype == "country":
-                self._country_filter.setText(getattr(f, "text", ""))
-            elif ftype == "state":
-                self._state_filter.setText(getattr(f, "text", ""))
-            elif ftype == "county":
-                self._county_filter.setText(getattr(f, "text", ""))
             elif ftype == "user_flag":
                 flagged = getattr(f, "flagged", True)
                 self._flag_yes.setChecked(flagged)
@@ -1607,6 +1693,10 @@ class FilterDialog(QDialog):
                     self._tabs.setCurrentWidget(self._where_tab)
                     return
             self._where_error_label.hide()
+
+        # Et ugyldigt regulært udtryk ville stille matche ingenting — afvis det
+        if not self._validate_text_filters():
+            return
 
         fs = self._build_filterset()
         profile_name = (
