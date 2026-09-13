@@ -275,6 +275,26 @@ class TestBuildFilterset:
         assert "last_log_date" in types
         assert "hidden_date_range" in types
 
+    def test_single_day_date_range_covers_whole_day(self, dlg):
+        # #844: from_date skal være 00:00:00 og to_date 23:59:59, så en
+        # og samme dato i from/to-felterne giver et helt-dags vindue —
+        # ikke et 59-sekunders vindue (23:59:00-23:59:59), som gav
+        # "ingen cache matcher" ved single-day-filtrering.
+        same_date = QDate(2026, 9, 2)
+        dlg._found_from_enabled.setChecked(True)
+        dlg._found_to_enabled.setChecked(True)
+        dlg._found_from.setDate(same_date)
+        dlg._found_to.setDate(same_date)
+        fs = dlg._build_filterset()
+        found_filter = next(f for f in fs._filters if getattr(f, "filter_type", None) == "found_by_me_date")
+        assert found_filter.from_date == datetime(2026, 9, 2, 0, 0, 0)
+        assert found_filter.to_date == datetime(2026, 9, 2, 23, 59, 59)
+
+        class _Cache:
+            found = True
+            found_date = datetime(2026, 9, 2, 14, 30, 0)
+        assert found_filter.matches(_Cache()) is True
+
     def test_attributes_and_mode(self, dlg):
         attr_id = next(iter(dlg._attr_boxes))
         ja, nej, ingen = dlg._attr_boxes[attr_id]

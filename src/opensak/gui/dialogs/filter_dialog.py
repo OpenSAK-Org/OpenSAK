@@ -1199,11 +1199,15 @@ class FilterDialog(QDialog):
         # Begge valgt (eller ingen) = vis alt = intet filter
 
         # Datoer — hjælper til at konvertere QDate til datetime
+        # #844: hour/minute var hardkodet til 23/59 uanset end_of_day, så
+        # from_date reelt blev sat til 23:59:00 i stedet for 00:00:00 —
+        # samme dato i from/to gav dermed et 59-sekunders vindue og ingen
+        # match; en flerdagesrange "virkede" kun fordi from-grænsen i
+        # praksis rykkede en dag tilbage.
         def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
-            return datetime(
-                qdate.year(), qdate.month(), qdate.day(),
-                23, 59, 59 if end_of_day else 0,
-            )
+            if end_of_day:
+                return datetime(qdate.year(), qdate.month(), qdate.day(), 23, 59, 59)
+            return datetime(qdate.year(), qdate.month(), qdate.day(), 0, 0, 0)
 
         # Udlagt dato
         if self._hidden_from_enabled.isChecked() or self._hidden_to_enabled.isChecked():
