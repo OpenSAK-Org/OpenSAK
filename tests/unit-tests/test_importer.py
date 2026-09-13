@@ -6,7 +6,10 @@ from pathlib import Path
 
 from opensak.db.database import get_session, init_db
 from opensak.db.models import Cache, Log
-from opensak.importer import import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx, _parse_datetime
+from opensak.importer import (
+    import_gpx, import_zip, ImportResult, _count_wpts, _is_companion_gpx, _parse_datetime,
+    _SanitizedXmlReader,
+)
 
 from tests.data import (
     SAMPLE_GPX, SAMPLE_WPTS_GPX, EMPTY_GPX,
@@ -495,6 +498,31 @@ def test_import_gpx_fatal_parse_error(tmp_path):
     f = write_gpx(tmp_path, "broken.gpx", "<gpx><wpt this is not valid xml")
     result = import_gpx(f)
     assert len(result.errors) > 0
+
+
+def test_import_gpx_strips_illegal_char_refs(tmp_path):
+    # geocaching.com exports can reference characters XML forbids (e.g.
+    # "font-family:&#xFFFF;" in descriptions); lxml used to reject the whole file.
+    init_db(db_path=tmp_path / "illegal.db")
+    f = write_gpx(tmp_path, "illegal.gpx", build_gpx(
+        cache_wpt("GCBAD1", hint="Under&#xFFFF; a &#1;&#65534;rock&#xE9;"),
+    ))
+    result = import_gpx(f)
+    assert result.errors == []
+    assert result.created == 1
+    with get_session() as s:
+        assert s.query(Cache).filter_by(gc_code="GCBAD1").one().encoded_hints == "Under a rocké"
+
+
+@pytest.mark.parametrize("chunk_size", [1, 2, 3, 5, 7, 64])
+def test_sanitized_reader_handles_chunk_borders(tmp_path, chunk_size):
+    # Illegal refs / raw U+FFFF split across read chunks must still be removed,
+    # while legal refs and entities pass through intact.
+    f = tmp_path / "x.xml"
+    f.write_bytes("a&#xFFFF;b&#65535;c&amp;d&#xE9;e\x01f￿g".encode("utf-8"))
+    with _SanitizedXmlReader(f, chunk_size=chunk_size) as r:
+        out = b"".join(iter(lambda: r.read(4), b""))
+    assert out == b"abc&amp;d&#xE9;efg"
 
 
 def test_import_gpx_companion_wpts_file_error(tmp_path):
