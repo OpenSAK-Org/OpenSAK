@@ -4,6 +4,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0-beta.7] — 2026-09-13
+
+### Added
+
+- **Text filter operators (#557)** — Name, GC code, Placed by, Owner, Country,
+  State and County filters now offer 12 operators instead of a single
+  substring match: `contains`/`not contains`, `equals`/`not equals`,
+  `starts with`/`ends with`, `in list`/`not in list`, `empty`/`not empty`,
+  and `regex`/`not regex`. Matching is pushed down to SQL where possible for
+  performance; anything SQLite can't express (regex, and Unicode
+  case-folding beyond ASCII) falls back to an in-Python check on the
+  SQL-narrowed result set, so accented/non-Latin text still matches
+  correctly. Existing saved filter profiles keep working unchanged — a
+  profile without an operator loads as `contains`, and old-format country/
+  state/county lists are still recognised. Thanks to @nagisml for the
+  contribution, first part of the GSAK filter-parity work tracked in #821.
+- **PQ Email: "only check new (unread) messages" option (#443)** — Uses
+  IMAP's native `\Seen` flag instead of separate bookkeeping to avoid
+  re-importing already-read PQ e-mails; a message is only marked seen once
+  something from it is actually imported, so a failed import is still
+  retried on the next check. Thanks to Jimbo-DK for the feedback — checking
+  a real PQ-club mailbox had re-imported around 50 already-read e-mails.
+
+### Fixed
+
+- **Filter dialog: Reset didn't clear the Owner name field (fixes #848)** —
+  Resetting the General tab (or "Reset all") cleared Name, GC code and
+  Placed by but left a typed Owner name in place. Thanks to @nagisml for
+  the report and fix (#849).
+- **Filter dialog: single-day date range failed to match caches (fixes
+  #844)** — The start-of-range time was hardcoded to 23:59 regardless of
+  whether it was the "from" or "to" bound, so filtering on a single day
+  (same from/to date) produced a 59-second window instead of the full day
+  and matched nothing. A multi-day range only "worked" because the from
+  bound effectively slipped a day earlier.
+
+### Changed
+
+- **Filter dialog: "Save filter" pre-fills the current profile name (#852)**
+  — When a saved profile is selected, the save dialog now suggests its name
+  instead of an empty field, making it quicker to overwrite. Thanks to
+  @nagisml.
+
+---
+
 ## [1.19.0-beta.6] — 2026-09-13
 
 ### Fixed
