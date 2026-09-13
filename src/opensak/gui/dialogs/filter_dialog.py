@@ -1003,6 +1003,7 @@ class FilterDialog(QDialog):
         self._name_filter.clear()
         self._gc_filter.clear()
         self._placed_filter.clear()
+        self._owner_filter.clear()
         for cb in self._type_checks.values():
             cb.setChecked(True)
         for cb in self._cont_checks.values():
