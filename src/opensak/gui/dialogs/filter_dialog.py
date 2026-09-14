@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QCheckBox, QPushButton,
@@ -154,6 +154,9 @@ from opensak.filters.engine import (
 #   15=winter, 17=poisonoak, 18=dangerousanimals, 19=ticks, 20=mine, 21=cliff)
 
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES
+from opensak.utils.types import TEXT_SIZE_MAP
+from opensak.gui.icon_provider import get_cache_type_icon
+from opensak.gui.settings import get_settings
 
 
 # ── D/T spin box: snaps to valid 0.5-increment values (1.0–5.0) ──────────────
@@ -447,8 +450,12 @@ class FilterDialog(QDialog):
         type_outer = QVBoxLayout(type_group)
         type_layout = QGridLayout()
         self._type_checks: dict[str, QCheckBox] = {}
+        # Same icons and size as the cache table's type column
+        type_icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
         for i, ct in enumerate(CACHE_TYPES):
             cb = QCheckBox(ct.replace(" Cache", "").replace("Unknown", "Mystery"))
+            cb.setIcon(get_cache_type_icon(ct, size=type_icon_size))
+            cb.setIconSize(QSize(type_icon_size, type_icon_size))
             cb.setChecked(True)
             self._type_checks[ct] = cb
             type_layout.addWidget(cb, i // 3, i % 3)
