@@ -13,14 +13,14 @@ Understøtter gem/indlæs filterprofiler.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import date
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QCheckBox, QPushButton,
-    QComboBox, QDoubleSpinBox, QTabWidget, QWidget,
+    QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
     QDialogButtonBox, QMessageBox, QInputDialog,
     QDateEdit, QSizePolicy, QFrame, QPlainTextEdit,
@@ -45,7 +45,7 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    DateFilter, LEGACY_DATE_FILTER_FIELDS,
     TextSearchFilter,
     FilterProfile,
 )
@@ -281,6 +281,188 @@ class TextFilterRow(QWidget):
         else:
             placeholder = ""
         self.edit.setPlaceholderText(placeholder)
+
+
+# ── Hjælper widget: GSAK-lignende datofilter ──────────────────────────────────
+
+# Dropdown-rækkefølge som i GSAK. Nøglerne står som literals, så
+# test_no_unused_keys kan finde dem. "any" = intet filter.
+_DATE_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",          "filter_date_op_any"),
+    ("on_or_before", "filter_date_op_on_or_before"),
+    ("on_or_after",  "filter_date_op_on_or_after"),
+    ("equal",        "filter_date_op_equal"),
+    ("between",      "filter_date_op_between"),
+    ("during",       "filter_date_op_during"),
+    ("not_during",   "filter_date_op_not_during"),
+    ("compare",      "filter_date_op_compare"),
+)
+_DATE_UNIT_LABELS: tuple[tuple[str, str], ...] = (
+    ("days",   "filter_date_unit_days"),
+    ("weeks",  "filter_date_unit_weeks"),
+    ("months", "filter_date_unit_months"),
+    ("years",  "filter_date_unit_years"),
+)
+_DATE_COMPARE_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",          "filter_date_cmp_equal"),
+    ("older",          "filter_date_cmp_older"),
+    ("older_or_equal", "filter_date_cmp_older_or_equal"),
+    ("newer",          "filter_date_cmp_newer"),
+    ("newer_or_equal", "filter_date_cmp_newer_or_equal"),
+    ("within",         "filter_date_cmp_within"),
+    ("outside",        "filter_date_cmp_outside"),
+)
+# Datofelterne i GSAK's rækkefølge, med deres label.
+_DATE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
+    ("last_found_date", "col_last_found_date"),
+    ("hidden_date",     "filter_hidden_date_group"),
+    ("found_date",      "filter_found_date_group"),
+    ("dnf_date",        "col_dnf_date"),
+    ("creation_date",   "col_creation_date"),
+    ("last_gpx_update", "col_last_gpx_update"),
+    ("last_log_date",   "filter_log_date_group"),
+    ("changed_date",    "col_changed_date"),
+)
+_DATE_OPS_WITH_DATE1 = ("on_or_before", "on_or_after", "equal", "between")
+_DATE_OPS_RELATIVE = ("during", "not_during")
+
+
+def _qdate_to_date(qdate: QDate) -> date:
+    return date(qdate.year(), qdate.month(), qdate.day())
+
+
+class DateFilterRow(QWidget):
+    """Operator dropdown + inputs for one date field (GSAK's Dates tab).
+
+    Depending on the operator it shows one or two date pickers, "Last
+    [N] [days/weeks/months/years]", or a comparison with another date field
+    (plus a day count for "within"/"outside"). The label turns bold while the
+    row is active.
+    """
+
+    def __init__(self, field: str, label: str, parent=None):
+        super().__init__(parent)
+        self.field = field
+        self.label = QLabel(label)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.op_combo = QComboBox()
+        for op, key in _DATE_OP_LABELS:
+            self.op_combo.addItem(tr(key), op)
+        layout.addWidget(self.op_combo)
+
+        self.date1 = self._make_date_edit()
+        self.date2 = self._make_date_edit()
+        layout.addWidget(self.date1)
+        layout.addWidget(self.date2)
+
+        self._relative = QWidget()
+        rel_layout = QHBoxLayout(self._relative)
+        rel_layout.setContentsMargins(0, 0, 0, 0)
+        rel_layout.addWidget(QLabel(tr("filter_date_last")))
+        self.amount = QSpinBox()
+        self.amount.setRange(0, 9999)
+        self.amount.setValue(1)
+        rel_layout.addWidget(self.amount)
+        self.unit_combo = QComboBox()
+        for unit, key in _DATE_UNIT_LABELS:
+            self.unit_combo.addItem(tr(key), unit)
+        rel_layout.addWidget(self.unit_combo)
+        layout.addWidget(self._relative)
+
+        self._compare = QWidget()
+        cmp_layout = QHBoxLayout(self._compare)
+        cmp_layout.setContentsMargins(0, 0, 0, 0)
+        self.other_combo = QComboBox()
+        for other, key in _DATE_FIELD_LABELS:
+            if other != field:
+                self.other_combo.addItem(tr(key), other)
+        cmp_layout.addWidget(self.other_combo)
+        self.compare_combo = QComboBox()
+        for op, key in _DATE_COMPARE_LABELS:
+            self.compare_combo.addItem(tr(key), op)
+        cmp_layout.addWidget(self.compare_combo)
+        self.compare_days = QSpinBox()
+        self.compare_days.setRange(0, 99999)
+        cmp_layout.addWidget(self.compare_days)
+        self._days_label = QLabel(tr("filter_date_unit_days"))
+        cmp_layout.addWidget(self._days_label)
+        layout.addWidget(self._compare)
+        layout.addStretch()
+
+        self.op_combo.currentIndexChanged.connect(self._update_inputs)
+        self.compare_combo.currentIndexChanged.connect(self._update_inputs)
+        self._update_inputs()
+
+    @staticmethod
+    def _make_date_edit() -> QDateEdit:
+        edit = QDateEdit()
+        edit.setCalendarPopup(True)
+        edit.setDate(QDate.currentDate())
+        return edit
+
+    def op(self) -> str:
+        return self.op_combo.currentData()
+
+    @staticmethod
+    def _select(combo: QComboBox, value) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def reset(self) -> None:
+        self.op_combo.setCurrentIndex(0)
+        self.date1.setDate(QDate.currentDate())
+        self.date2.setDate(QDate.currentDate())
+        self.amount.setValue(1)
+        self.unit_combo.setCurrentIndex(0)
+        self.other_combo.setCurrentIndex(0)
+        self.compare_combo.setCurrentIndex(0)
+        self.compare_days.setValue(0)
+
+    def build(self) -> Optional[DateFilter]:
+        """Filter for the current input, or None when the row is "Any"."""
+        op = self.op()
+        if op == "any":
+            return None
+        # Only the dates the operator uses — keeps saved profiles free of
+        # stale picker values.
+        return DateFilter(
+            self.field, op,
+            date1=_qdate_to_date(self.date1.date()) if op in _DATE_OPS_WITH_DATE1 else None,
+            date2=_qdate_to_date(self.date2.date()) if op == "between" else None,
+            amount=self.amount.value(),
+            unit=self.unit_combo.currentData(),
+            other_field=self.other_combo.currentData(),
+            compare_op=self.compare_combo.currentData(),
+            compare_days=self.compare_days.value(),
+        )
+
+    def load(self, f: DateFilter) -> None:
+        self._select(self.op_combo, f.op)
+        for edit, value in ((self.date1, f.date1), (self.date2, f.date2)):
+            if value is not None:
+                edit.setDate(QDate(value.year, value.month, value.day))
+        self.amount.setValue(f.amount)
+        self._select(self.unit_combo, f.unit)
+        self._select(self.other_combo, f.other_field)
+        self._select(self.compare_combo, f.compare_op)
+        self.compare_days.setValue(f.compare_days)
+
+    def _update_inputs(self) -> None:
+        op = self.op()
+        self.date1.setVisible(op in _DATE_OPS_WITH_DATE1)
+        self.date2.setVisible(op == "between")
+        self._relative.setVisible(op in _DATE_OPS_RELATIVE)
+        self._compare.setVisible(op == "compare")
+        needs_days = self.compare_combo.currentData() in ("within", "outside")
+        self.compare_days.setVisible(needs_days)
+        self._days_label.setVisible(needs_days)
+        font = self.label.font()
+        font.setBold(op != "any")
+        self.label.setFont(font)
 
 
 # ── Filter dialog ─────────────────────────────────────────────────────────────
@@ -620,59 +802,17 @@ class FilterDialog(QDialog):
         return outer
 
     def _build_dates_tab(self) -> QWidget:
-        """Datoer filter fane."""
+        """Datoer filter fane — én GSAK-lignende operator-række pr. datofelt."""
         widget = QWidget()
         layout = QFormLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        def _make_date_group(title: str):
-            """Hjælper: lav en from/to dato-gruppe og returner (group, from_en, from_dt, to_en, to_dt)."""
-            group = QGroupBox(title)
-            grp_layout = QFormLayout(group)
-            from_en = QCheckBox(tr("filter_from"))
-            from_dt = QDateEdit()
-            from_dt.setCalendarPopup(True)
-            from_dt.setDate(QDate(2000, 1, 1))
-            from_dt.setEnabled(False)
-            from_en.toggled.connect(from_dt.setEnabled)
-            row1 = QHBoxLayout()
-            row1.addWidget(from_en)
-            row1.addWidget(from_dt)
-            row1.addStretch()
-            grp_layout.addRow(row1)
-            to_en = QCheckBox(tr("filter_to"))
-            to_dt = QDateEdit()
-            to_dt.setCalendarPopup(True)
-            to_dt.setDate(QDate.currentDate())
-            to_dt.setEnabled(False)
-            to_en.toggled.connect(to_dt.setEnabled)
-            row2 = QHBoxLayout()
-            row2.addWidget(to_en)
-            row2.addWidget(to_dt)
-            row2.addStretch()
-            grp_layout.addRow(row2)
-            return group, from_en, from_dt, to_en, to_dt
-
-        # Udlagt dato
-        g, self._hidden_from_enabled, self._hidden_from, self._hidden_to_enabled, self._hidden_to = \
-            _make_date_group(tr("filter_hidden_date_group"))
-        layout.addRow(g)
-
-        # Fundet af mig dato
-        g, self._found_from_enabled, self._found_from, self._found_to_enabled, self._found_to = \
-            _make_date_group(tr("filter_found_date_group"))
-        layout.addRow(g)
-
-        # DNF dato
-        g, self._dnf_date_from_enabled, self._dnf_date_from, self._dnf_date_to_enabled, self._dnf_date_to = \
-            _make_date_group(tr("col_dnf_date"))
-        layout.addRow(g)
-
-        # Seneste log dato
-        g, self._log_from_enabled, self._log_from, self._log_to_enabled, self._log_to = \
-            _make_date_group(tr("filter_log_date_group"))
-        layout.addRow(g)
+        self._date_rows: dict[str, DateFilterRow] = {}
+        for field, key in _DATE_FIELD_LABELS:
+            row = DateFilterRow(field, tr(key))
+            self._date_rows[field] = row
+            layout.addRow(row.label, row)
 
         return widget
 
@@ -1128,14 +1268,8 @@ class FilterDialog(QDialog):
         self._cc_no.setChecked(True)
 
     def _reset_dates(self) -> None:
-        self._hidden_from_enabled.setChecked(False)
-        self._hidden_to_enabled.setChecked(False)
-        self._found_from_enabled.setChecked(False)
-        self._found_to_enabled.setChecked(False)
-        self._dnf_date_from_enabled.setChecked(False)
-        self._dnf_date_to_enabled.setChecked(False)
-        self._log_from_enabled.setChecked(False)
-        self._log_to_enabled.setChecked(False)
+        for row in self._date_rows.values():
+            row.reset()
 
     def _reset_misc(self) -> None:
         for row, _cls in self._geo_text_rows():
@@ -1302,44 +1436,11 @@ class FilterDialog(QDialog):
             fs.add(NoCorrectedFilter())
         # Begge valgt (eller ingen) = vis alt = intet filter
 
-        # Datoer — hjælper til at konvertere QDate til datetime
-        # #844: hour/minute var hardkodet til 23/59 uanset end_of_day, så
-        # from_date reelt blev sat til 23:59:00 i stedet for 00:00:00 —
-        # samme dato i from/to gav dermed et 59-sekunders vindue og ingen
-        # match; en flerdagesrange "virkede" kun fordi from-grænsen i
-        # praksis rykkede en dag tilbage.
-        def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
-            if end_of_day:
-                return datetime(qdate.year(), qdate.month(), qdate.day(), 23, 59, 59)
-            return datetime(qdate.year(), qdate.month(), qdate.day(), 0, 0, 0)
-
-        # Udlagt dato
-        if self._hidden_from_enabled.isChecked() or self._hidden_to_enabled.isChecked():
-            fs.add(HiddenDateFilter(
-                from_date=_qdate_to_dt(self._hidden_from.date()) if self._hidden_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._hidden_to.date(), end_of_day=True) if self._hidden_to_enabled.isChecked() else None,
-            ))
-
-        # Fundet af mig dato
-        if self._found_from_enabled.isChecked() or self._found_to_enabled.isChecked():
-            fs.add(FoundByMeDateFilter(
-                from_date=_qdate_to_dt(self._found_from.date()) if self._found_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._found_to.date(), end_of_day=True) if self._found_to_enabled.isChecked() else None,
-            ))
-
-        # DNF dato
-        if self._dnf_date_from_enabled.isChecked() or self._dnf_date_to_enabled.isChecked():
-            fs.add(DnfDateFilter(
-                from_date=_qdate_to_dt(self._dnf_date_from.date()) if self._dnf_date_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._dnf_date_to.date(), end_of_day=True) if self._dnf_date_to_enabled.isChecked() else None,
-            ))
-
-        # Seneste log dato
-        if self._log_from_enabled.isChecked() or self._log_to_enabled.isChecked():
-            fs.add(LastLogDateFilter(
-                from_date=_qdate_to_dt(self._log_from.date()) if self._log_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._log_to.date(), end_of_day=True) if self._log_to_enabled.isChecked() else None,
-            ))
+        # Datoer — én DateFilter pr. datofelt med en valgt operator
+        for row in self._date_rows.values():
+            date_filter = row.build()
+            if date_filter is not None:
+                fs.add(date_filter)
 
         # Øvrigt — Land / Stat / Kommune
         for row, cls in self._geo_text_rows():
@@ -1637,45 +1738,17 @@ class FilterDialog(QDialog):
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
                 self._fav_max.setValue(getattr(f, "max_pts", 9999))
-            elif ftype == "found_by_me_date":
-                if getattr(f, "from_date", None):
-                    self._found_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._found_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._found_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._found_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "dnf_date":
-                if getattr(f, "from_date", None):
-                    self._dnf_date_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._dnf_date_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._dnf_date_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._dnf_date_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "last_log_date":
-                if getattr(f, "from_date", None):
-                    self._log_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._log_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._log_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._log_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "hidden_date_range":
-                # #857: this branch was missing, so the Hidden date
-                # checkboxes/fields silently reset on reopen even though the
-                # filter was still active on the cache list.
-                if getattr(f, "from_date", None):
-                    self._hidden_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._hidden_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._hidden_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._hidden_to.setDate(QDate(d.year, d.month, d.day))
+            elif ftype == "date":
+                row = self._date_rows.get(f.field)
+                if row is not None:
+                    row.load(f)
+            elif ftype in LEGACY_DATE_FILTER_FIELDS:
+                # Profiles saved before the GSAK-style date filter hold
+                # from/to range filters — show them as the equivalent
+                # operator (Between / On or after / On or before).
+                converted = DateFilter.from_legacy(f)
+                if converted is not None:
+                    self._date_rows[converted.field].load(converted)
             # Andre/ukendte filtre ignoreres stille
 
     # ── Apply ─────────────────────────────────────────────────────────────────
