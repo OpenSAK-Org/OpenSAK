@@ -714,6 +714,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Podaj odległość większą niż 0 dla filtra linii lub punktów.",
     "filter_caches_with":           "Skrytki, które mają:",
     "filter_all_selected":          "WSZYSTKIE wybrane atrybuty",
+    "filter_any_selected":          "JEDEN z wybranych atrybutów",
     "filter_attr_col_name":         "Atrybut",
     "filter_none_short":            "Dowolny",
     "filter_save_title":            "Zapisz filtr",

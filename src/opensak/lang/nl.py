@@ -716,6 +716,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Voer een afstand groter dan 0 in voor een lijn- of puntenfilter.",
     "filter_caches_with":           "Caches met:",
     "filter_all_selected":          "ALLE geselecteerde attributen",
+    "filter_any_selected":          "ÉÉN van de geselecteerde attributen",
     "filter_attr_col_name":         "Attribuut",
     "filter_none_short":            "Alle",
     "filter_save_title":            "Filter opslaan",
