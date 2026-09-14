@@ -1,6 +1,6 @@
 # tests/unit-tests/test_filter_dialog.py — complete filter dialog (build/load/profiles).
 
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -21,9 +21,14 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    DateFilter, DATE_FILTER_FIELDS,
     TextSearchFilter,
     FilterProfile,
 )
+
+
+def _date_filters(fs) -> dict:
+    return {f.field: f for f in fs._filters if isinstance(f, DateFilter)}
 
 
 @pytest.fixture(autouse=True)
@@ -265,36 +270,90 @@ class TestBuildFilterset:
         assert dlg._locked_yes.isChecked() is True
         assert dlg._locked_no.isChecked() is True
 
-    def test_date_filters(self, dlg):
-        dlg._hidden_from_enabled.setChecked(True)
-        dlg._found_from_enabled.setChecked(True)
-        dlg._dnf_date_from_enabled.setChecked(True)
-        dlg._log_from_enabled.setChecked(True)
-        types = _types(dlg._build_filterset())
-        assert "found_by_me_date" in types
-        assert "dnf_date" in types
-        assert "last_log_date" in types
-        assert "hidden_date_range" in types
+    def test_date_rows_default_to_any(self, dlg):
+        assert set(dlg._date_rows) == set(DATE_FILTER_FIELDS)
+        assert all(row.op() == "any" for row in dlg._date_rows.values())
+        assert _date_filters(dlg._build_filterset()) == {}
 
-    def test_single_day_date_range_covers_whole_day(self, dlg):
-        # #844: from_date skal være 00:00:00 og to_date 23:59:59, så en
-        # og samme dato i from/to-felterne giver et helt-dags vindue —
-        # ikke et 59-sekunders vindue (23:59:00-23:59:59), som gav
-        # "ingen cache matcher" ved single-day-filtrering.
-        same_date = QDate(2026, 9, 2)
-        dlg._found_from_enabled.setChecked(True)
-        dlg._found_to_enabled.setChecked(True)
-        dlg._found_from.setDate(same_date)
-        dlg._found_to.setDate(same_date)
-        fs = dlg._build_filterset()
-        found_filter = next(f for f in fs._filters if getattr(f, "filter_type", None) == "found_by_me_date")
-        assert found_filter.from_date == datetime(2026, 9, 2, 0, 0, 0)
-        assert found_filter.to_date == datetime(2026, 9, 2, 23, 59, 59)
+    def test_date_filters(self, dlg):
+        for row in dlg._date_rows.values():
+            row._select(row.op_combo, "on_or_after")
+        assert set(_date_filters(dlg._build_filterset())) == set(DATE_FILTER_FIELDS)
+
+    def test_single_day_equal_covers_whole_day(self, dlg):
+        # #844: a single date must match the whole day, whatever the time.
+        row = dlg._date_rows["found_date"]
+        row._select(row.op_combo, "equal")
+        row.date1.setDate(QDate(2026, 9, 2))
+        f = _date_filters(dlg._build_filterset())["found_date"]
+        assert (f.op, f.date1) == ("equal", date(2026, 9, 2))
 
         class _Cache:
             found = True
             found_date = datetime(2026, 9, 2, 14, 30, 0)
-        assert found_filter.matches(_Cache()) is True
+        assert f.matches(_Cache()) is True
+
+    def test_between_relative_and_compare_rows(self, dlg):
+        hidden = dlg._date_rows["hidden_date"]
+        hidden._select(hidden.op_combo, "between")
+        hidden.date1.setDate(QDate(2020, 1, 1))
+        hidden.date2.setDate(QDate(2020, 12, 31))
+        last_found = dlg._date_rows["last_found_date"]
+        last_found._select(last_found.op_combo, "not_during")
+        last_found.amount.setValue(2)
+        last_found._select(last_found.unit_combo, "years")
+        log = dlg._date_rows["last_log_date"]
+        log._select(log.op_combo, "compare")
+        log._select(log.other_combo, "hidden_date")
+        log._select(log.compare_combo, "within")
+        log.compare_days.setValue(7)
+
+        by_field = _date_filters(dlg._build_filterset())
+        assert set(by_field) == {"hidden_date", "last_found_date", "last_log_date"}
+        h = by_field["hidden_date"]
+        assert (h.op, h.date1, h.date2) == ("between", date(2020, 1, 1), date(2020, 12, 31))
+        lf = by_field["last_found_date"]
+        assert (lf.op, lf.amount, lf.unit) == ("not_during", 2, "years")
+        lg = by_field["last_log_date"]
+        assert (lg.op, lg.other_field, lg.compare_op, lg.compare_days) == \
+            ("compare", "hidden_date", "within", 7)
+
+    def test_date_row_inputs_follow_operator(self, dlg):
+        row = dlg._date_rows["dnf_date"]
+
+        def shown():
+            return tuple(not w.isHidden() for w in (row.date1, row.date2, row._relative, row._compare))
+
+        assert shown() == (False, False, False, False)
+        assert not row.label.font().bold()
+        for op, expected in [
+            ("on_or_before", (True, False, False, False)),
+            ("equal",        (True, False, False, False)),
+            ("between",      (True, True, False, False)),
+            ("during",       (False, False, True, False)),
+            ("not_during",   (False, False, True, False)),
+            ("compare",      (False, False, False, True)),
+        ]:
+            row._select(row.op_combo, op)
+            assert shown() == expected, op
+        assert row.label.font().bold()
+        assert row.compare_days.isHidden()
+        row._select(row.compare_combo, "outside")
+        assert not row.compare_days.isHidden()
+
+    def test_compare_offers_every_other_field(self, dlg):
+        row = dlg._date_rows["hidden_date"]
+        others = [row.other_combo.itemData(i) for i in range(row.other_combo.count())]
+        assert set(others) == set(DATE_FILTER_FIELDS) - {"hidden_date"}
+
+    def test_reset_dates(self, dlg):
+        row = dlg._date_rows["changed_date"]
+        row._select(row.op_combo, "during")
+        row.amount.setValue(5)
+        dlg._reset_dates()
+        assert row.op() == "any"
+        assert row.amount.value() == 1
+        assert not row.label.font().bold()
 
     def test_attributes_and_mode(self, dlg):
         attr_id = next(iter(dlg._attr_boxes))
@@ -383,31 +442,56 @@ class TestLoadFilterset:
         assert dlg._type_checks[CACHE_TYPES[0]].isChecked()
         assert not dlg._type_checks[CACHE_TYPES[1]].isChecked()
 
-    def test_loads_date_filters(self, dlg):
+    def test_loads_date_filters_round_trip(self, dlg):
+        filters = [
+            DateFilter("creation_date", "compare", other_field="last_gpx_update",
+                       compare_op="older_or_equal"),
+            DateFilter("changed_date", "between", date1=date(2020, 1, 1), date2=date(2021, 6, 30)),
+            DateFilter("dnf_date", "during", amount=3, unit="months"),
+            DateFilter("last_found_date", "compare", other_field="found_date",
+                       compare_op="outside", compare_days=30),
+        ]
+        fs = FilterSet(mode="AND")
+        for f in filters:
+            fs.add(f)
+        dlg._load_filterset(fs)
+        rebuilt = {k: f.to_dict() for k, f in _date_filters(dlg._build_filterset()).items()}
+        assert rebuilt == {f.field: f.to_dict() for f in filters}
+
+    def test_loads_legacy_date_filters(self, dlg):
+        # Profiles saved before the GSAK-style date filter hold from/to
+        # range filters; they show as the equivalent operator.
         fs = FilterSet(mode="AND")
         fs.add(FoundByMeDateFilter(from_date=datetime(2020, 1, 1),
                                    to_date=datetime(2021, 1, 1)))
         fs.add(DnfDateFilter(from_date=datetime(2020, 2, 2), to_date=None))
         fs.add(LastLogDateFilter(from_date=None, to_date=datetime(2022, 3, 3)))
         dlg._load_filterset(fs)
-        assert dlg._found_from_enabled.isChecked()
-        assert dlg._dnf_date_from_enabled.isChecked()
-        assert dlg._log_to_enabled.isChecked()
+        found = dlg._date_rows["found_date"]
+        assert found.op() == "between"
+        assert (found.date1.date(), found.date2.date()) == (QDate(2020, 1, 1), QDate(2021, 1, 1))
+        dnf = dlg._date_rows["dnf_date"]
+        assert (dnf.op(), dnf.date1.date()) == ("on_or_after", QDate(2020, 2, 2))
+        log = dlg._date_rows["last_log_date"]
+        assert (log.op(), log.date1.date()) == ("on_or_before", QDate(2022, 3, 3))
+        assert set(_date_filters(dlg._build_filterset())) == {"found_date", "dnf_date", "last_log_date"}
 
     def test_loads_hidden_date_filter(self, dlg):
         # #857: reopening the Filter dialog after setting a Hidden date
-        # range didn't restore the checkboxes/dates, even though the list
-        # was correctly filtered — no branch in _load_filterset() handled
-        # "hidden_date_range". Found/DNF/last-log date ranges round-tripped
-        # fine, only Hidden date was affected.
+        # range didn't restore it, even though the list was correctly
+        # filtered. A legacy hidden_date_range must still restore.
         fs = FilterSet(mode="AND")
         fs.add(HiddenDateFilter(from_date=datetime(2020, 5, 1),
                                  to_date=datetime(2020, 6, 15)))
         dlg._load_filterset(fs)
-        assert dlg._hidden_from_enabled.isChecked()
-        assert dlg._hidden_from.date() == QDate(2020, 5, 1)
-        assert dlg._hidden_to_enabled.isChecked()
-        assert dlg._hidden_to.date() == QDate(2020, 6, 15)
+        row = dlg._date_rows["hidden_date"]
+        assert row.op() == "between"
+        assert row.date1.date() == QDate(2020, 5, 1)
+        assert row.date2.date() == QDate(2020, 6, 15)
+
+    def test_legacy_range_without_dates_leaves_row_any(self, dlg):
+        dlg._load_filterset(FilterSet().add(FoundByMeDateFilter()))
+        assert dlg._date_rows["found_date"].op() == "any"
 
     def test_hidden_date_filter_round_trips_via_to_dict(self):
         # #857 (root cause, part 2): the old inline HiddenDateFilter's
