@@ -30,7 +30,8 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache, UserNote
+from opensak.db.models import Cache, UserNote, Waypoint
+from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -788,6 +789,107 @@ class DistanceFilter(BaseFilter):
             data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
             data.get("center_state"),
         )
+
+
+class LinePolygonFilter(BaseFilter):
+    """GSAK's line/polygon filter: keep caches along a line, inside a polygon
+    or near a set of points (see line_polygon.LineShape) — or, with
+    *exclude*, only the caches that don't match.
+
+    Tests each cache's effective_coords() (corrected coordinates when set,
+    as on the map). *points* is a frozen snapshot taken when the filter was
+    built, like DistanceFilter's centre; *text* is the dialog's point list
+    as entered ("W,<code>" lines and comments included), kept only to
+    re-populate the dialog.
+    """
+    filter_type = "line_polygon"
+
+    # apply_to_query() below only pushes a bounding-box pre-narrowing —
+    # matches() makes the exact decision. See BaseFilter.sql_exact.
+    sql_exact = False
+
+    def __init__(
+        self,
+        points: list[tuple[float, float]],
+        mode: str = "line",
+        distance_km: float = 0.0,
+        exclude: bool = False,
+        text: str = "",
+    ):
+        if mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        self.points = [(float(lat), float(lon)) for lat, lon in points]
+        self.mode = mode
+        self.distance_km = max(0.0, float(distance_km))
+        self.exclude = bool(exclude)
+        self.text = text
+        self._shape = LineShape(self.points, mode, self.distance_km)
+
+    def apply_to_query(self, query):
+        """Pre-narrow to the shape's bounding box (grown by the distance).
+
+        Checked against the raw coordinates OR the corrected ones, since
+        matches() uses whichever applies — a puzzle whose final lies on the
+        line but whose posted coordinates don't must still come through.
+        Nothing is pushed for *exclude* (the complement of a box narrows
+        nothing) or when the shape has no box (poles / antimeridian).
+        """
+        bbox = self._shape.bbox
+        if self.exclude or bbox is None:
+            return None
+        from sqlalchemy import and_, exists, or_
+        lat_lo, lat_hi, lon_lo, lon_hi = bbox
+        # .correlate(Cache) — see HasCorrectedFilter.apply_to_query().
+        corrected_in_box = (
+            exists()
+            .where(
+                UserNote.cache_id == Cache.id,
+                UserNote.is_corrected == True,  # noqa: E712
+                UserNote.corrected_lat.between(lat_lo, lat_hi),
+                UserNote.corrected_lon.between(lon_lo, lon_hi),
+            )
+            .correlate(Cache)
+        )
+        return query.filter(or_(
+            and_(
+                Cache.latitude.between(lat_lo, lat_hi),
+                Cache.longitude.between(lon_lo, lon_hi),
+            ),
+            corrected_in_box,
+        ))
+
+    def matches(self, cache: Cache) -> bool:
+        lat, lon = effective_coords(cache)
+        if lat is None or lon is None:
+            return False
+        return self._shape.contains(lat, lon) != self.exclude
+
+    def to_dict(self) -> dict:
+        # "shape_type", not "mode": FilterSet.from_dict() reads any dict
+        # with a "mode" key as a nested FilterSet.
+        return {
+            "filter_type": self.filter_type,
+            "shape_type": self.mode,
+            "points": [[lat, lon] for lat, lon in self.points],
+            "distance_km": self.distance_km,
+            "exclude": self.exclude,
+            "text": self.text,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LinePolygonFilter":
+        return cls(
+            points=data.get("points", []),
+            mode=data.get("shape_type", "line"),
+            distance_km=data.get("distance_km", 0.0),
+            exclude=data.get("exclude", False),
+            text=data.get("text", ""),
+        )
+
+    def __repr__(self) -> str:
+        exclude = " exclude" if self.exclude else ""
+        return (f"<LinePolygonFilter {self.mode} points={len(self.points)} "
+                f"{self.distance_km} km{exclude}>")
 
 
 class AttributeFilter(BaseFilter):
@@ -1678,6 +1780,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "placed_by":     PlacedByFilter,
     "owner_name":    OwnerFilter,
     "distance":      DistanceFilter,
+    "line_polygon":  LinePolygonFilter,
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
@@ -2627,6 +2730,58 @@ def effective_coords(cache) -> tuple[Optional[float], Optional[float]]:
         if lat is not None and lon is not None:
             return lat, lon
     return cache.latitude, cache.longitude
+
+
+def lookup_code_coords(session: Session, code: str) -> Optional[tuple[float, float]]:
+    """Coordinates for a GSAK-style "W,<code>" point of the line/polygon filter.
+
+    A cache code gives that cache's effective_coords() (corrected when set);
+    otherwise a waypoint is looked up by its own code — wp_code (GSAK
+    imports), else prefix + the parent cache's code without "GC" (PK12345
+    for a GC12345 parking waypoint, as GPX files name them). None for an
+    unknown code or a waypoint without coordinates.
+    """
+    code = code.strip().upper()
+    if not code:
+        return None
+    cache = session.query(Cache).filter(Cache.gc_code == code).first()
+    if cache is not None:
+        lat, lon = effective_coords(cache)
+        return (lat, lon) if lat is not None and lon is not None else None
+    from sqlalchemy import func
+    has_coords = (Waypoint.latitude.is_not(None), Waypoint.longitude.is_not(None))
+    wp = (
+        session.query(Waypoint)
+        .filter(func.upper(Waypoint.wp_code) == code, *has_coords)
+        .first()
+    )
+    if wp is None and len(code) > 2:
+        wp = (
+            session.query(Waypoint)
+            .join(Cache, Waypoint.cache_id == Cache.id)
+            .filter(
+                func.upper(Waypoint.prefix) == code[:2],
+                Cache.gc_code == "GC" + code[2:],
+                *has_coords,
+            )
+            .first()
+        )
+    if wp is None or wp.latitude is None or wp.longitude is None:
+        return None
+    return wp.latitude, wp.longitude
+
+
+def user_flagged_codes(session: Session) -> list[str]:
+    """GC codes of every cache with the user flag set, in user sort order
+    (then by code) — for the line/polygon filter's "Add flagged" button."""
+    from sqlalchemy import func
+    rows = (
+        session.query(Cache.gc_code)
+        .filter(Cache.user_flag == True)  # noqa: E712
+        .order_by(func.coalesce(Cache.user_sort, 999999), Cache.gc_code)
+        .all()
+    )
+    return [row[0] for row in rows]
 
 
 def get_nearby_caches(

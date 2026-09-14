@@ -22,13 +22,14 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across six tabs:
+The filter dialog is split across seven tabs:
 
 | Tab | What's on it |
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
 | **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
+| **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
@@ -242,6 +243,34 @@ Filter by the date a Did Not Find was recorded.
 ### Last log date
 
 Filter by the date of the most recent log entry for the cache.
+
+---
+
+## Line / polygon filter
+
+The **Line/Polygon** tab works like GSAK's filter of the same name. Enter one point per line in the text box:
+
+```text
+53.18346, 8.71113
+N 53 23.613, E 008 00.941
+W,GC12345
+```
+
+- Any coordinate format OpenSAK understands works (decimal degrees, DMM, DMS), with or without a comma between latitude and longitude.
+- `W,<code>` takes the coordinates of a cache (its corrected coordinates when set) or a waypoint in the current database.
+- Text after `#` is ignored, so you can annotate the list.
+- **Add flagged (user flag)** appends a `W,<code>` line for every cache with the user flag set.
+- **Read points from file** loads a GPX file (track points, else route points, else waypoints), a KML file, or a text file in the format above — replacing or appending to the list.
+
+Choose the filter type:
+
+| Type | Includes caches… | Needs |
+|---|---|---|
+| Line | within the distance of the line through the points (a route or track) | 2+ points and a distance |
+| Polygon | inside the area the points outline (closed automatically); a distance above 0 also includes caches that close to the outline | 3+ points |
+| Points | within the distance of any single point | 1+ point and a distance |
+
+Check **Exclude** to invert the filter and keep only the caches that do *not* match. The filter uses a cache's corrected coordinates when set. Distances are measured along the Earth's surface; polygon edges are straight lines in latitude/longitude. Shapes that cross the ±180° meridian are not supported.
 
 ---
 
