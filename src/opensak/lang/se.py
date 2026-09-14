@@ -715,6 +715,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Ange ett avstånd större än 0 för ett linje- eller punktfilter.",
     "filter_caches_with":           "Cacher som har:",
     "filter_all_selected":          "ALLA valda attribut",
+    "filter_any_selected":          "ETT av de valda attributen",
     "filter_attr_col_name":         "Attribut",
     "filter_none_short":            "Någon",
     "filter_save_title":            "Spara filter",

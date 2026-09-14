@@ -363,13 +363,33 @@ class TestBuildFilterset:
         assert any(getattr(f, "filter_type", None) == "attribute" for f in fs._filters)
 
     def test_attributes_or_mode(self, dlg):
-        dlg._attr_mode_all.setChecked(False)  # ANY/OR mode
+        dlg._attr_mode_any.setChecked(True)  # ANY/OR mode
+        assert dlg._attr_mode_all.isChecked() is False  # radios are exclusive
         ids = list(dlg._attr_boxes)[:2]
         for aid in ids:
             dlg._attr_boxes[aid][0].setChecked(True)
         fs = dlg._build_filterset()
         # nested OR FilterSet present
         assert any(isinstance(f, FilterSet) and f.mode == "OR" for f in fs._filters)
+
+    def test_attributes_or_mode_matches_cache_with_only_one(self, dlg):
+        # ONE-of mode: a cache carrying just one of the selected attributes
+        # passes; in ALL mode the same cache is rejected.
+        a1, a2 = list(dlg._attr_boxes)[:2]
+        dlg._attr_boxes[a1][0].setChecked(True)
+        dlg._attr_boxes[a2][0].setChecked(True)
+        cache = SimpleNamespace(attributes=[
+            SimpleNamespace(attribute_id=a1, is_on=True),
+        ])
+        assert dlg._build_filterset().matches(cache) is False
+        dlg._attr_mode_any.setChecked(True)
+        assert dlg._build_filterset().matches(cache) is True
+
+    def test_reset_attributes_restores_all_mode(self, dlg):
+        dlg._attr_mode_any.setChecked(True)
+        dlg._reset_attributes()
+        assert dlg._attr_mode_all.isChecked() is True
+        assert dlg._attr_mode_any.isChecked() is False
 
     def test_where_clause(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
@@ -526,9 +546,20 @@ class TestLoadFilterset:
         inner.add(AttributeFilter(attr_id, True))
         fs = FilterSet(mode="AND")
         fs.add(inner)
-        dlg._load_filterset(fs)        # exercises the fixed _attr_mode_all toggle
+        dlg._load_filterset(fs)
+        assert dlg._attr_mode_any.isChecked() is True
         assert dlg._attr_mode_all.isChecked() is False
         assert dlg._attr_boxes[attr_id][0].isChecked() is True
+
+    def test_loads_plain_attribute_sets_all_mode(self, dlg):
+        # A previously loaded ONE-of profile must not leak into the next load.
+        dlg._attr_mode_any.setChecked(True)
+        attr_id = next(iter(dlg._attr_boxes))
+        fs = FilterSet(mode="AND")
+        fs.add(AttributeFilter(attr_id, True))
+        dlg._load_filterset(fs)
+        assert dlg._attr_mode_all.isChecked() is True
+        assert dlg._attr_mode_any.isChecked() is False
 
     def test_loads_text_search_filter(self, dlg):
         fs = FilterSet(mode="AND")

@@ -715,6 +715,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Angiv en afstand større end 0 for et linje- eller punktfilter.",
     "filter_caches_with":           "Cacher der har:",
     "filter_all_selected":          "ALLE valgte attributter",
+    "filter_any_selected":          "ÉN af de valgte attributter",
     "filter_attr_col_name":         "Attribut",
     "filter_none_short":            "Ingen",
     "filter_save_title":            "Gem filter",

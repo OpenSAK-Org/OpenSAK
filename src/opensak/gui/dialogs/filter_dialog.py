@@ -1023,12 +1023,14 @@ class FilterDialog(QDialog):
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Mode
+        # Mode — ALLE valgte attributter skal passe (AND) eller blot ÉN af dem (OR)
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel(tr("filter_caches_with")))
-        self._attr_mode_all = QCheckBox(tr("filter_all_selected"))
+        self._attr_mode_all = QRadioButton(tr("filter_all_selected"))
+        self._attr_mode_any = QRadioButton(tr("filter_any_selected"))
         self._attr_mode_all.setChecked(True)
         mode_row.addWidget(self._attr_mode_all)
+        mode_row.addWidget(self._attr_mode_any)
         mode_row.addStretch()
         outer_layout.addLayout(mode_row)
 
@@ -1479,6 +1481,7 @@ class FilterDialog(QDialog):
         self._fav_max.setValue(9999)
 
     def _reset_attributes(self) -> None:
+        self._attr_mode_all.setChecked(True)
         for ja_cb, nej_cb, ingen_cb in self._attr_boxes.values():
             ja_cb.setChecked(False)
             nej_cb.setChecked(False)
@@ -1827,9 +1830,12 @@ class FilterDialog(QDialog):
             else:
                 flat_filters.append(f)
 
-        # OR-mode = "any selected"; the UI only has the "all selected" checkbox,
-        # so unchecking it expresses ANY (avoids a crash on the missing widget).
-        self._attr_mode_all.setChecked(not attr_mode_or_detected)
+        # OR-mode = "ONE of the selected attributes". The two mode radios are
+        # exclusive, so check the matching one (setChecked(False) is a no-op).
+        if attr_mode_or_detected:
+            self._attr_mode_any.setChecked(True)
+        else:
+            self._attr_mode_all.setChecked(True)
 
         text_rows = {
             cls.filter_type: row

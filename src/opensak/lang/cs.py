@@ -715,6 +715,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Pro filtr linie nebo bodů zadejte vzdálenost větší než 0.",
     "filter_caches_with":           "Keše, které mají:",
     "filter_all_selected":          "VŠECHNY vybrané atributy",
+    "filter_any_selected":          "JEDEN z vybraných atributů",
     "filter_attr_col_name":         "Atribut",
     "filter_none_short":            "Libovolné",
     "filter_save_title":            "Uložit filtr",
