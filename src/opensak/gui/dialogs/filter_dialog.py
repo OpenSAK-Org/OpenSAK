@@ -1,28 +1,30 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Seks faner:
+Syv faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
-4. Attributter — alle Groundspeak attributter
-5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-6. Where       — rå SQL WHERE-betingelse
+4. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
+5. Attributter — alle Groundspeak attributter
+6. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+7. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
 
 from __future__ import annotations
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QPushButton,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QRadioButton,
     QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
-    QDialogButtonBox, QMessageBox, QInputDialog,
+    QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
     QDateEdit, QSizePolicy, QFrame, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
 )
@@ -40,6 +42,7 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter,
+    LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
@@ -49,6 +52,7 @@ from opensak.filters.engine import (
     TextSearchFilter,
     FilterProfile,
 )
+from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
 
 
 # ── Groundspeak attribut definitioner ─────────────────────────────────────────
@@ -327,6 +331,22 @@ _DATE_OPS_WITH_DATE1 = ("on_or_before", "on_or_after", "equal", "between")
 _DATE_OPS_RELATIVE = ("during", "not_during")
 
 
+# ── Linje/polygon-fanen ───────────────────────────────────────────────────────
+
+# (filtertype, oversættelsesnøgle) i GSAK's rækkefølge. Nøglerne står som
+# literals, så test_no_unused_keys kan finde dem.
+_LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
+    ("line",    "filter_lp_type_line"),
+    ("polygon", "filter_lp_type_polygon"),
+    ("points",  "filter_lp_type_points"),
+)
+_LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
+
+
+def _format_lp_point(point: tuple[float, float]) -> str:
+    return f"{point[0]:.6f}, {point[1]:.6f}"
+
+
 def _qdate_to_date(qdate: QDate) -> date:
     return date(qdate.year(), qdate.month(), qdate.day())
 
@@ -557,12 +577,14 @@ class FilterDialog(QDialog):
         self._general_tab = self._build_general_tab()
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
+        self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
+        self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
@@ -923,6 +945,78 @@ class FilterDialog(QDialog):
         outer_layout.addWidget(scroll)
         return outer
 
+    def _build_line_polygon_tab(self) -> QWidget:
+        """Linje/Polygon fane — GSAK's linje-/polygonfilter: caches langs en
+        rute, inden for et område eller nær en række punkter."""
+        from opensak.gui.settings import get_settings as _gs
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Venstre: punktliste, markerede caches, punkter fra fil
+        left = QVBoxLayout()
+        left.addWidget(QLabel(tr("filter_lp_points_label")))
+        self._lp_text = QPlainTextEdit()
+        self._lp_text.setPlaceholderText(tr("filter_lp_points_placeholder"))
+        self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        left.addWidget(self._lp_text, 1)
+
+        flagged_btn = QPushButton(tr("filter_lp_add_flagged_btn"))
+        flagged_btn.setAutoDefault(False)
+        flagged_btn.clicked.connect(self._add_flagged_points)
+        left.addWidget(flagged_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        file_group = QGroupBox(tr("filter_lp_file_group"))
+        file_layout = QVBoxLayout(file_group)
+        file_btn = QPushButton(tr("filter_lp_choose_file_btn"))
+        file_btn.setAutoDefault(False)
+        file_btn.clicked.connect(self._load_points_file)
+        file_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        file_mode_row = QHBoxLayout()
+        self._lp_replace = QRadioButton(tr("filter_lp_replace"))
+        self._lp_replace.setChecked(True)
+        self._lp_append = QRadioButton(tr("filter_lp_append"))
+        file_mode_row.addWidget(self._lp_replace)
+        file_mode_row.addWidget(self._lp_append)
+        file_mode_row.addStretch()
+        file_layout.addLayout(file_mode_row)
+        left.addWidget(file_group)
+        layout.addLayout(left, 1)
+
+        # Højre: forklaring, filtertype, afstand, udeluk
+        right = QVBoxLayout()
+        desc_label = QLabel(tr("filter_lp_description"))
+        desc_label.setWordWrap(True)
+        right.addWidget(desc_label)
+
+        type_group = QGroupBox(tr("filter_lp_type_group"))
+        type_layout = QHBoxLayout(type_group)
+        self._lp_mode_buttons: dict[str, QRadioButton] = {}
+        for mode, key in _LP_MODE_LABELS:
+            button = QRadioButton(tr(key))
+            type_layout.addWidget(button)
+            self._lp_mode_buttons[mode] = button
+        self._lp_mode_buttons["line"].setChecked(True)
+        right.addWidget(type_group)
+
+        dist_row = QHBoxLayout()
+        dist_row.addWidget(QLabel(tr("filter_lp_distance_label")))
+        self._lp_distance = QDoubleSpinBox()
+        self._lp_distance.setRange(0.0, 99999.0)
+        self._lp_distance.setDecimals(3)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_distance.setSuffix(" mi" if _gs().use_miles else " km")
+        dist_row.addWidget(self._lp_distance)
+        dist_row.addStretch()
+        right.addLayout(dist_row)
+
+        self._lp_exclude = QCheckBox(tr("filter_lp_exclude"))
+        right.addWidget(self._lp_exclude)
+        right.addStretch()
+        layout.addLayout(right, 1)
+        return widget
+
     def _build_attributes_tab(self) -> QWidget:
         """Attributter filter fane med scrollbar."""
         outer = QWidget()
@@ -1223,6 +1317,104 @@ class FilterDialog(QDialog):
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
+    # ── Linje/Polygon ────────────────────────────────────────────────────────
+
+    def _lp_mode(self) -> str:
+        for mode, button in self._lp_mode_buttons.items():
+            if button.isChecked():
+                return mode
+        return "line"
+
+    def _lp_distance_km(self) -> float:
+        from opensak.gui.settings import get_settings as _gs
+        value = self._lp_distance.value()
+        return value * 1.60934 if _gs().use_miles else value
+
+    @staticmethod
+    def _resolve_point_code(code: str) -> Optional[tuple[float, float]]:
+        """Coordinates for a "W,<code>" line, from the open database."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                return lookup_code_coords(session, code)
+        except Exception:
+            return None
+
+    def _lp_points(self) -> tuple[list[tuple[float, float]], list[str]]:
+        return parse_points_text(self._lp_text.toPlainText(), self._resolve_point_code)
+
+    def _build_line_polygon_filter(self) -> Optional[LinePolygonFilter]:
+        """Filter for the Line/Polygon tab, or None when the tab is unused or
+        incomplete — _validate_line_polygon() tells the user why."""
+        points, bad = self._lp_points()
+        mode = self._lp_mode()
+        distance_km = self._lp_distance_km()
+        if bad or len(points) < LP_MIN_POINTS[mode]:
+            return None
+        if mode != "polygon" and distance_km <= 0:
+            return None
+        return LinePolygonFilter(
+            points, mode, distance_km,
+            exclude=self._lp_exclude.isChecked(),
+            text=self._lp_text.toPlainText().strip(),
+        )
+
+    def _validate_line_polygon(self) -> bool:
+        """Warn about, and show, a Line/Polygon tab that is filled in but
+        can't be used: unreadable lines, too few points or no distance."""
+        points, bad = self._lp_points()
+        if not points and not bad:
+            return True  # fanen er ikke i brug
+        mode = self._lp_mode()
+        if bad:
+            message = tr("filter_lp_invalid_lines", lines="\n".join(bad[:10]))
+        elif len(points) < LP_MIN_POINTS[mode]:
+            message = tr("filter_lp_too_few_points", count=LP_MIN_POINTS[mode])
+        elif mode != "polygon" and self._lp_distance_km() <= 0:
+            message = tr("filter_lp_distance_required")
+        else:
+            return True
+        self._tabs.setCurrentWidget(self._line_polygon_tab)
+        QMessageBox.warning(self, tr("warning"), message)
+        return False
+
+    def _add_lp_lines(self, lines: list[str], replace: bool = False) -> None:
+        current = "" if replace else self._lp_text.toPlainText().rstrip()
+        added = "\n".join(lines)
+        self._lp_text.setPlainText(f"{current}\n{added}" if current else added)
+
+    def _add_flagged_points(self) -> None:
+        """Tilføj en "W,<kode>"-linje for hver cache med user flag."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                codes = user_flagged_codes(session)
+        except Exception:
+            codes = []
+        if not codes:
+            QMessageBox.information(self, tr("filter_tab_line_polygon"), tr("filter_lp_no_flagged"))
+            return
+        self._add_lp_lines([f"W,{code}" for code in codes])
+
+    def _load_points_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("filter_lp_file_group"), "", tr("filter_lp_file_filter"),
+        )
+        if not path:
+            return
+        try:
+            points = read_points_file(Path(path), self._resolve_point_code)
+        except Exception as exc:
+            QMessageBox.warning(self, tr("error"), tr("filter_lp_file_error", error=exc))
+            return
+        if not points:
+            QMessageBox.warning(self, tr("warning"), tr("filter_lp_file_no_points"))
+            return
+        self._add_lp_lines(
+            [_format_lp_point(p) for p in points],
+            replace=self._lp_replace.isChecked(),
+        )
+
     def _on_dist_toggled(self, checked: bool) -> None:
         self._dist_max.setEnabled(checked)
         self._dist_min.setEnabled(checked)
@@ -1299,10 +1491,18 @@ class FilterDialog(QDialog):
         self._text_search_notes.setChecked(True)
         self._text_search_hint.setChecked(False)
 
+    def _reset_line_polygon(self) -> None:
+        self._lp_text.clear()
+        self._lp_mode_buttons["line"].setChecked(True)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_exclude.setChecked(False)
+        self._lp_replace.setChecked(True)
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
+        self._reset_line_polygon()
         self._reset_attributes()
         self._reset_text_search()
         if self._where_tab is not None:
@@ -1320,6 +1520,8 @@ class FilterDialog(QDialog):
             self._reset_dates()
         elif tab is self._misc_tab:
             self._reset_misc()
+        elif tab is self._line_polygon_tab:
+            self._reset_line_polygon()
         elif tab is self._attributes_tab:
             self._reset_attributes()
         elif tab is self._text_search_tab:
@@ -1486,6 +1688,11 @@ class FilterDialog(QDialog):
                 min_pts=int(self._fav_min.value()),
                 max_pts=int(self._fav_max.value()),
             ))
+
+        # Linje/Polygon
+        lp_filter = self._build_line_polygon_filter()
+        if lp_filter is not None:
+            fs.add(lp_filter)
 
         # Attributter
         attr_mode_and = self._attr_mode_all.isChecked()
@@ -1700,6 +1907,16 @@ class FilterDialog(QDialog):
             elif ftype == "no_corrected":
                 self._cc_yes.setChecked(False)
                 self._cc_no.setChecked(True)
+            elif ftype == "line_polygon":
+                self._lp_text.setPlainText(
+                    f.text or "\n".join(_format_lp_point(p) for p in f.points)
+                )
+                self._lp_mode_buttons[f.mode].setChecked(True)
+                from opensak.gui.settings import get_settings as _gs
+                self._lp_distance.setValue(
+                    f.distance_km * 0.621371 if _gs().use_miles else f.distance_km
+                )
+                self._lp_exclude.setChecked(f.exclude)
             elif ftype == "attribute":
                 attr_id = getattr(f, "attribute_id", None)
                 is_on   = getattr(f, "is_on", True)
@@ -1770,6 +1987,8 @@ class FilterDialog(QDialog):
 
         # Et ugyldigt regulært udtryk ville stille matche ingenting — afvis det
         if not self._validate_text_filters():
+            return
+        if not self._validate_line_polygon():
             return
 
         fs = self._build_filterset()
