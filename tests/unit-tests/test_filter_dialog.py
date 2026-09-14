@@ -119,8 +119,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_six_tabs(self, dlg):
-        assert dlg._tabs.count() == 6
+    def test_seven_tabs(self, dlg):
+        assert dlg._tabs.count() == 7
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
