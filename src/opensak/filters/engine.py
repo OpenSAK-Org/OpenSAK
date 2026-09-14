@@ -24,7 +24,7 @@ import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -1310,6 +1310,258 @@ class HiddenDateFilter(BaseFilter):
         )
 
 
+# ── GSAK-style date filter ────────────────────────────────────────────────────
+
+# Filterable date fields: filter key -> Cache attribute. The keys are the
+# cache table's column IDs (changed_date/creation_date display
+# last_updated/imported_at there as well).
+DATE_FILTER_FIELDS: dict[str, str] = {
+    "last_found_date": "last_found_date",
+    "hidden_date":     "hidden_date",
+    "found_date":      "found_date",
+    "dnf_date":        "dnf_date",
+    "creation_date":   "imported_at",
+    "last_gpx_update": "last_gpx_update",
+    "last_log_date":   "last_log_date",
+    "changed_date":    "last_updated",
+}
+DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
+            "during", "not_during", "compare")
+DATE_UNITS = ("days", "weeks", "months", "years")
+DATE_COMPARE_OPS = ("equal", "older", "older_or_equal", "newer",
+                    "newer_or_equal", "within", "outside")
+
+# filter_type of the older from/to-only date filters -> the field they cover.
+LEGACY_DATE_FILTER_FIELDS: dict[str, str] = {
+    "hidden_date_range": "hidden_date",
+    "found_by_me_date":  "found_date",
+    "dnf_date":          "dnf_date",
+    "last_log_date":     "last_log_date",
+}
+
+
+def _to_date(value) -> Optional[date]:
+    """Calendar date of a datetime (tz dropped, like the other date filters)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None).date()
+    return value
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    """Parse a saved date; accepts both 'YYYY-MM-DD' and full ISO datetimes."""
+    return datetime.fromisoformat(value).date() if value else None
+
+
+def _day_start(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day)
+
+
+def _months_back(d: date, months: int) -> date:
+    """*d* moved back *months* calendar months, clamped to the month's last day."""
+    import calendar
+    year, month0 = divmod(d.year * 12 + d.month - 1 - months, 12)
+    month = month0 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
+
+
+def _shift_back(d: date, amount: int, unit: str) -> date:
+    """*d* moved back *amount* days/weeks/months/years (date.min on underflow)."""
+    try:
+        if unit == "weeks":
+            return d - timedelta(weeks=amount)
+        if unit == "months":
+            return _months_back(d, amount)
+        if unit == "years":
+            return _months_back(d, amount * 12)
+        return d - timedelta(days=amount)
+    except (ValueError, OverflowError):
+        return date.min
+
+
+def _today() -> date:
+    """Reference day for the relative "during the last N …" operators."""
+    return date.today()
+
+
+def _compare_diff(op: str, diff, days: int, absolute=abs):
+    """Evaluate a DateFilter compare op on *diff* = this date - other date (in
+    days). Works on ints and on SQL expressions (pass absolute=func.abs)."""
+    if op == "equal":
+        return diff == 0
+    if op == "older":
+        return diff < 0
+    if op == "older_or_equal":
+        return diff <= 0
+    if op == "newer":
+        return diff > 0
+    if op == "newer_or_equal":
+        return diff >= 0
+    if op == "within":
+        return absolute(diff) <= days
+    return absolute(diff) > days  # outside
+
+
+class DateFilter(BaseFilter):
+    """GSAK-style filter on one of the cache's date fields (DATE_FILTER_FIELDS).
+
+    Operators — all compare calendar dates, ignoring the time of day:
+      on_or_before / on_or_after / equal   relative to *date1*
+      between      *date1*..*date2* inclusive (in either order)
+      during       within the last *amount* *unit*s, up to and including today
+      not_during   the complement of "during": also matches caches without a
+                   date, so "last found not during the last 2 years" keeps
+                   never-found caches
+      compare      against *other_field* of the same cache using *compare_op*;
+                   "within"/"outside" take *compare_days*
+    Apart from not_during, a cache without a date never matches.
+
+    Supersedes the from/to-only HiddenDateFilter/FoundByMeDateFilter/
+    DnfDateFilter/LastLogDateFilter, which stay registered so filter profiles
+    saved before this still load; from_legacy() converts them.
+    """
+    filter_type = "date"
+
+    def __init__(
+        self,
+        field: str,
+        op: str,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        amount: int = 1,
+        unit: str = "days",
+        other_field: str = "hidden_date",
+        compare_op: str = "equal",
+        compare_days: int = 0,
+    ):
+        if field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {field!r}")
+        if op not in DATE_OPS:
+            raise ValueError(f"Unknown date operator {op!r}")
+        if unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {unit!r}")
+        if other_field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {other_field!r}")
+        if compare_op not in DATE_COMPARE_OPS:
+            raise ValueError(f"Unknown date compare operator {compare_op!r}")
+        self.field = field
+        self.op = op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {op!r} needs date1")
+        if op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.amount = max(0, int(amount))
+        self.unit = unit
+        self.other_field = other_field
+        self.compare_op = compare_op
+        self.compare_days = max(0, int(compare_days))
+
+    def _range(self) -> tuple[Optional[date], Optional[date]]:
+        """Inclusive (lo, hi) bounds for every op except compare."""
+        if self.op == "on_or_before":
+            return None, self.date1
+        if self.op == "on_or_after":
+            return self.date1, None
+        if self.op == "equal":
+            return self.date1, self.date1
+        if self.op == "between":
+            return min(self.date1, self.date2), max(self.date1, self.date2)
+        today = _today()  # during / not_during
+        return _shift_back(today, self.amount, self.unit), today
+
+    def apply_to_query(self, query):
+        # Mirrors matches() exactly. Range bounds compare the raw column
+        # against day boundaries (index-friendly); compare uses SQLite's
+        # date()/julianday() so both sides are reduced to calendar dates.
+        from sqlalchemy import and_, func, not_, or_
+        col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
+        if self.op == "compare":
+            other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
+            diff = func.julianday(func.date(col)) - func.julianday(func.date(other))
+            return query.filter(
+                col.is_not(None), other.is_not(None),
+                _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
+            )
+        lo, hi = self._range()
+        conditions = [col.is_not(None)]
+        if lo is not None:
+            conditions.append(col >= _day_start(lo))
+        if hi is not None and hi < date.max:
+            conditions.append(col < _day_start(hi + timedelta(days=1)))
+        inside = and_(*conditions)
+        if self.op == "not_during":
+            return query.filter(or_(col.is_(None), not_(inside)))
+        return query.filter(inside)
+
+    def matches(self, cache: Cache) -> bool:
+        value = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.field], None))
+        if self.op == "compare":
+            other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
+            if value is None or other is None:
+                return False
+            return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
+        lo, hi = self._range()
+        inside = (
+            value is not None
+            and (lo is None or value >= lo)
+            and (hi is None or value <= hi)
+        )
+        return not inside if self.op == "not_during" else inside
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "field": self.field,
+            "op": self.op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "amount": self.amount,
+            "unit": self.unit,
+            "other_field": self.other_field,
+            "compare_op": self.compare_op,
+            "compare_days": self.compare_days,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DateFilter":
+        return cls(
+            field=data["field"],
+            op=data["op"],
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            amount=data.get("amount", 1),
+            unit=data.get("unit", "days"),
+            other_field=data.get("other_field", "hidden_date"),
+            compare_op=data.get("compare_op", "equal"),
+            compare_days=data.get("compare_days", 0),
+        )
+
+    @classmethod
+    def from_legacy(cls, legacy: BaseFilter) -> Optional["DateFilter"]:
+        """Equivalent DateFilter for an older from/to range filter
+        (LEGACY_DATE_FILTER_FIELDS), or None if it has no date bounds.
+
+        Not an exact match for FoundByMeDateFilter/DnfDateFilter, which also
+        let found/DNF caches without a date through — DateFilter never
+        matches a missing date."""
+        field = LEGACY_DATE_FILTER_FIELDS.get(legacy.filter_type)
+        from_date = getattr(legacy, "from_date", None)
+        to_date = getattr(legacy, "to_date", None)
+        if field is None or not (from_date or to_date):
+            return None
+        if from_date and to_date:
+            return cls(field, "between", date1=from_date, date2=to_date)
+        if from_date:
+            return cls(field, "on_or_after", date1=from_date)
+        return cls(field, "on_or_before", date1=to_date)
+
+    def __repr__(self) -> str:
+        return f"<DateFilter {self.to_dict()}>"
+
+
 class TextSearchFilter(BaseFilter):
     """Keep caches whose text fields contain *text* (case-insensitive).
 
@@ -1442,6 +1694,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
     "hidden_date_range":  HiddenDateFilter,
+    "date":               DateFilter,
     "text_search":        TextSearchFilter,
 }
 
