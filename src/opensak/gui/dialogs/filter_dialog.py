@@ -45,7 +45,7 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
+    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     TextSearchFilter,
     FilterProfile,
 )
@@ -1315,28 +1315,10 @@ class FilterDialog(QDialog):
 
         # Udlagt dato
         if self._hidden_from_enabled.isChecked() or self._hidden_to_enabled.isChecked():
-            from opensak.filters.engine import BaseFilter
-            from_date = _qdate_to_dt(self._hidden_from.date()) if self._hidden_from_enabled.isChecked() else None
-            to_date   = _qdate_to_dt(self._hidden_to.date(), end_of_day=True) if self._hidden_to_enabled.isChecked() else None
-
-            class HiddenDateFilter(BaseFilter):
-                filter_type = "hidden_date_range"
-                def __init__(self, fd, td):
-                    self.from_date = fd
-                    self.to_date   = td
-                def matches(self, cache):
-                    if cache.hidden_date is None:
-                        return False
-                    hd = cache.hidden_date.replace(tzinfo=None)
-                    if self.from_date and hd < self.from_date:
-                        return False
-                    if self.to_date and hd > self.to_date:
-                        return False
-                    return True
-                def to_dict(self):
-                    return {"filter_type": self.filter_type}
-
-            fs.add(HiddenDateFilter(from_date, to_date))
+            fs.add(HiddenDateFilter(
+                from_date=_qdate_to_dt(self._hidden_from.date()) if self._hidden_from_enabled.isChecked() else None,
+                to_date=_qdate_to_dt(self._hidden_to.date(), end_of_day=True) if self._hidden_to_enabled.isChecked() else None,
+            ))
 
         # Fundet af mig dato
         if self._found_from_enabled.isChecked() or self._found_to_enabled.isChecked():
@@ -1682,7 +1664,19 @@ class FilterDialog(QDialog):
                     self._log_to_enabled.setChecked(True)
                     d = f.to_date
                     self._log_to.setDate(QDate(d.year, d.month, d.day))
-            # Andre/inline filtre ignoreres stille (fx gammel hidden_date)
+            elif ftype == "hidden_date_range":
+                # #857: this branch was missing, so the Hidden date
+                # checkboxes/fields silently reset on reopen even though the
+                # filter was still active on the cache list.
+                if getattr(f, "from_date", None):
+                    self._hidden_from_enabled.setChecked(True)
+                    d = f.from_date
+                    self._hidden_from.setDate(QDate(d.year, d.month, d.day))
+                if getattr(f, "to_date", None):
+                    self._hidden_to_enabled.setChecked(True)
+                    d = f.to_date
+                    self._hidden_to.setDate(QDate(d.year, d.month, d.day))
+            # Andre/ukendte filtre ignoreres stille
 
     # ── Apply ─────────────────────────────────────────────────────────────────
 

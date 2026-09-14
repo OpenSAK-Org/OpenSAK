@@ -1254,6 +1254,62 @@ class LastLogDateFilter(BaseFilter):
         )
 
 
+class HiddenDateFilter(BaseFilter):
+    """Keep caches whose hidden_date falls within an optional date range.
+
+    #857: this used to be defined inline inside filter_dialog.py's _apply(),
+    with no filter_registry entry and a to_dict() that dropped from_date/
+    to_date entirely. That meant _load_filterset() had no branch to restore
+    it from (checkboxes/dates reset on reopen) and saved filter profiles
+    lost the dates on reload. Promoted to a proper class here, mirroring
+    LastLogDateFilter's NULL-exclusion behaviour (a cache with no
+    hidden_date does not match a hidden-date range).
+    """
+    filter_type = "hidden_date_range"
+
+    def __init__(
+        self,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ):
+        self.from_date = from_date
+        self.to_date = to_date
+
+    def apply_to_query(self, query):
+        from sqlalchemy import and_
+        conditions = [Cache.hidden_date.is_not(None)]
+        if self.from_date:
+            conditions.append(Cache.hidden_date >= self.from_date)
+        if self.to_date:
+            conditions.append(Cache.hidden_date <= self.to_date)
+        return query.filter(and_(*conditions))
+
+    def matches(self, cache: Cache) -> bool:
+        hd = cache.hidden_date
+        if hd is None:
+            return False
+        hd = hd.replace(tzinfo=None)
+        if self.from_date and hd < self.from_date:
+            return False
+        if self.to_date and hd > self.to_date:
+            return False
+        return True
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "from_date": self.from_date.isoformat() if self.from_date else None,
+            "to_date": self.to_date.isoformat() if self.to_date else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "HiddenDateFilter":
+        return cls(
+            from_date=datetime.fromisoformat(data["from_date"]) if data.get("from_date") else None,
+            to_date=datetime.fromisoformat(data["to_date"]) if data.get("to_date") else None,
+        )
+
+
 class TextSearchFilter(BaseFilter):
     """Keep caches whose text fields contain *text* (case-insensitive).
 
@@ -1385,6 +1441,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
+    "hidden_date_range":  HiddenDateFilter,
     "text_search":        TextSearchFilter,
 }
 

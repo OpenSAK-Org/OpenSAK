@@ -20,7 +20,8 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, TextSearchFilter,
+    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    TextSearchFilter,
     FilterProfile,
 )
 
@@ -392,6 +393,48 @@ class TestLoadFilterset:
         assert dlg._found_from_enabled.isChecked()
         assert dlg._dnf_date_from_enabled.isChecked()
         assert dlg._log_to_enabled.isChecked()
+
+    def test_loads_hidden_date_filter(self, dlg):
+        # #857: reopening the Filter dialog after setting a Hidden date
+        # range didn't restore the checkboxes/dates, even though the list
+        # was correctly filtered — no branch in _load_filterset() handled
+        # "hidden_date_range". Found/DNF/last-log date ranges round-tripped
+        # fine, only Hidden date was affected.
+        fs = FilterSet(mode="AND")
+        fs.add(HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                                 to_date=datetime(2020, 6, 15)))
+        dlg._load_filterset(fs)
+        assert dlg._hidden_from_enabled.isChecked()
+        assert dlg._hidden_from.date() == QDate(2020, 5, 1)
+        assert dlg._hidden_to_enabled.isChecked()
+        assert dlg._hidden_to.date() == QDate(2020, 6, 15)
+
+    def test_hidden_date_filter_round_trips_via_to_dict(self):
+        # #857 (root cause, part 2): the old inline HiddenDateFilter's
+        # to_dict() only returned {"filter_type": ...}, silently dropping
+        # from_date/to_date — so a *saved* filter profile would lose the
+        # dates entirely on reload, independent of the dialog bug above.
+        f = HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                              to_date=datetime(2020, 6, 15, 23, 59, 59))
+        restored = HiddenDateFilter.from_dict(f.to_dict())
+        assert restored.from_date == f.from_date
+        assert restored.to_date == f.to_date
+
+    def test_hidden_date_filter_matches(self):
+        f = HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                              to_date=datetime(2020, 6, 15, 23, 59, 59))
+
+        class _Cache:
+            hidden_date = datetime(2020, 5, 20)
+        assert f.matches(_Cache()) is True
+
+        class _CacheOutside:
+            hidden_date = datetime(2020, 7, 1)
+        assert f.matches(_CacheOutside()) is False
+
+        class _CacheNoDate:
+            hidden_date = None
+        assert f.matches(_CacheNoDate()) is False
 
     def test_loads_attribute_or_group_sets_any_mode(self, dlg):
         attr_id = next(iter(dlg._attr_boxes))

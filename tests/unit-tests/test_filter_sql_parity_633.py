@@ -18,7 +18,7 @@ from opensak.db.database import get_session
 from opensak.db.models import Cache, UserNote
 from opensak.filters.engine import (
     DnfDateFilter, DnfFilter, FavoritePointsFilter, FilterSet, FoundByMeDateFilter,
-    FtfFilter, HasCorrectedFilter, LastLogDateFilter, LockedFilter,
+    FtfFilter, HasCorrectedFilter, HiddenDateFilter, LastLogDateFilter, LockedFilter,
     NoCorrectedFilter, UserFlagFilter, apply_filters,
 )
 
@@ -67,6 +67,15 @@ def seed_633_data(tmp_db):
         Cache(gc_code="GC6330010", name="NoLastLog", cache_type="Traditional Cache",
               latitude=55.9, longitude=12.9,
               last_log_date=None),
+        # hidden_date present vs NULL — #857. Same NULL-exclusion semantics
+        # as last_log_date above (a cache with no hidden_date never matches
+        # a hidden-date range).
+        Cache(gc_code="GC6330011", name="HasHiddenDate", cache_type="Traditional Cache",
+              latitude=56.0, longitude=13.0,
+              hidden_date=datetime(2026, 5, 15)),
+        Cache(gc_code="GC6330012", name="NoHiddenDate", cache_type="Traditional Cache",
+              latitude=56.1, longitude=13.1,
+              hidden_date=None),
     ]
     with get_session() as s:
         for c in caches:
@@ -198,6 +207,23 @@ class TestLastLogDateFilter:
         )))
         assert "GC6330009" not in codes  # May 1st, before the range
         assert "GC6330010" not in codes  # NULL, always excluded
+
+
+class TestHiddenDateFilter:
+    # #857: HiddenDateFilter used to be defined inline in filter_dialog.py
+    # with no apply_to_query() at all (always fell back to Python matches()).
+    # Now promoted to a proper class with SQL pushdown — verify parity.
+    def test_null_hidden_date_excluded(self):
+        codes = assert_parity(FilterSet().add(HiddenDateFilter()))
+        assert "GC6330011" in codes
+        assert "GC6330012" not in codes
+
+    def test_range_excludes_out_of_range(self):
+        codes = assert_parity(FilterSet().add(HiddenDateFilter(
+            from_date=datetime(2026, 6, 1),
+        )))
+        assert "GC6330011" not in codes  # May 15th, before the range
+        assert "GC6330012" not in codes  # NULL, always excluded
 
 
 class TestComposition:
