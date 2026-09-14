@@ -4,6 +4,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0-beta.8] — 2026-09-14
+
+### Added
+
+- **Cache type icons in filter dialog (fixes #855)** — The General tab's
+  cache type checkboxes now show the same type icon used in the cache
+  table, at the same size as the table's icon column, instead of plain
+  text labels. Thanks to @nagisml for the contribution (#856).
+
+### Fixed
+
+- **Filter dialog: Hidden date range not restored on reopen (fixes #857)** —
+  Reopening the Filter dialog after setting a Hidden date range showed the
+  Hidden date checkboxes unchecked and the date fields empty, even though
+  the cache list was still correctly filtered — found/DNF/last-log date
+  ranges were unaffected. `HiddenDateFilter` was previously defined inline
+  with no restore handling and a `to_dict()` that dropped the dates
+  entirely; it is now a proper filter class alongside its siblings, with
+  working save/reload and dialog restore. Thanks to ianwork for the report.
+
+---
+
 ## [1.19.0-beta.7] — 2026-09-13
 
 ### Added
