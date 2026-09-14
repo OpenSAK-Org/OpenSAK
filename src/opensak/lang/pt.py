@@ -713,6 +713,7 @@ STRINGS: dict[str, str] = {
     "filter_lp_distance_required":  "Introduza uma distância maior que 0 para um filtro de linha ou de pontos.",
     "filter_caches_with":           "Caches que têm:",
     "filter_all_selected":          "TODOS os atributos selecionados",
+    "filter_any_selected":          "UM dos atributos selecionados",
     "filter_attr_col_name":         "Atributo",
     "filter_none_short":            "Qualquer",
     "filter_save_title":            "Guardar filtro",
