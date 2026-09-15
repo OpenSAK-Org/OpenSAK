@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSAK User Guide — v1.18.1</title>
+<title>OpenSAK User Guide — v1.19.0</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -473,7 +473,7 @@
 <nav>
   <div class="nav-header">
     <span class="nav-logo">OpenSAK</span>
-    <div class="nav-version">User Guide · v1.18.1</div>
+    <div class="nav-version">User Guide · v1.19.0</div>
   </div>
 
   <div class="nav-section-heading">Getting Started</div>
@@ -535,7 +535,7 @@
     <div class="hero-eyebrow">Complete User Guide</div>
     <h1>OpenSAK</h1>
     <p class="hero-sub">The open-source geocache management tool for Windows, Linux, and macOS.</p>
-    <div class="hero-meta">Version 1.18.1 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
+    <div class="hero-meta">Version 1.19.0 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
   </div>
 
   <figure class="screenshot" style="margin-top:-0.5rem;">
@@ -1110,7 +1110,7 @@ python run.py</code></pre>
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="gps">
     <h2><span class="section-num">20</span>Send to GPS</h2>
-    <p>Export the currently filtered caches directly to a Garmin GPS device or save them to a file.</p>
+    <p>Export the currently filtered caches directly to a Garmin GPS device (USB storage or Windows MTP) or save them to a file.</p>
 
     <p>Open with <strong>GPS → Send to GPS…</strong> (<kbd>Ctrl+G</kbd>) or the 📤 button in the toolbar.</p>
 
@@ -1121,9 +1121,9 @@ python run.py</code></pre>
 
     <h3>Sending to a Garmin Device</h3>
     <ol class="steps">
-      <li>Connect your Garmin device via USB.</li>
+      <li>Connect your Garmin device via USB (mass storage or MTP).</li>
       <li>Select <em>Send directly to GPS device</em>.</li>
-      <li>Click <strong>🔍 Scan</strong> to detect mounted Garmin devices.</li>
+      <li>Click <strong>🔍 Scan</strong> to detect Garmin devices.</li>
       <li>Select your device from the list.</li>
       <li>Choose a format — <strong>GPX</strong> or <strong>GGZ</strong> (see below).</li>
       <li>Click <strong>Send</strong>.</li>
@@ -1135,7 +1135,7 @@ python run.py</code></pre>
     <h3>Saving as a GPX File</h3>
     <p>Select <em>Save as GPX file</em>, choose a location, and click <strong>Send</strong>. This is useful for devices that are not automatically detected, or for copying to another location.</p>
 
-    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Only Garmin devices that mount as a USB mass-storage drive are supported. Bluetooth transfer is not available.</div></div>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Windows supports compatible Garmin devices using USB mass storage or MTP. Bluetooth transfer is not available.</div></div>
 
     <h3>Export Options</h3>
     <ul>
@@ -1463,7 +1463,7 @@ python run.py</code></pre>
         <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/OpenSAK-Org/opensak/issues">github.com/OpenSAK-Org/opensak/issues</a></td></tr>
         <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/opensak">Facebook group: OpenSAK</a></td></tr>
         <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
-        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.18.1/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
+        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.19.0/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
         <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
         <tr><td>Support the project</td><td><a href="https://opencollective.com/opensak">opencollective.com/opensak</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
@@ -1473,7 +1473,7 @@ python run.py</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.18.1). Last updated August 2026.
+      This guide was generated from the OpenSAK source code (v1.19.0). Last updated August 2026.
     </p>
   </section>
 

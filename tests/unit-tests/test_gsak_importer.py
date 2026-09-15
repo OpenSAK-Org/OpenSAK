@@ -263,6 +263,25 @@ def test_last_updated_empty_changed_maps_to_none(db_session, tmp_path):
     assert cache.last_updated is None
 
 
+def test_user_sort_zero_maps_to_none(db_session, tmp_path):
+    # Issue #830: GSAK doesn't allow a UserSort value of 0 — when the field
+    # is blank in GSAK's UI, the underlying column holds 0, not NULL. That
+    # 0 must map to None so OpenSAK displays it blank, same as GSAK does.
+    # _DEFAULT_CACHE already carries UserSort=0, so no override is needed.
+    db = _make_gsak_db(tmp_path / "gsak.db3")
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.user_sort is None
+
+
+def test_user_sort_nonzero_value_preserved(db_session, tmp_path):
+    # Real, non-zero UserSort values must still come through unchanged.
+    db = _make_gsak_db(tmp_path / "gsak.db3", caches=[{"UserSort": 7}])
+    import_gsak_db(db, db_session)
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.user_sort == 7
+
+
 def test_last_updated_not_overwritten_on_locked_cache(db_session, tmp_path):
     # last_updated is GC.com-side listing metadata, so it sits inside the
     # lock-guarded block alongside hidden_date — a locked cache keeps its own.

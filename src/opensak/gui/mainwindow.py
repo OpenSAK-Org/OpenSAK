@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QStatusBar,
     QToolBar, QPushButton, QComboBox, QApplication,
-    QSizePolicy, QMessageBox, QWidgetAction, QStackedWidget
+    QSizePolicy, QMessageBox, QWidgetAction, QStackedWidget,
+    QProgressDialog
 )
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
@@ -33,6 +34,7 @@ from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.updater import UpdateCheckWorker, RELEASES_PAGE
+from opensak.gui.dialogs.appimage_integration_dialog import maybe_prompt_for_integration
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.trip_dialog import TripPlannerDialog
@@ -237,6 +239,9 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         # Load caches after UI is ready
         QTimer.singleShot(500, self._initial_load)
+        # AppImage: engangs-prompt om integration i programmenuen (issue
+        # #835). No-op på Windows/macOS/kildekørsel — se appimage.py.
+        QTimer.singleShot(1000, self._maybe_offer_appimage_integration)
         # Tjek for opdateringer i baggrunden (5 sek forsinkelse — GUI er klar)
         QTimer.singleShot(5000, self._check_update_background)
         QTimer.singleShot(7000, self._check_setup_complete)
@@ -354,6 +359,10 @@ class MainWindow(QMainWindow):
         self._act_gsak_import = QAction(tr("action_gsak_import"), self)
         self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
         file_menu.addAction(self._act_gsak_import)
+
+        self._act_pq_email_check = QAction(tr("action_pq_email_check"), self)
+        self._act_pq_email_check.triggered.connect(self._open_pq_email_check_dialog)
+        file_menu.addAction(self._act_pq_email_check)
 
         file_menu.addSeparator()
 
@@ -1706,6 +1715,15 @@ class MainWindow(QMainWindow):
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
+    def _open_pq_email_check_dialog(self) -> None:
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.gui.dialogs.pq_email_check_dialog import PQEmailCheckDialog
+        dlg = PQEmailCheckDialog(self)
+        dlg.import_completed.connect(self._refresh_after_import)
+        dlg.exec()
+
     def _refresh_after_import(self) -> None:
         """Reload both cache table and map after a successful import."""
         from opensak.gui.settings import get_settings
@@ -3006,6 +3024,12 @@ class MainWindow(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
 
+    # ── AppImage selv-integration (#835) ─────────────────────────────────────
+
+    def _maybe_offer_appimage_integration(self) -> None:
+        """Kald ved opstart — viser AppImage-integrationsprompt hvis relevant."""
+        maybe_prompt_for_integration(self)
+
     # ── Opdateringsstjek ───────────────────────────────────────────────────────
 
     def _check_update_background(self) -> None:
@@ -3080,7 +3104,23 @@ class MainWindow(QMainWindow):
             + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
         )
         msg.setTextFormat(Qt.TextFormat.RichText)
-        btn_open = msg.addButton(tr("update_open_releases"), QMessageBox.ButtonRole.AcceptRole)
+
+        # AppImage-integrerede brugere får "Opgrader nu" (selv-opdatering,
+        # issue #836) i stedet for "Åbn releases-side". Kun en billig
+        # lokal statustjek her — selve asset-URL-opslaget sker først i
+        # AppImageUpdateWorker, når brugeren rent faktisk klikker knappen.
+        from opensak import appimage
+        can_self_update = (
+            appimage.is_running_as_appimage() and appimage.is_appimage_integrated()
+        )
+        if can_self_update:
+            btn_primary = msg.addButton(
+                tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
+            )
+        else:
+            btn_primary = msg.addButton(
+                tr("update_open_releases"), QMessageBox.ButtonRole.AcceptRole
+            )
         # More visible spot for supporting the project than the Help menu
         # alone, which users who never open Help would otherwise never see.
         btn_support = msg.addButton(tr("action_support_opensak"), QMessageBox.ButtonRole.HelpRole)
@@ -3090,12 +3130,57 @@ class MainWindow(QMainWindow):
         msg.exec()
 
         clicked = msg.clickedButton()
-        if clicked == btn_open:
-            import webbrowser
-            webbrowser.open(url)
+        if clicked == btn_primary:
+            if can_self_update:
+                self._start_appimage_self_update(latest_tag)
+            else:
+                import webbrowser
+                webbrowser.open(url)
         elif clicked == btn_skip:
             from opensak.gui.settings import get_settings
             get_settings().updates_skipped_version = latest_tag
         elif clicked == btn_support:
             self._open_support_page()
+
+    def _start_appimage_self_update(self, tag: str) -> None:
+        """
+        Kald ved klik på "Opgrader nu" for AppImage-integrerede brugere
+        (issue #836). Viser en ubestemt "Henter…"-indikator (§7 punkt 4 i
+        designdokumentet — ingen procent-visning i v1) mens
+        AppImageUpdateWorker finder asset-URL'en, downloader og udskifter
+        filen atomisk i baggrunden.
+        """
+        from opensak.updater import AppImageUpdateWorker
+
+        progress = QProgressDialog(tr("update_appimage_downloading"), "", 0, 0, self)
+        progress.setWindowTitle(tr("update_appimage_downloading_title"))
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        self._appimage_update_worker = AppImageUpdateWorker(tag, parent=self)
+
+        def _on_ok(_installed_path: str) -> None:
+            progress.close()
+            # Ingen execv-genstart (§7 punkt 5) — brugeren lukker og
+            # klikker ikonet igen, robust og forudsigeligt frem for
+            # skrøbelig in-process-genstart mens Qt/QtWebEngine kører.
+            QMessageBox.information(
+                self,
+                tr("update_appimage_done_title"),
+                tr("update_appimage_done_msg"),
+            )
+
+        def _on_error(error: str) -> None:
+            progress.close()
+            QMessageBox.warning(
+                self,
+                tr("update_appimage_error_title"),
+                tr("update_appimage_error_msg", error=error),
+            )
+
+        self._appimage_update_worker.finished_ok.connect(_on_ok)
+        self._appimage_update_worker.finished_error.connect(_on_error)
+        self._appimage_update_worker.start()
 

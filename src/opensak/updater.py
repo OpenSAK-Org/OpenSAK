@@ -7,8 +7,13 @@ Tjekker i baggrunden om der er en ny version af OpenSAK tilgængelig.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import ssl
+import stat
+import tempfile
 import urllib.request
+from pathlib import Path
 from urllib.error import URLError
 
 from PySide6.QtCore import QThread, Signal
@@ -250,3 +255,155 @@ class UpdateCheckWorker(QThread):
                     log.debug("Ingen ny version (%s <= %s)", latest_tag, self._current)
         finally:
             self.check_done.emit()
+
+
+# ── AppImage selv-opdatering (issue #836, Step B i epic #824) ───────────────
+#
+# Bevidst adskilt fra UpdateCheckWorker/fetch_latest_*() ovenfor: signaturen
+# på update_available-signalet (tag, url, is_prerelease) rører vi ikke, for
+# ikke at risikere regressioner i den eksisterende, grundigt testede
+# tjek-logik. I stedet slås asset-URL'en op i en helt separat, dedikeret
+# baggrundstråd — kun kaldt når brugeren rent faktisk klikker "Opgrader" i
+# mainwindow.py's opdateringsdialog, og kun for AppImage-integrerede
+# brugere (appimage.is_running_as_appimage() + is_appimage_integrated()).
+#
+# Ingen zsync/AppImageUpdate-afhængighed (§4.2 i designdokumentet) — fuld
+# download hver gang. Ingen download-progress (kun ubestemt spinner, §7
+# punkt 4) og ingen execv-genstart (§7 punkt 5) — bevidste, simple valg for
+# v1, se designdokumentets §7.
+
+GITHUB_API_RELEASE_BY_TAG_URL = "https://api.github.com/repos/OpenSAK-Org/opensak/releases/tags/{tag}"
+
+# AppImage-runtiden sætter selv $APPIMAGE, men den bekræfter aldrig et
+# tilhørende innehold — vi validerer derfor den downloadede fils
+# ELF-magic-bytes før vi lader den erstatte en virkende installation (samme
+# forsigtighedsprincip som #828 bruger til SQLite-filer).
+_ELF_MAGIC = b"\x7fELF"
+
+
+def fetch_release_by_tag(tag: str) -> dict | None:
+    """
+    Hent én specifik release (inkl. dens asset-liste) fra GitHub API ved tag.
+
+    Et separat, letvægts API-kald — bruges kun når selv-opdatering rent
+    faktisk startes, så det almindelige version-tjek (fetch_latest_release/
+    fetch_latest_prerelease ovenfor) ikke skal bære asset-data rundt for
+    brugere der aldrig får brug for det.
+    """
+    url = GITHUB_API_RELEASE_BY_TAG_URL.format(tag=tag)
+    log.debug("Henter release-detaljer for tag %s", tag)
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"Accept": "application/vnd.github+json",
+                     "User-Agent": "OpenSAK-version-check"},
+        )
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
+            data = json.load(resp)
+        return {
+            "tag_name": data.get("tag_name", tag),
+            "assets": data.get("assets", []) or [],
+        }
+    except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
+        log.debug("Kunne ikke hente release-detaljer for %s: %s", tag, exc)
+        return None
+
+
+def find_linux_appimage_asset_url(tag: str) -> str | None:
+    """
+    Find download-URL'en for Linux AppImage-asset'et i en given release.
+
+    Matcher navnemønsteret build.yml rent faktisk bruger:
+    'OpenSAK-<tag>-Linux-x86_64.AppImage' (verificeret mod .github/workflows/
+    build.yml). Returnerer None hvis release'en ikke findes, eller hvis den
+    (endnu) ikke har et Linux-asset — fx en release der stadig bygger, eller
+    hvor Linux-buildet fejlede (build.yml's tar.gz-fallback ved AppImage-
+    fejl, se §3 i designdokumentet).
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+    expected_name = f"OpenSAK-{tag}-Linux-x86_64.AppImage"
+    for asset in release["assets"]:
+        if asset.get("name") == expected_name:
+            return asset.get("browser_download_url")
+    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    return None
+
+
+class AppImageUpdateWorker(QThread):
+    """
+    Baggrundsthread der downloader en ny AppImage-version og udskifter den
+    integrerede kopi atomisk.
+
+    Flow: find asset-URL for tag'et → download til en midlertidig fil i
+    SAMME mappe som målet (så os.replace() garanteret er atomisk — samme
+    filsystem) → valider ELF-magic-bytes → sæt eksekverbar-bit → os.replace()
+    ind over den integrerede kopi. Linux tillader at overskrive en kørende
+    fils inode, så den kørende proces fortsætter uberørt på den gamle
+    version indtil den lukkes (se §4.2 i designdokumentet).
+
+    Signals:
+        finished_ok(installed_path):    Opdatering gennemført.
+        finished_error(error_message):  Opdatering fejlede (netværk, intet
+                                         Linux-asset i release'en, korrupt
+                                         download, eller filsystemfejl).
+    """
+
+    finished_ok    = Signal(str)
+    finished_error = Signal(str)
+
+    def __init__(self, tag: str, parent=None):
+        super().__init__(parent)
+        self._tag = tag
+
+    def run(self) -> None:
+        from opensak import appimage
+
+        target = appimage.get_integrated_appimage_path()
+        tmp_path: Path | None = None
+        try:
+            download_url = find_linux_appimage_asset_url(self._tag)
+            if download_url is None:
+                self.finished_error.emit("asset_not_found")
+                return
+
+            fd, tmp_name = tempfile.mkstemp(
+                dir=str(target.parent), prefix=".opensak-update-", suffix=".AppImage.part"
+            )
+            os.close(fd)
+            tmp_path = Path(tmp_name)
+
+            log.debug("Downloader AppImage-opdatering fra %s", download_url)
+            req = urllib.request.Request(
+                download_url, headers={"User-Agent": "OpenSAK-self-update"}
+            )
+            with urllib.request.urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp, \
+                    open(tmp_path, "wb") as out:
+                shutil.copyfileobj(resp, out)
+
+            with open(tmp_path, "rb") as f:
+                magic = f.read(4)
+            if magic != _ELF_MAGIC:
+                log.warning("Downloadet fil har ikke ELF-magic-bytes — forkastes")
+                self.finished_error.emit("invalid_download")
+                return
+
+            mode = tmp_path.stat().st_mode
+            os.chmod(tmp_path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+            os.replace(tmp_path, target)
+            tmp_path = None  # allerede flyttet — skal ikke ryddes op i finally
+            log.debug("AppImage opdateret til %s", target)
+            self.finished_ok.emit(str(target))
+
+        except (URLError, OSError) as exc:
+            log.warning("AppImage-selvopdatering fejlede: %s", exc)
+            self.finished_error.emit(str(exc))
+        finally:
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+

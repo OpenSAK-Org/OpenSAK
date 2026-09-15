@@ -68,7 +68,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - ⇄ Open coordinate converter directly from the cache list
 
 ### GPS Export
-- 📤 **Send to Garmin GPS** — auto-detects USB-mounted Garmin devices
+- 📤 **Send to Garmin GPS** — auto-detects USB-mounted and Windows MTP Garmin devices
 - 🗑️ **Optional: delete existing GPX files** on device before upload
 - 💾 **Save as GPX file** — export to any location
 

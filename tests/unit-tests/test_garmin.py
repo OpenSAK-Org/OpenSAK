@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import platform
 import pytest
 
 from opensak.gps.garmin import (
@@ -18,8 +19,12 @@ from opensak.gps.garmin import (
     _cache_symbol,
     _custom_wp_symbol,
     _effective_coords,
+    _find_mtp_garmin_root,
+    _find_mtp_ggz_dir,
+    _find_mtp_gpx_dir,
     _is_garmin,
     _macos_volumes,
+    cancel_mtp_transfer,
     debug_scan,
     delete_gpx_files,
     export_ggz_to_device,
@@ -31,6 +36,7 @@ from opensak.gps.garmin import (
     generate_loc,
     get_garmin_ggz_path,
     get_garmin_gpx_path,
+    is_mtp_device,
 )
 
 
@@ -1220,13 +1226,43 @@ class TestDeviceScan:
         plain = tmp_path / "USB"
         plain.mkdir()
         monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [garmin, plain])
+        # MTP scanning is independent of the mocked mass-storage candidates;
+        # disable both MTP discovery paths so this test remains focused on
+        # mass-storage mount-point filtering.
+        monkeypatch.setattr("opensak.gps.mtp.find_mtp_devices", lambda: [])
+        monkeypatch.setattr("opensak.gps.garmin._linux_mtp_mounts", lambda: [])
         assert find_garmin_devices() == [garmin]
+
+    def test_find_garmin_devices_requires_writable_mount(self, tmp_path, monkeypatch):
+        garmin = tmp_path / "GARMIN_DEV"
+        (garmin / "Garmin").mkdir(parents=True)
+        (garmin / "Garmin" / "GarminDevice.xml").write_text("<device/>")
+        monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [garmin])
+        monkeypatch.setattr("opensak.gps.garmin._linux_mtp_mounts", lambda: [])
+        monkeypatch.setattr("opensak.gps.mtp.find_mtp_devices", lambda: [])
+        monkeypatch.setattr("opensak.gps.garmin._is_writable_directory", lambda p: False)
+        assert find_garmin_devices() == []
+
+    @pytest.mark.skipif(platform.system() == "Windows", reason="MTP paths contain colons, illegal on Windows")
+    def test_find_garmin_devices_includes_mtp_mounts(self, tmp_path, monkeypatch):
+        mtp_root = tmp_path / "gvfs" / "mtp:host=091e_506a_0000"
+        mtp_root.mkdir(parents=True)
+        monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [])
+        monkeypatch.setattr("opensak.gps.garmin._linux_mtp_mounts", lambda: [mtp_root])
+        monkeypatch.setattr("opensak.gps.mtp.find_mtp_devices", lambda: [])
+        monkeypatch.setattr(
+            "opensak.gps.garmin._is_garmin_mtp_mount",
+            lambda p: p == mtp_root,
+        )
+        assert find_garmin_devices() == [mtp_root]
 
     def test_debug_scan_reports_devices(self, tmp_path, monkeypatch):
         garmin = tmp_path / "GARMIN_DEV"
         (garmin / "Garmin").mkdir(parents=True)
         (garmin / "Garmin" / "GarminDevice.xml").write_text("<device/>")
         monkeypatch.setattr("opensak.gps.garmin._get_mount_points", lambda: [garmin])
+        monkeypatch.setattr("opensak.gps.garmin._linux_mtp_mounts", lambda: [])
+        monkeypatch.setattr("opensak.gps.mtp.find_mtp_devices", lambda: [])
         report = debug_scan()
         assert "Garmin scan debug" in report
         assert "GARMIN" in report
@@ -1286,3 +1322,457 @@ class TestErrorPaths:
         result = export_to_file([_cache()], tmp_path / "out.gpx")
         assert result.success is False
         assert "nope" in result.error
+
+
+# ── MTP support ───────────────────────────────────────────────────────────────
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="MTP paths contain colons, illegal on Windows")
+class TestMtp:
+    """Tests for MTP detection, folder lookup, gio copy/remove, and MTP export."""
+
+    def _mtp_device(self, tmp_path):
+        """Build a fake MTP-style mount structure."""
+        root = tmp_path / "gvfs" / "mtp:host=091e_test"
+        storage = root / "Internal Storage"
+        garmin = storage / "GARMIN"
+        gpx = garmin / "GPX"
+        gpx.mkdir(parents=True)
+        (garmin / "GarminDevice.xml").write_text("<device/>")
+        return root
+
+    # ── is_mtp_device ─────────────────────────────────────────────────────
+
+    def test_is_mtp_device_true(self):
+        assert is_mtp_device(Path("/run/user/1000/gvfs/mtp:host=091e")) is True
+
+    def test_is_mtp_device_false(self):
+        assert is_mtp_device(Path("/media/user/GARMIN")) is False
+
+    # ── _find_mtp_garmin_root ─────────────────────────────────────────────
+
+    def test_find_mtp_garmin_root_found(self, tmp_path):
+        root = self._mtp_device(tmp_path)
+        result = _find_mtp_garmin_root(root)
+        assert result is not None
+        assert result.name == "GARMIN"
+
+    def test_find_mtp_garmin_root_not_found(self, tmp_path):
+        root = tmp_path / "gvfs" / "mtp:host=fake"
+        (root / "Internal Storage" / "SomeFolder").mkdir(parents=True)
+        assert _find_mtp_garmin_root(root) is None
+
+    def test_find_mtp_garmin_root_empty(self, tmp_path):
+        root = tmp_path / "gvfs" / "mtp:host=empty"
+        root.mkdir(parents=True)
+        assert _find_mtp_garmin_root(root) is None
+
+    # ── _find_mtp_gpx_dir ─────────────────────────────────────────────────
+
+    def test_find_mtp_gpx_dir_found(self, tmp_path):
+        root = self._mtp_device(tmp_path)
+        result = _find_mtp_gpx_dir(root)
+        assert result is not None
+        assert result.name == "GPX"
+
+    def test_find_mtp_gpx_dir_no_garmin(self, tmp_path):
+        root = tmp_path / "gvfs" / "mtp:host=nogarmin"
+        root.mkdir(parents=True)
+        assert _find_mtp_gpx_dir(root) is None
+
+    def test_find_mtp_gpx_dir_case_insensitive(self, tmp_path):
+        root = tmp_path / "gvfs" / "mtp:host=case"
+        garmin = root / "Internal Storage" / "Garmin"
+        (garmin / "gpx").mkdir(parents=True)
+        (garmin / "GarminDevice.xml").write_text("<device/>")
+        result = _find_mtp_gpx_dir(root)
+        assert result is not None
+
+    # ── _find_mtp_ggz_dir ─────────────────────────────────────────────────
+
+    def test_find_mtp_ggz_dir_found(self, tmp_path):
+        root = self._mtp_device(tmp_path)
+        ggz = root / "Internal Storage" / "GARMIN" / "GGZ"
+        ggz.mkdir()
+        result = _find_mtp_ggz_dir(root)
+        assert result is not None
+        assert result.name == "GGZ"
+
+    def test_find_mtp_ggz_dir_missing(self, tmp_path):
+        root = self._mtp_device(tmp_path)
+        assert _find_mtp_ggz_dir(root) is None
+
+    # ── cancel_mtp_transfer ───────────────────────────────────────────────
+
+    def test_cancel_mtp_transfer_no_proc(self):
+        import opensak.gps.garmin as mod
+        mod._active_gio_proc = None
+        cancel_mtp_transfer()  # should not raise
+        assert mod._active_gio_proc is None
+
+    def test_cancel_mtp_transfer_kills_proc(self):
+        import opensak.gps.garmin as mod
+        killed = []
+        proc = type("FakeProc", (), {"kill": lambda self: killed.append(True)})()
+        mod._active_gio_proc = proc
+        cancel_mtp_transfer()
+        assert killed == [True]
+        assert mod._active_gio_proc is None
+
+    # ── _gio_copy (mocked) ────────────────────────────────────────────────
+
+    def test_gio_subprocess_env_strips_packaged_library_paths(self, monkeypatch):
+        from opensak.gps.garmin import _gio_subprocess_env
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setenv("GI_TYPELIB_PATH", "/tmp/app/usr/lib/girepository-1.0")
+        monkeypatch.setenv("GIO_EXTRA_MODULES", "/tmp/app/usr/lib/gio/modules")
+        monkeypatch.setenv("GIO_MODULE_DIR", "/tmp/app/usr/lib/gio/modules")
+
+        env = _gio_subprocess_env()
+
+        assert "LD_LIBRARY_PATH" not in env
+        assert "GI_TYPELIB_PATH" not in env
+        assert "GIO_EXTRA_MODULES" not in env
+        assert "GIO_MODULE_DIR" not in env
+
+    def test_gio_subprocess_env_restores_original_ld_library_path(self, monkeypatch):
+        from opensak.gps.garmin import _gio_subprocess_env
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setenv("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH", "/opt/custom/lib")
+
+        env = _gio_subprocess_env()
+
+        assert env["LD_LIBRARY_PATH"] == "/opt/custom/lib"
+
+    def test_gio_copy_success(self, tmp_path, monkeypatch):
+        from opensak.gps.garmin import _gio_copy
+        src = tmp_path / "src.gpx"
+        src.write_text("<gpx/>")
+        dst = tmp_path / "dst.gpx"
+        captured = {}
+
+        class FakeProc:
+            returncode = 0
+            def communicate(self, timeout=None):
+                return b"", b""
+            def kill(self): pass
+
+        def fake_popen(*args, **kwargs):
+            captured.update(kwargs)
+            return FakeProc()
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.Popen", fake_popen)
+        _gio_copy(src, dst)  # should not raise
+        assert "LD_LIBRARY_PATH" not in captured["env"]
+
+    def test_gio_copy_failure(self, tmp_path, monkeypatch):
+        from opensak.gps.garmin import _gio_copy
+        src = tmp_path / "src.gpx"
+        src.write_text("<gpx/>")
+        dst = tmp_path / "dst.gpx"
+
+        class FakeProc:
+            returncode = 1
+            def communicate(self, timeout=None):
+                return b"", b"error msg"
+            def kill(self): pass
+
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.Popen", lambda *a, **k: FakeProc())
+        with pytest.raises(OSError, match="error msg"):
+            _gio_copy(src, dst)
+
+    def test_gio_copy_timeout(self, tmp_path, monkeypatch):
+        from opensak.gps.garmin import _gio_copy
+        import subprocess as sp
+        src = tmp_path / "src.gpx"
+        src.write_text("<gpx/>")
+        dst = tmp_path / "dst.gpx"
+
+        class FakeProc:
+            returncode = -9
+            def communicate(self, timeout=None):
+                if timeout:
+                    raise sp.TimeoutExpired("gio", timeout)
+                return b"", b""
+            def kill(self): pass
+
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.Popen", lambda *a, **k: FakeProc())
+        with pytest.raises(OSError, match="timed out"):
+            _gio_copy(src, dst)
+
+    # ── _gio_remove (mocked) ──────────────────────────────────────────────
+
+    def test_gio_remove_success(self, monkeypatch):
+        from opensak.gps.garmin import _gio_remove
+        captured = {}
+
+        def fake_run(*a, **k):
+            captured.update(k)
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/app/usr/lib")
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.run", fake_run)
+        assert _gio_remove(Path("/fake")) is True
+        assert "LD_LIBRARY_PATH" not in captured["env"]
+
+    def test_gio_remove_failure(self, monkeypatch):
+        from opensak.gps.garmin import _gio_remove
+        def fake_run(*a, **k):
+            return type("R", (), {"returncode": 1})()
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.run", fake_run)
+        assert _gio_remove(Path("/fake")) is False
+
+    def test_gio_remove_exception(self, monkeypatch):
+        from opensak.gps.garmin import _gio_remove
+        def fake_run(*a, **k):
+            raise FileNotFoundError("no gio")
+        monkeypatch.setattr("opensak.gps.garmin.subprocess.run", fake_run)
+        assert _gio_remove(Path("/fake")) is False
+
+    def test_gio_remove_and_wait_verifies_file_disappears(self, monkeypatch):
+        from opensak.gps.garmin import _gio_remove_and_wait
+
+        exists = [True, True, False]
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove", lambda path: True)
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: exists.pop(0))
+        monkeypatch.setattr("opensak.gps.garmin.time.sleep", lambda seconds: None)
+
+        assert _gio_remove_and_wait(Path("/fake")) is True
+
+    def test_gio_remove_and_wait_fails_when_file_remains(self, monkeypatch):
+        from opensak.gps.garmin import _gio_remove_and_wait
+
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove", lambda path: True)
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: True)
+        monkeypatch.setattr("opensak.gps.garmin.time.sleep", lambda seconds: None)
+
+        assert _gio_remove_and_wait(Path("/fake"), timeout=0.01) is False
+
+    def test_gio_copy_with_replace_removes_existing_target(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _gio_copy_with_replace
+
+        src = tmp_path / "Washington.gpx"
+        dst = tmp_path / "mtp" / "Washington.gpx"
+        src.write_text("<gpx/>")
+        removed = []
+        copied = []
+
+        states = {dst: True}
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: states.get(path, False))
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", lambda path: removed.append(path) or True)
+        def fake_copy(source, dest):
+            copied.append((source, dest))
+            states[dst] = True
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy", fake_copy)
+
+        _gio_copy_with_replace(src, dst)
+
+        assert removed == [dst]
+        assert copied == [(src, dst.parent)]
+
+    def test_gio_copy_with_replace_checks_space_after_removing_target(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _gio_copy_with_replace
+
+        src = tmp_path / "Washington.gpx"
+        dst = tmp_path / "mtp" / "Washington.gpx"
+        src.write_text("<gpx/>")
+        events = []
+        states = {dst: True}
+
+        def fake_remove(path):
+            events.append("remove")
+            states[dst] = False
+            return True
+
+        def fake_space(source, folder):
+            events.append("space")
+
+        def fake_copy(source, folder):
+            events.append("copy")
+            states[dst] = True
+
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: states.get(path, False))
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", fake_remove)
+        monkeypatch.setattr("opensak.gps.garmin._ensure_mtp_space", fake_space)
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy", fake_copy)
+
+        _gio_copy_with_replace(src, dst)
+
+        assert events == ["remove", "space", "copy"]
+
+    def test_ensure_mtp_space_reports_full_device(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _ensure_mtp_space
+
+        src = tmp_path / "Washington.gpx"
+        dest_folder = tmp_path / "mtp"
+        src.write_bytes(b"x" * 2048)
+        dest_folder.mkdir()
+
+        monkeypatch.setattr(
+            "opensak.gps.garmin.shutil.disk_usage",
+            lambda path: type("Usage", (), {"free": 0})(),
+        )
+
+        with pytest.raises(OSError, match="Not enough free space"):
+            _ensure_mtp_space(src, dest_folder)
+
+    def test_ensure_mtp_space_allows_unknown_usage(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _ensure_mtp_space
+
+        src = tmp_path / "Washington.gpx"
+        dest_folder = tmp_path / "mtp"
+        src.write_text("<gpx/>")
+
+        def fail_usage(path):
+            raise OSError("unknown")
+
+        monkeypatch.setattr("opensak.gps.garmin.shutil.disk_usage", fail_usage)
+
+        _ensure_mtp_space(src, dest_folder)
+
+    def test_gio_copy_with_replace_retries_send_object_info(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _gio_copy_with_replace
+
+        src = tmp_path / "Washington.gpx"
+        dst = tmp_path / "mtp" / "Washington.gpx"
+        src.write_text("<gpx/>")
+        calls = []
+
+        def fake_copy(source, dest):
+            calls.append((source, dest))
+            if len(calls) == 1:
+                raise OSError("gio: file:///tmp/Washington.gpx: libmtp error:  Could not send object info.")
+
+        states = {dst: False}
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: states.get(path, False))
+        monkeypatch.setattr("opensak.gps.garmin.time.sleep", lambda seconds: None)
+        def copy_and_create(source, dest):
+            fake_copy(source, dest)
+            if len(calls) == 2:
+                states[dst] = True
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy", copy_and_create)
+
+        _gio_copy_with_replace(src, dst)
+
+        assert calls == [(src, dst.parent), (src, dst.parent)]
+
+    def test_gio_copy_with_replace_fails_when_expected_file_missing(self, monkeypatch, tmp_path):
+        from opensak.gps.garmin import _gio_copy_with_replace
+
+        src = tmp_path / "Washington.gpx"
+        dst = tmp_path / "mtp" / "Washington.gpx"
+        src.write_text("<gpx/>")
+
+        monkeypatch.setattr("opensak.gps.garmin._path_exists", lambda path: False)
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy", lambda source, dest: None)
+
+        with pytest.raises(OSError, match="expected file"):
+            _gio_copy_with_replace(src, dst)
+
+    # ── export_to_device MTP branch ───────────────────────────────────────
+
+    def test_export_to_device_mtp(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        copied = []
+        def fake_gio_copy(src, dst):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            import shutil; shutil.copy2(src, dst)
+            copied.append((src, dst))
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy_with_replace", fake_gio_copy)
+
+        result = export_to_device([_cache()], root, "test_mtp")
+        assert result.success
+        assert result.cache_count == 1
+        assert len(copied) == 1
+        assert copied[0][0].name == "test_mtp.gpx"
+        assert copied[0][1].name == "test_mtp.gpx"
+
+    def test_export_to_device_mtp_no_gpx_dir(self, tmp_path, monkeypatch):
+        root = tmp_path / "gvfs" / "mtp:host=091e_nodir"
+        root.mkdir(parents=True)
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy_with_replace", lambda s, d: None)
+        result = export_to_device([_cache()], root, "test")
+        assert result.success is False
+        assert "not found" in result.error.lower()
+
+    # ── export_ggz_to_device MTP branch ───────────────────────────────────
+
+    def test_export_ggz_to_device_mtp(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        ggz = root / "Internal Storage" / "GARMIN" / "GGZ"
+        ggz.mkdir()
+        copied = []
+        def fake_gio_copy(src, dst):
+            copied.append((src, dst))
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy_with_replace", fake_gio_copy)
+
+        result = export_ggz_to_device([_cache()], root, "test_ggz")
+        assert result.success
+        assert len(copied) == 1
+        assert copied[0][0].name == "test_ggz.ggz"
+        assert copied[0][1].name == "test_ggz.ggz"
+
+    def test_export_ggz_to_device_mtp_no_garmin(self, tmp_path, monkeypatch):
+        root = tmp_path / "gvfs" / "mtp:host=091e_nogarmin"
+        root.mkdir(parents=True)
+        monkeypatch.setattr("opensak.gps.garmin._gio_copy_with_replace", lambda s, d: None)
+        result = export_ggz_to_device([_cache()], root, "test")
+        assert result.success is False
+
+    # ── delete_gpx_files MTP branch ───────────────────────────────────────
+
+    def test_delete_mtp_uses_gio_remove(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        gpx_dir = root / "Internal Storage" / "GARMIN" / "GPX"
+        (gpx_dir / "old.gpx").write_text("<gpx/>")
+
+        removed = []
+        def fake_gio_remove(p):
+            removed.append(p)
+            return True
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", fake_gio_remove)
+
+        result = delete_gpx_files(root)
+        assert result.deleted_count == 1
+        assert len(removed) == 1
+
+    def test_delete_mtp_gio_remove_failure(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        gpx_dir = root / "Internal Storage" / "GARMIN" / "GPX"
+        (gpx_dir / "old.gpx").write_text("<gpx/>")
+
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", lambda p: False)
+
+        result = delete_gpx_files(root)
+        assert result.failed_count == 1
+        assert result.deleted_count == 0
+
+    def test_delete_mtp_with_explicit_folder(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        ggz_dir = root / "Internal Storage" / "GARMIN" / "GGZ"
+        ggz_dir.mkdir()
+        (ggz_dir / "old.ggz").write_text("data")
+
+        removed = []
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", lambda p: (removed.append(p) or True))
+
+        result = delete_gpx_files(root, pattern="*.ggz", folder=ggz_dir)
+        assert result.deleted_count == 1
+
+    def test_delete_mtp_ggz_with_dialog_resolved_folder(self, tmp_path, monkeypatch):
+        root = self._mtp_device(tmp_path)
+        ggz_dir = root / "Internal Storage" / "GARMIN" / "GGZ"
+        ggz_dir.mkdir()
+        (ggz_dir / "old.ggz").write_text("data")
+
+        monkeypatch.setattr("opensak.gps.garmin._gio_remove_and_wait", lambda path: True)
+
+        result = delete_gpx_files(
+            root,
+            pattern="*.ggz",
+            folder=get_garmin_ggz_path(root),
+        )
+
+        assert result.deleted_count == 1

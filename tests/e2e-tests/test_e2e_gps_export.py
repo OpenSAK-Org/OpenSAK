@@ -111,7 +111,7 @@ def test_gps_export_file_mode_writes_gpx(qtbot, tmp_path, monkeypatch):
     qtbot.mouseClick(dlg._export_btn, Qt.MouseButton.LeftButton)
 
     qtbot.waitUntil(
-        lambda: (out_dir / "e2e_export.gpx").exists(),
+        lambda: dlg._worker is not None and dlg._worker.isFinished(),
         timeout=10_000,
     )
 

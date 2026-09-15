@@ -243,7 +243,9 @@ OpenSAK can export your filtered cache list directly to a Garmin GPS device conn
 
 The caches will be written as a GPX file to your Garmin's `Garmin/GPX/` folder.
 
-> **Note:** Only Garmin devices that mount as a USB drive are supported. Bluetooth transfer is not currently available.
+> **Note:** Windows also supports compatible Garmin devices connected through
+> MTP (Media Transfer Protocol). The Windows package includes the required
+> `pywin32` dependency. Bluetooth transfer is not currently available.
 
 ---
 

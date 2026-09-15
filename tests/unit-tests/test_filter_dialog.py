@@ -20,7 +20,8 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, TextSearchFilter,
+    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    TextSearchFilter,
     FilterProfile,
 )
 
@@ -275,6 +276,26 @@ class TestBuildFilterset:
         assert "last_log_date" in types
         assert "hidden_date_range" in types
 
+    def test_single_day_date_range_covers_whole_day(self, dlg):
+        # #844: from_date skal være 00:00:00 og to_date 23:59:59, så en
+        # og samme dato i from/to-felterne giver et helt-dags vindue —
+        # ikke et 59-sekunders vindue (23:59:00-23:59:59), som gav
+        # "ingen cache matcher" ved single-day-filtrering.
+        same_date = QDate(2026, 9, 2)
+        dlg._found_from_enabled.setChecked(True)
+        dlg._found_to_enabled.setChecked(True)
+        dlg._found_from.setDate(same_date)
+        dlg._found_to.setDate(same_date)
+        fs = dlg._build_filterset()
+        found_filter = next(f for f in fs._filters if getattr(f, "filter_type", None) == "found_by_me_date")
+        assert found_filter.from_date == datetime(2026, 9, 2, 0, 0, 0)
+        assert found_filter.to_date == datetime(2026, 9, 2, 23, 59, 59)
+
+        class _Cache:
+            found = True
+            found_date = datetime(2026, 9, 2, 14, 30, 0)
+        assert found_filter.matches(_Cache()) is True
+
     def test_attributes_and_mode(self, dlg):
         attr_id = next(iter(dlg._attr_boxes))
         ja, nej, ingen = dlg._attr_boxes[attr_id]
@@ -373,6 +394,48 @@ class TestLoadFilterset:
         assert dlg._dnf_date_from_enabled.isChecked()
         assert dlg._log_to_enabled.isChecked()
 
+    def test_loads_hidden_date_filter(self, dlg):
+        # #857: reopening the Filter dialog after setting a Hidden date
+        # range didn't restore the checkboxes/dates, even though the list
+        # was correctly filtered — no branch in _load_filterset() handled
+        # "hidden_date_range". Found/DNF/last-log date ranges round-tripped
+        # fine, only Hidden date was affected.
+        fs = FilterSet(mode="AND")
+        fs.add(HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                                 to_date=datetime(2020, 6, 15)))
+        dlg._load_filterset(fs)
+        assert dlg._hidden_from_enabled.isChecked()
+        assert dlg._hidden_from.date() == QDate(2020, 5, 1)
+        assert dlg._hidden_to_enabled.isChecked()
+        assert dlg._hidden_to.date() == QDate(2020, 6, 15)
+
+    def test_hidden_date_filter_round_trips_via_to_dict(self):
+        # #857 (root cause, part 2): the old inline HiddenDateFilter's
+        # to_dict() only returned {"filter_type": ...}, silently dropping
+        # from_date/to_date — so a *saved* filter profile would lose the
+        # dates entirely on reload, independent of the dialog bug above.
+        f = HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                              to_date=datetime(2020, 6, 15, 23, 59, 59))
+        restored = HiddenDateFilter.from_dict(f.to_dict())
+        assert restored.from_date == f.from_date
+        assert restored.to_date == f.to_date
+
+    def test_hidden_date_filter_matches(self):
+        f = HiddenDateFilter(from_date=datetime(2020, 5, 1),
+                              to_date=datetime(2020, 6, 15, 23, 59, 59))
+
+        class _Cache:
+            hidden_date = datetime(2020, 5, 20)
+        assert f.matches(_Cache()) is True
+
+        class _CacheOutside:
+            hidden_date = datetime(2020, 7, 1)
+        assert f.matches(_CacheOutside()) is False
+
+        class _CacheNoDate:
+            hidden_date = None
+        assert f.matches(_CacheNoDate()) is False
+
     def test_loads_attribute_or_group_sets_any_mode(self, dlg):
         attr_id = next(iter(dlg._attr_boxes))
         inner = FilterSet(mode="OR")
@@ -432,6 +495,14 @@ class TestReset:
         assert dlg._name_filter.text() == ""
         assert dlg._country_filter.text() == ""
         assert dlg._where_sql_general.toPlainText() == ""
+
+    def test_reset_general_clears_owner_name(self, dlg):
+        # "Reset tab" on General cleared name, GC code and placed by, but
+        # left the owner name filter in place.
+        dlg._owner_filter.setText("me")
+        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._reset_current_tab()
+        assert dlg._owner_filter.text() == ""
 
     def test_reset_current_tab_each(self, dlg):
         for i in range(dlg._tabs.count()):
@@ -531,6 +602,31 @@ class TestProfiles:
         monkeypatch.setattr(fd.FilterProfile, "save", lambda self, *a, **k: called.append(True))
         dlg._save_profile()
         assert called == []
+
+    def test_save_profile_prefills_selected_profile_name(self, dlg, monkeypatch):
+        captured = {}
+        def fake_get_text(parent, title, label, text=""):
+            captured["text"] = text
+            return ("", False)  # cancel — we only care about the suggestion
+        monkeypatch.setattr(QInputDialog, "getText", fake_get_text)
+        dlg._profile_combo.blockSignals(True)
+        dlg._profile_combo.addItem("AATestFilter", "/fake/AATestFilter.json")
+        dlg._profile_combo.setCurrentIndex(dlg._profile_combo.count() - 1)
+        dlg._profile_combo.blockSignals(False)
+        dlg._save_profile()
+        assert captured["text"] == "AATestFilter"
+
+    def test_save_profile_no_prefill_when_no_profile_selected(self, dlg, monkeypatch):
+        captured = {}
+        def fake_get_text(parent, title, label, text=""):
+            captured["text"] = text
+            return ("", False)
+        monkeypatch.setattr(QInputDialog, "getText", fake_get_text)
+        dlg._profile_combo.blockSignals(True)
+        dlg._profile_combo.setCurrentIndex(0)  # "none" entry
+        dlg._profile_combo.blockSignals(False)
+        dlg._save_profile()
+        assert captured["text"] == ""
 
     def test_on_profile_selected_none(self, dlg):
         dlg._on_profile_selected(0)  # "none" entry -> del btn disabled

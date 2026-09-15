@@ -11,6 +11,7 @@ Supports:
 
 from __future__ import annotations
 
+import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -112,6 +113,119 @@ def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
     return None
 
 
+# ── Illegal-character sanitizing reader ───────────────────────────────────────
+
+# XML 1.0 forbids some characters even as character references, but GPX
+# generators emit them anyway — e.g. geocaching.com descriptions pasted from
+# Word carry ``font-family:&#xFFFF;``. lxml then rejects the whole file with
+# "xmlParseCharRef: invalid xmlChar value 65535". Strip them before parsing.
+_CHAR_REF_RE = re.compile(rb"&#(?:x([0-9A-Fa-f]+)|([0-9]+));")
+# Raw C0 controls (never part of a UTF-8 multibyte sequence) and raw U+FFFE/U+FFFF.
+_RAW_ILLEGAL_RE = re.compile(rb"[\x00-\x08\x0B\x0C\x0E-\x1F]|\xEF\xBF[\xBE\xBF]")
+# A character reference longer than this is not held back across chunk borders.
+_MAX_CHAR_REF_LEN = 32
+
+
+def _is_xml_char(cp: int) -> bool:
+    return (
+        cp in (0x9, 0xA, 0xD)
+        or 0x20 <= cp <= 0xD7FF
+        or 0xE000 <= cp <= 0xFFFD
+        or 0x10000 <= cp <= 0x10FFFF
+    )
+
+
+def _drop_illegal_char_ref(m: re.Match) -> bytes:
+    hex_digits, dec_digits = m.groups()
+    cp = int(hex_digits, 16) if hex_digits else int(dec_digits)
+    return m.group(0) if _is_xml_char(cp) else b""
+
+
+def _sanitize_xml_bytes(data: bytes) -> bytes:
+    return _RAW_ILLEGAL_RE.sub(b"", _CHAR_REF_RE.sub(_drop_illegal_char_ref, data))
+
+
+def _incomplete_tail_start(buf: bytes) -> int:
+    """Index where a possibly unfinished char ref / U+FFFx sequence begins."""
+    cut = len(buf)
+    amp = buf.rfind(b"&", max(0, cut - _MAX_CHAR_REF_LEN))
+    if amp != -1 and b";" not in buf[amp:]:
+        cut = amp
+    if buf.endswith(b"\xef\xbf"):
+        cut = min(cut, len(buf) - 2)
+    elif buf.endswith(b"\xef"):
+        cut = min(cut, len(buf) - 1)
+    return cut
+
+
+class _SanitizedXmlReader:
+    """Binary file-like object that strips XML-illegal characters while streaming.
+
+    Reads in chunks so iterparse keeps its flat memory profile; a partial
+    character reference at a chunk border is held back until the next chunk.
+    UTF-16 files (BOM or NUL bytes up front) are passed through untouched,
+    since byte-level filtering would corrupt them.
+    """
+
+    def __init__(self, path: Path, chunk_size: int = 1 << 16):
+        self._fh = open(path, "rb")
+        self._chunk_size = chunk_size
+        self._pending = b""   # sanitized, but may end in an unfinished sequence
+        self._ready = b""     # sanitized and safe to hand out
+        self._eof = False
+        head = self._fh.peek(4)[:4]
+        self._passthrough = head.startswith((b"\xff\xfe", b"\xfe\xff")) or b"\x00" in head
+
+    def _fill(self) -> bool:
+        if self._eof:
+            return False
+        chunk = self._fh.read(self._chunk_size)
+        if not chunk:
+            self._eof = True
+            self._ready += _sanitize_xml_bytes(self._pending)
+            self._pending = b""
+            return False
+        buf = _sanitize_xml_bytes(self._pending + chunk)
+        cut = _incomplete_tail_start(buf)
+        self._ready += buf[:cut]
+        self._pending = buf[cut:]
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        if self._passthrough:
+            return self._fh.read(size)
+        if size is None or size < 0:
+            while self._fill():
+                pass
+            data, self._ready = self._ready, b""
+            return data
+        while len(self._ready) < size and self._fill():
+            pass
+        data, self._ready = self._ready[:size], self._ready[size:]
+        return data
+
+    def close(self) -> None:
+        self._fh.close()
+
+    def __enter__(self) -> "_SanitizedXmlReader":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
+def _iterparse(path: Path, **kwargs):
+    """etree.iterparse over a sanitized stream; the file closes with the generator."""
+    with _SanitizedXmlReader(path) as src:
+        yield from etree.iterparse(src, **kwargs)
+
+
+def _parse_xml(path: Path):
+    """etree.parse over a sanitized stream."""
+    with _SanitizedXmlReader(path) as src:
+        return etree.parse(src)
+
+
 # ── Companion file detector ───────────────────────────────────────────────────
 
 def _is_companion_gpx(path: Path) -> bool:
@@ -123,7 +237,7 @@ def _is_companion_gpx(path: Path) -> bool:
     Groundspeak cache extension block.
     """
     try:
-        for _, elem in etree.iterparse(str(path), events=("end",), tag=None):
+        for _, elem in _iterparse(path, events=("end",), tag=None):
             if etree.QName(elem).localname != "wpt":
                 elem.clear()
                 continue
@@ -510,9 +624,16 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             sort_el = gsak_ext.find(f"{{{gsak_uri}}}UserSort")
             if sort_el is not None and sort_el.text:
                 try:
-                    gsak_user_sort = int(sort_el.text.strip())
+                    parsed_user_sort = int(sort_el.text.strip())
                 except ValueError:
                     pass
+                else:
+                    # Issue #830: GSAK does not allow a UserSort value of 0
+                    # — a blank field in GSAK's UI is exported as "0" in
+                    # this extension element, not omitted. Treat 0 as
+                    # "no value" so it round-trips as blank in OpenSAK.
+                    if parsed_user_sort != 0:
+                        gsak_user_sort = parsed_user_sort
 
             ud1_el = gsak_ext.find(f"{{{gsak_uri}}}UserData")
             if ud1_el is not None and ud1_el.text and ud1_el.text.strip():
@@ -1549,7 +1670,7 @@ def _parse_gpx_to_data(
     errors: list[str] = []
 
     try:
-        context = etree.iterparse(str(gpx_path), events=("end",), tag=None)
+        context = _iterparse(gpx_path, events=("end",), tag=None)
 
         for event, elem in context:
             local_tag = etree.QName(elem).localname
@@ -1576,7 +1697,7 @@ def _parse_gpx_to_data(
     companion_data = None
     if wpts_path and wpts_path.exists():
         try:
-            wpts_tree = etree.parse(str(wpts_path))
+            wpts_tree = _parse_xml(wpts_path)
             companion_data = _parse_extra_waypoints(wpts_tree)
         except Exception as e:
             errors.append(f"Waypoints file error: {e}")
@@ -1586,7 +1707,7 @@ def _parse_gpx_to_data(
 
 def _count_wpts(gpx_path: Path) -> int:
     count = 0
-    for _, elem in etree.iterparse(str(gpx_path), events=("end",)):
+    for _, elem in _iterparse(gpx_path, events=("end",)):
         if etree.QName(elem).localname == "wpt":
             count += 1
         elem.clear()
@@ -1621,11 +1742,7 @@ def import_gpx(
 
     try:
         # Stream the XML using iterparse to avoid loading the entire file into RAM
-        context = etree.iterparse(
-            str(gpx_path), 
-            events=("end",), 
-            tag=None  
-        )
+        context = _iterparse(gpx_path, events=("end",), tag=None)
 
         # Parsed cache dicts are buffered and written one batch per SAVEPOINT
         # (see _flush_cache_batch). Each dict holds plain Python strings, so the
@@ -1690,7 +1807,7 @@ def import_gpx(
         # Process companion waypoint files (_wpts.gpx) if present
         if wpts_path and wpts_path.exists():
             try:
-                wpts_tree = etree.parse(str(wpts_path))
+                wpts_tree = _parse_xml(wpts_path)
                 extra_data = _parse_extra_waypoints(wpts_tree)
                 result.waypoints += _link_extra_waypoints(db_session, extra_data)
                 db_session.commit()
@@ -1785,7 +1902,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
             # Step 3: Link all companion files against the now-complete cache table.
             for companion_path in companions:
                 try:
-                    wpts_tree = etree.parse(str(companion_path))
+                    wpts_tree = _parse_xml(companion_path)
                     companion_data = _parse_extra_waypoints(wpts_tree)
                     overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
                     db_session.commit()
@@ -1817,7 +1934,7 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
     )
 
     try:
-        tree = etree.parse(str(loc_path))
+        tree = _parse_xml(loc_path)
     except etree.XMLSyntaxError as e:
         result.errors.append(f"XML parse error i {loc_path.name}: {e}")
         return result

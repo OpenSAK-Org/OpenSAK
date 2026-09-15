@@ -91,7 +91,7 @@ a = Analysis(
         "certifi",
         "shapely",
         "shapely.geometry",
-    ],
+    ] + (["win32com.client", "pythoncom"] if sys.platform == "win32" else []),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

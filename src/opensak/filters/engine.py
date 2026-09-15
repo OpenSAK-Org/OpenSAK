@@ -460,195 +460,251 @@ class AvailabilityFilter(BaseFilter):
         )
 
 
-class CountryFilter(BaseFilter):
-    """Keep caches whose country contains *text* (case-insensitive)."""
-    filter_type = "country"
+# ── Text match filters ────────────────────────────────────────────────────────
+#
+# The single-column text filters (cache name, GC code, placed by, owner name,
+# country, state, county) share one set of comparison operators. The first
+# nine mirror GSAK's text-comparison dropdown one-to-one — Enthält / Enthält
+# nicht / Gleich / Ungleich / Leer / Nicht leer / In Liste / RegEx /
+# Nicht(RegExp) — under the names scripts/migrate_gsak_filters.py already
+# uses for them; starts_with, ends_with and not_in_list are OpenSAK
+# additions. Every comparison is case-insensitive, like the plain "contains"
+# filters always were, and a NULL column counts as the empty string.
 
-    def __init__(self, text: str):
+TEXT_OPS: tuple[str, ...] = (
+    "contains", "not_contains", "equals", "not_equals",
+    "starts_with", "ends_with", "in_list", "not_in_list",
+    "empty", "not_empty", "regex", "not_regex",
+)
+
+# Operators that compare against nothing — the filter's text is ignored.
+TEXT_OPS_VALUELESS = frozenset({"empty", "not_empty"})
+
+# Separates the values of in_list / not_in_list — ";" like GSAK's "In Liste".
+TEXT_LIST_SEPARATOR = ";"
+
+# Negated operator → its positive counterpart. A negated operator matches
+# exactly when the positive one doesn't.
+_TEXT_OP_NEGATIONS = {
+    "not_contains": "contains",
+    "not_equals":   "equals",
+    "not_in_list":  "in_list",
+    "not_regex":    "regex",
+}
+
+# LIKE pattern per positive operator; {} is the escaped needle.
+_TEXT_OP_LIKE = {
+    "contains":    "%{}%",
+    "starts_with": "{}%",
+    "ends_with":   "%{}",
+    "equals":      "{}",
+    "in_list":     "{}",
+}
+
+
+def _like_pattern(needle: str) -> str:
+    """Escape LIKE wildcards in *needle* (for ESCAPE '\\') and turn every
+    non-ASCII character into a "_" wildcard — see TextMatchFilter.__init__."""
+    return "".join(
+        "\\" + ch if ch in "\\%_" else ch if ch.isascii() else "_"
+        for ch in needle
+    )
+
+
+class TextMatchFilter(BaseFilter):
+    """Keep caches whose *column* matches *text* under operator *op*.
+
+    Subclasses set filter_type and column. *text* is stored as entered
+    (stripped), so it round-trips through saved profiles and the filter
+    dialog unchanged; matching lower-cases both sides.
+    """
+    column: str = ""
+
+    def __init__(self, text: str = "", op: str = "contains"):
+        if op not in TEXT_OPS:
+            raise ValueError(f"op must be one of {TEXT_OPS}, got {op!r}")
         self.text = text.strip()
+        self.op = op
+        # The operator actually matched with — GcCodeFilter narrows
+        # "contains" to "starts_with"; self.op keeps what the user chose.
+        self._match_op = op
+        self._needle = self.text.lower()
+        self._items = [
+            item.strip().lower()
+            for item in self.text.split(TEXT_LIST_SEPARATOR)
+            if item.strip()
+        ]
+        # A regex that doesn't compile matches nothing; the filter dialog
+        # shows regex_error and refuses to apply such a filter.
+        self._regex: Optional[re.Pattern[str]] = None
+        self.regex_error: Optional[str] = None
+        if op in ("regex", "not_regex") and self.text:
+            try:
+                self._regex = re.compile(self.text, re.IGNORECASE)
+            except re.error as exc:
+                self.regex_error = str(exc)
+        # SQLite's lower() only folds ASCII, while matches() uses Python's
+        # Unicode-aware str.lower() ("ZÜRICH" → "zÜrich" vs "zürich"). So a
+        # needle with non-ASCII characters is pushed to SQL only as a
+        # pre-narrowing LIKE (each such character a "_" wildcard) and
+        # matches() makes the exact decision — see BaseFilter.sql_exact.
+        self.sql_exact = op in TEXT_OPS_VALUELESS or all(
+            n.isascii() for n in self._needles()
+        )
+
+    def _needles(self) -> list[str]:
+        if self.op in ("in_list", "not_in_list"):
+            return self._items
+        return [self._needle] if self._needle else []
+
+    def _is_noop(self) -> bool:
+        """Nothing to compare against (empty text) — every cache matches."""
+        return self.op not in TEXT_OPS_VALUELESS and not self._needles()
 
     def apply_to_query(self, query):
-        if not self.text:
-            return None  # empty filter — let Python handle (matches() drops NULLs)
-        from sqlalchemy import func
-        return query.filter(func.lower(Cache.country).like(f"%{self.text.lower()}%"))
+        if self._is_noop():
+            return query
+        from sqlalchemy import and_, func, or_
+        col = getattr(Cache, self.column)
+        if self.op == "empty":
+            return query.filter(or_(col.is_(None), col == ""))
+        if self.op == "not_empty":
+            return query.filter(and_(col.is_not(None), col != ""))
+        positive = _TEXT_OP_NEGATIONS.get(self._match_op, self._match_op)
+        negated = positive != self._match_op
+        if positive == "regex":
+            return None  # SQLite has no REGEXP operator — matches() only
+        if not self.sql_exact and (
+            negated or any(len(ch.lower()) != 1 for ch in self.text)
+        ):
+            # A pre-narrowing superset can't be negated, and a character
+            # that lower-cases to several (e.g. "İ") breaks the one-"_"-per-
+            # character pattern — leave both to matches().
+            return None
+        lowered = func.lower(col)
+        if self.sql_exact and positive == "equals":
+            cond = lowered == self._needle
+        elif self.sql_exact and positive == "in_list":
+            cond = lowered.in_(self._items)
+        else:
+            cond = or_(*(
+                lowered.like(_TEXT_OP_LIKE[positive].format(_like_pattern(n)), escape="\\")
+                for n in self._needles()
+            ))
+        if negated:
+            # NOT on a NULL column is NULL (row dropped) in SQL, but NULL is
+            # "" for matches() — which a negated operator lets through.
+            cond = or_(col.is_(None), ~cond)
+        return query.filter(cond)
 
     def matches(self, cache: Cache) -> bool:
-        if not cache.country:
-            return False
-        return self.text.lower() in cache.country.lower()
+        if self._is_noop():
+            return True
+        value = getattr(cache, self.column) or ""
+        if self.op == "empty":
+            return not value
+        if self.op == "not_empty":
+            return bool(value)
+        positive = _TEXT_OP_NEGATIONS.get(self._match_op, self._match_op)
+        if positive == "regex":
+            if self._regex is None:
+                return False  # invalid pattern
+            matched = self._regex.search(value) is not None
+        else:
+            value = value.lower()
+            if positive == "contains":
+                matched = self._needle in value
+            elif positive == "equals":
+                matched = value == self._needle
+            elif positive == "starts_with":
+                matched = value.startswith(self._needle)
+            elif positive == "ends_with":
+                matched = value.endswith(self._needle)
+            else:  # in_list
+                matched = value in self._items
+        negated = positive != self._match_op
+        return not matched if negated else matched
 
     def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
+        return {"filter_type": self.filter_type, "text": self.text, "op": self.op}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CountryFilter":
+    def from_dict(cls, data: dict) -> "TextMatchFilter":
+        # Profiles saved before the operator existed have no "op" — they
+        # were always "contains".
+        return cls(data.get("text", ""), data.get("op", "contains"))
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} {self.op} {self.text!r}>"
+
+
+class CountryFilter(TextMatchFilter):
+    """Keep caches whose country matches *text* (case-insensitive)."""
+    filter_type = "country"
+    column = "country"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TextMatchFilter":
         # Backwards compat: old format used "countries" list
         if "countries" in data:
             return cls(data["countries"][0] if data["countries"] else "")
-        return cls(data.get("text", ""))
+        return super().from_dict(data)
 
 
-class StateFilter(BaseFilter):
-    """Keep caches whose state/region contains *text* (case-insensitive)."""
+class StateFilter(TextMatchFilter):
+    """Keep caches whose state/region matches *text* (case-insensitive)."""
     filter_type = "state"
-
-    def __init__(self, text: str):
-        self.text = text.strip()
-
-    def apply_to_query(self, query):
-        if not self.text:
-            return None
-        from sqlalchemy import func
-        return query.filter(func.lower(Cache.state).like(f"%{self.text.lower()}%"))
-
-    def matches(self, cache: Cache) -> bool:
-        if not cache.state:
-            return False
-        return self.text.lower() in cache.state.lower()
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
+    column = "state"
 
     @classmethod
-    def from_dict(cls, data: dict) -> "StateFilter":
+    def from_dict(cls, data: dict) -> "TextMatchFilter":
         if "states" in data:
             return cls(data["states"][0] if data["states"] else "")
-        return cls(data.get("text", ""))
+        return super().from_dict(data)
 
 
-class CountyFilter(BaseFilter):
-    """Keep caches whose county contains *text* (case-insensitive)."""
+class CountyFilter(TextMatchFilter):
+    """Keep caches whose county matches *text* (case-insensitive)."""
     filter_type = "county"
-
-    def __init__(self, text: str):
-        self.text = text.strip()
-
-    def apply_to_query(self, query):
-        if not self.text:
-            return None
-        from sqlalchemy import func
-        return query.filter(func.lower(Cache.county).like(f"%{self.text.lower()}%"))
-
-    def matches(self, cache: Cache) -> bool:
-        if not cache.county:
-            return False
-        return self.text.lower() in cache.county.lower()
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
+    column = "county"
 
     @classmethod
-    def from_dict(cls, data: dict) -> "CountyFilter":
+    def from_dict(cls, data: dict) -> "TextMatchFilter":
         if "counties" in data:
             return cls(data["counties"][0] if data["counties"] else "")
-        return cls(data.get("text", ""))
+        return super().from_dict(data)
 
 
-class NameFilter(BaseFilter):
-    """Keep caches whose name contains *text* (case-insensitive)."""
+class NameFilter(TextMatchFilter):
+    """Keep caches whose name matches *text* (case-insensitive)."""
     filter_type = "name"
-
-    def __init__(self, text: str):
-        self.text = text.lower()
-        self._sql_applied = False
-
-    def apply_to_query(self, query):
-        from sqlalchemy import func
-        self._sql_applied = True
-        return query.filter(func.lower(Cache.name).like(f"%{self.text}%"))
-
-    def matches(self, cache: Cache) -> bool:
-        if self._sql_applied:
-            return True
-        return self.text in (cache.name or "").lower()
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "NameFilter":
-        return cls(data["text"])
+    column = "name"
 
 
-class GcCodeFilter(BaseFilter):
-    """Keep caches whose GC code contains *text* (case-insensitive)."""
+class GcCodeFilter(TextMatchFilter):
+    """Keep caches whose GC code matches *text* (case-insensitive)."""
     filter_type = "gc_code"
+    column = "gc_code"
 
-    def __init__(self, text: str):
-        self.text = text.upper()
-        # When the input already has the "GC" prefix, a prefix match is enough
-        # and lets SQLite use the B-tree index on gc_code.  Without the prefix,
-        # use a substring match so "BEK" finds "GCBEKKA".
-        self._prefix = self.text.startswith("GC")
-        self._sql_applied = False
-
-    def apply_to_query(self, query):
-        from sqlalchemy import func
-        self._sql_applied = True
-        pattern = f"{self.text}%" if self._prefix else f"%{self.text}%"
-        return query.filter(func.upper(Cache.gc_code).like(pattern))
-
-    def matches(self, cache: Cache) -> bool:
-        if self._sql_applied:
-            return True
-        code = (cache.gc_code or "").upper()
-        return code.startswith(self.text) if self._prefix else self.text in code
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "GcCodeFilter":
-        return cls(data["text"])
+    def __init__(self, text: str = "", op: str = "contains"):
+        super().__init__(text, op)
+        # "contains" with the "GC" prefix typed is a code entered from its
+        # start, so it matches as a prefix; without the prefix it stays a
+        # substring match so "BEK" finds "GCBEKKA".
+        if op == "contains" and self._needle.startswith("gc"):
+            self._match_op = "starts_with"
 
 
-class PlacedByFilter(BaseFilter):
-    """Keep caches placed by owners whose name contains *text* (case-insensitive)."""
+class PlacedByFilter(TextMatchFilter):
+    """Keep caches placed by owners whose name matches *text* (case-insensitive)."""
     filter_type = "placed_by"
-
-    def __init__(self, text: str):
-        self.text = text.lower()
-
-    def apply_to_query(self, query):
-        if not self.text:
-            return None  # empty text matches all (incl. NULL) — keep in Python
-        from sqlalchemy import func
-        return query.filter(func.lower(Cache.placed_by).like(f"%{self.text}%"))
-
-    def matches(self, cache: Cache) -> bool:
-        return self.text in (cache.placed_by or "").lower()
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "PlacedByFilter":
-        return cls(data["text"])
+    column = "placed_by"
 
 
-class OwnerFilter(BaseFilter):
-    """Keep caches whose owner name contains *text* (case-insensitive)."""
+class OwnerFilter(TextMatchFilter):
+    """Keep caches whose owner name matches *text* (case-insensitive)."""
     filter_type = "owner_name"
-
-    def __init__(self, text: str):
-        self.text = text.lower()
-
-    def apply_to_query(self, query):
-        if not self.text:
-            return None  # empty text matches all (incl. NULL) — keep in Python
-        from sqlalchemy import func
-        return query.filter(func.lower(Cache.owner_name).like(f"%{self.text}%"))
-
-    def matches(self, cache: Cache) -> bool:
-        return self.text in (cache.owner_name or "").lower()
-
-    def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "text": self.text}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "OwnerFilter":
-        return cls(data["text"])
+    column = "owner_name"
 
 
 class DistanceFilter(BaseFilter):
@@ -1198,6 +1254,62 @@ class LastLogDateFilter(BaseFilter):
         )
 
 
+class HiddenDateFilter(BaseFilter):
+    """Keep caches whose hidden_date falls within an optional date range.
+
+    #857: this used to be defined inline inside filter_dialog.py's _apply(),
+    with no filter_registry entry and a to_dict() that dropped from_date/
+    to_date entirely. That meant _load_filterset() had no branch to restore
+    it from (checkboxes/dates reset on reopen) and saved filter profiles
+    lost the dates on reload. Promoted to a proper class here, mirroring
+    LastLogDateFilter's NULL-exclusion behaviour (a cache with no
+    hidden_date does not match a hidden-date range).
+    """
+    filter_type = "hidden_date_range"
+
+    def __init__(
+        self,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ):
+        self.from_date = from_date
+        self.to_date = to_date
+
+    def apply_to_query(self, query):
+        from sqlalchemy import and_
+        conditions = [Cache.hidden_date.is_not(None)]
+        if self.from_date:
+            conditions.append(Cache.hidden_date >= self.from_date)
+        if self.to_date:
+            conditions.append(Cache.hidden_date <= self.to_date)
+        return query.filter(and_(*conditions))
+
+    def matches(self, cache: Cache) -> bool:
+        hd = cache.hidden_date
+        if hd is None:
+            return False
+        hd = hd.replace(tzinfo=None)
+        if self.from_date and hd < self.from_date:
+            return False
+        if self.to_date and hd > self.to_date:
+            return False
+        return True
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "from_date": self.from_date.isoformat() if self.from_date else None,
+            "to_date": self.to_date.isoformat() if self.to_date else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "HiddenDateFilter":
+        return cls(
+            from_date=datetime.fromisoformat(data["from_date"]) if data.get("from_date") else None,
+            to_date=datetime.fromisoformat(data["to_date"]) if data.get("to_date") else None,
+        )
+
+
 class TextSearchFilter(BaseFilter):
     """Keep caches whose text fields contain *text* (case-insensitive).
 
@@ -1329,6 +1441,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
+    "hidden_date_range":  HiddenDateFilter,
     "text_search":        TextSearchFilter,
 }
 

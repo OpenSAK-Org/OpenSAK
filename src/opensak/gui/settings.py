@@ -216,6 +216,59 @@ class AppSettings:
         except Exception:
             return None
 
+    # ── PQ Email (issue #443) — v1: plain IMAP only, no OAuth ────────────────
+    # Kodeordet gemmes IKKE her — kun host/port/SSL/brugernavn. Selve
+    # kodeordet ligger i OS keyring, se opensak.email.credentials,
+    # opslået via pq_email_username.
+
+    @property
+    def pq_email_host(self) -> str:
+        return str(get_store().get("pq_email.host", ""))
+
+    @pq_email_host.setter
+    def pq_email_host(self, value: str) -> None:
+        get_store().set("pq_email.host", value.strip())
+
+    @property
+    def pq_email_port(self) -> int:
+        return int(get_store().get("pq_email.port", 993))
+
+    @pq_email_port.setter
+    def pq_email_port(self, value: int) -> None:
+        get_store().set("pq_email.port", int(value))
+
+    @property
+    def pq_email_use_ssl(self) -> bool:
+        return bool(get_store().get("pq_email.use_ssl", True))
+
+    @pq_email_use_ssl.setter
+    def pq_email_use_ssl(self, value: bool) -> None:
+        get_store().set("pq_email.use_ssl", bool(value))
+
+    @property
+    def pq_email_username(self) -> str:
+        return str(get_store().get("pq_email.username", ""))
+
+    @pq_email_username.setter
+    def pq_email_username(self, value: str) -> None:
+        get_store().set("pq_email.username", value.strip())
+
+    @property
+    def pq_email_delete_after_import(self) -> bool:
+        return bool(get_store().get("pq_email.delete_after_import", False))
+
+    @pq_email_delete_after_import.setter
+    def pq_email_delete_after_import(self, value: bool) -> None:
+        get_store().set("pq_email.delete_after_import", bool(value))
+
+    @property
+    def pq_email_only_unseen(self) -> bool:
+        return bool(get_store().get("pq_email.only_unseen", True))
+
+    @pq_email_only_unseen.setter
+    def pq_email_only_unseen(self, value: bool) -> None:
+        get_store().set("pq_email.only_unseen", bool(value))
+
     # ── Theme / appearance ────────────────────────────────────────────────────
 
     @property

@@ -6,5 +6,6 @@ from opensak.gps.garmin import (
     generate_gpx,
     export_to_device,
     export_to_file,
+    is_mtp_device,
     ExportResult,
 )

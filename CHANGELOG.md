@@ -4,6 +4,281 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0] — 2026-09-15
+
+> First stable release of the 1.19.0 cycle. Replaces the `1.19.0-beta.1`
+> … `1.19.0-beta.8` builds — see git history / the entries below for the
+> detailed beta-by-beta log if needed. Headline of this cycle: MTP support
+> for newer Garmin devices (Linux + Windows), Linux AppImage
+> self-administration, Pocket Query e-mail retrieval, Polish and Spanish
+> UI languages, and the first wave of GSAK filter-parity work (12 text
+> filter operators).
+
+### Added
+
+- **MTP support for newer Garmin devices, Linux and Windows (#453, #822,
+  #826)** — Newer Garmin models (2020+) dropped USB mass-storage in
+  favour of MTP (Media Transfer Protocol), which the mount-point-based
+  device detection couldn't see, so "Send to GPS" silently found no
+  device for these units. On Linux, device detection now also scans
+  GVFS/MTP mounts (`/run/user/*/gvfs/mtp:...`); on Windows, a new
+  `opensak.gps.mtp` module talks to the device through the same Shell
+  "Folder" automation API File Explorer itself uses (via `pywin32`, a
+  new Windows-only dependency), wrapped in an `MTPDevice`/`MTPPath`
+  adapter that mirrors `pathlib.Path`'s interface — so the existing
+  GPX/GGZ export code needed no changes at all. With this, #453 is
+  resolved on both Linux and Windows; macOS remains unconfirmed. Thanks
+  to Brian Anderson (@blazerat) for the investigation and fix.
+- **Linux AppImage: self-administration, no terminal required (#824,
+  #835, #836, #837)** — Replaces the originally planned external
+  `uninstall.sh` + AppImageUpdate approach with self-integration,
+  self-update, and in-app uninstall implemented directly in OpenSAK.
+  Linux-only; a no-op everywhere else. On first launch, OpenSAK offers
+  to install itself into the application menu; an "Upgrade now" button
+  downloads and atomically replaces the running AppImage; and a new
+  "Uninstall OpenSAK" button removes the desktop integration with a
+  choice between removing the program only or the program and all data.
+- **Pocket Query e-mail retrieval (#443)** — OpenSAK can now check a
+  configured IMAP mailbox for Pocket Query zip attachments and import
+  them automatically. Settings → PQ Email configures the mailbox
+  (host/port/SSL/credentials), with the password stored in the OS
+  keyring, never in plaintext. File → "Check for PQ Email…" runs a
+  manual, on-demand check; an opt-in checkbox deletes the e-mail after a
+  successful import. An "only check new (unread) messages" option uses
+  IMAP's native `\Seen` flag to avoid re-importing already-read PQ
+  e-mails. Gmail and Outlook.com/Live.com aren't supported yet (both
+  need OAuth2, tracked as #697/#698); scheduled/background checking is
+  tracked separately as #445. Thanks to Jimbo-DK for real-world PQ-club
+  mailbox testing and feedback.
+- **Polish and Spanish UI languages** — OpenSAK now ships with `pl` and
+  `es` translations, bringing the total to 10 supported languages. Both
+  are a machine-translated first pass; community review and corrections
+  are welcome before promotion to stable status.
+- **Text filter operators (#557, #850)** — Name, GC code, Placed by,
+  Owner, Country, State and County filters now offer 12 operators
+  instead of a single substring match: `contains`/`not contains`,
+  `equals`/`not equals`, `starts with`/`ends with`, `in list`/`not in
+  list`, `empty`/`not empty`, and `regex`/`not regex`. Matching is
+  pushed down to SQL where possible; anything SQLite can't express
+  falls back to an in-Python check, so accented/non-Latin text still
+  matches correctly. Existing saved filter profiles keep working
+  unchanged. First part of the GSAK filter-parity work tracked in #821.
+  Thanks to @nagisml for the contribution.
+- **Cache type icons in filter dialog (#855, #856)** — The General tab's
+  cache type checkboxes now show the same type icon used in the cache
+  table instead of plain text labels. Thanks to @nagisml.
+
+### Fixed
+
+- **GPX import failing on invalid XML character references (#845,
+  #846)** — A cache description containing a character reference to a
+  code point XML 1.0 forbids (e.g. from text pasted out of Word) made
+  lxml reject the entire file and import zero caches. Illegal character
+  references and raw control characters are now stripped while
+  streaming the file, before parsing, for GPX, PQ ZIP, and .loc imports
+  alike. Thanks to @nagisml for the report and fix.
+- **Filter dialog: Reset didn't clear the Owner name field (fixes
+  #848)** — Resetting the General tab (or "Reset all") cleared Name, GC
+  code and Placed by but left a typed Owner name in place. Thanks to
+  @nagisml for the report and fix (#849).
+- **Filter dialog: single-day date range failed to match caches (fixes
+  #844)** — The start-of-range time was hardcoded to 23:59 regardless of
+  whether it was the "from" or "to" bound, so filtering on a single day
+  produced a 59-second window instead of the full day.
+- **Filter dialog: Hidden date range not restored on reopen (fixes
+  #857)** — Reopening the Filter dialog after setting a Hidden date
+  range showed the Hidden date checkboxes unchecked and the date fields
+  empty, even though the cache list was still correctly filtered.
+  `HiddenDateFilter` is now a proper filter class alongside its
+  siblings, with working save/reload and dialog restore. Thanks to
+  ianwork for the report.
+
+### Changed
+
+- **Filter dialog: "Save filter" pre-fills the current profile name
+  (#852)** — When a saved profile is selected, the save dialog now
+  suggests its name instead of an empty field. Thanks to @nagisml.
+
+---
+
+## [1.19.0-beta.8] — 2026-09-14
+
+### Added
+
+- **Cache type icons in filter dialog (fixes #855)** — The General tab's
+  cache type checkboxes now show the same type icon used in the cache
+  table, at the same size as the table's icon column, instead of plain
+  text labels. Thanks to @nagisml for the contribution (#856).
+
+### Fixed
+
+- **Filter dialog: Hidden date range not restored on reopen (fixes #857)** —
+  Reopening the Filter dialog after setting a Hidden date range showed the
+  Hidden date checkboxes unchecked and the date fields empty, even though
+  the cache list was still correctly filtered — found/DNF/last-log date
+  ranges were unaffected. `HiddenDateFilter` was previously defined inline
+  with no restore handling and a `to_dict()` that dropped the dates
+  entirely; it is now a proper filter class alongside its siblings, with
+  working save/reload and dialog restore. Thanks to ianwork for the report.
+
+---
+
+## [1.19.0-beta.7] — 2026-09-13
+
+### Added
+
+- **Text filter operators (#557)** — Name, GC code, Placed by, Owner, Country,
+  State and County filters now offer 12 operators instead of a single
+  substring match: `contains`/`not contains`, `equals`/`not equals`,
+  `starts with`/`ends with`, `in list`/`not in list`, `empty`/`not empty`,
+  and `regex`/`not regex`. Matching is pushed down to SQL where possible for
+  performance; anything SQLite can't express (regex, and Unicode
+  case-folding beyond ASCII) falls back to an in-Python check on the
+  SQL-narrowed result set, so accented/non-Latin text still matches
+  correctly. Existing saved filter profiles keep working unchanged — a
+  profile without an operator loads as `contains`, and old-format country/
+  state/county lists are still recognised. Thanks to @nagisml for the
+  contribution, first part of the GSAK filter-parity work tracked in #821.
+- **PQ Email: "only check new (unread) messages" option (#443)** — Uses
+  IMAP's native `\Seen` flag instead of separate bookkeeping to avoid
+  re-importing already-read PQ e-mails; a message is only marked seen once
+  something from it is actually imported, so a failed import is still
+  retried on the next check. Thanks to Jimbo-DK for the feedback — checking
+  a real PQ-club mailbox had re-imported around 50 already-read e-mails.
+
+### Fixed
+
+- **Filter dialog: Reset didn't clear the Owner name field (fixes #848)** —
+  Resetting the General tab (or "Reset all") cleared Name, GC code and
+  Placed by but left a typed Owner name in place. Thanks to @nagisml for
+  the report and fix (#849).
+- **Filter dialog: single-day date range failed to match caches (fixes
+  #844)** — The start-of-range time was hardcoded to 23:59 regardless of
+  whether it was the "from" or "to" bound, so filtering on a single day
+  (same from/to date) produced a 59-second window instead of the full day
+  and matched nothing. A multi-day range only "worked" because the from
+  bound effectively slipped a day earlier.
+
+### Changed
+
+- **Filter dialog: "Save filter" pre-fills the current profile name (#852)**
+  — When a saved profile is selected, the save dialog now suggests its name
+  instead of an empty field, making it quicker to overwrite. Thanks to
+  @nagisml.
+
+---
+
+## [1.19.0-beta.6] — 2026-09-13
+
+### Fixed
+
+- **GPX import failing on invalid XML character references** (fixes #845) — A cache
+  description containing a character reference to a code point XML 1.0 forbids (e.g.
+  `&#xFFFF;`), such as inline `font-family:&#xFFFF;` styling from text pasted out of
+  Word, made lxml reject the entire file and import zero caches. Illegal character
+  references and raw control characters are now stripped while streaming the file,
+  before parsing, for GPX, PQ ZIP, and .loc imports alike. Thanks to @nagismal for the
+  report and the fix (#846).
+
+---
+
+## [1.19.0-beta.5] — 2026-09-12
+
+### Added
+
+- **Polish and Spanish UI languages** — OpenSAK now ships with `pl` and `es`
+  translations, bringing the total to 10 supported languages. Aimed at
+  reaching Poland and Spain, two of geocaching.com's largest user bases.
+  Both translations are a machine-translated first pass; community
+  review and corrections are welcome via the Facebook group or GitHub
+  Discussions before promotion to stable.
+
+---
+
+## [1.19.0-beta.4] — 2026-09-11
+
+### Added
+
+- **Pocket Query e-mail retrieval (#443)** — OpenSAK can now check a
+  configured mailbox for Pocket Query zip attachments and import them
+  automatically, instead of requiring a manual download-and-import
+  every time. Aimed in particular at Danish (and likely other
+  countries') PQ-club/PQ-service setups, where a shared robot mails
+  out a rotating set of PQs that together cover a whole country.
+  - **Settings → PQ Email** — configure a plain IMAP mailbox (host,
+    port, SSL, username, password). The password is stored securely
+    in the OS keyring (Secret Service/KWallet on Linux, Credential
+    Manager on Windows, Keychain on macOS) — never in plaintext
+    config. A "Test connection" button verifies login separately from
+    saving, with distinct messages for a login failure versus a
+    network/server problem. Gmail and Outlook.com/Live.com are not
+    supported yet — both require OAuth2, tracked separately as #697
+    and #698.
+  - **File → "Check for PQ Email…"** — a manual, on-demand check of
+    the configured mailbox. Any e-mail with a `.zip` attachment is
+    treated as a candidate (no assumption about sender or subject —
+    Geocaching.com's own PQ-ready notification hasn't attached the
+    zip directly since around 2014, so this looks for the attachment
+    itself instead). Each zip is matched to a same-named database
+    where one exists, falling back to the currently active database
+    otherwise, and handed to the existing GPX/PQ-zip importer
+    unchanged. An opt-in checkbox deletes the e-mail after a
+    successful import; a failed import always leaves the e-mail in
+    place so it can be retried.
+  - Scheduled/background checking (repeating this automatically
+    without opening the dialog) is tracked separately as #445 and
+    intentionally not part of this first release — real-world
+    feedback on the manual flow first.
+
+---
+
+## [1.19.0-beta.3] — 2026-09-10
+
+### Added
+
+- **Linux AppImage: self-administration, no terminal required (#824, #835,
+  #836, #837)** — Replaces the originally planned external `uninstall.sh`
+  + AppImageUpdate approach with self-integration/-update/-uninstall
+  implemented directly in OpenSAK. Linux-only; a no-op everywhere else
+  (Windows/macOS/source installs are unaffected, and the AppImage's own
+  `scripts/install-opensak.sh` fallback path is unchanged).
+  - **Self-integration on first run (#835)** — On first launch as an
+    AppImage, OpenSAK offers to install itself into the application menu
+    (Yes / No thanks / Don't ask again). On "Yes", the running
+    `$APPIMAGE` file is copied to `~/.local/bin/OpenSAK.AppImage`, a
+    `.desktop` entry and icon are installed into the standard XDG
+    locations, and the chosen path is recorded so later self-update/
+    -uninstall never has to guess it. If AppImageLauncher has already
+    integrated the app (detected via an existing `X-AppImage-Identifier`
+    `.desktop` entry), the prompt is skipped silently instead of
+    double-integrating. A manual "Install in application menu" button was
+    also added under Settings → Advanced → AppImage, so choosing "Don't
+    ask again" is never an irreversible dead end.
+  - **Self-update (#836)** — AppImage-integrated users now see an
+    "Upgrade now" button (instead of "Open releases page") in the
+    existing update-available dialog. Clicking it downloads the matching
+    `OpenSAK-<tag>-Linux-x86_64.AppImage` release asset to a temp file
+    next to the installed copy, validates its ELF magic bytes before
+    accepting it, then atomically replaces the running installation
+    (`os.replace`) — safe even while the old version is still running.
+    No zsync/AppImageUpdate dependency; a full download every time, kept
+    deliberately simple. Shows an indeterminate "Downloading…" indicator
+    (no progress bar for v1) and, on success, asks the user to close and
+    relaunch rather than attempting a fragile in-process restart.
+  - **In-app uninstall (#837)** — A new "Uninstall OpenSAK" button
+    (Settings → Advanced → AppImage) removes the `.desktop` file, icons,
+    and the integrated AppImage copy, with a choice between "Remove
+    program only" (keeps databases/settings) and "Remove program and all
+    data" (the latter requires a second, explicit confirmation). Data
+    removal uses the exact `settings_store.get_install_dir()`/
+    `get_db_dir()` paths OpenSAK itself tracks — no guessing — with an
+    explicit safety guard against ever deleting the user's home
+    directory outright. Integration flags are always reset regardless of
+    which option is chosen, so a later reinstalled AppImage is correctly
+    re-offered integration instead of silently staying stuck.
+
+---
+
 ## [1.18.1] — 2026-09-09
 
 > Stable bugfix release on the 1.18.0 line. Replaces the `1.18.1-beta.1`
@@ -99,6 +374,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the corrupted database file behind #828 above. `tests/conftest.py` now
   isolates all three singletons behind a `tmp_path`-backed fixture for
   every test, layered underneath the existing per-file fixtures.
+
+---
+
+## [1.19.0-beta.2] — 2026-09-07
+
+### Added
+
+- **MTP support for newer Garmin devices, Windows (#453, #826)** —
+  Extends the MTP fix from #822 to Windows. Windows doesn't assign
+  MTP-connected devices a drive letter, so the existing mount-point
+  scan couldn't see them either. A new `opensak.gps.mtp` module talks
+  to the device through the same Shell "Folder" automation API File
+  Explorer itself uses (via `pywin32`, a new Windows-only dependency),
+  wrapped in a small `MTPDevice`/`MTPPath` adapter that mirrors
+  `pathlib.Path`'s interface (`/`, `write_text`, `mkdir`, `unlink`,
+  etc.). Because of that, the existing GPX/GGZ export code needed no
+  changes at all — it already worked in terms of `Path`-like objects,
+  so the new adapter just slots into the same code path a normal mount
+  point uses. File copies go through `Folder.CopyHere`, deletions
+  through `InvokeVerb("delete")`, both polled to confirm completion
+  since neither is a synchronous, confirmable operation on Windows.
+  Detection deliberately skips anything already exposed as a regular
+  drive letter, to avoid double-listing the same device. With this,
+  **#453 is now resolved on both Linux and Windows** — macOS is the
+  one remaining unconfirmed platform (see below). Thanks again to
+  Brian Anderson (@blazerat)!
+
+### Fixed
+
+- **Garmin folder lookup could resolve to a different casing on every
+  run, on case-insensitive filesystems (macOS, Windows)** — a
+  follow-up commit to #826 introduced `_get_garmin_folder()`, which
+  probed `garmin`/`GARMIN`/`Garmin` as constructed candidate paths and
+  tested each with `.is_dir()`. On a case-sensitive filesystem (Linux)
+  only the real one matches, but on macOS' APFS and Windows' NTFS all
+  three resolve to the same physical folder once it exists — so which
+  one "matched" depended on the iteration order of the Python `set`
+  they were stored in, itself randomised per-process by string hash
+  seeding. `TestExportGgzToDevice::test_file_path_recorded` caught
+  this via a genuinely flaky assertion on the macOS CI runner. Fixed
+  by scanning the real directory listing once and matching
+  case-insensitively against the actual on-disk name, instead of
+  guessing candidate paths. Caught and fixed before this reached a
+  tagged release — no user-facing impact.
+
+---
+
+## [1.19.0-beta.1] — 2026-09-07
+
+### Added
+
+- **MTP support for newer Garmin devices, Linux (#453, #822)** — Newer
+  Garmin models (2020+) dropped USB mass-storage in favour of MTP
+  (Media Transfer Protocol), which the mount-point-based device
+  detection couldn't see, so "Send to GPS" silently found no device on
+  Linux for these units. Device detection now also scans GVFS/MTP
+  mounts (`/run/user/*/gvfs/mtp:...`) for a Garmin folder (handling the
+  uppercase `GARMIN` naming and extra storage-root nesting MTP devices
+  use), and both GPX and GGZ export/delete now go through `gio copy`/
+  `gio remove` when the target is an MTP device instead of a direct
+  filesystem write. An in-progress MTP transfer is cancelled cleanly if
+  the export dialog is closed mid-copy. Requires `gio` (part of GLib/
+  GVFS), present by default on most GNOME-based Linux desktops; falls
+  back to a clear error message if it's missing. This fix is Linux-only
+  — Windows and macOS were not affected by the original mount-point
+  detection gap in the same way and are unchanged here. Thanks to Brian
+  Anderson (@blazerat) for both the investigation and the fix!
 
 ---
 

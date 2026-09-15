@@ -666,7 +666,11 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
         # direct-DB path silently dropped it, so every GSAK-DB-imported
         # cache came in as non-premium regardless of the source data.
         "premium_only":   _b(row["IsPremium"]),
-        "user_sort":      row["UserSort"] if row["UserSort"] not in (None, "") else None,
+        # Issue #830: GSAK does not allow a UserSort value of 0 — when the
+        # field is blank in GSAK's UI, the underlying column actually holds
+        # 0, not NULL. Treat 0 the same as None/"" so it round-trips as
+        # blank instead of surfacing as a literal "0" in OpenSAK.
+        "user_sort":      row["UserSort"] if row["UserSort"] not in (None, "", 0) else None,
         "user_data_1":    _s(row["UserData"]),
         "user_data_2":    _s(row["User2"]),
         "user_data_3":    _s(row["User3"]),

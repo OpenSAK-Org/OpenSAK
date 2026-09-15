@@ -59,6 +59,32 @@ class _ProfileWorker(QThread):
             self.error.emit(str(exc))
 
 
+class _ImapTestWorker(QThread):
+    """Tester PQ-mailkontoens IMAP-login i baggrunden (issue #443), så
+    GUI'en ikke fryser mens forbindelsen forsøges oprettet."""
+    success = Signal()
+    error   = Signal(str, str)   # (kind: "auth" | "network" | "other", detail)
+
+    def __init__(self, config, password: str, parent=None):
+        super().__init__(parent)
+        self._config = config
+        self._password = password
+
+    def run(self):
+        from opensak.email.connection import (
+            ImapAuthError, ImapNetworkError, check_connection,
+        )
+        try:
+            check_connection(self._config, self._password)
+            self.success.emit()
+        except ImapAuthError as exc:
+            self.error.emit("auth", str(exc))
+        except ImapNetworkError as exc:
+            self.error.emit("network", str(exc))
+        except Exception as exc:
+            self.error.emit("other", str(exc))
+
+
 # ── Hoved-dialog ──────────────────────────────────────────────────────────────
 
 class SettingsDialog(QDialog):
@@ -91,6 +117,7 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_general_tab(),   tr("settings_tab_general"))
         self._tabs.addTab(self._build_map_tab(),        tr("settings_tab_map"))
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
+        self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
 
         layout.addWidget(self._tabs)
@@ -524,6 +551,46 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(folders_group)
 
+        # ── AppImage (kun synlig når kørende som AppImage — issue #835) ────────
+        from opensak import appimage as _appimage_mod
+
+        if _appimage_mod.is_running_as_appimage():
+            appimage_group = QGroupBox(tr("settings_group_appimage"))
+            appimage_layout = QVBoxLayout(appimage_group)
+
+            is_integrated = _appimage_mod.is_appimage_integrated()
+            if is_integrated:
+                status_text = tr("settings_appimage_status_integrated")
+                button_label = tr("settings_appimage_reinstall_button")
+            else:
+                status_text = tr("settings_appimage_status_not_integrated")
+                button_label = tr("settings_appimage_install_button")
+
+            self._appimage_status_lbl = QLabel(status_text)
+            appimage_layout.addWidget(self._appimage_status_lbl)
+
+            appimage_btn_row = QHBoxLayout()
+            self._appimage_install_btn = QPushButton(button_label)
+            self._appimage_install_btn.clicked.connect(self._on_appimage_install_clicked)
+            appimage_btn_row.addWidget(self._appimage_install_btn)
+
+            # Afinstaller kun relevant (og kun vist) når der rent faktisk
+            # er noget integreret at fjerne — issue #837.
+            self._appimage_uninstall_btn = QPushButton(tr("settings_appimage_uninstall_button"))
+            self._appimage_uninstall_btn.clicked.connect(self._on_appimage_uninstall_clicked)
+            self._appimage_uninstall_btn.setVisible(is_integrated)
+            appimage_btn_row.addWidget(self._appimage_uninstall_btn)
+
+            appimage_btn_row.addStretch()
+            appimage_layout.addLayout(appimage_btn_row)
+
+            appimage_hint = QLabel(tr("settings_appimage_hint"))
+            appimage_hint.setWordWrap(True)
+            appimage_hint.setStyleSheet(hint_style())
+            appimage_layout.addWidget(appimage_hint)
+
+            layout.addWidget(appimage_group)
+
         # ── Search behaviour ──────────────────────────────────────────────────
         search_group = QGroupBox(tr("settings_group_search"))
         search_layout = QVBoxLayout(search_group)
@@ -682,6 +749,47 @@ class SettingsDialog(QDialog):
                 tr("restart_message"),
             )
 
+    def _on_appimage_install_clicked(self) -> None:
+        """
+        Installér (eller genintallér) OpenSAK i programmenuen manuelt
+        (issue #835, §7 punkt 3).
+
+        Nødvendig så "Spørg ikke igen" ved førstegangs-prompten ikke bliver
+        en irreversibel fælde — kalder samme integrate_appimage() som
+        selve prompten.
+        """
+        from opensak import appimage as _appimage_mod
+
+        result = _appimage_mod.integrate_appimage()
+        if result.success:
+            self._appimage_status_lbl.setText(tr("settings_appimage_status_integrated"))
+            self._appimage_install_btn.setText(tr("settings_appimage_reinstall_button"))
+            self._appimage_uninstall_btn.setVisible(True)
+            QMessageBox.information(
+                self,
+                tr("appimage_integrate_success_title"),
+                tr("appimage_integrate_success_msg"),
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                tr("appimage_integrate_error_title"),
+                tr("appimage_integrate_error_msg", error=result.error or ""),
+            )
+
+    def _on_appimage_uninstall_clicked(self) -> None:
+        """
+        Fjern OpenSAK fra programmenuen (og valgfrit alle data) — issue
+        #837. Lukker både indstillinger-dialogen og selve applikationen
+        ved succes, jf. §4.3 i designdokumentet ("Luk applikationen").
+        """
+        from opensak.gui.dialogs.appimage_uninstall_dialog import confirm_and_uninstall
+
+        if confirm_and_uninstall(self):
+            self.accept()
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()
+
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
     def _build_gc_tab(self) -> QWidget:
@@ -793,6 +901,137 @@ class SettingsDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         return scroll
+
+    # ── Fane: PQ Email (issue #443) ───────────────────────────────────────────
+
+    def _build_pq_email_tab(self) -> QWidget:
+        from opensak.email.connection import DEFAULT_IMAP_SSL_PORT
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        intro = QLabel(tr("pq_email_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        form_group = QGroupBox(tr("pq_email_group_account"))
+        form = QFormLayout(form_group)
+
+        self._pq_email_host = QLineEdit()
+        self._pq_email_host.setPlaceholderText("imap.example.com")
+        form.addRow(tr("pq_email_host_label"), self._pq_email_host)
+
+        self._pq_email_port = QSpinBox()
+        self._pq_email_port.setRange(1, 65535)
+        self._pq_email_port.setValue(DEFAULT_IMAP_SSL_PORT)
+        form.addRow(tr("pq_email_port_label"), self._pq_email_port)
+
+        self._pq_email_ssl_cb = QCheckBox(tr("pq_email_ssl_label"))
+        self._pq_email_ssl_cb.setChecked(True)
+        self._pq_email_ssl_cb.toggled.connect(self._on_pq_email_ssl_toggled)
+        form.addRow("", self._pq_email_ssl_cb)
+
+        self._pq_email_username = QLineEdit()
+        form.addRow(tr("pq_email_username_label"), self._pq_email_username)
+
+        self._pq_email_password = QLineEdit()
+        self._pq_email_password.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow(tr("pq_email_password_label"), self._pq_email_password)
+
+        self._pq_email_password_hint = QLabel("")
+        self._pq_email_password_hint.setStyleSheet(hint_style())
+        self._pq_email_password_hint.setWordWrap(True)
+        form.addRow("", self._pq_email_password_hint)
+
+        layout.addWidget(form_group)
+
+        btn_row = QHBoxLayout()
+        self._pq_email_test_btn = QPushButton(tr("pq_email_test_btn"))
+        self._pq_email_test_btn.clicked.connect(self._on_pq_email_test)
+        btn_row.addWidget(self._pq_email_test_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self._pq_email_status = QLabel("")
+        self._pq_email_status.setWordWrap(True)
+        layout.addWidget(self._pq_email_status)
+
+        layout.addStretch()
+
+        # Samme begrundelse som de øvrige faner — se #811-kommentaren i
+        # __init__ for den fulde forklaring af hvorfor hver fane skal
+        # kunne scrolle uafhængigt af de andre.
+        scroll = QScrollArea()
+        scroll.setWidget(tab)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        return scroll
+
+    def _on_pq_email_ssl_toggled(self, checked: bool) -> None:
+        # Skift standardport automatisk når SSL slås til/fra — men kun
+        # hvis feltet stadig står på en af de to standardporte, så vi
+        # ikke overskriver et bevidst valgt ikke-standard portnummer.
+        from opensak.email.connection import DEFAULT_IMAP_PORT, DEFAULT_IMAP_SSL_PORT
+        current = self._pq_email_port.value()
+        if current in (DEFAULT_IMAP_SSL_PORT, DEFAULT_IMAP_PORT):
+            self._pq_email_port.setValue(
+                DEFAULT_IMAP_SSL_PORT if checked else DEFAULT_IMAP_PORT
+            )
+
+    def _on_pq_email_test(self) -> None:
+        from opensak.email import credentials
+        from opensak.email.connection import ImapConfig
+
+        host = self._pq_email_host.text().strip()
+        username = self._pq_email_username.text().strip()
+        if not host or not username:
+            QMessageBox.warning(
+                self, tr("pq_email_test_btn"), tr("pq_email_missing_fields")
+            )
+            return
+
+        password = self._pq_email_password.text()
+        if not password:
+            # Intet nyt kodeord tastet ind — brug det gemte, hvis der
+            # findes ét for det brugernavn der står i feltet nu.
+            password = credentials.get_password(username) or ""
+        if not password:
+            QMessageBox.warning(
+                self, tr("pq_email_test_btn"), tr("pq_email_missing_password")
+            )
+            return
+
+        config = ImapConfig(
+            host=host,
+            port=self._pq_email_port.value(),
+            use_ssl=self._pq_email_ssl_cb.isChecked(),
+            username=username,
+        )
+
+        self._pq_email_test_btn.setEnabled(False)
+        self._pq_email_status.setText(tr("pq_email_testing"))
+
+        self._pq_email_worker = _ImapTestWorker(config, password, self)
+        self._pq_email_worker.success.connect(self._on_pq_email_test_success)
+        self._pq_email_worker.error.connect(self._on_pq_email_test_error)
+        self._pq_email_worker.start()
+
+    def _on_pq_email_test_success(self) -> None:
+        self._pq_email_test_btn.setEnabled(True)
+        self._pq_email_status.setText(tr("pq_email_test_success"))
+
+    def _on_pq_email_test_error(self, kind: str, detail: str) -> None:
+        self._pq_email_test_btn.setEnabled(True)
+        if kind == "auth":
+            msg = tr("pq_email_test_error_auth", detail=detail)
+        elif kind == "network":
+            msg = tr("pq_email_test_error_network", detail=detail)
+        else:
+            msg = tr("pq_email_test_error_other", detail=detail)
+        self._pq_email_status.setText(msg)
 
     # ── GC login/logout ───────────────────────────────────────────────────────
 
@@ -1137,6 +1376,17 @@ class SettingsDialog(QDialog):
         self._on_theme_changed()  # opdater preview-farve
         self._gc_username.setText(s.gc_username)
         self._gc_home_location.setText(s.gc_home_location)
+        self._pq_email_host.setText(s.pq_email_host)
+        self._pq_email_port.setValue(s.pq_email_port)
+        self._pq_email_ssl_cb.setChecked(s.pq_email_use_ssl)
+        self._pq_email_username.setText(s.pq_email_username)
+        self._pq_email_password.clear()
+        from opensak.email import credentials
+        if s.pq_email_username and credentials.get_password(s.pq_email_username):
+            self._pq_email_password_hint.setText(tr("pq_email_password_saved_hint"))
+        else:
+            self._pq_email_password_hint.setText("")
+        self._pq_email_status.setText("")
         self._search_min_chars.setValue(s.search_min_chars)
         self._search_debounce_ms.setValue(s.search_debounce_ms)
         if self._nominatim_cb is not None:
@@ -1197,6 +1447,19 @@ class SettingsDialog(QDialog):
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()
+
+        # PQ Email (issue #443) — kodeordet gemmes kun i OS keyring
+        # (opensak.email.credentials), aldrig i opensak.json. Et tomt
+        # kodeord-felt betyder "behold det eksisterende kodeord".
+        from opensak.email import credentials
+        s.pq_email_host = self._pq_email_host.text()
+        s.pq_email_port = self._pq_email_port.value()
+        s.pq_email_use_ssl = self._pq_email_ssl_cb.isChecked()
+        s.pq_email_username = self._pq_email_username.text()
+        new_pq_password = self._pq_email_password.text()
+        if new_pq_password and s.pq_email_username:
+            credentials.set_password(s.pq_email_username, new_pq_password)
+
         s.sync()
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den

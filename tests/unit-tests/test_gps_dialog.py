@@ -244,6 +244,16 @@ class TestDialogInteraction:
         assert launched == [True]
         assert "out" not in dlg._log.toPlainText() or dlg._log.toPlainText()
 
+    def test_on_delete_failure_does_not_run_export(self, dlg, monkeypatch, tmp_path):
+        run_export = MagicMock()
+        monkeypatch.setattr(dlg, "_run_export", run_export)
+        result = SimpleNamespace(success=False, failed_count=1)
+        result.__str__ = lambda: "delete failed"
+
+        dlg._on_delete_finished(result, tmp_path, "out", 100)
+
+        run_export.assert_not_called()
+
     def test_on_finished_and_error(self, dlg):
         dlg._on_finished("export ok")
         assert "export ok" in dlg._log.toPlainText()
