@@ -471,6 +471,68 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
         return False
 
 
+def _rewrite_stale_install_dir_paths(
+    json_path: Path, old_prefix: Path, new_prefix: Path
+) -> None:
+    """
+    Ret absolutte sti-strenge i en flyttet opensak.json, der stadig peger
+    på den gamle installations-mappe efter migrate_macos_default_paths()
+    har flyttet selve filerne.
+
+    Baggrund: migrate_macos_default_paths() flytter kun filerne fysisk —
+    den rører ikke opensak.json's eget INDHOLD. Men databases.list[].path,
+    databases.active og databases.dir er absolutte sti-strenge gemt i
+    netop den fil, og DatabaseManager._migrate_path() genkender kun den
+    ældre "/geocacher/"-mappe-omdøbning, ikke denne macOS-migrering. Uden
+    denne rettelse leder DatabaseManager derfor efter sin aktive database
+    på en sti der ikke længere findes, og opretter stiltiende en frisk,
+    tom database der i stedet for at finde brugerens rigtige (og fuldt
+    intakte) data ved siden af.
+
+    Best-effort: hvis filen ikke findes eller ikke er gyldig JSON, gøres
+    intet — dette må aldrig kunne forhindre selve fil-migreringen i at
+    have fuldført korrekt.
+    """
+    if not json_path.exists():
+        return
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(data, dict):
+        return
+
+    old_str = str(old_prefix)
+    new_str = str(new_prefix)
+    changed = False
+
+    def _rewrite(value: Any) -> Any:
+        nonlocal changed
+        if isinstance(value, str) and value.startswith(old_str):
+            changed = True
+            return new_str + value[len(old_str):]
+        return value
+
+    db_list = data.get("databases.list")
+    if isinstance(db_list, list):
+        for entry in db_list:
+            if isinstance(entry, dict) and "path" in entry:
+                entry["path"] = _rewrite(entry["path"])
+
+    if "databases.active" in data:
+        data["databases.active"] = _rewrite(data["databases.active"])
+
+    if "databases.dir" in data:
+        data["databases.dir"] = _rewrite(data["databases.dir"])
+
+    if changed:
+        try:
+            _atomic_write(json_path, data)
+        except OSError as exc:
+            print(f"[settings] macOS-migration: kunne ikke genskrive "
+                  f"stale stier i {json_path}: {exc}")
+
+
 def migrate_macos_default_paths() -> bool:
     """
     Én-gangs migration af eksisterende macOS-brugeres data fra den
@@ -552,6 +614,17 @@ def migrate_macos_default_paths() -> bool:
                     old_default_install.rmdir()
             except OSError:
                 pass
+
+            # Issue #XXX: databases.list/.active/.dir i opensak.json
+            # indeholder absolutte stier under den gamle mappe, som
+            # ovenstående filflytning ikke selv retter — uden dette leder
+            # DatabaseManager efter databasen på en sti der ikke længere
+            # findes, og opretter en tom database i stedet.
+            _rewrite_stale_install_dir_paths(
+                new_install_dir / "opensak.json",
+                old_default_install,
+                new_install_dir,
+            )
     else:
         # Brugervalgt mappe — indholdet er ikke ramt af bug'en, kun
         # bootstrap.json's egen (forkerte) placering skal rettes.
