@@ -589,3 +589,75 @@ class TestMigrateMacosDefaultPaths:
 
         assert ss.migrate_macos_default_paths() is True
         assert ss.migrate_macos_default_paths() is False  # nothing left to do
+
+    @posix_only
+    def test_rewrites_stale_database_paths_after_move(self, monkeypatch, tmp_path):
+        """
+        Regression test for the bug found while investigating a real macOS
+        user's report (Mike, Sep 2026): the file move alone left
+        databases.list/.active pointing at the now-gone old directory, so
+        DatabaseManager couldn't find the (fully intact, just moved)
+        database and silently created a fresh empty one instead.
+        """
+        self._patch_platform(monkeypatch, tmp_path)
+        old_dir = ss._legacy_macos_default_install_dir()
+        old_dir.mkdir(parents=True)
+        old_db_path = str(old_dir / "Default.db")
+        (old_dir / "opensak.json").write_text(json.dumps({
+            "user.gc_username": "MikeWood",
+            "databases.list": [{"name": "Default", "path": old_db_path}],
+            "databases.active": old_db_path,
+        }), encoding="utf-8")
+        (old_dir / "Default.db").write_text("real-cache-data", encoding="utf-8")
+
+        assert ss.migrate_macos_default_paths() is True
+
+        new_dir = ss._default_install_dir()
+        migrated_data = json.loads((new_dir / "opensak.json").read_text(encoding="utf-8"))
+
+        # Plain settings values must survive untouched.
+        assert migrated_data["user.gc_username"] == "MikeWood"
+
+        # Path-shaped values must now point at the NEW directory, not the
+        # old one that no longer exists.
+        expected_db_path = str(new_dir / "Default.db")
+        assert migrated_data["databases.list"][0]["path"] == expected_db_path
+        assert migrated_data["databases.active"] == expected_db_path
+        assert Path(expected_db_path).read_text(encoding="utf-8") == "real-cache-data"
+
+        # And DatabaseManager must actually find it — this is the part
+        # that silently failed before the fix.
+        from opensak.db.manager import DatabaseManager
+        mgr = DatabaseManager()
+        assert mgr.active is not None
+        assert mgr.active.path == Path(expected_db_path)
+        assert mgr.active.path.exists()
+
+    @posix_only
+    def test_rewrite_helper_noop_when_no_stale_paths(self, monkeypatch, tmp_path):
+        """A user with no databases.* keys at all must not error or change anything."""
+        self._patch_platform(monkeypatch, tmp_path)
+        old_dir = ss._legacy_macos_default_install_dir()
+        old_dir.mkdir(parents=True)
+        (old_dir / "opensak.json").write_text(
+            json.dumps({"display.theme": "dark"}), encoding="utf-8"
+        )
+
+        assert ss.migrate_macos_default_paths() is True
+
+        new_dir = ss._default_install_dir()
+        data = json.loads((new_dir / "opensak.json").read_text(encoding="utf-8"))
+        assert data == {"display.theme": "dark"}
+
+    def test_rewrite_helper_missing_file_is_safe(self, tmp_path):
+        """Must not raise if called against a path that doesn't exist."""
+        ss._rewrite_stale_install_dir_paths(
+            tmp_path / "does-not-exist.json", tmp_path / "old", tmp_path / "new"
+        )  # no exception == pass
+
+    def test_rewrite_helper_invalid_json_is_safe(self, tmp_path):
+        """Must not raise on a corrupted/non-JSON opensak.json."""
+        bad = tmp_path / "opensak.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        ss._rewrite_stale_install_dir_paths(bad, tmp_path / "old", tmp_path / "new")
+        assert bad.read_text(encoding="utf-8") == "{not valid json"  # left untouched
