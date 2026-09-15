@@ -4,6 +4,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.1] — 2026-09-15
+
+> Bugfix-only release on the 1.19.0 stable line. Fixes a data-loss-looking
+> bug affecting macOS users upgrading from a build that predates the #825
+> path fix, surfaced by a real user report.
+
+### Fixed
+
+- **macOS: #825 migration left database paths pointing at the old,
+  now-gone location (fixes #867)** — The one-time migration that moves
+  existing macOS users' data from the old, buggy path (`~/.config`/
+  `~/.local/share`) to the correct `~/Library/Application Support/opensak/`
+  (#825) moved the files themselves correctly, but never updated the
+  absolute `databases.list`/`databases.active`/`databases.dir` path
+  strings stored inside the migrated `opensak.json`. On next launch,
+  `DatabaseManager` looked for the active database at the old (no longer
+  existing) path, found nothing, and silently created a fresh, empty
+  database there instead — while the user's real data sat fully intact,
+  just orphaned, one folder over. Affected users should have their real
+  databases automatically found again on first launch of a build
+  containing this fix; no manual recovery should be needed. Thanks to
+  Mike Wood for the report.
+
+---
+
 ## [1.19.0] — 2026-09-15
 
 > First stable release of the 1.19.0 cycle. Replaces the `1.19.0-beta.1`
