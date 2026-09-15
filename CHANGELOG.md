@@ -4,6 +4,103 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.0] — 2026-09-15
+
+> First stable release of the 1.19.0 cycle. Replaces the `1.19.0-beta.1`
+> … `1.19.0-beta.8` builds — see git history / the entries below for the
+> detailed beta-by-beta log if needed. Headline of this cycle: MTP support
+> for newer Garmin devices (Linux + Windows), Linux AppImage
+> self-administration, Pocket Query e-mail retrieval, Polish and Spanish
+> UI languages, and the first wave of GSAK filter-parity work (12 text
+> filter operators).
+
+### Added
+
+- **MTP support for newer Garmin devices, Linux and Windows (#453, #822,
+  #826)** — Newer Garmin models (2020+) dropped USB mass-storage in
+  favour of MTP (Media Transfer Protocol), which the mount-point-based
+  device detection couldn't see, so "Send to GPS" silently found no
+  device for these units. On Linux, device detection now also scans
+  GVFS/MTP mounts (`/run/user/*/gvfs/mtp:...`); on Windows, a new
+  `opensak.gps.mtp` module talks to the device through the same Shell
+  "Folder" automation API File Explorer itself uses (via `pywin32`, a
+  new Windows-only dependency), wrapped in an `MTPDevice`/`MTPPath`
+  adapter that mirrors `pathlib.Path`'s interface — so the existing
+  GPX/GGZ export code needed no changes at all. With this, #453 is
+  resolved on both Linux and Windows; macOS remains unconfirmed. Thanks
+  to Brian Anderson (@blazerat) for the investigation and fix.
+- **Linux AppImage: self-administration, no terminal required (#824,
+  #835, #836, #837)** — Replaces the originally planned external
+  `uninstall.sh` + AppImageUpdate approach with self-integration,
+  self-update, and in-app uninstall implemented directly in OpenSAK.
+  Linux-only; a no-op everywhere else. On first launch, OpenSAK offers
+  to install itself into the application menu; an "Upgrade now" button
+  downloads and atomically replaces the running AppImage; and a new
+  "Uninstall OpenSAK" button removes the desktop integration with a
+  choice between removing the program only or the program and all data.
+- **Pocket Query e-mail retrieval (#443)** — OpenSAK can now check a
+  configured IMAP mailbox for Pocket Query zip attachments and import
+  them automatically. Settings → PQ Email configures the mailbox
+  (host/port/SSL/credentials), with the password stored in the OS
+  keyring, never in plaintext. File → "Check for PQ Email…" runs a
+  manual, on-demand check; an opt-in checkbox deletes the e-mail after a
+  successful import. An "only check new (unread) messages" option uses
+  IMAP's native `\Seen` flag to avoid re-importing already-read PQ
+  e-mails. Gmail and Outlook.com/Live.com aren't supported yet (both
+  need OAuth2, tracked as #697/#698); scheduled/background checking is
+  tracked separately as #445. Thanks to Jimbo-DK for real-world PQ-club
+  mailbox testing and feedback.
+- **Polish and Spanish UI languages** — OpenSAK now ships with `pl` and
+  `es` translations, bringing the total to 10 supported languages. Both
+  are a machine-translated first pass; community review and corrections
+  are welcome before promotion to stable status.
+- **Text filter operators (#557, #850)** — Name, GC code, Placed by,
+  Owner, Country, State and County filters now offer 12 operators
+  instead of a single substring match: `contains`/`not contains`,
+  `equals`/`not equals`, `starts with`/`ends with`, `in list`/`not in
+  list`, `empty`/`not empty`, and `regex`/`not regex`. Matching is
+  pushed down to SQL where possible; anything SQLite can't express
+  falls back to an in-Python check, so accented/non-Latin text still
+  matches correctly. Existing saved filter profiles keep working
+  unchanged. First part of the GSAK filter-parity work tracked in #821.
+  Thanks to @nagisml for the contribution.
+- **Cache type icons in filter dialog (#855, #856)** — The General tab's
+  cache type checkboxes now show the same type icon used in the cache
+  table instead of plain text labels. Thanks to @nagisml.
+
+### Fixed
+
+- **GPX import failing on invalid XML character references (#845,
+  #846)** — A cache description containing a character reference to a
+  code point XML 1.0 forbids (e.g. from text pasted out of Word) made
+  lxml reject the entire file and import zero caches. Illegal character
+  references and raw control characters are now stripped while
+  streaming the file, before parsing, for GPX, PQ ZIP, and .loc imports
+  alike. Thanks to @nagisml for the report and fix.
+- **Filter dialog: Reset didn't clear the Owner name field (fixes
+  #848)** — Resetting the General tab (or "Reset all") cleared Name, GC
+  code and Placed by but left a typed Owner name in place. Thanks to
+  @nagisml for the report and fix (#849).
+- **Filter dialog: single-day date range failed to match caches (fixes
+  #844)** — The start-of-range time was hardcoded to 23:59 regardless of
+  whether it was the "from" or "to" bound, so filtering on a single day
+  produced a 59-second window instead of the full day.
+- **Filter dialog: Hidden date range not restored on reopen (fixes
+  #857)** — Reopening the Filter dialog after setting a Hidden date
+  range showed the Hidden date checkboxes unchecked and the date fields
+  empty, even though the cache list was still correctly filtered.
+  `HiddenDateFilter` is now a proper filter class alongside its
+  siblings, with working save/reload and dialog restore. Thanks to
+  ianwork for the report.
+
+### Changed
+
+- **Filter dialog: "Save filter" pre-fills the current profile name
+  (#852)** — When a saved profile is selected, the save dialog now
+  suggests its name instead of an empty field. Thanks to @nagisml.
+
+---
+
 ## [1.19.0-beta.8] — 2026-09-14
 
 ### Added
