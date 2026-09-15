@@ -30,6 +30,10 @@ STRINGS: dict[str, str] = {
 
     # ── Hurtigfilter-bar ──────────────────────────────────────────────────────
     "search_placeholder":           "Navn…",
+    "search_where_label":           "Where",
+    "search_where_placeholder":     "fx distance < 5",
+    "search_where_tooltip":         "SQL WHERE-betingelse — samme syntaks som Where-fanen i filterdialogen. Tryk Enter for at anvende, ryd feltet for at fjerne den. Senest brugte udtryk findes i rullelisten.",
+    "search_where_invalid":         "Ugyldigt Where-udtryk: {error}",
     "quick_all":                    "Alle caches",
     "quick_not_found":              "Ikke fundne",
     "quick_found":                  "Fundne",

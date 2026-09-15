@@ -31,6 +31,10 @@ STRINGS: dict[str, str] = {
 
     # ── Quick filter bar ──────────────────────────────────────────────────────
     "search_placeholder":           "Name…",
+    "search_where_label":           "Where",
+    "search_where_placeholder":     "z. B. distance < 5",
+    "search_where_tooltip":         "SQL-WHERE-Bedingung — gleiche Syntax wie der Where-Reiter im Filterdialog. Enter zum Anwenden, Feld leeren zum Entfernen. Zuletzt verwendete Ausdrücke stehen in der Liste.",
+    "search_where_invalid":         "Ungültiger Where-Ausdruck: {error}",
     "quick_all":                    "Alle Caches",
     "quick_not_found":              "Nicht gefunden",
     "quick_found":                  "Gefunden",
