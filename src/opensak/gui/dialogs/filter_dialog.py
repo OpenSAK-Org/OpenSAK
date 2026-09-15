@@ -1642,8 +1642,8 @@ class FilterDialog(QDialog):
         # Begge valgt (eller ingen) = vis alt = intet filter
 
         # Datoer — én DateFilter pr. datofelt med en valgt operator
-        for row in self._date_rows.values():
-            date_filter = row.build()
+        for date_row in self._date_rows.values():
+            date_filter = date_row.build()
             if date_filter is not None:
                 fs.add(date_filter)
 

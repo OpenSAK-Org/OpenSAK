@@ -1570,7 +1570,9 @@ class DateFilter(BaseFilter):
         if self.op == "equal":
             return self.date1, self.date1
         if self.op == "between":
-            return min(self.date1, self.date2), max(self.date1, self.date2)
+            d1, d2 = self.date1, self.date2
+            assert d1 is not None and d2 is not None  # enforced in __init__
+            return min(d1, d2), max(d1, d2)
         today = _today()  # during / not_during
         return _shift_back(today, self.amount, self.unit), today
 
