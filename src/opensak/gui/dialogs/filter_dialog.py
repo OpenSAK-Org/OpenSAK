@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtCore import QDate
+from PySide6.QtGui import QColor
+import unicodedata
 
 from opensak.gui.widgets.center_point_picker import CenterPointPicker
 from opensak.lang import tr
@@ -161,6 +163,32 @@ from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES
 from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.gui.icon_provider import get_cache_type_icon
 from opensak.gui.settings import get_settings
+
+
+# ── Attribute search helpers ──────────────────────────────────────────────────
+
+def _fold(text: str) -> str:
+    """Case- and accent-insensitive form used for attribute search matching."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+class _AttrSearchEdit(QLineEdit):
+    """Search field for the attributes tab.
+
+    Return/Enter/Down jump into the table instead of triggering the dialog's
+    default (Apply) button, so typing a search and hitting Enter out of habit
+    does not close the dialog.
+    """
+
+    jump_requested = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+            self.jump_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 # ── D/T spin box: snaps to valid 0.5-increment values (1.0–5.0) ──────────────
@@ -503,6 +531,8 @@ class FilterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("filter_dialog_title"))
         self._attr_boxes: dict[int, tuple] = {}
+        # attr_id -> (table row, name item, folded search text)
+        self._attr_rows: dict[int, tuple] = {}
         # Cache currently selected in the main window's table, if any — lets
         # the "Afstand"-fanens center-punkt-vælger tilbyde "denne cache" som
         # centrum (issue #511). None if nothing is selected.
@@ -1018,7 +1048,7 @@ class FilterDialog(QDialog):
         return widget
 
     def _build_attributes_tab(self) -> QWidget:
-        """Attributter filter fane med scrollbar."""
+        """Attributter filter fane med søgefelt og scrollbar."""
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1034,6 +1064,21 @@ class FilterDialog(QDialog):
         mode_row.addStretch()
         outer_layout.addLayout(mode_row)
 
+        # Search row — live-filters the table on translated name, English name or ID
+        search_row = QHBoxLayout()
+        self._attr_search = _AttrSearchEdit()
+        self._attr_search.setPlaceholderText(tr("filter_attr_search_placeholder"))
+        self._attr_search.setClearButtonEnabled(True)
+        self._attr_search.textChanged.connect(self._apply_attr_search)
+        self._attr_search.jump_requested.connect(self._focus_first_visible_attr)
+        search_row.addWidget(self._attr_search, 1)
+        self._attr_only_selected = QCheckBox(tr("filter_attr_only_selected"))
+        self._attr_only_selected.toggled.connect(self._apply_attr_search)
+        search_row.addWidget(self._attr_only_selected)
+        self._attr_status = QLabel()
+        search_row.addWidget(self._attr_status)
+        outer_layout.addLayout(search_row)
+
         # Deduplicate keys (keep only first occurrence per attr_key)
         seen_keys: set[str] = set()
         unique_attrs: list[tuple[int, str]] = []
@@ -1042,7 +1087,11 @@ class FilterDialog(QDialog):
                 seen_keys.add(attr_key)
                 unique_attrs.append((attr_id, attr_key))
 
+        # English names are searchable too, whatever the UI language
+        from opensak.lang.en import STRINGS as en_strings
+
         table = QTableWidget(len(unique_attrs), 4)
+        self._attr_table = table
         table.setHorizontalHeaderLabels([
             tr("filter_attr_col_name"), tr("yes"), tr("no"), tr("filter_none_short"),
         ])
@@ -1093,9 +1142,69 @@ class FilterDialog(QDialog):
                 table.setCellWidget(i, col, cell)
 
             self._attr_boxes[attr_id] = (ja_cb, nej_cb, ingen_cb)
+            haystack = _fold(f"{tr(attr_key)} {en_strings.get(attr_key, '')}")
+            self._attr_rows[attr_id] = (i, name_item, haystack)
+
+            # Mark the row whenever its Yes/No state changes (also on profile load/reset)
+            ja_cb.toggled.connect(lambda _v, a=attr_id: self._on_attr_state_changed(a))
+            nej_cb.toggled.connect(lambda _v, a=attr_id: self._on_attr_state_changed(a))
 
         outer_layout.addWidget(table)
+        self._apply_attr_search()
         return outer
+
+    def _attr_is_set(self, attr_id: int) -> bool:
+        ja_cb, nej_cb, _ingen_cb = self._attr_boxes[attr_id]
+        return ja_cb.isChecked() or nej_cb.isChecked()
+
+    def _on_attr_state_changed(self, attr_id: int) -> None:
+        """Bold + tint the name of an attribute that has Yes or No ticked."""
+        _row, name_item, _haystack = self._attr_rows[attr_id]
+        is_set = self._attr_is_set(attr_id)
+        font = name_item.font()
+        font.setBold(is_set)
+        name_item.setFont(font)
+        if is_set:
+            tint = QColor(self._attr_table.palette().highlight().color())
+            tint.setAlpha(60)
+            name_item.setBackground(tint)
+        else:
+            name_item.setData(Qt.ItemDataRole.BackgroundRole, None)
+        # In "only selected" mode an un-ticked row stays visible until the view is
+        # refreshed, so a mis-click can be undone; only the counter updates here.
+        self._update_attr_status()
+
+    def _apply_attr_search(self, *_args) -> None:
+        """Hide attribute rows that don't match the search text / selection toggle.
+
+        Every whitespace-separated term must match the translated or English name
+        (case- and accent-insensitive), or equal the numeric attribute ID.
+        """
+        terms = _fold(self._attr_search.text()).split()
+        only_selected = self._attr_only_selected.isChecked()
+        for attr_id, (row, _item, haystack) in self._attr_rows.items():
+            visible = all(t in haystack or t == str(attr_id) for t in terms)
+            if only_selected and not self._attr_is_set(attr_id):
+                visible = False
+            self._attr_table.setRowHidden(row, not visible)
+        self._update_attr_status()
+
+    def _update_attr_status(self) -> None:
+        total = len(self._attr_rows)
+        shown = sum(1 for row, _i, _h in self._attr_rows.values()
+                    if not self._attr_table.isRowHidden(row))
+        selected = sum(1 for a in self._attr_boxes if self._attr_is_set(a))
+        self._attr_status.setText(
+            tr("filter_attr_status", shown=shown, total=total, selected=selected))
+
+    def _focus_first_visible_attr(self) -> None:
+        """Move keyboard focus to the Yes box of the first visible row."""
+        for attr_id, (row, name_item, _haystack) in sorted(
+                self._attr_rows.items(), key=lambda kv: kv[1][0]):
+            if not self._attr_table.isRowHidden(row):
+                self._attr_table.scrollToItem(name_item)
+                self._attr_boxes[attr_id][0].setFocus()
+                return
 
     def _build_text_search_tab(self) -> QWidget:
         """Tekstsøgning fane — søg i fritekst felter."""
@@ -1387,6 +1496,9 @@ class FilterDialog(QDialog):
             ja_cb.setChecked(False)
             nej_cb.setChecked(False)
             ingen_cb.setChecked(True)
+        self._attr_search.clear()
+        self._attr_only_selected.setChecked(False)
+        self._apply_attr_search()
 
     def _reset_text_search(self) -> None:
         self._text_search_input.clear()

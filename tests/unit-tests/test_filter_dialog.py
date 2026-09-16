@@ -391,6 +391,65 @@ class TestBuildFilterset:
         assert dlg._attr_mode_all.isChecked() is True
         assert dlg._attr_mode_any.isChecked() is False
 
+    @staticmethod
+    def _visible_attr_ids(dlg):
+        return {a for a, (row, _i, _h) in dlg._attr_rows.items()
+                if not dlg._attr_table.isRowHidden(row)}
+
+    def test_attr_search_matches_english_name_case_insensitive(self, dlg):
+        dlg._attr_search.setText("WHEELCHAIR")
+        assert self._visible_attr_ids(dlg) == {24}
+
+    def test_attr_search_all_terms_must_match(self, dlg):
+        dlg._attr_search.setText("hike long")
+        assert self._visible_attr_ids(dlg) == {57}
+
+    def test_attr_search_by_id(self, dlg):
+        dlg._attr_search.setText("41")
+        assert 41 in self._visible_attr_ids(dlg)
+
+    def test_attr_search_ignores_accents(self, dlg):
+        from opensak.gui.dialogs.filter_dialog import _fold
+        assert _fold("Élévation Ärger") == "elevation arger"
+
+    def test_attr_search_empty_shows_all(self, dlg):
+        dlg._attr_search.setText("xyz-no-such-attribute")
+        assert self._visible_attr_ids(dlg) == set()
+        dlg._attr_search.clear()
+        assert self._visible_attr_ids(dlg) == set(dlg._attr_rows)
+
+    def test_attr_only_selected_and_marking(self, dlg):
+        dlg._attr_boxes[24][0].setChecked(True)   # Yes
+        dlg._attr_boxes[19][1].setChecked(True)   # No
+        dlg._attr_only_selected.setChecked(True)
+        assert self._visible_attr_ids(dlg) == {24, 19}
+        assert dlg._attr_rows[24][1].font().bold() is True
+        assert dlg._attr_rows[1][1].font().bold() is False
+        dlg._attr_boxes[24][2].setChecked(True)   # back to "none"
+        assert dlg._attr_rows[24][1].font().bold() is False
+
+    def test_attr_status_counts(self, dlg):
+        total = len(dlg._attr_rows)
+        dlg._attr_boxes[24][0].setChecked(True)
+        dlg._attr_search.setText("wheelchair")
+        assert dlg._attr_status.text() == fd.tr(
+            "filter_attr_status", shown=1, total=total, selected=1)
+
+    def test_attr_search_enter_does_not_accept_dialog(self, dlg, qtbot):
+        from PySide6.QtCore import Qt
+        dlg.show()
+        dlg._attr_search.setText("wheelchair")
+        qtbot.keyClick(dlg._attr_search, Qt.Key.Key_Return)
+        assert dlg.isVisible()
+
+    def test_reset_attributes_clears_search(self, dlg):
+        dlg._attr_search.setText("wheelchair")
+        dlg._attr_only_selected.setChecked(True)
+        dlg._reset_attributes()
+        assert dlg._attr_search.text() == ""
+        assert dlg._attr_only_selected.isChecked() is False
+        assert self._visible_attr_ids(dlg) == set(dlg._attr_rows)
+
     def test_where_clause(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
         assert "where_clause" in _types(dlg._build_filterset())
