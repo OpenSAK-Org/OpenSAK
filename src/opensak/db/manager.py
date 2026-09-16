@@ -21,6 +21,13 @@ from opensak.settings_store import get_store
 
 logger = logging.getLogger(__name__)
 
+# Issue #870: detaljeret sporing af hvad der reelt indlæses fra settings.
+# Tavs medmindre "db_manager"-flaget er aktivt i debug_flags.py. De
+# ovenstående logger.warning()-kald forbliver altid synlige uanset flag.
+from opensak.logger import get_logger
+
+_debug_log = get_logger("db_manager")
+
 _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
@@ -137,6 +144,12 @@ class DatabaseManager:
         """Indlæs liste over kendte databaser fra opensak.json."""
         store = get_store()
         db_list = store.get("databases.list", [])
+        raw_active_path = store.get("databases.active")
+        _debug_log.debug(
+            "_load_from_settings: databases.list=%r, databases.active=%r, "
+            "databases.dir=%r",
+            db_list, raw_active_path, store.get("databases.dir"),
+        )
         if isinstance(db_list, list):
             for entry in db_list:
                 if isinstance(entry, dict):
@@ -144,14 +157,23 @@ class DatabaseManager:
                     path = entry.get("path")
                     if name and path:
                         migrated = self._migrate_path(Path(path))
+                        _debug_log.debug(
+                            "_load_from_settings: database %r -> %s "
+                            "(oprindelig sti %r, findes på disk: %s)",
+                            name, migrated, path, migrated.exists(),
+                        )
                         info = DatabaseInfo(name, migrated)
                         self._databases.append(info)
 
         # Aktiv database
-        active_path = store.get("databases.active")
+        active_path = raw_active_path
         if active_path:
             migrated_active = self._migrate_path(Path(active_path))
             found = self._find_by_path(migrated_active)
+            _debug_log.debug(
+                "_load_from_settings: aktiv sti %r -> %s, matchede en kendt "
+                "database: %s", active_path, migrated_active, found is not None,
+            )
             if found:
                 self._active = found
 
@@ -161,12 +183,25 @@ class DatabaseManager:
         # Hvis ingen databaser kendes, opret Default
         if not self._databases:
             default_path = self._default_db_path()
+            logger.warning(
+                "Ingen kendte databaser fundet i settings (databases.list var "
+                "%r, databases.active var %r) — opretter en frisk, tom "
+                "'Default'-database på %s. Hvis brugeren forventede en "
+                "eksisterende database, ligger den sandsynligvis stadig "
+                "urørt et andet sted på disken (se issue #870).",
+                db_list, raw_active_path, default_path,
+            )
             default = DatabaseInfo("Default", default_path)
             self._databases.append(default)
             self._active = default
             self._save_to_settings()
         elif self._active is None:
             # Databaser kendes men ingen aktiv — brug den første
+            _debug_log.debug(
+                "_load_from_settings: %d database(r) kendt, men ingen aktiv "
+                "— bruger den første: %r", len(self._databases),
+                self._databases[0].name,
+            )
             self._active = self._databases[0]
             self._save_to_settings()
 

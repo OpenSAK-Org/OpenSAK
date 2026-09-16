@@ -25,6 +25,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+# Issue #870: diagnostik for macOS-migreringen (#825/#867). Tavs medmindre
+# "settings_migration"-flaget er aktivt i debug_flags.py.
+from opensak.logger import get_logger
+
+_log = get_logger("settings_migration")
+
 
 # ── Bootstrap-sti ─────────────────────────────────────────────────────────────
 
@@ -494,43 +500,111 @@ def _rewrite_stale_install_dir_paths(
     have fuldført korrekt.
     """
     if not json_path.exists():
+        _log.debug("_rewrite_stale_install_dir_paths: %s findes ikke — intet at rette",
+                    json_path)
         return
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        _log.debug("_rewrite_stale_install_dir_paths: kunne ikke læse/parse "
+                    "%s (%s) — springer over", json_path, exc)
         return
     if not isinstance(data, dict):
+        _log.debug("_rewrite_stale_install_dir_paths: %s indeholder ikke et "
+                    "JSON-objekt — springer over", json_path)
         return
 
     old_str = str(old_prefix)
     new_str = str(new_prefix)
     changed = False
+    rewritten: list[str] = []
 
-    def _rewrite(value: Any) -> Any:
+    def _rewrite(value: Any, field: str) -> Any:
         nonlocal changed
         if isinstance(value, str) and value.startswith(old_str):
             changed = True
-            return new_str + value[len(old_str):]
+            new_value = new_str + value[len(old_str):]
+            rewritten.append(f"{field}: {value!r} -> {new_value!r}")
+            return new_value
         return value
 
     db_list = data.get("databases.list")
     if isinstance(db_list, list):
-        for entry in db_list:
+        for i, entry in enumerate(db_list):
             if isinstance(entry, dict) and "path" in entry:
-                entry["path"] = _rewrite(entry["path"])
+                entry["path"] = _rewrite(entry["path"], f"databases.list[{i}].path")
 
     if "databases.active" in data:
-        data["databases.active"] = _rewrite(data["databases.active"])
+        data["databases.active"] = _rewrite(data["databases.active"], "databases.active")
 
     if "databases.dir" in data:
-        data["databases.dir"] = _rewrite(data["databases.dir"])
+        data["databases.dir"] = _rewrite(data["databases.dir"], "databases.dir")
 
     if changed:
+        _log.debug("_rewrite_stale_install_dir_paths: retter %d felt(er) i %s: %s",
+                    len(rewritten), json_path, "; ".join(rewritten))
         try:
             _atomic_write(json_path, data)
         except OSError as exc:
             print(f"[settings] macOS-migration: kunne ikke genskrive "
                   f"stale stier i {json_path}: {exc}")
+            _log.debug("_rewrite_stale_install_dir_paths: _atomic_write af %s "
+                        "fejlede: %s", json_path, exc)
+    else:
+        _log.debug("_rewrite_stale_install_dir_paths: ingen stale stier fundet i %s "
+                    "(prefix %s)", json_path, old_str)
+
+
+_PRE_MIGRATION_BACKUP_NAME = "opensak.json.pre-825-migration-backup"
+
+
+def _backup_opensak_json_in_place(source_dir: Path) -> None:
+    """
+    Efterlad en permanent kopi af `opensak.json` i `source_dir`, FØR
+    migreringen rører noget som helst.
+
+    Baggrund: et rigtigt brugertilfælde (Mike, sep. 2026) viste at selve
+    filflytningen kan lykkes perfekt, og det færdigmigrerede opensak.json
+    alligevel efterfølgende gå tabt af en helt anden, endnu ikke fuldt
+    forstået årsag (formentlig en efterfølgende kørsel der ikke fandt
+    filen på det forventede tidspunkt). Uden en backup er brugerens
+    user.gc_username, hjemme-koordinater m.fl. i så fald definitivt væk —
+    kun bekræftet gendannet i praksis, fordi brugeren tilfældigvis havde
+    en Time Machine-backup af netop denne skjulte sti.
+
+    Denne funktion garanterer at en kopi altid bliver liggende, urørt, i
+    den ORIGINALE mappe — uafhængigt af om selve migreringen, eller noget
+    efter den, går galt. Filen flyttes/slettes ALDRIG af oprydnings-
+    logikken bagefter, netop fordi den gør mappen ikke-tom.
+
+    Kun `opensak.json` (typisk << 1 MB) sikkerhedskopieres — IKKE
+    databasefiler, som kan være mange GB og allerede håndteres af den
+    normale flytte-logik.
+
+    Best-effort: fejler stille (ingen exception) hvis kilden mangler,
+    allerede er sikkerhedskopieret, eller kopiering af en eller anden
+    grund ikke lykkes — dette må aldrig kunne forhindre selve
+    migreringen i at fortsætte.
+    """
+    source = source_dir / "opensak.json"
+    if not source.exists():
+        _log.debug("_backup_opensak_json_in_place: %s findes ikke — intet at "
+                    "sikkerhedskopiere", source)
+        return
+    backup = source_dir / _PRE_MIGRATION_BACKUP_NAME
+    if backup.exists():
+        _log.debug("_backup_opensak_json_in_place: backup findes allerede "
+                    "(%s) — springer over", backup)
+        return  # allerede sikkerhedskopieret (fx ved en tidligere, afbrudt kørsel)
+    try:
+        shutil.copy2(str(source), str(backup))
+        _log.debug("_backup_opensak_json_in_place: backup taget: %s -> %s "
+                    "(%d bytes)", source, backup, backup.stat().st_size)
+    except OSError as exc:
+        print(f"[settings] macOS-migration: kunne ikke tage backup af "
+              f"{source}: {exc}")
+        _log.debug("_backup_opensak_json_in_place: kopiering af %s fejlede: %s",
+                    source, exc)
 
 
 def migrate_macos_default_paths() -> bool:
@@ -564,12 +638,23 @@ def migrate_macos_default_paths() -> bool:
 
     new_bootstrap = _bootstrap_path()
     if new_bootstrap.exists():
+        _log.debug("migrate_macos_default_paths: %s findes allerede — "
+                    "intet at migrere", new_bootstrap)
         return False  # allerede migreret, eller frisk install på korrekt sti
 
     old_bootstrap = _legacy_macos_bootstrap_path()
     old_default_install = _legacy_macos_default_install_dir()
 
+    _log.debug(
+        "migrate_macos_default_paths: start — old_bootstrap=%s (exists=%s), "
+        "old_default_install=%s (exists=%s)",
+        old_bootstrap, old_bootstrap.exists(),
+        old_default_install, old_default_install.exists(),
+    )
+
     if not old_bootstrap.exists() and not old_default_install.exists():
+        _log.debug("migrate_macos_default_paths: hverken gammel bootstrap "
+                    "eller gammel install-mappe findes — helt frisk install")
         return False  # intet at migrere — helt frisk installation
 
     migrated_something = False
@@ -584,38 +669,59 @@ def migrate_macos_default_paths() -> bool:
             candidate = data.get("install_dir")
             if candidate:
                 actual_install_dir = Path(candidate)
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as exc:
+            _log.debug("migrate_macos_default_paths: kunne ikke læse gammel "
+                        "bootstrap %s (%s) — bruger standard-sti", old_bootstrap, exc)
 
     if actual_install_dir == old_default_install:
+        _log.debug("migrate_macos_default_paths: standard-sti-gren "
+                    "(actual_install_dir == old_default_install = %s)",
+                    old_default_install)
         # Standard-sti — flyt selve indholdet (opensak.json, databaser osv.)
         # til den nye standard-sti. Samme "best-effort, spring kollisioner
         # over"-mønster som _move_remaining_install_dir_contents() i
         # velkomst-wizarden (issue #562).
         new_install_dir = _default_install_dir()
         if old_default_install.exists():
+            _backup_opensak_json_in_place(old_default_install)
             new_install_dir.mkdir(parents=True, exist_ok=True)
             try:
                 entries = list(old_default_install.iterdir())
-            except OSError:
+            except OSError as exc:
+                _log.debug("migrate_macos_default_paths: kunne ikke liste "
+                            "%s: %s", old_default_install, exc)
                 entries = []
+            _log.debug("migrate_macos_default_paths: indhold fundet i %s: %s "
+                        "(backup-filen '%s' flyttes ikke, bliver liggende i "
+                        "den gamle mappe)", old_default_install,
+                        [e.name for e in entries], _PRE_MIGRATION_BACKUP_NAME)
             for entry in entries:
+                if entry.name == _PRE_MIGRATION_BACKUP_NAME:
+                    continue  # skal blive liggende urørt i den GAMLE mappe
                 target = new_install_dir / entry.name
                 if target.exists():
+                    _log.debug("migrate_macos_default_paths: kollision på %s "
+                                "— springer over, rører intet", target)
                     continue  # kollision — rør det ikke, behold begge som de er
                 try:
                     shutil.move(str(entry), str(target))
                     migrated_something = True
+                    _log.debug("migrate_macos_default_paths: flyttede %s -> %s",
+                                entry, target)
                 except OSError as exc:
                     print(f"[settings] macOS-migration: kunne ikke flytte "
                           f"{entry} → {target}: {exc}")
+                    _log.debug("migrate_macos_default_paths: flytning af %s "
+                                "-> %s fejlede: %s", entry, target, exc)
             try:
                 if not any(old_default_install.iterdir()):
                     old_default_install.rmdir()
+                    _log.debug("migrate_macos_default_paths: %s var tom og "
+                                "blev fjernet", old_default_install)
             except OSError:
                 pass
 
-            # Issue #XXX: databases.list/.active/.dir i opensak.json
+            # Issue #867: databases.list/.active/.dir i opensak.json
             # indeholder absolutte stier under den gamle mappe, som
             # ovenstående filflytning ikke selv retter — uden dette leder
             # DatabaseManager efter databasen på en sti der ikke længere
@@ -628,7 +734,11 @@ def migrate_macos_default_paths() -> bool:
     else:
         # Brugervalgt mappe — indholdet er ikke ramt af bug'en, kun
         # bootstrap.json's egen (forkerte) placering skal rettes.
+        _log.debug("migrate_macos_default_paths: brugervalgt install-mappe-gren "
+                    "— actual_install_dir=%s (rører ikke indholdet)",
+                    actual_install_dir)
         new_install_dir = actual_install_dir
+        _backup_opensak_json_in_place(actual_install_dir)
 
     # Skriv bootstrap.json på den nye, korrekte sti, pegende på den
     # (evt. flyttede) installationsmappe.
@@ -650,6 +760,14 @@ def migrate_macos_default_paths() -> bool:
     if migrated_something:
         print(f"[settings] macOS-sti migreret: {old_default_install} → "
               f"{new_install_dir}")
+
+    _log.debug(
+        "migrate_macos_default_paths: færdig — migrated_something=%s, "
+        "new_install_dir=%s, new_bootstrap=%s (findes=%s), indhold i "
+        "new_install_dir=%s",
+        migrated_something, new_install_dir, new_bootstrap, new_bootstrap.exists(),
+        sorted(p.name for p in new_install_dir.iterdir()) if new_install_dir.exists() else None,
+    )
 
     return migrated_something
 
