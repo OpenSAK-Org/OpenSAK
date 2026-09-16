@@ -22,7 +22,7 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across seven tabs:
+The filter dialog is split across eight tabs:
 
 | Tab | What's on it |
 |---|---|
@@ -30,6 +30,7 @@ The filter dialog is split across seven tabs:
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
 | **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
+| **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
@@ -162,6 +163,23 @@ Text contains search (case-insensitive) applied to the country, state, or county
 Show caches that have a specific Groundspeak attribute set. You can filter for attributes that are present (e.g. "Dogs allowed: yes") or explicitly absent ("Dogs allowed: no").
 
 The filter dialog shows the ~70 standard Groundspeak attributes on the **Attributes** tab.
+
+---
+
+### Child waypoints
+
+Filter caches by their child waypoints (parking, stages, final, …). Available on the **Child Waypoints** tab.
+
+| Field | Matches |
+|---|---|
+| Code | The waypoint code (GSAK imports), or the two-letter prefix for GPX imports — same text operators as Name |
+| Type | Waypoint type, e.g. `Parking Area`, `Physical Stage` |
+| Date | Waypoint date — same operators as the **Dates** tab, except comparing with another date |
+| Name / Comment | Waypoint name and comment |
+| Created by user | Yes = only waypoints you added yourself, No = only imported ones |
+| Count | Any, Equal, At least, At most, or Between |
+
+All criteria must hold for the **same** waypoint. Count is the number of waypoints that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Type contains `Parking` and Count equal 0 shows caches without a parking waypoint. Count alone filters on the total number of waypoints.
 
 ---
 

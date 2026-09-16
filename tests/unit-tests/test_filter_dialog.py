@@ -22,7 +22,7 @@ from opensak.filters.engine import (
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS,
-    TextSearchFilter,
+    TextSearchFilter, WaypointFilter,
     FilterProfile,
 )
 
@@ -119,8 +119,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_seven_tabs(self, dlg):
-        assert dlg._tabs.count() == 7
+    def test_eight_tabs(self, dlg):
+        assert dlg._tabs.count() == 8
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -694,6 +694,70 @@ class TestReset:
         assert dlg._dist_max.isEnabled()
         dlg._on_fav_toggled(True)
         assert dlg._fav_min.isEnabled() and dlg._fav_max.isEnabled()
+
+
+# ── waypoints tab ─────────────────────────────────────────────────────────────
+
+def _waypoint_filters(fs) -> list:
+    return [f for f in fs._filters if isinstance(f, WaypointFilter)]
+
+
+class TestWaypointsTab:
+    def test_default_builds_nothing(self, dlg):
+        assert _waypoint_filters(dlg._build_filterset()) == []
+        assert not dlg._wp_count1.isVisibleTo(dlg)
+
+    def test_date_row_has_no_compare(self, dlg):
+        row = dlg._wp_date_row
+        ops = [row.op_combo.itemData(i) for i in range(row.op_combo.count())]
+        assert "compare" not in ops and "between" in ops
+
+    def test_build_all_criteria(self, dlg):
+        dlg._wp_text_rows["code"].set_op("starts_with")
+        dlg._wp_text_rows["code"].edit.setText("PK")
+        dlg._wp_text_rows["comment"].set_op("empty")
+        dlg._wp_date_row._select(dlg._wp_date_row.op_combo, "between")
+        dlg._wp_date_row.date1.setDate(QDate(2025, 1, 1))
+        dlg._wp_date_row.date2.setDate(QDate(2025, 6, 30))
+        dlg._wp_by_user_no.setChecked(False)
+        dlg._wp_count_op.setCurrentIndex(dlg._wp_count_op.findData("between"))
+        dlg._wp_count1.setValue(1)
+        dlg._wp_count2.setValue(3)
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert {k: (m.text, m.op) for k, m in f.texts.items()} == {
+            "code": ("PK", "starts_with"), "comment": ("", "empty")}
+        assert (f.date_op, f.date1, f.date2) == ("between", date(2025, 1, 1), date(2025, 6, 30))
+        assert f.by_user is True
+        assert (f.count_op, f.count1, f.count2) == ("between", 1, 3)
+
+    def test_count_alone_builds_filter(self, dlg):
+        dlg._wp_count_op.setCurrentIndex(dlg._wp_count_op.findData("equal"))
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert (f.count_op, f.count1) == ("equal", 0)
+        assert not f.texts and f.date_op is None and f.by_user is None
+
+    def test_load_roundtrip_and_reset(self, dlg):
+        original = WaypointFilter(
+            texts={"wp_type": ("Parking", "contains"), "name": ("final", "not_contains")},
+            date_op="during", date_amount=2, date_unit="years",
+            by_user=False, count_op="at_most", count1=4,
+        )
+        dlg._load_filterset(FilterSet().add(original))
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert f.to_dict() == original.to_dict()
+        dlg._tabs.setCurrentWidget(dlg._waypoints_tab)
+        dlg._reset_current_tab()
+        assert _waypoint_filters(dlg._build_filterset()) == []
+        assert dlg._wp_by_user_yes.isChecked() and dlg._wp_by_user_no.isChecked()
+
+    def test_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._wp_text_rows["name"].set_op("regex")
+        dlg._wp_text_rows["name"].edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._waypoints_tab
 
 
 # ── where SQL validation ────────────────────────────────────────────────────────

@@ -1,14 +1,15 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Syv faner:
+Otte faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
-5. Attributter — alle Groundspeak attributter
-6. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-7. Where       — rå SQL WHERE-betingelse
+5. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
+6. Attributter — alle Groundspeak attributter
+7. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+8. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -52,6 +53,7 @@ from opensak.filters.engine import (
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
     DateFilter, LEGACY_DATE_FILTER_FIELDS,
     TextSearchFilter,
+    WaypointFilter, WAYPOINT_TEXT_FIELDS,
     FilterProfile,
 )
 from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
@@ -359,6 +361,25 @@ _DATE_OPS_WITH_DATE1 = ("on_or_before", "on_or_after", "equal", "between")
 _DATE_OPS_RELATIVE = ("during", "not_during")
 
 
+# ── Waypoints-fanen ───────────────────────────────────────────────────────────
+
+# (felt, oversættelsesnøgle) for tekstrækkerne, i GSAK's rækkefølge.
+_WP_TEXT_LABELS: tuple[tuple[str, str], ...] = (
+    ("code",    "filter_wp_code"),
+    ("wp_type", "col_type"),
+    ("name",    "col_name"),
+    ("comment", "filter_wp_comment"),
+)
+assert tuple(f for f, _ in _WP_TEXT_LABELS) == WAYPOINT_TEXT_FIELDS
+_WP_COUNT_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",      "filter_date_op_any"),
+    ("equal",    "filter_date_op_equal"),
+    ("at_least", "filter_wp_count_at_least"),
+    ("at_most",  "filter_wp_count_at_most"),
+    ("between",  "filter_date_op_between"),
+)
+
+
 # ── Linje/polygon-fanen ───────────────────────────────────────────────────────
 
 # (filtertype, oversættelsesnøgle) i GSAK's rækkefølge. Nøglerne står som
@@ -386,9 +407,13 @@ class DateFilterRow(QWidget):
     [N] [days/weeks/months/years]", or a comparison with another date field
     (plus a day count for "within"/"outside"). The label turns bold while the
     row is active.
+
+    *field* None means a date that is not one of the cache's date fields (a
+    waypoint's date): there is nothing to compare with, so no "compare"
+    operator, and build() is not used — read op() and range_args() instead.
     """
 
-    def __init__(self, field: str, label: str, parent=None):
+    def __init__(self, field: Optional[str], label: str, parent=None):
         super().__init__(parent)
         self.field = field
         self.label = QLabel(label)
@@ -398,7 +423,8 @@ class DateFilterRow(QWidget):
 
         self.op_combo = QComboBox()
         for op, key in _DATE_OP_LABELS:
-            self.op_combo.addItem(tr(key), op)
+            if field is not None or op != "compare":
+                self.op_combo.addItem(tr(key), op)
         layout.addWidget(self.op_combo)
 
         self.date1 = self._make_date_edit()
@@ -475,26 +501,36 @@ class DateFilterRow(QWidget):
         op = self.op()
         if op == "any":
             return None
-        # Only the dates the operator uses — keeps saved profiles free of
-        # stale picker values.
+        assert self.field is not None
         return DateFilter(
-            self.field, op,
-            date1=_qdate_to_date(self.date1.date()) if op in _DATE_OPS_WITH_DATE1 else None,
-            date2=_qdate_to_date(self.date2.date()) if op == "between" else None,
-            amount=self.amount.value(),
-            unit=self.unit_combo.currentData(),
+            self.field, op, **self.range_args(),
             other_field=self.other_combo.currentData(),
             compare_op=self.compare_combo.currentData(),
             compare_days=self.compare_days.value(),
         )
 
-    def load(self, f: DateFilter) -> None:
-        self._select(self.op_combo, f.op)
-        for edit, value in ((self.date1, f.date1), (self.date2, f.date2)):
+    def range_args(self) -> dict:
+        """date1/date2/amount/unit for the current operator. Only the dates
+        the operator uses — keeps saved profiles free of stale picker values."""
+        op = self.op()
+        return {
+            "date1": _qdate_to_date(self.date1.date()) if op in _DATE_OPS_WITH_DATE1 else None,
+            "date2": _qdate_to_date(self.date2.date()) if op == "between" else None,
+            "amount": self.amount.value(),
+            "unit": self.unit_combo.currentData(),
+        }
+
+    def load_range(self, op: str, date1: Optional[date], date2: Optional[date],
+                   amount: int, unit: str) -> None:
+        self._select(self.op_combo, op)
+        for edit, value in ((self.date1, date1), (self.date2, date2)):
             if value is not None:
                 edit.setDate(QDate(value.year, value.month, value.day))
-        self.amount.setValue(f.amount)
-        self._select(self.unit_combo, f.unit)
+        self.amount.setValue(amount)
+        self._select(self.unit_combo, unit)
+
+    def load(self, f: DateFilter) -> None:
+        self.load_range(f.op, f.date1, f.date2, f.amount, f.unit)
         self._select(self.other_combo, f.other_field)
         self._select(self.compare_combo, f.compare_op)
         self.compare_days.setValue(f.compare_days)
@@ -609,12 +645,14 @@ class FilterDialog(QDialog):
         self._misc_tab = self._build_misc_tab()
         self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
+        self._waypoints_tab = self._build_waypoints_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
         self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
+        self._tabs.addTab(self._waypoints_tab, tr("filter_tab_waypoints"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
@@ -1206,6 +1244,101 @@ class FilterDialog(QDialog):
                 self._attr_boxes[attr_id][0].setFocus()
                 return
 
+    def _build_waypoints_tab(self) -> QWidget:
+        """Waypoints fane — caches efter deres waypoints (GSAK's
+        "Child waypoints"). Alle kriterier skal gælde for samme waypoint;
+        Antal tæller de waypoints, der opfylder dem."""
+        widget = QWidget()
+        layout = QFormLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self._wp_text_rows: dict[str, TextFilterRow] = {}
+        for field, key in _WP_TEXT_LABELS:
+            row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
+            self._wp_text_rows[field] = row
+            layout.addRow(row.label, row)
+            if field == "wp_type":
+                # GSAK's order: Code, Type, Date, Name, Comment
+                self._wp_date_row = DateFilterRow(None, tr("filter_wp_date"))
+                layout.addRow(self._wp_date_row.label, self._wp_date_row)
+
+        by_user = QWidget()
+        by_user_layout = QHBoxLayout(by_user)
+        by_user_layout.setContentsMargins(0, 0, 0, 0)
+        self._wp_by_user_yes = QCheckBox(tr("yes"))
+        self._wp_by_user_yes.setChecked(True)
+        self._wp_by_user_no = QCheckBox(tr("no"))
+        self._wp_by_user_no.setChecked(True)
+        by_user_layout.addWidget(self._wp_by_user_yes)
+        by_user_layout.addWidget(self._wp_by_user_no)
+        by_user_layout.addStretch()
+        layout.addRow(tr("filter_wp_by_user"), by_user)
+
+        count = QWidget()
+        count_layout = QHBoxLayout(count)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self._wp_count_op = QComboBox()
+        for op, key in _WP_COUNT_LABELS:
+            self._wp_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._wp_count_op)
+        self._wp_count1 = QSpinBox()
+        self._wp_count1.setRange(0, 9999)
+        self._wp_count2 = QSpinBox()
+        self._wp_count2.setRange(0, 9999)
+        count_layout.addWidget(self._wp_count1)
+        count_layout.addWidget(self._wp_count2)
+        count_layout.addStretch()
+        layout.addRow(tr("filter_wp_count"), count)
+        self._wp_count_op.currentIndexChanged.connect(self._update_wp_count_inputs)
+        self._update_wp_count_inputs()
+
+        return widget
+
+    def _update_wp_count_inputs(self) -> None:
+        op = self._wp_count_op.currentData()
+        self._wp_count1.setVisible(op != "any")
+        self._wp_count2.setVisible(op == "between")
+
+    def _build_waypoint_filter(self) -> Optional[WaypointFilter]:
+        """WaypointFilter for the waypoints tab, or None when nothing is set."""
+        texts = {}
+        for field, row in self._wp_text_rows.items():
+            op = row.op()
+            text = row.edit.text().strip()
+            if op in TEXT_OPS_VALUELESS or text:
+                texts[field] = (text, op)
+        date_op = self._wp_date_row.op()
+        dates = self._wp_date_row.range_args()
+        yes, no = self._wp_by_user_yes.isChecked(), self._wp_by_user_no.isChecked()
+        f = WaypointFilter(
+            texts=texts,
+            date_op=None if date_op == "any" else date_op,
+            date1=dates["date1"],
+            date2=dates["date2"],
+            date_amount=dates["amount"],
+            date_unit=dates["unit"],
+            by_user=yes if yes != no else None,
+            count_op=self._wp_count_op.currentData(),
+            count1=self._wp_count1.value(),
+            count2=self._wp_count2.value(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_waypoint_filter(self, f: WaypointFilter) -> None:
+        for field, match in f.texts.items():
+            self._wp_text_rows[field].load(match)
+        if f.date_op is not None:
+            self._wp_date_row.load_range(f.date_op, f.date1, f.date2,
+                                         f.date_amount, f.date_unit)
+        if f.by_user is not None:
+            self._wp_by_user_yes.setChecked(f.by_user)
+            self._wp_by_user_no.setChecked(not f.by_user)
+        index = self._wp_count_op.findData(f.count_op)
+        self._wp_count_op.setCurrentIndex(max(index, 0))
+        self._wp_count1.setValue(f.count1)
+        self._wp_count2.setValue(f.count2)
+
     def _build_text_search_tab(self) -> QWidget:
         """Tekstsøgning fane — søg i fritekst felter."""
         widget = QWidget()
@@ -1322,6 +1455,18 @@ class FilterDialog(QDialog):
             QMessageBox.warning(
                 self, tr("warning"),
                 tr("filter_regex_invalid", field=row.label.rstrip(":"),
+                   error=text_filter.regex_error),
+            )
+            return False
+        for row in self._wp_text_rows.values():
+            text_filter = row.build(TextMatchFilter)
+            if text_filter is None or text_filter.regex_error is None:
+                continue
+            self._tabs.setCurrentWidget(self._waypoints_tab)
+            row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid", field=row.label,
                    error=text_filter.regex_error),
             )
             return False
@@ -1500,6 +1645,16 @@ class FilterDialog(QDialog):
         self._attr_only_selected.setChecked(False)
         self._apply_attr_search()
 
+    def _reset_waypoints(self) -> None:
+        for row in self._wp_text_rows.values():
+            row.reset()
+        self._wp_date_row.reset()
+        self._wp_by_user_yes.setChecked(True)
+        self._wp_by_user_no.setChecked(True)
+        self._wp_count_op.setCurrentIndex(0)
+        self._wp_count1.setValue(0)
+        self._wp_count2.setValue(0)
+
     def _reset_text_search(self) -> None:
         self._text_search_input.clear()
         self._text_search_description.setChecked(True)
@@ -1520,6 +1675,7 @@ class FilterDialog(QDialog):
         self._reset_misc()
         self._reset_line_polygon()
         self._reset_attributes()
+        self._reset_waypoints()
         self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
@@ -1540,6 +1696,8 @@ class FilterDialog(QDialog):
             self._reset_line_polygon()
         elif tab is self._attributes_tab:
             self._reset_attributes()
+        elif tab is self._waypoints_tab:
+            self._reset_waypoints()
         elif tab is self._text_search_tab:
             self._reset_text_search()
 
@@ -1728,6 +1886,11 @@ class FilterDialog(QDialog):
                 for af in attr_filters:
                     attr_or.add(af)
                 fs.add(attr_or)
+
+        # Waypoints
+        wp_filter = self._build_waypoint_filter()
+        if wp_filter is not None:
+            fs.add(wp_filter)
 
         # Tekstsøgning
         ts_text = self._text_search_input.text().strip()
@@ -1945,6 +2108,8 @@ class FilterDialog(QDialog):
                         ja_cb.setChecked(True)
                     else:
                         nej_cb.setChecked(True)
+            elif ftype == "waypoint":
+                self._load_waypoint_filter(f)
             elif ftype == "text_search":
                 self._text_search_input.setText(getattr(f, "text", ""))
                 self._text_search_description.setChecked(getattr(f, "search_description", True))

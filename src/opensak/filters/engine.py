@@ -565,12 +565,21 @@ class TextMatchFilter(BaseFilter):
     def apply_to_query(self, query):
         if self._is_noop():
             return query
-        from sqlalchemy import and_, func, or_
-        col = getattr(Cache, self.column)
+        cond = self.sql_condition(getattr(Cache, self.column))
+        return None if cond is None else query.filter(cond)
+
+    def sql_condition(self, col):
+        """SQL condition applying this match to column expression *col*, or
+        None when it can't be expressed in SQL (see apply_to_query). A no-op
+        filter yields true(). Shared with WaypointFilter, which matches the
+        same operators against waypoint columns."""
+        from sqlalchemy import and_, func, or_, true
+        if self._is_noop():
+            return true()
         if self.op == "empty":
-            return query.filter(or_(col.is_(None), col == ""))
+            return or_(col.is_(None), col == "")
         if self.op == "not_empty":
-            return query.filter(and_(col.is_not(None), col != ""))
+            return and_(col.is_not(None), col != "")
         positive = _TEXT_OP_NEGATIONS.get(self._match_op, self._match_op)
         negated = positive != self._match_op
         if positive == "regex":
@@ -596,12 +605,16 @@ class TextMatchFilter(BaseFilter):
             # NOT on a NULL column is NULL (row dropped) in SQL, but NULL is
             # "" for matches() — which a negated operator lets through.
             cond = or_(col.is_(None), ~cond)
-        return query.filter(cond)
+        return cond
 
     def matches(self, cache: Cache) -> bool:
+        return self.match_value(getattr(cache, self.column))
+
+    def match_value(self, value: Optional[str]) -> bool:
+        """Whether *value* (None counts as "") passes this match."""
         if self._is_noop():
             return True
-        value = getattr(cache, self.column) or ""
+        value = value or ""
         if self.op == "empty":
             return not value
         if self.op == "not_empty":
@@ -1505,6 +1518,49 @@ def _compare_diff(op: str, diff, days: int, absolute=abs):
     return absolute(diff) > days  # outside
 
 
+def _date_op_range(
+    op: str, date1: Optional[date], date2: Optional[date], amount: int, unit: str,
+) -> tuple[Optional[date], Optional[date]]:
+    """Inclusive (lo, hi) bounds of a DateFilter operator other than compare."""
+    if op == "on_or_before":
+        return None, date1
+    if op == "on_or_after":
+        return date1, None
+    if op == "equal":
+        return date1, date1
+    if op == "between":
+        assert date1 is not None and date2 is not None  # enforced by callers
+        return min(date1, date2), max(date1, date2)
+    today = _today()  # during / not_during
+    return _shift_back(today, amount, unit), today
+
+
+def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date]):
+    """SQL form of _date_in_range() on datetime column *col*. Compares the raw
+    column against day boundaries, so an index on it stays usable."""
+    from sqlalchemy import and_, not_, or_
+    conditions = [col.is_not(None)]
+    if lo is not None:
+        conditions.append(col >= _day_start(lo))
+    if hi is not None and hi < date.max:
+        conditions.append(col < _day_start(hi + timedelta(days=1)))
+    inside = and_(*conditions)
+    if op == "not_during":
+        return or_(col.is_(None), not_(inside))
+    return inside
+
+
+def _date_in_range(value: Optional[date], op: str, lo: Optional[date], hi: Optional[date]) -> bool:
+    """Whether calendar date *value* passes a range operator: inside [lo, hi],
+    or — for not_during — outside it or missing."""
+    inside = (
+        value is not None
+        and (lo is None or value >= lo)
+        and (hi is None or value <= hi)
+    )
+    return not inside if op == "not_during" else inside
+
+
 class DateFilter(BaseFilter):
     """GSAK-style filter on one of the cache's date fields (DATE_FILTER_FIELDS).
 
@@ -1563,24 +1619,13 @@ class DateFilter(BaseFilter):
 
     def _range(self) -> tuple[Optional[date], Optional[date]]:
         """Inclusive (lo, hi) bounds for every op except compare."""
-        if self.op == "on_or_before":
-            return None, self.date1
-        if self.op == "on_or_after":
-            return self.date1, None
-        if self.op == "equal":
-            return self.date1, self.date1
-        if self.op == "between":
-            d1, d2 = self.date1, self.date2
-            assert d1 is not None and d2 is not None  # enforced in __init__
-            return min(d1, d2), max(d1, d2)
-        today = _today()  # during / not_during
-        return _shift_back(today, self.amount, self.unit), today
+        return _date_op_range(self.op, self.date1, self.date2, self.amount, self.unit)
 
     def apply_to_query(self, query):
         # Mirrors matches() exactly. Range bounds compare the raw column
         # against day boundaries (index-friendly); compare uses SQLite's
         # date()/julianday() so both sides are reduced to calendar dates.
-        from sqlalchemy import and_, func, not_, or_
+        from sqlalchemy import func
         col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
         if self.op == "compare":
             other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
@@ -1589,16 +1634,7 @@ class DateFilter(BaseFilter):
                 col.is_not(None), other.is_not(None),
                 _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
             )
-        lo, hi = self._range()
-        conditions = [col.is_not(None)]
-        if lo is not None:
-            conditions.append(col >= _day_start(lo))
-        if hi is not None and hi < date.max:
-            conditions.append(col < _day_start(hi + timedelta(days=1)))
-        inside = and_(*conditions)
-        if self.op == "not_during":
-            return query.filter(or_(col.is_(None), not_(inside)))
-        return query.filter(inside)
+        return query.filter(_date_range_sql(col, self.op, *self._range()))
 
     def matches(self, cache: Cache) -> bool:
         value = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.field], None))
@@ -1607,13 +1643,7 @@ class DateFilter(BaseFilter):
             if value is None or other is None:
                 return False
             return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
-        lo, hi = self._range()
-        inside = (
-            value is not None
-            and (lo is None or value >= lo)
-            and (hi is None or value <= hi)
-        )
-        return not inside if self.op == "not_during" else inside
+        return _date_in_range(value, self.op, *self._range())
 
     def to_dict(self) -> dict:
         return {
@@ -1762,6 +1792,254 @@ class TextSearchFilter(BaseFilter):
         )
 
 
+# ── Child waypoint filter ─────────────────────────────────────────────────────
+
+# Text criteria of WaypointFilter, in GSAK's order: code, type, name, comment.
+WAYPOINT_TEXT_FIELDS = ("code", "wp_type", "name", "comment")
+# DateFilter's operators, minus compare (a waypoint has only the one date).
+WAYPOINT_DATE_OPS = tuple(op for op in DATE_OPS if op != "compare")
+WAYPOINT_COUNT_OPS = ("any", "equal", "at_least", "at_most", "between")
+
+
+def _waypoint_text_column(field_name: str):
+    from sqlalchemy import func
+    if field_name == "code":
+        return func.coalesce(Waypoint.wp_code, Waypoint.prefix)
+    return getattr(Waypoint, field_name)
+
+
+def _waypoint_text_value(wp, field_name: str) -> Optional[str]:
+    if field_name == "code":
+        return wp.wp_code or wp.prefix
+    return getattr(wp, field_name)
+
+
+class WaypointFilter(BaseFilter):
+    """Keep caches by their child waypoints (GSAK's "Child waypoints" tab).
+
+    A waypoint qualifies when it passes every criterion that is set: text
+    matches on code/type/name/comment (same operators as TextMatchFilter), a
+    date operator on wp_date (DateFilter's, except compare) and whether the
+    user created it. The cache matches when the number of qualifying
+    waypoints passes the count operator — "any" meaning at least one, so
+    "count equal 0" together with e.g. type "Parking Area" finds caches
+    without a parking waypoint. Code is the GSAK waypoint code (wp_code),
+    falling back to the two-letter prefix for GPX imports, which have none.
+
+    apply_filters() calls prepare() first, which counts the qualifying
+    waypoints per cache in one query; matches() then only looks up the
+    count, so it also works for LightweightCache rows. Without prepare()
+    (e.g. on in-memory objects) matches() walks cache.waypoints instead.
+    """
+    filter_type = "waypoint"
+
+    def __init__(
+        self,
+        texts: Optional[dict[str, tuple[str, str]]] = None,
+        date_op: Optional[str] = None,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        date_amount: int = 1,
+        date_unit: str = "days",
+        by_user: Optional[bool] = None,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+    ):
+        # texts: field -> (text, op); a match with nothing to compare is dropped.
+        self.texts: dict[str, TextMatchFilter] = {}
+        for field_name, (text, op) in (texts or {}).items():
+            if field_name not in WAYPOINT_TEXT_FIELDS:
+                raise ValueError(f"Unknown waypoint field {field_name!r}")
+            match = TextMatchFilter(text, op)
+            if not match._is_noop():
+                self.texts[field_name] = match
+        if date_op is not None and date_op not in WAYPOINT_DATE_OPS:
+            raise ValueError(f"Unknown waypoint date operator {date_op!r}")
+        if date_unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {date_unit!r}")
+        if count_op not in WAYPOINT_COUNT_OPS:
+            raise ValueError(f"Unknown waypoint count operator {count_op!r}")
+        self.date_op = date_op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if date_op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {date_op!r} needs date1")
+        if date_op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.date_amount = max(0, int(date_amount))
+        self.date_unit = date_unit
+        self.by_user = by_user
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        # cache id -> qualifying waypoint count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """First invalid regular expression among the text criteria, if any."""
+        return next((m.regex_error for m in self.texts.values() if m.regex_error), None)
+
+    def has_waypoint_criteria(self) -> bool:
+        return bool(self.texts) or self.date_op is not None or self.by_user is not None
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.has_waypoint_criteria()
+
+    # ── Per-waypoint criteria ────────────────────────────────────────────────
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        assert self.date_op is not None
+        return _date_op_range(self.date_op, self.date1, self.date2,
+                              self.date_amount, self.date_unit)
+
+    def waypoint_matches(self, wp) -> bool:
+        """Whether waypoint *wp* (ORM object or row with the same fields) qualifies."""
+        if self.by_user is not None and bool(wp.created_by_user) != self.by_user:
+            return False
+        if self.date_op is not None and not _date_in_range(
+                _to_date(wp.wp_date), self.date_op, *self._date_range()):
+            return False
+        return all(
+            match.match_value(_waypoint_text_value(wp, field_name))
+            for field_name, match in self.texts.items()
+        )
+
+    def _sql_waypoint_conditions(self) -> tuple[list, bool]:
+        """SQL conditions on the waypoints table plus whether they are exact.
+        Inexact ones (regex, non-ASCII text) only pre-narrow the rows, and
+        waypoint_matches() has to decide."""
+        conditions: list = []
+        exact = True
+        if self.by_user is not None:
+            conditions.append(Waypoint.created_by_user == self.by_user)
+        if self.date_op is not None:
+            conditions.append(_date_range_sql(Waypoint.wp_date, self.date_op, *self._date_range()))
+        for field_name, match in self.texts.items():
+            cond = match.sql_condition(_waypoint_text_column(field_name))
+            if cond is None or not match.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    # ── Count ────────────────────────────────────────────────────────────────
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying waypoint count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.has_waypoint_criteria() else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    # ── BaseFilter ───────────────────────────────────────────────────────────
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying waypoints (see the class docstring)."""
+        from sqlalchemy import func, select
+        conditions, exact = self._sql_waypoint_conditions()
+        if exact:
+            rows = session.execute(
+                select(Waypoint.cache_id, func.count(Waypoint.id))
+                .where(*conditions)
+                .group_by(Waypoint.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        rows = session.execute(
+            select(
+                Waypoint.cache_id, Waypoint.wp_code, Waypoint.prefix,
+                Waypoint.wp_type, Waypoint.name, Waypoint.comment,
+                Waypoint.wp_date, Waypoint.created_by_user,
+            ).where(*conditions)
+        )
+        for row in rows:
+            if self.waypoint_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        conditions, exact = self._sql_waypoint_conditions()
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import exists, func, select
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying waypoint.
+            return query.filter(
+                exists().where(Waypoint.cache_id == Cache.id, *conditions).correlate(Cache)
+            )
+        count = (
+            select(func.count(Waypoint.id))
+            .where(Waypoint.cache_id == Cache.id, *conditions)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        if lo > 0:
+            query = query.filter(count >= lo)
+        if hi is not None:
+            query = query.filter(count <= hi)
+        return query
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for wp in cache.waypoints if self.waypoint_matches(wp))
+        return self._count_ok(count)
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "texts": {f: {"text": m.text, "op": m.op} for f, m in self.texts.items()},
+            "date_op": self.date_op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "date_amount": self.date_amount,
+            "date_unit": self.date_unit,
+            "by_user": self.by_user,
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WaypointFilter":
+        return cls(
+            texts={
+                f: (spec.get("text", ""), spec.get("op", "contains"))
+                for f, spec in (data.get("texts") or {}).items()
+            },
+            date_op=data.get("date_op"),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            date_amount=data.get("date_amount", 1),
+            date_unit=data.get("date_unit", "days"),
+            by_user=data.get("by_user"),
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<WaypointFilter {self.to_dict()}>"
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -1801,6 +2079,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "hidden_date_range":  HiddenDateFilter,
     "date":               DateFilter,
     "text_search":        TextSearchFilter,
+    "waypoint":           WaypointFilter,
 }
 
 
@@ -2105,12 +2384,16 @@ def _prepare_where_clause_filters(
     distance_from: Optional[tuple[float, float]],
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
-    SQL directly against the database. Must run before any Python-level
-    matches() call touches a WhereClauseFilter. Mutates the filter objects
+    SQL directly against the database, and every WaypointFilter's waypoint
+    counts (WaypointFilter.prepare()). Must run before any Python-level
+    matches() call touches one of those filters. Mutates the filter objects
     in place; returns nothing.
     """
     if not filterset:
         return
+    for _f in _iter_filters(filterset):
+        if isinstance(_f, WaypointFilter):
+            _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
         _f for _f in _iter_filters(filterset)
