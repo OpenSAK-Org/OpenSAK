@@ -485,14 +485,18 @@ class TestPlatformSpecificPaths:
 
 # ── macOS default-path migration (issue #825) ──────────────────────────────
 
+def _patch_macos_platform(monkeypatch, home: Path):
+    """Common setup: pretend to be macOS, rooted at a temp $HOME."""
+    monkeypatch.setattr(ss.sys, "platform", "darwin")
+    monkeypatch.setattr(ss.os, "name", "posix")
+    monkeypatch.setattr(ss.Path, "home", lambda: home)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+
 class TestMigrateMacosDefaultPaths:
     def _patch_platform(self, monkeypatch, home: Path):
-        """Common setup: pretend to be macOS, rooted at a temp $HOME."""
-        monkeypatch.setattr(ss.sys, "platform", "darwin")
-        monkeypatch.setattr(ss.os, "name", "posix")
-        monkeypatch.setattr(ss.Path, "home", lambda: home)
-        monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        _patch_macos_platform(monkeypatch, home)
 
     def test_noop_on_non_macos(self, monkeypatch, tmp_path):
         monkeypatch.setattr(ss.sys, "platform", "linux")
@@ -531,8 +535,11 @@ class TestMigrateMacosDefaultPaths:
         new_dir = ss._default_install_dir()
         assert (new_dir / "opensak.json").exists()
         assert (new_dir / "MyCaches.sqlite").read_text(encoding="utf-8") == "dummy-db"
-        # Old dir should be cleaned up once empty.
-        assert not old_dir.exists()
+        # Old dir is now intentionally kept (not rmdir'd) because a
+        # permanent opensak.json backup lives there for safety (see
+        # TestBackupOpensakJsonInPlace) — it's no longer "empty" by design.
+        assert old_dir.exists()
+        assert sorted(p.name for p in old_dir.iterdir()) == [ss._PRE_MIGRATION_BACKUP_NAME]
         # New bootstrap.json must point at the new default install dir.
         new_bootstrap_data = json.loads(ss._bootstrap_path().read_text(encoding="utf-8"))
         assert Path(new_bootstrap_data["install_dir"]) == new_dir
@@ -661,3 +668,71 @@ class TestMigrateMacosDefaultPaths:
         bad.write_text("{not valid json", encoding="utf-8")
         ss._rewrite_stale_install_dir_paths(bad, tmp_path / "old", tmp_path / "new")
         assert bad.read_text(encoding="utf-8") == "{not valid json"  # left untouched
+
+
+class TestBackupOpensakJsonInPlace:
+    """
+    Regression tests for the pre-migration backup safety net added after a
+    real macOS user (Mike, Sep 2026) had a fully-migrated opensak.json go
+    missing for reasons unrelated to the move itself. The backup exists so
+    that scenario is always recoverable directly from the user's own
+    machine, without needing a Time Machine backup.
+    """
+
+    @posix_only
+    def test_backup_left_behind_and_survives_new_copy_being_lost(
+        self, monkeypatch, tmp_path
+    ):
+        _patch_macos_platform(monkeypatch, tmp_path)
+        old_dir = ss._legacy_macos_default_install_dir()
+        old_dir.mkdir(parents=True)
+        original_content = json.dumps({"user.gc_username": "MikeWood"})
+        (old_dir / "opensak.json").write_text(original_content, encoding="utf-8")
+
+        assert ss.migrate_macos_default_paths() is True
+
+        backup = old_dir / ss._PRE_MIGRATION_BACKUP_NAME
+        assert backup.exists()
+        assert backup.read_text(encoding="utf-8") == original_content
+
+        # Simulate whatever later wiped Mike's migrated settings file —
+        # the backup must be completely unaffected.
+        new_dir = ss._default_install_dir()
+        (new_dir / "opensak.json").unlink()
+        assert backup.exists()
+        assert backup.read_text(encoding="utf-8") == original_content
+
+    @posix_only
+    def test_backup_not_swept_up_by_the_generic_move_loop(self, monkeypatch, tmp_path):
+        """
+        The backup file is created inside the same directory the generic
+        move loop iterates over — it must explicitly skip it, or the
+        'permanent, in-place' guarantee is broken.
+        """
+        _patch_macos_platform(monkeypatch, tmp_path)
+        old_dir = ss._legacy_macos_default_install_dir()
+        old_dir.mkdir(parents=True)
+        (old_dir / "opensak.json").write_text("{}", encoding="utf-8")
+
+        ss.migrate_macos_default_paths()
+
+        new_dir = ss._default_install_dir()
+        assert not (new_dir / ss._PRE_MIGRATION_BACKUP_NAME).exists()
+        assert (old_dir / ss._PRE_MIGRATION_BACKUP_NAME).exists()
+
+    def test_noop_when_source_missing(self, tmp_path):
+        """Must not raise or create anything if there's no opensak.json to back up."""
+        ss._backup_opensak_json_in_place(tmp_path)
+        assert not (tmp_path / ss._PRE_MIGRATION_BACKUP_NAME).exists()
+
+    def test_does_not_overwrite_an_existing_backup(self, tmp_path):
+        """A second call (e.g. an interrupted earlier run) must not clobber
+        an existing backup with different/newer content."""
+        (tmp_path / "opensak.json").write_text('{"v": 2}', encoding="utf-8")
+        (tmp_path / ss._PRE_MIGRATION_BACKUP_NAME).write_text(
+            '{"v": 1}', encoding="utf-8"
+        )
+        ss._backup_opensak_json_in_place(tmp_path)
+        assert (tmp_path / ss._PRE_MIGRATION_BACKUP_NAME).read_text(
+            encoding="utf-8"
+        ) == '{"v": 1}'

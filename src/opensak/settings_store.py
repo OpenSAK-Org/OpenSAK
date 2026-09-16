@@ -533,6 +533,50 @@ def _rewrite_stale_install_dir_paths(
                   f"stale stier i {json_path}: {exc}")
 
 
+_PRE_MIGRATION_BACKUP_NAME = "opensak.json.pre-825-migration-backup"
+
+
+def _backup_opensak_json_in_place(source_dir: Path) -> None:
+    """
+    Efterlad en permanent kopi af `opensak.json` i `source_dir`, FØR
+    migreringen rører noget som helst.
+
+    Baggrund: et rigtigt brugertilfælde (Mike, sep. 2026) viste at selve
+    filflytningen kan lykkes perfekt, og det færdigmigrerede opensak.json
+    alligevel efterfølgende gå tabt af en helt anden, endnu ikke fuldt
+    forstået årsag (formentlig en efterfølgende kørsel der ikke fandt
+    filen på det forventede tidspunkt). Uden en backup er brugerens
+    user.gc_username, hjemme-koordinater m.fl. i så fald definitivt væk —
+    kun bekræftet gendannet i praksis, fordi brugeren tilfældigvis havde
+    en Time Machine-backup af netop denne skjulte sti.
+
+    Denne funktion garanterer at en kopi altid bliver liggende, urørt, i
+    den ORIGINALE mappe — uafhængigt af om selve migreringen, eller noget
+    efter den, går galt. Filen flyttes/slettes ALDRIG af oprydnings-
+    logikken bagefter, netop fordi den gør mappen ikke-tom.
+
+    Kun `opensak.json` (typisk << 1 MB) sikkerhedskopieres — IKKE
+    databasefiler, som kan være mange GB og allerede håndteres af den
+    normale flytte-logik.
+
+    Best-effort: fejler stille (ingen exception) hvis kilden mangler,
+    allerede er sikkerhedskopieret, eller kopiering af en eller anden
+    grund ikke lykkes — dette må aldrig kunne forhindre selve
+    migreringen i at fortsætte.
+    """
+    source = source_dir / "opensak.json"
+    if not source.exists():
+        return
+    backup = source_dir / _PRE_MIGRATION_BACKUP_NAME
+    if backup.exists():
+        return  # allerede sikkerhedskopieret (fx ved en tidligere, afbrudt kørsel)
+    try:
+        shutil.copy2(str(source), str(backup))
+    except OSError as exc:
+        print(f"[settings] macOS-migration: kunne ikke tage backup af "
+              f"{source}: {exc}")
+
+
 def migrate_macos_default_paths() -> bool:
     """
     Én-gangs migration af eksisterende macOS-brugeres data fra den
@@ -594,12 +638,15 @@ def migrate_macos_default_paths() -> bool:
         # velkomst-wizarden (issue #562).
         new_install_dir = _default_install_dir()
         if old_default_install.exists():
+            _backup_opensak_json_in_place(old_default_install)
             new_install_dir.mkdir(parents=True, exist_ok=True)
             try:
                 entries = list(old_default_install.iterdir())
             except OSError:
                 entries = []
             for entry in entries:
+                if entry.name == _PRE_MIGRATION_BACKUP_NAME:
+                    continue  # skal blive liggende urørt i den GAMLE mappe
                 target = new_install_dir / entry.name
                 if target.exists():
                     continue  # kollision — rør det ikke, behold begge som de er
@@ -629,6 +676,7 @@ def migrate_macos_default_paths() -> bool:
         # Brugervalgt mappe — indholdet er ikke ramt af bug'en, kun
         # bootstrap.json's egen (forkerte) placering skal rettes.
         new_install_dir = actual_install_dir
+        _backup_opensak_json_in_place(actual_install_dir)
 
     # Skriv bootstrap.json på den nye, korrekte sti, pegende på den
     # (evt. flyttede) installationsmappe.
