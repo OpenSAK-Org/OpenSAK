@@ -4,6 +4,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.2] — 2026-09-16
+
+> Bugfix-only release on the 1.19.0 stable line, following directly on
+> from v1.19.1. Adds a safety net for the macOS #825/#867 migration, plus
+> diagnostic logging to help track down a still-open, related report.
+
+### Fixed
+
+- **macOS: permanent in-place backup of `opensak.json` before the #825
+  migration touches anything (fixes #870)** — A real user (Mike Wood)
+  reported that his settings file (`opensak.json`) — username, home
+  coordinates, everything — disappeared entirely after upgrading on
+  macOS, despite the file-move logic itself behaving correctly when
+  traced step by step. The exact cause of the disappearance is still
+  under investigation, but regardless of that cause, there was no reason
+  a user should ever need a system backup to recover: the migration
+  already has the original file in hand for a moment before doing
+  anything to it. It now leaves a permanent copy
+  (`opensak.json.pre-825-migration-backup`) behind, in place, in the old
+  directory — explicitly excluded from the move/cleanup logic so it can
+  never be swept away by the same process, or by anything that happens
+  afterward. Previously, recovering from this required a Time Machine
+  (or similar) backup of a hidden path most backup tools don't cover by
+  default; this user was only able to recover in full because he
+  happened to have one.
+
+### Added
+
+- **Diagnostic logging for the macOS migration and database-manager
+  fallback (#870)** — Two new debug-log channels (`settings_migration`,
+  `db_manager`), enabled by default for now, trace exactly what the
+  #825/#867 migration finds and does at each step, and log a clear
+  warning at the precise moment `DatabaseManager` falls back to creating
+  a fresh, empty "Default" database because it couldn't find any
+  database it recognised. If this happens to you, `opensak.log` will now
+  show what your settings actually contained right before that point —
+  please attach it if you report a similar issue.
+
+---
+
 ## [1.19.1] — 2026-09-15
 
 > Bugfix-only release on the 1.19.0 stable line. Fixes a data-loss-looking

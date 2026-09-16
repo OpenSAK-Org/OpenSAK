@@ -17,12 +17,14 @@ from __future__ import annotations
 # Hvert modul der ønsker debug-logging skal have en nøgle her.
 # Nøglen bruges som logger-navn: logging.getLogger(f"opensak.{key}")
 DEBUG_MODULES: dict[str, bool] = {
-    "updater":          True,   # update checker — aktiveret for #204
-    "importer":         False,  # GPX/PQ import
-    "filter_engine":    False,  # filter beregning
-    "map_widget":       False,  # Leaflet/kort
-    "database":         False,  # SQLAlchemy queries
-    "geo":              False,  # reverse geocoding (boundaries, packs, store)
+    "updater":            True,   # update checker — aktiveret for #204
+    "importer":           False,  # GPX/PQ import
+    "filter_engine":      False,  # filter beregning
+    "map_widget":         False,  # Leaflet/kort
+    "database":           False,  # SQLAlchemy queries
+    "geo":                False,  # reverse geocoding (boundaries, packs, store)
+    "settings_migration": True,   # macOS #825/#867/#870-migration — aktiveret indtil #870's rodårsag er fundet
+    "db_manager":         True,   # DatabaseManager load/fallback-diagnostik — aktiveret indtil #870's rodårsag er fundet
 }
 
 
