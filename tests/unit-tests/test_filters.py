@@ -1056,6 +1056,38 @@ class TestDateFilter:
         assert not f.matches(_cache(found_date=datetime(2026, 9, 1), last_log_date=None))
         assert not f.matches(_cache(found_date=None, last_log_date=datetime(2026, 9, 1)))
 
+    def test_time_bounds_on_datetime_fields(self):
+        at = datetime(2026, 9, 14, 13, 45)
+        before = DateFilter("creation_date", "on_or_before", date1=at)
+        after = DateFilter("last_gpx_update", "on_or_after", date1=at)
+        equal = DateFilter("changed_date", "equal", date1=at)
+        assert before.matches(_cache(imported_at=datetime(2026, 9, 14, 13, 45, 59)))
+        assert not before.matches(_cache(imported_at=datetime(2026, 9, 14, 13, 46)))
+        assert after.matches(_cache(last_gpx_update=at))
+        assert not after.matches(_cache(last_gpx_update=datetime(2026, 9, 14, 13, 44, 59)))
+        assert equal.matches(_cache(last_updated=datetime(2026, 9, 14, 13, 45, 30)))
+        assert not equal.matches(_cache(last_updated=datetime(2026, 9, 14, 13, 46)))
+
+    def test_time_bounds_between_in_either_order(self):
+        f = DateFilter("creation_date", "between", date1=datetime(2026, 9, 14, 18, 0),
+                       date2=datetime(2026, 9, 14, 8, 30))
+        assert f.matches(_cache(imported_at=datetime(2026, 9, 14, 8, 30)))
+        assert f.matches(_cache(imported_at=datetime(2026, 9, 14, 18, 0, 59)))
+        assert not f.matches(_cache(imported_at=datetime(2026, 9, 14, 8, 29, 59)))
+        assert not f.matches(_cache(imported_at=datetime(2026, 9, 14, 18, 1)))
+
+    def test_time_dropped_on_date_only_fields(self):
+        f = DateFilter("hidden_date", "equal", date1=datetime(2026, 9, 14, 13, 45))
+        assert f.date1 == date(2026, 9, 14) and not isinstance(f.date1, datetime)
+        assert f.matches(_cache(hidden_date=_day(self.D, 23)))
+
+    def test_time_bounds_round_trip_through_json(self):
+        f = DateFilter("last_gpx_update", "between", date1=datetime(2026, 1, 2, 3, 4, 59),
+                       date2=date(2026, 2, 1))
+        restored = DateFilter.from_dict(json.loads(json.dumps(f.to_dict())))
+        assert restored.date1 == datetime(2026, 1, 2, 3, 4)
+        assert restored.date2 == date(2026, 2, 1) and not isinstance(restored.date2, datetime)
+
     def test_round_trip_through_json(self):
         fs = FilterSet()
         fs.add(DateFilter("changed_date", "between", date1=date(2020, 1, 1), date2=date(2020, 12, 31)))

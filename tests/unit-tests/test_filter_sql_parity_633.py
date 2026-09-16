@@ -267,6 +267,18 @@ class TestDateFilter:
             compare_op=compare_op, compare_days=days,
         )))
 
+    @pytest.mark.parametrize("op, kwargs", [
+        ("on_or_before", {"date1": datetime(2026, 4, 1, 23, 58)}),
+        ("on_or_before", {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("on_or_after",  {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("equal",        {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("between",      {"date1": datetime(2026, 4, 2, 0, 0), "date2": datetime(2026, 4, 1, 12, 0)}),
+    ])
+    def test_time_bounds(self, op, kwargs):
+        codes = assert_parity(FilterSet().add(DateFilter("changed_date", op, **kwargs)))
+        expected = not (op == "on_or_before" and kwargs["date1"].minute == 58)
+        assert ("GC6330013" in codes) is expected  # last_updated 23:59:59
+
     def test_equal_ignores_time_of_day(self):
         codes = assert_parity(FilterSet().add(DateFilter("hidden_date", "equal", date1=date(2026, 5, 1))))
         assert codes == {"GC6330013"}

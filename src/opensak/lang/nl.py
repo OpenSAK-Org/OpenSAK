@@ -686,6 +686,7 @@ STRINGS: dict[str, str] = {
     "filter_date_op_not_during":    "Niet tijdens",
     "filter_date_op_compare":       "Vergeleken met",
     "filter_date_last":             "Laatste",
+    "filter_date_with_time":        "Tijd",
     "filter_date_unit_days":        "dagen",
     "filter_date_unit_weeks":       "weken",
     "filter_date_unit_months":      "maanden",

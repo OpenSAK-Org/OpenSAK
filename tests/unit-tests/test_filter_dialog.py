@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 pytest.importorskip("pytestqt")
 
 from PySide6.QtWidgets import QInputDialog
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QTime
 
 from opensak.gui.dialogs import filter_dialog as fd
 from opensak.gui.dialogs.filter_dialog import FilterDialog, TriStateBox, DTSpinBox
@@ -21,7 +21,7 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
-    DateFilter, DATE_FILTER_FIELDS,
+    DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter, WaypointFilter,
     FilterProfile,
 )
@@ -292,6 +292,37 @@ class TestBuildFilterset:
             found = True
             found_date = datetime(2026, 9, 2, 14, 30, 0)
         assert f.matches(_Cache()) is True
+
+    def test_time_checkbox_only_on_datetime_fields(self, dlg):
+        for field, row in dlg._date_rows.items():
+            row._select(row.op_combo, "equal")
+            assert (not row.time_check.isHidden()) is (field in DATETIME_FILTER_FIELDS), field
+            row._select(row.op_combo, "during")
+            assert row.time_check.isHidden(), field
+
+    def test_time_bounds_build_load_and_reset(self, dlg):
+        row = dlg._date_rows["creation_date"]
+        row._select(row.op_combo, "between")
+        row.date1.setDate(QDate(2026, 9, 2))
+        row.date2.setDate(QDate(2026, 9, 3))
+        assert _date_filters(dlg._build_filterset())["creation_date"].date1 == date(2026, 9, 2)
+
+        date_width = row.date1.sizeHint().width()
+        row.time_check.setChecked(True)
+        assert "mm" in row.date1.displayFormat()
+        text_width = row.date1.fontMetrics().horizontalAdvance(row.date1.text())
+        assert row.date1.minimumWidth() > date_width
+        assert row.date1.minimumWidth() > text_width
+        row.date1.setTime(QTime(8, 15))
+        f = _date_filters(dlg._build_filterset())["creation_date"]
+        assert (f.date1, f.date2) == (datetime(2026, 9, 2, 8, 15), datetime(2026, 9, 3, 23, 59))
+
+        dlg._reset_dates()
+        assert not row.time_check.isChecked() and "mm" not in row.date1.displayFormat()
+        assert row.date1.minimumWidth() == date_width
+        row.load(f)
+        assert row.time_check.isChecked()
+        assert _date_filters(dlg._build_filterset())["creation_date"].to_dict() == f.to_dict()
 
     def test_between_relative_and_compare_rows(self, dlg):
         hidden = dlg._date_rows["hidden_date"]

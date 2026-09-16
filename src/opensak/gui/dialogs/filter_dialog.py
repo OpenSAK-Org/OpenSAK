@@ -15,7 +15,7 @@ Understøtter gem/indlæs filterprofiler.
 """
 
 from __future__ import annotations
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -26,11 +26,11 @@ from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
     QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
-    QDateEdit, QSizePolicy, QFrame, QPlainTextEdit,
+    QDateEdit, QDateTimeEdit, QSizePolicy, QFrame, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QDateTime, QTime
 from PySide6.QtGui import QColor
 import unicodedata
 
@@ -51,7 +51,7 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
-    DateFilter, LEGACY_DATE_FILTER_FIELDS,
+    DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
     FilterProfile,
@@ -400,13 +400,19 @@ def _qdate_to_date(qdate: QDate) -> date:
     return date(qdate.year(), qdate.month(), qdate.day())
 
 
+def _qdatetime_to_datetime(qdt: QDateTime) -> datetime:
+    d, t = qdt.date(), qdt.time()
+    return datetime(d.year(), d.month(), d.day(), t.hour(), t.minute())
+
+
 class DateFilterRow(QWidget):
     """Operator dropdown + inputs for one date field (GSAK's Dates tab).
 
     Depending on the operator it shows one or two date pickers, "Last
     [N] [days/weeks/months/years]", or a comparison with another date field
     (plus a day count for "within"/"outside"). The label turns bold while the
-    row is active.
+    row is active. Fields in DATETIME_FILTER_FIELDS get a "Time" checkbox that
+    adds hours:minutes to the date pickers.
 
     *field* None means a date that is not one of the cache's date fields (a
     waypoint's date): there is nothing to compare with, so no "compare"
@@ -429,8 +435,13 @@ class DateFilterRow(QWidget):
 
         self.date1 = self._make_date_edit()
         self.date2 = self._make_date_edit()
+        self._date_format = self.date1.displayFormat()
+        self._date_width: Optional[int] = None  # date-only picker width
         layout.addWidget(self.date1)
         layout.addWidget(self.date2)
+        self.time_check = QCheckBox(tr("filter_date_with_time"))
+        self._with_time = field in DATETIME_FILTER_FIELDS
+        layout.addWidget(self.time_check)
 
         self._relative = QWidget()
         rel_layout = QHBoxLayout(self._relative)
@@ -468,14 +479,36 @@ class DateFilterRow(QWidget):
 
         self.op_combo.currentIndexChanged.connect(self._update_inputs)
         self.compare_combo.currentIndexChanged.connect(self._update_inputs)
+        self.time_check.toggled.connect(self._update_time_format)
+        self._reset_times()
         self._update_inputs()
 
     @staticmethod
-    def _make_date_edit() -> QDateEdit:
-        edit = QDateEdit()
+    def _make_date_edit() -> QDateTimeEdit:
+        edit = QDateTimeEdit()
         edit.setCalendarPopup(True)
+        edit.setDisplayFormat(QDateEdit().displayFormat())
         edit.setDate(QDate.currentDate())
         return edit
+
+    def _reset_times(self) -> None:
+        # "between" defaults to the whole of both days once a time is shown
+        self.date1.setTime(QTime(0, 0))
+        self.date2.setTime(QTime(23, 59))
+
+    def _update_time_format(self) -> None:
+        fmt = self._date_format
+        with_time = self.time_check.isChecked()
+        if with_time:
+            fmt += " HH:mm"
+        for edit in (self.date1, self.date2):
+            # QDateTimeEdit caches its size hint, so it would not grow for
+            # the longer format — widen it by the width of the time part.
+            if self._date_width is None:
+                self._date_width = edit.sizeHint().width()
+            extra = edit.fontMetrics().horizontalAdvance(" 00:00") if with_time else 0
+            edit.setMinimumWidth(self._date_width + extra)
+            edit.setDisplayFormat(fmt)
 
     def op(self) -> str:
         return self.op_combo.currentData()
@@ -488,8 +521,10 @@ class DateFilterRow(QWidget):
 
     def reset(self) -> None:
         self.op_combo.setCurrentIndex(0)
+        self.time_check.setChecked(False)
         self.date1.setDate(QDate.currentDate())
         self.date2.setDate(QDate.currentDate())
+        self._reset_times()
         self.amount.setValue(1)
         self.unit_combo.setCurrentIndex(0)
         self.other_combo.setCurrentIndex(0)
@@ -514,18 +549,28 @@ class DateFilterRow(QWidget):
         the operator uses — keeps saved profiles free of stale picker values."""
         op = self.op()
         return {
-            "date1": _qdate_to_date(self.date1.date()) if op in _DATE_OPS_WITH_DATE1 else None,
-            "date2": _qdate_to_date(self.date2.date()) if op == "between" else None,
+            "date1": self._value(self.date1) if op in _DATE_OPS_WITH_DATE1 else None,
+            "date2": self._value(self.date2) if op == "between" else None,
             "amount": self.amount.value(),
             "unit": self.unit_combo.currentData(),
         }
 
+    def _value(self, edit: QDateTimeEdit) -> date:
+        """The picker's date, or date and time when the time box is ticked."""
+        if self._with_time and self.time_check.isChecked():
+            return _qdatetime_to_datetime(edit.dateTime())
+        return _qdate_to_date(edit.date())
+
     def load_range(self, op: str, date1: Optional[date], date2: Optional[date],
                    amount: int, unit: str) -> None:
         self._select(self.op_combo, op)
+        self.time_check.setChecked(self._with_time and any(
+            isinstance(value, datetime) for value in (date1, date2)))
         for edit, value in ((self.date1, date1), (self.date2, date2)):
             if value is not None:
                 edit.setDate(QDate(value.year, value.month, value.day))
+                if isinstance(value, datetime):
+                    edit.setTime(QTime(value.hour, value.minute))
         self.amount.setValue(amount)
         self._select(self.unit_combo, unit)
 
@@ -539,6 +584,7 @@ class DateFilterRow(QWidget):
         op = self.op()
         self.date1.setVisible(op in _DATE_OPS_WITH_DATE1)
         self.date2.setVisible(op == "between")
+        self.time_check.setVisible(self._with_time and op in _DATE_OPS_WITH_DATE1)
         self._relative.setVisible(op in _DATE_OPS_RELATIVE)
         self._compare.setVisible(op == "compare")
         needs_days = self.compare_combo.currentData() in ("within", "outside")

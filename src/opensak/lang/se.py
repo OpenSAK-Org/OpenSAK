@@ -683,6 +683,7 @@ STRINGS: dict[str, str] = {
     "filter_date_op_not_during":    "Inte under",
     "filter_date_op_compare":       "Jämfört med",
     "filter_date_last":             "Senaste",
+    "filter_date_with_time":        "Klockslag",
     "filter_date_unit_days":        "dagar",
     "filter_date_unit_weeks":       "veckor",
     "filter_date_unit_months":      "månader",

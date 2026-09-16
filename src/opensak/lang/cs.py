@@ -683,6 +683,7 @@ STRINGS: dict[str, str] = {
     "filter_date_op_not_during":    "Ne během",
     "filter_date_op_compare":       "Porovnáno s",
     "filter_date_last":             "Posledních",
+    "filter_date_with_time":        "Čas",
     "filter_date_unit_days":        "dní",
     "filter_date_unit_weeks":       "týdnů",
     "filter_date_unit_months":      "měsíců",

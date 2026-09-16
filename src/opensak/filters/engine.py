@@ -1440,6 +1440,9 @@ DATE_FILTER_FIELDS: dict[str, str] = {
     "last_log_date":   "last_log_date",
     "changed_date":    "last_updated",
 }
+# Fields whose DateFilter bounds may carry a time of day (to the minute) —
+# timestamps OpenSAK records itself, where the time is meaningful.
+DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "changed_date")
 DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
             "during", "not_during", "compare")
 DATE_UNITS = ("days", "weeks", "months", "years")
@@ -1469,8 +1472,40 @@ def _parse_iso_date(value: Optional[str]) -> Optional[date]:
     return datetime.fromisoformat(value).date() if value else None
 
 
+def _parse_iso_bound(value: Optional[str]) -> Optional[date]:
+    """Parse a saved DateFilter bound: a date for 'YYYY-MM-DD', a datetime
+    when the string carries a time."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    return parsed if "T" in value or " " in value else parsed.date()
+
+
+def _to_bound(value, with_time: bool) -> Optional[date]:
+    """A DateFilter bound: a naive datetime truncated to the minute when
+    *with_time* and *value* has a time, otherwise its calendar date."""
+    if with_time and isinstance(value, datetime):
+        return value.replace(tzinfo=None, second=0, microsecond=0)
+    return _to_date(value)
+
+
 def _day_start(d: date) -> datetime:
     return datetime(d.year, d.month, d.day)
+
+
+def _bound_start(b: date) -> datetime:
+    """First instant covered by bound *b* (a date or a to-the-minute datetime)."""
+    return b if isinstance(b, datetime) else _day_start(b)
+
+
+def _bound_end(b: date) -> Optional[datetime]:
+    """First instant after bound *b* (None if that overflows)."""
+    try:
+        if isinstance(b, datetime):
+            return b + timedelta(minutes=1)
+        return _day_start(b + timedelta(days=1))
+    except OverflowError:
+        return None
 
 
 def _months_back(d: date, months: int) -> date:
@@ -1530,33 +1565,40 @@ def _date_op_range(
         return date1, date1
     if op == "between":
         assert date1 is not None and date2 is not None  # enforced by callers
-        return min(date1, date2), max(date1, date2)
+        return min(date1, date2, key=_bound_start), max(date1, date2, key=_bound_start)
     today = _today()  # during / not_during
     return _shift_back(today, amount, unit), today
 
 
 def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date]):
     """SQL form of _date_in_range() on datetime column *col*. Compares the raw
-    column against day boundaries, so an index on it stays usable."""
+    column against day (or minute) boundaries, so an index on it stays usable."""
     from sqlalchemy import and_, not_, or_
     conditions = [col.is_not(None)]
     if lo is not None:
-        conditions.append(col >= _day_start(lo))
-    if hi is not None and hi < date.max:
-        conditions.append(col < _day_start(hi + timedelta(days=1)))
+        conditions.append(col >= _bound_start(lo))
+    end = _bound_end(hi) if hi is not None else None
+    if end is not None:
+        conditions.append(col < end)
     inside = and_(*conditions)
     if op == "not_during":
         return or_(col.is_(None), not_(inside))
     return inside
 
 
-def _date_in_range(value: Optional[date], op: str, lo: Optional[date], hi: Optional[date]) -> bool:
-    """Whether calendar date *value* passes a range operator: inside [lo, hi],
-    or — for not_during — outside it or missing."""
+def _date_in_range(value, op: str, lo: Optional[date], hi: Optional[date]) -> bool:
+    """Whether *value* (a date or datetime) passes a range operator: inside
+    [lo, hi], or — for not_during — outside it or missing. Date bounds cover
+    whole days, datetime bounds whole minutes."""
+    if isinstance(value, datetime):
+        value = value.replace(tzinfo=None)
+    elif value is not None:
+        value = _day_start(value)
+    end = _bound_end(hi) if hi is not None else None
     inside = (
         value is not None
-        and (lo is None or value >= lo)
-        and (hi is None or value <= hi)
+        and (lo is None or value >= _bound_start(lo))
+        and (end is None or value < end)
     )
     return not inside if op == "not_during" else inside
 
@@ -1566,6 +1608,8 @@ class DateFilter(BaseFilter):
 
     Operators — all compare calendar dates, ignoring the time of day:
       on_or_before / on_or_after / equal   relative to *date1*
+                   (for DATETIME_FILTER_FIELDS, *date1*/*date2* may be
+                   datetimes: the bound is then that minute instead of a day)
       between      *date1*..*date2* inclusive (in either order)
       during       within the last *amount* *unit*s, up to and including today
       not_during   the complement of "during": also matches caches without a
@@ -1605,8 +1649,9 @@ class DateFilter(BaseFilter):
             raise ValueError(f"Unknown date compare operator {compare_op!r}")
         self.field = field
         self.op = op
-        self.date1 = _to_date(date1)
-        self.date2 = _to_date(date2)
+        with_time = field in DATETIME_FILTER_FIELDS
+        self.date1 = _to_bound(date1, with_time)
+        self.date2 = _to_bound(date2, with_time)
         if op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
             raise ValueError(f"Date operator {op!r} needs date1")
         if op == "between" and self.date2 is None:
@@ -1637,13 +1682,14 @@ class DateFilter(BaseFilter):
         return query.filter(_date_range_sql(col, self.op, *self._range()))
 
     def matches(self, cache: Cache) -> bool:
-        value = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.field], None))
+        raw = getattr(cache, DATE_FILTER_FIELDS[self.field], None)
+        value = _to_date(raw)
         if self.op == "compare":
             other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
             if value is None or other is None:
                 return False
             return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
-        return _date_in_range(value, self.op, *self._range())
+        return _date_in_range(raw, self.op, *self._range())
 
     def to_dict(self) -> dict:
         return {
@@ -1664,8 +1710,8 @@ class DateFilter(BaseFilter):
         return cls(
             field=data["field"],
             op=data["op"],
-            date1=_parse_iso_date(data.get("date1")),
-            date2=_parse_iso_date(data.get("date2")),
+            date1=_parse_iso_bound(data.get("date1")),
+            date2=_parse_iso_bound(data.get("date2")),
             amount=data.get("amount", 1),
             unit=data.get("unit", "days"),
             other_field=data.get("other_field", "hidden_date"),
