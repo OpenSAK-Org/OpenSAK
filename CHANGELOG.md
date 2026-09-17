@@ -4,6 +4,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.3] — 2026-09-17
+
+> Bugfix-only release on the 1.19.0 stable line. Closes the root cause
+> behind #870, reproduced and confirmed on real Mac hardware.
+
+### Fixed
+
+- **macOS: `opensak.json` could be silently lost during the #825
+  migration instead of being moved (fixes #870)** — Reproducing the
+  original report on real Mac hardware showed that `shutil.move()` can
+  apparently fail for a specific file during the one-time macOS path
+  migration without ever raising an exception — evidenced by the
+  "migrated" `opensak.json` carrying the migration's own timestamp
+  rather than its original one, meaning it had been freshly created by
+  the app finding nothing at the destination, not actually moved.
+  Meanwhile other files in the very same migration run (e.g.
+  `Default.db`) moved correctly, ruling out a simple permissions
+  problem. The exact underlying trigger is still unconfirmed, but the
+  migration no longer depends on `shutil.move()` behaving correctly to
+  avoid data loss: each file is now copied, verified to match the
+  original by size, and only then is the source removed. If
+  verification ever fails, the original file is left completely
+  untouched (and the incomplete copy is cleaned up) instead of quietly
+  vanishing.
+
+---
+
 ## [1.19.2] — 2026-09-16
 
 > Bugfix-only release on the 1.19.0 stable line, following directly on

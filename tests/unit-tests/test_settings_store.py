@@ -669,6 +669,148 @@ class TestMigrateMacosDefaultPaths:
         ss._rewrite_stale_install_dir_paths(bad, tmp_path / "old", tmp_path / "new")
         assert bad.read_text(encoding="utf-8") == "{not valid json"  # left untouched
 
+    @posix_only
+    def test_end_to_end_survives_silent_copy_corruption_of_settings(
+        self, monkeypatch, tmp_path
+    ):
+        """
+        Full-migration regression test for #870: simulates the exact
+        symptom reproduced on real hardware — copying opensak.json
+        "succeeds" with no exception, but the destination ends up empty
+        instead of matching the source (Default.db, in the same run,
+        copies correctly). Before the _move_verified() fix, this meant
+        the real settings were silently lost, and the app fell back to
+        a fresh-looking install (missing username/home location) on
+        next launch. After the fix, the real opensak.json must survive
+        in the OLD directory rather than being replaced by an empty one.
+        """
+        self._patch_platform(monkeypatch, tmp_path)
+        old_dir = ss._legacy_macos_default_install_dir()
+        old_dir.mkdir(parents=True)
+        real_settings = json.dumps({"user.gc_username": "Allan", "user.home_lat": 55.6})
+        (old_dir / "opensak.json").write_text(real_settings, encoding="utf-8")
+        (old_dir / "Default.db").write_text("real-cache-data", encoding="utf-8")
+
+        original_copy2 = ss.shutil.copy2
+
+        def _corrupt_only_settings_json(src, dst, *a, **kw):
+            if Path(src).name == "opensak.json":
+                Path(dst).write_text("{}", encoding="utf-8")  # silent corruption
+            else:
+                original_copy2(src, dst, *a, **kw)  # everything else moves fine
+        monkeypatch.setattr(ss.shutil, "copy2", _corrupt_only_settings_json)
+
+        ss.migrate_macos_default_paths()
+
+        new_dir = ss._default_install_dir()
+        # The database migrated fine, same as the real hardware reproduction.
+        assert (new_dir / "Default.db").read_text(encoding="utf-8") == "real-cache-data"
+        # The settings file must NOT have been silently replaced by an
+        # empty one — the real data must still be found, in the old dir,
+        # not lost.
+        assert not (new_dir / "opensak.json").exists()
+        assert (old_dir / "opensak.json").read_text(encoding="utf-8") == real_settings
+
+
+class TestMoveVerified:
+    """
+    Issue #870: reproduced on real Mac hardware that shutil.move() can
+    apparently fail silently for a specific file during the macOS #825
+    migration, with no exception ever raised — evidenced by a "migrated"
+    opensak.json carrying the migration run's own timestamp instead of
+    its original one, meaning it was freshly created (nothing found at
+    the destination), not actually moved.
+
+    _move_verified() replaces the raw shutil.move() call with a
+    copy-then-verify-then-delete sequence, so the source file is never
+    lost regardless of the still-unconfirmed underlying cause.
+    """
+
+    def test_successful_move_copies_content_and_removes_source(self, tmp_path):
+        entry = tmp_path / "opensak.json"
+        entry.write_text('{"real": "data"}', encoding="utf-8")
+        target = tmp_path / "dest" / "opensak.json"
+        target.parent.mkdir()
+
+        assert ss._move_verified(entry, target) is True
+        assert not entry.exists()
+        assert target.read_text(encoding="utf-8") == '{"real": "data"}'
+
+    def test_directory_falls_back_to_plain_move(self, tmp_path):
+        entry = tmp_path / "somedir"
+        entry.mkdir()
+        (entry / "inner.txt").write_text("x", encoding="utf-8")
+        target = tmp_path / "dest" / "somedir"
+        target.parent.mkdir()
+
+        assert ss._move_verified(entry, target) is True
+        assert not entry.exists()
+        assert (target / "inner.txt").read_text(encoding="utf-8") == "x"
+
+    def test_copy_failure_preserves_source(self, monkeypatch, tmp_path):
+        entry = tmp_path / "opensak.json"
+        entry.write_text('{"real": "data"}', encoding="utf-8")
+        target = tmp_path / "dest" / "opensak.json"
+        target.parent.mkdir()
+
+        def _boom(*a, **kw):
+            raise OSError("simulated I/O failure")
+        monkeypatch.setattr(ss.shutil, "copy2", _boom)
+
+        assert ss._move_verified(entry, target) is False
+        # Source must survive untouched — this is the core guarantee.
+        assert entry.read_text(encoding="utf-8") == '{"real": "data"}'
+        assert not target.exists()
+
+    def test_size_mismatch_preserves_source_and_cleans_up_partial_copy(
+        self, monkeypatch, tmp_path
+    ):
+        """
+        Directly reproduces the observed #870 symptom: the copy
+        "succeeds" (no exception) but the destination doesn't actually
+        match the source — e.g. an empty/truncated file appears there
+        instead. Must be treated as a failed move, not a successful one.
+        """
+        entry = tmp_path / "opensak.json"
+        entry.write_text('{"user.gc_username": "MikeWood"}', encoding="utf-8")
+        target = tmp_path / "dest" / "opensak.json"
+        target.parent.mkdir()
+
+        def _write_empty_instead(src, dst, *a, **kw):
+            Path(dst).write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(ss.shutil, "copy2", _write_empty_instead)
+
+        assert ss._move_verified(entry, target) is False
+        # Source must survive untouched — this is the whole point of the fix.
+        assert entry.read_text(encoding="utf-8") == '{"user.gc_username": "MikeWood"}'
+        # The bogus partial copy must be cleaned up, not left behind
+        # looking like a (wrong) successful migration.
+        assert not target.exists()
+
+    def test_source_unlink_failure_still_counts_as_success(self, monkeypatch, tmp_path):
+        """
+        If the verified-identical copy exists but the source can't be
+        deleted (e.g. a locked file), the migration of THIS file should
+        still be considered successful — having both is harmless, unlike
+        losing the data.
+        """
+        entry = tmp_path / "opensak.json"
+        entry.write_text('{"real": "data"}', encoding="utf-8")
+        target = tmp_path / "dest" / "opensak.json"
+        target.parent.mkdir()
+
+        original_unlink = Path.unlink
+
+        def _boom_unlink(self, *a, **kw):
+            if self == entry:
+                raise OSError("simulated: file locked")
+            return original_unlink(self, *a, **kw)
+        monkeypatch.setattr(Path, "unlink", _boom_unlink)
+
+        assert ss._move_verified(entry, target) is True
+        assert entry.exists()  # left behind, but harmless
+        assert target.read_text(encoding="utf-8") == '{"real": "data"}'
+
 
 class TestBackupOpensakJsonInPlace:
     """
