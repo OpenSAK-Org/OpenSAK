@@ -607,6 +607,87 @@ def _backup_opensak_json_in_place(source_dir: Path) -> None:
                     source, exc)
 
 
+def _move_verified(entry: Path, target: Path) -> bool:
+    """
+    Robust erstatning for shutil.move() til brug i
+    migrate_macos_default_paths(): kopiér, verificér at kopien reelt
+    matcher kilden, og slet FØRST kildefilen når det er bekræftet.
+
+    Issue #870: reproduceret på rigtig Mac-hardware, at shutil.move()
+    tilsyneladende kan fejle stille for netop opensak.json under denne
+    migrering, mens andre filer i samme løkke (fx Default.db) flyttes
+    korrekt — uden at nogen exception nogensinde ramte den daværende
+    except-gren. Timestamp-bevis: den "migrerede" opensak.json havde
+    migreringstidspunktet som mtime, ikke det oprindelige, bekræftende
+    at filen blev nyoprettet af SettingsStore (fordi intet fandtes på
+    destinationen), ikke flyttet.
+
+    Den præcise bagvedliggende årsag (race condition, macOS-specifik
+    I/O-kvirk, andet) er stadig ukendt — denne funktion løser symptomet
+    uafhængigt af årsagen: kildefilen fjernes ALDRIG, medmindre
+    destinationen beviseligt indeholder identisk indhold bagefter.
+    Undlader bevidst en indholds-hash for at holde det billigt for store
+    databasefiler — filstørrelse er tilstrækkeligt til at opdage den
+    "tom/delvis fil" fejlklasse, vi faktisk har observeret.
+
+    Kataloger (bør ikke forekomme i praksis i denne installations-mappe,
+    men for en sikkerheds skyld) falder tilbage til almindelig
+    shutil.move(), da størrelses-verifikation ikke giver mening for dem.
+
+    Returnerer True hvis flytningen lykkedes og blev verificeret.
+    """
+    if entry.is_dir():
+        try:
+            shutil.move(str(entry), str(target))
+            return True
+        except OSError as exc:
+            _log.warning("migrate_macos_default_paths: flytning af mappen "
+                          "%s -> %s fejlede: %s", entry, target, exc)
+            return False
+
+    try:
+        shutil.copy2(str(entry), str(target))
+    except OSError as exc:
+        _log.warning("migrate_macos_default_paths: kopiering af %s -> %s "
+                      "fejlede: %s", entry, target, exc)
+        return False
+
+    try:
+        source_size = entry.stat().st_size
+        target_size = target.stat().st_size
+    except OSError as exc:
+        _log.warning("migrate_macos_default_paths: kunne ikke verificere "
+                      "%s efter kopiering fra %s: %s", target, entry, exc)
+        return False
+
+    if source_size != target_size:
+        _log.warning(
+            "migrate_macos_default_paths: verifikation fejlede for %s -> "
+            "%s (kilde=%d bytes, kopi=%d bytes) — kildefilen BEVARES "
+            "urørt, kopien slettes igen", entry, target, source_size,
+            target_size,
+        )
+        try:
+            target.unlink()
+        except OSError:
+            pass
+        return False
+
+    try:
+        entry.unlink()
+    except OSError as exc:
+        # Kopien er verificeret identisk, men kilden kunne ikke fjernes
+        # (fx en fil der er låst). Ufarligt at have begge liggende —
+        # betragt selve migreringen af DENNE fil som lykkedes.
+        _log.warning(
+            "migrate_macos_default_paths: kunne ikke slette kildefilen %s "
+            "efter bekræftet kopiering til %s: %s (begge steder har nu "
+            "identisk indhold — ufarligt, men ryd op manuelt om ønsket)",
+            entry, target, exc,
+        )
+    return True
+
+
 def migrate_macos_default_paths() -> bool:
     """
     Én-gangs migration af eksisterende macOS-brugeres data fra den
@@ -703,16 +784,15 @@ def migrate_macos_default_paths() -> bool:
                     _log.debug("migrate_macos_default_paths: kollision på %s "
                                 "— springer over, rører intet", target)
                     continue  # kollision — rør det ikke, behold begge som de er
-                try:
-                    shutil.move(str(entry), str(target))
+                if _move_verified(entry, target):
                     migrated_something = True
-                    _log.debug("migrate_macos_default_paths: flyttede %s -> %s",
-                                entry, target)
-                except OSError as exc:
-                    print(f"[settings] macOS-migration: kunne ikke flytte "
-                          f"{entry} → {target}: {exc}")
+                    _log.debug("migrate_macos_default_paths: flyttede %s -> %s "
+                                "(verificeret)", entry, target)
+                else:
                     _log.debug("migrate_macos_default_paths: flytning af %s "
-                                "-> %s fejlede: %s", entry, target, exc)
+                                "-> %s fejlede eller kunne ikke verificeres "
+                                "(se warning ovenfor) — kildefil bevaret",
+                                entry, target)
             try:
                 if not any(old_default_install.iterdir()):
                     old_default_install.rmdir()
