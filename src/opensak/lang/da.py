@@ -468,6 +468,21 @@ STRINGS: dict[str, str] = {
     "wp_ph_parent_gc":                         "f.eks. GC12345 (valgfrit)",
     "wp_val_dt_invalid":                       "Ugyldig D/T værdi: {value}. Gyldige værdier: 1.0, 1.5, 2.0 ... 5.0",
     "wp_val_parent_gc_invalid":                "'Tilhører cache' skal starte med 'GC'.",
+    # ── Edit cache dialog — extra fields / child waypoints ─────────────────
+    "wp_tab_personal":                         "Personligt",
+    "wp_cb_desc_html":                         "Indeholder HTML",
+    "wp_val_elevation_invalid":                "Højde skal være et tal (meter).",
+    "wp_child_add":                            "Tilføj waypoint…",
+    "wp_child_dialog_title_add":               "Tilføj waypoint",
+    "wp_child_dialog_title_edit":              "Rediger waypoint",
+    "wp_child_col_prefix":                     "Præfiks",
+    "wp_child_label_prefix":                   "Præfiks *:",
+    "wp_child_label_comment":                  "Kommentar:",
+    "wp_child_label_code":                     "Waypoint-kode:",
+    "wp_child_label_date":                     "Dato:",
+    "wp_child_cb_flag":                        "Markeret",
+    "wp_child_val_prefix_required":            "Præfiks er påkrævet.",
+    "wp_child_val_code_duplicate":             "Waypoint-koden {code} bruges allerede af et andet waypoint på denne cache.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_log_placeholder":          "Status vises her…",

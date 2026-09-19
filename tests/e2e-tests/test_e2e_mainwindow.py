@@ -52,6 +52,9 @@ def fake_dialog(*, exec_result=0, signals=(), data=None, attrs=None):
 
         def get_data(self):
             return data
+
+        def save_related(self, session, cache):
+            pass
     return _Fake
 
 

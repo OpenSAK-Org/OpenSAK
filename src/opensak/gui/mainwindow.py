@@ -2210,6 +2210,8 @@ class MainWindow(QMainWindow):
                     return
                 cache = Cache(**data)
                 session.add(cache)
+                session.flush()   # save_related() har brug for cache.id
+                dlg.save_related(session, cache)
             # Issue #662: a newly added cache/custom waypoint had no
             # distance/bearing computed, so it sorted to the bottom of the
             # list (as if distance were unset) until the user switched the
@@ -2261,6 +2263,8 @@ class MainWindow(QMainWindow):
                     for field, value in data.items():
                         if field != "gc_code":
                             setattr(c, field, value)
+                    # UserNote (note + korrigerede koordinater) og child-waypoints
+                    dlg.save_related(session, c)
             # Issue #662 follow-up: same stale-distance issue as adding a
             # new cache — editing coordinates left Cache.distance/bearing
             # unchanged until the center/home point was switched away and
@@ -2275,6 +2279,9 @@ class MainWindow(QMainWindow):
                 from opensak.db.database import recalculate_distances
                 recalculate_distances(s.home_lat, s.home_lon)
             self._refresh_cache_list()
+            # Detaljepanel/kort viser ellers de gamle waypoints, noter og
+            # korrigerede koordinater indtil cachen vælges igen.
+            self._on_found_status_changed(data["gc_code"])
             self._statusbar.showMessage(
                 tr("status_cache_updated", gc_code=data["gc_code"]), 3000
             )

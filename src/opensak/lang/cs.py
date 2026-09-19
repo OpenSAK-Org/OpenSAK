@@ -468,6 +468,21 @@ STRINGS: dict[str, str] = {
     "wp_ph_parent_gc":                         "např. GC12345 (volitelné)",
     "wp_val_dt_invalid":                       "Neplatná hodnota D/T: {value}. Platné hodnoty: 1,0; 1,5; 2,0 … 5,0",
     "wp_val_parent_gc_invalid":                "'Patří ke kešce' musí začínat 'GC'.",
+    # ── Edit cache dialog — extra fields / child waypoints ─────────────────
+    "wp_tab_personal":                         "Osobní",
+    "wp_cb_desc_html":                         "Obsahuje HTML",
+    "wp_val_elevation_invalid":                "Nadmořská výška musí být číslo (metry).",
+    "wp_child_add":                            "Přidat waypoint…",
+    "wp_child_dialog_title_add":               "Přidat waypoint",
+    "wp_child_dialog_title_edit":              "Upravit waypoint",
+    "wp_child_col_prefix":                     "Prefix",
+    "wp_child_label_prefix":                   "Prefix *:",
+    "wp_child_label_comment":                  "Komentář:",
+    "wp_child_label_code":                     "Kód waypointu:",
+    "wp_child_label_date":                     "Datum:",
+    "wp_child_cb_flag":                        "Označeno",
+    "wp_child_val_prefix_required":            "Prefix je povinný.",
+    "wp_child_val_code_duplicate":             "Kód waypointu {code} už používá jiný waypoint této keše.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_log_placeholder":          "Stav se zobrazí zde…",

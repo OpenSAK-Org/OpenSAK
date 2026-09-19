@@ -467,6 +467,21 @@ STRINGS: dict[str, str] = {
     "wp_ph_parent_gc":                         "e.g. GC12345 (optional)",
     "wp_val_dt_invalid":                       "Invalid D/T value: {value}. Valid values: 1.0, 1.5, 2.0 … 5.0",
     "wp_val_parent_gc_invalid":                "'Belongs to cache' must start with 'GC'.",
+    # ── Edit cache dialog — extra fields / child waypoints ─────────────────
+    "wp_tab_personal":                         "Personal",
+    "wp_cb_desc_html":                         "Contains HTML",
+    "wp_val_elevation_invalid":                "Elevation must be a number (metres).",
+    "wp_child_add":                            "Add waypoint…",
+    "wp_child_dialog_title_add":               "Add Waypoint",
+    "wp_child_dialog_title_edit":              "Edit Waypoint",
+    "wp_child_col_prefix":                     "Prefix",
+    "wp_child_label_prefix":                   "Prefix *:",
+    "wp_child_label_comment":                  "Comment:",
+    "wp_child_label_code":                     "Waypoint code:",
+    "wp_child_label_date":                     "Date:",
+    "wp_child_cb_flag":                        "Flagged",
+    "wp_child_val_prefix_required":            "Prefix is required.",
+    "wp_child_val_code_duplicate":             "Waypoint code {code} is already used by another waypoint of this cache.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_log_placeholder":          "Status will be shown here…",
