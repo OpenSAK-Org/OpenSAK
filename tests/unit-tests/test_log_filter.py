@@ -1,7 +1,7 @@
 """tests/unit-tests/test_log_filter.py — LogFilter (GSAK's Logs tab).
 
-Covers the scope (log categories and the last-N window), each per-log
-criterion, the count operators, include/exclude and serialisation, and that
+Covers the last-N window, each per-log criterion (category, type, date,
+finder), the count operators, include/exclude and serialisation, and that
 the SQL push-down, the prepare()-count path and the pure-Python cache.logs
 path all agree — for both apply_filters() and apply_filters_lightweight().
 """
@@ -52,6 +52,13 @@ def seed_log_data(tmp_db):
         ]),
         # No logs at all.
         cache("GCL0004", "Delta", []),
+        # An old DNF buried under two newer finds — the case that tells
+        # "a DNF among the last 2 logs" apart from "the last 2 DNFs".
+        cache("GCL0005", "Epsilon", [
+            log("Found it", 30, finder="Xena", finder_id="U-5"),
+            log("Found it", 28, finder="Yuri", finder_id="U-6"),
+            log("Didn't find it", 4, finder="Bob", finder_id="U-2"),
+        ]),
     ]
     with get_session() as s:
         for c in caches:
@@ -86,8 +93,9 @@ def test_log_category_classifies_by_type():
 
 
 def test_category_scope():
-    assert _all_paths(LogFilter(categories=["found"])) == {"GCL0001", "GCL0002"}
-    assert _all_paths(LogFilter(categories=["not_found"])) == {"GCL0002"}
+    assert _all_paths(LogFilter(categories=["found"])) == \
+        {"GCL0001", "GCL0002", "GCL0005"}
+    assert _all_paths(LogFilter(categories=["not_found"])) == {"GCL0002", "GCL0005"}
     assert _all_paths(LogFilter(categories=["other"])) == {"GCL0001", "GCL0002", "GCL0003"}
     # Nothing to search at all — no cache can have a qualifying log.
     assert _all_paths(LogFilter(categories=[])) == set()
@@ -97,21 +105,30 @@ def test_category_scope():
 
 def test_last_n_limits_which_logs_are_searched():
     # Alpha's newest log is the maintenance one and Beta's is the DNF, so
-    # neither has a find in a one-log window; both do in a two-log one.
-    assert _all_paths(LogFilter(last_n=1, types=["Found it"])) == set()
-    assert _all_paths(LogFilter(last_n=2, types=["Found it"])) == {"GCL0001", "GCL0002"}
-    # Beta's second find is its oldest log — only an unlimited window sees it.
+    # neither has a find in a one-log window (only Epsilon does); all three
+    # do in a two-log one.
+    assert _all_paths(LogFilter(last_n=1, types=["Found it"])) == {"GCL0005"}
+    assert _all_paths(LogFilter(last_n=2, types=["Found it"])) == \
+        {"GCL0001", "GCL0002", "GCL0005"}
+    # Beta's second find is its oldest log — only an unlimited window sees it,
+    # so a three-log window drops Beta from "at least two finds".
     assert _all_paths(LogFilter(types=["Found it"], count_op="at_least", count1=2)) == \
-        {"GCL0001", "GCL0002"}
+        {"GCL0001", "GCL0002", "GCL0005"}
     assert _all_paths(LogFilter(last_n=3, types=["Found it"],
-                                count_op="at_least", count1=2)) == {"GCL0001"}
+                                count_op="at_least", count1=2)) == {"GCL0001", "GCL0005"}
 
 
-def test_last_n_applies_after_the_categories():
-    # Only found logs are searched, so "the last one" is the newest find —
-    # Beta's is Zoë's, not the DNF above it.
-    f = LogFilter(categories=["found"], last_n=1, finder_text="Zoë", finder_op="equals")
-    assert _all_paths(f) == {"GCL0002"}
+def test_last_n_window_spans_every_log_not_just_the_matching_ones():
+    # Regression: the window used to be taken over the logs already narrowed
+    # by the criteria, so "a DNF among the last 2 logs" also matched Epsilon,
+    # whose only DNF sits under two newer finds ("the last 2 DNFs" instead).
+    assert _all_paths(LogFilter(last_n=2, categories=["not_found"])) == {"GCL0002"}
+    assert _all_paths(LogFilter(categories=["not_found"])) == \
+        {"GCL0002", "GCL0005"}
+    # Same for the log types: Epsilon's find is inside a 2-log window, its
+    # DNF is not.
+    assert _all_paths(LogFilter(last_n=2, types=["Didn't find it"])) == {"GCL0002"}
+    assert _all_paths(LogFilter(last_n=1, categories=["found"])) == {"GCL0005"}
 
 
 def test_last_n_orders_undated_logs_last():
@@ -133,17 +150,17 @@ def test_types_and_the_other_catch_all():
 
 def test_date():
     f = LogFilter(date_op="on_or_after", date1=date(2025, 1, 20))
-    assert _all_paths(f) == {"GCL0001", "GCL0002"}
+    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0005"}
     f = LogFilter(date_op="between", date1=date(2025, 1, 1), date2=date(2025, 1, 5))
-    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003"}
+    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003", "GCL0005"}
     # not_during also keeps logs without a date
     f = LogFilter(date_op="not_during", date_amount=1, date_unit="days")
-    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003"}
+    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003", "GCL0005"}
 
 
 def test_finder_by_name_and_by_id():
     assert _all_paths(LogFilter(finder_text="bob", finder_op="equals")) == \
-        {"GCL0001", "GCL0002"}
+        {"GCL0001", "GCL0002", "GCL0005"}
     assert _all_paths(LogFilter(finder_text="U-9", finder_op="equals",
                                 finder_by_id=True)) == {"GCL0003"}
     assert _all_paths(LogFilter(finder_text="", finder_op="empty")) == set()
@@ -159,20 +176,20 @@ def test_criteria_apply_to_the_same_log():
 def test_inexact_sql_paths_regex_and_non_ascii():
     assert _all_paths(LogFilter(finder_text=r"^U-\d$", finder_op="regex",
                                 finder_by_id=True)) == \
-        {"GCL0001", "GCL0002", "GCL0003"}
+        {"GCL0001", "GCL0002", "GCL0003", "GCL0005"}
     assert _all_paths(LogFilter(finder_text="ZOË", finder_op="equals")) == {"GCL0002"}
     assert _all_paths(LogFilter(finder_text="alice", finder_op="not_equals")) == \
-        {"GCL0001", "GCL0002", "GCL0003"}
+        {"GCL0001", "GCL0002", "GCL0003", "GCL0005"}
 
 
 # ── Count ─────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("op, c1, c2, expected", [
     ("equal",    0, 0, {"GCL0004"}),
-    ("equal",    3, 0, {"GCL0001"}),
+    ("equal",    3, 0, {"GCL0001", "GCL0005"}),
     ("at_least", 4, 0, {"GCL0002"}),
     ("at_most",  2, 0, {"GCL0003", "GCL0004"}),
-    ("between",  4, 2, {"GCL0001", "GCL0002", "GCL0003"}),
+    ("between",  4, 2, {"GCL0001", "GCL0002", "GCL0003", "GCL0005"}),
 ])
 def test_total_count(op, c1, c2, expected):
     assert _all_paths(LogFilter(count_op=op, count1=c1, count2=c2)) == expected
@@ -181,7 +198,7 @@ def test_total_count(op, c1, c2, expected):
 def test_count_of_qualifying_logs():
     # Caches with at least two finds
     f = LogFilter(types=["Found it"], count_op="at_least", count1=2)
-    assert _all_paths(f) == {"GCL0001", "GCL0002"}
+    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0005"}
     # Caches without a single find — Delta has no logs at all
     f = LogFilter(types=["Found it"], count_op="equal", count1=0)
     assert _all_paths(f) == {"GCL0003", "GCL0004"}
@@ -194,7 +211,8 @@ def test_count_of_qualifying_logs():
 # ── Include / exclude ─────────────────────────────────────────────────────────
 
 def test_exclude_inverts_the_verdict():
-    assert _all_paths(LogFilter(types=["Found it"])) == {"GCL0001", "GCL0002"}
+    assert _all_paths(LogFilter(types=["Found it"])) == \
+        {"GCL0001", "GCL0002", "GCL0005"}
     assert _all_paths(LogFilter(types=["Found it"], exclude=True)) == \
         {"GCL0003", "GCL0004"}
 
@@ -203,7 +221,7 @@ def test_exclude_on_the_last_n_window():
     # "No maintenance log among the last two" — Alpha's newest log is one.
     f = LogFilter(last_n=2, types=["Owner Maintenance", "Needs Maintenance"],
                   exclude=True)
-    assert _all_paths(f) == {"GCL0002", "GCL0003", "GCL0004"}
+    assert _all_paths(f) == {"GCL0002", "GCL0003", "GCL0004", "GCL0005"}
 
 
 def test_exclude_with_a_count_operator():
@@ -216,7 +234,7 @@ def test_exclude_with_a_count_operator():
 def test_noop_matches_everything():
     f = LogFilter()
     assert f.is_noop()
-    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003", "GCL0004"}
+    assert _all_paths(f) == {"GCL0001", "GCL0002", "GCL0003", "GCL0004", "GCL0005"}
 
 
 def test_combines_with_another_filter():

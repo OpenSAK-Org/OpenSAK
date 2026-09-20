@@ -193,20 +193,20 @@ Filter caches by the logs on them, on the **Logs** tab. It mirrors GSAK's Logs t
 | Setting | Effect |
 |---|---|
 | Logs to search | *All logs*, or only each cache's *N* most recent ones (Latest, Last 2 … Last 100) |
-| Found / Not found / Other | Which kinds of log are searched at all. *Found* covers Found it, Attended and Webcam Photo Taken; *Not found* covers Didn't find it; *Other* is everything else |
 | Include / exclude | Whether the caches that match are kept or dropped |
 
-The categories apply first and the last-*N* window second, so *Logs to search: Latest* with only **Found** ticked means "the most recent find", not "the most recent log, if it is a find".
+The window counts **every** log the cache has, not just the ones the criteria below look for. So *Logs to search: Last 2* with **Not found** ticked means "a DNF among the cache's two most recent logs" — a cache whose only DNF sits under three newer finds does *not* match.
 
 **2. What a log has to be**
 
 | Field | Matches |
 |---|---|
+| Found / Not found / Other | The kind of log. *Found* covers Found it, Attended and Webcam Photo Taken; *Not found* covers Didn't find it; *Other* is everything else |
 | Log date | The log's date — the same operators as the **Dates** tab, except comparing with another date |
 | Log types | The ticked types. Untick **All** to choose individual ones; `"Other"` matches any type not in the list |
 | Logged by | The log's finder — the same text operators as *Name*. Tick **Match the user ID** to compare the numeric user ID instead of the display name |
 
-All of these must hold for the **same** log.
+All of these must hold for the **same** log. Leaving **Logged by** empty matches a log by *anyone* — to find your own logs, type your geocaching name there.
 
 **3. How many such logs**
 
@@ -215,10 +215,11 @@ All of these must hold for the **same** log.
 | To find | Set |
 |---|---|
 | Caches with no find in the last year | Log types = Found it, Log date During 1 years, Exclude |
-| Caches whose most recent log is a DNF | Logs to search = Latest, Log types = Didn't find it |
+| Caches whose most recent log is a DNF | Logs to search = Latest, Not found only |
 | Caches you have never logged yourself | Logged by = equals *your name*, Exclude |
 | Caches with at least 5 favourite-worthy finds | Log types = Found it, Required count At least 5 |
-| Caches with an open maintenance request | Logs to search = Last 5, Log types = Needs Maintenance |
+| Caches with a recent maintenance request | Logs to search = Last 5, Log types = Needs Maintenance |
+| Caches you have DNFed in their last 2 logs | Logs to search = Last 2, Not found only, Logged by equals *your name* |
 
 ---
 

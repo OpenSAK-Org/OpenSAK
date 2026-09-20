@@ -1549,6 +1549,17 @@ class FilterDialog(QDialog):
         enabled = self._log_finder_enabled.isChecked()
         self._log_finder_row.setEnabled(enabled)
         self._log_finder_by_id.setEnabled(enabled)
+        name = get_settings().gc_username if enabled else ""
+        if name and not self._log_finder_row.edit.text().strip():
+            # "Logged by" nearly always means "by me", and an empty field
+            # would quietly match a log by anyone — so offer the user's own
+            # name. Exactly, not "contains": a caching name is an identity,
+            # so a substring match would also pull in every longer name that
+            # embeds it, and it costs a LIKE '%…%' scan to do so.
+            # _load_log_filter() overwrites both right after, and the user is
+            # free to widen the operator again.
+            self._log_finder_row.edit.setText(name)
+            self._log_finder_row.set_op("equals")
 
     def _selected_log_types(self) -> list[str]:
         """The ticked log types, or [] for "every type" — which is both what

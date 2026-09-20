@@ -848,6 +848,44 @@ class TestLogsTab:
         assert (f.count_op, f.count1) == ("at_least", 2)
         assert f.exclude is True
 
+    def test_enabling_finder_prefills_the_users_own_name(self, qtbot, monkeypatch):
+        # An empty "Logged by" matches a log by anyone, which is rarely what
+        # ticking the box means — so it starts on the user's own name.
+        monkeypatch.setattr(fd, "get_settings",
+                            lambda: SimpleNamespace(gc_username="Nagi", text_size=None))
+        d = FilterDialog.__new__(FilterDialog)
+        d._log_finder_enabled = fd.QCheckBox()
+        d._log_finder_row = fd.TextFilterRow("", "")
+        d._log_finder_by_id = fd.QCheckBox()
+        qtbot.addWidget(d._log_finder_row)
+        d._log_finder_enabled.setChecked(True)
+        d._update_log_finder_inputs()
+        # Exactly, not "contains" — a caching name is an identity, so a
+        # substring match would also catch every longer name embedding it.
+        assert d._log_finder_row.edit.text() == "Nagi"
+        assert d._log_finder_row.op() == "equals"
+
+    def test_enabling_finder_keeps_text_the_user_typed(self, dlg):
+        dlg._log_finder_row.set_op("contains")
+        dlg._log_finder_row.edit.setText("someone else")
+        dlg._log_finder_enabled.setChecked(True)
+        assert dlg._log_finder_row.edit.text() == "someone else"
+        assert dlg._log_finder_row.op() == "contains"
+
+    def test_enabling_finder_without_a_username_configured(self, qtbot, monkeypatch):
+        # Nothing to prefill, so the operator is left alone too.
+        monkeypatch.setattr(fd, "get_settings",
+                            lambda: SimpleNamespace(gc_username="", text_size=None))
+        d = FilterDialog.__new__(FilterDialog)
+        d._log_finder_enabled = fd.QCheckBox()
+        d._log_finder_row = fd.TextFilterRow("", "")
+        d._log_finder_by_id = fd.QCheckBox()
+        qtbot.addWidget(d._log_finder_row)
+        d._log_finder_enabled.setChecked(True)
+        d._update_log_finder_inputs()
+        assert d._log_finder_row.edit.text() == ""
+        assert d._log_finder_row.op() == "contains"
+
     def test_finder_row_is_ignored_until_enabled(self, dlg):
         dlg._log_finder_row.edit.setText("alice")
         assert _log_filters(dlg._build_filterset()) == []

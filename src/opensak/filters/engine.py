@@ -2123,14 +2123,18 @@ class LogFilter(BaseFilter):
 
     Evaluated in three steps, mirroring how the GSAK tab reads top to bottom:
 
-    1. **Scope** — which of the cache's logs are searched at all: only those
-       in *categories* (found / not found / other), and of those only the
-       *last_n* most recent ones (0 = all of them).
+    1. **Scope** — which of the cache's logs are searched at all: the *last_n*
+       most recent ones, counted over *every* log the cache has (0 = all of
+       them). The window is deliberately not narrowed by the criteria below,
+       so "last_n=2, categories=['not_found']" means "a DNF among the cache's
+       last two logs" — not "the last two DNFs", which would match a cache
+       whose only DNF is ancient.
     2. **Criteria** — a scoped log *qualifies* when it passes every criterion
-       that is set: its type is among *types* (empty = every type), its date
-       passes *date_op* (LOG_DATE_OPS, DateFilter's operators minus compare),
-       and its finder matches *finder_text*/*finder_op* — against Log.finder,
-       or Log.finder_id when *finder_by_id*.
+       that is set: its category is among *categories* (found / not found /
+       other), its type is among *types* (empty = every type), its date passes
+       *date_op* (LOG_DATE_OPS, DateFilter's operators minus compare), and its
+       finder matches *finder_text*/*finder_op* — against Log.finder, or
+       Log.finder_id when *finder_by_id*.
     3. **Count** — the cache matches when the number of qualifying logs passes
        *count_op*, "any" meaning at least one. *exclude* then inverts that
        per-cache verdict, which is what makes "no Needs Maintenance log among
@@ -2221,11 +2225,49 @@ class LogFilter(BaseFilter):
     def is_noop(self) -> bool:
         return self.count_op == "any" and not self.has_log_criteria()
 
-    # ── Scope: categories and the last-N window ──────────────────────────────
+    # ── Scope: the last-N window ─────────────────────────────────────────────
+
+    @staticmethod
+    def _recency_key(log):
+        """Sort key putting the newest log first and undated logs last —
+        the order SQLite's "log_date DESC" produces."""
+        return (log.log_date is not None, log.log_date or datetime.min)
+
+    def _scoped_logs(self, cache) -> list:
+        """The cache's logs this filter searches — its last_n most recent
+        ones, over every log it has (see the class docstring)."""
+        if not self.last_n:
+            return list(cache.logs)
+        logs = sorted(cache.logs, key=self._recency_key, reverse=True)
+        return logs[:self.last_n]
+
+    def _scoped_select(self):
+        """Subquery over the logs this filter searches: every log, narrowed
+        per cache to the last_n most recent."""
+        from sqlalchemy import func, select
+        base = select(
+            Log.cache_id.label("cache_id"),
+            Log.log_type.label("log_type"),
+            Log.log_date.label("log_date"),
+            Log.finder.label("finder"),
+            Log.finder_id.label("finder_id"),
+        )
+        if not self.last_n:
+            return base.subquery()
+        # Ties on log_date are broken by id, so the window is deterministic.
+        ranked = base.add_columns(
+            func.row_number().over(
+                partition_by=Log.cache_id,
+                order_by=(Log.log_date.desc(), Log.id.desc()),
+            ).label("rn")
+        ).subquery()
+        return select(ranked).where(ranked.c.rn <= self.last_n).subquery()
+
+    # ── Per-log criteria ─────────────────────────────────────────────────────
 
     def _category_condition(self, c):
-        """SQL condition restricting *c* (the Log class or a subquery's
-        columns) to the enabled categories, or None when all are enabled."""
+        """SQL condition keeping only the enabled categories of *c* (the Log
+        class or a subquery's columns), or None when all are enabled."""
         from sqlalchemy import false, func, or_
         if self._searches_every_category():
             return None
@@ -2239,52 +2281,8 @@ class LogFilter(BaseFilter):
         if "other" in self.categories:
             conditions.append(~lowered.in_(named))
         if not conditions:
-            return false()  # no category enabled — nothing is searched
+            return false()  # no category enabled — no log can qualify
         return or_(*conditions) if len(conditions) > 1 else conditions[0]
-
-    def _in_scope(self, log) -> bool:
-        return log_category(log.log_type) in self.categories
-
-    @staticmethod
-    def _recency_key(log):
-        """Sort key putting the newest log first and undated logs last —
-        the order SQLite's "log_date DESC" produces."""
-        return (log.log_date is not None, log.log_date or datetime.min)
-
-    def _scoped_logs(self, cache) -> list:
-        """The cache's logs this filter searches (see the class docstring)."""
-        logs = [log for log in cache.logs if self._in_scope(log)]
-        if not self.last_n:
-            return logs
-        logs.sort(key=self._recency_key, reverse=True)
-        return logs[:self.last_n]
-
-    def _scoped_select(self):
-        """Subquery over the logs this filter searches: the enabled
-        categories, narrowed per cache to the last_n most recent."""
-        from sqlalchemy import func, select
-        base = select(
-            Log.cache_id.label("cache_id"),
-            Log.log_type.label("log_type"),
-            Log.log_date.label("log_date"),
-            Log.finder.label("finder"),
-            Log.finder_id.label("finder_id"),
-        )
-        category = self._category_condition(Log)
-        if category is not None:
-            base = base.where(category)
-        if not self.last_n:
-            return base.subquery()
-        # Ties on log_date are broken by id, so the window is deterministic.
-        ranked = base.add_columns(
-            func.row_number().over(
-                partition_by=Log.cache_id,
-                order_by=(Log.log_date.desc(), Log.id.desc()),
-            ).label("rn")
-        ).subquery()
-        return select(ranked).where(ranked.c.rn <= self.last_n).subquery()
-
-    # ── Per-log criteria ─────────────────────────────────────────────────────
 
     def _date_range(self) -> tuple[Optional[date], Optional[date]]:
         assert self.date_op is not None
@@ -2304,8 +2302,10 @@ class LogFilter(BaseFilter):
 
     def log_matches(self, log) -> bool:
         """Whether log *log* (ORM object or row with the same fields)
-        qualifies. The scope is not re-checked here — _scoped_logs() and
-        _scoped_select() have already applied it."""
+        qualifies. The last-N window is not re-checked here — _scoped_logs()
+        and _scoped_select() have already applied it."""
+        if log_category(log.log_type) not in self.categories:
+            return False
         if not self._type_matches(log.log_type):
             return False
         if self.date_op is not None and not _date_in_range(
@@ -2321,6 +2321,9 @@ class LogFilter(BaseFilter):
         from sqlalchemy import func, or_
         conditions: list = []
         exact = True
+        category = self._category_condition(c)
+        if category is not None:
+            conditions.append(category)
         if self.types:
             lowered = func.lower(c.log_type)
             named = [t for t in self.types if t != LOG_TYPE_OTHER]
@@ -2389,16 +2392,14 @@ class LogFilter(BaseFilter):
         if not exact:
             return None  # matches() decides, from prepare()'s counts
         from sqlalchemy import and_, exists, false, func, select
-        category = self._category_condition(Log)
-        scope = ([category] if category is not None else []) + conditions
         lo, hi = self._count_bounds()
         if lo == 1 and hi is None:
             # "at least one" — EXISTS stops at the first qualifying log.
-            cond = exists().where(Log.cache_id == Cache.id, *scope).correlate(Cache)
+            cond = exists().where(Log.cache_id == Cache.id, *conditions).correlate(Cache)
             return query.filter(~cond if self.exclude else cond)
         count = (
             select(func.count(Log.id))
-            .where(Log.cache_id == Cache.id, *scope)
+            .where(Log.cache_id == Cache.id, *conditions)
             .correlate(Cache)
             .scalar_subquery()
         )
