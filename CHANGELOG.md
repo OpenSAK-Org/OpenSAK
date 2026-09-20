@@ -4,6 +4,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.5] — 2026-09-20
+
+> Diagnostics-only release on the 1.19.0 stable line — no behavior changes.
+> Added while continuing to verify v1.19.4/#878 on real Mac hardware: that
+> testing turned up evidence of a second, deeper issue than #878 itself
+> (`DatabaseManager` seeing an unexpectedly empty settings store right
+> after a successful, verified macOS migration), which needs direct
+> runtime evidence rather than further code reading to pin down.
+
+### Added
+
+- **More detail in the existing `settings_migration` debug-log channel
+  (#878)** — `migrate_from_qsettings()` now logs the settings store's
+  in-memory state both immediately before and immediately after its first
+  read of `opensak.json` (including the resolved settings path, whether
+  that path exists on disk, and the legacy `QSettings` key list and file
+  name it checks), and `is_first_run()` now logs the same in-memory state
+  at the point it decides whether to show the welcome wizard. No behavior
+  changes — this is purely additional visibility into a discrepancy where
+  the settings file on disk has been confirmed (by size and by explicit
+  move-verification logging) to hold real data moments before
+  `DatabaseManager` reads an unexpectedly near-empty in-memory copy of it.
+
+---
+
 ## [1.19.4] — 2026-09-20
 
 > Bugfix-only release on the 1.19.0 stable line. Found while verifying the

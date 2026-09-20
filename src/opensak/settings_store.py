@@ -351,13 +351,33 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
 
     Gemmer migrerings-flag i opensak.json så det kun sker én gang.
     """
-    if store.get("_migrated_from_qsettings", False):
+    # Issue #878: log den EKSAKTE tilstand af store._data FØR første .get()
+    # (som trigger _load()), samt selve _settings_path(), så vi kan se om
+    # _load() rent faktisk fandt/læste den forventede fil, eller startede
+    # fra en tom dict.
+    _log.debug(
+        "migrate_from_qsettings: FØR store.get() — id(store)=%s, "
+        "store._data (pre-load)=%r, store._path (cached)=%r",
+        id(store), store._data, store._path,
+    )
+    already_migrated = store.get("_migrated_from_qsettings", False)
+    _log.debug(
+        "migrate_from_qsettings: EFTER _load() — settings_path=%s "
+        "(findes=%s), already_migrated=%r, fuld store._data=%r",
+        store._settings_path(), store._settings_path().exists(),
+        already_migrated, store._data,
+    )
+    if already_migrated:
         return False
 
     try:
         from PySide6.QtCore import QSettings
         qs = QSettings("OpenSAK Project", "OpenSAK")
         all_keys = qs.allKeys()
+        _log.debug(
+            "migrate_from_qsettings: QSettings('OpenSAK Project','OpenSAK') "
+            "all_keys=%r (fileName()=%r)", all_keys, qs.fileName(),
+        )
         if not all_keys:
             store.set("_migrated_from_qsettings", True)
             return False
@@ -875,7 +895,14 @@ def is_first_run() -> bool:
     Tjekker om _wizard_completed er sat i opensak.json.
     Bruges af app.py til at beslutte om wizard skal vises.
     """
-    return not get_store().get("_wizard_completed", False)
+    store = get_store()
+    val = store.get("_wizard_completed", False)
+    _log.debug(
+        "is_first_run: id(store)=%s, _wizard_completed=%r, settings_path=%s, "
+        "fuld store._data=%r", id(store), val, store._settings_path(),
+        store._data,
+    )
+    return not val
 
 
 def mark_wizard_completed() -> None:
