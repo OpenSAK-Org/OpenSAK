@@ -22,13 +22,14 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across eight tabs:
+The filter dialog is split across nine tabs:
 
 | Tab | What's on it |
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
 | **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
+| **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
@@ -180,6 +181,44 @@ Filter caches by their child waypoints (parking, stages, final, …). Available 
 | Count | Any, Equal, At least, At most, or Between |
 
 All criteria must hold for the **same** waypoint. Count is the number of waypoints that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Type contains `Parking` and Count equal 0 shows caches without a parking waypoint. Count alone filters on the total number of waypoints.
+
+---
+
+### Logs
+
+Filter caches by the logs on them, on the **Logs** tab. It mirrors GSAK's Logs tab and is read top to bottom in three steps.
+
+**1. Which logs are searched**
+
+| Setting | Effect |
+|---|---|
+| Logs to search | *All logs*, or only each cache's *N* most recent ones (Latest, Last 2 … Last 100) |
+| Found / Not found / Other | Which kinds of log are searched at all. *Found* covers Found it, Attended and Webcam Photo Taken; *Not found* covers Didn't find it; *Other* is everything else |
+| Include / exclude | Whether the caches that match are kept or dropped |
+
+The categories apply first and the last-*N* window second, so *Logs to search: Latest* with only **Found** ticked means "the most recent find", not "the most recent log, if it is a find".
+
+**2. What a log has to be**
+
+| Field | Matches |
+|---|---|
+| Log date | The log's date — the same operators as the **Dates** tab, except comparing with another date |
+| Log types | The ticked types. Untick **All** to choose individual ones; `"Other"` matches any type not in the list |
+| Logged by | The log's finder — the same text operators as *Name*. Tick **Match the user ID** to compare the numeric user ID instead of the display name |
+
+All of these must hold for the **same** log.
+
+**3. How many such logs**
+
+**Required count** is the number of logs that met the criteria: *At least one log*, *At most*, *At least*, *Equal* or *Between*. Together with **Exclude** this is what makes negative conditions expressible:
+
+| To find | Set |
+|---|---|
+| Caches with no find in the last year | Log types = Found it, Log date During 1 years, Exclude |
+| Caches whose most recent log is a DNF | Logs to search = Latest, Log types = Didn't find it |
+| Caches you have never logged yourself | Logged by = equals *your name*, Exclude |
+| Caches with at least 5 favourite-worthy finds | Log types = Found it, Required count At least 5 |
+| Caches with an open maintenance request | Logs to search = Last 5, Log types = Needs Maintenance |
 
 ---
 

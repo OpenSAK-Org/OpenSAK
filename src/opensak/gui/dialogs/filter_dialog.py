@@ -1,15 +1,16 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Otte faner:
+Ni faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
-4. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
-5. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
-6. Attributter — alle Groundspeak attributter
-7. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-8. Where       — rå SQL WHERE-betingelse
+4. Logs        — caches efter deres logs (type, dato, logger, antal …)
+5. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
+6. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
+7. Attributter — alle Groundspeak attributter
+8. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+9. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -54,6 +55,7 @@ from opensak.filters.engine import (
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
+    LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
 from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
@@ -161,7 +163,7 @@ from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_
 #   8=scenic, 9=hiking, 10=climbing, 11=wading, 12=swimming, 13=available, 14=night,
 #   15=winter, 17=poisonoak, 18=dangerousanimals, 19=ticks, 20=mine, 21=cliff)
 
-from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES
+from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES, LOG_TYPES
 from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.gui.icon_provider import get_cache_type_icon
 from opensak.gui.settings import get_settings
@@ -376,6 +378,27 @@ _WP_COUNT_LABELS: tuple[tuple[str, str], ...] = (
     ("equal",    "filter_date_op_equal"),
     ("at_least", "filter_wp_count_at_least"),
     ("at_most",  "filter_wp_count_at_most"),
+    ("between",  "filter_date_op_between"),
+)
+
+
+# ── Logs-fanen ────────────────────────────────────────────────────────────────
+
+# (kategori, oversættelsesnøgle) for "Zu durchsuchende Logs", i GSAK's
+# rækkefølge. Nøglerne står som literals, så test_no_unused_keys kan finde dem.
+_LOG_CATEGORY_LABELS: tuple[tuple[str, str], ...] = (
+    ("found",     "quick_found"),
+    ("not_found", "quick_not_found"),
+    ("other",     "filter_log_cat_other"),
+)
+assert tuple(c for c, _ in _LOG_CATEGORY_LABELS) == LOG_CATEGORIES
+# GSAK's "Nötige Anzahl" — som waypoint-antallet, men med GSAK's egen tekst
+# for "any" ("Mindestens ein Log").
+_LOG_COUNT_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",      "filter_log_count_any"),
+    ("at_most",  "filter_wp_count_at_most"),
+    ("at_least", "filter_wp_count_at_least"),
+    ("equal",    "filter_date_op_equal"),
     ("between",  "filter_date_op_between"),
 )
 
@@ -689,6 +712,7 @@ class FilterDialog(QDialog):
         self._general_tab = self._build_general_tab()
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
+        self._logs_tab = self._build_logs_tab()
         self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
         self._waypoints_tab = self._build_waypoints_tab()
@@ -697,6 +721,7 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
+        self._tabs.addTab(self._logs_tab, tr("detail_tab_logs"))
         self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
         self._tabs.addTab(self._waypoints_tab, tr("filter_tab_waypoints"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
@@ -1385,6 +1410,216 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(f.count1)
         self._wp_count2.setValue(f.count2)
 
+    def _build_logs_tab(self) -> QWidget:
+        """Logs fane — caches efter deres logs (GSAK's "Logs"). Øverst vælges
+        hvilke logs der søges i, nederst hvad de skal opfylde."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        scope_form = QFormLayout()
+        scope_form.setSpacing(8)
+
+        self._log_date_row = DateFilterRow(None, tr("filter_log_date"))
+        scope_form.addRow(self._log_date_row.label, self._log_date_row)
+
+        scope = QWidget()
+        scope_layout = QHBoxLayout(scope)
+        scope_layout.setContentsMargins(0, 0, 0, 0)
+        self._log_scope = QComboBox()
+        for n in LOG_SCOPE_CHOICES:
+            if n == 0:
+                label = tr("filter_log_scope_all")
+            elif n == 1:
+                label = tr("filter_log_scope_last_one")
+            else:
+                label = tr("filter_log_scope_last", n=n)
+            self._log_scope.addItem(label, n)
+        scope_layout.addWidget(self._log_scope)
+        scope_layout.addSpacing(12)
+        self._log_categories: dict[str, QCheckBox] = {}
+        for category, key in _LOG_CATEGORY_LABELS:
+            cb = QCheckBox(tr(key))
+            cb.setChecked(True)
+            self._log_categories[category] = cb
+            scope_layout.addWidget(cb)
+        scope_layout.addStretch()
+        scope_form.addRow(tr("filter_log_scope"), scope)
+
+        exclude = QWidget()
+        exclude_layout = QHBoxLayout(exclude)
+        exclude_layout.setContentsMargins(0, 0, 0, 0)
+        self._log_exclude = QComboBox()
+        self._log_exclude.addItem(tr("filter_log_include_yes"), False)
+        self._log_exclude.addItem(tr("filter_lp_exclude"), True)
+        exclude_layout.addWidget(self._log_exclude)
+        exclude_layout.addWidget(QLabel(tr("filter_log_include_hint")), 1)
+        scope_form.addRow(tr("filter_log_include"), exclude)
+        layout.addLayout(scope_form)
+
+        # ── Logtyper ──────────────────────────────────────────────────────────
+        type_group = QGroupBox(tr("filter_log_types"))
+        type_outer = QVBoxLayout(type_group)
+        self._log_types_all = QCheckBox(tr("filter_log_types_all"))
+        self._log_types_all.setChecked(True)
+        type_outer.addWidget(self._log_types_all)
+
+        count_row = QWidget()
+        count_layout = QHBoxLayout(count_row)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        count_layout.addWidget(QLabel(tr("filter_log_count")))
+        self._log_count_op = QComboBox()
+        for op, key in _LOG_COUNT_LABELS:
+            self._log_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._log_count_op)
+        self._log_count1 = QSpinBox()
+        self._log_count1.setRange(0, 9999)
+        self._log_count2 = QSpinBox()
+        self._log_count2.setRange(0, 9999)
+        count_layout.addWidget(self._log_count1)
+        count_layout.addWidget(self._log_count2)
+        count_layout.addStretch()
+        type_outer.addWidget(count_row)
+
+        self._log_types_box = QWidget()
+        types_layout = QHBoxLayout(self._log_types_box)
+        types_layout.setContentsMargins(0, 0, 0, 0)
+        type_grid = QGridLayout()
+        self._log_type_checks: dict[str, QCheckBox] = {}
+        # GSAK's own list plus its "Other" catch-all, in two columns.
+        entries = list(LOG_TYPES) + [LOG_TYPE_OTHER]
+        rows = (len(entries) + 1) // 2
+        for i, log_type in enumerate(entries):
+            label = tr("filter_log_type_other") if log_type == LOG_TYPE_OTHER else log_type
+            cb = QCheckBox(label)
+            self._log_type_checks[log_type] = cb
+            type_grid.addWidget(cb, i % rows, i // rows)
+        types_layout.addLayout(type_grid, 1)
+
+        type_btn_col = QVBoxLayout()
+        type_none = QPushButton(tr("filter_type_disable_all"))
+        type_none.setAutoDefault(False)
+        type_none.clicked.connect(lambda: self._set_all_log_types(False))
+        type_all = QPushButton(tr("filter_type_enable_all"))
+        type_all.setAutoDefault(False)
+        type_all.clicked.connect(lambda: self._set_all_log_types(True))
+        type_btn_col.addWidget(type_none)
+        type_btn_col.addWidget(type_all)
+        type_btn_col.addStretch()
+        types_layout.addLayout(type_btn_col)
+        type_outer.addWidget(self._log_types_box)
+        layout.addWidget(type_group)
+
+        # ── Logget af ──────────────────────────────────────────────────────────
+        finder_form = QFormLayout()
+        finder_form.setSpacing(8)
+        self._log_finder_enabled = QCheckBox(tr("filter_log_finder_enable"))
+        finder_form.addRow(tr("filter_log_finder"), self._log_finder_enabled)
+        self._log_finder_row = TextFilterRow(tr("filter_log_finder"),
+                                             tr("filter_contains_placeholder"))
+        finder_form.addRow("", self._log_finder_row)
+        self._log_finder_by_id = QCheckBox(tr("filter_log_finder_by_id"))
+        finder_form.addRow("", self._log_finder_by_id)
+        layout.addLayout(finder_form)
+        layout.addStretch()
+
+        self._log_types_all.toggled.connect(self._update_log_type_inputs)
+        self._log_count_op.currentIndexChanged.connect(self._update_log_count_inputs)
+        self._log_finder_enabled.toggled.connect(self._update_log_finder_inputs)
+        self._update_log_type_inputs()
+        self._update_log_count_inputs()
+        self._update_log_finder_inputs()
+        return widget
+
+    def _set_all_log_types(self, checked: bool) -> None:
+        for cb in self._log_type_checks.values():
+            cb.setChecked(checked)
+
+    def _update_log_type_inputs(self) -> None:
+        # "All log types" ticked = no type criterion, so the list is inert.
+        self._log_types_box.setEnabled(not self._log_types_all.isChecked())
+
+    def _update_log_count_inputs(self) -> None:
+        op = self._log_count_op.currentData()
+        self._log_count1.setVisible(op != "any")
+        self._log_count2.setVisible(op == "between")
+
+    def _update_log_finder_inputs(self) -> None:
+        enabled = self._log_finder_enabled.isChecked()
+        self._log_finder_row.setEnabled(enabled)
+        self._log_finder_by_id.setEnabled(enabled)
+
+    def _selected_log_types(self) -> list[str]:
+        """The ticked log types, or [] for "every type" — which is both what
+        the "All" box means and what an empty selection falls back to."""
+        if self._log_types_all.isChecked():
+            return []
+        return [t for t, cb in self._log_type_checks.items() if cb.isChecked()]
+
+    def _build_log_filter(self) -> Optional[LogFilter]:
+        """LogFilter for the logs tab, or None when nothing is set."""
+        date_op = self._log_date_row.op()
+        dates = self._log_date_row.range_args()
+        finder_op = self._log_finder_row.op()
+        finder_text = self._log_finder_row.edit.text().strip()
+        if not self._log_finder_enabled.isChecked():
+            finder_op, finder_text = "contains", ""
+        f = LogFilter(
+            date_op=None if date_op == "any" else date_op,
+            date1=dates["date1"],
+            date2=dates["date2"],
+            date_amount=dates["amount"],
+            date_unit=dates["unit"],
+            categories=[c for c, cb in self._log_categories.items() if cb.isChecked()],
+            last_n=self._log_scope.currentData(),
+            types=self._selected_log_types(),
+            finder_text=finder_text,
+            finder_op=finder_op,
+            finder_by_id=self._log_finder_by_id.isChecked(),
+            count_op=self._log_count_op.currentData(),
+            count1=self._log_count1.value(),
+            count2=self._log_count2.value(),
+            exclude=self._log_exclude.currentData(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_log_filter(self, f: LogFilter) -> None:
+        if f.date_op is not None:
+            self._log_date_row.load_range(f.date_op, f.date1, f.date2,
+                                          f.date_amount, f.date_unit)
+        for category, cb in self._log_categories.items():
+            cb.setChecked(category in f.categories)
+        index = self._log_scope.findData(f.last_n)
+        self._log_scope.setCurrentIndex(max(index, 0))
+        self._log_types_all.setChecked(not f.types)
+        for log_type, cb in self._log_type_checks.items():
+            cb.setChecked(log_type in f.types)
+        if f.finder is not None:
+            self._log_finder_enabled.setChecked(True)
+            self._log_finder_row.load(f.finder)
+        self._log_finder_by_id.setChecked(f.finder_by_id)
+        index = self._log_count_op.findData(f.count_op)
+        self._log_count_op.setCurrentIndex(max(index, 0))
+        self._log_count1.setValue(f.count1)
+        self._log_count2.setValue(f.count2)
+        self._log_exclude.setCurrentIndex(1 if f.exclude else 0)
+
+    def _reset_logs(self) -> None:
+        self._log_date_row.reset()
+        self._log_scope.setCurrentIndex(0)
+        for cb in self._log_categories.values():
+            cb.setChecked(True)
+        self._log_exclude.setCurrentIndex(0)
+        self._log_types_all.setChecked(True)
+        self._set_all_log_types(False)
+        self._log_count_op.setCurrentIndex(0)
+        self._log_count1.setValue(0)
+        self._log_count2.setValue(0)
+        self._log_finder_enabled.setChecked(False)
+        self._log_finder_row.reset()
+        self._log_finder_by_id.setChecked(False)
+
     def _build_text_search_tab(self) -> QWidget:
         """Tekstsøgning fane — søg i fritekst felter."""
         widget = QWidget()
@@ -1514,6 +1749,16 @@ class FilterDialog(QDialog):
                 self, tr("warning"),
                 tr("filter_regex_invalid", field=row.label,
                    error=text_filter.regex_error),
+            )
+            return False
+        log_filter = self._build_log_filter()
+        if log_filter is not None and log_filter.regex_error is not None:
+            self._tabs.setCurrentWidget(self._logs_tab)
+            self._log_finder_row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid", field=tr("filter_log_finder"),
+                   error=log_filter.regex_error),
             )
             return False
         return True
@@ -1719,6 +1964,7 @@ class FilterDialog(QDialog):
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
+        self._reset_logs()
         self._reset_line_polygon()
         self._reset_attributes()
         self._reset_waypoints()
@@ -1738,6 +1984,8 @@ class FilterDialog(QDialog):
             self._reset_dates()
         elif tab is self._misc_tab:
             self._reset_misc()
+        elif tab is self._logs_tab:
+            self._reset_logs()
         elif tab is self._line_polygon_tab:
             self._reset_line_polygon()
         elif tab is self._attributes_tab:
@@ -1932,6 +2180,11 @@ class FilterDialog(QDialog):
                 for af in attr_filters:
                     attr_or.add(af)
                 fs.add(attr_or)
+
+        # Logs
+        log_filter = self._build_log_filter()
+        if log_filter is not None:
+            fs.add(log_filter)
 
         # Waypoints
         wp_filter = self._build_waypoint_filter()
@@ -2185,6 +2438,8 @@ class FilterDialog(QDialog):
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
                 self._fav_max.setValue(getattr(f, "max_pts", 9999))
+            elif ftype == "log":
+                self._load_log_filter(f)
             elif ftype == "date":
                 row = self._date_rows.get(f.field)
                 if row is not None:

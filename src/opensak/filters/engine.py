@@ -30,8 +30,9 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache, UserNote, Waypoint
+from opensak.db.models import Cache, Log, UserNote, Waypoint
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
+from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2086,6 +2087,382 @@ class WaypointFilter(BaseFilter):
         return f"<WaypointFilter {self.to_dict()}>"
 
 
+# ── Log filter ────────────────────────────────────────────────────────────────
+
+# "Logtypen" checkbox for a log whose type is none of constants.LOG_TYPES —
+# GSAK spells it "Other" (in quotes) in the same list.
+LOG_TYPE_OTHER = '"Other"'
+# The three log categories of GSAK's "Zu durchsuchende Logs" row: a log is
+# "found" when its type is in FOUND_LOG_TYPES, "not_found" for DNF_LOG_TYPES,
+# and "other" for everything else.
+LOG_CATEGORIES = ("found", "not_found", "other")
+# DateFilter's operators, minus compare (a log has only the one date).
+LOG_DATE_OPS = tuple(op for op in DATE_OPS if op != "compare")
+LOG_COUNT_OPS = ("any", "equal", "at_least", "at_most", "between")
+# How many of a cache's most recent logs to search; 0 = all of them. GSAK's
+# "Zu durchsuchende Logs" dropdown offers exactly these.
+LOG_SCOPE_CHOICES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50, 100)
+
+_FOUND_TYPES_LOWER = frozenset(t.lower() for t in FOUND_LOG_TYPES)
+_DNF_TYPES_LOWER = frozenset(t.lower() for t in DNF_LOG_TYPES)
+_LOG_TYPES_LOWER = frozenset(t.lower() for t in LOG_TYPES)
+
+
+def log_category(log_type: Optional[str]) -> str:
+    """Which of LOG_CATEGORIES log type *log_type* belongs to."""
+    lowered = (log_type or "").strip().lower()
+    if lowered in _FOUND_TYPES_LOWER:
+        return "found"
+    if lowered in _DNF_TYPES_LOWER:
+        return "not_found"
+    return "other"
+
+
+class LogFilter(BaseFilter):
+    """Keep caches by their logs (GSAK's "Logs" tab).
+
+    Evaluated in three steps, mirroring how the GSAK tab reads top to bottom:
+
+    1. **Scope** — which of the cache's logs are searched at all: only those
+       in *categories* (found / not found / other), and of those only the
+       *last_n* most recent ones (0 = all of them).
+    2. **Criteria** — a scoped log *qualifies* when it passes every criterion
+       that is set: its type is among *types* (empty = every type), its date
+       passes *date_op* (LOG_DATE_OPS, DateFilter's operators minus compare),
+       and its finder matches *finder_text*/*finder_op* — against Log.finder,
+       or Log.finder_id when *finder_by_id*.
+    3. **Count** — the cache matches when the number of qualifying logs passes
+       *count_op*, "any" meaning at least one. *exclude* then inverts that
+       per-cache verdict, which is what makes "no Needs Maintenance log among
+       the last 5 logs" expressible.
+
+    apply_filters() calls prepare() first, which counts each cache's
+    qualifying logs in one query; matches() then only looks up the count, so
+    it also works for LightweightCache rows. Without prepare() (e.g. on
+    in-memory objects) matches() walks cache.logs instead.
+    """
+    filter_type = "log"
+
+    def __init__(
+        self,
+        date_op: Optional[str] = None,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        date_amount: int = 1,
+        date_unit: str = "days",
+        categories: Optional[list[str]] = None,
+        last_n: int = 0,
+        types: Optional[list[str]] = None,
+        finder_text: str = "",
+        finder_op: str = "contains",
+        finder_by_id: bool = False,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+        exclude: bool = False,
+    ):
+        if date_op is not None and date_op not in LOG_DATE_OPS:
+            raise ValueError(f"Unknown log date operator {date_op!r}")
+        if date_unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {date_unit!r}")
+        if count_op not in LOG_COUNT_OPS:
+            raise ValueError(f"Unknown log count operator {count_op!r}")
+        self.date_op = date_op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if date_op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {date_op!r} needs date1")
+        if date_op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.date_amount = max(0, int(date_amount))
+        self.date_unit = date_unit
+
+        chosen = list(LOG_CATEGORIES if categories is None else categories)
+        for category in chosen:
+            if category not in LOG_CATEGORIES:
+                raise ValueError(f"Unknown log category {category!r}")
+        # Keep LOG_CATEGORIES' order and drop duplicates, so to_dict() is stable.
+        self.categories = [c for c in LOG_CATEGORIES if c in chosen]
+
+        self.last_n = max(0, int(last_n))
+        self.types = list(types or [])
+        # A text match with nothing to compare against is dropped.
+        finder = TextMatchFilter(finder_text, finder_op)
+        self.finder: Optional[TextMatchFilter] = None if finder._is_noop() else finder
+        self.finder_text = finder.text
+        self.finder_op = finder.op
+        self.finder_by_id = bool(finder_by_id)
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        self.exclude = bool(exclude)
+        # cache id -> qualifying log count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """The finder match's invalid regular expression, if it has one."""
+        return self.finder.regex_error if self.finder is not None else None
+
+    def _searches_every_category(self) -> bool:
+        return len(self.categories) == len(LOG_CATEGORIES)
+
+    def has_log_criteria(self) -> bool:
+        """Whether anything narrows the logs — the scope counts too, since
+        "the last 3 logs" already says which logs the count is about."""
+        return (
+            not self._searches_every_category()
+            or bool(self.last_n)
+            or bool(self.types)
+            or self.date_op is not None
+            or self.finder is not None
+        )
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.has_log_criteria()
+
+    # ── Scope: categories and the last-N window ──────────────────────────────
+
+    def _category_condition(self, c):
+        """SQL condition restricting *c* (the Log class or a subquery's
+        columns) to the enabled categories, or None when all are enabled."""
+        from sqlalchemy import false, func, or_
+        if self._searches_every_category():
+            return None
+        lowered = func.lower(c.log_type)
+        named = sorted(_FOUND_TYPES_LOWER | _DNF_TYPES_LOWER)
+        conditions = []
+        if "found" in self.categories:
+            conditions.append(lowered.in_(sorted(_FOUND_TYPES_LOWER)))
+        if "not_found" in self.categories:
+            conditions.append(lowered.in_(sorted(_DNF_TYPES_LOWER)))
+        if "other" in self.categories:
+            conditions.append(~lowered.in_(named))
+        if not conditions:
+            return false()  # no category enabled — nothing is searched
+        return or_(*conditions) if len(conditions) > 1 else conditions[0]
+
+    def _in_scope(self, log) -> bool:
+        return log_category(log.log_type) in self.categories
+
+    @staticmethod
+    def _recency_key(log):
+        """Sort key putting the newest log first and undated logs last —
+        the order SQLite's "log_date DESC" produces."""
+        return (log.log_date is not None, log.log_date or datetime.min)
+
+    def _scoped_logs(self, cache) -> list:
+        """The cache's logs this filter searches (see the class docstring)."""
+        logs = [log for log in cache.logs if self._in_scope(log)]
+        if not self.last_n:
+            return logs
+        logs.sort(key=self._recency_key, reverse=True)
+        return logs[:self.last_n]
+
+    def _scoped_select(self):
+        """Subquery over the logs this filter searches: the enabled
+        categories, narrowed per cache to the last_n most recent."""
+        from sqlalchemy import func, select
+        base = select(
+            Log.cache_id.label("cache_id"),
+            Log.log_type.label("log_type"),
+            Log.log_date.label("log_date"),
+            Log.finder.label("finder"),
+            Log.finder_id.label("finder_id"),
+        )
+        category = self._category_condition(Log)
+        if category is not None:
+            base = base.where(category)
+        if not self.last_n:
+            return base.subquery()
+        # Ties on log_date are broken by id, so the window is deterministic.
+        ranked = base.add_columns(
+            func.row_number().over(
+                partition_by=Log.cache_id,
+                order_by=(Log.log_date.desc(), Log.id.desc()),
+            ).label("rn")
+        ).subquery()
+        return select(ranked).where(ranked.c.rn <= self.last_n).subquery()
+
+    # ── Per-log criteria ─────────────────────────────────────────────────────
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        assert self.date_op is not None
+        return _date_op_range(self.date_op, self.date1, self.date2,
+                              self.date_amount, self.date_unit)
+
+    def _type_matches(self, log_type: Optional[str]) -> bool:
+        if not self.types:
+            return True
+        lowered = (log_type or "").strip().lower()
+        if lowered in {t.lower() for t in self.types}:
+            return True
+        return LOG_TYPE_OTHER in self.types and lowered not in _LOG_TYPES_LOWER
+
+    def _finder_value(self, log) -> Optional[str]:
+        return log.finder_id if self.finder_by_id else log.finder
+
+    def log_matches(self, log) -> bool:
+        """Whether log *log* (ORM object or row with the same fields)
+        qualifies. The scope is not re-checked here — _scoped_logs() and
+        _scoped_select() have already applied it."""
+        if not self._type_matches(log.log_type):
+            return False
+        if self.date_op is not None and not _date_in_range(
+                log.log_date, self.date_op, *self._date_range()):
+            return False
+        return self.finder is None or self.finder.match_value(self._finder_value(log))
+
+    def _criteria_conditions(self, c) -> tuple[list, bool]:
+        """SQL conditions for the per-log criteria on *c* (the Log class or a
+        subquery's columns), plus whether they are exact. Inexact ones (regex,
+        non-ASCII text) only pre-narrow the rows, and log_matches() has to
+        decide — the same contract as WaypointFilter._sql_waypoint_conditions()."""
+        from sqlalchemy import func, or_
+        conditions: list = []
+        exact = True
+        if self.types:
+            lowered = func.lower(c.log_type)
+            named = [t for t in self.types if t != LOG_TYPE_OTHER]
+            parts = []
+            if named:
+                parts.append(lowered.in_(sorted(t.lower() for t in named)))
+            if LOG_TYPE_OTHER in self.types:
+                parts.append(~lowered.in_(sorted(_LOG_TYPES_LOWER)))
+            conditions.append(or_(*parts) if len(parts) > 1 else parts[0])
+        if self.date_op is not None:
+            conditions.append(_date_range_sql(c.log_date, self.date_op, *self._date_range()))
+        if self.finder is not None:
+            column = c.finder_id if self.finder_by_id else c.finder
+            cond = self.finder.sql_condition(column)
+            if cond is None or not self.finder.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    # ── Count ────────────────────────────────────────────────────────────────
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying log count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.has_log_criteria() else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    # ── BaseFilter ───────────────────────────────────────────────────────────
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying logs (see the class docstring)."""
+        from sqlalchemy import func, select
+        scoped = self._scoped_select()
+        conditions, exact = self._criteria_conditions(scoped.c)
+        if exact:
+            rows = session.execute(
+                select(scoped.c.cache_id, func.count())
+                .where(*conditions)
+                .group_by(scoped.c.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        for row in session.execute(select(scoped).where(*conditions)):
+            if self.log_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        if self.last_n:
+            return None  # the per-cache window needs prepare()'s counts
+        conditions, exact = self._criteria_conditions(Log)
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import and_, exists, false, func, select
+        category = self._category_condition(Log)
+        scope = ([category] if category is not None else []) + conditions
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying log.
+            cond = exists().where(Log.cache_id == Cache.id, *scope).correlate(Cache)
+            return query.filter(~cond if self.exclude else cond)
+        count = (
+            select(func.count(Log.id))
+            .where(Log.cache_id == Cache.id, *scope)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        bounds = ([count >= lo] if lo > 0 else []) + ([count <= hi] if hi is not None else [])
+        if not bounds:
+            # Every count passes ("at least 0"), so excluding drops everything.
+            return query.filter(false()) if self.exclude else query
+        cond = and_(*bounds) if len(bounds) > 1 else bounds[0]
+        return query.filter(~cond if self.exclude else cond)
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for log in self._scoped_logs(cache) if self.log_matches(log))
+        passed = self._count_ok(count)
+        return not passed if self.exclude else passed
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "date_op": self.date_op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "date_amount": self.date_amount,
+            "date_unit": self.date_unit,
+            "categories": list(self.categories),
+            "last_n": self.last_n,
+            "types": list(self.types),
+            "finder_text": self.finder_text,
+            "finder_op": self.finder_op,
+            "finder_by_id": self.finder_by_id,
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+            "exclude": self.exclude,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LogFilter":
+        return cls(
+            date_op=data.get("date_op"),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            date_amount=data.get("date_amount", 1),
+            date_unit=data.get("date_unit", "days"),
+            categories=data.get("categories"),
+            last_n=data.get("last_n", 0),
+            types=data.get("types"),
+            finder_text=data.get("finder_text", ""),
+            finder_op=data.get("finder_op", "contains"),
+            finder_by_id=data.get("finder_by_id", False),
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+            exclude=data.get("exclude", False),
+        )
+
+    def __repr__(self) -> str:
+        return f"<LogFilter {self.to_dict()}>"
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -2126,6 +2503,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "date":               DateFilter,
     "text_search":        TextSearchFilter,
     "waypoint":           WaypointFilter,
+    "log":                LogFilter,
 }
 
 
@@ -2431,14 +2809,14 @@ def _prepare_where_clause_filters(
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
     SQL directly against the database, and every WaypointFilter's waypoint
-    counts (WaypointFilter.prepare()). Must run before any Python-level
-    matches() call touches one of those filters. Mutates the filter objects
-    in place; returns nothing.
+    counts and every LogFilter's log counts (their prepare()). Must run
+    before any Python-level matches() call touches one of those filters.
+    Mutates the filter objects in place; returns nothing.
     """
     if not filterset:
         return
     for _f in _iter_filters(filterset):
-        if isinstance(_f, WaypointFilter):
+        if isinstance(_f, (WaypointFilter, LogFilter)):
             _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
