@@ -4,6 +4,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.4] — 2026-09-20
+
+> Bugfix-only release on the 1.19.0 stable line. Found while verifying the
+> v1.19.3/#870 fix on real Mac hardware: a second, distinct bug that could
+> still make it look like a user's databases and settings had vanished,
+> even though the #870 migration itself now completes correctly.
+
+### Fixed
+
+- **`DatabaseManager` could overwrite known databases and user settings
+  with an empty fallback state right after a correct migration (fixes
+  #878)** — `_load_from_settings()` called `_save_to_settings()`
+  unconditionally immediately after parsing `databases.list`/
+  `databases.active`, before checking whether any databases had actually
+  been found. In the real, packaged/signed macOS app (not reproduced yet
+  in an isolated test), `self._databases` was observed to sometimes be
+  empty at that exact point even though the just-migrated `opensak.json`
+  on disk provably held the correct data a moment earlier. That premature
+  save wrote the empty state back to disk, and the fallback logic that
+  runs immediately afterward then created and saved a fresh, empty
+  "Default" database over it — the user-visible result being a "please
+  set your username and home location" prompt and a lost custom database,
+  despite #870's migration itself having worked. The save now happens
+  exactly once, after all fallback logic has run, so an empty intermediate
+  state can never reach disk. The underlying reason `self._databases` was
+  briefly empty in the packaged app is still unconfirmed; this closes the
+  persistence hole regardless of that trigger.
+
+### Added
+
+- **More detail in the existing `db_manager` debug-log channel (#878)** —
+  now also logs `id()` of the settings store and its full in-memory
+  contents at the top of `_load_from_settings()`, to help determine
+  whether a future reproduction involves the same `SettingsStore`
+  singleton seeing empty data (a real read failure) or a second, separate
+  instance (a singleton/caching bug).
+
+---
+
 ## [1.19.3] — 2026-09-17
 
 > Bugfix-only release on the 1.19.0 stable line. Closes the root cause

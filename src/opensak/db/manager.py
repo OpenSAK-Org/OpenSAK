@@ -145,6 +145,13 @@ class DatabaseManager:
         store = get_store()
         db_list = store.get("databases.list", [])
         raw_active_path = store.get("databases.active")
+        # Issue #878: id(store) + hele store._data logges her for at afgøre
+        # om det er samme SettingsStore-singleton der ses tom (reel
+        # læsnings-fejl) eller en anden instans (singleton/cache-fejl).
+        _debug_log.debug(
+            "_load_from_settings: id(store)=%s, store._data=%r",
+            id(store), getattr(store, "_data", None),
+        )
         _debug_log.debug(
             "_load_from_settings: databases.list=%r, databases.active=%r, "
             "databases.dir=%r",
@@ -177,9 +184,6 @@ class DatabaseManager:
             if found:
                 self._active = found
 
-        # Gem migrerede stier tilbage (én gang)
-        self._save_to_settings()
-
         # Hvis ingen databaser kendes, opret Default
         if not self._databases:
             default_path = self._default_db_path()
@@ -194,7 +198,6 @@ class DatabaseManager:
             default = DatabaseInfo("Default", default_path)
             self._databases.append(default)
             self._active = default
-            self._save_to_settings()
         elif self._active is None:
             # Databaser kendes men ingen aktiv — brug den første
             _debug_log.debug(
@@ -203,7 +206,17 @@ class DatabaseManager:
                 self._databases[0].name,
             )
             self._active = self._databases[0]
-            self._save_to_settings()
+
+        # Issue #878: dette kald er flyttet hertil (efter al fallback-logik
+        # ovenfor) fra sin oprindelige placering lige efter parsing af
+        # databases.list/.active. Kaldet var der ubetinget og kunne dermed
+        # skrive en tom/delvis mellemtilstand til disk, FØR fallback-logikken
+        # nåede at rette den op — hvis self._databases var tom på det
+        # tidspunkt (root cause endnu ukendt, kun set i den pakkede/signerede
+        # macOS-app, ikke reproduceret isoleret). Ved kun at gemme én gang,
+        # med den endelige tilstand, kan et sådant tomt mellemresultat aldrig
+        # nå at blive persisteret.
+        self._save_to_settings()
 
     def _save_to_settings(self) -> None:
         """Gem liste over kendte databaser til opensak.json."""
