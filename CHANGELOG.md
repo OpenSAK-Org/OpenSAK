@@ -4,6 +4,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.19.6] — 2026-09-20
+
+> Bugfix-only release on the 1.19.0 stable line. This is believed to be the
+> actual root-cause fix for #878, found using the diagnostic logging added
+> in v1.19.5 while testing on real Mac hardware — a deeper, earlier bug
+> than the guard added in v1.19.4, which remains in place but was not
+> sufficient on its own.
+
+### Fixed
+
+- **Settings could be permanently, silently emptied in memory before the
+  macOS #825 migration ever ran, because startup read them one step too
+  early (fixes #878)** — `main()` called `apply_theme(app)` — pure UI
+  palette setup — before running the macOS path migration. `apply_theme()`
+  turned out to indirectly read the `display.theme` setting, which
+  creates and loads the settings store on first use. `SettingsStore`
+  caches both the file path it resolves and the data it reads from that
+  path exactly once, by design, and never re-reads either afterward. At
+  the point `apply_theme()` ran, the correct (post-migration) settings
+  file didn't exist yet, so the store cached an empty result — and kept
+  serving that same empty result for the rest of the session, even though
+  the migration, moments later, moved the user's real `opensak.json`
+  (databases, username, home location, everything) to exactly the path
+  the store had already given up on. Every setting read for the rest of
+  that session — including `DatabaseManager`'s database list — saw this
+  permanently empty store, regardless of what the migration had actually
+  done or what was genuinely sitting on disk. `main()` now runs logging
+  setup and the macOS path migration first, before anything (including
+  theme setup) can read a setting for the first time. No effect on
+  Windows/Linux, where the migration step is already a no-op.
+
+### Known follow-up (not fixed here)
+
+- **`migrate_from_qsettings()`'s "no legacy data" check is unreliable on
+  macOS.** It treats `QSettings.allKeys()` being non-empty as "found an
+  old installation to migrate", but on macOS `QSettings` transparently
+  falls back to the OS's own global preference domain (keyboard, trackpad,
+  language settings, etc.) when the app's own domain has no keys of its
+  own — so the check sees a non-empty list on a genuinely fresh install
+  too. With this release's fix, that no longer loses any data (real
+  settings are already loaded by the time this check runs, so the
+  incorrect "already migrated" flag it sets is merged in rather than
+  overwriting anything) — but it still incorrectly marks the welcome
+  wizard as already completed on a first-ever run, so a new macOS user
+  can be shown the "set your username and home location" reminder instead
+  of the wizard itself. Tracked separately, to be filed as its own issue.
+
+---
+
 ## [1.19.5] — 2026-09-20
 
 > Diagnostics-only release on the 1.19.0 stable line — no behavior changes.

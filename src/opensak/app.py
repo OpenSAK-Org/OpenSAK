@@ -257,8 +257,44 @@ def main() -> None:
     app.setOrganizationName("OpenSAK Project")
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
+    # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
+    # alt der sker under resten af opstarten, inkl. migration og wizard.
+    from opensak.logger import setup_logging
+    setup_logging()
+    logger.info("startup: main() begin, version=%s", _ver)
+    _startup_t0 = time.monotonic()
+
+    # Kør macOS-sti-migreringen (issue #825) FØR NOGET ANDET rører
+    # settings-systemet — inklusive apply_theme() nedenfor.
+    #
+    # Issue #878: denne migrering lå tidligere efter apply_theme(app), som
+    # så ud til at være uden afhængighed af den (ren UI-palette-opsætning).
+    # Men apply_theme() slår internt "display.theme" op via
+    # get_settings().theme → get_store() — og SettingsStore cacher BÅDE sin
+    # opløste fil-sti (_path) OG sit indlæste indhold (_data) permanent ved
+    # første tilgang (_load() kører aldrig igen, jf. dens egen
+    # "if self._data is not None: return"-guard). Når apply_theme() kørte
+    # FØR migreringen, ramte denne første tilgang en sti hvor den endnu
+    # ikke-migrerede opensak.json ikke fandtes endnu — singletonen cachede
+    # `{}` for resten af processens levetid, og fortsatte med at gøre det
+    # selvom migreringen et øjeblik senere fysisk flyttede den rigtige fil
+    # ind på præcis den sti. Den efterfølgende migrate_from_qsettings()
+    # (og enhver anden settings-læsning under resten af opstarten) arvede
+    # dermed en permanent tom store, uanset hvad der reelt lå på disken —
+    # den synlige effekt var at brugerens database, brugernavn og
+    # hjem-koordinater så ud til at være forsvundet efter opdatering.
+    #
+    # Ingen effekt på Windows/Linux (funktionen er selv et no-op der).
+    from opensak.settings_store import (
+        get_store, migrate_from_qsettings, migrate_macos_default_paths,
+        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
+    )
+    migrate_macos_default_paths()
+
     # Anvend Fusion stil + platform-tilpasset font + brugertema
-    # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt)
+    # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
+    # Skal køre EFTER migrate_macos_default_paths() ovenfor — se
+    # kommentaren der.
     from opensak.gui.theme import apply_theme
     apply_theme(app)
 
@@ -275,26 +311,9 @@ def main() -> None:
         )
         app.processEvents()
 
-    # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
-    # alt der sker under resten af opstarten, inkl. migration og wizard.
-    from opensak.logger import setup_logging
-    setup_logging()
-    logger.info("startup: main() begin, version=%s", _ver)
-    _startup_t0 = time.monotonic()
-
     # Indlæs sprog FØR noget UI oprettes
     splash_msg("Indlæser sprog...")
     # Kør én-gangs migration fra QSettings → opensak.json (issue #209)
-    from opensak.settings_store import (
-        get_store, migrate_from_qsettings, migrate_macos_default_paths,
-        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
-    )
-    # Issue #825: macOS brugte fejlagtigt Linux-stierne (~/.config,
-    # ~/.local/share) i stedet for ~/Library/Application Support. Skal
-    # køres FØR get_store() kaldes nedenfor, så SettingsStore-singletonen
-    # aldrig når at slå op i (og cache) den gamle, forkerte sti. Ingen
-    # effekt på Windows/Linux.
-    migrate_macos_default_paths()
     did_migrate = migrate_from_qsettings(get_store())
     # Reparér evt. boolean-værdier korrumperet af en tidligere bug i
     # _flush() — kører altid, uafhængigt af om migration var nødvendig,
