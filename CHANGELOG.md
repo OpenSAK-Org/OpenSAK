@@ -4,6 +4,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.1] — 2026-09-21
+
+> First beta of the 1.20.0 cycle — opens with the follow-up fix for
+> v1.19.6's known macOS issue, plus two independent update-flow
+> improvements for Windows and macOS.
+
+### Fixed
+
+- **macOS: a genuinely fresh install could incorrectly skip the welcome
+  wizard (fixes #882)** — `migrate_from_qsettings()`'s "does old OpenSAK
+  data exist" check treated `QSettings.allKeys()` being non-empty as
+  proof of a legacy installation to migrate. On macOS, `QSettings`
+  transparently falls back to the OS's own global preference domain
+  (keyboard, locale, trackpad, spelling, etc.) whenever the app's own
+  domain has no keys of its own — so a brand new install could still see
+  40-50 keys back here, none of them ever written by OpenSAK. The check
+  now looks at whether any *actual* OpenSAK data was found (the same
+  `updates` dict the migration itself builds), not at whether the
+  QSettings domain answered at all. No data-loss risk either way (see
+  v1.19.6's own note on this) — this only fixes which users correctly see
+  the first-run wizard.
+- **Windows: Microsoft Store/MSIX installs were shown a misleading
+  "download and run this .exe yourself" update popup (fixes #874)** — the
+  built-in update checker didn't distinguish installation sources on
+  Windows, so a Store user got the exact same notification as a
+  portable/.exe user, even though the Store already updates the app
+  automatically in the background. The background check is now skipped
+  entirely for MSIX builds; a manual "Check for updates" click still
+  checks, but shows a plain informational message instead of an actionable
+  download prompt.
+
+### Added
+
+- **Windows/macOS: checksum-verified self-download for updates (#572)** —
+  Linux (AppImage) has had a fully automatic self-update since #836; this
+  brings the equivalent convenience to Windows and macOS within what those
+  platforms actually allow. Clicking "Download & Install" on an update
+  notification now downloads the correct OS/architecture-matched asset
+  in-app with a real progress bar, verifies its SHA256 checksum against a
+  new `SHA256SUMS.txt` published with every release, and then opens it
+  (reveals in Explorer on Windows, mounts and opens in Finder on macOS) —
+  the same last step as a manual download, minus having to find and pick
+  the right file yourself. Replacing the running `.exe`/`.app` itself is
+  intentionally out of scope (Windows locks a running executable; macOS
+  installation is drag-to-Applications, not a single-file swap) — see
+  `SelfUpdateWorker` in `updater.py` for the reasoning.
+
+---
+
 ## [1.19.6] — 2026-09-20
 
 > Bugfix-only release on the 1.19.0 stable line. This is believed to be the
