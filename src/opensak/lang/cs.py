@@ -418,6 +418,8 @@ STRINGS: dict[str, str] = {
     "update_available_msg":         "OpenSAK {latest} je k dispozici — používáte {current}.",
     "update_available_info":        "Klikněte na 'Stáhnout' pro otevření stránky GitHub a získání nejnovější verze.",
     "update_open_releases":         "Stáhnout novou verzi",
+    "update_msix_managed_title":    "Aktualizaci zajišťuje Microsoft Store",
+    "update_msix_managed_msg":      "Je dostupná verze OpenSAK {latest} — používáte {current}. Microsoft Store udržuje tuto instalaci automaticky aktuální, takže není třeba nic dělat.",
     "update_later":                 "Později",
     "update_skip_version":           "Přeskočit tuto verzi",
     "update_changelog":              "Zobrazit protokol změn",

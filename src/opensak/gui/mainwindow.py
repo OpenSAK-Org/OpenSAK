@@ -3038,6 +3038,18 @@ class MainWindow(QMainWindow):
         from opensak.gui.settings import get_settings
         if not get_settings().updates_check_enabled:
             return
+        # Issue #874: Microsoft Store/MSIX-installs opdaterer sig selv
+        # automatisk i baggrunden — vores eget tjek her ville blot vise en
+        # forvirrende "ny version tilgængelig, download her"-besked om
+        # noget brugeren hverken skal eller bør handle på selv (se #883
+        # for et reelt eksempel: en Store-bruger fik denne besked ved
+        # hver opstart). Springes derfor helt over for MSIX-builds; et
+        # manuelt "Check for updates"-klik (_check_update_manual) tjekker
+        # stadig, men viser en anden, ikke-handlingsorienteret besked —
+        # se _on_update_available().
+        from opensak import msix
+        if msix.is_msix_packaged():
+            return
         self._update_worker = UpdateCheckWorker(
             __version__, parent=self,
             include_prereleases=get_settings().notify_about_betas,
@@ -3086,6 +3098,23 @@ class MainWindow(QMainWindow):
                 return
 
         from opensak import __version__
+
+        # Issue #874: baggrunds-tjekket springes helt over for MSIX (se
+        # _check_update_background()), så denne gren nås kun via et
+        # manuelt "Check for updates"-klik. Store/MSIX-installs opdaterer
+        # allerede automatisk i baggrunden — at tilbyde samme "download og
+        # kør selv"-dialog som portable/.exe-brugere får risikerer at
+        # blande installationsmetoder på samme maskine. Vis i stedet en
+        # simpel infobesked uden nogen handlingsknap.
+        from opensak import msix
+        if manual and msix.is_msix_packaged():
+            QMessageBox.information(
+                self,
+                tr("update_msix_managed_title"),
+                tr("update_msix_managed_msg", latest=latest_tag, current=__version__),
+            )
+            return
+
         # Point at the specific release tag, not always `main` — betas live on
         # the `beta` branch and aren't merged to `main` until they go stable,
         # so a hardcoded main link showed the wrong (older) changelog entry
