@@ -1211,6 +1211,14 @@ STRINGS: dict[str, str] = {
     "update_appimage_done_msg":          "A nova versão foi instalada. Feche o OpenSAK e clique novamente no ícone para o iniciar.",
     "update_appimage_error_title":       "Falha na atualização",
     "update_appimage_error_msg":         "Não foi possível atualizar o OpenSAK automaticamente ({error}). Ainda pode transferir a nova versão manualmente a partir da página de releases.",
+    "update_download_button":       "Transferir e instalar",
+    "update_downloading_title":     "A transferir atualização",
+    "update_downloading":           "A transferir a nova versão…",
+    "update_downloading_percent":   "A transferir a nova versão… ({percent}%)",
+    "update_download_done_title":   "Transferência concluída",
+    "update_download_done_msg":     "A nova versão foi transferida e aberta para si. Feche o OpenSAK e conclua a instalação a partir daí.",
+    "update_download_error_title":  "Falha na transferência",
+    "update_download_error_msg":    "Não foi possível transferir a atualização automaticamente ({error}). Ainda pode transferi-la manualmente a partir da página de releases.",
 
     # ── AppImage in-app afinstaller (Linux, issue #837) ─────────────────────
     "settings_appimage_uninstall_button":     "Desinstalar o OpenSAK",

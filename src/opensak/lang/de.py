@@ -1210,6 +1210,14 @@ STRINGS: dict[str, str] = {
     "update_appimage_done_msg":          "Die neue Version wurde installiert. Schließen Sie OpenSAK und klicken Sie erneut auf das Symbol, um es zu starten.",
     "update_appimage_error_title":       "Update fehlgeschlagen",
     "update_appimage_error_msg":         "OpenSAK konnte nicht automatisch aktualisiert werden ({error}). Sie können die neue Version weiterhin manuell von der Release-Seite herunterladen.",
+    "update_download_button":       "Herunterladen & installieren",
+    "update_downloading_title":     "Update wird heruntergeladen",
+    "update_downloading":           "Die neue Version wird heruntergeladen…",
+    "update_downloading_percent":   "Die neue Version wird heruntergeladen… ({percent} %)",
+    "update_download_done_title":   "Download abgeschlossen",
+    "update_download_done_msg":     "Die neue Version wurde heruntergeladen und für Sie geöffnet. Schließen Sie OpenSAK und schließen Sie die Installation von dort ab.",
+    "update_download_error_title":  "Download fehlgeschlagen",
+    "update_download_error_msg":    "OpenSAK konnte das Update nicht automatisch herunterladen ({error}). Sie können die neue Version weiterhin manuell von der Release-Seite herunterladen.",
 
     # ── AppImage in-app afinstaller (Linux, issue #837) ─────────────────────
     "settings_appimage_uninstall_button":     "OpenSAK deinstallieren",

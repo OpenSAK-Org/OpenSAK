@@ -1206,6 +1206,14 @@ STRINGS: dict[str, str] = {
     "update_appimage_done_msg":          "Nová verze byla nainstalována. Zavřete OpenSAK a spusťte jej opětovným kliknutím na ikonu.",
     "update_appimage_error_title":       "Aktualizace se nezdařila",
     "update_appimage_error_msg":         "OpenSAK se nepodařilo automaticky aktualizovat ({error}). Novou verzi si stále můžete stáhnout ručně ze stránky s vydáními.",
+    "update_download_button":       "Stáhnout a nainstalovat",
+    "update_downloading_title":     "Stahuje se aktualizace",
+    "update_downloading":           "Stahuje se nová verze…",
+    "update_downloading_percent":   "Stahuje se nová verze… ({percent} %)",
+    "update_download_done_title":   "Stahování dokončeno",
+    "update_download_done_msg":     "Nová verze byla stažena a otevřena. Zavřete OpenSAK a dokončete instalaci odtud.",
+    "update_download_error_title":  "Stahování selhalo",
+    "update_download_error_msg":    "OpenSAK se nepodařilo automaticky stáhnout aktualizaci ({error}). Novou verzi si stále můžete stáhnout ručně ze stránky s vydáními.",
 
     # ── AppImage in-app afinstaller (Linux, issue #837) ─────────────────────
     "settings_appimage_uninstall_button":     "Odinstalovat OpenSAK",

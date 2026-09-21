@@ -3139,12 +3139,25 @@ class MainWindow(QMainWindow):
         # lokal statustjek her — selve asset-URL-opslaget sker først i
         # AppImageUpdateWorker, når brugeren rent faktisk klikker knappen.
         from opensak import appimage
-        can_self_update = (
+        can_appimage_self_update = (
             appimage.is_running_as_appimage() and appimage.is_appimage_integrated()
         )
-        if can_self_update:
+        # Issue #572: Windows/macOS kan ikke erstatte en kørende .exe/.app
+        # atomisk som Linux kan (se SelfUpdateWorker's docstring i
+        # updater.py) — men vi kan stadig downloade det rigtige,
+        # checksum-verificerede asset for brugeren og "åbne" det, i stedet
+        # for at sende dem til en browser til at vælge selv.
+        import sys
+        can_self_download = (
+            not can_appimage_self_update and sys.platform in ("win32", "darwin")
+        )
+        if can_appimage_self_update:
             btn_primary = msg.addButton(
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
+            )
+        elif can_self_download:
+            btn_primary = msg.addButton(
+                tr("update_download_button"), QMessageBox.ButtonRole.AcceptRole
             )
         else:
             btn_primary = msg.addButton(
@@ -3160,8 +3173,10 @@ class MainWindow(QMainWindow):
 
         clicked = msg.clickedButton()
         if clicked == btn_primary:
-            if can_self_update:
+            if can_appimage_self_update:
                 self._start_appimage_self_update(latest_tag)
+            elif can_self_download:
+                self._start_self_download_update(latest_tag)
             else:
                 import webbrowser
                 webbrowser.open(url)
@@ -3212,4 +3227,61 @@ class MainWindow(QMainWindow):
         self._appimage_update_worker.finished_ok.connect(_on_ok)
         self._appimage_update_worker.finished_error.connect(_on_error)
         self._appimage_update_worker.start()
+
+    def _start_self_download_update(self, tag: str) -> None:
+        """
+        Kald ved klik på "Download & Install" for Windows/macOS-brugere
+        (issue #572). Til forskel fra AppImage-flowets ubestemte
+        "Henter…"-indikator kender vi her den faktiske downloadstørrelse
+        via Content-Length, så fremskridtslinjen viser en reel procent.
+
+        SelfUpdateWorker erstatter ikke selv den kørende .exe/.app — når
+        download og checksum-verifikation er gennemført, "åbnes" filen
+        blot for brugeren (Explorer/Finder), som så selv fuldfører
+        installationen, ligesom ved et manuelt download.
+        """
+        from opensak.updater import SelfUpdateWorker
+
+        progress = QProgressDialog(tr("update_downloading"), "", 0, 100, self)
+        progress.setWindowTitle(tr("update_downloading_title"))
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        self._self_update_worker = SelfUpdateWorker(tag, parent=self)
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            if total > 0:
+                percent = min(100, int(downloaded * 100 / total))
+                progress.setValue(percent)
+                progress.setLabelText(tr("update_downloading_percent", percent=percent))
+
+        def _on_ok(_opened_path: str) -> None:
+            progress.close()
+            QMessageBox.information(
+                self,
+                tr("update_download_done_title"),
+                tr("update_download_done_msg"),
+            )
+
+        _ERROR_MESSAGES = {
+            "unsupported_platform": "unsupported platform",
+            "asset_not_found": "no matching release asset found",
+            "checksum_unavailable": "checksum verification unavailable for this release",
+            "checksum_mismatch": "downloaded file failed checksum verification",
+        }
+
+        def _on_error(error: str) -> None:
+            progress.close()
+            QMessageBox.warning(
+                self,
+                tr("update_download_error_title"),
+                tr("update_download_error_msg", error=_ERROR_MESSAGES.get(error, error)),
+            )
+
+        self._self_update_worker.progress.connect(_on_progress)
+        self._self_update_worker.finished_ok.connect(_on_ok)
+        self._self_update_worker.finished_error.connect(_on_error)
+        self._self_update_worker.start()
 

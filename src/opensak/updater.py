@@ -6,11 +6,14 @@ Tjekker i baggrunden om der er en ny version af OpenSAK tilgængelig.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
 import shutil
 import ssl
 import stat
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -329,6 +332,248 @@ def find_linux_appimage_asset_url(tag: str) -> str | None:
             return asset.get("browser_download_url")
     log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
     return None
+
+
+# ── Windows/macOS selv-download (issue #572) ────────────────────────────────
+#
+# Til forskel fra Linux (AppImageUpdateWorker ovenfor, som atomisk kan
+# erstatte en kørende fils inode) understøtter hverken Windows eller macOS
+# at erstatte et kørende program på samme måde — Windows låser en kørende
+# .exe, og macOS-installation er drag-to-Applications, ikke en enkelt fil.
+# Denne sektion downloader i stedet det korrekte platform-specifikke asset,
+# verificerer dets SHA256-checksum, og "åbner" det for brugeren (samme
+# sidste skridt som ved et manuelt download) — se SelfUpdateWorker's
+# docstring. At erstatte selve den kørende .exe/.app er bevidst uden for
+# scope, jf. issue #572's egen afgrænsning.
+
+def find_windows_asset_url(tag: str) -> str | None:
+    """
+    Find download-URL'en for Windows-asset'et i en given release.
+
+    Matcher navnemønsteret build.yml rent faktisk bruger:
+    'OpenSAK-<tag>-Windows.zip' (verificeret mod
+    .github/workflows/build.yml).
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+    expected_name = windows_asset_name(tag)
+    for asset in release["assets"]:
+        if asset.get("name") == expected_name:
+            return asset.get("browser_download_url")
+    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    return None
+
+
+def windows_asset_name(tag: str) -> str:
+    """Filnavnet build.yml giver Windows-asset'et for et givet tag."""
+    return f"OpenSAK-{tag}-Windows.zip"
+
+
+def macos_arch_suffix() -> str:
+    """
+    Returner 'arm64' eller 'x86_64' ud fra platform.machine().
+
+    build.yml bygger separate .dmg-filer for Apple Silicon og Intel — dette
+    afgør hvilken af de to den kørende Mac faktisk skal bruge.
+    """
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return "x86_64"
+
+
+def macos_asset_name(tag: str) -> str:
+    """Filnavnet build.yml giver macOS-asset'et for et givet tag, arkitektur-korrekt."""
+    return f"OpenSAK-{tag}-macOS-{macos_arch_suffix()}.dmg"
+
+
+def find_macos_asset_url(tag: str) -> str | None:
+    """
+    Find download-URL'en for det arkitektur-korrekte macOS .dmg-asset i en
+    given release — matcher build.yml's
+    'OpenSAK-<tag>-macOS-<arm64|x86_64>.dmg'-navnemønster.
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+    expected_name = macos_asset_name(tag)
+    for asset in release["assets"]:
+        if asset.get("name") == expected_name:
+            return asset.get("browser_download_url")
+    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    return None
+
+
+SHA256SUMS_ASSET_NAME = "SHA256SUMS.txt"
+
+
+def fetch_checksums(tag: str) -> dict[str, str] | None:
+    """
+    Hent og parse SHA256SUMS.txt fra en release.
+
+    Filen forventes i standard `sha256sum`-format: "<hex-digest>  <filnavn>"
+    pr. linje (én linje pr. asset — genereret af create-release-jobbet i
+    build.yml). Returnerer None hvis release'en ikke findes, eller den
+    (endnu) ikke har en SHA256SUMS.txt — fx en ældre release fra før dette
+    blev tilføjet.
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+
+    checksums_url = None
+    for asset in release["assets"]:
+        if asset.get("name") == SHA256SUMS_ASSET_NAME:
+            checksums_url = asset.get("browser_download_url")
+            break
+    if checksums_url is None:
+        log.debug("Ingen %s fundet i release %s", SHA256SUMS_ASSET_NAME, tag)
+        return None
+
+    try:
+        req = urllib.request.Request(
+            checksums_url, headers={"User-Agent": "OpenSAK-self-update"}
+        )
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
+            text = resp.read().decode("utf-8")
+    except (URLError, OSError, UnicodeDecodeError) as exc:
+        log.debug("Kunne ikke hente/læse %s for %s: %s", SHA256SUMS_ASSET_NAME, tag, exc)
+        return None
+
+    checksums: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, filename = parts
+        # sha256sum-formatet kan prefixe filnavnet med '*' (binær-mode)
+        filename = filename.lstrip("*").strip()
+        checksums[filename] = digest.lower()
+    return checksums
+
+
+def _sha256_of_file(path: Path) -> str:
+    """SHA256-hex-digest af en fil, læst i chunks (ikke hele filen i RAM)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class SelfUpdateWorker(QThread):
+    """
+    Baggrundsthread der downloader og verificerer den korrekte
+    platform-specifikke Windows/macOS-asset for en given release, og
+    derefter "åbner" den for brugeren (issue #572).
+
+    Se modul-sektionens docstring ovenfor for hvorfor dette IKKE forsøger
+    at erstatte den kørende .exe/.app selv, i modsætning til
+    AppImageUpdateWorker på Linux.
+
+    Signals:
+        progress(downloaded, total):  Fremskridt under download, i bytes.
+                                       `total` er 0 hvis serveren ikke
+                                       sender Content-Length.
+        finished_ok(opened_path):     Download + åbning gennemført.
+        finished_error(error_code):   "unsupported_platform" | "asset_not_found" |
+                                       "checksum_unavailable" | "checksum_mismatch",
+                                       eller en rå OSError/URLError-strengbesked
+                                       for netværks-/filsystemfejl.
+    """
+
+    progress       = Signal(int, int)   # (downloaded_bytes, total_bytes)
+    finished_ok    = Signal(str)
+    finished_error = Signal(str)
+
+    def __init__(self, tag: str, parent=None):
+        super().__init__(parent)
+        self._tag = tag
+
+    def run(self) -> None:
+        # mypy antager (korrekt, når selve mypy-kørslen sker på Linux) at
+        # `sys.platform == "win32"`/`"darwin"` er statisk uopnåelige grene
+        # her, og udelader dem derfor fra sin definitiv-tildelings-analyse
+        # — prædeklarér variablerne så "Name not defined" ikke opstår.
+        download_url: str | None
+        asset_name: str
+        if sys.platform == "win32":
+            download_url = find_windows_asset_url(self._tag)
+            asset_name = windows_asset_name(self._tag)
+        elif sys.platform == "darwin":
+            download_url = find_macos_asset_url(self._tag)
+            asset_name = macos_asset_name(self._tag)
+        else:
+            self.finished_error.emit("unsupported_platform")
+            return
+
+        if download_url is None:
+            self.finished_error.emit("asset_not_found")
+            return
+
+        checksums = fetch_checksums(self._tag)
+        if not checksums or asset_name not in checksums:
+            self.finished_error.emit("checksum_unavailable")
+            return
+        expected_digest = checksums[asset_name]
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="opensak-update-"))
+        downloaded_path = tmp_dir / asset_name
+        try:
+            log.debug("Downloader selv-opdatering fra %s", download_url)
+            req = urllib.request.Request(
+                download_url, headers={"User-Agent": "OpenSAK-self-update"}
+            )
+            with urllib.request.urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp:
+                total = int(resp.headers.get("Content-Length", 0) or 0)
+                downloaded = 0
+                with open(downloaded_path, "wb") as out:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress.emit(downloaded, total)
+
+            actual_digest = _sha256_of_file(downloaded_path)
+            if actual_digest.lower() != expected_digest.lower():
+                log.warning(
+                    "Checksum-mismatch for %s: forventede %s, fik %s",
+                    asset_name, expected_digest, actual_digest,
+                )
+                self.finished_error.emit("checksum_mismatch")
+                return
+
+            self._reveal(downloaded_path)
+            log.debug("Selv-opdatering downloadet og åbnet: %s", downloaded_path)
+            self.finished_ok.emit(str(downloaded_path))
+
+        except (URLError, OSError) as exc:
+            log.warning("Selv-opdatering fejlede: %s", exc)
+            self.finished_error.emit(str(exc))
+
+    def _reveal(self, path: Path) -> None:
+        """
+        "Åbn" den downloadede fil for brugeren.
+
+        Splittet ud som egen metode udelukkende for testbarhed — tests
+        monkeypatcher denne i stedet for rent faktisk at åbne et
+        Explorer/Finder-vindue.
+        """
+        import subprocess
+        if sys.platform == "win32":
+            # /select fremhæver filen i en åben Explorer-mappe, i stedet
+            # for at forsøge at åbne/udpakke .zip'en direkte.
+            subprocess.run(["explorer", f"/select,{path}"])
+        elif sys.platform == "darwin":
+            # "open" på en .dmg monterer den og åbner et Finder-vindue —
+            # samme resultat som et manuelt dobbeltklik.
+            subprocess.run(["open", str(path)])
 
 
 class AppImageUpdateWorker(QThread):

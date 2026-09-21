@@ -331,6 +331,16 @@ jobs:
           path: release-files/
       - name: List release files
         run: ls -lh release-files/
+      - name: Generate SHA256 checksums
+        # Issue #572: OpenSAK's self-download update flow (SelfUpdateWorker
+        # in updater.py) verifies the downloaded Windows/macOS asset
+        # against this file before "opening" it for the user. Standard
+        # `sha256sum` output format ("<hex>  <filename>") — one line per
+        # release asset, including this file's own siblings but obviously
+        # not itself. Picked up automatically by the `files:` glob below,
+        # same as every other file in release-files/.
+        working-directory: release-files
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -375,6 +385,9 @@ jobs:
 
             1. Download the correct .dmg for your Mac (arm64 or x86_64)
             2. Open the .dmg and drag OpenSAK to your Applications folder — the app is signed and notarized by Apple, so it opens normally on first launch
+
+            ---
+            🔒 SHA256 checksums for all files above: `SHA256SUMS.txt`
 
             ---
             See [CHANGELOG.md](https://github.com/OpenSAK-Org/OpenSAK/blob/${{ steps.version.outputs.VERSION }}/CHANGELOG.md) for details.
