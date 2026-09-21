@@ -222,6 +222,159 @@ class TestRepairCorruptedBoolKeys:
         assert raw["updates.check_enabled"] is True
 
 
+# ── migrate_from_qsettings ──────────────────────────────────────────────────
+
+def _make_fake_qsettings(values=None, databases=None, active_database=None):
+    """
+    Build a fake QSettings *class* for monkeypatching
+    ``PySide6.QtCore.QSettings``.
+
+    ``migrate_from_qsettings()`` only ever calls ``allKeys()``,
+    ``value()``, ``fileName()``, and the ``beginReadArray``/
+    ``setArrayIndex``/``endArray`` trio for the "databases" array — this
+    stub covers exactly those calls without touching the real OS
+    preference store (registry / plist / INI file), which would make the
+    test depend on and pollute whatever machine runs it.
+    """
+    _values = dict(values or {})
+    _databases = list(databases or [])
+
+    class _FakeQSettings:
+        def __init__(self, *args, **kwargs):
+            self._in_array = False
+            self._array_index = 0
+
+        def allKeys(self):
+            return list(_values.keys())
+
+        def value(self, key, default=None):
+            if self._in_array:
+                return _databases[self._array_index].get(key, default)
+            if key == "active_database":
+                return active_database
+            return _values.get(key, default)
+
+        def fileName(self):
+            return "/fake/Library/Preferences/com.opensak-project.OpenSAK.plist"
+
+        def beginReadArray(self, prefix):
+            assert prefix == "databases"
+            self._in_array = True
+            return len(_databases)
+
+        def setArrayIndex(self, i):
+            self._array_index = i
+
+        def endArray(self):
+            self._in_array = False
+
+    return _FakeQSettings
+
+
+class TestMigrateFromQsettings:
+    """
+    Regression coverage for issue #882.
+
+    On macOS, ``QSettings.allKeys()`` transparently falls back to the OS's
+    global preference domain (keyboard, locale, trackpad, spelling, ...)
+    whenever OpenSAK's own domain has no keys of its own — so a genuinely
+    fresh install can still get 40-50 keys back here, none of them ever
+    written by OpenSAK. Whether migration actually happened must be judged
+    on the *content* found (``updates``), never on whether ``all_keys``
+    happened to be non-empty.
+    """
+
+    def test_already_migrated_short_circuits(self, store):
+        store.set("_migrated_from_qsettings", True)
+        # No QSettings stub installed at all — if migrate_from_qsettings()
+        # tried to touch QSettings here, it would raise ImportError/fail,
+        # proving the already-migrated guard returned first.
+        assert ss.migrate_from_qsettings(store) is False
+
+    def test_global_domain_fallback_alone_is_not_treated_as_legacy_data(
+        self, store, monkeypatch
+    ):
+        """Issue #882's exact scenario: non-empty all_keys, zero OpenSAK keys."""
+        fake = _make_fake_qsettings(values={
+            "AppleLanguages": "(en)",
+            "AppleLocale": "en_US",
+            "com/apple/trackpad/Clicking": "1",
+        })
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is False
+        # Flag is still set (so this only runs once), but the caller
+        # (app.py) only calls mark_wizard_completed() when the return
+        # value is True — so a fresh macOS user still sees the wizard.
+        assert store.get("_migrated_from_qsettings") is True
+
+    def test_no_qsettings_data_at_all_returns_false(self, store, monkeypatch):
+        fake = _make_fake_qsettings(values={})
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        assert ss.migrate_from_qsettings(store) is False
+        assert store.get("_migrated_from_qsettings") is True
+
+    def test_real_key_map_value_is_migrated_and_returns_true(self, store, monkeypatch):
+        fake = _make_fake_qsettings(values={"user/gc_username": "AgreeDK"})
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is True
+        assert store.get("user.gc_username") == "AgreeDK"
+        assert store.get("_migrated_from_qsettings") is True
+
+    def test_key_map_value_mixed_with_global_noise_still_migrates(
+        self, store, monkeypatch
+    ):
+        """A real OpenSAK key alongside macOS's global fallback noise."""
+        fake = _make_fake_qsettings(values={
+            "AppleLanguages": "(en)",
+            "display/theme": "dark",
+        })
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is True
+        assert store.get("display.theme") == "dark"
+
+    def test_per_database_prefixed_key_counts_as_real_data(self, store, monkeypatch):
+        fake = _make_fake_qsettings(values={
+            "AppleLanguages": "(en)",  # noise, like #882
+            "db_dbid1/home_lat": 55.5,
+        })
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is True
+        assert store.get("qs.db_dbid1.home_lat") == 55.5
+
+    def test_databases_array_alone_counts_as_real_data(self, store, monkeypatch):
+        fake = _make_fake_qsettings(
+            values={"AppleLanguages": "(en)"},  # noise only
+            databases=[{"name": "Zealand", "path": "/db/zealand.sqlite"}],
+        )
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is True
+        assert store.get("databases.list") == [
+            {"name": "Zealand", "path": "/db/zealand.sqlite"}
+        ]
+
+    def test_active_database_alone_counts_as_real_data(self, store, monkeypatch):
+        fake = _make_fake_qsettings(
+            values={"AppleLanguages": "(en)"},  # noise only
+            active_database="/db/zealand.sqlite",
+        )
+        monkeypatch.setattr("PySide6.QtCore.QSettings", fake)
+        result = ss.migrate_from_qsettings(store)
+        assert result is True
+        assert store.get("databases.active") == "/db/zealand.sqlite"
+
+    def test_qsettings_failure_is_caught_and_flag_still_set(self, store, monkeypatch):
+        def _raise(*a, **k):
+            raise RuntimeError("boom")
+        monkeypatch.setattr("PySide6.QtCore.QSettings", _raise)
+        assert ss.migrate_from_qsettings(store) is False
+        assert store.get("_migrated_from_qsettings") is True
+
+
 # ── sync and invalidate_path_cache ─────────────────────────────────────────
 
 class TestSyncAndInvalidate:

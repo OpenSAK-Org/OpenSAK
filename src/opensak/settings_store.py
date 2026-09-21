@@ -378,11 +378,22 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
             "migrate_from_qsettings: QSettings('OpenSAK Project','OpenSAK') "
             "all_keys=%r (fileName()=%r)", all_keys, qs.fileName(),
         )
-        if not all_keys:
-            store.set("_migrated_from_qsettings", True)
-            return False
 
-        updates: dict[str, Any] = {"_migrated_from_qsettings": True}
+        # Issue #882: `all_keys` alene er IKKE et pålideligt signal på
+        # macOS. Qt's QSettings falder tavst tilbage til OS'ets globale
+        # preference-domæne (tastatur, sprog, trackpad m.v.) når appens
+        # eget domæne ("OpenSAK Project"/"OpenSAK") ingen nøgler har — så
+        # en helt frisk macOS-installation kan sagtens få 40-50 nøgler
+        # tilbage her (AppleLanguages, AppleLocale, com/apple/trackpad/...),
+        # uden at nogen af dem er OpenSAK-data. At bruge "all_keys er
+        # ikke-tom" som betingelse for "der findes gammelt OpenSAK-data at
+        # migrere" satte derfor `_wizard_completed` forkert på en frisk
+        # install (se issuets beskrivelse). Afgør i stedet ud fra `updates`
+        # selv, længere nede — dvs. om mindst én nøgle vi faktisk kender
+        # (key_map, window/*, databases-arrayet, eller db_/sort/-præfikset)
+        # havde en reel værdi.
+
+        updates: dict[str, Any] = {}
 
         # Mapping fra QSettings nøgler → opensak.json nøgler
         # (kun nøgler vi kender og ønsker at migrere)
@@ -487,9 +498,20 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
         if active_db:
             updates["databases.active"] = active_db
 
+        # Issue #882: se kommentaren ovenfor — det er `updates` (det vi
+        # faktisk fandt), ikke `all_keys` (om QSettings-domænet overhovedet
+        # svarede noget), der afgør om der var reel OpenSAK-data at
+        # migrere. `_migrated_from_qsettings`-flaget sættes altid, uanset
+        # udfald, så vi kun kører dette tjek én gang pr. installation.
+        found_real_data = bool(updates)
+        updates["_migrated_from_qsettings"] = True
         store.set_many(updates)
-        print(f"[settings] Migrerede {len(updates)-1} nøgler fra QSettings → opensak.json")
-        return True
+
+        if found_real_data:
+            print(f"[settings] Migrerede {len(updates)-1} nøgler fra QSettings → opensak.json")
+        else:
+            print("[settings] Ingen OpenSAK-data fundet i QSettings — ingen migration nødvendig")
+        return found_real_data
 
     except Exception as e:
         print(f"[settings] Migration fra QSettings fejlede: {e}")
