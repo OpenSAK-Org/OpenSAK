@@ -23,16 +23,38 @@ pytest.importorskip("pytestqt")
 
 from opensak.gui.mainwindow import MainWindow
 
+# Saved BEFORE any monkeypatching, so the tests that specifically exercise
+# _check_update_background() can call the real implementation explicitly —
+# see the comment on _quiet_startup below for why the class attribute
+# itself must stay stubbed for every other MainWindow() in this file.
+_REAL_CHECK_UPDATE_BACKGROUND = MainWindow._check_update_background
+
 
 @pytest.fixture(autouse=True)
 def _quiet_startup(monkeypatch):
-    # Keep window construction cheap/deterministic. _check_update_background
-    # is deliberately NOT stubbed here (unlike the similar fixture in
-    # test_previous_log_menu_737.py) — it's what this file tests. Leaving
-    # it real is safe: __init__ only schedules it via
-    # QTimer.singleShot(5000, ...), so it never actually fires during a
-    # fast unit test unless a test calls it explicitly.
+    # _check_update_background IS stubbed here, same as
+    # test_previous_log_menu_737.py's convention — and for the same
+    # reason that convention exists, not despite it. __init__ schedules
+    # it via QTimer.singleShot(5000, ...), and a full test-session run
+    # comfortably exceeds 5 seconds, so an unstubbed real
+    # _check_update_background WILL eventually fire during some later,
+    # unrelated test once Qt's event loop gets pumped again (qtbot does
+    # this constantly) — spawning a genuine background UpdateCheckWorker
+    # thread that outlives this test's own mocks entirely. When it then
+    # calls the real urllib.request.urlopen, it lands inside whatever
+    # OTHER test file's urlopen monkeypatch happens to be active at that
+    # later moment, with arguments that patch was never written to
+    # expect — a real, reproduced failure (not flaky CI infra): a leaked
+    # thread from here crashed test_packs.py's teardown, because its
+    # `if "prt.geojson" in url` fake assumed a plain string url, not the
+    # Request object UpdateCheckWorker.run() actually passes.
+    #
+    # The tests below that need the REAL method call
+    # _REAL_CHECK_UPDATE_BACKGROUND(window) directly instead — that
+    # bypasses this stub deliberately, on purpose, only for the one
+    # explicit call the test makes, never for __init__'s own scheduled one.
     monkeypatch.setattr(MainWindow, "_initial_load", lambda self: None)
+    monkeypatch.setattr(MainWindow, "_check_update_background", lambda self: None)
     monkeypatch.setattr(MainWindow, "_check_setup_complete", lambda self: None)
 
 
@@ -68,9 +90,9 @@ class TestCheckUpdateBackgroundMsixSkip:
              patch("opensak.gui.mainwindow.UpdateCheckWorker") as mock_worker_cls, \
              patch("opensak.gui.settings.get_settings") as mock_settings:
             mock_settings.return_value.updates_check_enabled = True
-            # Call the REAL method — the autouse fixture only stubs it on
-            # the class for __init__-time startup, not for this explicit call.
-            MainWindow._check_update_background(window)
+            # Real implementation, saved before the autouse fixture's stub
+            # took effect — see _REAL_CHECK_UPDATE_BACKGROUND above.
+            _REAL_CHECK_UPDATE_BACKGROUND(window)
         mock_worker_cls.assert_not_called()
 
     def test_not_msix_packaged_still_starts_a_worker_as_before(self, window):
@@ -82,7 +104,7 @@ class TestCheckUpdateBackgroundMsixSkip:
             mock_settings.return_value.notify_about_betas = False
             mock_instance = MagicMock()
             mock_worker_cls.return_value = mock_instance
-            MainWindow._check_update_background(window)
+            _REAL_CHECK_UPDATE_BACKGROUND(window)
         mock_worker_cls.assert_called_once()
         mock_instance.start.assert_called_once()
 
@@ -92,7 +114,7 @@ class TestCheckUpdateBackgroundMsixSkip:
              patch("opensak.gui.mainwindow.UpdateCheckWorker") as mock_worker_cls, \
              patch("opensak.gui.settings.get_settings") as mock_settings:
             mock_settings.return_value.updates_check_enabled = False
-            MainWindow._check_update_background(window)
+            _REAL_CHECK_UPDATE_BACKGROUND(window)
         mock_worker_cls.assert_not_called()
 
 
