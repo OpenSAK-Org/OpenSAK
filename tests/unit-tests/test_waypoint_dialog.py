@@ -245,3 +245,282 @@ class TestGetData:
         assert data["parent_gc_code"] == "GC999"
         assert data["difficulty"] is None
         assert data["container"] is None
+
+
+# ── extra cache fields ────────────────────────────────────────────────────────
+
+class TestExtraFields:
+    def test_extra_fields_populate_and_roundtrip(self, qtbot):
+        from datetime import datetime
+        c = _cache()
+        c.owner_name = "Real Owner"
+        c.hidden_date = datetime(2020, 5, 17, 10, 30)
+        c.county = "Kreis"
+        c.elevation = 512.0
+        c.short_desc_html = True
+        c.long_desc_html = False
+        c.user_flag = True
+        c.watch = True
+        c.user_data_1 = "u1"
+        c.user_data_4 = "u4"
+        c.gc_note = "gc note"
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        data = dlg.get_data()
+        assert data["owner_name"] == "Real Owner"
+        # Time of day preserved while the date itself is unchanged
+        assert data["hidden_date"] == datetime(2020, 5, 17, 10, 30)
+        assert data["county"] == "Kreis"
+        assert data["elevation"] == 512.0
+        assert data["short_desc_html"] is True
+        assert data["long_desc_html"] is False
+        assert data["user_flag"] is True
+        assert data["watch"] is True
+        assert data["user_data_1"] == "u1"
+        assert data["user_data_2"] is None
+        assert data["user_data_4"] == "u4"
+        assert data["gc_note"] == "gc note"
+
+    def test_missing_optional_attrs_default_to_empty(self, qtbot):
+        dlg = WaypointDialog(cache=_cache())
+        qtbot.addWidget(dlg)
+        data = dlg.get_data()
+        assert data["hidden_date"] is None
+        assert data["elevation"] is None
+        assert data["user_flag"] is False
+
+    def test_elevation_zero_is_kept(self, qtbot):
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._elevation.setText("0")
+        assert dlg.get_data()["elevation"] == 0.0
+
+    def test_elevation_accepts_decimal_comma(self, qtbot):
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._elevation.setText("12,5")
+        assert dlg.get_data()["elevation"] == 12.5
+
+    def test_invalid_elevation_blocks_accept(self, qtbot, warn):
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._name.setText("Good")
+        dlg._gc_code.setText("GC123")
+        dlg._elevation.setText("high")
+        dlg._validate_and_accept()
+        warn.assert_called_once()
+        assert dlg.result() != QDialog.DialogCode.Accepted
+
+
+# ── found/dnf ↔ date sync ─────────────────────────────────────────────────────
+
+class TestFlagDateSync:
+    def test_ticking_found_sets_today(self, qtbot):
+        from datetime import date
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._found.setChecked(True)
+        assert dlg.get_data()["found_date"].date() == date.today()
+
+    def test_unticking_found_clears_date(self, qtbot):
+        from datetime import datetime
+        c = _cache()
+        c.found_date = datetime(2021, 1, 2, 8, 0)
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        assert dlg.get_data()["found_date"] == datetime(2021, 1, 2, 8, 0)
+        dlg._found.setChecked(False)
+        data = dlg.get_data()
+        assert data["found"] is False
+        assert data["found_date"] is None
+
+    def test_populate_keeps_existing_state(self, qtbot):
+        # found without a date stays that way on open (no silent "today")
+        dlg = WaypointDialog(cache=_cache())
+        qtbot.addWidget(dlg)
+        assert dlg.get_data()["found_date"] is None
+
+    def test_dnf_sync(self, qtbot):
+        dlg = WaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._dnf.setChecked(True)
+        assert dlg.get_data()["dnf_date"] is not None
+        dlg._dnf.setChecked(False)
+        assert dlg.get_data()["dnf_date"] is None
+
+
+# ── user note / corrected coordinates ─────────────────────────────────────────
+
+class TestUserNote:
+    def test_populates_note_and_corrected(self, qtbot):
+        c = _cache()
+        c.user_note = SimpleNamespace(
+            note="my note", corrected_lat=55.5, corrected_lon=12.5, is_corrected=True)
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        assert dlg.get_user_note_data() == {
+            "note": "my note", "corrected_lat": 55.5, "corrected_lon": 12.5}
+        assert dlg._corr_clear_btn.isEnabled()
+
+    def test_clear_corrected(self, qtbot):
+        c = _cache()
+        c.user_note = SimpleNamespace(
+            note=None, corrected_lat=55.5, corrected_lon=12.5, is_corrected=True)
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        dlg._corr_clear_btn.click()
+        assert dlg.get_user_note_data()["corrected_lat"] is None
+        assert not dlg._corr_clear_btn.isEnabled()
+
+    def test_edit_corrected_via_dialog(self, qtbot, monkeypatch):
+        from opensak.gui.dialogs import corrected_coords_dialog as ccd
+        monkeypatch.setattr(ccd.CorrectedCoordsDialog, "exec", lambda self: True)
+        monkeypatch.setattr(ccd.CorrectedCoordsDialog, "get_coords", lambda self: (1.5, 2.5))
+        dlg = WaypointDialog(cache=_cache())
+        qtbot.addWidget(dlg)
+        dlg._corr_edit_btn.click()
+        assert dlg.get_user_note_data()["corrected_lat"] == 1.5
+        assert dlg.get_user_note_data()["corrected_lon"] == 2.5
+
+
+# ── child waypoints ───────────────────────────────────────────────────────────
+
+def _wp(id=1, prefix="PK", wp_code="PK12345"):
+    return SimpleNamespace(
+        id=id, prefix=prefix, wp_type="Parking Area", name="Parking",
+        description=None, comment=None, latitude=55.1, longitude=12.1,
+        wp_code=wp_code, url=None, wp_date=None, wp_flag=False,
+    )
+
+
+def _wp_dict(**overrides):
+    d = {k: v for k, v in vars(_wp()).items() if k != "id"}
+    d.update(overrides)
+    return d
+
+
+class TestChildWaypoints:
+    def test_waypoints_listed(self, qtbot):
+        c = _cache()
+        c.waypoints = [_wp(), _wp(id=2, prefix="FN", wp_code="FN12345")]
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        assert dlg._wp_table.rowCount() == 2
+        assert dlg._wp_table.item(1, 0).text() == "FN"
+
+    def test_waypoints_tab_hidden_for_custom(self, qtbot):
+        dlg = WaypointDialog(cache=_cache(gc_code="CW001", cache_type="Parking Area"))
+        qtbot.addWidget(dlg)
+        assert not dlg._tabs.isTabVisible(dlg._waypoints_tab_idx)
+        assert dlg.get_waypoints_data() is None
+
+    def test_add_edit_delete(self, qtbot, monkeypatch):
+        c = _cache()
+        c.waypoints = [_wp()]
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+
+        new = _wp_dict(prefix="S1", wp_type="Stage", wp_code=None)
+        monkeypatch.setattr(wpd.ChildWaypointDialog, "exec", lambda self: True)
+        monkeypatch.setattr(wpd.ChildWaypointDialog, "get_data", lambda self: dict(new))
+        dlg._add_child_wp()
+        wps = dlg.get_waypoints_data()
+        assert [w["prefix"] for w in wps] == ["PK", "S1"]
+        assert wps[1]["id"] is None
+
+        # edit keeps the DB id of the edited row
+        dlg._wp_table.selectRow(0)
+        dlg._edit_child_wp()
+        assert dlg.get_waypoints_data()[0]["id"] == 1
+        assert dlg.get_waypoints_data()[0]["prefix"] == "S1"
+
+        dlg._wp_table.selectRow(0)
+        dlg._delete_child_wp()
+        assert len(dlg.get_waypoints_data()) == 1
+
+    def test_duplicate_wp_code_rejected(self, qtbot, monkeypatch, warn):
+        c = _cache()
+        c.waypoints = [_wp(), _wp(id=2, prefix="FN", wp_code="FN12345")]
+        dlg = WaypointDialog(cache=c)
+        qtbot.addWidget(dlg)
+        results = iter([True, False])   # OK with a duplicate code, then Cancel
+        monkeypatch.setattr(wpd.ChildWaypointDialog, "exec", lambda self: next(results))
+        monkeypatch.setattr(wpd.ChildWaypointDialog, "get_data",
+                            lambda self: _wp_dict(prefix="XX", wp_code="FN12345"))
+        dlg._add_child_wp()
+        warn.assert_called_once()
+        assert len(dlg.get_waypoints_data()) == 2
+
+
+class TestChildWaypointDialog:
+    def test_prefix_required(self, qtbot, warn):
+        dlg = wpd.ChildWaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._validate_and_accept()
+        warn.assert_called_once()
+
+    def test_known_prefix_suggests_type(self, qtbot):
+        dlg = wpd.ChildWaypointDialog()
+        qtbot.addWidget(dlg)
+        qtbot.keyClicks(dlg._prefix, "fn")
+        assert dlg._wp_type.currentText() == "Final Location"
+
+    def test_roundtrip(self, qtbot):
+        dlg = wpd.ChildWaypointDialog(wp=_wp_dict())
+        qtbot.addWidget(dlg)
+        data = dlg.get_data()
+        assert data["prefix"] == "PK"
+        assert data["wp_type"] == "Parking Area"
+        assert abs(data["latitude"] - 55.1) < 1e-6
+        assert data["wp_code"] == "PK12345"
+
+    def test_bad_coords_blocked(self, qtbot, warn):
+        dlg = wpd.ChildWaypointDialog()
+        qtbot.addWidget(dlg)
+        dlg._prefix.setText("PK")
+        dlg._coord_input.setText("garbage")
+        dlg._validate_and_accept()
+        warn.assert_called_once()
+
+
+# ── save_related against a real DB ────────────────────────────────────────────
+
+class TestSaveRelated:
+    def test_user_note_and_waypoints_persisted(self, qtbot, db_session, make_cache):
+        from opensak.db.models import Cache, UserNote, Waypoint
+        cache = make_cache()
+        cache.waypoints = [Waypoint(prefix="PK", wp_type="Parking Area", wp_code="PK1"),
+                           Waypoint(prefix="FN", wp_type="Final Location", wp_code="FN1")]
+        db_session.add(cache)
+        db_session.commit()
+
+        dlg = WaypointDialog(cache=cache)
+        qtbot.addWidget(dlg)
+        dlg._user_note.setPlainText("my note")
+        dlg._set_corrected(55.5, 12.5)
+        # drop FN1 and add a new waypoint that reuses its wp_code
+        dlg._waypoints = [w for w in dlg._waypoints if w["prefix"] == "PK"]
+        dlg._waypoints.append({"id": None, **_wp_dict(prefix="S1", wp_code="FN1")})
+        dlg.save_related(db_session, cache)
+        db_session.commit()
+
+        note = db_session.query(UserNote).filter_by(cache_id=cache.id).one()
+        assert note.note == "my note"
+        assert note.is_corrected is True
+        prefixes = sorted(w.prefix for w in db_session.query(Waypoint).filter_by(cache_id=cache.id))
+        assert prefixes == ["PK", "S1"]
+        new = db_session.query(Waypoint).filter_by(prefix="S1").one()
+        assert new.created_by_user is True
+        assert new.parent_gc_code == cache.gc_code
+        assert db_session.get(Cache, cache.id).waypoint_count == 2
+
+    def test_no_empty_user_note_created(self, qtbot, db_session, make_cache):
+        from opensak.db.models import UserNote
+        cache = make_cache()
+        db_session.add(cache)
+        db_session.commit()
+        dlg = WaypointDialog(cache=cache)
+        qtbot.addWidget(dlg)
+        dlg.save_related(db_session, cache)
+        db_session.commit()
+        assert db_session.query(UserNote).count() == 0

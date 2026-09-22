@@ -469,6 +469,21 @@ STRINGS: dict[str, str] = {
     "wp_ph_parent_gc":                         "np. GC12345 (opcjonalnie)",
     "wp_val_dt_invalid":                       "Nieprawidłowa wartość D/T: {value}. Dozwolone wartości: 1.0, 1.5, 2.0 … 5.0",
     "wp_val_parent_gc_invalid":                "„Należy do skrytki” musi zaczynać się od „GC”.",
+    # ── Edit cache dialog — extra fields / child waypoints ─────────────────
+    "wp_tab_personal":                         "Osobiste",
+    "wp_cb_desc_html":                         "Zawiera HTML",
+    "wp_val_elevation_invalid":                "Wysokość musi być liczbą (metry).",
+    "wp_child_add":                            "Dodaj waypoint…",
+    "wp_child_dialog_title_add":               "Dodaj waypoint",
+    "wp_child_dialog_title_edit":              "Edytuj waypoint",
+    "wp_child_col_prefix":                     "Prefiks",
+    "wp_child_label_prefix":                   "Prefiks *:",
+    "wp_child_label_comment":                  "Komentarz:",
+    "wp_child_label_code":                     "Kod waypointu:",
+    "wp_child_label_date":                     "Data:",
+    "wp_child_cb_flag":                        "Oznaczony",
+    "wp_child_val_prefix_required":            "Prefiks jest wymagany.",
+    "wp_child_val_code_duplicate":             "Kod waypointu {code} jest już używany przez inny waypoint tej skrzynki.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_log_placeholder":          "Status pojawi się tutaj…",

@@ -468,6 +468,21 @@ STRINGS: dict[str, str] = {
     "wp_ph_parent_gc":                         "t.ex. GC12345 (valfritt)",
     "wp_val_dt_invalid":                       "Ogiltigt D/T-värde: {value}. Giltiga värden: 1,0; 1,5; 2,0 … 5,0",
     "wp_val_parent_gc_invalid":                "'Tillhör cache' måste börja med 'GC'.",
+    # ── Edit cache dialog — extra fields / child waypoints ─────────────────
+    "wp_tab_personal":                         "Personligt",
+    "wp_cb_desc_html":                         "Innehåller HTML",
+    "wp_val_elevation_invalid":                "Höjden måste vara ett tal (meter).",
+    "wp_child_add":                            "Lägg till waypoint…",
+    "wp_child_dialog_title_add":               "Lägg till waypoint",
+    "wp_child_dialog_title_edit":              "Redigera waypoint",
+    "wp_child_col_prefix":                     "Prefix",
+    "wp_child_label_prefix":                   "Prefix *:",
+    "wp_child_label_comment":                  "Kommentar:",
+    "wp_child_label_code":                     "Waypointkod:",
+    "wp_child_label_date":                     "Datum:",
+    "wp_child_cb_flag":                        "Flaggad",
+    "wp_child_val_prefix_required":            "Prefix krävs.",
+    "wp_child_val_code_duplicate":             "Waypointkoden {code} används redan av en annan waypoint för denna cache.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
     "gps_log_placeholder":          "Status visas här…",
