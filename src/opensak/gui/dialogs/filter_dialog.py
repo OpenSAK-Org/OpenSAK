@@ -1187,114 +1187,15 @@ class FilterDialog(QDialog):
 
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
-        from PySide6.QtWidgets import QScrollArea as _QScrollArea
-        from PySide6.QtCore import QLocale
-        from opensak.gui.settings import get_settings
-        from opensak.utils.types import DateFormat, norm_locale_date_fmt
-
-        settings = get_settings()
-        dist_unit = "mi" if settings.use_miles else "km"
-
-        fmt = settings.date_format
-        if fmt == DateFormat.DMY:
-            date_col_eg = "15.06.2020"
-            date_where_eg = "01.01.2023"
-        elif fmt == DateFormat.MDY:
-            date_col_eg = "06/15/2020"
-            date_where_eg = "01/01/2023"
-        elif fmt == DateFormat.YMD:
-            date_col_eg = "2020-06-15"
-            date_where_eg = "2023-01-01"
-        else:  # LOCALE
-            _loc = QLocale.system()
-            _fmt = norm_locale_date_fmt(_loc.dateFormat(QLocale.FormatType.ShortFormat))
-            date_col_eg = _loc.toString(QDate(2020, 6, 15), _fmt)
-            date_where_eg = _loc.toString(QDate(2023, 1, 1), _fmt)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(tr("filter_where_info_title"))
-        dlg.resize(560, 480)
-
-        outer = QVBoxLayout(dlg)
-
-        scroll = _QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        content = QLabel()
-        content.setTextFormat(Qt.TextFormat.RichText)
-        content.setWordWrap(True)
-        content.setContentsMargins(8, 8, 8, 8)
-        content.setText(
-            f"<b>{tr('filter_where_help_heading')}</b><br><br>"
-            f"{tr('filter_where_help_intro')}<br><br>"
-            "<table cellspacing='4'>"
-            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
-            f"<th align='left'>{tr('col_type')}</th>"
-            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
-            "<tr><td><code>gc_code</code></td><td>text</td><td>e.g. <code>'GC12345'</code></td></tr>"
-            f"<tr><td><code>name</code></td><td>text</td><td>{tr('filter_where_note_name')}</td></tr>"
-            f"<tr><td><code>long_description</code></td><td>text</td><td>{tr('filter_where_note_long_desc')}</td></tr>"
-            "<tr><td><code>cache_type</code></td><td>text</td>"
-            "<td><code>'Traditional Cache'</code>, <code>'Multi-cache'</code>, "
-            "<code>'Mystery Cache'</code>, …</td></tr>"
-            "<tr><td><code>container</code></td><td>text</td>"
-            "<td><code>'Nano'</code>, <code>'Micro'</code>, <code>'Small'</code>, "
-            "<code>'Regular'</code>, <code>'Large'</code></td></tr>"
-            "<tr><td><code>difficulty</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
-            "<tr><td><code>terrain</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
-            f"<tr><td><code>placed_by</code></td><td>text</td><td>{tr('filter_where_note_placed_by')}</td></tr>"
-            "<tr><td><code>country</code></td><td>text</td><td>e.g. <code>'Denmark'</code></td></tr>"
-            f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
-            f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
-            "<tr><td><code>hidden_date</code></td><td>datetime</td>"
-            f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
-            "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
-            "<tr><td><code>premium_only</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            f"<tr><td><code>favorite_points</code></td><td>integer</td><td>{tr('filter_where_note_fav')}</td></tr>"
-            f"<tr><td><code>log_count</code></td><td>integer</td><td>{tr('filter_where_note_logcount')}</td></tr>"
-            f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance', unit=dist_unit)}</td></tr>"
-            f"<tr><td><code>user_data_1</code> – <code>user_data_4</code></td>"
-            f"<td>text</td><td>{tr('filter_where_note_userdata')}</td></tr>"
-            "</table><br>"
-            f"<b>{tr('filter_where_examples_heading')}</b><br>"
-            "<code>difficulty &gt;= 4 AND terrain &gt;= 4</code><br>"
-            "<code>cache_type = 'Traditional Cache' AND country = 'Denmark'</code><br>"
-            "<code>favorite_points &gt; 100</code><br>"
-            "<code>found = 0 AND available = 1</code><br>"
-            "<code>name LIKE '%night%'</code><br>"
-            "<code>long_description LIKE '%waterfall%'</code><br>"
-            f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
-            f"<b>{tr('filter_where_subquery_heading')}</b><br>"
-            "<table cellspacing='4'>"
-            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
-            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
-            f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
-            f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
-            "</table><br>"
-            "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
-            "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
-        )
-
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
-
-        close_btn = QPushButton(tr("close"))
-        close_btn.clicked.connect(dlg.accept)
-        outer.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
-
-        dlg.exec()
+        show_where_info(self)
 
     def _validate_where_sql(self, sql: str) -> Optional[str]:
         """Return an error message if the SQL is invalid, or None if valid."""
         try:
             from opensak.db.database import get_session
-            from sqlalchemy import text as _sa_text
+            from opensak.filters.engine import validate_where_sql
             with get_session() as session:
-                session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
-            return None
+                return validate_where_sql(session, sql)
         except Exception as exc:
             return str(exc)
 
@@ -2005,3 +1906,107 @@ class FilterDialog(QDialog):
         )
         self.filter_applied.emit(fs, SortSpec("name"), profile_name)
         self.accept()
+
+
+def show_where_info(parent: Optional[QWidget] = None) -> None:
+    """Show the Where-clause column reference dialog. Shared by the Set
+    Filter dialog's Where tab and the toolbar's quick Where box (#558)."""
+    from PySide6.QtWidgets import QScrollArea as _QScrollArea
+    from PySide6.QtCore import QLocale
+    from opensak.gui.settings import get_settings
+    from opensak.utils.types import DateFormat, norm_locale_date_fmt
+
+    settings = get_settings()
+    dist_unit = "mi" if settings.use_miles else "km"
+
+    fmt = settings.date_format
+    if fmt == DateFormat.DMY:
+        date_col_eg = "15.06.2020"
+        date_where_eg = "01.01.2023"
+    elif fmt == DateFormat.MDY:
+        date_col_eg = "06/15/2020"
+        date_where_eg = "01/01/2023"
+    elif fmt == DateFormat.YMD:
+        date_col_eg = "2020-06-15"
+        date_where_eg = "2023-01-01"
+    else:  # LOCALE
+        _loc = QLocale.system()
+        _fmt = norm_locale_date_fmt(_loc.dateFormat(QLocale.FormatType.ShortFormat))
+        date_col_eg = _loc.toString(QDate(2020, 6, 15), _fmt)
+        date_where_eg = _loc.toString(QDate(2023, 1, 1), _fmt)
+
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(tr("filter_where_info_title"))
+    dlg.resize(560, 480)
+
+    outer = QVBoxLayout(dlg)
+
+    scroll = _QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    content = QLabel()
+    content.setTextFormat(Qt.TextFormat.RichText)
+    content.setWordWrap(True)
+    content.setContentsMargins(8, 8, 8, 8)
+    content.setText(
+        f"<b>{tr('filter_where_help_heading')}</b><br><br>"
+        f"{tr('filter_where_help_intro')}<br><br>"
+        "<table cellspacing='4'>"
+        f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+        f"<th align='left'>{tr('col_type')}</th>"
+        f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+        "<tr><td><code>gc_code</code></td><td>text</td><td>e.g. <code>'GC12345'</code></td></tr>"
+        f"<tr><td><code>name</code></td><td>text</td><td>{tr('filter_where_note_name')}</td></tr>"
+        f"<tr><td><code>long_description</code></td><td>text</td><td>{tr('filter_where_note_long_desc')}</td></tr>"
+        "<tr><td><code>cache_type</code></td><td>text</td>"
+        "<td><code>'Traditional Cache'</code>, <code>'Multi-cache'</code>, "
+        "<code>'Mystery Cache'</code>, …</td></tr>"
+        "<tr><td><code>container</code></td><td>text</td>"
+        "<td><code>'Nano'</code>, <code>'Micro'</code>, <code>'Small'</code>, "
+        "<code>'Regular'</code>, <code>'Large'</code></td></tr>"
+        "<tr><td><code>difficulty</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
+        "<tr><td><code>terrain</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
+        f"<tr><td><code>placed_by</code></td><td>text</td><td>{tr('filter_where_note_placed_by')}</td></tr>"
+        "<tr><td><code>country</code></td><td>text</td><td>e.g. <code>'Denmark'</code></td></tr>"
+        f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
+        f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
+        "<tr><td><code>hidden_date</code></td><td>datetime</td>"
+        f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
+        "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
+        "<tr><td><code>premium_only</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        f"<tr><td><code>favorite_points</code></td><td>integer</td><td>{tr('filter_where_note_fav')}</td></tr>"
+        f"<tr><td><code>log_count</code></td><td>integer</td><td>{tr('filter_where_note_logcount')}</td></tr>"
+        f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance', unit=dist_unit)}</td></tr>"
+        f"<tr><td><code>user_data_1</code> – <code>user_data_4</code></td>"
+        f"<td>text</td><td>{tr('filter_where_note_userdata')}</td></tr>"
+        "</table><br>"
+        f"<b>{tr('filter_where_examples_heading')}</b><br>"
+        "<code>difficulty &gt;= 4 AND terrain &gt;= 4</code><br>"
+        "<code>cache_type = 'Traditional Cache' AND country = 'Denmark'</code><br>"
+        "<code>favorite_points &gt; 100</code><br>"
+        "<code>found = 0 AND available = 1</code><br>"
+        "<code>name LIKE '%night%'</code><br>"
+        "<code>long_description LIKE '%waterfall%'</code><br>"
+        f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
+        f"<b>{tr('filter_where_subquery_heading')}</b><br>"
+        "<table cellspacing='4'>"
+        f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+        f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+        f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
+        f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
+        "</table><br>"
+        "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
+        "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
+    )
+
+    scroll.setWidget(content)
+    outer.addWidget(scroll)
+
+    close_btn = QPushButton(tr("close"))
+    close_btn.clicked.connect(dlg.accept)
+    outer.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+    dlg.exec()

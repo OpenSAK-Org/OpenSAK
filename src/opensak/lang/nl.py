@@ -33,6 +33,10 @@ STRINGS: dict[str, str] = {
 
     # ── Quick filter bar ──────────────────────────────────────────────────────
     "search_placeholder":           "Naam…",
+    "search_where_label":           "Where",
+    "search_where_placeholder":     "bv. distance < 5",
+    "search_where_tooltip":         "SQL WHERE-voorwaarde — zelfde syntaxis als het tabblad Where in het filtervenster. Druk op Enter om toe te passen, maak het veld leeg om te verwijderen. Recent gebruikte expressies staan in de lijst.",
+    "search_where_invalid":         "Ongeldige Where-expressie: {error}",
     "quick_all":                    "Alle caches",
     "quick_not_found":              "Niet gevonden",
     "quick_found":                  "Gevonden",

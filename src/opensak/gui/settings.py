@@ -678,6 +678,18 @@ class AppSettings:
     def search_debounce_ms(self, value: int) -> None:
         get_store().set("search.debounce_ms", int(value))
 
+    @property
+    def quick_where_history(self) -> list[str]:
+        """Recently applied toolbar Where expressions, newest first (#558)."""
+        raw = get_store().get("search.where_history", [])
+        if not isinstance(raw, list):
+            return []
+        return [str(x) for x in raw if str(x).strip()]
+
+    @quick_where_history.setter
+    def quick_where_history(self, value: list[str]) -> None:
+        get_store().set("search.where_history", list(value))
+
     # ── Location refinement ───────────────────────────────────────────────────
 
     @property

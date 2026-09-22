@@ -2118,28 +2118,7 @@ def _prepare_where_clause_filters(
     ]
     _dist_udf_ready = False
     if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
-        # The "distance" column in the caches table is never persisted — it
-        # is always NULL. Register a SQLite UDF so WHERE clauses can use
-        # "distance" as haversine distance from the home point. SQL
-        # references to "distance" are rewritten to the UDF call below.
-        _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
-        try:
-            from opensak.gui.settings import get_settings as _gs
-            _st = _gs()
-            _home_lat, _home_lon = _st.home_lat, _st.home_lon
-            _use_miles = _st.use_miles
-        except Exception:
-            pass
-        if distance_from:
-            _home_lat, _home_lon = distance_from
-        _factor = 0.621371 if _use_miles else 1.0
-        def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
-            if lat is None or lon is None:
-                return None
-            return _haversine_km(_h, _o, lat, lon) * _k
-        _dbapi = session.connection().connection.dbapi_connection
-        assert _dbapi is not None
-        _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+        _register_distance_udf(session, distance_from)
         _dist_udf_ready = True
 
     for _f in _where_filters:
@@ -2155,6 +2134,53 @@ def _prepare_where_clause_filters(
             _f._matching_ids = {row[0] for row in _result}
         except Exception:
             _f._matching_ids = set()  # invalid SQL → no matches
+
+
+def _register_distance_udf(
+    session: Session,
+    distance_from: Optional[tuple[float, float]],
+) -> None:
+    """The "distance" column in the caches table is never persisted — it is
+    always NULL. Register a SQLite UDF so WHERE clauses can use "distance"
+    as haversine distance from the home point (or *distance_from*). SQL
+    references to "distance" are rewritten to the UDF call by the callers.
+    """
+    _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
+    try:
+        from opensak.gui.settings import get_settings as _gs
+        _st = _gs()
+        _home_lat, _home_lon = _st.home_lat, _st.home_lon
+        _use_miles = _st.use_miles
+    except Exception:
+        pass
+    if distance_from:
+        _home_lat, _home_lon = distance_from
+    _factor = 0.621371 if _use_miles else 1.0
+    def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
+        if lat is None or lon is None:
+            return None
+        return _haversine_km(_h, _o, lat, lon) * _k
+    _dbapi = session.connection().connection.dbapi_connection
+    assert _dbapi is not None
+    _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+
+
+def validate_where_sql(session: Session, sql: str) -> Optional[str]:
+    """Return an error message if *sql* is not a valid WHERE clause for
+    WhereClauseFilter, or None if it is valid. Rewrites "distance" exactly
+    like _prepare_where_clause_filters() does, so what validates here is
+    what actually runs. Shared by the Set Filter dialog's Where tab and the
+    toolbar's quick Where box (#558).
+    """
+    from sqlalchemy import text as _sa_text
+    try:
+        if _DISTANCE_RE.search(sql):
+            _register_distance_udf(session, None)
+            sql = _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", sql)
+        session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
+        return None
+    except Exception as exc:
+        return str(exc)
 
 
 def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):

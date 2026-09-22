@@ -642,6 +642,81 @@ class TestSearch:
 
 # ── drag & drop ───────────────────────────────────────────────────────────────
 
+# ── quick Where box (issue #558) ──────────────────────────────────────────────
+
+class TestQuickWhere:
+    @staticmethod
+    def _apply(window, text):
+        window._where_combo.setEditText(text)
+        window._apply_quick_where()
+        wait_for_refresh(window)
+
+    @staticmethod
+    def _codes(window):
+        return {c.gc_code for c in window._cache_table.get_all_caches()}
+
+    def test_valid_expression_filters_and_is_remembered(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        self._apply(seeded_window, "difficulty >= 4")
+        assert self._codes(seeded_window) == {"GC99999", "GCAAA02"}
+        assert seeded_window._where_error is None
+        assert get_settings().quick_where_history[0] == "difficulty >= 4"
+        assert seeded_window._where_combo.itemText(0) == "difficulty >= 4"
+        assert seeded_window._btn_clear_filter.isEnabled()
+        assert (seeded_window._filter_profile_combo.itemText(0)
+                == tr("toolbar_filter_combo_active"))
+
+    def test_invalid_expression_reports_error_and_keeps_list(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        before = self._codes(seeded_window)
+        seeded_window._where_combo.setEditText("no_such_column = 1")
+        seeded_window._apply_quick_where()
+        assert seeded_window._where_error
+        assert seeded_window._where_sql_applied == ""
+        assert self._codes(seeded_window) == before
+        assert "no_such_column = 1" not in get_settings().quick_where_history
+
+    def test_editing_clears_error(self, seeded_window):
+        seeded_window._where_combo.setEditText("difficulty >")
+        seeded_window._apply_quick_where()
+        assert seeded_window._where_error
+        seeded_window._where_combo.setEditText("difficulty > 1")
+        assert seeded_window._where_error is None
+
+    def test_clearing_box_removes_filter(self, seeded_window):
+        self._apply(seeded_window, "difficulty >= 4")
+        seeded_window._where_combo.setEditText("")
+        wait_for_refresh(seeded_window)
+        assert seeded_window._where_sql_applied == ""
+        assert len(self._codes(seeded_window)) == 4
+
+    def test_clear_filter_resets_where_box(self, seeded_window):
+        self._apply(seeded_window, "difficulty >= 4")
+        seeded_window._clear_filter()
+        wait_for_refresh(seeded_window)
+        assert seeded_window._where_combo.currentText() == ""
+        assert seeded_window._where_sql_applied == ""
+        assert len(self._codes(seeded_window)) == 4
+
+    def test_history_is_deduplicated_and_capped(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        cap = seeded_window._WHERE_HISTORY_MAX
+        for i in range(cap + 5):
+            seeded_window._remember_where(f"difficulty >= {i}")
+        seeded_window._remember_where("difficulty >= 3")
+        history = get_settings().quick_where_history
+        assert len(history) == cap
+        assert history[0] == "difficulty >= 3"
+        assert history.count("difficulty >= 3") == 1
+
+    def test_distance_expression_validates(self, seeded_window):
+        from opensak.db.database import get_session
+        from opensak.filters.engine import validate_where_sql
+        with get_session() as session:
+            assert validate_where_sql(session, "distance < 5") is None
+            assert validate_where_sql(session, "distance <") is not None
+
+
 def _evt(paths, accept, ignore):
     urls = [SimpleNamespace(toLocalFile=lambda p=p: p) for p in paths]
     mime = SimpleNamespace(hasUrls=lambda: bool(urls), urls=lambda: urls)

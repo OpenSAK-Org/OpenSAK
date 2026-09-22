@@ -225,6 +225,11 @@ class MainWindow(QMainWindow):
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
         self._active_refresh_workers: list[RefreshWorker] = []
+        # Issue #558: the toolbar Where box's expression currently in
+        # effect — only set once validated on Enter, so a half-typed
+        # expression never leaks into refreshes triggered elsewhere.
+        self._where_sql_applied: str = ""
+        self._where_error: str | None = None
         self._setup_ui()
         self._setup_menu()
         self._setup_toolbar()
@@ -862,6 +867,43 @@ class MainWindow(QMainWindow):
         self._search_box.textChanged.connect(self._on_search_changed)
         row.addWidget(self._search_box)
 
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        row.addWidget(sep2)
+
+        # Quick "Where" box (issue #558) — GSAK-style editable combo with
+        # history; same SQL syntax as the Where tab in the filter dialog.
+        where_lbl = QLabel(tr("search_where_label") + ":")
+        where_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        row.addWidget(where_lbl)
+
+        self._where_combo = QComboBox()
+        self._where_combo.setEditable(True)
+        # History is managed by _remember_where(), not by Qt's own insert.
+        self._where_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # No inline autocompletion — Enter must apply exactly what was typed
+        # (e.g. "distance < 1" must not silently become "distance < 10").
+        self._where_combo.setCompleter(None)  # type: ignore[arg-type]  # Qt: None disables
+        self._where_combo.setFixedWidth(260)
+        self._where_combo.setToolTip(tr("search_where_tooltip"))
+        self._where_combo.addItems(get_settings().quick_where_history)
+        self._where_combo.setCurrentIndex(-1)
+        where_edit = cast(QLineEdit, self._where_combo.lineEdit())
+        where_edit.setPlaceholderText(tr("search_where_placeholder"))
+        where_edit.setClearButtonEnabled(True)
+        where_edit.returnPressed.connect(self._apply_quick_where)
+        self._where_combo.activated.connect(lambda _idx: self._apply_quick_where())
+        self._where_combo.editTextChanged.connect(self._on_where_text_changed)
+        row.addWidget(self._where_combo)
+
+        where_info_btn = QPushButton("ⓘ")
+        where_info_btn.setFlat(True)
+        where_info_btn.setFixedWidth(26)
+        where_info_btn.setToolTip(tr("filter_where_info_tooltip"))
+        where_info_btn.clicked.connect(self._show_where_info)
+        row.addWidget(where_info_btn)
+
         # Spacer — skubber felterne til venstre (issue #125)
         row.addStretch()
 
@@ -1457,6 +1499,11 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import NameFilter
             fs.add(NameFilter(name_search))
 
+        # Quick "Where" box (issue #558) — only the validated expression
+        if self._where_sql_applied:
+            from opensak.filters.engine import WhereClauseFilter
+            fs.add(WhereClauseFilter(self._where_sql_applied))
+
         return fs
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -1621,13 +1668,27 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
         self._update_info_bar()
 
-    def _on_search_changed(self, text: str) -> None:
-        has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
-        if has_search:
+    def _has_quick_search(self) -> bool:
+        """True if any toolbar search box (GC code / Name / Where) is in effect."""
+        if not hasattr(self, "_search_gc") or not hasattr(self, "_search_box"):
+            return False
+        return bool(
+            self._search_gc.text().strip()
+            or self._search_box.text().strip()
+            or self._where_sql_applied
+        )
+
+    def _update_quick_search_state(self) -> None:
+        """Sync the Clear button and the profile dropdown's 'None' / 'Active
+        (unsaved)' entry with the toolbar search boxes."""
+        if self._has_quick_search():
             self._set_clear_filter_active(True)
         elif not self._active_filter_name:
             self._set_clear_filter_active(False)
         self._update_filter_combo_placeholder()
+
+    def _on_search_changed(self, text: str) -> None:
+        self._update_quick_search_state()
         min_chars, debounce_ms = self._search_thresholds()
         if text == "":
             # Clearing always fires immediately
@@ -1659,6 +1720,70 @@ class MainWindow(QMainWindow):
     def _on_quick_filter_changed(self, index: int) -> None:
         self._update_filter_combo_placeholder()
         self._refresh_cache_list()
+
+    # ── Quick "Where" box (issue #558) ────────────────────────────────────────
+
+    _WHERE_HISTORY_MAX = 20
+
+    def _apply_quick_where(self) -> None:
+        """Enter in the Where box, or picking a history entry: validate and
+        apply the expression. Invalid SQL is reported inline and leaves the
+        current list untouched, instead of silently showing zero rows."""
+        sql = self._where_combo.currentText().strip()
+        if sql == self._where_sql_applied and not self._where_error:
+            return  # e.g. activated + returnPressed for the same Enter
+        if sql:
+            from opensak.filters.engine import validate_where_sql
+            with get_session() as session:
+                error = validate_where_sql(session, sql)
+            if error:
+                self._set_where_error(error)
+                return
+            self._remember_where(sql)
+        self._set_where_error(None)
+        self._where_sql_applied = sql
+        self._update_quick_search_state()
+        self._refresh_cache_list()
+
+    def _on_where_text_changed(self, text: str) -> None:
+        if self._where_error:
+            self._set_where_error(None)
+        if not text.strip() and self._where_sql_applied:
+            # Clearing the box removes the filter immediately, same as the
+            # GC code / Name boxes.
+            self._apply_quick_where()
+
+    def _remember_where(self, sql: str) -> None:
+        """Move *sql* to the top of the persisted history and the dropdown."""
+        s = get_settings()
+        history = [sql] + [h for h in s.quick_where_history if h != sql]
+        history = history[:self._WHERE_HISTORY_MAX]
+        s.quick_where_history = history
+        self._where_combo.blockSignals(True)
+        self._where_combo.clear()
+        self._where_combo.addItems(history)
+        self._where_combo.setCurrentIndex(0)
+        self._where_combo.blockSignals(False)
+
+    def _set_where_error(self, error: str | None) -> None:
+        """Lightweight inline feedback for the Where box — red text, the
+        error in the tooltip and the status bar (no dialog to host a label)."""
+        self._where_error = error
+        edit = cast(QLineEdit, self._where_combo.lineEdit())
+        if error:
+            from opensak.gui.theme import effective_theme
+            color = "#ff8a80" if effective_theme(get_settings().theme) == "dark" else "#cc0000"
+            edit.setStyleSheet(f"QLineEdit {{ color: {color}; }}")
+            message = tr("search_where_invalid", error=error)
+            self._where_combo.setToolTip(message)
+            self._statusbar.showMessage(message, 8000)
+        else:
+            edit.setStyleSheet("")
+            self._where_combo.setToolTip(tr("search_where_tooltip"))
+
+    def _show_where_info(self) -> None:
+        from opensak.gui.dialogs.filter_dialog import show_where_info
+        show_where_info(self)
 
     # ── Drag & drop ───────────────────────────────────────────────────────────
 
@@ -2504,8 +2629,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
-            has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
-            self._set_clear_filter_active(has_search)
+            self._set_clear_filter_active(self._has_quick_search())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
             self._refresh_cache_list()
@@ -2541,6 +2665,12 @@ class MainWindow(QMainWindow):
             field.blockSignals(True)
             field.clear()
             field.blockSignals(False)
+        self._where_combo.blockSignals(True)
+        self._where_combo.setCurrentIndex(-1)
+        self._where_combo.setEditText("")
+        self._where_combo.blockSignals(False)
+        self._where_sql_applied = ""
+        self._set_where_error(None)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -2571,9 +2701,8 @@ class MainWindow(QMainWindow):
             return False  # a saved profile is selected — not "unsaved"
         if self._current_filterset.active_count() > 0:
             return True
-        if hasattr(self, "_search_gc") and hasattr(self, "_search_box"):
-            if self._search_gc.text().strip() or self._search_box.text().strip():
-                return True
+        if self._has_quick_search():
+            return True
         if hasattr(self, "_quick_filter") and self._quick_filter.currentIndex() != 0:
             return True
         return False

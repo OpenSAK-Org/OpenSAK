@@ -30,6 +30,10 @@ STRINGS: dict[str, str] = {
 
     # ── Quick filter bar ──────────────────────────────────────────────────────
     "search_placeholder":           "Název…",
+    "search_where_label":           "Where",
+    "search_where_placeholder":     "např. distance < 5",
+    "search_where_tooltip":         "Podmínka SQL WHERE — stejná syntaxe jako karta Where v dialogu filtru. Enter ji použije, vymazáním pole ji zrušíte. Nedávno použité výrazy jsou v seznamu.",
+    "search_where_invalid":         "Neplatný výraz Where: {error}",
     "quick_all":                    "Všechny keše",
     "quick_not_found":              "Nenalezené",
     "quick_found":                  "Nalezené",
