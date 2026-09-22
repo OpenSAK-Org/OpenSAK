@@ -22,14 +22,16 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across seven tabs:
+The filter dialog is split across nine tabs:
 
 | Tab | What's on it |
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
 | **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
+| **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
+| **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
@@ -162,6 +164,62 @@ Text contains search (case-insensitive) applied to the country, state, or county
 Show caches that have a specific Groundspeak attribute set. You can filter for attributes that are present (e.g. "Dogs allowed: yes") or explicitly absent ("Dogs allowed: no").
 
 The filter dialog shows the ~70 standard Groundspeak attributes on the **Attributes** tab.
+
+---
+
+### Child waypoints
+
+Filter caches by their child waypoints (parking, stages, final, …). Available on the **Child Waypoints** tab.
+
+| Field | Matches |
+|---|---|
+| Code | The waypoint code (GSAK imports), or the two-letter prefix for GPX imports — same text operators as Name |
+| Type | Waypoint type, e.g. `Parking Area`, `Physical Stage` |
+| Date | Waypoint date — same operators as the **Dates** tab, except comparing with another date |
+| Name / Comment | Waypoint name and comment |
+| Created by user | Yes = only waypoints you added yourself, No = only imported ones |
+| Count | Any, Equal, At least, At most, or Between |
+
+All criteria must hold for the **same** waypoint. Count is the number of waypoints that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Type contains `Parking` and Count equal 0 shows caches without a parking waypoint. Count alone filters on the total number of waypoints.
+
+---
+
+### Logs
+
+Filter caches by the logs on them, on the **Logs** tab. It mirrors GSAK's Logs tab and is read top to bottom in three steps.
+
+**1. Which logs are searched**
+
+| Setting | Effect |
+|---|---|
+| Logs to search | *All logs*, or only each cache's *N* most recent ones (Latest, Last 2 … Last 100) |
+| Include / exclude | Whether the caches that match are kept or dropped |
+
+The window counts **every** log the cache has, not just the ones the criteria below look for. So *Logs to search: Last 2* with **Not found** ticked means "a DNF among the cache's two most recent logs" — a cache whose only DNF sits under three newer finds does *not* match.
+
+**2. What a log has to be**
+
+| Field | Matches |
+|---|---|
+| Found / Not found / Other | The kind of log. *Found* covers Found it, Attended and Webcam Photo Taken; *Not found* covers Didn't find it; *Other* is everything else |
+| Log date | The log's date — the same operators as the **Dates** tab, except comparing with another date |
+| Log types | The ticked types. Untick **All** to choose individual ones; `"Other"` matches any type not in the list |
+| Logged by | The log's finder — the same text operators as *Name*. Tick **Match the user ID** to compare the numeric user ID instead of the display name |
+
+All of these must hold for the **same** log. Leaving **Logged by** empty matches a log by *anyone* — to find your own logs, type your geocaching name there.
+
+**3. How many such logs**
+
+**Required count** is the number of logs that met the criteria: *At least one log*, *At most*, *At least*, *Equal* or *Between*. Together with **Exclude** this is what makes negative conditions expressible:
+
+| To find | Set |
+|---|---|
+| Caches with no find in the last year | Log types = Found it, Log date During 1 years, Exclude |
+| Caches whose most recent log is a DNF | Logs to search = Latest, Not found only |
+| Caches you have never logged yourself | Logged by = equals *your name*, Exclude |
+| Caches with at least 5 favourite-worthy finds | Log types = Found it, Required count At least 5 |
+| Caches with a recent maintenance request | Logs to search = Last 5, Log types = Needs Maintenance |
+| Caches you have DNFed in their last 2 logs | Logs to search = Last 2, Not found only, Logged by equals *your name* |
 
 ---
 

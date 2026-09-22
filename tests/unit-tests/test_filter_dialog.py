@@ -9,10 +9,11 @@ from unittest.mock import MagicMock
 pytest.importorskip("pytestqt")
 
 from PySide6.QtWidgets import QInputDialog
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QTime
 
 from opensak.gui.dialogs import filter_dialog as fd
 from opensak.gui.dialogs.filter_dialog import FilterDialog, TriStateBox, DTSpinBox
+from opensak.utils.constants import LOG_TYPES
 from opensak.filters.engine import (
     FilterSet, NameFilter, GcCodeFilter, PlacedByFilter, OwnerFilter,
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
@@ -21,8 +22,9 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
-    DateFilter, DATE_FILTER_FIELDS,
-    TextSearchFilter,
+    DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
+    TextSearchFilter, WaypointFilter,
+    LogFilter, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
 
@@ -119,8 +121,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_seven_tabs(self, dlg):
-        assert dlg._tabs.count() == 7
+    def test_nine_tabs(self, dlg):
+        assert dlg._tabs.count() == 9
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -293,6 +295,37 @@ class TestBuildFilterset:
             found_date = datetime(2026, 9, 2, 14, 30, 0)
         assert f.matches(_Cache()) is True
 
+    def test_time_checkbox_only_on_datetime_fields(self, dlg):
+        for field, row in dlg._date_rows.items():
+            row._select(row.op_combo, "equal")
+            assert (not row.time_check.isHidden()) is (field in DATETIME_FILTER_FIELDS), field
+            row._select(row.op_combo, "during")
+            assert row.time_check.isHidden(), field
+
+    def test_time_bounds_build_load_and_reset(self, dlg):
+        row = dlg._date_rows["creation_date"]
+        row._select(row.op_combo, "between")
+        row.date1.setDate(QDate(2026, 9, 2))
+        row.date2.setDate(QDate(2026, 9, 3))
+        assert _date_filters(dlg._build_filterset())["creation_date"].date1 == date(2026, 9, 2)
+
+        date_width = row.date1.sizeHint().width()
+        row.time_check.setChecked(True)
+        assert "mm" in row.date1.displayFormat()
+        text_width = row.date1.fontMetrics().horizontalAdvance(row.date1.text())
+        assert row.date1.minimumWidth() > date_width
+        assert row.date1.minimumWidth() > text_width
+        row.date1.setTime(QTime(8, 15))
+        f = _date_filters(dlg._build_filterset())["creation_date"]
+        assert (f.date1, f.date2) == (datetime(2026, 9, 2, 8, 15), datetime(2026, 9, 3, 23, 59))
+
+        dlg._reset_dates()
+        assert not row.time_check.isChecked() and "mm" not in row.date1.displayFormat()
+        assert row.date1.minimumWidth() == date_width
+        row.load(f)
+        assert row.time_check.isChecked()
+        assert _date_filters(dlg._build_filterset())["creation_date"].to_dict() == f.to_dict()
+
     def test_between_relative_and_compare_rows(self, dlg):
         hidden = dlg._date_rows["hidden_date"]
         hidden._select(hidden.op_combo, "between")
@@ -390,6 +423,65 @@ class TestBuildFilterset:
         dlg._reset_attributes()
         assert dlg._attr_mode_all.isChecked() is True
         assert dlg._attr_mode_any.isChecked() is False
+
+    @staticmethod
+    def _visible_attr_ids(dlg):
+        return {a for a, (row, _i, _h) in dlg._attr_rows.items()
+                if not dlg._attr_table.isRowHidden(row)}
+
+    def test_attr_search_matches_english_name_case_insensitive(self, dlg):
+        dlg._attr_search.setText("WHEELCHAIR")
+        assert self._visible_attr_ids(dlg) == {24}
+
+    def test_attr_search_all_terms_must_match(self, dlg):
+        dlg._attr_search.setText("hike long")
+        assert self._visible_attr_ids(dlg) == {57}
+
+    def test_attr_search_by_id(self, dlg):
+        dlg._attr_search.setText("41")
+        assert 41 in self._visible_attr_ids(dlg)
+
+    def test_attr_search_ignores_accents(self, dlg):
+        from opensak.gui.dialogs.filter_dialog import _fold
+        assert _fold("Élévation Ärger") == "elevation arger"
+
+    def test_attr_search_empty_shows_all(self, dlg):
+        dlg._attr_search.setText("xyz-no-such-attribute")
+        assert self._visible_attr_ids(dlg) == set()
+        dlg._attr_search.clear()
+        assert self._visible_attr_ids(dlg) == set(dlg._attr_rows)
+
+    def test_attr_only_selected_and_marking(self, dlg):
+        dlg._attr_boxes[24][0].setChecked(True)   # Yes
+        dlg._attr_boxes[19][1].setChecked(True)   # No
+        dlg._attr_only_selected.setChecked(True)
+        assert self._visible_attr_ids(dlg) == {24, 19}
+        assert dlg._attr_rows[24][1].font().bold() is True
+        assert dlg._attr_rows[1][1].font().bold() is False
+        dlg._attr_boxes[24][2].setChecked(True)   # back to "none"
+        assert dlg._attr_rows[24][1].font().bold() is False
+
+    def test_attr_status_counts(self, dlg):
+        total = len(dlg._attr_rows)
+        dlg._attr_boxes[24][0].setChecked(True)
+        dlg._attr_search.setText("wheelchair")
+        assert dlg._attr_status.text() == fd.tr(
+            "filter_attr_status", shown=1, total=total, selected=1)
+
+    def test_attr_search_enter_does_not_accept_dialog(self, dlg, qtbot):
+        from PySide6.QtCore import Qt
+        dlg.show()
+        dlg._attr_search.setText("wheelchair")
+        qtbot.keyClick(dlg._attr_search, Qt.Key.Key_Return)
+        assert dlg.isVisible()
+
+    def test_reset_attributes_clears_search(self, dlg):
+        dlg._attr_search.setText("wheelchair")
+        dlg._attr_only_selected.setChecked(True)
+        dlg._reset_attributes()
+        assert dlg._attr_search.text() == ""
+        assert dlg._attr_only_selected.isChecked() is False
+        assert self._visible_attr_ids(dlg) == set(dlg._attr_rows)
 
     def test_where_clause(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
@@ -635,6 +727,222 @@ class TestReset:
         assert dlg._dist_max.isEnabled()
         dlg._on_fav_toggled(True)
         assert dlg._fav_min.isEnabled() and dlg._fav_max.isEnabled()
+
+
+# ── waypoints tab ─────────────────────────────────────────────────────────────
+
+def _waypoint_filters(fs) -> list:
+    return [f for f in fs._filters if isinstance(f, WaypointFilter)]
+
+
+class TestWaypointsTab:
+    def test_default_builds_nothing(self, dlg):
+        assert _waypoint_filters(dlg._build_filterset()) == []
+        assert not dlg._wp_count1.isVisibleTo(dlg)
+
+    def test_date_row_has_no_compare(self, dlg):
+        row = dlg._wp_date_row
+        ops = [row.op_combo.itemData(i) for i in range(row.op_combo.count())]
+        assert "compare" not in ops and "between" in ops
+
+    def test_build_all_criteria(self, dlg):
+        dlg._wp_text_rows["code"].set_op("starts_with")
+        dlg._wp_text_rows["code"].edit.setText("PK")
+        dlg._wp_text_rows["comment"].set_op("empty")
+        dlg._wp_date_row._select(dlg._wp_date_row.op_combo, "between")
+        dlg._wp_date_row.date1.setDate(QDate(2025, 1, 1))
+        dlg._wp_date_row.date2.setDate(QDate(2025, 6, 30))
+        dlg._wp_by_user_no.setChecked(False)
+        dlg._wp_count_op.setCurrentIndex(dlg._wp_count_op.findData("between"))
+        dlg._wp_count1.setValue(1)
+        dlg._wp_count2.setValue(3)
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert {k: (m.text, m.op) for k, m in f.texts.items()} == {
+            "code": ("PK", "starts_with"), "comment": ("", "empty")}
+        assert (f.date_op, f.date1, f.date2) == ("between", date(2025, 1, 1), date(2025, 6, 30))
+        assert f.by_user is True
+        assert (f.count_op, f.count1, f.count2) == ("between", 1, 3)
+
+    def test_count_alone_builds_filter(self, dlg):
+        dlg._wp_count_op.setCurrentIndex(dlg._wp_count_op.findData("equal"))
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert (f.count_op, f.count1) == ("equal", 0)
+        assert not f.texts and f.date_op is None and f.by_user is None
+
+    def test_load_roundtrip_and_reset(self, dlg):
+        original = WaypointFilter(
+            texts={"wp_type": ("Parking", "contains"), "name": ("final", "not_contains")},
+            date_op="during", date_amount=2, date_unit="years",
+            by_user=False, count_op="at_most", count1=4,
+        )
+        dlg._load_filterset(FilterSet().add(original))
+        [f] = _waypoint_filters(dlg._build_filterset())
+        assert f.to_dict() == original.to_dict()
+        dlg._tabs.setCurrentWidget(dlg._waypoints_tab)
+        dlg._reset_current_tab()
+        assert _waypoint_filters(dlg._build_filterset()) == []
+        assert dlg._wp_by_user_yes.isChecked() and dlg._wp_by_user_no.isChecked()
+
+    def test_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._wp_text_rows["name"].set_op("regex")
+        dlg._wp_text_rows["name"].edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._waypoints_tab
+
+
+# ── logs tab ──────────────────────────────────────────────────────────────────
+
+def _log_filters(fs) -> list:
+    return [f for f in fs._filters if isinstance(f, LogFilter)]
+
+
+class TestLogsTab:
+    def test_default_builds_nothing(self, dlg):
+        assert _log_filters(dlg._build_filterset()) == []
+        assert not dlg._log_count1.isVisibleTo(dlg)
+        # "All log types" starts ticked, so the type list is inert
+        assert not dlg._log_types_box.isEnabled()
+
+    def test_date_row_has_no_compare(self, dlg):
+        row = dlg._log_date_row
+        ops = [row.op_combo.itemData(i) for i in range(row.op_combo.count())]
+        assert "compare" not in ops and "during" in ops
+
+    def test_scope_offers_gsak_choices(self, dlg):
+        data = [dlg._log_scope.itemData(i) for i in range(dlg._log_scope.count())]
+        assert data == list(LOG_SCOPE_CHOICES)
+        assert data[0] == 0  # "All logs"
+
+    def test_unticking_all_enables_the_type_list(self, dlg):
+        dlg._log_types_all.setChecked(False)
+        assert dlg._log_types_box.isEnabled()
+        # but no type ticked still means "every type"
+        assert _log_filters(dlg._build_filterset()) == []
+
+    def test_type_list_covers_every_log_type_plus_other(self, dlg):
+        assert list(dlg._log_type_checks) == list(LOG_TYPES) + [LOG_TYPE_OTHER]
+
+    def test_build_all_criteria(self, dlg):
+        dlg._log_date_row._select(dlg._log_date_row.op_combo, "during")
+        dlg._log_date_row.amount.setValue(6)
+        dlg._log_date_row._select(dlg._log_date_row.unit_combo, "months")
+        dlg._log_scope.setCurrentIndex(dlg._log_scope.findData(5))
+        dlg._log_categories["other"].setChecked(False)
+        dlg._log_types_all.setChecked(False)
+        dlg._log_type_checks["Found it"].setChecked(True)
+        dlg._log_finder_enabled.setChecked(True)
+        dlg._log_finder_row.set_op("equals")
+        dlg._log_finder_row.edit.setText("alice")
+        dlg._log_count_op.setCurrentIndex(dlg._log_count_op.findData("at_least"))
+        dlg._log_count1.setValue(2)
+        dlg._log_exclude.setCurrentIndex(1)
+        [f] = _log_filters(dlg._build_filterset())
+        assert (f.date_op, f.date_amount, f.date_unit) == ("during", 6, "months")
+        assert f.last_n == 5
+        assert f.categories == ["found", "not_found"]
+        assert f.types == ["Found it"]
+        assert (f.finder_text, f.finder_op, f.finder_by_id) == ("alice", "equals", False)
+        assert (f.count_op, f.count1) == ("at_least", 2)
+        assert f.exclude is True
+
+    def test_enabling_finder_prefills_the_users_own_name(self, qtbot, monkeypatch):
+        # An empty "Logged by" matches a log by anyone, which is rarely what
+        # ticking the box means — so it starts on the user's own name.
+        monkeypatch.setattr(fd, "get_settings",
+                            lambda: SimpleNamespace(gc_username="Nagi", text_size=None))
+        d = FilterDialog.__new__(FilterDialog)
+        d._log_finder_enabled = fd.QCheckBox()
+        d._log_finder_row = fd.TextFilterRow("", "")
+        d._log_finder_by_id = fd.QCheckBox()
+        qtbot.addWidget(d._log_finder_row)
+        d._log_finder_enabled.setChecked(True)
+        d._update_log_finder_inputs()
+        # Exactly, not "contains" — a caching name is an identity, so a
+        # substring match would also catch every longer name embedding it.
+        assert d._log_finder_row.edit.text() == "Nagi"
+        assert d._log_finder_row.op() == "equals"
+
+    def test_enabling_finder_keeps_text_the_user_typed(self, dlg):
+        dlg._log_finder_row.set_op("contains")
+        dlg._log_finder_row.edit.setText("someone else")
+        dlg._log_finder_enabled.setChecked(True)
+        assert dlg._log_finder_row.edit.text() == "someone else"
+        assert dlg._log_finder_row.op() == "contains"
+
+    def test_enabling_finder_without_a_username_configured(self, qtbot, monkeypatch):
+        # Nothing to prefill, so the operator is left alone too.
+        monkeypatch.setattr(fd, "get_settings",
+                            lambda: SimpleNamespace(gc_username="", text_size=None))
+        d = FilterDialog.__new__(FilterDialog)
+        d._log_finder_enabled = fd.QCheckBox()
+        d._log_finder_row = fd.TextFilterRow("", "")
+        d._log_finder_by_id = fd.QCheckBox()
+        qtbot.addWidget(d._log_finder_row)
+        d._log_finder_enabled.setChecked(True)
+        d._update_log_finder_inputs()
+        assert d._log_finder_row.edit.text() == ""
+        assert d._log_finder_row.op() == "contains"
+
+    def test_finder_row_is_ignored_until_enabled(self, dlg):
+        dlg._log_finder_row.edit.setText("alice")
+        assert _log_filters(dlg._build_filterset()) == []
+        dlg._log_finder_enabled.setChecked(True)
+        [f] = _log_filters(dlg._build_filterset())
+        assert f.finder_text == "alice"
+
+    def test_finder_by_id(self, dlg):
+        dlg._log_finder_enabled.setChecked(True)
+        dlg._log_finder_row.edit.setText("U-1")
+        dlg._log_finder_by_id.setChecked(True)
+        [f] = _log_filters(dlg._build_filterset())
+        assert f.finder_by_id is True
+
+    def test_scope_alone_builds_filter(self, dlg):
+        dlg._log_scope.setCurrentIndex(dlg._log_scope.findData(1))
+        [f] = _log_filters(dlg._build_filterset())
+        assert f.last_n == 1 and f.count_op == "any"
+
+    def test_count_alone_builds_filter(self, dlg):
+        dlg._log_count_op.setCurrentIndex(dlg._log_count_op.findData("equal"))
+        [f] = _log_filters(dlg._build_filterset())
+        assert (f.count_op, f.count1) == ("equal", 0)
+        assert not f.types and f.date_op is None and f.finder is None
+
+    def test_exclude_alone_builds_nothing(self, dlg):
+        # Nothing to exclude on — the filter would match every cache anyway.
+        dlg._log_exclude.setCurrentIndex(1)
+        assert _log_filters(dlg._build_filterset()) == []
+
+    def test_load_roundtrip_and_reset(self, dlg):
+        original = LogFilter(
+            date_op="on_or_after", date1=date(2024, 3, 1),
+            categories=["found"], last_n=10,
+            types=["Needs Maintenance", LOG_TYPE_OTHER],
+            finder_text="rev", finder_op="starts_with", finder_by_id=True,
+            count_op="at_most", count1=3, exclude=True,
+        )
+        dlg._load_filterset(FilterSet().add(original))
+        [f] = _log_filters(dlg._build_filterset())
+        assert f.to_dict() == original.to_dict()
+        dlg._tabs.setCurrentWidget(dlg._logs_tab)
+        dlg._reset_current_tab()
+        assert _log_filters(dlg._build_filterset()) == []
+        assert all(cb.isChecked() for cb in dlg._log_categories.values())
+        assert dlg._log_types_all.isChecked()
+        assert not dlg._log_finder_enabled.isChecked()
+
+    def test_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._log_finder_enabled.setChecked(True)
+        dlg._log_finder_row.set_op("regex")
+        dlg._log_finder_row.edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._logs_tab
 
 
 # ── where SQL validation ────────────────────────────────────────────────────────
