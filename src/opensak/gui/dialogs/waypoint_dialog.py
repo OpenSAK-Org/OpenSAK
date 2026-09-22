@@ -562,15 +562,16 @@ class WaypointDialog(QDialog):
         self._update_corrected_display()
 
     def _update_corrected_display(self) -> None:
-        has = self._corr_lat is not None and self._corr_lon is not None
-        if has:
+        lat, lon = self._corr_lat, self._corr_lon
+        if lat is not None and lon is not None:
             self._corr_display.setText(
-                format_coords(self._corr_lat, self._corr_lon, get_settings().coord_format))
+                format_coords(lat, lon, get_settings().coord_format))
             self._corr_edit_btn.setText(tr("detail_corrected_edit_btn"))
+            self._corr_clear_btn.setEnabled(True)
         else:
             self._corr_display.setText("—")
             self._corr_edit_btn.setText(tr("detail_corrected_add_btn"))
-        self._corr_clear_btn.setEnabled(has)
+            self._corr_clear_btn.setEnabled(False)
 
     # ── Child waypoints ───────────────────────────────────────────────────────
 
@@ -939,7 +940,8 @@ class WaypointDialog(QDialog):
         session.flush()
         for data in waypoints:
             fields = {f: data.get(f) for f in _WP_FIELDS}
-            row = existing.get(data.get("id"))
+            data_id = data.get("id")
+            row = existing.get(data_id) if data_id is not None else None
             if row is None:
                 cache_row.waypoints.append(Waypoint(
                     **fields, parent_gc_code=cache_row.gc_code, created_by_user=True,
