@@ -857,7 +857,7 @@ class FilterDialog(QDialog):
         geo_group = QGroupBox(tr("filter_geo_group"))
         geo_layout = QFormLayout(geo_group)
 
-        self._country_row = TextFilterRow(tr("filter_country_label"), tr("filter_contains_placeholder"))
+        self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         geo_layout.addRow(self._country_row.label, self._country_row)
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
         geo_layout.addRow(self._state_row.label, self._state_row)

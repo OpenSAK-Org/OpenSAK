@@ -229,7 +229,6 @@ STRINGS: dict[str, str] = {
     "filter_text_search_placeholder": "Palabras a buscar",
     "filter_text_search_notes":       "Notas personales",
     "filter_geo_group":            "Ubicación geográfica",
-    "filter_country_label":        "País",
     "filter_state_label":          "Estado/Región",
     "filter_county_label":         "Provincia",
     "filter_user_flag_group":      "Marca de usuario",

@@ -1,8 +1,9 @@
 """
-src/opensak/lang/de.py — German language file for OpenSAK.
+src/opensak/lang/de_CH.py — Swiss Standard German (Schweizer Hochdeutsch) language file for OpenSAK.
 
-All UI strings collected in one place.
-To add a language, copy 'en.py' to a new file (e.g. xx.py) and translate the values.
+Derived from de.py. Differences: "ss" instead of "ß", Swiss terms (Kanton, Bezirk,
+Velo, parkieren, ÖV), Swiss number formatting (5'000, 0.3), «guillemets» and Swiss examples.
+Keep it in sync with de.py when strings are added or changed there.
 The keys (left side) must NEVER be changed — they are used in the code.
 """
 
@@ -10,7 +11,7 @@ STRINGS: dict[str, str] = {
 
     # ── General ───────────────────────────────────────────────────────────────
     "cancel":                       "Abbrechen",
-    "close":                        "Schließen",
+    "close":                        "Schliessen",
     "yes":                          "Ja",
     "no":                           "Nein",
     "save":                         "Speichern",
@@ -227,8 +228,8 @@ STRINGS: dict[str, str] = {
     "filter_text_search_placeholder": "Suchbegriffe eingeben",
     "filter_text_search_notes":       "Persönliche Notizen",
     "filter_geo_group":            "Geografische Lage",
-    "filter_state_label":          "Bundesland/Region",
-    "filter_county_label":         "Landkreis",
+    "filter_state_label":          "Kanton/Region",
+    "filter_county_label":         "Bezirk",
     "filter_user_flag_group":      "Benutzer-Flag",
     "filter_locked_group":          "Gesperrt",
     "filter_dnf_group":            "DNF (Nicht gefunden)",
@@ -247,8 +248,8 @@ STRINGS: dict[str, str] = {
     "filter_where_note_name":       "Cache-Name",
     "filter_where_note_long_desc":  "Vollständige Cache-Beschreibung (HTML)",
     "filter_where_note_placed_by":  "Benutzername des Besitzers",
-    "filter_where_note_state":      "Region / Bundesland",
-    "filter_where_note_county":     "Landkreis",
+    "filter_where_note_state":      "Kanton / Region",
+    "filter_where_note_county":     "Bezirk",
     "filter_where_note_found":      "1 = von mir gefunden",
     "filter_where_note_fav":        "Community-Favoritenpunkte (API)",
     "filter_where_note_logcount":   "Gesamtanzahl der Logs",
@@ -271,7 +272,7 @@ STRINGS: dict[str, str] = {
     "gps_no_device":                "(Kein GPS-Gerät gefunden)",
     "gps_no_device_hint":           "Kein Garmin-Gerät gefunden — verbinde dein GPS und klicke erneut auf Scannen oder nutze 'Als Datei speichern'",
     "gps_format_group":             "Exportformat",
-    "gps_format_gpx":               "GPX  —  Standard-Garmin-Format (max. ~5 000 Caches)",
+    "gps_format_gpx":               "GPX  —  Standard-Garmin-Format (max. ~5'000 Caches)",
     "gps_format_ggz":               "GGZ  —  komprimiertes Garmin-Format (unbegrenzte Cache-Anzahl)",
     "gps_browse":                   "Durchsuchen…",
     "gps_file_placeholder":         "Ort wählen…",
@@ -313,19 +314,19 @@ STRINGS: dict[str, str] = {
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Koordinatenformat:",
     "settings_date_format_label":   "Datumsformat:",
-    "settings_text_size_label":     "Text- und Symbolgröße:",
+    "settings_text_size_label":     "Text- und Symbolgrösse:",
     "settings_text_size_small":     "Klein",
     "settings_text_size_medium":    "Mittel",
-    "settings_text_size_large":     "Groß",
-    "settings_default_decode_hints_cb": "Hinweise standardmäßig entschlüsselt anzeigen",
+    "settings_text_size_large":     "Gross",
+    "settings_default_decode_hints_cb": "Hinweise standardmässig entschlüsselt anzeigen",
 
     # ── Issue #638: Karte-Tab ──────────────────────────────────────────────────
     "settings_map_enabled_cb":          "Karte anzeigen",
-    "settings_map_enabled_note":        "Wenn die Karte deaktiviert ist, werden ihre Markierungsdaten bei jeder Aktualisierung nicht aufgebaut und geladen — derzeit die größte verbleibende Kostenstelle beim Anzeigen einer großen Datenbank. Schalten Sie dies aus, wenn Sie hauptsächlich die Cache-Liste nutzen und die Kartenansicht nicht benötigen.",
+    "settings_map_enabled_note":        "Wenn die Karte deaktiviert ist, werden ihre Markierungsdaten bei jeder Aktualisierung nicht aufgebaut und geladen — derzeit die grösste verbleibende Kostenstelle beim Anzeigen einer grossen Datenbank. Schalten Sie dies aus, wenn Sie hauptsächlich die Cache-Liste nutzen und die Kartenansicht nicht benötigen.",
     "settings_group_map":               "Kartenanzeige",
     "settings_map_max_caches_label":    "Max. Caches auf der Karte:",
     "settings_map_unlimited":           "Unbegrenzt",
-    "settings_map_max_caches_note":     "Begrenzt die Karte auf die nächstgelegenen Caches von Ihrem aktiven Heimatpunkt aus — bei großen Datenbanken deutlich schneller, und eine Karte mit Hunderttausenden von Markierungen ist bei normalem Zoom ohnehin nicht sehr lesbar. Die Cache-Liste wird von dieser Grenze nie beeinflusst.",
+    "settings_map_max_caches_note":     "Begrenzt die Karte auf die nächstgelegenen Caches von Ihrem aktiven Heimatpunkt aus — bei grossen Datenbanken deutlich schneller, und eine Karte mit Hunderttausenden von Markierungen ist bei normalem Zoom ohnehin nicht sehr lesbar. Die Cache-Liste wird von dieser Grenze nie beeinflusst.",
     "settings_map_nearby_radius_label":    "Radius für Split-Screen-Karte:",
     "settings_map_nearby_max_caches_label": "Cache-Grenze für Split-Screen-Karte:",
     "settings_map_nearby_note":          "Steuert die einzelne Cache-Karte, die im Split-Screen angezeigt wird — zeigt Caches innerhalb dieses Radius um den ausgewählten Cache, unabhängig von der obigen Grenze der Übersichtskarte. Ein Kreis wird auf der Karte mit diesem Radius gezeichnet; wird die Cache-Grenze innerhalb erreicht, zeigt eine Beschriftung, wie viele ausgeblendet sind. Wird pro Datenbank gespeichert.",
@@ -373,11 +374,11 @@ STRINGS: dict[str, str] = {
     "wizard_settings_file_exists_msg": "Der Ordner \"{path}\" enthält bereits eine opensak.json-Datei, daher wurden Ihre aktuellen Einstellungen nicht dorthin verschoben. Die vorhandene Datei wurde nicht verändert — überprüfen Sie den Ordner bei Bedarf manuell.",
     "settings_group_nominatim":                    "Standortverfeinerung",
     "settings_nominatim_cb":                       "Online-Abfrage für höhere Genauigkeit aktivieren",
-    "settings_nominatim_hint":                     "Wenn aktiviert, werden Landkreis-, Bundesland- und Länderdaten nach dem schnellen Offline-Durchlauf zusätzlich über OpenStreetMap verfeinert.\n\nHinweis: Erfordert eine Internetverbindung und dauert etwa 1 Sekunde pro Wegpunkt. Eine Datenbank mit 10 000 Wegpunkten benötigt rund 3 Stunden für die vollständige Verfeinerung. Nur aktivieren, wenn du in der Nähe von Verwaltungsgrenzen eine höhere Genauigkeit brauchst.",
+    "settings_nominatim_hint":                     "Wenn aktiviert, werden Bezirks-, Kantons- und Länderdaten nach dem schnellen Offline-Durchlauf zusätzlich über OpenStreetMap verfeinert.\n\nHinweis: Erfordert eine Internetverbindung und dauert etwa 1 Sekunde pro Wegpunkt. Eine Datenbank mit 10'000 Wegpunkten benötigt rund 3 Stunden für die vollständige Verfeinerung. Nur aktivieren, wenn du in der Nähe von Verwaltungsgrenzen eine höhere Genauigkeit brauchst.",
 
     "settings_group_folders": "Ordner",
     "settings_install_dir_label": "Installationsordner (Einstellungen & Protokolle):",
-    "settings_install_dir_note": "Um dies zu ändern, klicken Sie unten auf „Einrichtungsassistenten erneut ausführen“ oder bearbeiten Sie die Bootstrap-Datei manuell.",
+    "settings_install_dir_note": "Um dies zu ändern, klicken Sie unten auf «Einrichtungsassistenten erneut ausführen» oder bearbeiten Sie die Bootstrap-Datei manuell.",
     "settings_run_wizard_button": "Einrichtungsassistenten erneut ausführen",
     "settings_run_wizard_restart_notice": "Der Installationsordner wurde geändert. Starten Sie OpenSAK neu, damit dies wirksam wird.",
     "settings_db_dir_label": "Datenbankordner:",
@@ -398,7 +399,7 @@ STRINGS: dict[str, str] = {
     "settings_search_min_chars_label":             "Mindestzeichen:",
     "settings_search_debounce_label":              "Debounce-Verzögerung (ms):",
     "settings_search_auto":                        "Auto",
-    "settings_search_hint":                        "0 (Auto) wählt adaptive Schwellenwerte. Mindestzeichen erreicht → sofort auslösen; Debounce-Pause abgewartet → trotzdem auslösen. < 1 000 Caches → 1 Zeichen / 200 ms, 1 000–10 000 → 2 / 400 ms, > 10 000 → 3 / 600 ms.",
+    "settings_search_hint":                        "0 (Auto) wählt adaptive Schwellenwerte. Mindestzeichen erreicht → sofort auslösen; Debounce-Pause abgewartet → trotzdem auslösen. < 1'000 Caches → 1 Zeichen / 200 ms, 1'000–10'000 → 2 / 400 ms, > 10'000 → 3 / 600 ms.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_dialog_title":              "Datenbanken verwalten",
@@ -433,7 +434,7 @@ STRINGS: dict[str, str] = {
     "settings_distance_hint":
         "Haversine betrachtet die Erde als Kugel (wie Geocaching.com). "
         "Vincenty verwendet das WGS84-Ellipsoid und ist bei langen Distanzen "
-        "~0,3 % genauer. Entfernungen werden neu berechnet, wenn sich der "
+        "~0.3 % genauer. Entfernungen werden neu berechnet, wenn sich der "
         "Mittelpunkt ändert, nicht bei jeder Aktualisierung der Tabelle.",
 
     "update_uptodate_title":        "Kein Update gefunden",
@@ -462,7 +463,7 @@ STRINGS: dict[str, str] = {
     "wp_label_cw_id":                          "Wegpunkt-ID:",
     "wp_label_parent_gc":                      "Gehört zu Cache:",
     "wp_ph_parent_gc":                         "z.B. GC12345 (optional)",
-    "wp_val_dt_invalid":                       "Ungültiger D/T-Wert: {value}. Gültige Werte: 1,0; 1,5; 2,0 … 5,0",
+    "wp_val_dt_invalid":                       "Ungültiger D/T-Wert: {value}. Gültige Werte: 1.0, 1.5, 2.0 … 5.0",
     "wp_val_parent_gc_invalid":                "'Gehört zu Cache' muss mit 'GC' beginnen.",
 
     # ── GPS dialog ────────────────────────────────────────────────────────────
@@ -503,7 +504,7 @@ STRINGS: dict[str, str] = {
     "update_loc_nothing_to_do":     "Keine Caches mit dem gewählten Umfang zu aktualisieren.",
     "update_loc_row":               "{gc_code}: {country} / {state} / {county}",
     "update_loc_row_error":         "{gc_code}: Fehler — {msg}",
-    "update_loc_prefetch_progress": "Fehlende Landkreisdaten werden heruntergeladen: {done}/{total}…",
+    "update_loc_prefetch_progress": "Fehlende Bezirksdaten werden heruntergeladen: {done}/{total}…",
 
     # ── Grenzpolygon-Dialoge ──────────────────────────────────────────────────
     "boundary_dl_title":            "Grenzpolygon-Pakete herunterladen",
@@ -525,7 +526,7 @@ STRINGS: dict[str, str] = {
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Neue Datenbank",
     "db_name_label":                "Name:",
-    "db_name_placeholder":          "z.B. Bayern, Berlin 2026…",
+    "db_name_placeholder":          "z.B. Graubünden, Bern 2026…",
     "db_new_info":                  "Die Datenbank wird automatisch im Programmordner gespeichert.\nDu kannst den Ort unten ändern (optional).",
     "db_default_path":              "(Standard-Speicherplatz)",
     "db_name_required":             "Bitte einen Namen für die Datenbank eingeben.",
@@ -534,7 +535,7 @@ STRINGS: dict[str, str] = {
     "db_list_label":                "Datenbanken:",
     "db_details_group":             "Details",
     "db_path_label":                "Pfad:",
-    "db_size_label":                "Größe:",
+    "db_size_label":                "Grösse:",
     "db_modified_label":            "Modifiziert:",
     "db_switch_btn":                "⟵  Wechsle hierzu",
     "db_new_btn":                   "＋  Neue Datenbank…",
@@ -604,7 +605,7 @@ STRINGS: dict[str, str] = {
     "column_view_load_error": "Ansicht kann nicht geladen werden:\n{error}",
     "column_view_default_set_title": "Standard festgelegt",
     "column_view_default_set_msg": "'{name}' ist jetzt die Standardansicht für neue Datenbanken.",
-    "container_display_label":      "Größenanzeige:",
+    "container_display_label":      "Grössenanzeige:",
     "container_display_bar":        "Balken",
     "container_display_text":       "Text",
     "type_display_label":           "Cache-Typ-Anzeige:",
@@ -642,7 +643,7 @@ STRINGS: dict[str, str] = {
     "filter_cache_type_group":      "Cache-Typ",
     "filter_type_enable_all":       "Alle aktivieren",
     "filter_type_disable_all":      "Alle deaktivieren",
-    "filter_container_group":       "Container-Größe",
+    "filter_container_group":       "Container-Grösse",
     "filter_dt_group":              "Schwierigkeit / Terrain (D/T)",
     "filter_from":                  "Von:",
     "filter_to":                    "Bis:",
@@ -690,10 +691,10 @@ STRINGS: dict[str, str] = {
     "filter_date_cmp_newer":        "neuer",
     "filter_date_cmp_newer_or_equal":"gleich oder neuer",
     "filter_date_cmp_within":       "innerhalb",
-    "filter_date_cmp_outside":      "außerhalb",
+    "filter_date_cmp_outside":      "ausserhalb",
     "filter_tab_line_polygon":      "Linie/Polygon",
     "filter_lp_points_label":       "Linien-/Polygon-Punkte",
-    "filter_lp_points_placeholder": "Breitengrad, Längengrad — ein Punkt pro Zeile, z. B.\n53.18346, 8.71113\nN 53 23.613, E 008 00.941\n\nW,GC12345 übernimmt die Koordinaten eines Caches oder Wegpunkts aus der Datenbank.\nText nach # wird ignoriert.",
+    "filter_lp_points_placeholder": "Breitengrad, Längengrad — ein Punkt pro Zeile, z. B.\n47.37690, 8.54170\nN 46 56.868, E 007 26.826\n\nW,GC12345 übernimmt die Koordinaten eines Caches oder Wegpunkts aus der Datenbank.\nText nach # wird ignoriert.",
     "filter_lp_add_flagged_btn":    "Markierte (User-Flag) hinzufügen",
     "filter_lp_no_flagged":         "Kein Cache hat das User-Flag gesetzt.",
     "filter_lp_file_group":         "Punkte aus Datei lesen",
@@ -703,16 +704,16 @@ STRINGS: dict[str, str] = {
     "filter_lp_file_filter":        "Punktdateien (*.gpx *.kml *.txt *.csv);;Alle Dateien (*)",
     "filter_lp_file_error":         "Die Datei konnte nicht gelesen werden:\n{error}",
     "filter_lp_file_no_points":     "In der Datei wurden keine Punkte gefunden.",
-    "filter_lp_description":        "Der Linienfilter wählt Caches danach aus, wie nahe sie an einer Linie liegen — einer Folge verbundener Punkte, ähnlich einer Route oder einem Track. Gib mindestens zwei Punkte und die Entfernung zur Linie an, innerhalb der Caches berücksichtigt werden.\n\nPolygon: Die Punkte umranden ein Gebiet (wird automatisch geschlossen, mindestens drei Punkte); Caches darin werden berücksichtigt. Eine Entfernung größer 0 schließt zusätzlich Caches in dieser Entfernung zum Rand ein.\n\nPunkte: Caches innerhalb der Entfernung zu einem der Punkte werden berücksichtigt.\n\nSetze den Haken bei „Ausschließen“, um stattdessen nur die nicht passenden Caches zu behalten. Korrigierte Koordinaten werden verwendet, sofern vorhanden.",
+    "filter_lp_description":        "Der Linienfilter wählt Caches danach aus, wie nahe sie an einer Linie liegen — einer Folge verbundener Punkte, ähnlich einer Route oder einem Track. Gib mindestens zwei Punkte und die Entfernung zur Linie an, innerhalb der Caches berücksichtigt werden.\n\nPolygon: Die Punkte umranden ein Gebiet (wird automatisch geschlossen, mindestens drei Punkte); Caches darin werden berücksichtigt. Eine Entfernung grösser 0 schliesst zusätzlich Caches in dieser Entfernung zum Rand ein.\n\nPunkte: Caches innerhalb der Entfernung zu einem der Punkte werden berücksichtigt.\n\nSetze den Haken bei «Ausschliessen», um stattdessen nur die nicht passenden Caches zu behalten. Korrigierte Koordinaten werden verwendet, sofern vorhanden.",
     "filter_lp_type_group":         "Filter-Typ",
     "filter_lp_type_line":          "Linie",
     "filter_lp_type_polygon":       "Polygon",
     "filter_lp_type_points":        "Punkte",
     "filter_lp_distance_label":     "Entfernung:",
-    "filter_lp_exclude":            "Ausschließen",
+    "filter_lp_exclude":            "Ausschliessen",
     "filter_lp_invalid_lines":      "Diese Linien-/Polygon-Punkte konnten nicht gelesen werden:\n{lines}",
     "filter_lp_too_few_points":     "Der gewählte Filter-Typ benötigt mindestens {count} Punkte.",
-    "filter_lp_distance_required":  "Gib für einen Linien- oder Punktefilter eine Entfernung größer 0 ein.",
+    "filter_lp_distance_required":  "Gib für einen Linien- oder Punktefilter eine Entfernung grösser 0 ein.",
     "filter_caches_with":           "Caches mit:",
     "filter_all_selected":          "ALLE gewählten Attribute",
     "filter_any_selected":          "EINES der gewählten Attribute",
@@ -766,7 +767,7 @@ STRINGS: dict[str, str] = {
     "col_container":    "Container",
     "col_country":      "Land",
     "col_state":        "Region",
-    "col_county":       "Landkreis",
+    "col_county":       "Bezirk",
     "col_distance":     "Entfernung",
     "col_found":        "Gefunden",
     "col_placed_by":    "Versteckt von",
@@ -852,7 +853,7 @@ STRINGS: dict[str, str] = {
     "wp_label_terrain":             "Terrain (T):",
     "wp_label_placed_by":           "Versteckt von:",
     "wp_label_country":             "Land:",
-    "wp_label_state":               "Bundesland/Region:",
+    "wp_label_state":               "Kanton/Region:",
     "wp_label_short_desc":          "Kurzbeschr.:",
     "wp_label_long_desc":           "Langbeschr.:",
     "wp_label_hint":                "Hinweis:",
@@ -861,8 +862,8 @@ STRINGS: dict[str, str] = {
     "wp_ph_gc_code":                "z.B. GC12345",
     "wp_ph_name":                   "Cache-Name",
     "wp_ph_placed_by":              "Besitzer Benutzername",
-    "wp_ph_country":                "z.B. Dänemark",
-    "wp_ph_state":                  "z.B. Bayern",
+    "wp_ph_country":                "z.B. Schweiz",
+    "wp_ph_state":                  "z.B. Bern",
     "wp_ph_short_desc":             "Kurzbeschreibung...",
     "wp_ph_long_desc":              "Langbeschreibung...",
     "wp_ph_hint":                   "Cache-Hinweis",
@@ -879,11 +880,11 @@ STRINGS: dict[str, str] = {
     "coord_conv_title":             "Koordinaten-Konverter",
     "coord_conv_input_group":       "Koordinaten eingeben",
     "coord_conv_input_hint":        "Formatunabhängig eingeben: DMM, DMS oder DD — Automatische Konvertierung",
-    "coord_conv_placeholder":       "z.B. N55 47.250 E012 25.000",
+    "coord_conv_placeholder":       "z.B. N47 22.500 E008 32.500",
     "coord_conv_output_group":      "Alle Formate",
     "coord_conv_copy_btn":          "Kopieren",
     "coord_conv_open_in":           "Öffnen in:",
-    "coord_conv_parse_error":       "Unbekanntes Koordinatenformat — versuche z.B. N55 47.250 E012 25.000",
+    "coord_conv_parse_error":       "Unbekanntes Koordinatenformat — versuche z.B. N47 22.500 E008 32.500",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Koordinaten-Projektion",
@@ -892,7 +893,7 @@ STRINGS: dict[str, str] = {
     "proj_params_group":            "Peilung und Entfernung",
     "proj_bearing_label":           "Peilung (Azimut):",
     "proj_unit_m":                  "Meter",
-    "proj_unit_ft":                 "Fuß",
+    "proj_unit_ft":                 "Fuss",
     "proj_result_group":            "Projizierte Koordinate",
 
     # ── Checksum dialog ───────────────────────────────────────────────────────
@@ -953,14 +954,14 @@ STRINGS: dict[str, str] = {
     # ── Attributes (official Groundspeak list) ────────────────────────────────
     # Permissions
     "attr_dogs":               "Hunde",
-    "attr_bicycles":           "Fahrräder",
+    "attr_bicycles":           "Velos",
     "attr_motorcycles":        "Motorräder",
     "attr_atv":                "Quad / ATV",
     "attr_jeeps":              "Geländefahrzeuge / Jeeps",
     "attr_snowmobile":         "Schneemobile",
     "attr_horses":             "Pferde",
     "attr_campfires":          "Lagerfeuer",
-    "attr_trucks":             "LKW / Wohnmobile",
+    "attr_trucks":             "Lastwagen / Wohnmobile",
     # Conditions
     "attr_kids":               "Empfohlen für Kinder",
     "attr_onehour":            "Dauert weniger als eine Stunde",
@@ -977,7 +978,7 @@ STRINGS: dict[str, str] = {
     "attr_dangerous_animals":  "Gefährliche Tiere",
     "attr_field_puzzle":       "Unterwegs-Rätsel",
     "attr_nightcache":         "Nachtcache",
-    "attr_park_and_grab":      "Parken und Loggen",
+    "attr_park_and_grab":      "Parkieren und Loggen",
     "attr_abandoned_structure":"Verlassenes Gebäude",
     "attr_short_hike":         "Kurze Wanderung (< 1 km)",
     "attr_medium_hike":        "Mittlere Wanderung (1-10 km)",
@@ -1018,7 +1019,7 @@ STRINGS: dict[str, str] = {
     # Facilities
     "attr_wheelchair":         "Rollstuhlgerecht",
     "attr_parking":            "Parkplatz in der Nähe",
-    "attr_public_transport":   "Öffentlicher Nahverkehr in der Nähe",
+    "attr_public_transport":   "Öffentlicher Verkehr (ÖV) in der Nähe",
     "attr_restrooms":          "Öffentliche Toilette in der Nähe",
     "attr_telephone":          "Telefon in der Nähe",
     "attr_water":              "Trinkwasser in der Nähe",
@@ -1053,7 +1054,7 @@ STRINGS: dict[str, str] = {
 
     # Toolbar & menu
     "action_trip_planner":          "🗺️  &Ausflugsplaner…",
-    "trip_planner_close_first":      "Schließen Sie den Ausflugsplaner, bevor Sie ein anderes Fenster öffnen",
+    "trip_planner_close_first":      "Schliessen Sie den Ausflugsplaner, bevor Sie ein anderes Fenster öffnen",
     "toolbar_trip":                 "Ausflugsplaner",
     "toolbar_trip_tooltip":         "Einen Geocaching-Ausflug planen",
     "toolbar_home_tooltip":         "Schwenke die Karte zum Startpunkt.",
@@ -1076,7 +1077,7 @@ STRINGS: dict[str, str] = {
     "settings_hp_delete_msg":                  "Bist du sicher, dass du \"{name}\" löschen möchtest?",
     "settings_hp_name_required":               "Bitte gib einen Namen für diesen Punkt ein.",
     "settings_hp_coord_required":              "Bitte Koordinaten eingeben.",
-    "settings_hp_coord_invalid":               "Ungültiges Koordinatenformat — versuche z.B. N55 47.250 E012 25.000",
+    "settings_hp_coord_invalid":               "Ungültiges Koordinatenformat — versuche z.B. N47 22.500 E008 32.500",
     "toolbar_db_combo_tooltip":                "Aktive Datenbank wechseln",
     "toolbar_db_no_databases":                 "(Keine Datenbanken)",
     "toolbar_home_combo_tooltip":              "Wechsle den aktiven Startpunkt",
@@ -1250,7 +1251,7 @@ STRINGS: dict[str, str] = {
     "update_appimage_downloading_title": "Update wird heruntergeladen",
     "update_appimage_downloading":       "Die neue Version wird heruntergeladen…",
     "update_appimage_done_title":        "Update installiert",
-    "update_appimage_done_msg":          "Die neue Version wurde installiert. Schließen Sie OpenSAK und klicken Sie erneut auf das Symbol, um es zu starten.",
+    "update_appimage_done_msg":          "Die neue Version wurde installiert. Schliessen Sie OpenSAK und klicken Sie erneut auf das Symbol, um es zu starten.",
     "update_appimage_error_title":       "Update fehlgeschlagen",
     "update_appimage_error_msg":         "OpenSAK konnte nicht automatisch aktualisiert werden ({error}). Sie können die neue Version weiterhin manuell von der Release-Seite herunterladen.",
     "update_download_button":       "Herunterladen & installieren",
@@ -1258,7 +1259,7 @@ STRINGS: dict[str, str] = {
     "update_downloading":           "Die neue Version wird heruntergeladen…",
     "update_downloading_percent":   "Die neue Version wird heruntergeladen… ({percent} %)",
     "update_download_done_title":   "Download abgeschlossen",
-    "update_download_done_msg":     "Die neue Version wurde heruntergeladen und für Sie geöffnet. Schließen Sie OpenSAK und schließen Sie die Installation von dort ab.",
+    "update_download_done_msg":     "Die neue Version wurde heruntergeladen und für Sie geöffnet. Schliessen Sie OpenSAK und schliessen Sie die Installation von dort ab.",
     "update_download_error_title":  "Download fehlgeschlagen",
     "update_download_error_msg":    "OpenSAK konnte das Update nicht automatisch herunterladen ({error}). Sie können die neue Version weiterhin manuell von der Release-Seite herunterladen.",
 
@@ -1294,7 +1295,7 @@ STRINGS: dict[str, str] = {
     "pq_email_missing_fields":          "Bitte zuerst Server und Benutzernamen ausfüllen.",
     "pq_email_missing_password":        "Bitte ein Passwort zum Testen eingeben oder zuerst eines speichern.",
 
-    # ── Dialog „Nach PQ-E-Mail suchen“ (issue #443, session 2) ─────────────────
+    # ── Dialog «Nach PQ-E-Mail suchen» (issue #443, session 2) ─────────────────
     "action_pq_email_check":            "Nach PQ-E-Mail suchen…",
     "pq_check_dialog_title":            "Nach PQ-E-Mail suchen",
     "pq_check_intro":                   "Durchsuche dein eingerichtetes Postfach nach Pocket-Query-Zip-Anhängen und importiere sie in die passende Datenbank.",
@@ -1302,14 +1303,14 @@ STRINGS: dict[str, str] = {
     "pq_check_only_unseen_cb":       "Nur neue (ungelesene) E-Mails prüfen",
     "pq_check_btn":                     "Jetzt prüfen",
     "pq_check_open_settings_btn":       "E-Mail-Konto einrichten…",
-    "pq_check_not_configured":          "Es ist noch kein E-Mail-Konto eingerichtet. Klicke auf „E-Mail-Konto einrichten…“, um eines unter Einstellungen → PQ Email hinzuzufügen.",
-    "pq_check_no_password":             "Für dieses Konto ist noch kein Passwort gespeichert. Öffne Einstellungen → PQ Email und nutze „Verbindung testen“, um eines zu speichern.",
+    "pq_check_not_configured":          "Es ist noch kein E-Mail-Konto eingerichtet. Klicke auf «E-Mail-Konto einrichten…», um eines unter Einstellungen → PQ Email hinzuzufügen.",
+    "pq_check_no_password":             "Für dieses Konto ist noch kein Passwort gespeichert. Öffne Einstellungen → PQ Email und nutze «Verbindung testen», um eines zu speichern.",
     "pq_check_checking":                "Postfach wird nach Pocket-Query-E-Mails durchsucht…",
     "pq_check_no_new_mail":             "Es wurden keine Pocket-Query-Zip-Anhänge gefunden.",
     "pq_check_error_auth":              "✗ Anmeldung am Postfach fehlgeschlagen: {detail}",
     "pq_check_error_network":           "✗ Mailserver konnte nicht erreicht werden: {detail}",
     "pq_check_error_other":             "✗ Prüfung des Postfachs fehlgeschlagen: {detail}",
-    "pq_check_entry_success":           "✓ „{name}“ — {count} Cache(s) importiert nach „{db}“",
-    "pq_check_entry_error":             "✗ „{name}“ — Import fehlgeschlagen: {error}",
+    "pq_check_entry_success":           "✓ «{name}» — {count} Cache(s) importiert nach «{db}»",
+    "pq_check_entry_error":             "✗ «{name}» — Import fehlgeschlagen: {error}",
     "pq_check_done":                    "Fertig.",
 }
