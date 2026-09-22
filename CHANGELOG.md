@@ -4,6 +4,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.3] — 2026-09-22
+
+> New UI language: Swiss German, plus a quick way to run a raw SQL WHERE
+> filter directly from the top bar.
+
+### Added
+
+- **Quick Where filter in the top bar (#887, implements #558)** — Adds a
+  "Where:" combo box directly in the top toolbar (next to the existing GC
+  code / Name quick-filter fields), letting you type a raw SQL WHERE-style
+  condition (e.g. `distance < 5`) and apply it without first opening the
+  full Filter dialog's Where tab. The dropdown keeps recent entries for
+  quick reuse; an inline info icon links to WHERE-syntax help.
+- **Swiss German (de_CH) UI language (#886)** — New `src/opensak/lang/de_CH.py`,
+  derived from `de.py` with Swiss orthography ("ss" instead of "ß") and Swiss
+  terminology (Kanton, Bezirk). Registered as `de_CH` → "Deutsch (Schweiz)" in
+  `AVAILABLE_LANGUAGES`. Qt's own bundled dialog translations (Close/OK/Cancel
+  etc.) map to the existing `qtbase_de.qm`, since no Swiss-specific
+  `qtbase_de_CH.qm` exists. Now 11 UI languages in total.
+
+### Changed
+
+- **Filter dialog: dropped the redundant `filter_country_label` translation
+  key (#886)** — the country filter label now reuses the existing
+  `col_country` key instead of a duplicate key carrying the same text, across
+  all language files.
+
+> Contributed by nagisml.
+
+---
+
 ## [1.20.0-beta.2] — 2026-09-22
 
 > Next installment of the ongoing GSAK filter-parity work tracked in #557
