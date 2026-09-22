@@ -289,3 +289,60 @@ def hint_style(*, font_size: int | None = 10, extra: str = "") -> str:
     if extra:
         parts.append(extra)
     return " ".join(parts)
+
+
+# ── Filter highlight colour (issue #610) ──────────────────────────────────────
+#
+# GSAK marks every filter element that differs from its default with a yellow
+# background, so you can see at a glance what a saved filter actually does.
+# OpenSAK does the same on the filter dialog's labels, group titles and tabs.
+#
+# Light mode uses GSAK's own bright yellow; dark mode uses a dark amber with
+# light text, since bright yellow with black text is glaring on a dark
+# background (the same reasoning as the Where-tab error box, issue #613).
+#
+# Centralised here so a future user-configurable highlight colour only needs
+# to change these two pairs.
+
+HIGHLIGHT_BG_LIGHT = "#ffec3d"
+HIGHLIGHT_FG_LIGHT = "#1a1a1a"
+HIGHLIGHT_BG_DARK  = "#7a6500"
+HIGHLIGHT_FG_DARK  = "#fff8c4"
+
+
+def highlight_colors(theme: str | None = None) -> tuple[str, str]:
+    """
+    Return ``(background, foreground)`` hex colours for a changed filter element.
+
+    Parameters
+    ----------
+    theme:
+        One of ``"auto"``, ``"light"``, ``"dark"``. When *None*, the user's
+        saved preference is read from AppSettings (falls back to ``"auto"``
+        if settings aren't available, e.g. in unit tests).
+    """
+    if theme is None:
+        try:
+            from opensak.gui.settings import get_settings
+            theme = get_settings().theme
+        except Exception:
+            theme = THEME_AUTO
+    if effective_theme(theme) == THEME_DARK:
+        return HIGHLIGHT_BG_DARK, HIGHLIGHT_FG_DARK
+    return HIGHLIGHT_BG_LIGHT, HIGHLIGHT_FG_LIGHT
+
+
+def highlight_style(selector: str = "", *, theme: str | None = None) -> str:
+    """
+    Return a Qt stylesheet that paints *selector* in the highlight colour.
+
+    With no *selector* the rules apply to the styled widget itself (a QLabel,
+    typically); pass ``"QGroupBox::title"`` to highlight only a group's title
+    rather than its whole frame.
+
+        label.setStyleSheet(highlight_style())
+        group.setStyleSheet(highlight_style("QGroupBox::title"))
+    """
+    bg, fg = highlight_colors(theme)
+    rules = f"background: {bg}; color: {fg}; border-radius: 3px; padding: 0px 3px;"
+    return f"{selector} {{ {rules} }}" if selector else rules

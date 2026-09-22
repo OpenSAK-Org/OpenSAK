@@ -18,24 +18,26 @@ Understøtter gem/indlæs filterprofiler.
 from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QCheckBox, QPushButton, QRadioButton,
-    QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QWidget,
+    QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QTabBar, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
     QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
     QDateEdit, QDateTimeEdit, QSizePolicy, QFrame, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
+    QStyle, QStyleOptionTab, QStylePainter,
 )
+from PySide6.QtGui import QBrush, QColor, QPalette
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtCore import QDate, QDateTime, QTime
-from PySide6.QtGui import QColor
 import unicodedata
 
 from opensak.gui.widgets.center_point_picker import CenterPointPicker
+from opensak.gui.theme import highlight_colors, highlight_style
 from opensak.lang import tr
 from opensak.filters.engine import (
     FilterSet, SortSpec,
@@ -195,6 +197,76 @@ class _AttrSearchEdit(QLineEdit):
         super().keyPressEvent(event)
 
 
+# ── Highlight af ændrede filterelementer (issue #610) ────────────────────────
+
+def hug_label(label: QLabel) -> QLabel:
+    """Stop a label from filling its layout column, so a highlight (#610)
+    hugs the text instead of running on to the next widget."""
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+    return label
+
+
+def set_highlighted(widget: QWidget, on: bool) -> None:
+    """Paint *widget* in the "changed filter element" colour, or clear it (#610).
+
+    Group boxes get only their title highlighted — a whole yellow frame would
+    drown the tab — everything else (labels, mostly) is painted as a whole.
+    """
+    if isinstance(widget, QGroupBox):
+        widget.setStyleSheet(highlight_style("QGroupBox::title") if on else "")
+    else:
+        widget.setStyleSheet(highlight_style() if on else "")
+
+
+class HighlightTabBar(QTabBar):
+    """Tab bar that marks tabs holding a changed filter condition (#610).
+
+    Qt style sheets can't address a single tab by index, so the highlighted
+    tabs are painted by hand: the native tab shape, a coloured band behind the
+    label, then the label on top.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._highlighted: set[int] = set()
+
+    def set_tab_highlighted(self, index: int, on: bool) -> None:
+        if on == (index in self._highlighted):
+            return
+        if on:
+            self._highlighted.add(index)
+        else:
+            self._highlighted.discard(index)
+        self.update()
+
+    def is_tab_highlighted(self, index: int) -> bool:
+        return index in self._highlighted
+
+    def paintEvent(self, event) -> None:  # noqa: N802  (Qt naming)
+        painter = QStylePainter(self)
+        # Same order as QTabBar's own painter: the selected tab goes last, so
+        # its border overlaps its neighbours instead of the other way round.
+        selected = self.currentIndex()
+        for i in range(self.count()):
+            if i != selected:
+                self._paint_tab(painter, i)
+        if 0 <= selected < self.count():
+            self._paint_tab(painter, selected)
+
+    def _paint_tab(self, painter: QStylePainter, index: int) -> None:
+        option = QStyleOptionTab()
+        self.initStyleOption(option, index)
+        if index not in self._highlighted:
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTab, option)
+            return
+        bg, fg = highlight_colors()
+        painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
+        painter.fillRect(self.tabRect(index).adjusted(6, 5, -6, -5), QColor(bg))
+        option.palette.setColor(QPalette.ColorRole.WindowText, QColor(fg))
+        option.palette.setColor(QPalette.ColorRole.ButtonText, QColor(fg))
+        painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
+
+
 # ── D/T spin box: snaps to valid 0.5-increment values (1.0–5.0) ──────────────
 
 class DTSpinBox(QDoubleSpinBox):
@@ -268,7 +340,9 @@ class TextFilterRow(QWidget):
 
     def __init__(self, label: str, placeholder: str, parent=None):
         super().__init__(parent)
-        self.label = label
+        # A real QLabel (like DateFilterRow's) rather than a bare string, so
+        # the highlighting in issue #610 has something to paint yellow.
+        self.label = hug_label(QLabel(label))
         self._placeholder = placeholder
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -300,6 +374,10 @@ class TextFilterRow(QWidget):
             return cls("", op)
         text = self.edit.text().strip()
         return cls(text, op) if text else None
+
+    def is_set(self) -> bool:
+        """True when the row contributes a condition (issue #610 highlighting)."""
+        return self.op() in TEXT_OPS_VALUELESS or bool(self.edit.text().strip())
 
     def load(self, f) -> None:
         self.set_op(getattr(f, "op", "contains"))
@@ -445,7 +523,7 @@ class DateFilterRow(QWidget):
     def __init__(self, field: Optional[str], label: str, parent=None):
         super().__init__(parent)
         self.field = field
-        self.label = QLabel(label)
+        self.label = hug_label(QLabel(label))
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -638,6 +716,9 @@ class FilterDialog(QDialog):
         self._attr_boxes: dict[int, tuple] = {}
         # attr_id -> (table row, name item, folded search text)
         self._attr_rows: dict[int, tuple] = {}
+        # Last painted highlight state, so a keystroke doesn't restyle the
+        # whole dialog (#610)
+        self._highlight_state: dict[int, bool] = {}
         # Cache currently selected in the main window's table, if any — lets
         # the "Afstand"-fanens center-punkt-vælger tilbyde "denne cache" som
         # centrum (issue #511). None if nothing is selected.
@@ -709,6 +790,7 @@ class FilterDialog(QDialog):
 
         # ── Faneblade ─────────────────────────────────────────────────────────
         self._tabs = QTabWidget()
+        self._tabs.setTabBar(HighlightTabBar(self._tabs))
         self._general_tab = self._build_general_tab()
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
@@ -728,6 +810,8 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
+        self._connect_highlight_signals()
+        self._refresh_highlights()
 
         # ── Knapper ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -754,7 +838,15 @@ class FilterDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _build_general_tab(self) -> QWidget:
-        """Generelt filter fane — indpakket i QScrollArea så indhold ikke klemmes."""
+        """Generelt filter fane.
+
+        Issue #610: fanen var én lang kolonne af QGroupBox'e og krævede altid
+        scrolling. Den er nu lagt ud i to kolonner, og de fem rene ja/nej-
+        grupper (fundet, tilgængelighed, premium, trackables, rettede
+        koordinater) er blevet til kompakte etiket-rækker i stedet for hver sin
+        ramme — det alene sparede ~300 px. QScrollArea'en er beholdt som
+        sikkerhedsnet for meget små skærme og "stor tekst"-indstillingen.
+        """
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -764,37 +856,50 @@ class FilterDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
-        layout = QFormLayout(inner)
+        layout = QVBoxLayout(inner)
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Cachenavn / GC kode / Udlagt af / Owner name — hver med operator-
-        # vælger (Indeholder, Er lig med, RegEx, …). *_filter er selve
-        # tekstfeltet, som før.
+        # ── Cachenavn / GC kode / Udlagt af / Owner name ─────────────────────
+        # To rækker à to felter i stedet for fire fulde rækker. *_filter er
+        # stadig selve tekstfeltet, som før.
         self._name_row = TextFilterRow(tr("filter_name_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._name_row.label, self._name_row)
         self._gc_row = TextFilterRow(tr("filter_gc_label"), tr("filter_gc_placeholder"))
-        layout.addRow(self._gc_row.label, self._gc_row)
         self._placed_row = TextFilterRow(tr("filter_placed_by_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._placed_row.label, self._placed_row)
         self._owner_row = TextFilterRow(tr("filter_owner_name_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._owner_row.label, self._owner_row)
+        text_grid = QGridLayout()
+        text_grid.setHorizontalSpacing(12)
+        text_grid.setVerticalSpacing(4)
+        for i, row in enumerate((self._name_row, self._gc_row,
+                                 self._placed_row, self._owner_row)):
+            r, c = divmod(i, 2)
+            text_grid.addWidget(row.label, r, c * 2)
+            text_grid.addWidget(row, r, c * 2 + 1)
+        text_grid.setColumnStretch(1, 1)
+        text_grid.setColumnStretch(3, 1)
+        layout.addLayout(text_grid)
+
         self._name_filter = self._name_row.edit
         self._gc_filter = self._gc_row.edit
         self._placed_filter = self._placed_row.edit
         self._owner_filter = self._owner_row.edit
 
-        spacer = QWidget()
-        spacer.setFixedHeight(6)
-        layout.addRow(spacer)
+        # ── Midterblok: cachetyper til venstre, beholder + D/T til højre ─────
+        middle = QHBoxLayout()
+        middle.setSpacing(10)
 
         # Cache type
-        type_group = QGroupBox(tr("filter_cache_type_group"))
-        type_outer = QVBoxLayout(type_group)
+        self._type_group = QGroupBox(tr("filter_cache_type_group"))
+        type_outer = QVBoxLayout(self._type_group)
+        type_outer.setSpacing(4)
         type_layout = QGridLayout()
+        type_layout.setHorizontalSpacing(10)
+        type_layout.setVerticalSpacing(2)
         self._type_checks: dict[str, QCheckBox] = {}
-        # Same icons and size as the cache table's type column
-        type_icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+        # Same icons as the cache table's type column, but capped at 16 px —
+        # at "large text" the table's 26 px icons made this grid alone taller
+        # than the whole tab (#610).
+        type_icon_size = min(16, TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"])
         for i, ct in enumerate(CACHE_TYPES):
             cb = QCheckBox(ct.replace(" Cache", "").replace("Unknown", "Mystery"))
             cb.setIcon(get_cache_type_icon(ct, size=type_icon_size))
@@ -805,29 +910,38 @@ class FilterDialog(QDialog):
         type_outer.addLayout(type_layout)
         type_btn_row = QHBoxLayout()
         type_enable_all = QPushButton(tr("filter_type_enable_all"))
+        type_enable_all.setAutoDefault(False)
         type_enable_all.clicked.connect(self._enable_all_types)
         type_disable_all = QPushButton(tr("filter_type_disable_all"))
+        type_disable_all.setAutoDefault(False)
         type_disable_all.clicked.connect(self._disable_all_types)
         type_btn_row.addWidget(type_enable_all)
         type_btn_row.addWidget(type_disable_all)
         type_btn_row.addStretch()
         type_outer.addLayout(type_btn_row)
-        layout.addRow(type_group)
+        middle.addWidget(self._type_group, 3)
 
-        # Container
-        cont_group = QGroupBox(tr("filter_container_group"))
-        cont_layout = QHBoxLayout(cont_group)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(8)
+
+        # Container — to rækker à tre i stedet for én bred række
+        self._cont_group = QGroupBox(tr("filter_container_group"))
+        cont_layout = QGridLayout(self._cont_group)
+        cont_layout.setHorizontalSpacing(10)
+        cont_layout.setVerticalSpacing(2)
         self._cont_checks: dict[str, QCheckBox] = {}
-        for cs in CONTAINER_SIZES:
+        for i, cs in enumerate(CONTAINER_SIZES):
             cb = QCheckBox(cs)
             cb.setChecked(True)
             self._cont_checks[cs] = cb
-            cont_layout.addWidget(cb)
-        layout.addRow(cont_group)
+            cont_layout.addWidget(cb, i // 3, i % 3)
+        right_col.addWidget(self._cont_group)
 
-        # Sværhedsgrad
+        # Sværhedsgrad / terræn
         dt_group = QGroupBox(tr("filter_dt_group"))
         dt_layout = QFormLayout(dt_group)
+        dt_layout.setContentsMargins(8, 4, 8, 4)
+        dt_layout.setVerticalSpacing(4)
 
         d_row = QHBoxLayout()
         self._diff_min = DTSpinBox()
@@ -838,7 +952,8 @@ class FilterDialog(QDialog):
         d_row.addWidget(QLabel(tr("filter_to")))
         d_row.addWidget(self._diff_max)
         d_row.addStretch()
-        dt_layout.addRow(tr("wp_label_difficulty"), d_row)
+        self._diff_label = hug_label(QLabel(tr("wp_label_difficulty")))
+        dt_layout.addRow(self._diff_label, d_row)
 
         t_row = QHBoxLayout()
         self._terr_min = DTSpinBox()
@@ -849,43 +964,19 @@ class FilterDialog(QDialog):
         t_row.addWidget(QLabel(tr("filter_to")))
         t_row.addWidget(self._terr_max)
         t_row.addStretch()
-        dt_layout.addRow(tr("wp_label_terrain"), t_row)
-        layout.addRow(dt_group)
+        self._terr_label = hug_label(QLabel(tr("wp_label_terrain")))
+        dt_layout.addRow(self._terr_label, t_row)
+        right_col.addWidget(dt_group)
+        right_col.addStretch()
 
-        # Fundet status
-        found_group = QGroupBox(tr("filter_found_group"))
-        found_layout = QHBoxLayout(found_group)
-        self._found_cb   = QCheckBox(tr("quick_found"))
-        self._found_cb.setChecked(True)
-        self._notfound_cb = QCheckBox(tr("quick_not_found"))
-        self._notfound_cb.setChecked(True)
-        found_layout.addWidget(self._found_cb)
-        found_layout.addWidget(self._notfound_cb)
-        found_layout.addStretch()
-        layout.addRow(found_group)
+        middle.addLayout(right_col, 2)
+        layout.addLayout(middle)
 
-        # Tilgængelighed
-        avail_group = QGroupBox(tr("filter_avail_group"))
-        avail_layout = QHBoxLayout(avail_group)
-        self._avail_cb    = QCheckBox(tr("filter_available"))
-        self._avail_cb.setChecked(True)
-        self._unavail_cb  = QCheckBox(tr("filter_unavailable"))
-        self._unavail_cb.setChecked(True)
-        self._archived_cb = QCheckBox(tr("quick_archived"))
-        # Issue #576 (Mike): GSAK always shows archived caches unless a
-        # filter is explicitly set to hide them — OpenSAK previously hid
-        # them by default, which surprised users and (per Mike's report)
-        # made an explicit "show archived" choice forget itself on reopen.
-        self._archived_cb.setChecked(True)
-        avail_layout.addWidget(self._avail_cb)
-        avail_layout.addWidget(self._unavail_cb)
-        avail_layout.addWidget(self._archived_cb)
-        avail_layout.addStretch()
-        layout.addRow(avail_group)
-
-        # Afstand
-        dist_group = QGroupBox(tr("filter_distance_group"))
-        dist_outer = QVBoxLayout(dist_group)
+        # ── Afstand — i fuld bredde, center-punktvælgeren er bred ────────────
+        self._dist_group = QGroupBox(tr("filter_distance_group"))
+        dist_outer = QVBoxLayout(self._dist_group)
+        dist_outer.setContentsMargins(8, 4, 8, 4)
+        dist_outer.setSpacing(4)
 
         dist_row = QHBoxLayout()
         self._dist_enabled = QCheckBox(tr("filter_enable"))
@@ -907,56 +998,89 @@ class FilterDialog(QDialog):
         self._dist_max.setSuffix(_unit)
         self._dist_max.setEnabled(False)
         dist_row.addWidget(self._dist_max)
-        dist_row.addStretch()
-        dist_outer.addLayout(dist_row)
+        dist_row.addSpacing(16)
 
         # Center-punkt (issue #511) — genbrugelig widget, delt med den
-        # planlagte quick "Where"-boks i toolbaren (#558).
-        center_row = QHBoxLayout()
-        center_row.addWidget(QLabel(tr("center_point_label")))
+        # planlagte quick "Where"-boks i toolbaren (#558). Ligger nu på samme
+        # række som min/max i stedet for sin egen.
+        dist_row.addWidget(QLabel(tr("center_point_label")))
         self._center_picker = CenterPointPicker(self)
         self._center_picker.set_current_cache(self._current_cache)
         self._center_picker.setEnabled(False)
-        center_row.addWidget(self._center_picker, 1)
-        dist_outer.addLayout(center_row)
+        dist_row.addWidget(self._center_picker, 1)
+        dist_outer.addLayout(dist_row)
 
-        layout.addRow(dist_group)
+        layout.addWidget(self._dist_group)
+
+        # ── Ja/nej-valg: fem etiket-rækker i to kolonner ─────────────────────
+        # Tidligere fem QGroupBox'e under hinanden — hver med ~24 px indhold i
+        # en ~70 px ramme. Etiketterne er selve highlight-målet (#610).
+        status_grid = QGridLayout()
+        status_grid.setHorizontalSpacing(16)
+        status_grid.setVerticalSpacing(4)
+
+        def _status_row(label_text: str, *boxes: QCheckBox) -> tuple[QLabel, QWidget]:
+            label = hug_label(QLabel(label_text))
+            holder = QWidget()
+            holder_layout = QHBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 0, 0, 0)
+            holder_layout.setSpacing(8)
+            for box in boxes:
+                box.setChecked(True)
+                holder_layout.addWidget(box)
+            holder_layout.addStretch()
+            return label, holder
+
+        # Fundet status
+        self._found_cb    = QCheckBox(tr("quick_found"))
+        self._notfound_cb = QCheckBox(tr("quick_not_found"))
+        self._found_label, found_widget = _status_row(
+            tr("filter_found_group"), self._found_cb, self._notfound_cb)
+
+        # Tilgængelighed
+        self._avail_cb    = QCheckBox(tr("filter_available"))
+        self._unavail_cb  = QCheckBox(tr("filter_unavailable"))
+        # Issue #576 (Mike): GSAK always shows archived caches unless a
+        # filter is explicitly set to hide them — OpenSAK previously hid
+        # them by default, which surprised users and (per Mike's report)
+        # made an explicit "show archived" choice forget itself on reopen.
+        self._archived_cb = QCheckBox(tr("quick_archived"))
+        self._avail_label, avail_widget = _status_row(
+            tr("filter_avail_group"), self._avail_cb, self._unavail_cb, self._archived_cb)
 
         # Premium
-        prem_group = QGroupBox(tr("col_premium"))
-        prem_layout = QHBoxLayout(prem_group)
         self._prem_yes = QCheckBox(tr("filter_premium_only"))
-        self._prem_yes.setChecked(True)
         self._prem_no  = QCheckBox(tr("filter_not_premium"))
-        self._prem_no.setChecked(True)
-        prem_layout.addWidget(self._prem_yes)
-        prem_layout.addWidget(self._prem_no)
-        prem_layout.addStretch()
-        layout.addRow(prem_group)
+        self._prem_label, prem_widget = _status_row(
+            tr("col_premium"), self._prem_yes, self._prem_no)
 
         # Trackables
-        tb_group = QGroupBox(tr("filter_trackables_group"))
-        tb_layout = QHBoxLayout(tb_group)
         self._tb_yes = QCheckBox(tr("filter_has_trackables"))
-        self._tb_yes.setChecked(True)
         self._tb_no  = QCheckBox(tr("filter_no_trackables"))
-        self._tb_no.setChecked(True)
-        tb_layout.addWidget(self._tb_yes)
-        tb_layout.addWidget(self._tb_no)
-        tb_layout.addStretch()
-        layout.addRow(tb_group)
+        self._tb_label, tb_widget = _status_row(
+            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
 
         # Corrected Coordinates
-        cc_group = QGroupBox(tr("filter_corrected_group"))
-        cc_layout = QHBoxLayout(cc_group)
         self._cc_yes = QCheckBox(tr("filter_has_corrected"))
-        self._cc_yes.setChecked(True)
         self._cc_no  = QCheckBox(tr("filter_no_corrected"))
-        self._cc_no.setChecked(True)
-        cc_layout.addWidget(self._cc_yes)
-        cc_layout.addWidget(self._cc_no)
-        cc_layout.addStretch()
-        layout.addRow(cc_group)
+        self._cc_label, cc_widget = _status_row(
+            tr("filter_corrected_group"), self._cc_yes, self._cc_no)
+
+        for i, (label, widget) in enumerate((
+            (self._found_label, found_widget),
+            (self._prem_label, prem_widget),
+            (self._avail_label, avail_widget),
+            (self._tb_label, tb_widget),
+            (self._cc_label, cc_widget),
+        )):
+            r, c = divmod(i, 2)
+            status_grid.addWidget(label, r, c * 2)
+            status_grid.addWidget(widget, r, c * 2 + 1)
+        status_grid.setColumnStretch(1, 1)
+        status_grid.setColumnStretch(3, 1)
+        layout.addLayout(status_grid)
+
+        layout.addStretch()
 
         scroll.setWidget(inner)
         outer_layout.addWidget(scroll)
@@ -993,8 +1117,8 @@ class FilterDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
 
         # Land / Stat / Kommune
-        geo_group = QGroupBox(tr("filter_geo_group"))
-        geo_layout = QFormLayout(geo_group)
+        self._geo_group = QGroupBox(tr("filter_geo_group"))
+        geo_layout = QFormLayout(self._geo_group)
 
         self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         geo_layout.addRow(self._country_row.label, self._country_row)
@@ -1006,11 +1130,11 @@ class FilterDialog(QDialog):
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
-        layout.addRow(geo_group)
+        layout.addRow(self._geo_group)
 
         # User Flag
-        flag_group = QGroupBox(tr("filter_user_flag_group"))
-        flag_layout = QHBoxLayout(flag_group)
+        self._flag_group = QGroupBox(tr("filter_user_flag_group"))
+        flag_layout = QHBoxLayout(self._flag_group)
         self._flag_yes = QCheckBox(tr("yes"))
         self._flag_yes.setChecked(True)
         self._flag_no  = QCheckBox(tr("no"))
@@ -1018,11 +1142,11 @@ class FilterDialog(QDialog):
         flag_layout.addWidget(self._flag_yes)
         flag_layout.addWidget(self._flag_no)
         flag_layout.addStretch()
-        layout.addRow(flag_group)
+        layout.addRow(self._flag_group)
 
         # Locked (issue #202)
-        locked_group = QGroupBox(tr("filter_locked_group"))
-        locked_layout = QHBoxLayout(locked_group)
+        self._locked_group = QGroupBox(tr("filter_locked_group"))
+        locked_layout = QHBoxLayout(self._locked_group)
         self._locked_yes = QCheckBox(tr("yes"))
         self._locked_yes.setChecked(True)
         self._locked_no  = QCheckBox(tr("no"))
@@ -1030,11 +1154,11 @@ class FilterDialog(QDialog):
         locked_layout.addWidget(self._locked_yes)
         locked_layout.addWidget(self._locked_no)
         locked_layout.addStretch()
-        layout.addRow(locked_group)
+        layout.addRow(self._locked_group)
 
         # DNF
-        dnf_group = QGroupBox(tr("filter_dnf_group"))
-        dnf_layout = QHBoxLayout(dnf_group)
+        self._dnf_group = QGroupBox(tr("filter_dnf_group"))
+        dnf_layout = QHBoxLayout(self._dnf_group)
         self._dnf_yes = QCheckBox(tr("yes"))
         self._dnf_yes.setChecked(True)
         self._dnf_no  = QCheckBox(tr("no"))
@@ -1042,11 +1166,11 @@ class FilterDialog(QDialog):
         dnf_layout.addWidget(self._dnf_yes)
         dnf_layout.addWidget(self._dnf_no)
         dnf_layout.addStretch()
-        layout.addRow(dnf_group)
+        layout.addRow(self._dnf_group)
 
         # FTF
-        ftf_group = QGroupBox(tr("filter_ftf_group"))
-        ftf_layout = QHBoxLayout(ftf_group)
+        self._ftf_group = QGroupBox(tr("filter_ftf_group"))
+        ftf_layout = QHBoxLayout(self._ftf_group)
         self._ftf_yes = QCheckBox(tr("yes"))
         self._ftf_yes.setChecked(True)
         self._ftf_no  = QCheckBox(tr("no"))
@@ -1054,11 +1178,11 @@ class FilterDialog(QDialog):
         ftf_layout.addWidget(self._ftf_yes)
         ftf_layout.addWidget(self._ftf_no)
         ftf_layout.addStretch()
-        layout.addRow(ftf_group)
+        layout.addRow(self._ftf_group)
 
         # Favorit points
-        fav_group = QGroupBox(tr("filter_fav_points_group"))
-        fav_layout = QHBoxLayout(fav_group)
+        self._fav_group = QGroupBox(tr("filter_fav_points_group"))
+        fav_layout = QHBoxLayout(self._fav_group)
         self._fav_enabled = QCheckBox(tr("filter_enable"))
         self._fav_enabled.toggled.connect(self._on_fav_toggled)
         fav_layout.addWidget(self._fav_enabled)
@@ -1077,7 +1201,7 @@ class FilterDialog(QDialog):
         self._fav_max.setEnabled(False)
         fav_layout.addWidget(self._fav_max)
         fav_layout.addStretch()
-        layout.addRow(fav_group)
+        layout.addRow(self._fav_group)
 
         inner.setLayout(layout)
         scroll.setWidget(inner)
@@ -1095,7 +1219,8 @@ class FilterDialog(QDialog):
 
         # Venstre: punktliste, markerede caches, punkter fra fil
         left = QVBoxLayout()
-        left.addWidget(QLabel(tr("filter_lp_points_label")))
+        self._lp_points_label = hug_label(QLabel(tr("filter_lp_points_label")))
+        left.addWidget(self._lp_points_label)
         self._lp_text = QPlainTextEdit()
         self._lp_text.setPlaceholderText(tr("filter_lp_points_placeholder"))
         self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
@@ -1267,16 +1392,15 @@ class FilterDialog(QDialog):
         return ja_cb.isChecked() or nej_cb.isChecked()
 
     def _on_attr_state_changed(self, attr_id: int) -> None:
-        """Bold + tint the name of an attribute that has Yes or No ticked."""
+        """Bold + highlight (#610) the name of an attribute that has Yes or No ticked."""
         _row, name_item, _haystack = self._attr_rows[attr_id]
         is_set = self._attr_is_set(attr_id)
         font = name_item.font()
         font.setBold(is_set)
         name_item.setFont(font)
         if is_set:
-            tint = QColor(self._attr_table.palette().highlight().color())
-            tint.setAlpha(60)
-            name_item.setBackground(tint)
+            bg, _fg = highlight_colors()
+            name_item.setBackground(QBrush(QColor(bg)))
         else:
             name_item.setData(Qt.ItemDataRole.BackgroundRole, None)
         # In "only selected" mode an un-ticked row stays visible until the view is
@@ -1644,7 +1768,8 @@ class FilterDialog(QDialog):
 
         self._text_search_input = QLineEdit()
         self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
-        group_layout.addRow(tr("filter_text_search_label"), self._text_search_input)
+        self._text_search_label = hug_label(QLabel(tr("filter_text_search_label")))
+        group_layout.addRow(self._text_search_label, self._text_search_input)
 
         self._text_search_description = QCheckBox(tr("detail_tab_desc"))
         self._text_search_description.setChecked(True)
@@ -1719,6 +1844,122 @@ class FilterDialog(QDialog):
 
         return widget
 
+    # ── Highlight af ændrede filterelementer (issue #610) ─────────────────────
+    #
+    # GSAK markerer hvert filterelement, der afviger fra standarden, med gul
+    # baggrund, så man kan se på et øjeblik hvad et gemt filter egentlig gør.
+    # Her gøres det samme: etiketten (eller gruppens titel) males gul, og
+    # fanebladet males gult hvis noget på det er sat.
+
+    def _highlight_specs(self) -> list[tuple[QWidget, Optional[QWidget], Callable[[], bool]]]:
+        """(fane, element der males gult eller None, "er sat?"-funktion)."""
+        general = self._general_tab
+        misc = self._misc_tab
+        specs: list[tuple[QWidget, Optional[QWidget], Callable[[], bool]]] = []
+
+        for row, _cls in self._general_text_rows():
+            specs.append((general, row.label, row.is_set))
+        specs += [
+            (general, self._type_group,
+             lambda: not all(cb.isChecked() for cb in self._type_checks.values())),
+            (general, self._cont_group,
+             lambda: not all(cb.isChecked() for cb in self._cont_checks.values())),
+            (general, self._diff_label,
+             lambda: self._diff_min.value() > 1.0 or self._diff_max.value() < 5.0),
+            (general, self._terr_label,
+             lambda: self._terr_min.value() > 1.0 or self._terr_max.value() < 5.0),
+            (general, self._found_label,
+             lambda: not (self._found_cb.isChecked() and self._notfound_cb.isChecked())),
+            (general, self._avail_label,
+             lambda: not (self._avail_cb.isChecked() and self._unavail_cb.isChecked()
+                          and self._archived_cb.isChecked())),
+            (general, self._prem_label,
+             lambda: not (self._prem_yes.isChecked() and self._prem_no.isChecked())),
+            (general, self._tb_label,
+             lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
+            (general, self._cc_label,
+             lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
+            (general, self._dist_group, self._dist_enabled.isChecked),
+        ]
+
+        def date_is_set(row: DateFilterRow) -> Callable[[], bool]:
+            # Bound here rather than with a default argument, so each
+            # closure keeps its own row.
+            return lambda: row.op() != "any"
+
+        for date_row in self._date_rows.values():
+            specs.append((self._dates_tab, date_row.label, date_is_set(date_row)))
+
+        for row, _cls in self._geo_text_rows():
+            specs.append((misc, row.label, row.is_set))
+        specs += [
+            (misc, self._geo_group,
+             lambda: any(row.is_set() for row, _cls in self._geo_text_rows())),
+            (misc, self._flag_group,
+             lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
+            (misc, self._locked_group,
+             lambda: not (self._locked_yes.isChecked() and self._locked_no.isChecked())),
+            (misc, self._dnf_group,
+             lambda: not (self._dnf_yes.isChecked() and self._dnf_no.isChecked())),
+            (misc, self._ftf_group,
+             lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
+            (misc, self._fav_group, self._fav_enabled.isChecked),
+            (self._line_polygon_tab, self._lp_points_label,
+             lambda: bool(self._lp_text.toPlainText().strip())),
+            # The attribute rows are cells, not widgets — painted by
+            # _on_attr_state_changed; this entry only drives the tab itself.
+            (self._attributes_tab, None, self._attributes_changed),
+            (self._text_search_tab, self._text_search_label,
+             lambda: bool(self._text_search_input.text().strip())),
+            # Nothing on the Where tab is a label worth painting — the SQL box
+            # already shows plainly whether it holds anything.
+            (self._where_tab, None,
+             lambda: bool(self._where_sql_general.toPlainText().strip())),
+        ]
+        return specs
+
+    def _attributes_changed(self) -> bool:
+        """True when at least one attribute is set to Yes or No."""
+        return any(self._attr_is_set(attr_id) for attr_id in self._attr_boxes)
+
+    def _connect_highlight_signals(self) -> None:
+        """Re-evaluate the highlighting whenever any input in the dialog changes.
+
+        Connected generically rather than control by control, so a filter
+        element added later can't silently miss its highlight.
+        """
+        refresh = self._refresh_highlights
+        for child in self.findChildren(QWidget):
+            if isinstance(child, (QCheckBox, QRadioButton)):
+                child.toggled.connect(refresh)
+            elif isinstance(child, QComboBox):
+                child.currentIndexChanged.connect(refresh)
+            elif isinstance(child, QLineEdit):
+                child.textChanged.connect(refresh)
+            elif isinstance(child, (QSpinBox, QDoubleSpinBox)):
+                child.valueChanged.connect(refresh)
+            elif isinstance(child, QDateEdit):
+                child.dateChanged.connect(refresh)
+            elif isinstance(child, QPlainTextEdit):
+                child.textChanged.connect(refresh)
+
+    def _refresh_highlights(self) -> None:
+        """Repaint every changed filter element, and every tab holding one."""
+        changed_tabs: set[QWidget] = set()
+        for i, (tab, target, is_set) in enumerate(self._highlight_specs()):
+            on = bool(is_set())
+            if on:
+                changed_tabs.add(tab)
+            if target is None or self._highlight_state.get(i) == on:
+                continue
+            self._highlight_state[i] = on
+            set_highlighted(target, on)
+
+        tab_bar = self._tabs.tabBar()
+        if isinstance(tab_bar, HighlightTabBar):
+            for i in range(self._tabs.count()):
+                tab_bar.set_tab_highlighted(i, self._tabs.widget(i) in changed_tabs)
+
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
         show_where_info(self)
@@ -1746,7 +1987,7 @@ class FilterDialog(QDialog):
             row.edit.setFocus()
             QMessageBox.warning(
                 self, tr("warning"),
-                tr("filter_regex_invalid", field=row.label.rstrip(":"),
+                tr("filter_regex_invalid", field=row.label.text().rstrip(":"),
                    error=text_filter.regex_error),
             )
             return False
@@ -1983,6 +2224,7 @@ class FilterDialog(QDialog):
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
+        self._refresh_highlights()
 
     def _reset_current_tab(self) -> None:
         tab = self._tabs.currentWidget()
@@ -2005,6 +2247,7 @@ class FilterDialog(QDialog):
             self._reset_waypoints()
         elif tab is self._text_search_tab:
             self._reset_text_search()
+        self._refresh_highlights()
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
 
@@ -2463,6 +2706,10 @@ class FilterDialog(QDialog):
                 if converted is not None:
                     self._date_rows[converted.field].load(converted)
             # Andre/ukendte filtre ignoreres stille
+
+        # Sætning af widgets ovenfor udløser normalt selv et refresh, men
+        # ikke hvis en værdi var identisk med standarden (#610).
+        self._refresh_highlights()
 
     # ── Apply ─────────────────────────────────────────────────────────────────
 
