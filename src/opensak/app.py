@@ -25,6 +25,8 @@ _qt_translator: "QTranslator | None" = None
 # hedder qtbase_sv.qm (ISO 639-1 for svensk er "sv", ikke "se").
 _QT_LOCALE_OVERRIDES: dict[str, str] = {
     "se": "sv",
+    # Schweizertysk har ingen egen qtbase_de_CH.qm — brug den tyske.
+    "de_CH": "de",
 }
 
 

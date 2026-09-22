@@ -227,7 +227,6 @@ STRINGS: dict[str, str] = {
     "filter_text_search_placeholder": "Slova k vyhledání",
     "filter_text_search_notes":       "Osobní poznámky",
     "filter_geo_group":            "Geografická poloha",
-    "filter_country_label":        "Země",
     "filter_state_label":          "Stát/Kraj",
     "filter_county_label":         "Okres",
     "filter_user_flag_group":      "Uživatelský příznak",

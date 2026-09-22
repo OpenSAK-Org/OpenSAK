@@ -227,7 +227,6 @@ STRINGS: dict[str, str] = {
     "filter_text_search_placeholder": "Ord at søge efter",
     "filter_text_search_notes":       "Personlige noter",
     "filter_geo_group":            "Geografisk placering",
-    "filter_country_label":        "Land",
     "filter_state_label":          "Stat/Region",
     "filter_county_label":         "Kommune",
     "filter_user_flag_group":      "User Flag",
