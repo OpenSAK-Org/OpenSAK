@@ -3,11 +3,12 @@
 import json
 import pytest
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache, Attribute, Trackable
+from opensak.filters import engine
 from opensak.filters.engine import (
     FilterSet, SortSpec, FilterProfile, apply_filters, annotate_distances,
     # All filter classes
@@ -19,6 +20,7 @@ from opensak.filters.engine import (
     WhereClauseFilter,
     HasCorrectedFilter, NoCorrectedFilter, UserFlagFilter, LockedFilter, DnfFilter, FtfFilter,
     FavoritePointsFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
+    HiddenDateFilter, DateFilter,
     # Helpers
     _haversine_km, _iter_filters, FILTER_REGISTRY, SORT_FIELDS,
 )
@@ -954,6 +956,169 @@ class TestDateFilters:
         assert f.matches(_cache(last_log_date=datetime(2021, 6, 1))) is False
         restored = LastLogDateFilter.from_dict(f.to_dict())
         assert restored.to_date == self.TO
+
+
+def _day(d: date, hour: int = 0) -> datetime:
+    return datetime(d.year, d.month, d.day, hour)
+
+
+class TestDateFilter:
+    """GSAK-style DateFilter — every operator works on calendar dates."""
+    D = date(2026, 9, 14)
+
+    def test_on_or_before_after_equal_ignore_time_of_day(self):
+        before = DateFilter("hidden_date", "on_or_before", date1=self.D)
+        after = DateFilter("hidden_date", "on_or_after", date1=self.D)
+        equal = DateFilter("hidden_date", "equal", date1=self.D)
+        same_day_evening = _cache(hidden_date=_day(self.D, 23))
+        next_day = _cache(hidden_date=_day(self.D + timedelta(days=1)))
+        day_before = _cache(hidden_date=_day(self.D - timedelta(days=1), 23))
+        assert before.matches(same_day_evening) and before.matches(day_before)
+        assert not before.matches(next_day)
+        assert after.matches(same_day_evening) and after.matches(next_day)
+        assert not after.matches(day_before)
+        assert equal.matches(same_day_evening)
+        assert not equal.matches(next_day) and not equal.matches(day_before)
+
+    @pytest.mark.parametrize("op", ["on_or_before", "on_or_after", "equal", "between", "during"])
+    def test_missing_date_never_matches(self, op):
+        f = DateFilter("found_date", op, date1=self.D, date2=self.D)
+        assert f.matches(_cache(found=True, found_date=None)) is False
+
+    def test_between_is_inclusive_in_either_order(self):
+        f = DateFilter("found_date", "between", date1=date(2026, 9, 20), date2=date(2026, 9, 10))
+        assert f.matches(_cache(found_date=datetime(2026, 9, 10)))
+        assert f.matches(_cache(found_date=datetime(2026, 9, 20, 23, 59)))
+        assert not f.matches(_cache(found_date=datetime(2026, 9, 21)))
+        assert not f.matches(_cache(found_date=datetime(2026, 9, 9, 23, 59)))
+
+    def test_during_and_not_during(self, monkeypatch):
+        monkeypatch.setattr(engine, "_today", lambda: self.D)
+        during = DateFilter("last_found_date", "during", amount=2, unit="weeks")
+        not_during = DateFilter("last_found_date", "not_during", amount=2, unit="weeks")
+        cutoff = _cache(last_found_date=datetime(2026, 8, 31, 8))  # exactly 2 weeks back
+        older = _cache(last_found_date=datetime(2026, 8, 30, 23))
+        never = _cache(last_found_date=None)
+        future = _cache(last_found_date=datetime(2026, 9, 15))
+        assert during.matches(cutoff)
+        assert not during.matches(older)
+        assert not during.matches(never)
+        assert not during.matches(future)
+        # not_during is the exact complement — including caches without a date
+        for c in (cutoff, older, never, future):
+            assert not_during.matches(c) is (not during.matches(c))
+
+    @pytest.mark.parametrize("unit, amount, cutoff", [
+        ("days",   10, date(2026, 9, 4)),
+        ("weeks",   1, date(2026, 9, 7)),
+        ("months",  1, date(2026, 8, 14)),
+        ("years",   2, date(2024, 9, 14)),
+        ("days",    0, date(2026, 9, 14)),
+    ])
+    def test_relative_units(self, monkeypatch, unit, amount, cutoff):
+        monkeypatch.setattr(engine, "_today", lambda: self.D)
+        f = DateFilter("hidden_date", "during", amount=amount, unit=unit)
+        assert f.matches(_cache(hidden_date=_day(cutoff)))
+        assert not f.matches(_cache(hidden_date=_day(cutoff - timedelta(days=1), 23)))
+
+    def test_shift_back_clamps(self):
+        assert engine._shift_back(date(2026, 3, 31), 1, "months") == date(2026, 2, 28)
+        assert engine._shift_back(date(2024, 2, 29), 1, "years") == date(2023, 2, 28)
+        assert engine._shift_back(date(2026, 1, 15), 13, "months") == date(2024, 12, 15)
+        assert engine._shift_back(date(2026, 1, 1), 9999, "years") == date.min
+
+    # found_date is 5 calendar days before last_log_date (times deliberately
+    # "wrong way round" so a datetime diff would be 4.1 days, not 5).
+    @pytest.mark.parametrize("compare_op, days, expected", [
+        ("equal",          0, False),
+        ("older",          0, True),
+        ("older_or_equal", 0, True),
+        ("newer",          0, False),
+        ("newer_or_equal", 0, False),
+        ("within",         5, True),
+        ("within",         4, False),
+        ("outside",        4, True),
+        ("outside",        5, False),
+    ])
+    def test_compare(self, compare_op, days, expected):
+        f = DateFilter("found_date", "compare", other_field="last_log_date",
+                       compare_op=compare_op, compare_days=days)
+        c = _cache(found_date=datetime(2026, 9, 1, 22), last_log_date=datetime(2026, 9, 6, 1))
+        assert f.matches(c) is expected
+
+    def test_compare_equal_is_same_calendar_day(self):
+        f = DateFilter("last_found_date", "compare", other_field="found_date", compare_op="equal")
+        assert f.matches(_cache(last_found_date=datetime(2026, 9, 1, 8),
+                                found_date=datetime(2026, 9, 1, 20)))
+
+    def test_compare_needs_both_dates(self):
+        f = DateFilter("found_date", "compare", other_field="last_log_date", compare_op="outside")
+        assert not f.matches(_cache(found_date=datetime(2026, 9, 1), last_log_date=None))
+        assert not f.matches(_cache(found_date=None, last_log_date=datetime(2026, 9, 1)))
+
+    def test_round_trip_through_json(self):
+        fs = FilterSet()
+        fs.add(DateFilter("changed_date", "between", date1=date(2020, 1, 1), date2=date(2020, 12, 31)))
+        fs.add(DateFilter("creation_date", "compare", other_field="hidden_date",
+                          compare_op="within", compare_days=3))
+        fs.add(DateFilter("dnf_date", "not_during", amount=6, unit="months"))
+        restored = FilterSet.from_dict(json.loads(json.dumps(fs.to_dict())))
+        assert [f.to_dict() for f in restored._filters] == [f.to_dict() for f in fs._filters]
+        assert FILTER_REGISTRY["date"] is DateFilter
+
+    @pytest.mark.parametrize("kwargs", [
+        dict(field="nope", op="equal", date1=date(2026, 1, 1)),
+        dict(field="hidden_date", op="sometimes", date1=date(2026, 1, 1)),
+        dict(field="hidden_date", op="equal"),
+        dict(field="hidden_date", op="between", date1=date(2026, 1, 1)),
+        dict(field="hidden_date", op="during", unit="decades"),
+        dict(field="hidden_date", op="compare", other_field="nope"),
+        dict(field="hidden_date", op="compare", compare_op="roughly"),
+    ])
+    def test_invalid_values_rejected(self, kwargs):
+        with pytest.raises(ValueError):
+            DateFilter(**kwargs)
+
+    def test_legacy_profile_json_still_loads(self):
+        # Filter profiles saved before DateFilter existed.
+        data = {"mode": "AND", "filters": [
+            {"filter_type": "hidden_date_range",
+             "from_date": "2020-05-01T00:00:00", "to_date": "2020-06-15T23:59:59"},
+            {"filter_type": "found_by_me_date", "from_date": "2021-01-01T00:00:00", "to_date": None},
+            {"filter_type": "dnf_date", "from_date": None, "to_date": "2022-01-01T23:59:59"},
+            {"filter_type": "last_log_date", "from_date": "2023-01-01T00:00:00", "to_date": None},
+        ]}
+        fs = FilterSet.from_dict(data)
+        assert [type(f) for f in fs._filters] == [
+            HiddenDateFilter, FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter,
+        ]
+        assert fs._filters[0].to_date == datetime(2020, 6, 15, 23, 59, 59)
+
+    @pytest.mark.parametrize("legacy, expected", [
+        (HiddenDateFilter(datetime(2020, 5, 1), datetime(2020, 6, 15, 23, 59, 59)),
+         ("hidden_date", "between", date(2020, 5, 1), date(2020, 6, 15))),
+        (FoundByMeDateFilter(from_date=datetime(2021, 1, 1)),
+         ("found_date", "on_or_after", date(2021, 1, 1), None)),
+        (LastLogDateFilter(to_date=datetime(2022, 3, 3, 23, 59, 59)),
+         ("last_log_date", "on_or_before", date(2022, 3, 3), None)),
+        (DnfDateFilter(from_date=datetime(2020, 2, 2), to_date=datetime(2020, 3, 3)),
+         ("dnf_date", "between", date(2020, 2, 2), date(2020, 3, 3))),
+        (DnfDateFilter(), None),
+    ])
+    def test_from_legacy(self, legacy, expected):
+        converted = DateFilter.from_legacy(legacy)
+        if expected is None:
+            assert converted is None
+        else:
+            assert (converted.field, converted.op, converted.date1, converted.date2) == expected
+
+    def test_from_legacy_matches_like_the_legacy_range(self):
+        legacy = HiddenDateFilter(datetime(2020, 5, 1), datetime(2020, 6, 15, 23, 59, 59))
+        converted = DateFilter.from_legacy(legacy)
+        for d in (datetime(2020, 4, 30, 23), datetime(2020, 5, 1), datetime(2020, 6, 15, 23),
+                  datetime(2020, 6, 16), None):
+            c = _cache(hidden_date=d)
+            assert converted.matches(c) is legacy.matches(c)
 
 
 class TestFilterSetEdges:

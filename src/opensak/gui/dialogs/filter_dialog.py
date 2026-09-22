@@ -1,28 +1,30 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Seks faner:
+Syv faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
-4. Attributter — alle Groundspeak attributter
-5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-6. Where       — rå SQL WHERE-betingelse
+4. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
+5. Attributter — alle Groundspeak attributter
+6. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+7. Where       — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import date
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QPushButton,
-    QComboBox, QDoubleSpinBox, QTabWidget, QWidget,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QRadioButton,
+    QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
-    QDialogButtonBox, QMessageBox, QInputDialog,
+    QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
     QDateEdit, QSizePolicy, QFrame, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
 )
@@ -40,15 +42,17 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter,
+    LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    DateFilter, LEGACY_DATE_FILTER_FIELDS,
     TextSearchFilter,
     FilterProfile,
 )
+from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
 
 
 # ── Groundspeak attribut definitioner ─────────────────────────────────────────
@@ -283,6 +287,204 @@ class TextFilterRow(QWidget):
         self.edit.setPlaceholderText(placeholder)
 
 
+# ── Hjælper widget: GSAK-lignende datofilter ──────────────────────────────────
+
+# Dropdown-rækkefølge som i GSAK. Nøglerne står som literals, så
+# test_no_unused_keys kan finde dem. "any" = intet filter.
+_DATE_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",          "filter_date_op_any"),
+    ("on_or_before", "filter_date_op_on_or_before"),
+    ("on_or_after",  "filter_date_op_on_or_after"),
+    ("equal",        "filter_date_op_equal"),
+    ("between",      "filter_date_op_between"),
+    ("during",       "filter_date_op_during"),
+    ("not_during",   "filter_date_op_not_during"),
+    ("compare",      "filter_date_op_compare"),
+)
+_DATE_UNIT_LABELS: tuple[tuple[str, str], ...] = (
+    ("days",   "filter_date_unit_days"),
+    ("weeks",  "filter_date_unit_weeks"),
+    ("months", "filter_date_unit_months"),
+    ("years",  "filter_date_unit_years"),
+)
+_DATE_COMPARE_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",          "filter_date_cmp_equal"),
+    ("older",          "filter_date_cmp_older"),
+    ("older_or_equal", "filter_date_cmp_older_or_equal"),
+    ("newer",          "filter_date_cmp_newer"),
+    ("newer_or_equal", "filter_date_cmp_newer_or_equal"),
+    ("within",         "filter_date_cmp_within"),
+    ("outside",        "filter_date_cmp_outside"),
+)
+# Datofelterne i GSAK's rækkefølge, med deres label.
+_DATE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
+    ("last_found_date", "col_last_found_date"),
+    ("hidden_date",     "filter_hidden_date_group"),
+    ("found_date",      "filter_found_date_group"),
+    ("dnf_date",        "col_dnf_date"),
+    ("creation_date",   "col_creation_date"),
+    ("last_gpx_update", "col_last_gpx_update"),
+    ("last_log_date",   "filter_log_date_group"),
+    ("changed_date",    "col_changed_date"),
+)
+_DATE_OPS_WITH_DATE1 = ("on_or_before", "on_or_after", "equal", "between")
+_DATE_OPS_RELATIVE = ("during", "not_during")
+
+
+# ── Linje/polygon-fanen ───────────────────────────────────────────────────────
+
+# (filtertype, oversættelsesnøgle) i GSAK's rækkefølge. Nøglerne står som
+# literals, så test_no_unused_keys kan finde dem.
+_LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
+    ("line",    "filter_lp_type_line"),
+    ("polygon", "filter_lp_type_polygon"),
+    ("points",  "filter_lp_type_points"),
+)
+_LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
+
+
+def _format_lp_point(point: tuple[float, float]) -> str:
+    return f"{point[0]:.6f}, {point[1]:.6f}"
+
+
+def _qdate_to_date(qdate: QDate) -> date:
+    return date(qdate.year(), qdate.month(), qdate.day())
+
+
+class DateFilterRow(QWidget):
+    """Operator dropdown + inputs for one date field (GSAK's Dates tab).
+
+    Depending on the operator it shows one or two date pickers, "Last
+    [N] [days/weeks/months/years]", or a comparison with another date field
+    (plus a day count for "within"/"outside"). The label turns bold while the
+    row is active.
+    """
+
+    def __init__(self, field: str, label: str, parent=None):
+        super().__init__(parent)
+        self.field = field
+        self.label = QLabel(label)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.op_combo = QComboBox()
+        for op, key in _DATE_OP_LABELS:
+            self.op_combo.addItem(tr(key), op)
+        layout.addWidget(self.op_combo)
+
+        self.date1 = self._make_date_edit()
+        self.date2 = self._make_date_edit()
+        layout.addWidget(self.date1)
+        layout.addWidget(self.date2)
+
+        self._relative = QWidget()
+        rel_layout = QHBoxLayout(self._relative)
+        rel_layout.setContentsMargins(0, 0, 0, 0)
+        rel_layout.addWidget(QLabel(tr("filter_date_last")))
+        self.amount = QSpinBox()
+        self.amount.setRange(0, 9999)
+        self.amount.setValue(1)
+        rel_layout.addWidget(self.amount)
+        self.unit_combo = QComboBox()
+        for unit, key in _DATE_UNIT_LABELS:
+            self.unit_combo.addItem(tr(key), unit)
+        rel_layout.addWidget(self.unit_combo)
+        layout.addWidget(self._relative)
+
+        self._compare = QWidget()
+        cmp_layout = QHBoxLayout(self._compare)
+        cmp_layout.setContentsMargins(0, 0, 0, 0)
+        self.other_combo = QComboBox()
+        for other, key in _DATE_FIELD_LABELS:
+            if other != field:
+                self.other_combo.addItem(tr(key), other)
+        cmp_layout.addWidget(self.other_combo)
+        self.compare_combo = QComboBox()
+        for op, key in _DATE_COMPARE_LABELS:
+            self.compare_combo.addItem(tr(key), op)
+        cmp_layout.addWidget(self.compare_combo)
+        self.compare_days = QSpinBox()
+        self.compare_days.setRange(0, 99999)
+        cmp_layout.addWidget(self.compare_days)
+        self._days_label = QLabel(tr("filter_date_unit_days"))
+        cmp_layout.addWidget(self._days_label)
+        layout.addWidget(self._compare)
+        layout.addStretch()
+
+        self.op_combo.currentIndexChanged.connect(self._update_inputs)
+        self.compare_combo.currentIndexChanged.connect(self._update_inputs)
+        self._update_inputs()
+
+    @staticmethod
+    def _make_date_edit() -> QDateEdit:
+        edit = QDateEdit()
+        edit.setCalendarPopup(True)
+        edit.setDate(QDate.currentDate())
+        return edit
+
+    def op(self) -> str:
+        return self.op_combo.currentData()
+
+    @staticmethod
+    def _select(combo: QComboBox, value) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def reset(self) -> None:
+        self.op_combo.setCurrentIndex(0)
+        self.date1.setDate(QDate.currentDate())
+        self.date2.setDate(QDate.currentDate())
+        self.amount.setValue(1)
+        self.unit_combo.setCurrentIndex(0)
+        self.other_combo.setCurrentIndex(0)
+        self.compare_combo.setCurrentIndex(0)
+        self.compare_days.setValue(0)
+
+    def build(self) -> Optional[DateFilter]:
+        """Filter for the current input, or None when the row is "Any"."""
+        op = self.op()
+        if op == "any":
+            return None
+        # Only the dates the operator uses — keeps saved profiles free of
+        # stale picker values.
+        return DateFilter(
+            self.field, op,
+            date1=_qdate_to_date(self.date1.date()) if op in _DATE_OPS_WITH_DATE1 else None,
+            date2=_qdate_to_date(self.date2.date()) if op == "between" else None,
+            amount=self.amount.value(),
+            unit=self.unit_combo.currentData(),
+            other_field=self.other_combo.currentData(),
+            compare_op=self.compare_combo.currentData(),
+            compare_days=self.compare_days.value(),
+        )
+
+    def load(self, f: DateFilter) -> None:
+        self._select(self.op_combo, f.op)
+        for edit, value in ((self.date1, f.date1), (self.date2, f.date2)):
+            if value is not None:
+                edit.setDate(QDate(value.year, value.month, value.day))
+        self.amount.setValue(f.amount)
+        self._select(self.unit_combo, f.unit)
+        self._select(self.other_combo, f.other_field)
+        self._select(self.compare_combo, f.compare_op)
+        self.compare_days.setValue(f.compare_days)
+
+    def _update_inputs(self) -> None:
+        op = self.op()
+        self.date1.setVisible(op in _DATE_OPS_WITH_DATE1)
+        self.date2.setVisible(op == "between")
+        self._relative.setVisible(op in _DATE_OPS_RELATIVE)
+        self._compare.setVisible(op == "compare")
+        needs_days = self.compare_combo.currentData() in ("within", "outside")
+        self.compare_days.setVisible(needs_days)
+        self._days_label.setVisible(needs_days)
+        font = self.label.font()
+        font.setBold(op != "any")
+        self.label.setFont(font)
+
+
 # ── Filter dialog ─────────────────────────────────────────────────────────────
 
 class FilterDialog(QDialog):
@@ -375,12 +577,14 @@ class FilterDialog(QDialog):
         self._general_tab = self._build_general_tab()
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
+        self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
+        self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
@@ -620,59 +824,17 @@ class FilterDialog(QDialog):
         return outer
 
     def _build_dates_tab(self) -> QWidget:
-        """Datoer filter fane."""
+        """Datoer filter fane — én GSAK-lignende operator-række pr. datofelt."""
         widget = QWidget()
         layout = QFormLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        def _make_date_group(title: str):
-            """Hjælper: lav en from/to dato-gruppe og returner (group, from_en, from_dt, to_en, to_dt)."""
-            group = QGroupBox(title)
-            grp_layout = QFormLayout(group)
-            from_en = QCheckBox(tr("filter_from"))
-            from_dt = QDateEdit()
-            from_dt.setCalendarPopup(True)
-            from_dt.setDate(QDate(2000, 1, 1))
-            from_dt.setEnabled(False)
-            from_en.toggled.connect(from_dt.setEnabled)
-            row1 = QHBoxLayout()
-            row1.addWidget(from_en)
-            row1.addWidget(from_dt)
-            row1.addStretch()
-            grp_layout.addRow(row1)
-            to_en = QCheckBox(tr("filter_to"))
-            to_dt = QDateEdit()
-            to_dt.setCalendarPopup(True)
-            to_dt.setDate(QDate.currentDate())
-            to_dt.setEnabled(False)
-            to_en.toggled.connect(to_dt.setEnabled)
-            row2 = QHBoxLayout()
-            row2.addWidget(to_en)
-            row2.addWidget(to_dt)
-            row2.addStretch()
-            grp_layout.addRow(row2)
-            return group, from_en, from_dt, to_en, to_dt
-
-        # Udlagt dato
-        g, self._hidden_from_enabled, self._hidden_from, self._hidden_to_enabled, self._hidden_to = \
-            _make_date_group(tr("filter_hidden_date_group"))
-        layout.addRow(g)
-
-        # Fundet af mig dato
-        g, self._found_from_enabled, self._found_from, self._found_to_enabled, self._found_to = \
-            _make_date_group(tr("filter_found_date_group"))
-        layout.addRow(g)
-
-        # DNF dato
-        g, self._dnf_date_from_enabled, self._dnf_date_from, self._dnf_date_to_enabled, self._dnf_date_to = \
-            _make_date_group(tr("col_dnf_date"))
-        layout.addRow(g)
-
-        # Seneste log dato
-        g, self._log_from_enabled, self._log_from, self._log_to_enabled, self._log_to = \
-            _make_date_group(tr("filter_log_date_group"))
-        layout.addRow(g)
+        self._date_rows: dict[str, DateFilterRow] = {}
+        for field, key in _DATE_FIELD_LABELS:
+            row = DateFilterRow(field, tr(key))
+            self._date_rows[field] = row
+            layout.addRow(row.label, row)
 
         return widget
 
@@ -783,18 +945,92 @@ class FilterDialog(QDialog):
         outer_layout.addWidget(scroll)
         return outer
 
+    def _build_line_polygon_tab(self) -> QWidget:
+        """Linje/Polygon fane — GSAK's linje-/polygonfilter: caches langs en
+        rute, inden for et område eller nær en række punkter."""
+        from opensak.gui.settings import get_settings as _gs
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Venstre: punktliste, markerede caches, punkter fra fil
+        left = QVBoxLayout()
+        left.addWidget(QLabel(tr("filter_lp_points_label")))
+        self._lp_text = QPlainTextEdit()
+        self._lp_text.setPlaceholderText(tr("filter_lp_points_placeholder"))
+        self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        left.addWidget(self._lp_text, 1)
+
+        flagged_btn = QPushButton(tr("filter_lp_add_flagged_btn"))
+        flagged_btn.setAutoDefault(False)
+        flagged_btn.clicked.connect(self._add_flagged_points)
+        left.addWidget(flagged_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        file_group = QGroupBox(tr("filter_lp_file_group"))
+        file_layout = QVBoxLayout(file_group)
+        file_btn = QPushButton(tr("filter_lp_choose_file_btn"))
+        file_btn.setAutoDefault(False)
+        file_btn.clicked.connect(self._load_points_file)
+        file_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        file_mode_row = QHBoxLayout()
+        self._lp_replace = QRadioButton(tr("filter_lp_replace"))
+        self._lp_replace.setChecked(True)
+        self._lp_append = QRadioButton(tr("filter_lp_append"))
+        file_mode_row.addWidget(self._lp_replace)
+        file_mode_row.addWidget(self._lp_append)
+        file_mode_row.addStretch()
+        file_layout.addLayout(file_mode_row)
+        left.addWidget(file_group)
+        layout.addLayout(left, 1)
+
+        # Højre: forklaring, filtertype, afstand, udeluk
+        right = QVBoxLayout()
+        desc_label = QLabel(tr("filter_lp_description"))
+        desc_label.setWordWrap(True)
+        right.addWidget(desc_label)
+
+        type_group = QGroupBox(tr("filter_lp_type_group"))
+        type_layout = QHBoxLayout(type_group)
+        self._lp_mode_buttons: dict[str, QRadioButton] = {}
+        for mode, key in _LP_MODE_LABELS:
+            button = QRadioButton(tr(key))
+            type_layout.addWidget(button)
+            self._lp_mode_buttons[mode] = button
+        self._lp_mode_buttons["line"].setChecked(True)
+        right.addWidget(type_group)
+
+        dist_row = QHBoxLayout()
+        dist_row.addWidget(QLabel(tr("filter_lp_distance_label")))
+        self._lp_distance = QDoubleSpinBox()
+        self._lp_distance.setRange(0.0, 99999.0)
+        self._lp_distance.setDecimals(3)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_distance.setSuffix(" mi" if _gs().use_miles else " km")
+        dist_row.addWidget(self._lp_distance)
+        dist_row.addStretch()
+        right.addLayout(dist_row)
+
+        self._lp_exclude = QCheckBox(tr("filter_lp_exclude"))
+        right.addWidget(self._lp_exclude)
+        right.addStretch()
+        layout.addLayout(right, 1)
+        return widget
+
     def _build_attributes_tab(self) -> QWidget:
         """Attributter filter fane med scrollbar."""
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Mode
+        # Mode — ALLE valgte attributter skal passe (AND) eller blot ÉN af dem (OR)
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel(tr("filter_caches_with")))
-        self._attr_mode_all = QCheckBox(tr("filter_all_selected"))
+        self._attr_mode_all = QRadioButton(tr("filter_all_selected"))
+        self._attr_mode_any = QRadioButton(tr("filter_any_selected"))
         self._attr_mode_all.setChecked(True)
         mode_row.addWidget(self._attr_mode_all)
+        mode_row.addWidget(self._attr_mode_any)
         mode_row.addStretch()
         outer_layout.addLayout(mode_row)
 
@@ -1083,6 +1319,104 @@ class FilterDialog(QDialog):
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
+    # ── Linje/Polygon ────────────────────────────────────────────────────────
+
+    def _lp_mode(self) -> str:
+        for mode, button in self._lp_mode_buttons.items():
+            if button.isChecked():
+                return mode
+        return "line"
+
+    def _lp_distance_km(self) -> float:
+        from opensak.gui.settings import get_settings as _gs
+        value = self._lp_distance.value()
+        return value * 1.60934 if _gs().use_miles else value
+
+    @staticmethod
+    def _resolve_point_code(code: str) -> Optional[tuple[float, float]]:
+        """Coordinates for a "W,<code>" line, from the open database."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                return lookup_code_coords(session, code)
+        except Exception:
+            return None
+
+    def _lp_points(self) -> tuple[list[tuple[float, float]], list[str]]:
+        return parse_points_text(self._lp_text.toPlainText(), self._resolve_point_code)
+
+    def _build_line_polygon_filter(self) -> Optional[LinePolygonFilter]:
+        """Filter for the Line/Polygon tab, or None when the tab is unused or
+        incomplete — _validate_line_polygon() tells the user why."""
+        points, bad = self._lp_points()
+        mode = self._lp_mode()
+        distance_km = self._lp_distance_km()
+        if bad or len(points) < LP_MIN_POINTS[mode]:
+            return None
+        if mode != "polygon" and distance_km <= 0:
+            return None
+        return LinePolygonFilter(
+            points, mode, distance_km,
+            exclude=self._lp_exclude.isChecked(),
+            text=self._lp_text.toPlainText().strip(),
+        )
+
+    def _validate_line_polygon(self) -> bool:
+        """Warn about, and show, a Line/Polygon tab that is filled in but
+        can't be used: unreadable lines, too few points or no distance."""
+        points, bad = self._lp_points()
+        if not points and not bad:
+            return True  # fanen er ikke i brug
+        mode = self._lp_mode()
+        if bad:
+            message = tr("filter_lp_invalid_lines", lines="\n".join(bad[:10]))
+        elif len(points) < LP_MIN_POINTS[mode]:
+            message = tr("filter_lp_too_few_points", count=LP_MIN_POINTS[mode])
+        elif mode != "polygon" and self._lp_distance_km() <= 0:
+            message = tr("filter_lp_distance_required")
+        else:
+            return True
+        self._tabs.setCurrentWidget(self._line_polygon_tab)
+        QMessageBox.warning(self, tr("warning"), message)
+        return False
+
+    def _add_lp_lines(self, lines: list[str], replace: bool = False) -> None:
+        current = "" if replace else self._lp_text.toPlainText().rstrip()
+        added = "\n".join(lines)
+        self._lp_text.setPlainText(f"{current}\n{added}" if current else added)
+
+    def _add_flagged_points(self) -> None:
+        """Tilføj en "W,<kode>"-linje for hver cache med user flag."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                codes = user_flagged_codes(session)
+        except Exception:
+            codes = []
+        if not codes:
+            QMessageBox.information(self, tr("filter_tab_line_polygon"), tr("filter_lp_no_flagged"))
+            return
+        self._add_lp_lines([f"W,{code}" for code in codes])
+
+    def _load_points_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("filter_lp_file_group"), "", tr("filter_lp_file_filter"),
+        )
+        if not path:
+            return
+        try:
+            points = read_points_file(Path(path), self._resolve_point_code)
+        except Exception as exc:
+            QMessageBox.warning(self, tr("error"), tr("filter_lp_file_error", error=exc))
+            return
+        if not points:
+            QMessageBox.warning(self, tr("warning"), tr("filter_lp_file_no_points"))
+            return
+        self._add_lp_lines(
+            [_format_lp_point(p) for p in points],
+            replace=self._lp_replace.isChecked(),
+        )
+
     def _on_dist_toggled(self, checked: bool) -> None:
         self._dist_max.setEnabled(checked)
         self._dist_min.setEnabled(checked)
@@ -1128,14 +1462,8 @@ class FilterDialog(QDialog):
         self._cc_no.setChecked(True)
 
     def _reset_dates(self) -> None:
-        self._hidden_from_enabled.setChecked(False)
-        self._hidden_to_enabled.setChecked(False)
-        self._found_from_enabled.setChecked(False)
-        self._found_to_enabled.setChecked(False)
-        self._dnf_date_from_enabled.setChecked(False)
-        self._dnf_date_to_enabled.setChecked(False)
-        self._log_from_enabled.setChecked(False)
-        self._log_to_enabled.setChecked(False)
+        for row in self._date_rows.values():
+            row.reset()
 
     def _reset_misc(self) -> None:
         for row, _cls in self._geo_text_rows():
@@ -1153,6 +1481,7 @@ class FilterDialog(QDialog):
         self._fav_max.setValue(9999)
 
     def _reset_attributes(self) -> None:
+        self._attr_mode_all.setChecked(True)
         for ja_cb, nej_cb, ingen_cb in self._attr_boxes.values():
             ja_cb.setChecked(False)
             nej_cb.setChecked(False)
@@ -1165,10 +1494,18 @@ class FilterDialog(QDialog):
         self._text_search_notes.setChecked(True)
         self._text_search_hint.setChecked(False)
 
+    def _reset_line_polygon(self) -> None:
+        self._lp_text.clear()
+        self._lp_mode_buttons["line"].setChecked(True)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_exclude.setChecked(False)
+        self._lp_replace.setChecked(True)
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
+        self._reset_line_polygon()
         self._reset_attributes()
         self._reset_text_search()
         if self._where_tab is not None:
@@ -1186,6 +1523,8 @@ class FilterDialog(QDialog):
             self._reset_dates()
         elif tab is self._misc_tab:
             self._reset_misc()
+        elif tab is self._line_polygon_tab:
+            self._reset_line_polygon()
         elif tab is self._attributes_tab:
             self._reset_attributes()
         elif tab is self._text_search_tab:
@@ -1302,44 +1641,11 @@ class FilterDialog(QDialog):
             fs.add(NoCorrectedFilter())
         # Begge valgt (eller ingen) = vis alt = intet filter
 
-        # Datoer — hjælper til at konvertere QDate til datetime
-        # #844: hour/minute var hardkodet til 23/59 uanset end_of_day, så
-        # from_date reelt blev sat til 23:59:00 i stedet for 00:00:00 —
-        # samme dato i from/to gav dermed et 59-sekunders vindue og ingen
-        # match; en flerdagesrange "virkede" kun fordi from-grænsen i
-        # praksis rykkede en dag tilbage.
-        def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
-            if end_of_day:
-                return datetime(qdate.year(), qdate.month(), qdate.day(), 23, 59, 59)
-            return datetime(qdate.year(), qdate.month(), qdate.day(), 0, 0, 0)
-
-        # Udlagt dato
-        if self._hidden_from_enabled.isChecked() or self._hidden_to_enabled.isChecked():
-            fs.add(HiddenDateFilter(
-                from_date=_qdate_to_dt(self._hidden_from.date()) if self._hidden_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._hidden_to.date(), end_of_day=True) if self._hidden_to_enabled.isChecked() else None,
-            ))
-
-        # Fundet af mig dato
-        if self._found_from_enabled.isChecked() or self._found_to_enabled.isChecked():
-            fs.add(FoundByMeDateFilter(
-                from_date=_qdate_to_dt(self._found_from.date()) if self._found_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._found_to.date(), end_of_day=True) if self._found_to_enabled.isChecked() else None,
-            ))
-
-        # DNF dato
-        if self._dnf_date_from_enabled.isChecked() or self._dnf_date_to_enabled.isChecked():
-            fs.add(DnfDateFilter(
-                from_date=_qdate_to_dt(self._dnf_date_from.date()) if self._dnf_date_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._dnf_date_to.date(), end_of_day=True) if self._dnf_date_to_enabled.isChecked() else None,
-            ))
-
-        # Seneste log dato
-        if self._log_from_enabled.isChecked() or self._log_to_enabled.isChecked():
-            fs.add(LastLogDateFilter(
-                from_date=_qdate_to_dt(self._log_from.date()) if self._log_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._log_to.date(), end_of_day=True) if self._log_to_enabled.isChecked() else None,
-            ))
+        # Datoer — én DateFilter pr. datofelt med en valgt operator
+        for date_row in self._date_rows.values():
+            date_filter = date_row.build()
+            if date_filter is not None:
+                fs.add(date_filter)
 
         # Øvrigt — Land / Stat / Kommune
         for row, cls in self._geo_text_rows():
@@ -1385,6 +1691,11 @@ class FilterDialog(QDialog):
                 min_pts=int(self._fav_min.value()),
                 max_pts=int(self._fav_max.value()),
             ))
+
+        # Linje/Polygon
+        lp_filter = self._build_line_polygon_filter()
+        if lp_filter is not None:
+            fs.add(lp_filter)
 
         # Attributter
         attr_mode_and = self._attr_mode_all.isChecked()
@@ -1519,9 +1830,12 @@ class FilterDialog(QDialog):
             else:
                 flat_filters.append(f)
 
-        # OR-mode = "any selected"; the UI only has the "all selected" checkbox,
-        # so unchecking it expresses ANY (avoids a crash on the missing widget).
-        self._attr_mode_all.setChecked(not attr_mode_or_detected)
+        # OR-mode = "ONE of the selected attributes". The two mode radios are
+        # exclusive, so check the matching one (setChecked(False) is a no-op).
+        if attr_mode_or_detected:
+            self._attr_mode_any.setChecked(True)
+        else:
+            self._attr_mode_all.setChecked(True)
 
         text_rows = {
             cls.filter_type: row
@@ -1599,6 +1913,16 @@ class FilterDialog(QDialog):
             elif ftype == "no_corrected":
                 self._cc_yes.setChecked(False)
                 self._cc_no.setChecked(True)
+            elif ftype == "line_polygon":
+                self._lp_text.setPlainText(
+                    f.text or "\n".join(_format_lp_point(p) for p in f.points)
+                )
+                self._lp_mode_buttons[f.mode].setChecked(True)
+                from opensak.gui.settings import get_settings as _gs
+                self._lp_distance.setValue(
+                    f.distance_km * 0.621371 if _gs().use_miles else f.distance_km
+                )
+                self._lp_exclude.setChecked(f.exclude)
             elif ftype == "attribute":
                 attr_id = getattr(f, "attribute_id", None)
                 is_on   = getattr(f, "is_on", True)
@@ -1637,45 +1961,17 @@ class FilterDialog(QDialog):
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
                 self._fav_max.setValue(getattr(f, "max_pts", 9999))
-            elif ftype == "found_by_me_date":
-                if getattr(f, "from_date", None):
-                    self._found_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._found_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._found_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._found_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "dnf_date":
-                if getattr(f, "from_date", None):
-                    self._dnf_date_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._dnf_date_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._dnf_date_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._dnf_date_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "last_log_date":
-                if getattr(f, "from_date", None):
-                    self._log_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._log_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._log_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._log_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "hidden_date_range":
-                # #857: this branch was missing, so the Hidden date
-                # checkboxes/fields silently reset on reopen even though the
-                # filter was still active on the cache list.
-                if getattr(f, "from_date", None):
-                    self._hidden_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._hidden_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._hidden_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._hidden_to.setDate(QDate(d.year, d.month, d.day))
+            elif ftype == "date":
+                row = self._date_rows.get(f.field)
+                if row is not None:
+                    row.load(f)
+            elif ftype in LEGACY_DATE_FILTER_FIELDS:
+                # Profiles saved before the GSAK-style date filter hold
+                # from/to range filters — show them as the equivalent
+                # operator (Between / On or after / On or before).
+                converted = DateFilter.from_legacy(f)
+                if converted is not None:
+                    self._date_rows[converted.field].load(converted)
             # Andre/ukendte filtre ignoreres stille
 
     # ── Apply ─────────────────────────────────────────────────────────────────
@@ -1697,6 +1993,8 @@ class FilterDialog(QDialog):
 
         # Et ugyldigt regulært udtryk ville stille matche ingenting — afvis det
         if not self._validate_text_filters():
+            return
+        if not self._validate_line_polygon():
             return
 
         fs = self._build_filterset()

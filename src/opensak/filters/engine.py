@@ -24,13 +24,14 @@ import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache, UserNote
+from opensak.db.models import Cache, UserNote, Waypoint
+from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -790,6 +791,107 @@ class DistanceFilter(BaseFilter):
         )
 
 
+class LinePolygonFilter(BaseFilter):
+    """GSAK's line/polygon filter: keep caches along a line, inside a polygon
+    or near a set of points (see line_polygon.LineShape) — or, with
+    *exclude*, only the caches that don't match.
+
+    Tests each cache's effective_coords() (corrected coordinates when set,
+    as on the map). *points* is a frozen snapshot taken when the filter was
+    built, like DistanceFilter's centre; *text* is the dialog's point list
+    as entered ("W,<code>" lines and comments included), kept only to
+    re-populate the dialog.
+    """
+    filter_type = "line_polygon"
+
+    # apply_to_query() below only pushes a bounding-box pre-narrowing —
+    # matches() makes the exact decision. See BaseFilter.sql_exact.
+    sql_exact = False
+
+    def __init__(
+        self,
+        points: list[tuple[float, float]],
+        mode: str = "line",
+        distance_km: float = 0.0,
+        exclude: bool = False,
+        text: str = "",
+    ):
+        if mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        self.points = [(float(lat), float(lon)) for lat, lon in points]
+        self.mode = mode
+        self.distance_km = max(0.0, float(distance_km))
+        self.exclude = bool(exclude)
+        self.text = text
+        self._shape = LineShape(self.points, mode, self.distance_km)
+
+    def apply_to_query(self, query):
+        """Pre-narrow to the shape's bounding box (grown by the distance).
+
+        Checked against the raw coordinates OR the corrected ones, since
+        matches() uses whichever applies — a puzzle whose final lies on the
+        line but whose posted coordinates don't must still come through.
+        Nothing is pushed for *exclude* (the complement of a box narrows
+        nothing) or when the shape has no box (poles / antimeridian).
+        """
+        bbox = self._shape.bbox
+        if self.exclude or bbox is None:
+            return None
+        from sqlalchemy import and_, exists, or_
+        lat_lo, lat_hi, lon_lo, lon_hi = bbox
+        # .correlate(Cache) — see HasCorrectedFilter.apply_to_query().
+        corrected_in_box = (
+            exists()
+            .where(
+                UserNote.cache_id == Cache.id,
+                UserNote.is_corrected == True,  # noqa: E712
+                UserNote.corrected_lat.between(lat_lo, lat_hi),
+                UserNote.corrected_lon.between(lon_lo, lon_hi),
+            )
+            .correlate(Cache)
+        )
+        return query.filter(or_(
+            and_(
+                Cache.latitude.between(lat_lo, lat_hi),
+                Cache.longitude.between(lon_lo, lon_hi),
+            ),
+            corrected_in_box,
+        ))
+
+    def matches(self, cache: Cache) -> bool:
+        lat, lon = effective_coords(cache)
+        if lat is None or lon is None:
+            return False
+        return self._shape.contains(lat, lon) != self.exclude
+
+    def to_dict(self) -> dict:
+        # "shape_type", not "mode": FilterSet.from_dict() reads any dict
+        # with a "mode" key as a nested FilterSet.
+        return {
+            "filter_type": self.filter_type,
+            "shape_type": self.mode,
+            "points": [[lat, lon] for lat, lon in self.points],
+            "distance_km": self.distance_km,
+            "exclude": self.exclude,
+            "text": self.text,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LinePolygonFilter":
+        return cls(
+            points=data.get("points", []),
+            mode=data.get("shape_type", "line"),
+            distance_km=data.get("distance_km", 0.0),
+            exclude=data.get("exclude", False),
+            text=data.get("text", ""),
+        )
+
+    def __repr__(self) -> str:
+        exclude = " exclude" if self.exclude else ""
+        return (f"<LinePolygonFilter {self.mode} points={len(self.points)} "
+                f"{self.distance_km} km{exclude}>")
+
+
 class AttributeFilter(BaseFilter):
     """
     Keep caches that have a specific attribute set to *is_on*.
@@ -1310,6 +1412,260 @@ class HiddenDateFilter(BaseFilter):
         )
 
 
+# ── GSAK-style date filter ────────────────────────────────────────────────────
+
+# Filterable date fields: filter key -> Cache attribute. The keys are the
+# cache table's column IDs (changed_date/creation_date display
+# last_updated/imported_at there as well).
+DATE_FILTER_FIELDS: dict[str, str] = {
+    "last_found_date": "last_found_date",
+    "hidden_date":     "hidden_date",
+    "found_date":      "found_date",
+    "dnf_date":        "dnf_date",
+    "creation_date":   "imported_at",
+    "last_gpx_update": "last_gpx_update",
+    "last_log_date":   "last_log_date",
+    "changed_date":    "last_updated",
+}
+DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
+            "during", "not_during", "compare")
+DATE_UNITS = ("days", "weeks", "months", "years")
+DATE_COMPARE_OPS = ("equal", "older", "older_or_equal", "newer",
+                    "newer_or_equal", "within", "outside")
+
+# filter_type of the older from/to-only date filters -> the field they cover.
+LEGACY_DATE_FILTER_FIELDS: dict[str, str] = {
+    "hidden_date_range": "hidden_date",
+    "found_by_me_date":  "found_date",
+    "dnf_date":          "dnf_date",
+    "last_log_date":     "last_log_date",
+}
+
+
+def _to_date(value) -> Optional[date]:
+    """Calendar date of a datetime (tz dropped, like the other date filters)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None).date()
+    return value
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    """Parse a saved date; accepts both 'YYYY-MM-DD' and full ISO datetimes."""
+    return datetime.fromisoformat(value).date() if value else None
+
+
+def _day_start(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day)
+
+
+def _months_back(d: date, months: int) -> date:
+    """*d* moved back *months* calendar months, clamped to the month's last day."""
+    import calendar
+    year, month0 = divmod(d.year * 12 + d.month - 1 - months, 12)
+    month = month0 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
+
+
+def _shift_back(d: date, amount: int, unit: str) -> date:
+    """*d* moved back *amount* days/weeks/months/years (date.min on underflow)."""
+    try:
+        if unit == "weeks":
+            return d - timedelta(weeks=amount)
+        if unit == "months":
+            return _months_back(d, amount)
+        if unit == "years":
+            return _months_back(d, amount * 12)
+        return d - timedelta(days=amount)
+    except (ValueError, OverflowError):
+        return date.min
+
+
+def _today() -> date:
+    """Reference day for the relative "during the last N …" operators."""
+    return date.today()
+
+
+def _compare_diff(op: str, diff, days: int, absolute=abs):
+    """Evaluate a DateFilter compare op on *diff* = this date - other date (in
+    days). Works on ints and on SQL expressions (pass absolute=func.abs)."""
+    if op == "equal":
+        return diff == 0
+    if op == "older":
+        return diff < 0
+    if op == "older_or_equal":
+        return diff <= 0
+    if op == "newer":
+        return diff > 0
+    if op == "newer_or_equal":
+        return diff >= 0
+    if op == "within":
+        return absolute(diff) <= days
+    return absolute(diff) > days  # outside
+
+
+class DateFilter(BaseFilter):
+    """GSAK-style filter on one of the cache's date fields (DATE_FILTER_FIELDS).
+
+    Operators — all compare calendar dates, ignoring the time of day:
+      on_or_before / on_or_after / equal   relative to *date1*
+      between      *date1*..*date2* inclusive (in either order)
+      during       within the last *amount* *unit*s, up to and including today
+      not_during   the complement of "during": also matches caches without a
+                   date, so "last found not during the last 2 years" keeps
+                   never-found caches
+      compare      against *other_field* of the same cache using *compare_op*;
+                   "within"/"outside" take *compare_days*
+    Apart from not_during, a cache without a date never matches.
+
+    Supersedes the from/to-only HiddenDateFilter/FoundByMeDateFilter/
+    DnfDateFilter/LastLogDateFilter, which stay registered so filter profiles
+    saved before this still load; from_legacy() converts them.
+    """
+    filter_type = "date"
+
+    def __init__(
+        self,
+        field: str,
+        op: str,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        amount: int = 1,
+        unit: str = "days",
+        other_field: str = "hidden_date",
+        compare_op: str = "equal",
+        compare_days: int = 0,
+    ):
+        if field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {field!r}")
+        if op not in DATE_OPS:
+            raise ValueError(f"Unknown date operator {op!r}")
+        if unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {unit!r}")
+        if other_field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {other_field!r}")
+        if compare_op not in DATE_COMPARE_OPS:
+            raise ValueError(f"Unknown date compare operator {compare_op!r}")
+        self.field = field
+        self.op = op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {op!r} needs date1")
+        if op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.amount = max(0, int(amount))
+        self.unit = unit
+        self.other_field = other_field
+        self.compare_op = compare_op
+        self.compare_days = max(0, int(compare_days))
+
+    def _range(self) -> tuple[Optional[date], Optional[date]]:
+        """Inclusive (lo, hi) bounds for every op except compare."""
+        if self.op == "on_or_before":
+            return None, self.date1
+        if self.op == "on_or_after":
+            return self.date1, None
+        if self.op == "equal":
+            return self.date1, self.date1
+        if self.op == "between":
+            d1, d2 = self.date1, self.date2
+            assert d1 is not None and d2 is not None  # enforced in __init__
+            return min(d1, d2), max(d1, d2)
+        today = _today()  # during / not_during
+        return _shift_back(today, self.amount, self.unit), today
+
+    def apply_to_query(self, query):
+        # Mirrors matches() exactly. Range bounds compare the raw column
+        # against day boundaries (index-friendly); compare uses SQLite's
+        # date()/julianday() so both sides are reduced to calendar dates.
+        from sqlalchemy import and_, func, not_, or_
+        col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
+        if self.op == "compare":
+            other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
+            diff = func.julianday(func.date(col)) - func.julianday(func.date(other))
+            return query.filter(
+                col.is_not(None), other.is_not(None),
+                _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
+            )
+        lo, hi = self._range()
+        conditions = [col.is_not(None)]
+        if lo is not None:
+            conditions.append(col >= _day_start(lo))
+        if hi is not None and hi < date.max:
+            conditions.append(col < _day_start(hi + timedelta(days=1)))
+        inside = and_(*conditions)
+        if self.op == "not_during":
+            return query.filter(or_(col.is_(None), not_(inside)))
+        return query.filter(inside)
+
+    def matches(self, cache: Cache) -> bool:
+        value = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.field], None))
+        if self.op == "compare":
+            other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
+            if value is None or other is None:
+                return False
+            return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
+        lo, hi = self._range()
+        inside = (
+            value is not None
+            and (lo is None or value >= lo)
+            and (hi is None or value <= hi)
+        )
+        return not inside if self.op == "not_during" else inside
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "field": self.field,
+            "op": self.op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "amount": self.amount,
+            "unit": self.unit,
+            "other_field": self.other_field,
+            "compare_op": self.compare_op,
+            "compare_days": self.compare_days,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DateFilter":
+        return cls(
+            field=data["field"],
+            op=data["op"],
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            amount=data.get("amount", 1),
+            unit=data.get("unit", "days"),
+            other_field=data.get("other_field", "hidden_date"),
+            compare_op=data.get("compare_op", "equal"),
+            compare_days=data.get("compare_days", 0),
+        )
+
+    @classmethod
+    def from_legacy(cls, legacy: BaseFilter) -> Optional["DateFilter"]:
+        """Equivalent DateFilter for an older from/to range filter
+        (LEGACY_DATE_FILTER_FIELDS), or None if it has no date bounds.
+
+        Not an exact match for FoundByMeDateFilter/DnfDateFilter, which also
+        let found/DNF caches without a date through — DateFilter never
+        matches a missing date."""
+        field = LEGACY_DATE_FILTER_FIELDS.get(legacy.filter_type)
+        from_date = getattr(legacy, "from_date", None)
+        to_date = getattr(legacy, "to_date", None)
+        if field is None or not (from_date or to_date):
+            return None
+        if from_date and to_date:
+            return cls(field, "between", date1=from_date, date2=to_date)
+        if from_date:
+            return cls(field, "on_or_after", date1=from_date)
+        return cls(field, "on_or_before", date1=to_date)
+
+    def __repr__(self) -> str:
+        return f"<DateFilter {self.to_dict()}>"
+
+
 class TextSearchFilter(BaseFilter):
     """Keep caches whose text fields contain *text* (case-insensitive).
 
@@ -1426,6 +1782,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "placed_by":     PlacedByFilter,
     "owner_name":    OwnerFilter,
     "distance":      DistanceFilter,
+    "line_polygon":  LinePolygonFilter,
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
@@ -1442,6 +1799,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
     "hidden_date_range":  HiddenDateFilter,
+    "date":               DateFilter,
     "text_search":        TextSearchFilter,
 }
 
@@ -2374,6 +2732,58 @@ def effective_coords(cache) -> tuple[Optional[float], Optional[float]]:
         if lat is not None and lon is not None:
             return lat, lon
     return cache.latitude, cache.longitude
+
+
+def lookup_code_coords(session: Session, code: str) -> Optional[tuple[float, float]]:
+    """Coordinates for a GSAK-style "W,<code>" point of the line/polygon filter.
+
+    A cache code gives that cache's effective_coords() (corrected when set);
+    otherwise a waypoint is looked up by its own code — wp_code (GSAK
+    imports), else prefix + the parent cache's code without "GC" (PK12345
+    for a GC12345 parking waypoint, as GPX files name them). None for an
+    unknown code or a waypoint without coordinates.
+    """
+    code = code.strip().upper()
+    if not code:
+        return None
+    cache = session.query(Cache).filter(Cache.gc_code == code).first()
+    if cache is not None:
+        lat, lon = effective_coords(cache)
+        return (lat, lon) if lat is not None and lon is not None else None
+    from sqlalchemy import func
+    has_coords = (Waypoint.latitude.is_not(None), Waypoint.longitude.is_not(None))
+    wp = (
+        session.query(Waypoint)
+        .filter(func.upper(Waypoint.wp_code) == code, *has_coords)
+        .first()
+    )
+    if wp is None and len(code) > 2:
+        wp = (
+            session.query(Waypoint)
+            .join(Cache, Waypoint.cache_id == Cache.id)
+            .filter(
+                func.upper(Waypoint.prefix) == code[:2],
+                Cache.gc_code == "GC" + code[2:],
+                *has_coords,
+            )
+            .first()
+        )
+    if wp is None or wp.latitude is None or wp.longitude is None:
+        return None
+    return wp.latitude, wp.longitude
+
+
+def user_flagged_codes(session: Session) -> list[str]:
+    """GC codes of every cache with the user flag set, in user sort order
+    (then by code) — for the line/polygon filter's "Add flagged" button."""
+    from sqlalchemy import func
+    rows = (
+        session.query(Cache.gc_code)
+        .filter(Cache.user_flag == True)  # noqa: E712
+        .order_by(func.coalesce(Cache.user_sort, 999999), Cache.gc_code)
+        .all()
+    )
+    return [row[0] for row in rows]
 
 
 def get_nearby_caches(
