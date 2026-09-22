@@ -4,6 +4,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.2] — 2026-09-22
+
+> Next installment of the ongoing GSAK filter-parity work tracked in #557
+> (part of the wider filter-parity epic, #821) — continuing on from the 12
+> text-field operators shipped in v1.19.0-beta.7 (#850).
+
+### Added
+
+- **Date filter operators (#557)** — Date-based filter fields now support the
+  same kind of condition set already available for text fields (equals /
+  before / after / between / empty / not empty, etc.), instead of a single
+  fixed comparison per field.
+- **Line/Point/Polygon filtering (#557)** — Adds geometry-based filtering
+  (lines, points and polygons) as a new filter criterion.
+- **OR condition for attribute filtering (#557)** — Attribute filtering gains
+  an OR-based combination option alongside the existing AND matching.
+
+> Contributed by nagisml (#866). This is a partial delivery — #557 remains
+> open for further filter-enhancement work.
+
+---
+
 ## [1.20.0-beta.1] — 2026-09-21
 
 > First beta of the 1.20.0 cycle — opens with the follow-up fix for
