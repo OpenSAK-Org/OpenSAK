@@ -4,6 +4,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.4] — 2026-09-22
+
+> Two larger additions from the community: the Filter dialog gains GSAK-style
+> Logs and Child Waypoints tabs (continuing the filter-parity work in #821),
+> and the Edit Cache dialog can now edit most of the fields and related data
+> it previously only displayed or ignored.
+
+### Added
+
+- **Filter dialog: new Logs tab (#889, part of #821)** — Filter caches by the
+  logs on them, mirroring GSAK's Logs tab: choose which logs are searched
+  (all logs, or only each cache's latest / last *N*), which kind of log counts
+  (Found / Not found / Other, log date, individual log types), who logged it
+  (same text operators as Name, or match on the numeric user ID), and how many
+  such logs are required (at least / at most / equal / between). Combined with
+  Include/Exclude this makes negative conditions expressible, e.g. "caches
+  with no find in the last year" or "caches whose most recent log is a DNF".
+- **Filter dialog: new Child Waypoints tab (#889, part of #821)** — Filter
+  caches by properties of their child waypoints: code, type, date, name,
+  comment, created-by-user, and count. All criteria must hold for the same
+  waypoint; e.g. *Type contains "Parking"* with *Count equal 0* finds caches
+  without a parking waypoint.
+- **Filter dialog: time-of-day filtering on created, changed and last GPX
+  update dates (#889, part of #821)** — These three date fields now accept a
+  time as well as a date.
+- **Filter dialog: search attributes by name or ID (#889)** — The Attributes
+  tab gets a search box, a "Show only selected" toggle, and a status line
+  showing how many attributes are shown and selected.
+- **Edit Cache dialog: many more editable fields (#890, addresses #873)** —
+  Owner name, hidden / found / DNF dates, county, elevation (validated as a
+  number in metres), "Contains HTML" for the short and long description, and
+  a new **Personal** tab with user flag, user data 1–4, GC note, watch, the
+  personal note and corrected coordinates.
+- **Edit Cache dialog: add, edit and delete child waypoints (#890, addresses
+  #873)** — Including prefix, code, date, comment and flag. A prefix is
+  required, and a waypoint code already used by another waypoint of the same
+  cache is rejected.
+
+### Changed
+
+- **Edit Cache dialog: found/DNF dates follow their checkboxes (#890)** —
+  Unticking Found or DNF now clears the matching date instead of leaving a
+  stale date behind.
+- **Detail panel and map refresh immediately after Edit Cache (#890)** —
+  Changed waypoints, notes and corrected coordinates are shown right away,
+  without having to re-select the cache.
+- **`docs/filters.md` documents the new Logs and Child Waypoints tabs
+  (#889)**, including a table of common negative-condition recipes.
+
+> Contributed by nagisml.
+
+---
+
 ## [1.20.0-beta.3] — 2026-09-22
 
 > New UI language: Swiss German, plus a quick way to run a raw SQL WHERE
