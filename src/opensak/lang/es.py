@@ -422,6 +422,8 @@ STRINGS: dict[str, str] = {
     "update_available_title":       "Nueva versión disponible",
     "update_available_msg":         "OpenSAK {latest} está disponible — estás usando {current}.",
     "update_available_info":        "Haz clic en «Descargar» para abrir la página de versiones de GitHub y obtener la última versión.",
+    "update_available_info_appimage":      "Haz clic en «Actualizar ahora» para descargar, verificar e instalar la actualización automáticamente.",
+    "update_available_info_self_download": "Haz clic en «Descargar e instalar» para descargar y verificar la actualización — luego se abrirá automáticamente por ti.",
     "update_open_releases":         "Descargar nueva versión",
     "update_msix_managed_title":    "Actualización gestionada por Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} está disponible — estás usando {current}. Microsoft Store mantiene esta instalación actualizada automáticamente, por lo que no es necesaria ninguna acción.",

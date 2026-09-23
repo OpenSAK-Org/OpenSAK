@@ -3264,11 +3264,6 @@ class MainWindow(QMainWindow):
         else:
             msg.setWindowTitle(tr("update_available_title"))
             msg.setText(tr("update_available_msg", latest=latest_tag, current=__version__))
-        msg.setInformativeText(
-            tr("update_available_info")
-            + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
-        )
-        msg.setTextFormat(Qt.TextFormat.RichText)
 
         # AppImage-integrerede brugere får "Opgrader nu" (selv-opdatering,
         # issue #836) i stedet for "Åbn releases-side". Kun en billig
@@ -3287,6 +3282,27 @@ class MainWindow(QMainWindow):
         can_self_download = (
             not can_appimage_self_update and sys.platform in ("win32", "darwin")
         )
+
+        # Bug fundet via feedback fra Mike Wood (GSAK-forum, 22/9): denne
+        # infotekst blev tidligere sat ÉN gang, uafhængigt af hvilken
+        # primærknap der reelt vises nedenfor — så en macOS/Windows-bruger
+        # med #572's "Download & Install"-knap så teksten "Klik 'Download'
+        # for at åbne GitHub-releases-siden", selvom knappen rent faktisk
+        # downloadede automatisk. Teksten skal nu matche den sti brugeren
+        # faktisk får.
+        if can_appimage_self_update:
+            info_text = tr("update_available_info_appimage")
+        elif can_self_download:
+            info_text = tr("update_available_info_self_download")
+        else:
+            info_text = tr("update_available_info")
+
+        msg.setInformativeText(
+            info_text
+            + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
+        )
+        msg.setTextFormat(Qt.TextFormat.RichText)
+
         if can_appimage_self_update:
             btn_primary = msg.addButton(
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole

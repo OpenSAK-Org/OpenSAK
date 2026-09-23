@@ -123,6 +123,50 @@ class TestPrimaryButtonChoicePerPlatform:
         mock_webopen.assert_called_once_with("https://example.invalid/releases")
 
 
+class TestInformativeTextMatchesOfferedButton:
+    """
+    Regression coverage for a bug reported by Mike Wood (GSAK forum, 22/9):
+    the informative text was set once, unconditionally, before the
+    button-selection logic ran — so a macOS/Windows user got #572's
+    working "Download & Install" button, but the text next to it still
+    said "Click 'Download' to open the GitHub releases page", because
+    that fixed string never varied per path. Same bug affected AppImage
+    users since #836 shipped, just never reported. Each path must now
+    get informative text that actually matches its own button.
+    """
+
+    def test_self_download_path_gets_matching_text(self, window):
+        with patch("opensak.msix.is_msix_packaged", return_value=False), \
+             patch("opensak.appimage.is_running_as_appimage", return_value=False), \
+             patch.object(sys, "platform", "win32"), \
+             patch.object(MainWindow, "_start_self_download_update"):
+            fake_msg = _run_dialog_and_click_primary(window)
+        info_text = fake_msg.setInformativeText.call_args[0][0]
+        assert "Download & Install" in info_text
+        assert "GitHub releases page" not in info_text
+
+    def test_appimage_path_gets_matching_text(self, window):
+        with patch("opensak.msix.is_msix_packaged", return_value=False), \
+             patch("opensak.appimage.is_running_as_appimage", return_value=True), \
+             patch("opensak.appimage.is_appimage_integrated", return_value=True), \
+             patch.object(sys, "platform", "linux"), \
+             patch.object(MainWindow, "_start_appimage_self_update"):
+            fake_msg = _run_dialog_and_click_primary(window)
+        info_text = fake_msg.setInformativeText.call_args[0][0]
+        assert "Upgrade now" in info_text
+        assert "GitHub releases page" not in info_text
+
+    def test_plain_fallback_path_keeps_original_text(self, window):
+        with patch("opensak.msix.is_msix_packaged", return_value=False), \
+             patch("opensak.appimage.is_running_as_appimage", return_value=False), \
+             patch.object(sys, "platform", "linux"), \
+             patch("webbrowser.open"):
+            fake_msg = _run_dialog_and_click_primary(window)
+        info_text = fake_msg.setInformativeText.call_args[0][0]
+        assert "Download" in info_text
+        assert "GitHub releases page" in info_text
+
+
 class TestStartSelfDownloadUpdate:
     def test_progress_signal_updates_dialog(self, window):
         with patch("opensak.updater.SelfUpdateWorker") as mock_worker_cls:
