@@ -4,6 +4,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.5] — 2026-09-23
+
+### Fixed
+
+- **Update dialog showed the wrong instructions next to a working button**
+  — reported by Mike Wood (GSAK forum) testing beta.1 → beta.3 self-download
+  on macOS: the "Download & Install" button correctly downloaded and
+  verified the update, but the text beside it still said "Click 'Download'
+  to open the GitHub releases page", left over from before #572. The same
+  stale text was shown for AppImage's "Upgrade now" button too, since #836 —
+  just never reported. Each path (AppImage self-update, Windows/macOS
+  self-download, and the plain manual-download fallback) now shows text that
+  actually matches its own button.
+
+---
+
 ## [1.20.0-beta.4] — 2026-09-22
 
 > Two larger additions from the community: the Filter dialog gains GSAK-style
