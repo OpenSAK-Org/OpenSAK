@@ -206,6 +206,20 @@ def hug_label(label: QLabel) -> QLabel:
     return label
 
 
+def labeled_row(label_text: str, *widgets: QWidget) -> tuple[QLabel, QWidget]:
+    """Compact "Label:  [w] [w] …" row (#610) — replaces a QGroupBox holding a
+    single line of controls. The label is the highlight target."""
+    label = hug_label(QLabel(label_text))
+    holder = QWidget()
+    holder_layout = QHBoxLayout(holder)
+    holder_layout.setContentsMargins(0, 0, 0, 0)
+    holder_layout.setSpacing(8)
+    for w in widgets:
+        holder_layout.addWidget(w)
+    holder_layout.addStretch()
+    return label, holder
+
+
 def set_highlighted(widget: QWidget, on: bool) -> None:
     """Paint *widget* in the "changed filter element" colour, or clear it (#610).
 
@@ -1020,16 +1034,9 @@ class FilterDialog(QDialog):
         status_grid.setVerticalSpacing(4)
 
         def _status_row(label_text: str, *boxes: QCheckBox) -> tuple[QLabel, QWidget]:
-            label = hug_label(QLabel(label_text))
-            holder = QWidget()
-            holder_layout = QHBoxLayout(holder)
-            holder_layout.setContentsMargins(0, 0, 0, 0)
-            holder_layout.setSpacing(8)
             for box in boxes:
                 box.setChecked(True)
-                holder_layout.addWidget(box)
-            holder_layout.addStretch()
-            return label, holder
+            return labeled_row(label_text, *boxes)
 
         # Fundet status
         self._found_cb    = QCheckBox(tr("quick_found"))
@@ -1102,7 +1109,12 @@ class FilterDialog(QDialog):
         return widget
 
     def _build_misc_tab(self) -> QWidget:
-        """Øvrigt filter fane — land, user flag, DNF, favorit points."""
+        """Øvrigt filter fane — land, user flag, DNF, favorit points.
+
+        Issue #610: samme komprimering som Generelt-fanen — tekstfelterne i to
+        kolonner, og de rene ja/nej-grupper er blevet til etiket-rækker i
+        stedet for hver sin QGroupBox.
+        """
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1112,98 +1124,86 @@ class FilterDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
-        layout = QFormLayout(inner)
+        layout = QVBoxLayout(inner)
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Land / Stat / Kommune
-        self._geo_group = QGroupBox(tr("filter_geo_group"))
-        geo_layout = QFormLayout(self._geo_group)
-
+        # ── Land / Stat / Kommune — to kolonner ──────────────────────────────
         self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._country_row.label, self._country_row)
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._state_row.label, self._state_row)
         self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._county_row.label, self._county_row)
+        geo_grid = QGridLayout()
+        geo_grid.setHorizontalSpacing(12)
+        geo_grid.setVerticalSpacing(4)
+        for i, row in enumerate((self._country_row, self._state_row, self._county_row)):
+            r, c = divmod(i, 2)
+            geo_grid.addWidget(row.label, r, c * 2)
+            geo_grid.addWidget(row, r, c * 2 + 1)
+        geo_grid.setColumnStretch(1, 1)
+        geo_grid.setColumnStretch(3, 1)
+        layout.addLayout(geo_grid)
         self._country_filter = self._country_row.edit
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
-        layout.addRow(self._geo_group)
+        # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
+        def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
+            yes = QCheckBox(tr("yes"))
+            no = QCheckBox(tr("no"))
+            yes.setChecked(True)
+            no.setChecked(True)
+            label, holder = labeled_row(tr(label_key), yes, no)
+            return yes, no, label, holder
 
-        # User Flag
-        self._flag_group = QGroupBox(tr("filter_user_flag_group"))
-        flag_layout = QHBoxLayout(self._flag_group)
-        self._flag_yes = QCheckBox(tr("yes"))
-        self._flag_yes.setChecked(True)
-        self._flag_no  = QCheckBox(tr("no"))
-        self._flag_no.setChecked(True)
-        flag_layout.addWidget(self._flag_yes)
-        flag_layout.addWidget(self._flag_no)
-        flag_layout.addStretch()
-        layout.addRow(self._flag_group)
-
+        self._flag_yes, self._flag_no, self._flag_label, flag_widget = \
+            _yes_no_row("filter_user_flag_group")
         # Locked (issue #202)
-        self._locked_group = QGroupBox(tr("filter_locked_group"))
-        locked_layout = QHBoxLayout(self._locked_group)
-        self._locked_yes = QCheckBox(tr("yes"))
-        self._locked_yes.setChecked(True)
-        self._locked_no  = QCheckBox(tr("no"))
-        self._locked_no.setChecked(True)
-        locked_layout.addWidget(self._locked_yes)
-        locked_layout.addWidget(self._locked_no)
-        locked_layout.addStretch()
-        layout.addRow(self._locked_group)
-
-        # DNF
-        self._dnf_group = QGroupBox(tr("filter_dnf_group"))
-        dnf_layout = QHBoxLayout(self._dnf_group)
-        self._dnf_yes = QCheckBox(tr("yes"))
-        self._dnf_yes.setChecked(True)
-        self._dnf_no  = QCheckBox(tr("no"))
-        self._dnf_no.setChecked(True)
-        dnf_layout.addWidget(self._dnf_yes)
-        dnf_layout.addWidget(self._dnf_no)
-        dnf_layout.addStretch()
-        layout.addRow(self._dnf_group)
-
-        # FTF
-        self._ftf_group = QGroupBox(tr("filter_ftf_group"))
-        ftf_layout = QHBoxLayout(self._ftf_group)
-        self._ftf_yes = QCheckBox(tr("yes"))
-        self._ftf_yes.setChecked(True)
-        self._ftf_no  = QCheckBox(tr("no"))
-        self._ftf_no.setChecked(True)
-        ftf_layout.addWidget(self._ftf_yes)
-        ftf_layout.addWidget(self._ftf_no)
-        ftf_layout.addStretch()
-        layout.addRow(self._ftf_group)
+        self._locked_yes, self._locked_no, self._locked_label, locked_widget = \
+            _yes_no_row("filter_locked_group")
+        self._dnf_yes, self._dnf_no, self._dnf_label, dnf_widget = \
+            _yes_no_row("filter_dnf_group")
+        self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
+            _yes_no_row("filter_ftf_group")
 
         # Favorit points
-        self._fav_group = QGroupBox(tr("filter_fav_points_group"))
-        fav_layout = QHBoxLayout(self._fav_group)
         self._fav_enabled = QCheckBox(tr("filter_enable"))
         self._fav_enabled.toggled.connect(self._on_fav_toggled)
-        fav_layout.addWidget(self._fav_enabled)
-        fav_layout.addWidget(QLabel(tr("filter_from")))
         self._fav_min = QDoubleSpinBox()
         self._fav_min.setRange(0, 9999)
         self._fav_min.setDecimals(0)
         self._fav_min.setValue(0)
         self._fav_min.setEnabled(False)
-        fav_layout.addWidget(self._fav_min)
-        fav_layout.addWidget(QLabel(tr("filter_to")))
         self._fav_max = QDoubleSpinBox()
         self._fav_max.setRange(0, 9999)
         self._fav_max.setDecimals(0)
         self._fav_max.setValue(9999)
         self._fav_max.setEnabled(False)
-        fav_layout.addWidget(self._fav_max)
-        fav_layout.addStretch()
-        layout.addRow(self._fav_group)
+        self._fav_label, fav_widget = labeled_row(
+            tr("filter_fav_points_group"),
+            self._fav_enabled,
+            QLabel(tr("filter_from")), self._fav_min,
+            QLabel(tr("filter_to")), self._fav_max,
+        )
 
-        inner.setLayout(layout)
+        status_grid = QGridLayout()
+        status_grid.setHorizontalSpacing(16)
+        status_grid.setVerticalSpacing(4)
+        for i, (label, widget) in enumerate((
+            (self._flag_label, flag_widget),
+            (self._locked_label, locked_widget),
+            (self._dnf_label, dnf_widget),
+            (self._ftf_label, ftf_widget),
+            (self._fav_label, fav_widget),
+        )):
+            r, c = divmod(i, 2)
+            status_grid.addWidget(label, r, c * 2)
+            status_grid.addWidget(widget, r, c * 2 + 1)
+        status_grid.setColumnStretch(1, 1)
+        status_grid.setColumnStretch(3, 1)
+        layout.addLayout(status_grid)
+
+        layout.addStretch()
+
         scroll.setWidget(inner)
         outer_layout.addWidget(scroll)
         return outer
@@ -1893,17 +1893,15 @@ class FilterDialog(QDialog):
         for row, _cls in self._geo_text_rows():
             specs.append((misc, row.label, row.is_set))
         specs += [
-            (misc, self._geo_group,
-             lambda: any(row.is_set() for row, _cls in self._geo_text_rows())),
-            (misc, self._flag_group,
+            (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
-            (misc, self._locked_group,
+            (misc, self._locked_label,
              lambda: not (self._locked_yes.isChecked() and self._locked_no.isChecked())),
-            (misc, self._dnf_group,
+            (misc, self._dnf_label,
              lambda: not (self._dnf_yes.isChecked() and self._dnf_no.isChecked())),
-            (misc, self._ftf_group,
+            (misc, self._ftf_label,
              lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
-            (misc, self._fav_group, self._fav_enabled.isChecked),
+            (misc, self._fav_label, self._fav_enabled.isChecked),
             (self._line_polygon_tab, self._lp_points_label,
              lambda: bool(self._lp_text.toPlainText().strip())),
             # The attribute rows are cells, not widgets — painted by

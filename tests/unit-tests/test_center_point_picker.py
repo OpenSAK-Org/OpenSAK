@@ -124,3 +124,38 @@ class TestChangedSignal:
         picker.set_state({"kind": "custom", "text": ""})
         with qtbot.waitSignal(picker.changed, timeout=1000):
             picker._custom_edit.setText("56.5, 10.1")
+
+
+class TestActiveHomeNotDuplicated:
+    """The active home point must appear once, under its own name (#610)."""
+
+    def _picker(self, qtbot, monkeypatch, active):
+        from opensak.gui.settings import HomePoint
+        s = _settings(home_points=[HomePoint("★ Home", 0.0, 0.0),
+                                   HomePoint("TestSW", 47.0, 8.0)])
+        s.active_home_name = active
+        s.get_gc_home_point = lambda: HomePoint("★ Home", 46.5, 7.5)
+        monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
+        p = CenterPointPicker()
+        qtbot.addWidget(p)
+        return p
+
+    def _labels(self, p):
+        return [p._combo.itemText(i) for i in range(p._combo.count())]
+
+    def test_same_entries_as_toolbar(self, qtbot, monkeypatch):
+        p = self._picker(qtbot, monkeypatch, "★ Home")
+        assert self._labels(p)[:2] == ["★ Home", "TestSW"]
+        assert p.to_state() == {"kind": "home"}
+        assert p.get_center() == (55.0, 12.0)
+
+    def test_home_is_default_even_when_not_first(self, qtbot, monkeypatch):
+        p = self._picker(qtbot, monkeypatch, "TestSW")
+        assert self._labels(p)[:2] == ["★ Home", "TestSW"]
+        assert p.current_label() == "TestSW"
+        assert p.to_state() == {"kind": "home"}
+
+    def test_gc_home_placeholder_uses_real_coords(self, qtbot, monkeypatch):
+        p = self._picker(qtbot, monkeypatch, "TestSW")
+        p.set_state({"kind": "point", "name": "★ Home"})
+        assert p.get_center() == (46.5, 7.5)

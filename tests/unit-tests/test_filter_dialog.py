@@ -1390,7 +1390,7 @@ class TestHighlightChangedElements:
 
     def test_misc_tab_groups(self, dlg):
         dlg._fav_enabled.setChecked(True)
-        assert _lit(dlg._fav_group)
+        assert _lit(dlg._fav_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
 
     def test_line_polygon_points(self, dlg):
