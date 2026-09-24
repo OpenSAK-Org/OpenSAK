@@ -1892,6 +1892,8 @@ class FilterDialog(QDialog):
 
         for row, _cls in self._geo_text_rows():
             specs.append((misc, row.label, row.is_set))
+        for wp_row in self._wp_text_rows.values():
+            specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
         specs += [
             (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
@@ -1902,8 +1904,17 @@ class FilterDialog(QDialog):
             (misc, self._ftf_label,
              lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
             (misc, self._fav_label, self._fav_enabled.isChecked),
+            # Logs/Waypoints: the date row labels light up on their own; the
+            # tab follows the whole filter, so scope, types, count etc. count too.
+            (self._logs_tab, self._log_date_row.label,
+             date_is_set(self._log_date_row)),
+            (self._logs_tab, None, lambda: self._build_log_filter() is not None),
             (self._line_polygon_tab, self._lp_points_label,
              lambda: bool(self._lp_text.toPlainText().strip())),
+            (self._waypoints_tab, self._wp_date_row.label,
+             date_is_set(self._wp_date_row)),
+            (self._waypoints_tab, None,
+             lambda: self._build_waypoint_filter() is not None),
             # The attribute rows are cells, not widgets — painted by
             # _on_attr_state_changed; this entry only drives the tab itself.
             (self._attributes_tab, None, self._attributes_changed),

@@ -1398,6 +1398,25 @@ class TestHighlightChangedElements:
         assert _lit(dlg._lp_points_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._line_polygon_tab)}
 
+    def test_log_date_row_and_tab(self, dlg):
+        dlg._log_date_row.op_combo.setCurrentIndex(1)  # anything but "Any"
+        assert _lit(dlg._log_date_row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._logs_tab)}
+
+    def test_log_scope_lights_only_the_tab(self, dlg):
+        next(iter(dlg._log_categories.values())).setChecked(False)
+        assert not _lit(dlg._log_date_row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._logs_tab)}
+
+    def test_waypoint_text_row_and_tab(self, dlg):
+        row = next(iter(dlg._wp_text_rows.values()))
+        row.edit.setText("parking")
+        assert _lit(row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._waypoints_tab)}
+        dlg._reset_waypoints()
+        assert not _lit(row.label)
+        assert _lit_tabs(dlg) == set()
+
     def test_attribute_cell_and_tab(self, dlg):
         attr_id, (ja_cb, _nej, ingen_cb) = next(iter(dlg._attr_boxes.items()))
         ja_cb.setChecked(True)
