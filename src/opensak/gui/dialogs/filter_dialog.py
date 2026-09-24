@@ -53,7 +53,8 @@ from opensak.filters.engine import (
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, PersonalNoteFilter,
+    FavoritePointsFilter,
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
@@ -1195,6 +1196,18 @@ class FilterDialog(QDialog):
         self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
             _yes_no_row("filter_ftf_group")
 
+        # Personlig note (GSAK "Has user notes")
+        pnote_group = QGroupBox(tr("filter_personal_note_group"))
+        pnote_layout = QHBoxLayout(pnote_group)
+        self._pnote_yes = QCheckBox(tr("yes"))
+        self._pnote_yes.setChecked(True)
+        self._pnote_no  = QCheckBox(tr("no"))
+        self._pnote_no.setChecked(True)
+        pnote_layout.addWidget(self._pnote_yes)
+        pnote_layout.addWidget(self._pnote_no)
+        pnote_layout.addStretch()
+        layout.addRow(pnote_group)
+
         # Favorit points
         self._fav_enabled = QCheckBox(tr("filter_enable"))
         self._fav_enabled.toggled.connect(self._on_fav_toggled)
@@ -2220,6 +2233,8 @@ class FilterDialog(QDialog):
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
         self._ftf_no.setChecked(True)
+        self._pnote_yes.setChecked(True)
+        self._pnote_no.setChecked(True)
         self._fav_enabled.setChecked(False)
         self._fav_min.setValue(0)
         self._fav_max.setValue(9999)
@@ -2454,6 +2469,14 @@ class FilterDialog(QDialog):
             fs.add(FtfFilter(has_ftf=True))
         elif ftf_no and not ftf_yes:
             fs.add(FtfFilter(has_ftf=False))
+
+        # Personlig note
+        pnote_yes = self._pnote_yes.isChecked()
+        pnote_no  = self._pnote_no.isChecked()
+        if pnote_yes and not pnote_no:
+            fs.add(PersonalNoteFilter(has_note=True))
+        elif pnote_no and not pnote_yes:
+            fs.add(PersonalNoteFilter(has_note=False))
 
         # Favorit points
         if self._fav_enabled.isChecked():
@@ -2781,6 +2804,10 @@ class FilterDialog(QDialog):
                 has_ftf = getattr(f, "has_ftf", True)
                 self._ftf_yes.setChecked(has_ftf)
                 self._ftf_no.setChecked(not has_ftf)
+            elif ftype == "personal_note":
+                has_note = getattr(f, "has_note", True)
+                self._pnote_yes.setChecked(has_note)
+                self._pnote_no.setChecked(not has_note)
             elif ftype == "favorite_points":
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))

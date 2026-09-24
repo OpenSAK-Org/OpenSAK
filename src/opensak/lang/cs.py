@@ -236,6 +236,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Zamčeno",
     "filter_dnf_group":            "DNF (Nenalezeno)",
     "filter_ftf_group":            "FTF (První u keše) 🥇",
+    "filter_personal_note_group":  "Má osobní poznámku",
     "filter_direction_group":      "Směr od středového bodu",
     "filter_fav_points_group":     "Oblíbené body",
     "filter_found_date_group":     "Datum nalezení mnou",

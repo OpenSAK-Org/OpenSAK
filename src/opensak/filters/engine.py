@@ -1236,6 +1236,52 @@ class FtfFilter(BaseFilter):
         return cls(has_ftf=data["has_ftf"])
 
 
+# Characters stripped before deciding whether a personal note is empty —
+# used both as SQLite's trim() set and Python's str.strip() argument so
+# PersonalNoteFilter's SQL pushdown and matches() agree exactly.
+_NOTE_BLANK_CHARS = " \t\r\n"
+
+
+class PersonalNoteFilter(BaseFilter):
+    """GSAK's "Has user notes" filter: keep caches that do (or don't) have a
+    non-blank personal note (UserNote.note — the local note edited on the
+    detail panel's Notes tab, not GC.com's synced gc_note).
+
+    A whitespace-only note counts as no note, as does a UserNote row that
+    only carries corrected coordinates.
+    """
+    filter_type = "personal_note"
+
+    def __init__(self, has_note: bool):
+        self.has_note = has_note
+
+    def apply_to_query(self, query):
+        # Correlated EXISTS, same shape as HasCorrectedFilter — including the
+        # explicit .correlate(Cache) the lightweight path needs (see there).
+        from sqlalchemy import exists, func
+
+        from opensak.db.models import UserNote
+        subq = (
+            exists()
+            .where(UserNote.cache_id == Cache.id,
+                   func.trim(UserNote.note, _NOTE_BLANK_CHARS) != "")
+            .correlate(Cache)
+        )
+        return query.filter(subq if self.has_note else ~subq)
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        has = bool(note and note.note and note.note.strip(_NOTE_BLANK_CHARS))
+        return has == self.has_note
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "has_note": self.has_note}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "PersonalNoteFilter":
+        return cls(has_note=data["has_note"])
+
+
 class FavoritePointsFilter(BaseFilter):
     """Keep caches with favorite_points within [min_pts, max_pts]."""
     filter_type = "favorite_points"
@@ -2555,6 +2601,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "locked":             LockedFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
+    "personal_note":      PersonalNoteFilter,
     "favorite_points":    FavoritePointsFilter,
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
@@ -3028,6 +3075,12 @@ def _filterset_relationship_needs(filterset: Optional["FilterSet"]) -> _Relation
     # routes notes-only searches to the full ORM path instead, which
     # already handles the same exists() subquery correctly.
     needs_notes = any(f.search_notes for f in _text_filters)
+    # PersonalNoteFilter.matches() reads UserNote.note, which
+    # LightweightUserNote doesn't carry — an OR group left to Python would
+    # hit an AttributeError on the lightweight path.
+    needs_notes = needs_notes or (filterset is not None and any(
+        isinstance(f, PersonalNoteFilter) for f in _iter_filters(filterset)
+    ))
     return _RelationshipNeeds(
         attributes=needs_attributes, trackables=needs_trackables,
         logs=needs_logs, description=needs_description, hint=needs_hint,

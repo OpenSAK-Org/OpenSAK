@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Zablokowane",
     "filter_dnf_group":            "DNF (nieznaleziona)",
     "filter_ftf_group":            "FTF (pierwszy odkrywca) 🥇",
+    "filter_personal_note_group":  "Ma notatkę osobistą",
     "filter_direction_group":      "Kierunek od punktu centralnego",
     "filter_fav_points_group":     "Punkty ulubione",
     "filter_found_date_group":     "Data znalezienia przeze mnie",

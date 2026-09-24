@@ -21,6 +21,7 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter, DirectionFilter,
+    PersonalNoteFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter, WaypointFilter,
@@ -253,10 +254,11 @@ class TestBuildFilterset:
         dlg._locked_no.setChecked(False)  # locked yes only (issue #202)
         dlg._dnf_no.setChecked(False)
         dlg._ftf_no.setChecked(False)
+        dlg._pnote_no.setChecked(False)
         dlg._fav_enabled.setChecked(True)
         types = _types(dlg._build_filterset())
         assert {"country", "state", "county", "user_flag", "locked", "dnf", "ftf",
-                "favorite_points"} <= set(types)
+                "personal_note", "favorite_points"} <= set(types)
 
     def test_loads_locked_filter(self, dlg):
         # Issue #202: round-trip a saved "Locked = No" profile.
@@ -271,6 +273,28 @@ class TestBuildFilterset:
         dlg._reset_misc()
         assert dlg._locked_yes.isChecked() is True
         assert dlg._locked_no.isChecked() is True
+
+    def test_personal_note_both_adds_no_filter(self, dlg):
+        assert "personal_note" not in _types(dlg._build_filterset())
+
+    @pytest.mark.parametrize("has_note", [True, False])
+    def test_personal_note_one_side(self, dlg, has_note):
+        (dlg._pnote_no if has_note else dlg._pnote_yes).setChecked(False)
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "personal_note")
+        assert f.has_note is has_note
+
+    def test_loads_personal_note_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(PersonalNoteFilter(has_note=False))
+        dlg._load_filterset(fs)
+        assert dlg._pnote_no.isChecked() is True
+        assert dlg._pnote_yes.isChecked() is False
+
+    def test_reset_misc_clears_personal_note(self, dlg):
+        dlg._pnote_yes.setChecked(False)
+        dlg._reset_misc()
+        assert dlg._pnote_yes.isChecked() is True
+        assert dlg._pnote_no.isChecked() is True
 
     def test_all_directions_adds_no_filter(self, dlg):
         assert "direction" not in _types(dlg._build_filterset())

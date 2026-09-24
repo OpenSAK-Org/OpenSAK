@@ -28,7 +28,7 @@ The filter dialog is split across nine tabs:
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, direction, user flag, DNF, FTF, favourite points, locked |
+| **Other** | Country / State / County, direction, user flag, DNF, FTF, personal note, favourite points, locked |
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
@@ -285,6 +285,17 @@ Filter on Did Not Find status. Available on the **Other** tab.
 ### FTF (First to Find)
 
 Filter by First to Find status. Available on the **Other** tab.
+
+---
+
+### Personal note
+
+| Filter | Shows |
+|---|---|
+| Yes | Only caches with a personal note (the note on the cache's **Notes** tab) |
+| No | Only caches without one |
+
+A note containing only whitespace counts as no note; GC.com's synced personal cache note is not considered. Both are checked by default, so the filter has no effect until you uncheck one. Available on the **Other** tab.
 
 ---
 
