@@ -236,6 +236,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Verrouillé",
     "filter_dnf_group":            "DNF (Non trouvée)",
     "filter_ftf_group":            "FTF (Premier trouveur) 🥇",
+    "filter_direction_group":      "Direction depuis le point central",
     "filter_fav_points_group":     "Points favoris",
     "filter_found_date_group":     "Date de découverte par moi",
     "filter_where_description":     "Filtrer les caches avec une clause SQL WHERE brute sur la table caches.",

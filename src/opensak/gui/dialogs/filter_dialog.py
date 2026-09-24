@@ -47,7 +47,7 @@ from opensak.filters.engine import (
     AvailableFilter, ArchivedFilter, AvailabilityFilter,
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
-    PlacedByFilter, OwnerFilter, DistanceFilter,
+    PlacedByFilter, OwnerFilter, DistanceFilter, DirectionFilter, DIRECTIONS,
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
@@ -1146,6 +1146,36 @@ class FilterDialog(QDialog):
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
+        # Retning fra centerpunkt (GSAK "Richtung") — kompasrose-gitter
+        self._dir_group = QGroupBox(tr("filter_direction_group"))
+        dir_layout = QHBoxLayout(self._dir_group)
+        dir_grid = QGridLayout()
+        # (row, col) for each direction in a 3x3 compass rose, centre empty
+        dir_cells = {
+            "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
+            "W":  (1, 0),              "E":  (1, 2),
+            "SW": (2, 0), "S": (2, 1), "SE": (2, 2),
+        }
+        dir_labels = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
+        self._dir_checks: dict[str, QCheckBox] = {}
+        for d in DIRECTIONS:
+            cb = QCheckBox(dir_labels.get(d, d))
+            cb.setChecked(True)
+            self._dir_checks[d] = cb
+            dir_grid.addWidget(cb, *dir_cells[d])
+        dir_layout.addLayout(dir_grid)
+        dir_btns = QVBoxLayout()
+        dir_none = QPushButton(tr("filter_type_disable_all"))
+        dir_none.clicked.connect(lambda: self._set_all_directions(False))
+        dir_all = QPushButton(tr("filter_type_enable_all"))
+        dir_all.clicked.connect(lambda: self._set_all_directions(True))
+        dir_btns.addWidget(dir_none)
+        dir_btns.addWidget(dir_all)
+        dir_btns.addStretch()
+        dir_layout.addLayout(dir_btns)
+        dir_layout.addStretch()
+        layout.addWidget(self._dir_group)
+
         # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
         def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
             yes = QCheckBox(tr("yes"))
@@ -1895,6 +1925,8 @@ class FilterDialog(QDialog):
         for wp_row in self._wp_text_rows.values():
             specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
         specs += [
+            (misc, self._dir_group,
+             lambda: not all(cb.isChecked() for cb in self._dir_checks.values())),
             (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
             (misc, self._locked_label,
@@ -2133,6 +2165,10 @@ class FilterDialog(QDialog):
         self._fav_min.setEnabled(checked)
         self._fav_max.setEnabled(checked)
 
+    def _set_all_directions(self, checked: bool) -> None:
+        for cb in self._dir_checks.values():
+            cb.setChecked(checked)
+
     def _enable_all_types(self) -> None:
         for cb in self._type_checks.values():
             cb.setChecked(True)
@@ -2175,6 +2211,7 @@ class FilterDialog(QDialog):
     def _reset_misc(self) -> None:
         for row, _cls in self._geo_text_rows():
             row.reset()
+        self._set_all_directions(True)
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
         self._locked_yes.setChecked(True)
@@ -2380,6 +2417,11 @@ class FilterDialog(QDialog):
             text_filter = row.build(cls)
             if text_filter is not None:
                 fs.add(text_filter)
+
+        # Retning — alle eller ingen valgt = intet filter (samme som Container)
+        selected_dirs = [d for d, cb in self._dir_checks.items() if cb.isChecked()]
+        if selected_dirs and len(selected_dirs) < len(DIRECTIONS):
+            fs.add(DirectionFilter(selected_dirs))
 
         # User Flag
         flag_yes = self._flag_yes.isChecked()
@@ -2630,6 +2672,10 @@ class FilterDialog(QDialog):
                 sizes = getattr(f, "sizes", [])
                 for cs, cb in self._cont_checks.items():
                     cb.setChecked(cs in sizes)
+            elif ftype == "direction":
+                dirs = getattr(f, "directions", [])
+                for d, cb in self._dir_checks.items():
+                    cb.setChecked(d in dirs)
             elif ftype == "difficulty":
                 self._diff_min.setValue(getattr(f, "min_difficulty", 1.0))
                 self._diff_max.setValue(getattr(f, "max_difficulty", 5.0))

@@ -805,6 +805,64 @@ class DistanceFilter(BaseFilter):
         )
 
 
+# Compass directions in clockwise order from north — index i is the 45° sector
+# centred on i*45° (N = 337.5°–22.5°). Language-independent codes; the dialog
+# shows them via tr("bearing_dirs"), which lists the same eight in this order.
+DIRECTIONS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def bearing_direction(deg: float) -> str:
+    """Compass direction code (see DIRECTIONS) for a bearing in degrees.
+
+    Sectors are half-open [lo, hi) — a bearing of exactly 22.5° is NE —
+    matching DirectionFilter.apply_to_query()'s SQL ranges.
+    """
+    return DIRECTIONS[int(((deg % 360.0) + 22.5) // 45.0) % 8]
+
+
+class DirectionFilter(BaseFilter):
+    """GSAK's "Direction" filter: keep caches lying in one of the selected
+    compass sectors (N/NE/E/SE/S/SW/W/NW) as seen from the centre point.
+
+    Uses the persisted Cache.bearing column — the bearing from the active
+    home point, maintained by recalculate_distances() and shown in the
+    Bearing column — so it always agrees with what the list displays and is
+    fully pushable to SQL. Caches without a bearing (no coordinates, or not
+    yet recalculated) never match.
+    """
+    filter_type = "direction"
+
+    def __init__(self, directions: list[str]):
+        self.directions = [d for d in DIRECTIONS if d in {x.strip().upper() for x in directions}]
+
+    def apply_to_query(self, query):
+        from sqlalchemy import and_, false, or_
+        terms = []
+        for d in self.directions:
+            lo = (DIRECTIONS.index(d) * 45.0 - 22.5) % 360.0
+            hi = lo + 45.0
+            if hi > 360.0:  # N wraps around 0°
+                terms.append(or_(Cache.bearing >= lo, Cache.bearing < hi - 360.0))
+            else:
+                terms.append(and_(Cache.bearing >= lo, Cache.bearing < hi))
+        return query.filter(or_(*terms) if terms else false())
+
+    def matches(self, cache: Cache) -> bool:
+        if cache.bearing is None:
+            return False
+        return bearing_direction(cache.bearing) in self.directions
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "directions": self.directions}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DirectionFilter":
+        return cls(data.get("directions", []))
+
+    def __repr__(self) -> str:
+        return f"<DirectionFilter directions={self.directions}>"
+
+
 class LinePolygonFilter(BaseFilter):
     """GSAK's line/polygon filter: keep caches along a line, inside a polygon
     or near a set of points (see line_polygon.LineShape) — or, with
@@ -2484,6 +2542,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "placed_by":     PlacedByFilter,
     "owner_name":    OwnerFilter,
     "distance":      DistanceFilter,
+    "direction":     DirectionFilter,
     "line_polygon":  LinePolygonFilter,
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,

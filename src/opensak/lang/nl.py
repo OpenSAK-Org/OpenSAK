@@ -239,6 +239,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Vergrendeld",
     "filter_dnf_group":            "DNF (Niet gevonden)",
     "filter_ftf_group":            "FTF (First to Find) 🥇",
+    "filter_direction_group":      "Richting vanaf middelpunt",
     "filter_fav_points_group":     "Favorietpunten",
     "filter_found_date_group":     "Door mij gevonden datum",
     "filter_where_description":     "Filter caches met een SQL WHERE-clausule op de caches-tabel.",

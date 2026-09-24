@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Bloqueada",
     "filter_dnf_group":            "DNF (no encontrada)",
     "filter_ftf_group":            "FTF (primer descubridor) 🥇",
+    "filter_direction_group":      "Dirección desde el punto central",
     "filter_fav_points_group":     "Puntos favoritos",
     "filter_found_date_group":     "Fecha en que la encontré",
     "filter_where_description":     "Filtra cachés con una cláusula SQL WHERE sin procesar sobre la tabla caches.",

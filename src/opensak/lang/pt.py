@@ -236,6 +236,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Bloqueado",
     "filter_dnf_group":            "DNF (Não encontrado)",
     "filter_ftf_group":            "FTF (Primeiro a encontrar) 🥇",
+    "filter_direction_group":      "Direção a partir do ponto central",
     "filter_fav_points_group":     "Pontos favoritos",
     "filter_found_date_group":     "Data encontrado por mim",
     "filter_where_description":     "Filtre geocaches com uma cláusula SQL WHERE diretamente na tabela caches.",

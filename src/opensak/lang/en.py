@@ -236,6 +236,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Locked",
     "filter_dnf_group":            "DNF (Did Not Find)",
     "filter_ftf_group":            "FTF (First to Find) 🥇",
+    "filter_direction_group":      "Direction from center point",
     "filter_fav_points_group":     "Favorite points",
     "filter_found_date_group":     "Found by me date",
     "filter_where_description":     "Filter caches with a raw SQL WHERE clause against the caches table.",

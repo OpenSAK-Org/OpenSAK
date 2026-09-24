@@ -20,7 +20,7 @@ from opensak.filters.engine import (
     FoundFilter, NotFoundFilter, AvailabilityFilter, DistanceFilter,
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
-    FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
+    FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter, DirectionFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter, WaypointFilter,
@@ -271,6 +271,32 @@ class TestBuildFilterset:
         dlg._reset_misc()
         assert dlg._locked_yes.isChecked() is True
         assert dlg._locked_no.isChecked() is True
+
+    def test_all_directions_adds_no_filter(self, dlg):
+        assert "direction" not in _types(dlg._build_filterset())
+
+    def test_no_directions_adds_no_filter(self, dlg):
+        # Same as Container: an empty selection is treated as "no filter".
+        dlg._set_all_directions(False)
+        assert "direction" not in _types(dlg._build_filterset())
+
+    def test_direction_subset(self, dlg):
+        dlg._set_all_directions(False)
+        dlg._dir_checks["N"].setChecked(True)
+        dlg._dir_checks["SW"].setChecked(True)
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.directions == ["N", "SW"]
+
+    def test_loads_direction_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(["E", "NW"]))
+        dlg._load_filterset(fs)
+        assert {d for d, cb in dlg._dir_checks.items() if cb.isChecked()} == {"E", "NW"}
+
+    def test_reset_misc_checks_all_directions(self, dlg):
+        dlg._set_all_directions(False)
+        dlg._reset_misc()
+        assert all(cb.isChecked() for cb in dlg._dir_checks.values())
 
     def test_date_rows_default_to_any(self, dlg):
         assert set(dlg._date_rows) == set(DATE_FILTER_FIELDS)

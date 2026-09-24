@@ -28,7 +28,7 @@ The filter dialog is split across nine tabs:
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
+| **Other** | Country / State / County, direction, user flag, DNF, FTF, favourite points, locked |
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
@@ -259,6 +259,14 @@ Show only caches that currently have at least one trackable logged as in the cac
 |---|---|
 | Has corrected | Only caches where you have stored corrected (puzzle-solved) coordinates |
 | No corrected | Only caches without corrected coordinates |
+
+---
+
+### Direction
+
+Show only caches lying in the selected compass directions (N, NE, E, SE, S, SW, W, NW) as seen from your active home point — the same bearing shown in the **Bearing** column. Each direction covers a 45° sector centred on it (N = 337.5°–22.5°). Available on the **Other** tab.
+
+All eight are checked by default, so the filter has no effect until you uncheck at least one. Caches without coordinates never match.
 
 ---
 
