@@ -1002,9 +1002,11 @@ def dispose_engine(db_path: Path | None = None) -> None:
         return  # Intet at frigive
 
     if db_path is not None:
-        # Sammenlign stier — normaliser separatorer for Windows-kompatibilitet
-        engine_url = str(_engine.url).replace("sqlite:///", "")
-        engine_path = Path(engine_url).resolve()
+        # Sammenlign stier — brug url.database (den ukodede sti), ikke
+        # str(url): SQLAlchemy 2.1+ percent-encoder ':' og backslash (Windows-
+        # stier) samt ikke-ASCII-tegn (æ/ø/å) i str(url), så stien aldrig
+        # matchede og dispose stille blev sprunget over.
+        engine_path = Path(_engine.url.database or "").resolve()
         try:
             target_path = db_path.resolve()
         except OSError:
