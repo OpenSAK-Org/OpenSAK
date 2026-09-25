@@ -4,6 +4,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.8] — 2026-09-25
+
+> Two security-related network fixes. Boundary Data Updates works again on
+> macOS, and the PQ email connection now checks that it's really talking to
+> your mail server before sending your password.
+
+### Fixed
+
+- **Boundary Data Updates always failed on macOS with "no network
+  connection" (#901)** — The network was fine; the macOS app couldn't find
+  the certificates it needs to verify HTTPS connections, and the error was
+  reported as a missing connection. All HTTPS requests now share one
+  verifying setup that uses both the system's certificates and a bundled
+  certificate set, so this also works on fresh Windows installs, on Linux
+  distributions outside the Debian/Ubuntu family, and behind company
+  networks that inspect encrypted traffic. The real cause of a failed
+  boundary data check is now written to `opensak.log`.
+- **PQ email: the mail server's certificate was never checked (#902)** —
+  The connection was encrypted, but OpenSAK accepted any server
+  certificate, so on an untrusted network (e.g. public Wi-Fi) your mail
+  password could have been intercepted. OpenSAK now verifies the server's
+  certificate and name before logging in. If verification fails, the
+  password is not sent, and **Test connection** / **Check for PQ Email**
+  explain why and what to check.
+
+  **Please note:** mail servers with a self-signed certificate (e.g. a
+  private server on a NAS), or a server name that doesn't match the
+  server's certificate, will now be refused. Use the server name your mail
+  provider gives, exactly as written.
+
+---
+
 ## [1.20.0-beta.7] — 2026-09-25
 
 > A test release for the new macOS self-update flow from beta.6 (#893): that
