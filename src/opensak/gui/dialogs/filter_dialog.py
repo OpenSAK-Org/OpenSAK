@@ -55,7 +55,8 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, PersonalNoteFilter,
-    FavoritePointsFilter,
+    FavoritePointsFilter, ElevationFilter,
+    UserData1Filter, UserData2Filter, UserData3Filter, UserData4Filter, GcNoteFilter,
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
@@ -524,6 +525,7 @@ _LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
     ("points",  "filter_lp_type_points"),
 )
 _LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
+_M_TO_FT = 3.28084  # højdefilteret gemmer meter; vises i ft når use_miles
 
 
 def _format_lp_point(point: tuple[float, float]) -> str:
@@ -1153,10 +1155,16 @@ class FilterDialog(QDialog):
         self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
         self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
+        # GSAK UserData1–4 + GC.com's synced personal note (gc_note)
+        self._ud_rows = [
+            TextFilterRow(tr(f"col_user_data_{i}"), tr("filter_contains_placeholder"))
+            for i in range(1, 5)
+        ]
+        self._gc_note_row = TextFilterRow(tr("col_gc_note"), tr("filter_contains_placeholder"))
         geo_grid = QGridLayout()
         geo_grid.setHorizontalSpacing(12)
         geo_grid.setVerticalSpacing(4)
-        for i, row in enumerate((self._country_row, self._state_row, self._county_row)):
+        for i, (row, _cls) in enumerate(self._misc_text_rows()):
             r, c = divmod(i, 2)
             geo_grid.addWidget(row.label, r, c * 2)
             geo_grid.addWidget(row, r, c * 2 + 1)
@@ -1249,6 +1257,24 @@ class FilterDialog(QDialog):
             QLabel(tr("filter_to")), self._fav_max,
         )
 
+        # Højde (m, eller ft når use_miles) — ukendt højde matcher aldrig
+        self._elev_enabled = QCheckBox(tr("filter_enable"))
+        self._elev_enabled.toggled.connect(self._on_elev_toggled)
+        self._elev_min = QDoubleSpinBox()
+        self._elev_min.setDecimals(0)
+        self._elev_min.setEnabled(False)
+        self._elev_max = QDoubleSpinBox()
+        self._elev_max.setDecimals(0)
+        self._elev_max.setEnabled(False)
+        self._set_elev_range(-500.0, 9000.0)
+        self._elev_label, elev_widget = labeled_row(
+            tr("col_elevation"),
+            self._elev_enabled,
+            QLabel(tr("filter_from")), self._elev_min,
+            QLabel(tr("filter_to")), self._elev_max,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+
         status_grid = QGridLayout()
         status_grid.setHorizontalSpacing(16)
         status_grid.setVerticalSpacing(4)
@@ -1259,6 +1285,7 @@ class FilterDialog(QDialog):
             (self._ftf_label, ftf_widget),
             (self._pnote_label, pnote_widget),
             (self._fav_label, fav_widget),
+            (self._elev_label, elev_widget),
         )):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
@@ -2027,7 +2054,7 @@ class FilterDialog(QDialog):
         for date_row in self._date_rows.values():
             specs.append((self._dates_tab, date_row.label, date_is_set(date_row)))
 
-        for row, _cls in self._geo_text_rows():
+        for row, _cls in self._misc_text_rows():
             specs.append((misc, row.label, row.is_set))
         for wp_row in self._wp_text_rows.values():
             specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
@@ -2047,6 +2074,7 @@ class FilterDialog(QDialog):
             (misc, self._pnote_label,
              lambda: not (self._pnote_yes.isChecked() and self._pnote_no.isChecked())),
             (misc, self._fav_label, self._fav_enabled.isChecked),
+            (misc, self._elev_label, self._elev_enabled.isChecked),
             # Logs/Waypoints: the date row labels light up on their own; the
             # tab follows the whole filter, so scope, types, count etc. count too.
             (self._logs_tab, self._log_date_row.label,
@@ -2133,7 +2161,7 @@ class FilterDialog(QDialog):
 
     def _validate_text_filters(self) -> bool:
         """Warn about, and focus, the first text filter with an invalid regex."""
-        for row, cls in self._general_text_rows() + self._geo_text_rows():
+        for row, cls in self._general_text_rows() + self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is None or text_filter.regex_error is None:
                 continue
@@ -2294,6 +2322,28 @@ class FilterDialog(QDialog):
         self._fav_min.setEnabled(checked)
         self._fav_max.setEnabled(checked)
 
+    def _on_elev_toggled(self, checked: bool) -> None:
+        self._elev_min.setEnabled(checked)
+        self._elev_max.setEnabled(checked)
+
+    @staticmethod
+    def _use_miles() -> bool:
+        from opensak.gui.settings import get_settings
+        return get_settings().use_miles
+
+    def _set_elev_range(self, min_m: float, max_m: float) -> None:
+        """Show an elevation range given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._elev_min, self._elev_max):
+            spin.setRange(-2000 * factor, 9000 * factor)
+        self._elev_min.setValue(min_m * factor)
+        self._elev_max.setValue(max_m * factor)
+
+    def _elev_range_m(self) -> tuple[float, float]:
+        """The elevation range entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._elev_min.value() / factor, self._elev_max.value() / factor
+
     def _set_all_directions(self, checked: bool) -> None:
         for cb in self._dir_checks.values():
             cb.setChecked(checked)
@@ -2336,7 +2386,7 @@ class FilterDialog(QDialog):
             row.reset()
 
     def _reset_misc(self) -> None:
-        for row, _cls in self._geo_text_rows():
+        for row, _cls in self._misc_text_rows():
             row.reset()
         self._set_all_directions(True)
         self._flag_yes.setChecked(True)
@@ -2352,6 +2402,8 @@ class FilterDialog(QDialog):
         self._fav_enabled.setChecked(False)
         self._fav_min.setValue(0)
         self._fav_max.setValue(9999)
+        self._elev_enabled.setChecked(False)
+        self._set_elev_range(-500.0, 9000.0)
 
     def _reset_attributes(self) -> None:
         self._attr_mode_all.setChecked(True)
@@ -2459,11 +2511,17 @@ class FilterDialog(QDialog):
             (self._owner_row, OwnerFilter),
         ]
 
-    def _geo_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+    def _misc_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+        ud1, ud2, ud3, ud4 = self._ud_rows
         return [
             (self._country_row, CountryFilter),
             (self._state_row, StateFilter),
             (self._county_row, CountyFilter),
+            (ud1, UserData1Filter),
+            (ud2, UserData2Filter),
+            (ud3, UserData3Filter),
+            (ud4, UserData4Filter),
+            (self._gc_note_row, GcNoteFilter),
         ]
 
     def _build_filterset(self) -> FilterSet:
@@ -2566,8 +2624,8 @@ class FilterDialog(QDialog):
             if date_filter is not None:
                 fs.add(date_filter)
 
-        # Øvrigt — Land / Stat / Kommune
-        for row, cls in self._geo_text_rows():
+        # Øvrigt — Land / Stat / Kommune / UserData1–4 / GC-note
+        for row, cls in self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is not None:
                 fs.add(text_filter)
@@ -2623,6 +2681,11 @@ class FilterDialog(QDialog):
                 min_pts=int(self._fav_min.value()),
                 max_pts=int(self._fav_max.value()),
             ))
+
+        # Højde
+        if self._elev_enabled.isChecked():
+            min_m, max_m = self._elev_range_m()
+            fs.add(ElevationFilter(min_m=min_m, max_m=max_m))
 
         # Linje/Polygon
         lp_filter = self._build_line_polygon_filter()
@@ -2819,7 +2882,7 @@ class FilterDialog(QDialog):
 
         text_rows = {
             cls.filter_type: row
-            for row, cls in self._general_text_rows() + self._geo_text_rows()
+            for row, cls in self._general_text_rows() + self._misc_text_rows()
         }
         for f in flat_filters:
             ftype = getattr(f, "filter_type", None)
@@ -2953,6 +3016,9 @@ class FilterDialog(QDialog):
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
                 self._fav_max.setValue(getattr(f, "max_pts", 9999))
+            elif ftype == "elevation":
+                self._elev_enabled.setChecked(True)
+                self._set_elev_range(getattr(f, "min_m", -500.0), getattr(f, "max_m", 9000.0))
             elif ftype == "log":
                 self._load_log_filter(f)
             elif ftype == "date":

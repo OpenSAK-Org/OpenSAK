@@ -722,6 +722,38 @@ class OwnerFilter(TextMatchFilter):
     column = "owner_name"
 
 
+class UserData1Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData1 matches *text* (case-insensitive)."""
+    filter_type = "user_data_1"
+    column = "user_data_1"
+
+
+class UserData2Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData2 matches *text* (case-insensitive)."""
+    filter_type = "user_data_2"
+    column = "user_data_2"
+
+
+class UserData3Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData3 matches *text* (case-insensitive)."""
+    filter_type = "user_data_3"
+    column = "user_data_3"
+
+
+class UserData4Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData4 matches *text* (case-insensitive)."""
+    filter_type = "user_data_4"
+    column = "user_data_4"
+
+
+class GcNoteFilter(TextMatchFilter):
+    """Keep caches whose GC.com personal note (the synced gc_note, not the
+    local UserNote.note that PersonalNoteFilter and TextSearchFilter look at)
+    matches *text* (case-insensitive)."""
+    filter_type = "gc_note"
+    column = "gc_note"
+
+
 class DistanceFilter(BaseFilter):
     """
     Keep caches within *max_km* kilometres of a reference coordinate.
@@ -1310,6 +1342,38 @@ class FavoritePointsFilter(BaseFilter):
     @classmethod
     def from_dict(cls, data: dict) -> "FavoritePointsFilter":
         return cls(min_pts=data.get("min_pts", 0), max_pts=data.get("max_pts", 9999))
+
+
+class ElevationFilter(BaseFilter):
+    """Keep caches whose elevation (metres) is within [min_m, max_m].
+
+    A cache with unknown elevation (NULL — not yet looked up) never matches:
+    unlike favorite points, NULL can't be read as 0, which is a real
+    elevation at sea level.
+    """
+    filter_type = "elevation"
+
+    def __init__(self, min_m: float = -500.0, max_m: float = 9000.0):
+        self.min_m = min_m
+        self.max_m = max_m
+
+    def apply_to_query(self, query):
+        # BETWEEN on NULL is NULL, so unknown elevations drop out here too.
+        return query.filter(Cache.elevation.between(self.min_m, self.max_m))
+
+    def matches(self, cache: Cache) -> bool:
+        return cache.elevation is not None and self.min_m <= cache.elevation <= self.max_m
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "min_m": self.min_m,
+            "max_m": self.max_m,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ElevationFilter":
+        return cls(min_m=data.get("min_m", -500.0), max_m=data.get("max_m", 9000.0))
 
 
 class FoundByMeDateFilter(BaseFilter):
@@ -2799,6 +2863,11 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "gc_code":       GcCodeFilter,
     "placed_by":     PlacedByFilter,
     "owner_name":    OwnerFilter,
+    "user_data_1":   UserData1Filter,
+    "user_data_2":   UserData2Filter,
+    "user_data_3":   UserData3Filter,
+    "user_data_4":   UserData4Filter,
+    "gc_note":       GcNoteFilter,
     "distance":      DistanceFilter,
     "direction":     DirectionFilter,
     "line_polygon":  LinePolygonFilter,
@@ -2815,6 +2884,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "ftf":                FtfFilter,
     "personal_note":      PersonalNoteFilter,
     "favorite_points":    FavoritePointsFilter,
+    "elevation":          ElevationFilter,
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
