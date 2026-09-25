@@ -4,6 +4,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.6] — 2026-09-25
+
+> The Filter dialog now shows at a glance what a filter actually restricts,
+> and warns before a save would overwrite an existing filter. On macOS,
+> "Download & Install" now finishes the job itself. This release is also the
+> first half of a two-release test of that new macOS update flow — it can only
+> be exercised when updating *from* this version, so beta.7 follows shortly.
+
+### Added
+
+- **Filter dialog: highlight what a filter sets (#610, #895)** — Every filter
+  element that differs from its default is highlighted, and so is any tab
+  that holds one, as in GSAK. Open a saved filter and you can see immediately
+  what it restricts; **Reset all** / **Reset tab** clear the highlighting with
+  the values. The highlight colour follows the light/dark theme.
+- **Filter dialog: warning before overwriting a saved filter (#671, #896)** —
+  Saving under a name that already exists now asks before replacing it
+  (default: No). The check is made against the actual file on disk, so names
+  that only differ in characters that get replaced when saving, or only in
+  upper/lower case on Windows and macOS, are caught too.
+
+### Changed
+
+- **macOS: "Download & Install" now installs the update itself (#893)** —
+  Reported by Mike Wood (GSAK forum): the update was downloaded and the DMG
+  opened, but the app still had to be copied by hand, the disk image stayed
+  mounted, and the downloaded file ended up hidden in `/private/var/folders`.
+  OpenSAK now mounts the verified DMG invisibly, replaces the installed app
+  safely (the old version is only removed once the new one is in place),
+  unmounts it again and deletes the download. It then tells you the update is
+  installed and closes — open OpenSAK again to start the new version. If the
+  automatic install isn't possible (e.g. a read-only Applications folder on a
+  managed Mac), it falls back to opening the DMG as before, now saved in your
+  Downloads folder with the exact location shown. Windows is unchanged.
+- **Filter dialog: General and Other tabs redesigned (#895)** — Laid out in
+  two columns so the General tab fits without scrolling.
+- **Dependency versions are now bounded (#897)** — CI and the release builds
+  no longer pick up whatever is newest on PyPI at build time, so an upstream
+  release can't silently change what ships inside OpenSAK. PyInstaller is
+  pinned for the release builds as well.
+- **Internal: replaced SQLAlchemy's deprecated `noload()` (#898)** — No
+  visible change; removes ~3,000 deprecation warnings per test run and makes
+  code that reads data not loaded for the cache list fail loudly in testing
+  instead of silently seeing an empty list.
+
+### Fixed
+
+- **Deleting or removing a database could leave its file locked** — With
+  SQLAlchemy 2.1, OpenSAK no longer recognised which database connection to
+  close before deleting a database on Windows, which could fail with a
+  "file in use" error (WinError 32). Database paths containing non-ASCII
+  characters (e.g. æ/ø/å) were affected on all platforms.
+- **Filter dialog: "Home" shown twice in the centre point list (#895)** —
+  The list now matches the home-point dropdown in the toolbar.
+- **Danish: self-update text named the wrong button** — It referred to
+  "Download & Install" instead of the Danish button label.
+
+> Filter highlighting, redesign and overwrite warning contributed by nagisml.
+> #671's other two items — the profile name pre-filled when saving over a
+> selected filter, and the Archived box keeping its state after saving — were
+> already fixed earlier; #896 adds regression tests for both.
+
+---
+
 ## [1.20.0-beta.5] — 2026-09-23
 
 ### Fixed
