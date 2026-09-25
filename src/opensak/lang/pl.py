@@ -771,6 +771,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Nazwa profilu filtra:",
     "filter_saved_title":           "Zapisano",
     "filter_saved_msg":             "Filtr „{name}” został zapisany.",
+    "filter_overwrite_title":       "Nadpisz profil",
+    "filter_overwrite_msg":         "Profil filtra „{name}” już istnieje. Nadpisać go?",
     "filter_delete_title":          "Usuń profil",
     "filter_delete_msg":            "Usunąć profil filtra „{name}”?",
     "filter_load_error":            "Nie udało się wczytać profilu:\n{error}",

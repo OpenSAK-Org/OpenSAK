@@ -770,6 +770,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Nome do perfil de filtro:",
     "filter_saved_title":           "Guardado",
     "filter_saved_msg":             "O filtro '{name}' foi guardado.",
+    "filter_overwrite_title":       "Substituir perfil",
+    "filter_overwrite_msg":         "O perfil de filtro '{name}' já existe. Pretende substituí-lo?",
     "filter_delete_title":          "Eliminar perfil",
     "filter_delete_msg":            "Eliminar o perfil de filtro '{name}'?",
     "filter_load_error":            "Não foi possível carregar o perfil:\n{error}",

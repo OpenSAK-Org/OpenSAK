@@ -769,6 +769,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Filter profile name:",
     "filter_saved_title":           "Saved",
     "filter_saved_msg":             "Filter '{name}' has been saved.",
+    "filter_overwrite_title":       "Overwrite profile",
+    "filter_overwrite_msg":         "Filter profile '{name}' already exists. Overwrite it?",
     "filter_delete_title":          "Delete profile",
     "filter_delete_msg":            "Delete filter profile '{name}'?",
     "filter_load_error":            "Could not load profile:\n{error}",

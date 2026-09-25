@@ -770,6 +770,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Navn på filter profil:",
     "filter_saved_title":           "Gemt",
     "filter_saved_msg":             "Filter '{name}' er gemt.",
+    "filter_overwrite_title":       "Overskriv profil",
+    "filter_overwrite_msg":         "Filterprofilen '{name}' findes allerede. Vil du overskrive den?",
     "filter_delete_title":          "Slet profil",
     "filter_delete_msg":            "Slet filterprofilen '{name}'?",
     "filter_load_error":            "Kunne ikke indlæse profil:\n{error}",

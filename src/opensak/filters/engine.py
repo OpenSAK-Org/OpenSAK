@@ -3614,15 +3614,26 @@ class FilterProfile:
         self.filterset = filterset
         self.sort = sort or SortSpec()
 
-    def save(self, profiles_dir: Optional[Path] = None) -> Path:
-        """Save this profile to disk as JSON. Returns the saved file path."""
+    @classmethod
+    def profile_path(cls, name: str, profiles_dir: Optional[Path] = None) -> Path:
+        """Return the JSON path a profile called *name* is stored at.
+
+        Split out of save() (issue #671) so callers can ask "would saving
+        under this name overwrite an existing profile?" without writing
+        anything. The answer must be derived from the sanitised filename,
+        not from the name the user typed: 'My/Filter' and 'My_Filter' are
+        two different display names but the same file on disk.
+        """
         if profiles_dir is None:
             from opensak.config import get_app_data_dir
             profiles_dir = get_app_data_dir() / "filters"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name)
+        return profiles_dir / f"{safe_name}.json"
 
-        safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in self.name)
-        path = profiles_dir / f"{safe_name}.json"
+    def save(self, profiles_dir: Optional[Path] = None) -> Path:
+        """Save this profile to disk as JSON. Returns the saved file path."""
+        path = self.profile_path(self.name, profiles_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
             "name": self.name,
