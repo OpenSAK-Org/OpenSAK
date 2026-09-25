@@ -1848,10 +1848,15 @@ class DateFilter(BaseFilter):
 
 
 class TextSearchFilter(BaseFilter):
-    """Keep caches whose text fields contain *text* (case-insensitive).
+    """Keep caches whose free-text fields match *text* under operator *op*.
 
     Searches any combination of: short/long description, log texts,
-    personal user notes, and the encoded hint.
+    personal user notes, and the encoded hint. *op* is one of TEXT_OPS, the
+    same operators (and case-insensitive semantics) as the single-column
+    text filters. A positive operator matches when *any* searched field (or
+    any one log) matches; a negated one — and "empty" — when *none* does, so
+    "not contains X" keeps caches that mention X nowhere in the searched
+    fields. With no field selected nothing matches.
     """
     filter_type = "text_search"
 
@@ -1862,70 +1867,99 @@ class TextSearchFilter(BaseFilter):
         search_logs: bool = True,
         search_notes: bool = True,
         search_hint: bool = False,
+        op: str = "contains",
     ):
-        self.text = text.strip()
+        match = TextMatchFilter(text, op)
+        self.text = match.text
+        self.op = op
+        self.regex_error = match.regex_error
         self.search_description = search_description
         self.search_logs = search_logs
         self.search_notes = search_notes
         self.search_hint = search_hint
+        # Evaluate the positive operator per field and negate the combined
+        # result: "empty" is the negation of "not_empty".
+        positive = "not_empty" if op == "empty" else _TEXT_OP_NEGATIONS.get(op, op)
+        self._negated = positive != op
+        self._positive = TextMatchFilter(text, positive)
+        # A non-ASCII needle is only pushed as a pre-narrowing LIKE — see
+        # TextMatchFilter.sql_exact.
+        self.sql_exact = self._positive.sql_exact
+
+    def _is_noop(self) -> bool:
+        """Nothing to compare against (empty text) — every cache matches."""
+        return self._positive._is_noop()
+
+    def _has_fields(self) -> bool:
+        return (self.search_description or self.search_logs
+                or self.search_notes or self.search_hint)
 
     def apply_to_query(self, query):
-        if not self.text:
+        if self._is_noop() or not self._has_fields():
             return None
-        from sqlalchemy import func, exists, or_
+        from sqlalchemy import and_, exists, or_
         from opensak.db.models import Log, UserNote
 
-        pattern = f"%{self.text.lower()}%"
+        if self._negated and not self.sql_exact:
+            return None  # a pre-narrowing superset can't be negated
+        if self._positive.sql_condition(Cache.short_description) is None:
+            return None  # regex, or a needle LIKE can't handle — matches() only
+
+        def column_cond(col):
+            # NULL-safe: a NULL column never matches the positive operator,
+            # and must not turn the negation below into NULL.
+            return and_(col.is_not(None), self._positive.sql_condition(col))
+
         conditions = []
         if self.search_description:
-            conditions.append(func.lower(Cache.short_description).like(pattern))
-            conditions.append(func.lower(Cache.long_description).like(pattern))
+            conditions.append(column_cond(Cache.short_description))
+            conditions.append(column_cond(Cache.long_description))
         if self.search_hint:
-            conditions.append(func.lower(Cache.encoded_hints).like(pattern))
+            conditions.append(column_cond(Cache.encoded_hints))
         if self.search_logs:
             conditions.append(
                 exists().where(
-                    (Log.cache_id == Cache.id)
-                    & func.lower(Log.text).like(pattern)
+                    (Log.cache_id == Cache.id) & column_cond(Log.text)
                 )
             )
         if self.search_notes:
             conditions.append(
                 exists().where(
-                    (UserNote.cache_id == Cache.id)
-                    & func.lower(UserNote.note).like(pattern)
+                    (UserNote.cache_id == Cache.id) & column_cond(UserNote.note)
                 )
             )
-        if not conditions:
-            return None
-        return query.filter(or_(*conditions))
+        cond = or_(*conditions)
+        return query.filter(~cond if self._negated else cond)
 
-    def matches(self, cache: Cache) -> bool:
-        if not self.text:
-            return True
-        needle = self.text.lower()
+    def _values(self, cache: Cache):
+        """The searched field values of *cache* (None for an unset field)."""
         if self.search_description:
-            if cache.short_description and needle in cache.short_description.lower():
-                return True
-            if cache.long_description and needle in cache.long_description.lower():
-                return True
+            yield cache.short_description
+            yield cache.long_description
         if self.search_hint:
-            if cache.encoded_hints and needle in cache.encoded_hints.lower():
-                return True
-        if self.search_notes:
-            if cache.user_note and cache.user_note.note:
-                if needle in cache.user_note.note.lower():
-                    return True
+            yield cache.encoded_hints
+        if self.search_notes and cache.user_note is not None:
+            yield cache.user_note.note
         if self.search_logs:
             for log in cache.logs:
-                if log.text and needle in log.text.lower():
-                    return True
-        return False
+                yield log.text
+
+    def matches(self, cache: Cache) -> bool:
+        if self._is_noop():
+            return True
+        if not self._has_fields():
+            return False
+        found = any(
+            value and self._positive.match_value(value)
+            for value in self._values(cache)
+        )
+        return not found if self._negated else found
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
             "text": self.text,
+            "op": self.op,
             "search_description": self.search_description,
             "search_logs": self.search_logs,
             "search_notes": self.search_notes,
@@ -1934,13 +1968,19 @@ class TextSearchFilter(BaseFilter):
 
     @classmethod
     def from_dict(cls, data: dict) -> "TextSearchFilter":
+        # Profiles saved before the operator existed have no "op" — they
+        # were always "contains".
         return cls(
             text=data.get("text", ""),
             search_description=data.get("search_description", True),
             search_logs=data.get("search_logs", True),
             search_notes=data.get("search_notes", True),
             search_hint=data.get("search_hint", False),
+            op=data.get("op", "contains"),
         )
+
+    def __repr__(self) -> str:
+        return f"<TextSearchFilter {self.op} {self.text!r}>"
 
 
 # ── Child waypoint filter ─────────────────────────────────────────────────────
@@ -3058,7 +3098,7 @@ def _filterset_relationship_needs(filterset: Optional["FilterSet"]) -> _Relation
     )
     _text_filters = [
         f for f in _iter_filters(filterset)
-        if isinstance(f, TextSearchFilter) and f.text
+        if isinstance(f, TextSearchFilter) and not f._is_noop()
     ] if filterset is not None else []
     needs_description = any(f.search_description for f in _text_filters)
     needs_hint = any(f.search_hint for f in _text_filters)

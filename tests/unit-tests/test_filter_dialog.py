@@ -538,26 +538,53 @@ class TestBuildFilterset:
         assert "where_clause" in _types(dlg._build_filterset())
 
     def test_text_search_builds_filter(self, dlg):
-        dlg._text_search_input.setText("waterfall")
+        dlg._text_search_row.edit.setText("waterfall")
         types = _types(dlg._build_filterset())
         assert "text_search" in types
 
     def test_text_search_empty_text_no_filter(self, dlg):
-        dlg._text_search_input.setText("  ")
+        dlg._text_search_row.edit.setText("  ")
         assert "text_search" not in _types(dlg._build_filterset())
 
     def test_text_search_hint_flag_propagates(self, dlg):
-        dlg._text_search_input.setText("rock")
+        dlg._text_search_row.edit.setText("rock")
         dlg._text_search_hint.setChecked(True)
         fs = dlg._build_filterset()
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
         assert f.search_hint is True
 
     def test_text_search_logs_enabled_by_default(self, dlg):
-        dlg._text_search_input.setText("TFTC")
+        dlg._text_search_row.edit.setText("TFTC")
         fs = dlg._build_filterset()
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
         assert f.search_logs is True
+
+    def test_text_search_op_propagates(self, dlg):
+        dlg._text_search_row.set_op("regex")
+        dlg._text_search_row.edit.setText(r"N\s*47")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert (f.op, f.text) == ("regex", r"N\s*47")
+
+    def test_text_search_valueless_op_needs_no_text(self, dlg):
+        dlg._text_search_row.set_op("empty")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.op == "empty"
+
+    def test_text_search_loads_op(self, dlg):
+        dlg._load_filterset(FilterSet().add(TextSearchFilter("x", op="not_contains")))
+        assert dlg._text_search_row.op() == "not_contains"
+        assert dlg._text_search_row.edit.text() == "x"
+
+    def test_text_search_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._text_search_row.set_op("regex")
+        dlg._text_search_row.edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._text_search_tab
 
 
 # ── load_filterset roundtrip ────────────────────────────────────────────────────
@@ -708,7 +735,7 @@ class TestLoadFilterset:
         fs.add(TextSearchFilter("waterfall", search_description=True,
                                 search_logs=False, search_notes=False, search_hint=True))
         dlg._load_filterset(fs)
-        assert dlg._text_search_input.text() == "waterfall"
+        assert dlg._text_search_row.edit.text() == "waterfall"
         assert dlg._text_search_description.isChecked() is True
         assert dlg._text_search_logs.isChecked() is False
         assert dlg._text_search_notes.isChecked() is False
@@ -1494,9 +1521,13 @@ class TestHighlightChangedElements:
         assert _lit_tabs(dlg) == set()
 
     def test_text_search(self, dlg):
-        dlg._text_search_input.setText("spoiler")
-        assert _lit(dlg._text_search_label)
+        dlg._text_search_row.edit.setText("spoiler")
+        assert _lit(dlg._text_search_row.label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._text_search_tab)}
+
+    def test_text_search_valueless_op(self, dlg):
+        dlg._text_search_row.set_op("not_empty")
+        assert _lit(dlg._text_search_row.label)
 
     def test_where_sql_lights_only_the_tab(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
@@ -1504,7 +1535,7 @@ class TestHighlightChangedElements:
 
     def test_several_tabs_at_once(self, dlg):
         dlg._dist_enabled.setChecked(True)
-        dlg._text_search_input.setText("spoiler")
+        dlg._text_search_row.edit.setText("spoiler")
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab), _tab(dlg, dlg._text_search_tab)}
 
     def test_reset_all_clears_every_highlight(self, dlg):

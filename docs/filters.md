@@ -368,7 +368,9 @@ Check **Exclude** to invert the filter and keep only the caches that do *not* ma
 
 ## Text search filter
 
-The **Text Search** tab searches free-text fields for a word or phrase, rather than an exact match like the *Name* or *GC code* filters.
+The **Text Search** tab searches free-text fields for a word, phrase or pattern. It has the same operators as *Name* (contains, equals, starts/ends with, in list, empty, regex, and their negations), all case-insensitive.
+
+A positive operator matches when **any** of the searched fields — or any single log — matches. A negated operator (*does not contain*, *not regex*, …) and *is empty* match when **none** of them does, so *does not contain* `spoiler` keeps caches that mention "spoiler" in none of the ticked fields.
 
 | Field | Searched by default |
 |---|---|
@@ -377,7 +379,7 @@ The **Text Search** tab searches free-text fields for a word or phrase, rather t
 | Personal notes | ✓ |
 | Hint | ✗ (off — enable it explicitly if you want hint text included) |
 
-The search uses SQL `LIKE` pushdown rather than loading every cache into Python, so it stays fast even on large databases.
+The search uses SQL `LIKE` pushdown rather than loading every cache into Python, so it stays fast even on large databases. Regex searches can't be pushed to SQL and are checked cache by cache, so they are slower — especially with *Logs* ticked.
 
 ---
 

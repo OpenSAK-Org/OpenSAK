@@ -18,7 +18,7 @@ Understøtter gem/indlæs filterprofiler.
 from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
@@ -40,7 +40,7 @@ from opensak.gui.widgets.center_point_picker import CenterPointPicker
 from opensak.gui.theme import highlight_colors, highlight_style
 from opensak.lang import tr
 from opensak.filters.engine import (
-    FilterSet, SortSpec,
+    BaseFilter, FilterSet, SortSpec,
     CacheTypeFilter, ContainerFilter,
     DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter,
@@ -346,6 +346,9 @@ _TEXT_OP_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+_F = TypeVar("_F", bound=BaseFilter)
+
+
 class TextFilterRow(QWidget):
     """Operator dropdown + value field for one text filter (name, owner, …).
 
@@ -382,8 +385,11 @@ class TextFilterRow(QWidget):
         self.set_op("contains")
         self.edit.clear()
 
-    def build(self, cls: type[TextMatchFilter]) -> Optional[TextMatchFilter]:
-        """Filter for the current input, or None when the row is not set."""
+    def build(self, cls: Callable[[str, str], _F]) -> Optional[_F]:
+        """Filter for the current input, or None when the row is not set.
+
+        *cls* is called as ``cls(text, op)`` — a TextMatchFilter subclass, or
+        a factory like the Text Search tab's."""
         op = self.op()
         if op in TEXT_OPS_VALUELESS:
             return cls("", op)
@@ -1801,10 +1807,10 @@ class FilterDialog(QDialog):
         group_layout = QFormLayout(group)
         group_layout.setSpacing(8)
 
-        self._text_search_input = QLineEdit()
-        self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
-        self._text_search_label = hug_label(QLabel(tr("filter_text_search_label")))
-        group_layout.addRow(self._text_search_label, self._text_search_input)
+        # Same operators as the other text filters, regex included.
+        self._text_search_row = TextFilterRow(tr("filter_text_search_label"),
+                                              tr("filter_text_search_placeholder"))
+        group_layout.addRow(self._text_search_row.label, self._text_search_row)
 
         self._text_search_description = QCheckBox(tr("detail_tab_desc"))
         self._text_search_description.setChecked(True)
@@ -1957,8 +1963,8 @@ class FilterDialog(QDialog):
             # The attribute rows are cells, not widgets — painted by
             # _on_attr_state_changed; this entry only drives the tab itself.
             (self._attributes_tab, None, self._attributes_changed),
-            (self._text_search_tab, self._text_search_label,
-             lambda: bool(self._text_search_input.text().strip())),
+            (self._text_search_tab, self._text_search_row.label,
+             self._text_search_row.is_set),
             # Nothing on the Where tab is a label worth painting — the SQL box
             # already shows plainly whether it holds anything.
             (self._where_tab, None,
@@ -2049,6 +2055,17 @@ class FilterDialog(QDialog):
                 self, tr("warning"),
                 tr("filter_regex_invalid", field=row.label,
                    error=text_filter.regex_error),
+            )
+            return False
+        text_search = self._build_text_search_filter()
+        if text_search is not None and text_search.regex_error is not None:
+            self._tabs.setCurrentWidget(self._text_search_tab)
+            self._text_search_row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid",
+                   field=self._text_search_row.label.text().rstrip(":"),
+                   error=text_search.regex_error),
             )
             return False
         log_filter = self._build_log_filter()
@@ -2253,8 +2270,20 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(0)
         self._wp_count2.setValue(0)
 
+    def _build_text_search_filter(self) -> Optional[TextSearchFilter]:
+        """The Text Search tab's filter, or None when its row is not set."""
+        return self._text_search_row.build(
+            lambda text, op: TextSearchFilter(
+                text,
+                search_description=self._text_search_description.isChecked(),
+                search_logs=self._text_search_logs.isChecked(),
+                search_notes=self._text_search_notes.isChecked(),
+                search_hint=self._text_search_hint.isChecked(),
+                op=op,
+            ))
+
     def _reset_text_search(self) -> None:
-        self._text_search_input.clear()
+        self._text_search_row.reset()
         self._text_search_description.setChecked(True)
         self._text_search_logs.setChecked(True)
         self._text_search_notes.setChecked(True)
@@ -2514,15 +2543,9 @@ class FilterDialog(QDialog):
             fs.add(wp_filter)
 
         # Tekstsøgning
-        ts_text = self._text_search_input.text().strip()
-        if ts_text:
-            fs.add(TextSearchFilter(
-                text=ts_text,
-                search_description=self._text_search_description.isChecked(),
-                search_logs=self._text_search_logs.isChecked(),
-                search_notes=self._text_search_notes.isChecked(),
-                search_hint=self._text_search_hint.isChecked(),
-            ))
+        text_search = self._build_text_search_filter()
+        if text_search is not None:
+            fs.add(text_search)
 
         # WHERE clause
         if self._where_tab is not None:
@@ -2774,7 +2797,7 @@ class FilterDialog(QDialog):
             elif ftype == "waypoint":
                 self._load_waypoint_filter(f)
             elif ftype == "text_search":
-                self._text_search_input.setText(getattr(f, "text", ""))
+                self._text_search_row.load(f)
                 self._text_search_description.setChecked(getattr(f, "search_description", True))
                 self._text_search_logs.setChecked(getattr(f, "search_logs", True))
                 self._text_search_notes.setChecked(getattr(f, "search_notes", True))
