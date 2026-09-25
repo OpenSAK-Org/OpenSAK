@@ -35,6 +35,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, List
 from enum import IntEnum
+from opensak.net import SSL_CONTEXT
 from opensak.utils.types import GcCode, LogType
 from opensak.utils.utils import validate_gc_code
 
@@ -245,7 +246,7 @@ def _exchange_code(code: str, code_verifier: str) -> dict:
         method="POST",
     )
 
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
         token_data = json.loads(resp.read().decode("utf-8"))
 
     # Beregn absolut udløbstidspunkt
@@ -276,7 +277,7 @@ def _refresh_token() -> Optional[dict]:
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
             new_token = json.loads(resp.read().decode("utf-8"))
 
         expires_in = new_token.get("expires_in", 3600)
@@ -354,7 +355,7 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 401:

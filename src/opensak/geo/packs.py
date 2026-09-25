@@ -16,6 +16,7 @@ from typing import Callable, Iterable
 from urllib.error import URLError
 
 from opensak.logger import get_logger
+from opensak.net import SSL_CONTEXT
 
 log = get_logger("geo.packs")
 
@@ -54,10 +55,15 @@ def _asset_url(filename: str) -> str:
 def fetch_manifest(timeout: int = REQUEST_TIMEOUT) -> dict | None:
     """Download manifest.json from OpenSAK-Data. Returns parsed dict or None on error."""
     try:
-        with urllib.request.urlopen(_asset_url(MANIFEST_FILENAME), timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            _asset_url(MANIFEST_FILENAME), timeout=timeout, context=SSL_CONTEXT
+        ) as resp:
             return json.load(resp)  # type: ignore[no-any-return]
     except (*_FETCH_ERRORS, json.JSONDecodeError) as exc:
-        log.debug("manifest fetch failed: %s", exc)
+        # Issue #901: warning, ikke debug — kalderen melder det blot som
+        # "ingen netværksforbindelse", så den faktiske årsag (fx en SSL-
+        # certifikatfejl) skal kunne ses i opensak.log.
+        log.warning("manifest fetch failed: %s", exc)
         return None
 
 
@@ -68,7 +74,9 @@ def fetch_pack(filename: str, dest_dir: Path, timeout: int = DOWNLOAD_TIMEOUT) -
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
-        with urllib.request.urlopen(_asset_url(filename), timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            _asset_url(filename), timeout=timeout, context=SSL_CONTEXT
+        ) as resp:
             data = resp.read()
     except _FETCH_ERRORS as exc:
         log.debug("pack fetch failed (%s): %s", filename, exc)
@@ -251,7 +259,9 @@ def _atomic_write(dest_dir: Path, filename: str, data: bytes) -> bool:
 def _fetch_file_atomic(filename: str, dest_dir: Path) -> bool:
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
-        with urllib.request.urlopen(_asset_url(filename), timeout=DOWNLOAD_TIMEOUT) as resp:
+        with urllib.request.urlopen(
+            _asset_url(filename), timeout=DOWNLOAD_TIMEOUT, context=SSL_CONTEXT
+        ) as resp:
             data = resp.read()
     except _FETCH_ERRORS as exc:
         log.debug("file fetch failed (%s): %s", filename, exc)

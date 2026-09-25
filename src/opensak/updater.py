@@ -12,7 +12,6 @@ import os
 import platform
 import plistlib
 import shutil
-import ssl
 import stat
 import subprocess
 import sys
@@ -24,34 +23,15 @@ from urllib.error import URLError
 from PySide6.QtCore import QThread, Signal
 
 from opensak.logger import get_logger
+from opensak.net import SSL_CONTEXT, build_ssl_context
 
 log = get_logger("updater")
 
 
-def _build_ssl_context() -> ssl.SSLContext:
-    """
-    Byg en SSL-kontekst der eksplicit bruger certifi's certifikat-bundt.
-
-    Uden dette kan HTTPS-kald fejle med CERTIFICATE_VERIFY_FAILED i en
-    PyInstaller-bundlet .exe på Windows, fordi Python's standard SSL-
-    verifikation falder tilbage til systemets certifikat-store, som ikke
-    altid er korrekt tilgængelig i en bundlet kontekst. certifi's
-    cacert.pem bundles eksplicit med .spec-filen og bruges her i stedet
-    for at stole på systemets opslag.
-
-    Falder tilbage til Python's standard SSL-kontekst hvis certifi af en
-    eller anden grund ikke er tilgængeligt — bedre at forsøge med
-    systemets certifikater end at crashe helt.
-    """
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        log.debug("certifi ikke tilgængeligt — falder tilbage til systemets SSL-kontekst")
-        return ssl.create_default_context()
-
-
-_SSL_CONTEXT = _build_ssl_context()
+# Issue #901: den certifi-baserede SSL-kontekst bor nu i opensak.net, så alle
+# HTTPS-kald deler den. De gamle navne bevares som aliaser.
+_build_ssl_context = build_ssl_context
+_SSL_CONTEXT = SSL_CONTEXT
 
 GITHUB_API_URL          = "https://api.github.com/repos/OpenSAK-Org/opensak/releases/latest"
 GITHUB_API_ALL_URL      = "https://api.github.com/repos/OpenSAK-Org/opensak/releases"
