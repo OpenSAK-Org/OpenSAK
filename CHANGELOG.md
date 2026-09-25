@@ -4,6 +4,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.9] — 2026-09-25
+
+> Fixes a startup failure in the direct Windows download on PCs where
+> Windows' Smart App Control is switched on. The Microsoft Store version was
+> never affected, and remains the recommended way to install OpenSAK on
+> Windows.
+
+### Fixed
+
+- **Windows: the direct download could fail to start with Smart App Control
+  on (#904)** — beta.6 to beta.8 passed the welcome wizard, then stopped with
+  *"OpenSAK could not open your database and cannot start"* and *"DLL load
+  failed … An Application Control policy has blocked this file"*. Your
+  database was fine: Windows' Smart App Control blocked a new, unsigned
+  component of the database library that Microsoft hadn't seen before. The
+  direct download no longer includes that component (the library's own
+  equivalent is used instead, with no noticeable difference).
+
+  Smart App Control is on by default on many newer Windows 11 PCs and can
+  switch itself on, so you may have it without knowing. If it ever blocks
+  another part of OpenSAK, you now get a clear explanation instead of a
+  database error.
+
+### Changed
+
+- **Microsoft Store is the recommended Windows installation** — it is signed
+  by Microsoft, is never blocked by Smart App Control, and updates itself
+  automatically. The direct download from GitHub remains available.
+
+---
+
 ## [1.20.0-beta.8] — 2026-09-25
 
 > Two security-related network fixes. Boundary Data Updates works again on
