@@ -3292,6 +3292,9 @@ class MainWindow(QMainWindow):
         # faktisk får.
         if can_appimage_self_update:
             info_text = tr("update_available_info_appimage")
+        elif can_self_download and sys.platform == "darwin":
+            # Issue #893: macOS installerer nu selv og lukker derefter OpenSAK.
+            info_text = tr("update_available_info_self_install_mac")
         elif can_self_download:
             info_text = tr("update_available_info_self_download")
         else:
@@ -3387,11 +3390,17 @@ class MainWindow(QMainWindow):
         "Henter…"-indikator kender vi her den faktiske downloadstørrelse
         via Content-Length, så fremskridtslinjen viser en reel procent.
 
-        SelfUpdateWorker erstatter ikke selv den kørende .exe/.app — når
+        Windows: SelfUpdateWorker erstatter ikke den kørende .exe — når
         download og checksum-verifikation er gennemført, "åbnes" filen
-        blot for brugeren (Explorer/Finder), som så selv fuldfører
-        installationen, ligesom ved et manuelt download.
+        blot i Explorer, og brugeren fuldfører selv installationen.
+
+        macOS (issue #893): SelfUpdateWorker installerer selv og emitter
+        `installed`; OpenSAK lukkes så pænt (se _on_installed). Fejler den
+        automatiske installation, kommer `finished_ok` i stedet, med DMG'en
+        flyttet til ~/Downloads og åbnet for manuel installation.
         """
+        import sys
+
         from opensak.updater import SelfUpdateWorker
 
         progress = QProgressDialog(tr("update_downloading"), "", 0, 100, self)
@@ -3409,13 +3418,30 @@ class MainWindow(QMainWindow):
                 progress.setValue(percent)
                 progress.setLabelText(tr("update_downloading_percent", percent=percent))
 
-        def _on_ok(_opened_path: str) -> None:
+        def _on_ok(opened_path: str) -> None:
+            progress.close()
+            if sys.platform == "darwin":
+                # #893-fallback: automatisk installation fejlede — fortæl
+                # hvor DMG'en ligger, så den kan findes og slettes bagefter.
+                msg = tr("update_download_saved_msg_mac", path=opened_path)
+            else:
+                msg = tr("update_download_done_msg")
+            QMessageBox.information(self, tr("update_download_done_title"), msg)
+
+        def _on_installed(_app_path: str) -> None:
             progress.close()
             QMessageBox.information(
                 self,
-                tr("update_download_done_title"),
-                tr("update_download_done_msg"),
+                tr("update_appimage_done_title"),
+                tr("update_installed_msg_mac"),
             )
+            # Issue #893: den kørende .app-bundle er nu udskiftet på disken.
+            # PyInstaller indlæser moduler/plugins dovent fra bundlen, så en
+            # videre kørsel ville blande gammel kode i hukommelsen med den
+            # nye versions filer. Luk derfor pænt via den normale closeEvent
+            # (gemmer layout osv.) — ingen automatisk genstart (uden for
+            # scope i #893); brugeren åbner selv den nye version.
+            self.close()
 
         _ERROR_MESSAGES = {
             "unsupported_platform": "unsupported platform",
@@ -3433,6 +3459,7 @@ class MainWindow(QMainWindow):
             )
 
         self._self_update_worker.progress.connect(_on_progress)
+        self._self_update_worker.installed.connect(_on_installed)
         self._self_update_worker.finished_ok.connect(_on_ok)
         self._self_update_worker.finished_error.connect(_on_error)
         self._self_update_worker.start()

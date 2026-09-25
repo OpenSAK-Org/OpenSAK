@@ -403,10 +403,15 @@ class TestSelfUpdateWorkerWindows:
 
 
 class TestSelfUpdateWorkerMacos:
-    def test_success_downloads_verifies_and_reveals(self, monkeypatch):
+    """Issue #893: macOS now installs by itself instead of only opening the
+    DMG. install_macos_update() and the Downloads folder are always
+    redirected here — no test may run hdiutil/ditto or touch ~/Downloads."""
+
+    @staticmethod
+    def _mac_env(monkeypatch, tmp_path, content):
         monkeypatch.setattr(updater.sys, "platform", "darwin")
         monkeypatch.setattr(updater.platform, "machine", lambda: "arm64")
-        content, digest = _content_and_digest(b"fake dmg contents")
+        digest = hashlib.sha256(content).hexdigest()
         monkeypatch.setattr(
             "urllib.request.urlopen",
             _dispatching_urlopen(
@@ -415,20 +420,80 @@ class TestSelfUpdateWorkerMacos:
                 asset_bytes=content,
             ),
         )
+        target = tmp_path / "Applications" / "OpenSAK.app"
+        monkeypatch.setattr(updater, "macos_install_target", lambda: target)
+        downloads = tmp_path / "Downloads"
+        monkeypatch.setattr(updater, "_macos_downloads_dir", lambda: downloads)
         revealed: list = []
         monkeypatch.setattr(SelfUpdateWorker, "_reveal", lambda self, path: revealed.append(path))
+        return target, downloads, revealed
 
-        worker = SelfUpdateWorker("v1.20.0")
-        ok_results: list = []
-        err_results: list = []
-        worker.finished_ok.connect(ok_results.append)
-        worker.finished_error.connect(err_results.append)
+    @staticmethod
+    def _run(worker):
+        signals: dict = {"installed": [], "ok": [], "err": []}
+        worker.installed.connect(signals["installed"].append)
+        worker.finished_ok.connect(signals["ok"].append)
+        worker.finished_error.connect(signals["err"].append)
         worker.run()
+        return signals
 
-        assert err_results == []
-        assert len(ok_results) == 1
-        assert ok_results[0].endswith(_MAC_ARM_ASSET_NAME)
-        assert len(revealed) == 1
+    def test_success_installs_emits_installed_and_removes_download(self, monkeypatch, tmp_path):
+        target, downloads, revealed = self._mac_env(monkeypatch, tmp_path, b"fake dmg")
+        calls: list = []
+
+        def _fake_install(dmg, tgt):
+            assert dmg.read_bytes() == b"fake dmg"
+            calls.append((dmg, tgt))
+            return tgt
+        monkeypatch.setattr(updater, "install_macos_update", _fake_install)
+
+        signals = self._run(SelfUpdateWorker("v1.20.0"))
+
+        assert signals == {"installed": [str(target)], "ok": [], "err": []}
+        assert revealed == []
+        dmg, tgt = calls[0]
+        assert tgt == target
+        assert not dmg.exists()            # no orphan in /private/var/folders
+        assert not dmg.parent.exists()     # temp dir cleaned up as well
+        assert not downloads.exists()
+
+    @pytest.mark.parametrize("exc", [
+        updater.MacInstallError("no .app bundle found"),
+        PermissionError("/Applications is not writable"),
+        subprocess.CalledProcessError(1, ["hdiutil", "attach"]),
+        subprocess.TimeoutExpired(["ditto"], 600),
+    ])
+    def test_install_failure_falls_back_to_downloads(self, monkeypatch, tmp_path, exc):
+        target, downloads, revealed = self._mac_env(monkeypatch, tmp_path, b"fake dmg")
+
+        def _failing_install(dmg, tgt):
+            raise exc
+        monkeypatch.setattr(updater, "install_macos_update", _failing_install)
+
+        signals = self._run(SelfUpdateWorker("v1.20.0"))
+
+        saved = downloads / _MAC_ARM_ASSET_NAME
+        assert signals == {"installed": [], "ok": [str(saved)], "err": []}
+        assert saved.read_bytes() == b"fake dmg"
+        assert revealed == [saved]
+
+    def test_checksum_mismatch_never_installs(self, monkeypatch, tmp_path):
+        self._mac_env(monkeypatch, tmp_path, b"fake dmg")
+        monkeypatch.setattr(
+            "urllib.request.urlopen",
+            _dispatching_urlopen(
+                release_payload=_RELEASE_ALL_PLATFORMS,
+                checksums_text=f"{'0' * 64}  {_MAC_ARM_ASSET_NAME}\n",
+                asset_bytes=b"tampered",
+            ),
+        )
+
+        def _must_not_install(*_a):
+            raise AssertionError("must not install an unverified download")
+        monkeypatch.setattr(updater, "install_macos_update", _must_not_install)
+
+        signals = self._run(SelfUpdateWorker("v1.20.0"))
+        assert signals == {"installed": [], "ok": [], "err": ["checksum_mismatch"]}
 
     def test_reveal_calls_open(self, monkeypatch, tmp_path):
         monkeypatch.setattr(updater.sys, "platform", "darwin")

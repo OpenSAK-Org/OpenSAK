@@ -422,6 +422,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Klicken Sie auf 'Herunterladen', um die GitHub-Seite zu öffnen.",
     "update_available_info_appimage":      "Klicken Sie auf 'Jetzt aktualisieren', um das Update automatisch herunterzuladen, zu prüfen und zu installieren.",
     "update_available_info_self_download": "Klicken Sie auf 'Herunterladen & installieren', um das Update herunterzuladen und zu prüfen — es wird danach automatisch für Sie geöffnet.",
+    "update_available_info_self_install_mac": "Klicken Sie auf 'Herunterladen & installieren', um das Update herunterzuladen, zu prüfen und zu installieren. OpenSAK wird danach geschlossen, damit Sie die neue Version starten können.",
     "update_open_releases":         "Neue Version herunterladen",
     "update_msix_managed_title":    "Update wird vom Microsoft Store verwaltet",
     "update_msix_managed_msg":      "OpenSAK {latest} ist verfügbar — Sie verwenden {current}. Der Microsoft Store hält diese Installation automatisch auf dem neuesten Stand, es ist also keine Aktion erforderlich.",
@@ -1311,6 +1312,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Die neue Version wird heruntergeladen… ({percent} %)",
     "update_download_done_title":   "Download abgeschlossen",
     "update_download_done_msg":     "Die neue Version wurde heruntergeladen und für Sie geöffnet. Schliessen Sie OpenSAK und schliessen Sie die Installation von dort ab.",
+    "update_download_saved_msg_mac": "Das Update konnte nicht automatisch installiert werden und wurde stattdessen für Sie geöffnet: Ziehen Sie OpenSAK in den Ordner Programme, um die Installation abzuschliessen. Die heruntergeladene Datei befindet sich in Ihrem Downloads-Ordner:\n{path}",
+    "update_installed_msg_mac":     "Die neue Version wurde installiert. OpenSAK wird jetzt geschlossen — öffnen Sie es erneut, um die neue Version zu starten.",
     "update_download_error_title":  "Download fehlgeschlagen",
     "update_download_error_msg":    "OpenSAK konnte das Update nicht automatisch herunterladen ({error}). Sie können die neue Version weiterhin manuell von der Release-Seite herunterladen.",
 

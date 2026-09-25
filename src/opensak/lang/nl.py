@@ -424,6 +424,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Klik op 'Downloaden' om de GitHub releases-pagina te openen en de nieuwste versie te downloaden.",
     "update_available_info_appimage":      "Klik op 'Nu bijwerken' om de update automatisch te downloaden, verifiëren en installeren.",
     "update_available_info_self_download": "Klik op 'Downloaden & installeren' om de update te downloaden en verifiëren — deze wordt daarna automatisch voor u geopend.",
+    "update_available_info_self_install_mac": "Klik op 'Downloaden & installeren' om de update te downloaden, te verifiëren en te installeren. OpenSAK wordt daarna gesloten zodat u de nieuwe versie kunt starten.",
     "update_open_releases":         "Nieuwe versie downloaden",
     "update_msix_managed_title":    "Update wordt beheerd door de Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} is beschikbaar — u gebruikt {current}. De Microsoft Store houdt deze installatie automatisch up-to-date, dus er is geen actie nodig.",
@@ -1307,6 +1308,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "De nieuwe versie wordt gedownload… ({percent}%)",
     "update_download_done_title":   "Download voltooid",
     "update_download_done_msg":     "De nieuwe versie is gedownload en voor u geopend. Sluit OpenSAK en voltooi de installatie vandaar.",
+    "update_download_saved_msg_mac": "De update kon niet automatisch worden geïnstalleerd en is in plaats daarvan voor u geopend: sleep OpenSAK naar de map Apps om te voltooien. Het gedownloade bestand staat in uw map Downloads:\n{path}",
+    "update_installed_msg_mac":     "De nieuwe versie is geïnstalleerd. OpenSAK wordt nu gesloten — open het opnieuw om de nieuwe versie te starten.",
     "update_download_error_title":  "Download mislukt",
     "update_download_error_msg":    "OpenSAK kon de update niet automatisch downloaden ({error}). U kunt deze nog steeds handmatig downloaden van de releasepagina.",
 

@@ -421,6 +421,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Clique em 'Baixar' para abrir a página do GitHub e obter a versão mais recente.",
     "update_available_info_appimage":      "Clique em 'Atualizar agora' para transferir, verificar e instalar a atualização automaticamente.",
     "update_available_info_self_download": "Clique em 'Transferir e instalar' para transferir e verificar a atualização — será depois aberta automaticamente para si.",
+    "update_available_info_self_install_mac": "Clique em 'Transferir e instalar' para transferir, verificar e instalar a atualização. O OpenSAK fechará em seguida para que possa iniciar a nova versão.",
     "update_open_releases":         "Baixar nova versão",
     "update_msix_managed_title":    "Atualização gerenciada pela Microsoft Store",
     "update_msix_managed_msg":      "O OpenSAK {latest} está disponível — você está usando {current}. A Microsoft Store mantém esta instalação atualizada automaticamente, portanto nenhuma ação é necessária.",
@@ -1310,6 +1311,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "A transferir a nova versão… ({percent}%)",
     "update_download_done_title":   "Transferência concluída",
     "update_download_done_msg":     "A nova versão foi transferida e aberta para si. Feche o OpenSAK e conclua a instalação a partir daí.",
+    "update_download_saved_msg_mac": "Não foi possível instalar a atualização automaticamente, por isso foi aberta para si: arraste o OpenSAK para a pasta Aplicações para concluir. O ficheiro transferido está na sua pasta Transferências:\n{path}",
+    "update_installed_msg_mac":     "A nova versão foi instalada. O OpenSAK vai fechar agora — abra-o novamente para iniciar a nova versão.",
     "update_download_error_title":  "Falha na transferência",
     "update_download_error_msg":    "Não foi possível transferir a atualização automaticamente ({error}). Ainda pode transferi-la manualmente a partir da página de releases.",
 

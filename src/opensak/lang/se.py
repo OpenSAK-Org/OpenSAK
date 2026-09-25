@@ -421,6 +421,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Klicka på 'Ladda ner' för att öppna GitHub-sidan och hämta den senaste versionen.",
     "update_available_info_appimage":      "Klicka på 'Uppdatera nu' för att automatiskt ladda ner, verifiera och installera uppdateringen.",
     "update_available_info_self_download": "Klicka på 'Ladda ner och installera' för att ladda ner och verifiera uppdateringen — den öppnas sedan automatiskt åt dig.",
+    "update_available_info_self_install_mac": "Klicka på 'Ladda ner och installera' för att ladda ner, verifiera och installera uppdateringen. OpenSAK stängs sedan så att du kan starta den nya versionen.",
     "update_open_releases":         "Ladda ner ny version",
     "update_msix_managed_title":    "Uppdatering hanteras av Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} är tillgänglig — du kör {current}. Microsoft Store håller den här installationen uppdaterad automatiskt, så ingen åtgärd behövs.",
@@ -1309,6 +1310,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Laddar ner den nya versionen… ({percent}%)",
     "update_download_done_title":   "Nedladdning klar",
     "update_download_done_msg":     "Den nya versionen har laddats ner och öppnats åt dig. Stäng OpenSAK och slutför installationen därifrån.",
+    "update_download_saved_msg_mac": "Uppdateringen kunde inte installeras automatiskt, så den har öppnats åt dig i stället: dra OpenSAK till mappen Program för att slutföra. Den nedladdade filen finns i din mapp Hämtade filer:\n{path}",
+    "update_installed_msg_mac":     "Den nya versionen har installerats. OpenSAK stängs nu — öppna programmet igen för att starta den nya versionen.",
     "update_download_error_title":  "Nedladdningen misslyckades",
     "update_download_error_msg":    "OpenSAK kunde inte ladda ner uppdateringen automatiskt ({error}). Du kan fortfarande ladda ner den manuellt från sidan för utgåvor.",
 

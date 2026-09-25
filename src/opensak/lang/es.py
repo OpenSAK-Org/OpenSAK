@@ -423,6 +423,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Haz clic en «Descargar» para abrir la página de versiones de GitHub y obtener la última versión.",
     "update_available_info_appimage":      "Haz clic en «Actualizar ahora» para descargar, verificar e instalar la actualización automáticamente.",
     "update_available_info_self_download": "Haz clic en «Descargar e instalar» para descargar y verificar la actualización — luego se abrirá automáticamente por ti.",
+    "update_available_info_self_install_mac": "Haz clic en «Descargar e instalar» para descargar, verificar e instalar la actualización. OpenSAK se cerrará después para que puedas iniciar la nueva versión.",
     "update_open_releases":         "Descargar nueva versión",
     "update_msix_managed_title":    "Actualización gestionada por Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} está disponible — estás usando {current}. Microsoft Store mantiene esta instalación actualizada automáticamente, por lo que no es necesaria ninguna acción.",
@@ -1310,6 +1311,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Descargando la nueva versión… ({percent} %)",
     "update_download_done_title":   "Descarga completada",
     "update_download_done_msg":     "Se ha descargado y abierto la nueva versión. Cierra OpenSAK y termina la instalación desde ahí.",
+    "update_download_saved_msg_mac": "No se pudo instalar la actualización automáticamente, así que se ha abierto para ti: arrastra OpenSAK a la carpeta Aplicaciones para terminar. El archivo descargado está en tu carpeta Descargas:\n{path}",
+    "update_installed_msg_mac":     "Se ha instalado la nueva versión. OpenSAK se cerrará ahora — ábrelo de nuevo para iniciar la nueva versión.",
     "update_download_error_title":  "Error al descargar",
     "update_download_error_msg":    "OpenSAK no pudo descargar la actualización automáticamente ({error}). Aún puedes descargarla manualmente desde la página de versiones.",
 

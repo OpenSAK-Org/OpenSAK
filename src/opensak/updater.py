@@ -10,9 +10,11 @@ import hashlib
 import json
 import os
 import platform
+import plistlib
 import shutil
 import ssl
 import stat
+import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -343,8 +345,14 @@ def find_linux_appimage_asset_url(tag: str) -> str | None:
 # Denne sektion downloader i stedet det korrekte platform-specifikke asset,
 # verificerer dets SHA256-checksum, og "åbner" det for brugeren (samme
 # sidste skridt som ved et manuelt download) — se SelfUpdateWorker's
-# docstring. At erstatte selve den kørende .exe/.app er bevidst uden for
-# scope, jf. issue #572's egen afgrænsning.
+# docstring. På Windows er det stadig sådan.
+#
+# Issue #893: på macOS installerer vi nu selv — at udskifte en kørende
+# .app-bundle på disken er sikkert (det er præcis hvad Sparkle gør); #572's
+# forsigtighed byggede på en Windows-analogi der ikke holder her. Se
+# install_macos_update() nedenfor. Kun hvis det fejler (fx en skrivebeskyttet
+# /Applications på en administreret Mac) falder vi tilbage til det manuelle
+# flow — nu med DMG'en lagt i ~/Downloads, hvor brugeren kan finde den.
 
 def find_windows_asset_url(tag: str) -> str | None:
     """
@@ -465,21 +473,215 @@ def _sha256_of_file(path: Path) -> str:
     return h.hexdigest()
 
 
+# ── macOS-installation (issue #893) ──────────────────────────────────────────
+
+MACOS_APP_NAME = "OpenSAK.app"
+_MACOS_DEFAULT_TARGET = Path("/Applications") / MACOS_APP_NAME
+
+
+class MacInstallError(Exception):
+    """Automatisk macOS-installation kunne ikke gennemføres (issue #893)."""
+
+
+def _running_app_bundle() -> Path | None:
+    """
+    Stien til den .app-bundle den kørende OpenSAK ligger i, eller None når
+    vi ikke kører som en frosset (PyInstaller) app — fx fra kildekoden.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def _is_transient_location(bundle: Path) -> bool:
+    """
+    True når bundlen ikke ligger et sted, man kan installere oven i: direkte
+    fra en monteret DMG (/Volumes/...) eller en Gatekeeper "App Translocation"-
+    kopi (en skrivebeskyttet, tilfældig sti macOS bruger for apps startet fra
+    en download-placering).
+    """
+    text = bundle.as_posix()
+    return text.startswith("/Volumes/") or "/AppTranslocation/" in text
+
+
+def macos_install_target() -> Path:
+    """
+    Hvor opdateringen skal installeres: der hvor den kørende app ligger, så
+    en bruger der har OpenSAK i fx ~/Applications ikke får en ekstra kopi i
+    /Applications. /Applications/OpenSAK.app bruges når placeringen ikke kan
+    afgøres eller er midlertidig (se _is_transient_location).
+    """
+    bundle = _running_app_bundle()
+    if bundle is not None and not _is_transient_location(bundle):
+        return bundle
+    return _MACOS_DEFAULT_TARGET
+
+
+def _hdiutil_attach(dmg: Path) -> Path:
+    """
+    Montér DMG'en usynligt (-nobrowse: intet Finder-vindue, ingen ikon på
+    skrivebordet) og returnér mountpunktet.
+
+    hdiutil vælger selv et ledigt mountpunkt ("/Volumes/OpenSAK 1" osv.), så
+    en efterladt montering fra et tidligere mislykket forsøg giver ingen
+    navnekonflikt — vi læser bare det faktiske punkt ud af -plist-outputtet.
+    """
+    result = subprocess.run(
+        ["hdiutil", "attach", "-nobrowse", "-noautoopen", "-plist", str(dmg)],
+        capture_output=True, check=True, timeout=120,
+    )
+    out = result.stdout
+    # hdiutil kan skrive tekst før selve plist'en — start ved XML-headeren.
+    start = out.find(b"<?xml")
+    try:
+        data = plistlib.loads(out[start:] if start >= 0 else out)
+    except Exception as exc:  # InvalidFileException, ValueError, ExpatError, ...
+        raise MacInstallError(f"could not read hdiutil output: {exc}") from exc
+    if not isinstance(data, dict):
+        raise MacInstallError("unexpected hdiutil output")
+    for entity in data.get("system-entities", []):
+        mount_point = entity.get("mount-point")
+        if mount_point:
+            return Path(mount_point)
+    raise MacInstallError("hdiutil reported no mount point")
+
+
+def _hdiutil_detach(mount_point: Path) -> None:
+    """Afmontér — med -force som fallback. Kaster aldrig: kaldes fra finally."""
+    for args in (["hdiutil", "detach", str(mount_point)],
+                 ["hdiutil", "detach", "-force", str(mount_point)]):
+        try:
+            subprocess.run(args, capture_output=True, check=True, timeout=60)
+            return
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            log.debug("hdiutil detach fejlede (%s): %s", args, exc)
+    log.warning("Kunne ikke afmontere %s", mount_point)
+
+
+def _find_app_in_volume(mount_point: Path) -> Path:
+    """Find .app-bundlen på den monterede DMG (ikke Applications-genvejen)."""
+    preferred = mount_point / MACOS_APP_NAME
+    if preferred.is_dir():
+        return preferred
+    candidates = sorted(
+        p for p in mount_point.glob("*.app") if p.is_dir() and not p.is_symlink()
+    )
+    if candidates:
+        return candidates[0]
+    raise MacInstallError(f"no .app bundle found in {mount_point}")
+
+
+def _replace_app_bundle(source_app: Path, target: Path) -> None:
+    """
+    Kopiér *source_app* ind som *target* uden nogensinde at efterlade en
+    halvkopieret app:
+
+    1. ditto til en skjult '.<navn>.new' ved siden af målet — ditto er
+       macOS' anbefalede værktøj til .app-bundles (bevarer symlinks,
+       udvidede attributter og kodesignaturen); shutil.copytree er ikke
+       pålidelig nok til det.
+    2. Den gamle bundle omdøbes til '.<navn>.old', den nye til målnavnet
+       (samme mappe, så begge omdøbninger er atomiske).
+    3. Den gamle slettes først til sidst. Fejler omdøbningen, rulles tilbage.
+
+    Kaster PermissionError før noget kopieres, hvis mappen ikke er skrivbar.
+    """
+    parent = target.parent
+    if not os.access(parent, os.W_OK) or (target.exists() and not os.access(target, os.W_OK)):
+        raise PermissionError(f"{parent} is not writable")
+
+    staged = parent / f".{target.name}.new"
+    old = parent / f".{target.name}.old"
+    for leftover in (staged, old):
+        shutil.rmtree(leftover, ignore_errors=True)
+
+    try:
+        subprocess.run(
+            ["ditto", str(source_app), str(staged)],
+            capture_output=True, check=True, timeout=600,
+        )
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+
+    had_old = target.exists()
+    if had_old:
+        os.rename(target, old)
+    try:
+        os.rename(staged, target)
+    except OSError:
+        if had_old:
+            os.rename(old, target)
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def install_macos_update(dmg: Path, target: Path) -> Path:
+    """
+    Installér .app'en fra *dmg* som *target* (issue #893): montér usynligt,
+    kopiér sikkert, afmontér altid igen. Returnerer den installerede sti.
+
+    Kaster MacInstallError, OSError (inkl. PermissionError),
+    subprocess.CalledProcessError eller subprocess.TimeoutExpired ved fejl —
+    SelfUpdateWorker falder så tilbage til det manuelle flow.
+    """
+    mount_point = _hdiutil_attach(dmg)
+    try:
+        source_app = _find_app_in_volume(mount_point)
+        _replace_app_bundle(source_app, target)
+    finally:
+        _hdiutil_detach(mount_point)
+    return target
+
+
+def _macos_downloads_dir() -> Path:
+    """Brugerens Downloads-mappe (egen funktion så tests kan omdirigere den)."""
+    return Path.home() / "Downloads"
+
+
+def _move_to_downloads(path: Path) -> Path:
+    """
+    Flyt den downloadede fil til ~/Downloads, med ' (1)', ' (2)' ... ved
+    navnekonflikt, og returnér den nye sti — så brugeren kan finde (og selv
+    slette) den, i stedet for at den forsvinder i /private/var/folders.
+    """
+    downloads = _macos_downloads_dir()
+    downloads.mkdir(parents=True, exist_ok=True)
+    dest = downloads / path.name
+    n = 1
+    while dest.exists():
+        dest = downloads / f"{path.stem} ({n}){path.suffix}"
+        n += 1
+    shutil.move(str(path), str(dest))
+    return dest
+
+
 class SelfUpdateWorker(QThread):
     """
     Baggrundsthread der downloader og verificerer den korrekte
-    platform-specifikke Windows/macOS-asset for en given release, og
-    derefter "åbner" den for brugeren (issue #572).
+    platform-specifikke Windows/macOS-asset for en given release (issue
+    #572), og derefter:
 
-    Se modul-sektionens docstring ovenfor for hvorfor dette IKKE forsøger
-    at erstatte den kørende .exe/.app selv, i modsætning til
-    AppImageUpdateWorker på Linux.
+    - Windows: "åbner" den for brugeren i Explorer (den kørende .exe er
+      låst og kan ikke erstattes).
+    - macOS (issue #893): installerer den selv via install_macos_update()
+      og emitter `installed`. Fejler det, flyttes DMG'en til ~/Downloads,
+      åbnes for brugeren, og `finished_ok` emittes med den nye sti.
 
     Signals:
         progress(downloaded, total):  Fremskridt under download, i bytes.
                                        `total` er 0 hvis serveren ikke
                                        sender Content-Length.
-        finished_ok(opened_path):     Download + åbning gennemført.
+        installed(app_path):          macOS: ny version installeret —
+                                       OpenSAK skal genstartes.
+        finished_ok(opened_path):     Download + åbning gennemført (Windows,
+                                       eller macOS-fallback til manuel
+                                       installation).
         finished_error(error_code):   "unsupported_platform" | "asset_not_found" |
                                        "checksum_unavailable" | "checksum_mismatch",
                                        eller en rå OSError/URLError-strengbesked
@@ -487,6 +689,7 @@ class SelfUpdateWorker(QThread):
     """
 
     progress       = Signal(int, int)   # (downloaded_bytes, total_bytes)
+    installed      = Signal(str)
     finished_ok    = Signal(str)
     finished_error = Signal(str)
 
@@ -549,6 +752,10 @@ class SelfUpdateWorker(QThread):
                 self.finished_error.emit("checksum_mismatch")
                 return
 
+            if sys.platform == "darwin":
+                self._finish_macos(downloaded_path, tmp_dir)
+                return
+
             self._reveal(downloaded_path)
             log.debug("Selv-opdatering downloadet og åbnet: %s", downloaded_path)
             self.finished_ok.emit(str(downloaded_path))
@@ -556,6 +763,28 @@ class SelfUpdateWorker(QThread):
         except (URLError, OSError) as exc:
             log.warning("Selv-opdatering fejlede: %s", exc)
             self.finished_error.emit(str(exc))
+
+    def _finish_macos(self, dmg: Path, tmp_dir: Path) -> None:
+        """
+        Issue #893: installér DMG'ens .app automatisk. Ved succes slettes
+        download-mappen (og dermed DMG'en); ved fejl flyttes DMG'en til
+        ~/Downloads og åbnes, så brugeren kan fuldføre manuelt og selv
+        finde filen bagefter.
+        """
+        target = macos_install_target()
+        try:
+            installed_at = install_macos_update(dmg, target)
+        except (MacInstallError, OSError,
+                subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            log.warning("Automatisk macOS-installation til %s fejlede: %s", target, exc)
+            saved = _move_to_downloads(dmg)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            self._reveal(saved)
+            self.finished_ok.emit(str(saved))
+            return
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        log.debug("Selv-opdatering installeret: %s", installed_at)
+        self.installed.emit(str(installed_at))
 
     def _reveal(self, path: Path) -> None:
         """

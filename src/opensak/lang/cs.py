@@ -421,6 +421,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Klikněte na 'Stáhnout' pro otevření stránky GitHub a získání nejnovější verze.",
     "update_available_info_appimage":      "Kliknutím na 'Aktualizovat nyní' aktualizaci automaticky stáhnete, ověříte a nainstalujete.",
     "update_available_info_self_download": "Kliknutím na 'Stáhnout a nainstalovat' aktualizaci stáhnete a ověříte, poté ji pro vás automaticky otevřeme.",
+    "update_available_info_self_install_mac": "Kliknutím na 'Stáhnout a nainstalovat' aktualizaci stáhnete, ověříte a nainstalujete. OpenSAK se poté zavře, abyste mohli spustit novou verzi.",
     "update_open_releases":         "Stáhnout novou verzi",
     "update_msix_managed_title":    "Aktualizaci zajišťuje Microsoft Store",
     "update_msix_managed_msg":      "Je dostupná verze OpenSAK {latest} — používáte {current}. Microsoft Store udržuje tuto instalaci automaticky aktuální, takže není třeba nic dělat.",
@@ -1305,6 +1306,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Stahuje se nová verze… ({percent} %)",
     "update_download_done_title":   "Stahování dokončeno",
     "update_download_done_msg":     "Nová verze byla stažena a otevřena. Zavřete OpenSAK a dokončete instalaci odtud.",
+    "update_download_saved_msg_mac": "Aktualizaci se nepodařilo nainstalovat automaticky, proto byla otevřena pro vás: dokončete ji přetažením OpenSAK do složky Aplikace. Stažený soubor najdete ve složce Stažené soubory:\n{path}",
+    "update_installed_msg_mac":     "Nová verze byla nainstalována. OpenSAK se nyní zavře — otevřete jej znovu a spustíte novou verzi.",
     "update_download_error_title":  "Stahování selhalo",
     "update_download_error_msg":    "OpenSAK se nepodařilo automaticky stáhnout aktualizaci ({error}). Novou verzi si stále můžete stáhnout ručně ze stránky s vydáními.",
 

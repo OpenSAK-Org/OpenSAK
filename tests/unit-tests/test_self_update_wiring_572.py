@@ -215,3 +215,65 @@ class TestStartSelfDownloadUpdate:
             error_slot("[Errno 2] some raw OSError text")
         args, kwargs = mock_warning.call_args
         assert "[Errno 2] some raw OSError text" in args[2]
+
+
+class TestMacosInstallWiring893:
+    """Issue #893: macOS installs by itself, then OpenSAK closes cleanly; a
+    failed install falls back to a message pointing at ~/Downloads."""
+
+    def test_macos_info_text_says_it_installs_and_closes(self, window):
+        with patch("opensak.msix.is_msix_packaged", return_value=False), \
+             patch("opensak.appimage.is_running_as_appimage", return_value=False), \
+             patch.object(sys, "platform", "darwin"), \
+             patch.object(MainWindow, "_start_self_download_update"):
+            fake_msg = _run_dialog_and_click_primary(window)
+        info_text = fake_msg.setInformativeText.call_args[0][0]
+        assert "Download & Install" in info_text
+        assert "install the update" in info_text
+        assert "close" in info_text
+
+    def test_windows_info_text_unchanged(self, window):
+        with patch("opensak.msix.is_msix_packaged", return_value=False), \
+             patch("opensak.appimage.is_running_as_appimage", return_value=False), \
+             patch.object(sys, "platform", "win32"), \
+             patch.object(MainWindow, "_start_self_download_update"):
+            fake_msg = _run_dialog_and_click_primary(window)
+        info_text = fake_msg.setInformativeText.call_args[0][0]
+        assert "opened for you automatically" in info_text
+
+    def test_installed_shows_message_then_closes_window(self, window):
+        order: list = []
+        with patch("opensak.updater.SelfUpdateWorker") as mock_worker_cls, \
+             patch("opensak.gui.mainwindow.QMessageBox.information",
+                   side_effect=lambda *a, **k: order.append("message")), \
+             patch.object(window, "close", side_effect=lambda: order.append("close")):
+            mock_instance = MagicMock()
+            mock_worker_cls.return_value = mock_instance
+            MainWindow._start_self_download_update(window, "v1.20.0")
+            installed_slot = mock_instance.installed.connect.call_args[0][0]
+            installed_slot("/Applications/OpenSAK.app")
+        assert order == ["message", "close"]
+
+    def test_macos_fallback_message_names_the_download(self, window):
+        with patch("opensak.updater.SelfUpdateWorker") as mock_worker_cls, \
+             patch("opensak.gui.mainwindow.QMessageBox.information") as mock_info, \
+             patch.object(sys, "platform", "darwin"):
+            mock_instance = MagicMock()
+            mock_worker_cls.return_value = mock_instance
+            MainWindow._start_self_download_update(window, "v1.20.0")
+            ok_slot = mock_instance.finished_ok.connect.call_args[0][0]
+            ok_slot("/Users/me/Downloads/OpenSAK-v1.20.0-macOS-arm64.dmg")
+        msg = mock_info.call_args[0][2]
+        assert "/Users/me/Downloads/OpenSAK-v1.20.0-macOS-arm64.dmg" in msg
+        assert "Applications" in msg
+
+    def test_windows_ok_message_unchanged(self, window):
+        with patch("opensak.updater.SelfUpdateWorker") as mock_worker_cls, \
+             patch("opensak.gui.mainwindow.QMessageBox.information") as mock_info, \
+             patch.object(sys, "platform", "win32"):
+            mock_instance = MagicMock()
+            mock_worker_cls.return_value = mock_instance
+            MainWindow._start_self_download_update(window, "v1.20.0")
+            ok_slot = mock_instance.finished_ok.connect.call_args[0][0]
+            ok_slot("C:/tmp/OpenSAK-v1.20.0-Windows.zip")
+        assert "finish installing it from there" in mock_info.call_args[0][2]

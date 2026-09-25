@@ -421,6 +421,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Click 'Download' to open the GitHub releases page and get the latest version.",
     "update_available_info_appimage":      "Click 'Upgrade now' to download, verify, and install the update automatically.",
     "update_available_info_self_download": "Click 'Download & Install' to download and verify the update — it will then be opened for you automatically.",
+    "update_available_info_self_install_mac": "Click 'Download & Install' to download, verify and install the update. OpenSAK will then close so you can start the new version.",
     "update_open_releases":         "Download new version",
     "update_msix_managed_title":    "Update handled by Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} is available — you are running {current}. The Microsoft Store keeps this installation up to date automatically, so no action is needed here.",
@@ -1308,6 +1309,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Downloading the new version… ({percent}%)",
     "update_download_done_title":   "Download complete",
     "update_download_done_msg":     "The new version has been downloaded and opened for you. Close OpenSAK, then finish installing it from there.",
+    "update_download_saved_msg_mac": "The update could not be installed automatically, so it has been opened for you instead: drag OpenSAK to your Applications folder to finish. The downloaded file is in your Downloads folder:\n{path}",
+    "update_installed_msg_mac":     "The new version has been installed. OpenSAK will now close — open it again to start the new version.",
     "update_download_error_title":  "Download failed",
     "update_download_error_msg":    "OpenSAK could not download the update automatically ({error}). You can still download it manually from the releases page.",
 

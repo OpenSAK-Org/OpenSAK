@@ -420,7 +420,8 @@ STRINGS: dict[str, str] = {
     "update_available_msg":         "OpenSAK {latest} er tilgængelig — du bruger {current}.",
     "update_available_info":        "Klik 'Download' for at åbne GitHub-siden og hente den nyeste version.",
     "update_available_info_appimage":      "Klik 'Opgrader nu' for automatisk at downloade, verificere og installere opdateringen.",
-    "update_available_info_self_download": "Klik 'Download & Install' for at downloade og verificere opdateringen, hvorefter den åbnes automatisk for dig.",
+    "update_available_info_self_download": "Klik 'Download og installér' for at downloade og verificere opdateringen, hvorefter den åbnes automatisk for dig.",
+    "update_available_info_self_install_mac": "Klik 'Download og installér' for at downloade, verificere og installere opdateringen. OpenSAK lukker derefter, så du kan starte den nye version.",
     "update_open_releases":         "Download ny version",
     "update_msix_managed_title":    "Opdatering håndteres af Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} er tilgængelig — du kører {current}. Microsoft Store holder denne installation opdateret automatisk, så der er ikke noget at gøre her.",
@@ -1309,6 +1310,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Downloader den nye version… ({percent} %)",
     "update_download_done_title":   "Download fuldført",
     "update_download_done_msg":     "Den nye version er downloadet og åbnet for dig. Luk OpenSAK, og fuldfør installationen derfra.",
+    "update_download_saved_msg_mac": "Opdateringen kunne ikke installeres automatisk, så den er i stedet åbnet for dig: træk OpenSAK over i mappen Programmer for at fuldføre. Den downloadede fil ligger i din Overførsler-mappe:\n{path}",
+    "update_installed_msg_mac":     "Den nye version er installeret. OpenSAK lukker nu — åbn programmet igen for at starte den nye version.",
     "update_download_error_title":  "Download fejlede",
     "update_download_error_msg":    "OpenSAK kunne ikke downloade opdateringen automatisk ({error}). Du kan stadig hente den nye version manuelt fra releases-siden.",
 

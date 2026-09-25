@@ -421,6 +421,7 @@ STRINGS: dict[str, str] = {
     "update_available_info":        "Cliquez sur 'Télécharger' pour ouvrir la page GitHub et obtenir la dernière version.",
     "update_available_info_appimage":      "Cliquez sur 'Mettre à jour maintenant' pour télécharger, vérifier et installer la mise à jour automatiquement.",
     "update_available_info_self_download": "Cliquez sur 'Télécharger et installer' pour télécharger et vérifier la mise à jour — elle sera ensuite ouverte automatiquement pour vous.",
+    "update_available_info_self_install_mac": "Cliquez sur 'Télécharger et installer' pour télécharger, vérifier et installer la mise à jour. OpenSAK se fermera ensuite pour que vous puissiez lancer la nouvelle version.",
     "update_open_releases":         "Télécharger la nouvelle version",
     "update_msix_managed_title":    "Mise à jour gérée par le Microsoft Store",
     "update_msix_managed_msg":      "OpenSAK {latest} est disponible — vous utilisez {current}. Le Microsoft Store maintient cette installation à jour automatiquement, aucune action n'est donc nécessaire.",
@@ -1310,6 +1311,8 @@ STRINGS: dict[str, str] = {
     "update_downloading_percent":   "Téléchargement de la nouvelle version… ({percent} %)",
     "update_download_done_title":   "Téléchargement terminé",
     "update_download_done_msg":     "La nouvelle version a été téléchargée et ouverte pour vous. Fermez OpenSAK, puis terminez l'installation à partir de là.",
+    "update_download_saved_msg_mac": "La mise à jour n'a pas pu être installée automatiquement ; elle a donc été ouverte pour vous : faites glisser OpenSAK dans le dossier Applications pour terminer. Le fichier téléchargé se trouve dans votre dossier Téléchargements :\n{path}",
+    "update_installed_msg_mac":     "La nouvelle version a été installée. OpenSAK va maintenant se fermer — rouvrez-le pour lancer la nouvelle version.",
     "update_download_error_title":  "Échec du téléchargement",
     "update_download_error_msg":    "OpenSAK n'a pas pu télécharger la mise à jour automatiquement ({error}). Vous pouvez toujours la télécharger manuellement depuis la page des releases.",
 
