@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.7] — 2026-09-25
+
+> A test release for the new macOS self-update flow from beta.6 (#893): that
+> flow can only be exercised when updating *from* a version that contains it,
+> so this release exists to give beta.6 users something to update to. No new
+> features or fixes compared to beta.6.
+
+### Changed
+
+- **Screenshots on opensak.com and in the User Guide refreshed** for the
+  redesigned Filter dialog (#899).
+
+---
+
 ## [1.20.0-beta.6] — 2026-09-25
 
 > The Filter dialog now shows at a glance what a filter actually restricts,
