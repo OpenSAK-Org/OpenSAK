@@ -1442,6 +1442,23 @@ class TestHighlightChangedElements:
         assert _lit(dlg._fav_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
 
+    def test_unchecking_one_direction_lights_the_group(self, dlg):
+        dlg._dir_checks["N"].setChecked(False)
+        assert _lit(dlg._dir_group)
+        assert "QGroupBox::title" in dlg._dir_group.styleSheet()
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+        dlg._set_all_directions(True)
+        assert not _lit(dlg._dir_group)
+        assert _lit_tabs(dlg) == set()
+
+    def test_personal_note_row(self, dlg):
+        dlg._pnote_no.setChecked(False)
+        assert _lit(dlg._pnote_label)
+        assert not _lit(dlg._ftf_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+        dlg._reset_misc()
+        assert not _lit(dlg._pnote_label)
+
     def test_line_polygon_points(self, dlg):
         dlg._lp_text.setPlainText("55.0, 12.0\n55.1, 12.1\n55.2, 12.0")
         assert _lit(dlg._lp_points_label)

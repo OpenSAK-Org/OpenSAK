@@ -1197,16 +1197,7 @@ class FilterDialog(QDialog):
             _yes_no_row("filter_ftf_group")
 
         # Personlig note (GSAK "Has user notes")
-        pnote_group = QGroupBox(tr("filter_personal_note_group"))
-        pnote_layout = QHBoxLayout(pnote_group)
-        self._pnote_yes = QCheckBox(tr("yes"))
-        self._pnote_yes.setChecked(True)
-        self._pnote_no  = QCheckBox(tr("no"))
-        self._pnote_no.setChecked(True)
-        pnote_layout.addWidget(self._pnote_yes)
-        pnote_layout.addWidget(self._pnote_no)
-        pnote_layout.addStretch()
-        layout.addRow(pnote_group)
+        self._pnote_yes, self._pnote_no, self._pnote_label, pnote_widget =             _yes_no_row("filter_personal_note_group")
 
         # Favorit points
         self._fav_enabled = QCheckBox(tr("filter_enable"))
@@ -1236,6 +1227,7 @@ class FilterDialog(QDialog):
             (self._locked_label, locked_widget),
             (self._dnf_label, dnf_widget),
             (self._ftf_label, ftf_widget),
+            (self._pnote_label, pnote_widget),
             (self._fav_label, fav_widget),
         )):
             r, c = divmod(i, 2)
@@ -1948,6 +1940,8 @@ class FilterDialog(QDialog):
              lambda: not (self._dnf_yes.isChecked() and self._dnf_no.isChecked())),
             (misc, self._ftf_label,
              lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
+            (misc, self._pnote_label,
+             lambda: not (self._pnote_yes.isChecked() and self._pnote_no.isChecked())),
             (misc, self._fav_label, self._fav_enabled.isChecked),
             # Logs/Waypoints: the date row labels light up on their own; the
             # tab follows the whole filter, so scope, types, count etc. count too.
