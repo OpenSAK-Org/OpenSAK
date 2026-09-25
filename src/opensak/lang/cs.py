@@ -771,6 +771,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Název profilu filtru:",
     "filter_saved_title":           "Uloženo",
     "filter_saved_msg":             "Filtr '{name}' byl uložen.",
+    "filter_overwrite_title":       "Přepsat profil",
+    "filter_overwrite_msg":         "Profil filtru '{name}' už existuje. Přepsat ho?",
     "filter_delete_title":          "Smazat profil",
     "filter_delete_msg":            "Smazat profil filtru '{name}'?",
     "filter_load_error":            "Profil nelze načíst:\n{error}",

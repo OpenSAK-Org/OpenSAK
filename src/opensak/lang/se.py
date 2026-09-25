@@ -771,6 +771,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Filter profilnamn:",
     "filter_saved_title":           "Sparat",
     "filter_saved_msg":             "Filter '{name}' har sparats.",
+    "filter_overwrite_title":       "Skriv över profil",
+    "filter_overwrite_msg":         "Filterprofilen '{name}' finns redan. Vill du skriva över den?",
     "filter_delete_title":          "Ta bort profil",
     "filter_delete_msg":            "Ta bort filter profil '{name}'?",
     "filter_load_error":            "Kunde inte ladda profil:\n{error}",

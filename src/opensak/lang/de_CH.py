@@ -773,6 +773,8 @@ STRINGS: dict[str, str] = {
     "filter_profile_name_label":    "Name Filterprofil:",
     "filter_saved_title":           "Gespeichert",
     "filter_saved_msg":             "Filter '{name}' wurde gespeichert.",
+    "filter_overwrite_title":       "Profil überschreiben",
+    "filter_overwrite_msg":         "Das Filterprofil '{name}' existiert bereits. Überschreiben?",
     "filter_delete_title":          "Profil löschen",
     "filter_delete_msg":            "Filterprofil '{name}' löschen?",
     "filter_load_error":            "Profil kann nicht geladen werden:\n{error}",

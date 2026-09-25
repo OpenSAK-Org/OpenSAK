@@ -1275,3 +1275,135 @@ class TestCenterPointIntegration:
         dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
         dlg._reset_general()
         assert dlg._center_picker.to_state() == {"kind": "home"}
+
+
+# ── issue #671: saving filter improvements ───────────────────────────────────
+
+@pytest.fixture
+def profiles_dir(tmp_path, monkeypatch):
+    """Real profile round-trips against a throwaway directory.
+
+    Overrides the module-level `isolate` fixture's stubbed list_profiles so
+    save -> list -> load actually goes through disk, which is where #671's
+    overwrite and reload behaviour lives.
+    """
+    d = tmp_path / "appdata" / "filters"
+    d.mkdir(parents=True)
+    # save()/profile_path() resolve the directory themselves via config, so
+    # redirecting that keeps the real path logic (and its sanitising) in play.
+    monkeypatch.setattr("opensak.config.get_app_data_dir", lambda: d.parent)
+    # Undo the module-level isolate fixture's empty list_profiles stub.
+    monkeypatch.setattr(fd.FilterProfile, "list_profiles",
+                        staticmethod(lambda profiles_dir=None: sorted(d.glob("*.json"))))
+    monkeypatch.setattr(fd.QMessageBox, "information", MagicMock())
+    monkeypatch.setattr(fd.QMessageBox, "warning", MagicMock())
+    # No catalogue is loaded under test, so tr() hands back the bare key and
+    # the interpolated values vanish. Keep them visible so the tests below can
+    # assert on which profile a prompt actually names.
+    monkeypatch.setattr(fd, "tr", lambda key, **kw: f"{key} {kw}" if kw else key)
+    return d
+
+
+def _answer_name(monkeypatch, name):
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (name, True)))
+
+
+def _answer_question(monkeypatch, button):
+    asked = []
+    def fake_question(parent, title, text, *a, **k):
+        asked.append(text)
+        return button
+    monkeypatch.setattr(fd.QMessageBox, "question", staticmethod(fake_question))
+    return asked
+
+
+class TestProfileOverwriteWarning:
+    """#671 item 1 — saving over an existing profile must be confirmable."""
+
+    def test_new_name_saves_without_asking(self, dlg, profiles_dir, monkeypatch):
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.Yes)
+        _answer_name(monkeypatch, "Brand New")
+        dlg._save_profile()
+        assert asked == []
+        assert (profiles_dir / "Brand New.json").exists()
+
+    def test_existing_name_asks_and_yes_overwrites(self, dlg, profiles_dir, monkeypatch):
+        _answer_name(monkeypatch, "P1")
+        dlg._name_filter.setText("first")
+        dlg._save_profile()
+
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.Yes)
+        dlg._name_filter.setText("second")
+        dlg._save_profile()
+        assert len(asked) == 1 and "P1" in asked[0]
+        assert FilterProfile.load(profiles_dir / "P1.json").filterset._filters[0].text == "second"
+
+    def test_existing_name_no_leaves_profile_untouched(self, dlg, profiles_dir, monkeypatch):
+        _answer_name(monkeypatch, "P1")
+        dlg._name_filter.setText("first")
+        dlg._save_profile()
+
+        saved = []
+        monkeypatch.setattr(dlg, "profile_saved", SimpleNamespace(emit=saved.append))
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.No)
+        dlg._name_filter.setText("second")
+        dlg._save_profile()
+        assert len(asked) == 1
+        assert saved == [], "profile_saved must not fire for a cancelled overwrite"
+        assert FilterProfile.load(profiles_dir / "P1.json").filterset._filters[0].text == "first"
+
+    def test_asks_even_when_that_profile_is_selected(self, dlg, profiles_dir, monkeypatch):
+        # The name is prefilled from the selected profile (#671 item 2), which
+        # makes re-saving the easiest way to clobber a filter by accident —
+        # so this path warns too.
+        _answer_name(monkeypatch, "P1")
+        dlg._save_profile()
+        assert dlg._profile_combo.currentText() == "P1"
+
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.No)
+        dlg._save_profile()
+        assert len(asked) == 1
+
+    def test_collision_after_filename_sanitising_is_caught(self, dlg, profiles_dir, monkeypatch):
+        # 'My/Filter' is stored as My_Filter.json, so saving 'My_Filter'
+        # overwrites it even though the two names differ in the combo.
+        FilterProfile("My/Filter", FilterSet(mode="AND")).save(profiles_dir)
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.No)
+        _answer_name(monkeypatch, "My_Filter")
+        dlg._save_profile()
+        assert len(asked) == 1
+        assert "My/Filter" in asked[0], "prompt should name the profile actually at risk"
+
+    def test_whitespace_only_name_never_reaches_the_check(self, dlg, profiles_dir, monkeypatch):
+        asked = _answer_question(monkeypatch, fd.QMessageBox.StandardButton.Yes)
+        _answer_name(monkeypatch, "   ")
+        dlg._save_profile()
+        assert asked == []
+        assert list(profiles_dir.glob("*.json")) == []
+
+
+class TestSaveKeepsAvailabilityState:
+    """#671 item 3 — saving must not silently retick/untick Availability.
+
+    Saving reloads the combo and reselects the new profile, which runs the
+    full _reset_all + _load_filterset cycle. Any availability combination the
+    user had must survive that round-trip.
+    """
+
+    @pytest.mark.parametrize("avail,unavail,archived", [
+        (True,  True,  True),   # the no-op baseline — emits no filter at all
+        (True,  True,  False),
+        (True,  False, True),
+        (False, True,  True),
+        (False, False, True),
+    ])
+    def test_availability_survives_save(self, dlg, profiles_dir, monkeypatch,
+                                        avail, unavail, archived):
+        dlg._avail_cb.setChecked(avail)
+        dlg._unavail_cb.setChecked(unavail)
+        dlg._archived_cb.setChecked(archived)
+        _answer_name(monkeypatch, "P1")
+        dlg._save_profile()
+        assert (dlg._avail_cb.isChecked(),
+                dlg._unavail_cb.isChecked(),
+                dlg._archived_cb.isChecked()) == (avail, unavail, archived)

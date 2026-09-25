@@ -2258,20 +2258,58 @@ class FilterDialog(QDialog):
         )
         if not ok or not name.strip():
             return
+        name = name.strip()
+        if not self._confirm_overwrite(name):
+            return
         fs = self._build_filterset()
-        profile = FilterProfile(name.strip(), fs)
+        profile = FilterProfile(name, fs)
         profile.save()
         self._load_profiles_into_combo()
         # Vælg den nye profil i combo
         for i in range(self._profile_combo.count()):
-            if self._profile_combo.itemText(i) == name.strip():
+            if self._profile_combo.itemText(i) == name:
                 self._profile_combo.setCurrentIndex(i)
                 break
         # issue #682: rapportér straks til MainWindow at en ny profil er
         # gemt, uanset om dialogen bagefter lukkes med Apply eller bare
         # med Close/Escape — samme mønster som profile_deleted (#491).
-        self.profile_saved.emit(name.strip())
+        self.profile_saved.emit(name)
         QMessageBox.information(self, tr("filter_saved_title"), tr("filter_saved_msg", name=name))
+
+    def _confirm_overwrite(self, name: str) -> bool:
+        """Ask before a save would replace an existing profile (issue #671).
+
+        Returns True when the save may go ahead. The check is on the file
+        the profile would land in — not on the names shown in the combo —
+        so a name that only collides after sanitising ('My/Filter' vs.
+        'My_Filter') is caught too, and so is a case-only difference on the
+        case-insensitive filesystems where it really does overwrite.
+
+        Re-saving the profile that is currently selected asks as well: the
+        prefilled name (#671 item 2) makes that the easiest way to clobber
+        a filter by simply not noticing which one was loaded.
+        """
+        try:
+            path = FilterProfile.profile_path(name)
+        except Exception:
+            # Can't work out where it would go — don't block the save.
+            return True
+        if not path.exists():
+            return True
+        # Prefer the stored display name in the prompt: it is what the user
+        # sees in the combo, and it can differ from what they just typed.
+        existing = name
+        try:
+            existing = FilterProfile.load(path).name
+        except Exception:
+            pass
+        reply = QMessageBox.question(
+            self, tr("filter_overwrite_title"),
+            tr("filter_overwrite_msg", name=existing),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _delete_profile(self) -> None:
         path = self._profile_combo.currentData()
