@@ -688,6 +688,7 @@ STRINGS: dict[str, str] = {
     "filter_trackables_group":      "Spårbara",
     "filter_has_trackables":        "Har spårbara",
     "filter_no_trackables":         "Inga spårbara",
+    "filter_tb_tracking_code":      "Spårningskod",
     "filter_corrected_group":       "Korrigerade koordinater",
     "filter_has_corrected":         "Har korrigerade koordinater",
     "filter_no_corrected":          "Inga korrigerade koordinater",

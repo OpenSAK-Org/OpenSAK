@@ -688,6 +688,7 @@ STRINGS: dict[str, str] = {
     "filter_trackables_group":      "Trackables",
     "filter_has_trackables":        "Obsahuje trackables",
     "filter_no_trackables":         "Bez trackables",
+    "filter_tb_tracking_code":      "Sledovací kód",
     "filter_corrected_group":       "Opravené souřadnice",
     "filter_has_corrected":         "Má opravené souřadnice",
     "filter_no_corrected":          "Bez opravených souřadnic",

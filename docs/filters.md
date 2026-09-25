@@ -22,7 +22,7 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ## Filter tabs
 
-The filter dialog is split across nine tabs:
+The filter dialog is split across ten tabs:
 
 | Tab | What's on it |
 |---|---|
@@ -32,6 +32,7 @@ The filter dialog is split across nine tabs:
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
+| **Trackables** | Caches by their trackables — name, tracking code, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
@@ -241,6 +242,20 @@ All of these must hold for the **same** log. Leaving **Logged by** empty matches
 ### Has trackable
 
 Show only caches that currently have at least one trackable logged as in the cache.
+
+---
+
+### Trackables
+
+Filter caches by the trackables (travel bugs, geocoins) in them. Available on the **Trackables** tab.
+
+| Field | Matches |
+|---|---|
+| Name | Trackable name — same text operators as Name |
+| Tracking code | The trackable's tracking code — same text operators as Name |
+| Count | Any, Equal, At least, At most, or Between |
+
+Both text criteria must hold for the **same** trackable. Count is the number of trackables that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Name contains `coin` and Count equal 0 shows caches without a geocoin. Count alone filters on the total number of trackables, e.g. **At least 3**.
 
 ---
 

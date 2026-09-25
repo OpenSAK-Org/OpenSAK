@@ -1,16 +1,17 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Ni faner:
+Ti faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Logs        — caches efter deres logs (type, dato, logger, antal …)
 5. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
 6. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
-7. Attributter — alle Groundspeak attributter
-8. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-9. Where       — rå SQL WHERE-betingelse
+7. Trackables  — caches efter deres trackables (navn, tracking code, antal)
+8. Attributter — alle Groundspeak attributter
+9. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+10. Where      — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -58,6 +59,7 @@ from opensak.filters.engine import (
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
+    TrackableFilter, TRACKABLE_TEXT_FIELDS,
     LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
@@ -481,6 +483,16 @@ _WP_COUNT_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+# ── Trackables-fanen ──────────────────────────────────────────────────────────
+
+# (felt, oversættelsesnøgle) for tekstrækkerne; antal bruger _WP_COUNT_LABELS.
+_TB_TEXT_LABELS: tuple[tuple[str, str], ...] = (
+    ("name",          "col_name"),
+    ("tracking_code", "filter_tb_tracking_code"),
+)
+assert tuple(f for f, _ in _TB_TEXT_LABELS) == TRACKABLE_TEXT_FIELDS
+
+
 # ── Logs-fanen ────────────────────────────────────────────────────────────────
 
 # (kategori, oversættelsesnøgle) for "Zu durchsuchende Logs", i GSAK's
@@ -819,6 +831,7 @@ class FilterDialog(QDialog):
         self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
         self._waypoints_tab = self._build_waypoints_tab()
+        self._trackables_tab = self._build_trackables_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
@@ -827,6 +840,7 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._logs_tab, tr("detail_tab_logs"))
         self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
         self._tabs.addTab(self._waypoints_tab, tr("filter_tab_waypoints"))
+        self._tabs.addTab(self._trackables_tab, tr("filter_trackables_group"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
@@ -1575,6 +1589,69 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(f.count1)
         self._wp_count2.setValue(f.count2)
 
+    def _build_trackables_tab(self) -> QWidget:
+        """Trackables fane — caches efter deres trackables. Tekstkriterierne
+        skal gælde for samme trackable; Antal tæller dem, der opfylder dem."""
+        widget = QWidget()
+        layout = QFormLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self._tb_text_rows: dict[str, TextFilterRow] = {}
+        for field, key in _TB_TEXT_LABELS:
+            row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
+            self._tb_text_rows[field] = row
+            layout.addRow(row.label, row)
+
+        count = QWidget()
+        count_layout = QHBoxLayout(count)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self._tb_count_op = QComboBox()
+        for op, key in _WP_COUNT_LABELS:
+            self._tb_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._tb_count_op)
+        self._tb_count1 = QSpinBox()
+        self._tb_count1.setRange(0, 9999)
+        self._tb_count2 = QSpinBox()
+        self._tb_count2.setRange(0, 9999)
+        count_layout.addWidget(self._tb_count1)
+        count_layout.addWidget(self._tb_count2)
+        count_layout.addStretch()
+        layout.addRow(tr("filter_wp_count"), count)
+        self._tb_count_op.currentIndexChanged.connect(self._update_tb_count_inputs)
+        self._update_tb_count_inputs()
+
+        return widget
+
+    def _update_tb_count_inputs(self) -> None:
+        op = self._tb_count_op.currentData()
+        self._tb_count1.setVisible(op != "any")
+        self._tb_count2.setVisible(op == "between")
+
+    def _build_trackable_filter(self) -> Optional[TrackableFilter]:
+        """TrackableFilter for the trackables tab, or None when nothing is set."""
+        texts = {}
+        for field, row in self._tb_text_rows.items():
+            op = row.op()
+            text = row.edit.text().strip()
+            if op in TEXT_OPS_VALUELESS or text:
+                texts[field] = (text, op)
+        f = TrackableFilter(
+            texts=texts,
+            count_op=self._tb_count_op.currentData(),
+            count1=self._tb_count1.value(),
+            count2=self._tb_count2.value(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_trackable_filter(self, f: TrackableFilter) -> None:
+        for field, match in f.texts.items():
+            self._tb_text_rows[field].load(match)
+        index = self._tb_count_op.findData(f.count_op)
+        self._tb_count_op.setCurrentIndex(max(index, 0))
+        self._tb_count1.setValue(f.count1)
+        self._tb_count2.setValue(f.count2)
+
     def _build_logs_tab(self) -> QWidget:
         """Logs fane — caches efter deres logs (GSAK's "Logs"). Øverst vælges
         hvilke logs der søges i, nederst hvad de skal opfylde."""
@@ -1935,6 +2012,8 @@ class FilterDialog(QDialog):
             specs.append((misc, row.label, row.is_set))
         for wp_row in self._wp_text_rows.values():
             specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
+        for tb_row in self._tb_text_rows.values():
+            specs.append((self._trackables_tab, tb_row.label, tb_row.is_set))
         specs += [
             (misc, self._dir_group,
              lambda: not all(cb.isChecked() for cb in self._dir_checks.values())),
@@ -1960,6 +2039,8 @@ class FilterDialog(QDialog):
              date_is_set(self._wp_date_row)),
             (self._waypoints_tab, None,
              lambda: self._build_waypoint_filter() is not None),
+            (self._trackables_tab, None,
+             lambda: self._build_trackable_filter() is not None),
             # The attribute rows are cells, not widgets — painted by
             # _on_attr_state_changed; this entry only drives the tab itself.
             (self._attributes_tab, None, self._attributes_changed),
@@ -2045,18 +2126,20 @@ class FilterDialog(QDialog):
                    error=text_filter.regex_error),
             )
             return False
-        for row in self._wp_text_rows.values():
-            text_filter = row.build(TextMatchFilter)
-            if text_filter is None or text_filter.regex_error is None:
-                continue
-            self._tabs.setCurrentWidget(self._waypoints_tab)
-            row.edit.setFocus()
-            QMessageBox.warning(
-                self, tr("warning"),
-                tr("filter_regex_invalid", field=row.label,
-                   error=text_filter.regex_error),
-            )
-            return False
+        for tab, rows in ((self._waypoints_tab, self._wp_text_rows),
+                          (self._trackables_tab, self._tb_text_rows)):
+            for row in rows.values():
+                text_filter = row.build(TextMatchFilter)
+                if text_filter is None or text_filter.regex_error is None:
+                    continue
+                self._tabs.setCurrentWidget(tab)
+                row.edit.setFocus()
+                QMessageBox.warning(
+                    self, tr("warning"),
+                    tr("filter_regex_invalid", field=row.label,
+                       error=text_filter.regex_error),
+                )
+                return False
         text_search = self._build_text_search_filter()
         if text_search is not None and text_search.regex_error is not None:
             self._tabs.setCurrentWidget(self._text_search_tab)
@@ -2270,6 +2353,13 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(0)
         self._wp_count2.setValue(0)
 
+    def _reset_trackables(self) -> None:
+        for row in self._tb_text_rows.values():
+            row.reset()
+        self._tb_count_op.setCurrentIndex(0)
+        self._tb_count1.setValue(0)
+        self._tb_count2.setValue(0)
+
     def _build_text_search_filter(self) -> Optional[TextSearchFilter]:
         """The Text Search tab's filter, or None when its row is not set."""
         return self._text_search_row.build(
@@ -2304,6 +2394,7 @@ class FilterDialog(QDialog):
         self._reset_line_polygon()
         self._reset_attributes()
         self._reset_waypoints()
+        self._reset_trackables()
         self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
@@ -2329,6 +2420,8 @@ class FilterDialog(QDialog):
             self._reset_attributes()
         elif tab is self._waypoints_tab:
             self._reset_waypoints()
+        elif tab is self._trackables_tab:
+            self._reset_trackables()
         elif tab is self._text_search_tab:
             self._reset_text_search()
         self._refresh_highlights()
@@ -2541,6 +2634,11 @@ class FilterDialog(QDialog):
         wp_filter = self._build_waypoint_filter()
         if wp_filter is not None:
             fs.add(wp_filter)
+
+        # Trackables
+        tb_filter = self._build_trackable_filter()
+        if tb_filter is not None:
+            fs.add(tb_filter)
 
         # Tekstsøgning
         text_search = self._build_text_search_filter()
@@ -2796,6 +2894,8 @@ class FilterDialog(QDialog):
                         nej_cb.setChecked(True)
             elif ftype == "waypoint":
                 self._load_waypoint_filter(f)
+            elif ftype == "trackable":
+                self._load_trackable_filter(f)
             elif ftype == "text_search":
                 self._text_search_row.load(f)
                 self._text_search_description.setChecked(getattr(f, "search_description", True))

@@ -24,7 +24,7 @@ from opensak.filters.engine import (
     PersonalNoteFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
-    TextSearchFilter, WaypointFilter,
+    TextSearchFilter, WaypointFilter, TrackableFilter,
     LogFilter, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
@@ -122,8 +122,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_nine_tabs(self, dlg):
-        assert dlg._tabs.count() == 9
+    def test_ten_tabs(self, dlg):
+        assert dlg._tabs.count() == 10
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -868,6 +868,68 @@ class TestWaypointsTab:
         assert dlg._validate_text_filters() is False
         warned.assert_called_once()
         assert dlg._tabs.currentWidget() is dlg._waypoints_tab
+
+
+# ── trackables tab ────────────────────────────────────────────────────────────
+
+def _trackable_filters(fs) -> list:
+    return [f for f in fs._filters if isinstance(f, TrackableFilter)]
+
+
+class TestTrackablesTab:
+    def test_default_builds_nothing(self, dlg):
+        assert _trackable_filters(dlg._build_filterset()) == []
+        assert not dlg._tb_count1.isVisibleTo(dlg)
+
+    def test_build_all_criteria(self, dlg):
+        dlg._tb_text_rows["name"].set_op("contains")
+        dlg._tb_text_rows["name"].edit.setText("coin")
+        dlg._tb_text_rows["tracking_code"].set_op("starts_with")
+        dlg._tb_text_rows["tracking_code"].edit.setText("TB")
+        dlg._tb_count_op.setCurrentIndex(dlg._tb_count_op.findData("between"))
+        dlg._tb_count1.setValue(1)
+        dlg._tb_count2.setValue(3)
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert {k: (m.text, m.op) for k, m in f.texts.items()} == {
+            "name": ("coin", "contains"), "tracking_code": ("TB", "starts_with")}
+        assert (f.count_op, f.count1, f.count2) == ("between", 1, 3)
+
+    def test_count_alone_builds_filter(self, dlg):
+        dlg._tb_count_op.setCurrentIndex(dlg._tb_count_op.findData("at_least"))
+        dlg._tb_count1.setValue(2)
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert (f.count_op, f.count1) == ("at_least", 2)
+        assert not f.texts
+
+    def test_load_roundtrip_and_reset(self, dlg):
+        original = TrackableFilter(
+            texts={"name": ("bug", "not_contains"), "tracking_code": ("", "not_empty")},
+            count_op="at_most", count1=4,
+        )
+        dlg._load_filterset(FilterSet().add(original))
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert f.to_dict() == original.to_dict()
+        dlg._tabs.setCurrentWidget(dlg._trackables_tab)
+        dlg._reset_current_tab()
+        assert _trackable_filters(dlg._build_filterset()) == []
+
+    def test_text_row_and_tab_highlight(self, dlg):
+        row = dlg._tb_text_rows["tracking_code"]
+        row.edit.setText("TB")
+        assert _lit(row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._trackables_tab)}
+        dlg._reset_trackables()
+        assert not _lit(row.label)
+        assert _lit_tabs(dlg) == set()
+
+    def test_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._tb_text_rows["name"].set_op("regex")
+        dlg._tb_text_rows["name"].edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._trackables_tab
 
 
 # ── logs tab ──────────────────────────────────────────────────────────────────

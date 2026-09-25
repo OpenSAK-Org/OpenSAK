@@ -690,6 +690,7 @@ STRINGS: dict[str, str] = {
     "filter_trackables_group":      "Trackables",
     "filter_has_trackables":        "Hat Trackables",
     "filter_no_trackables":         "Keine Trackables",
+    "filter_tb_tracking_code":      "Tracking-Code",
     "filter_corrected_group":       "Korrigierte Koordinaten",
     "filter_has_corrected":         "Hat korrigierte Koordinaten",
     "filter_no_corrected":          "Keine korrigierten Koordinaten",

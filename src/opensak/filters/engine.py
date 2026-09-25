@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache, Log, UserNote, Waypoint
+from opensak.db.models import Cache, Log, Trackable, UserNote, Waypoint
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
 from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES
 
@@ -2231,6 +2231,178 @@ class WaypointFilter(BaseFilter):
         return f"<WaypointFilter {self.to_dict()}>"
 
 
+# ── Trackable filter ──────────────────────────────────────────────────────────
+
+# Text criteria of TrackableFilter.
+TRACKABLE_TEXT_FIELDS = ("name", "tracking_code")
+TRACKABLE_COUNT_OPS = WAYPOINT_COUNT_OPS
+
+
+class TrackableFilter(BaseFilter):
+    """Keep caches by the trackables (travel bugs, geocoins) in them.
+
+    Works like WaypointFilter: a trackable qualifies when it passes every
+    text criterion that is set (name / tracking_code, same operators as
+    TextMatchFilter), and the cache matches when the number of qualifying
+    trackables passes the count operator — "any" meaning at least one, so
+    "count equal 0" together with e.g. name contains "coin" finds caches
+    without a geocoin. Count alone filters on the total number of trackables.
+
+    apply_filters() calls prepare() first, which counts the qualifying
+    trackables per cache in one query; matches() then only looks up the
+    count, so it also works for LightweightCache rows. Without prepare()
+    (e.g. on in-memory objects) matches() walks cache.trackables instead.
+    """
+    filter_type = "trackable"
+
+    def __init__(
+        self,
+        texts: Optional[dict[str, tuple[str, str]]] = None,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+    ):
+        # texts: field -> (text, op); a match with nothing to compare is dropped.
+        self.texts: dict[str, TextMatchFilter] = {}
+        for field_name, (text, op) in (texts or {}).items():
+            if field_name not in TRACKABLE_TEXT_FIELDS:
+                raise ValueError(f"Unknown trackable field {field_name!r}")
+            match = TextMatchFilter(text, op)
+            if not match._is_noop():
+                self.texts[field_name] = match
+        if count_op not in TRACKABLE_COUNT_OPS:
+            raise ValueError(f"Unknown trackable count operator {count_op!r}")
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        # cache id -> qualifying trackable count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """First invalid regular expression among the text criteria, if any."""
+        return next((m.regex_error for m in self.texts.values() if m.regex_error), None)
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.texts
+
+    def trackable_matches(self, tb) -> bool:
+        """Whether trackable *tb* (ORM object or row with the same fields) qualifies."""
+        return all(
+            match.match_value(getattr(tb, field_name))
+            for field_name, match in self.texts.items()
+        )
+
+    def _sql_trackable_conditions(self) -> tuple[list, bool]:
+        """SQL conditions on the trackables table plus whether they are exact
+        — see WaypointFilter._sql_waypoint_conditions()."""
+        conditions: list = []
+        exact = True
+        for field_name, match in self.texts.items():
+            cond = match.sql_condition(getattr(Trackable, field_name))
+            if cond is None or not match.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying trackable count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.texts else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying trackables (see the class docstring)."""
+        from sqlalchemy import func, select
+        conditions, exact = self._sql_trackable_conditions()
+        if exact:
+            rows = session.execute(
+                select(Trackable.cache_id, func.count(Trackable.id))
+                .where(*conditions)
+                .group_by(Trackable.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        rows = session.execute(
+            select(Trackable.cache_id, Trackable.name, Trackable.tracking_code)
+            .where(*conditions)
+        )
+        for row in rows:
+            if self.trackable_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        conditions, exact = self._sql_trackable_conditions()
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import exists, func, select
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying trackable.
+            return query.filter(
+                exists().where(Trackable.cache_id == Cache.id, *conditions).correlate(Cache)
+            )
+        count = (
+            select(func.count(Trackable.id))
+            .where(Trackable.cache_id == Cache.id, *conditions)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        if lo > 0:
+            query = query.filter(count >= lo)
+        if hi is not None:
+            query = query.filter(count <= hi)
+        return query
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for tb in cache.trackables if self.trackable_matches(tb))
+        return self._count_ok(count)
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "texts": {f: {"text": m.text, "op": m.op} for f, m in self.texts.items()},
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TrackableFilter":
+        return cls(
+            texts={
+                f: (spec.get("text", ""), spec.get("op", "contains"))
+                for f, spec in (data.get("texts") or {}).items()
+            },
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<TrackableFilter {self.to_dict()}>"
+
+
 # ── Log filter ────────────────────────────────────────────────────────────────
 
 # "Logtypen" checkbox for a log whose type is none of constants.LOG_TYPES —
@@ -2650,6 +2822,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "date":               DateFilter,
     "text_search":        TextSearchFilter,
     "waypoint":           WaypointFilter,
+    "trackable":          TrackableFilter,
     "log":                LogFilter,
 }
 
@@ -2956,14 +3129,15 @@ def _prepare_where_clause_filters(
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
     SQL directly against the database, and every WaypointFilter's waypoint
-    counts and every LogFilter's log counts (their prepare()). Must run
+    counts, TrackableFilter's trackable counts and LogFilter's log counts
+    (their prepare()). Must run
     before any Python-level matches() call touches one of those filters.
     Mutates the filter objects in place; returns nothing.
     """
     if not filterset:
         return
     for _f in _iter_filters(filterset):
-        if isinstance(_f, (WaypointFilter, LogFilter)):
+        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter)):
             _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
