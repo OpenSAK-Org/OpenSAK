@@ -341,9 +341,10 @@ def _run_migrations(engine: Engine) -> None:
         # ── Migration 7: log_count kolonne (issue #87) ───────────────────────
         logger.debug("[migrations] entering migration 7 (+%.2fs)", time.monotonic() - _mig_t0)
         # log_count caches the number of logs per cache so the UI can display
-        # it without loading the logs relationship. apply_filters() uses
-        # noload(Cache.logs) for performance, which made cache.logs always
+        # it without loading the logs relationship. apply_filters() does not
+        # load Cache.logs for performance, which made cache.logs always
         # return an empty list — and len(cache.logs) was therefore always 0.
+        # (Since #898 such access raises instead of returning [].)
         # We add the column AND populate it from existing data so users don't
         # have to re-import their databases for the count to appear.
         existing_caches = [
@@ -415,7 +416,7 @@ def _run_migrations(engine: Engine) -> None:
         # ── Migration 11: last_log_date (issue #186) ─────────────────────────
         logger.debug("[migrations] entering migration 11 (+%.2fs)", time.monotonic() - _mig_t0)
         # Caches the date of the most recent log so the "Latest Log" column can
-        # display it without loading the noload'ed logs relationship.
+        # display it without loading the (unloaded) logs relationship.
         # Populated from existing log data so users don't need to re-import.
         existing_caches = [
             row[1]
@@ -537,7 +538,7 @@ def _run_migrations(engine: Engine) -> None:
         # ── Migration 15: waypoint_count on caches (issue #377) ──────────────
         logger.debug("[migrations] entering migration 15 (+%.2fs)", time.monotonic() - _mig_t0)
         # Cached count of child waypoints so the grid can show a visual cue
-        # without loading the noload'ed waypoints relationship.
+        # without loading the (unloaded) waypoints relationship.
         existing_caches_14 = [
             row[1]
             for row in conn.execute(text("PRAGMA table_info(caches)")).fetchall()

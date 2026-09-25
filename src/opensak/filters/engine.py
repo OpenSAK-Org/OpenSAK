@@ -2923,7 +2923,7 @@ def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):
 class _RelationshipNeeds:
     """Which relationships/deferred fields a filterset actually touches.
 
-    apply_filters() uses this to decide what to joinedload/noload/defer.
+    apply_filters() uses this to decide what to joinedload/raiseload/defer.
     apply_filters_lightweight() uses it to decide whether it can serve the
     request at all — LightweightCache has none of these, so any True flag
     means falling back to the full apply_filters() ORM path.
@@ -3020,15 +3020,23 @@ def apply_filters(
     _needs = _filterset_relationship_needs(filterset)
     needs_hint_column = columns is not None and "hints" in columns
 
-    from sqlalchemy.orm import defer, joinedload, noload
+    # Issue #898: relationships no filter needs use raiseload() (was the
+    # deprecated noload()). The returned caches are handed to the GUI after
+    # the session has closed (see refresh_worker.py), so nothing may lazy-load
+    # them there — noload() made such access silently return an empty list,
+    # raiseload() makes it fail loudly instead. Code that needs the full
+    # relationships must reload the cache (reload_caches_full() /
+    # MainWindow._load_full_cache()); the grid uses the cached count/date
+    # columns (log_count, waypoint_count, last_log_date, ...).
+    from sqlalchemy.orm import defer, joinedload, raiseload
     _opts: list = [
-        joinedload(Cache.attributes) if _needs.attributes else noload(Cache.attributes),
-        joinedload(Cache.trackables) if _needs.trackables else noload(Cache.trackables),
-        # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
-        # would pull all logs for all caches. Python matches() will lazy-load
-        # logs only for the already-filtered result set.
-        joinedload(Cache.logs)       if _needs.logs        else noload(Cache.logs),
-        noload(Cache.waypoints),
+        joinedload(Cache.attributes) if _needs.attributes else raiseload(Cache.attributes),
+        joinedload(Cache.trackables) if _needs.trackables else raiseload(Cache.trackables),
+        # Log/Waypoint filters count via their prepare() query, not the
+        # relationship, so logs are only joinedloaded for a text search in
+        # log text — never for all logs of all caches otherwise.
+        joinedload(Cache.logs)       if _needs.logs        else raiseload(Cache.logs),
+        raiseload(Cache.waypoints),
         joinedload(Cache.user_note),
     ]
     # Defer the large free-text blobs unless text search needs them.

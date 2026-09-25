@@ -160,8 +160,8 @@ class Cache(Base):
 
     # ── Issue #87: Cached log count ──────────────────────────────────────────
     # Number of logs in this cache, cached as a column so the UI can display
-    # the count without loading the logs relationship (which is noload'ed
-    # for performance). Updated automatically on import in _upsert_cache().
+    # the count without loading the logs relationship (which the grid
+    # doesn't load, for performance). Updated automatically on import in _upsert_cache().
     log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # ── Issue #489/#491: Cached trackable count ──────────────────────────────
@@ -179,18 +179,18 @@ class Cache(Base):
     # found CACHES, in their totals. Matched the same way found_date/FTF
     # are derived (finder_id -> gc_finder_id, falling back to finder ->
     # gc_username), so a cache found N times by the user contributes N here.
-    # Cached as a column for the same noload()-performance reason as
+    # Cached as a column for the same not-loaded-for-performance reason as
     # log_count/trackable_count above.
     found_log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # ── Issue #186: Cached latest log date ───────────────────────────────────
     # Date of the most recent log entry, cached so the UI can display it
-    # without loading the noload'ed logs relationship. Updated on import.
+    # without loading the (unloaded) logs relationship. Updated on import.
     last_log_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # ── Issue #377: Cached waypoint count ────────────────────────────────────
     # Number of child waypoints (parking, stages, etc.), cached so the grid
-    # can show a visual cue without loading the noload'ed waypoints relation.
+    # can show a visual cue without loading the (unloaded) waypoints relation.
     # Updated on import in _insert_extra_wpts() and _link_extra_waypoints().
     waypoint_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -237,7 +237,7 @@ class Cache(Base):
     last_gpx_update: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, default=_utcnow)
 
     # Cached summary of the 4 most recent logs (any type), so the "Last
-    # four logs" column can display them without loading the noload'ed
+    # four logs" column can display them without loading the (unloaded)
     # logs relationship. One log per line, tab-separated
     # "ISO8601 date\tlog type\tfinder", most recent first. Updated on
     # import from the same merged log set as last_log_date.

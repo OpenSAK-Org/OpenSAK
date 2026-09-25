@@ -1213,7 +1213,7 @@ def _upsert_cache(
     cache.last_found_date = max(found_log_dates) if found_log_dates else None
 
     # ── Issue #716: last_four_logs (cached summary — logs relationship is
-    # noload'ed in the grid, same reasoning as last_log_date above) ────────
+    # not loaded in the grid, same reasoning as last_log_date above) ──────
     _recent = sorted(
         (lg for lg in existing_logs_by_id.values() if lg.log_date),
         key=lambda lg: _as_aware_utc(lg.log_date), reverse=True,

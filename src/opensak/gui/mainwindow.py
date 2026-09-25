@@ -1512,8 +1512,8 @@ class MainWindow(QMainWindow):
         """
         Indlæs en enkelt cache fra DB med alle relationer eager-loaded.
 
-        apply_filters() bruger noload() på logs/waypoints/user_note for
-        performance ved store databaser. Denne hjælper bruges når brugeren
+        apply_filters() indlæser ikke logs/waypoints/attributes/trackables
+        (raiseload(), #898) for performance ved store databaser. Denne hjælper bruges når brugeren
         vælger en cache, så detaljepanelet altid får komplette data.
 
         Bruger selectinload() (ikke joinedload()) på de fire samtidige
