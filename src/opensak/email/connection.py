@@ -18,6 +18,8 @@ import socket
 import ssl
 from dataclasses import dataclass
 
+from opensak.net import SSL_CONTEXT
+
 # Standard IMAP ports — used both as sensible dialog defaults and by
 # the Settings dialog's "flip default port when SSL is toggled" logic.
 DEFAULT_IMAP_SSL_PORT = 993
@@ -53,6 +55,15 @@ class ImapNetworkError(ImapConnectionError):
     timeout, eller en TLS-fejl under opsætning af forbindelsen."""
 
 
+class ImapCertificateError(ImapNetworkError):
+    """Serverens certifikat kunne ikke verificeres (issue #902):
+    selvsigneret, udløbet, eller værtsnavnet passer ikke til certifikatet.
+
+    Sker under TLS-håndtrykket, altså FØR login — kodeordet er ikke sendt.
+    Arver fra ImapNetworkError, så kode der kun skelner auth/netværk stadig
+    fanger den; GUI'en fanger den først for at vise en præcis besked."""
+
+
 def connect(config: ImapConfig, password: str, timeout: float = 10.0) -> imaplib.IMAP4:
     """
     Opret og log ind på en IMAP-forbindelse.
@@ -60,14 +71,26 @@ def connect(config: ImapConfig, password: str, timeout: float = 10.0) -> imaplib
     Kalderen har ansvar for til sidst at lukke forbindelsen igen med
     `conn.logout()`.
 
-    Rejser `ImapAuthError` ved forkert login, `ImapNetworkError` ved
-    alt andet forbindelsesrelateret.
+    Rejser `ImapAuthError` ved forkert login, `ImapCertificateError` hvis
+    serverens certifikat ikke kan verificeres, `ImapNetworkError` ved alt
+    andet forbindelsesrelateret.
+
+    Issue #902: SSL-forbindelsen verificerer nu serverens certifikat og
+    værtsnavn med den fælles kontekst fra opensak.net (systemets
+    certifikater + certifi). Uden en eksplicit ssl_context bruger imaplib
+    en kontekst UDEN verifikation, så kodeordet kunne opsnappes af en
+    man-in-the-middle. Der er bevidst ingen undtagelse for selvsignerede
+    servere (løsning A i #902).
     """
     try:
         if config.use_ssl:
-            conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(config.host, config.port, timeout=timeout)
+            conn: imaplib.IMAP4 = imaplib.IMAP4_SSL(
+                config.host, config.port, timeout=timeout, ssl_context=SSL_CONTEXT,
+            )
         else:
             conn = imaplib.IMAP4(config.host, config.port, timeout=timeout)
+    except ssl.SSLCertVerificationError as exc:
+        raise ImapCertificateError(_certificate_detail(exc)) from exc
     except (OSError, socket.gaierror, ssl.SSLError) as exc:
         raise ImapNetworkError(str(exc)) from exc
 
@@ -83,6 +106,12 @@ def connect(config: ImapConfig, password: str, timeout: float = 10.0) -> imaplib
         raise ImapNetworkError(str(exc)) from exc
 
     return conn
+
+
+def _certificate_detail(exc: ssl.SSLCertVerificationError) -> str:
+    """Den korte, læsbare årsag (fx 'self-signed certificate' eller
+    'Hostname mismatch, ...') frem for hele OpenSSL-strengen."""
+    return getattr(exc, "verify_message", None) or str(exc)
 
 
 def check_connection(config: ImapConfig, password: str, timeout: float = 10.0) -> None:

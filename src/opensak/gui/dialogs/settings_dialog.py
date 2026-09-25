@@ -63,7 +63,7 @@ class _ImapTestWorker(QThread):
     """Tester PQ-mailkontoens IMAP-login i baggrunden (issue #443), så
     GUI'en ikke fryser mens forbindelsen forsøges oprettet."""
     success = Signal()
-    error   = Signal(str, str)   # (kind: "auth" | "network" | "other", detail)
+    error   = Signal(str, str)   # (kind: "auth" | "certificate" | "network" | "other", detail)
 
     def __init__(self, config, password: str, parent=None):
         super().__init__(parent)
@@ -72,13 +72,15 @@ class _ImapTestWorker(QThread):
 
     def run(self):
         from opensak.email.connection import (
-            ImapAuthError, ImapNetworkError, check_connection,
+            ImapAuthError, ImapCertificateError, ImapNetworkError, check_connection,
         )
         try:
             check_connection(self._config, self._password)
             self.success.emit()
         except ImapAuthError as exc:
             self.error.emit("auth", str(exc))
+        except ImapCertificateError as exc:   # #902 — før ImapNetworkError (subklasse)
+            self.error.emit("certificate", str(exc))
         except ImapNetworkError as exc:
             self.error.emit("network", str(exc))
         except Exception as exc:
@@ -1027,6 +1029,8 @@ class SettingsDialog(QDialog):
         self._pq_email_test_btn.setEnabled(True)
         if kind == "auth":
             msg = tr("pq_email_test_error_auth", detail=detail)
+        elif kind == "certificate":
+            msg = tr("pq_email_test_error_certificate", detail=detail)
         elif kind == "network":
             msg = tr("pq_email_test_error_network", detail=detail)
         else:
