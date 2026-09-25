@@ -967,6 +967,8 @@ STRINGS: dict[str, str] = {
     "map_nearby_label":             "Zobrazeno {shown} nejbližších z {total} v okruhu {radius} {unit}",
     "startup_db_error_title":       "OpenSAK se nepodařilo spustit",
     "startup_db_error_msg":         "OpenSAK se nepodařilo otevřít vaši databázi a nelze jej spustit.\n\n{error}\n\nPodrobný protokol chyb byl uložen do:\n{path}\n\nProsím, sdílejte tento soubor protokolu na github.com/OpenSAK-Org/OpenSAK/issues nebo hello@opensak.com, abychom mohli pomoci.",
+    "startup_app_control_title":    "Zablokováno funkcí Smart App Control systému Windows",
+    "startup_app_control_msg":      "Funkce Smart App Control systému Windows zabránila načtení části aplikace OpenSAK, proto ji nelze spustit.\n\nTo se může stát u přímého stažení z GitHubu. Nainstalujte prosím OpenSAK raději z Microsoft Store (viz opensak.com) — tato verze je podepsána společností Microsoft, není blokována a sama se aktualizuje.\n\n{error}\n\nPodrobný protokol byl uložen do:\n{path}",
     "map_ctx_copy_coords":          "Kopírovat {coords}",
     "map_ctx_copy_as":              "Kopírovat jako...",
     "map_ctx_set_corrected":        "Nastavit opravené souřadnice",

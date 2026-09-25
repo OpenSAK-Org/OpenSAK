@@ -967,6 +967,8 @@ STRINGS: dict[str, str] = {
     "map_nearby_label":             "A mostrar as {shown} mais próximas de {total} num raio de {radius} {unit}",
     "startup_db_error_title":       "O OpenSAK não conseguiu iniciar",
     "startup_db_error_msg":         "O OpenSAK não conseguiu abrir a sua base de dados e não pode iniciar.\n\n{error}\n\nFoi guardado um registo de erro detalhado em:\n{path}\n\nPor favor partilhe este ficheiro de registo em github.com/OpenSAK-Org/OpenSAK/issues ou hello@opensak.com para que possamos ajudar.",
+    "startup_app_control_title":    "Bloqueado pelo Smart App Control do Windows",
+    "startup_app_control_msg":      "O Smart App Control do Windows impediu o carregamento de uma parte do OpenSAK, por isso o OpenSAK não pode iniciar.\n\nIsto pode acontecer com a transferência direta a partir do GitHub. Instale antes o OpenSAK a partir da Microsoft Store (ver opensak.com) — essa versão é assinada pela Microsoft, não é bloqueada e mantém-se atualizada automaticamente.\n\n{error}\n\nFoi guardado um registo detalhado em:\n{path}",
     "map_ctx_copy_coords":          "Copiar {coords}",
     "map_ctx_copy_as":              "Copiar como...",
     "map_ctx_set_corrected":        "Definir coordenadas corrigidas",

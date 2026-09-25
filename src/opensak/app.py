@@ -366,6 +366,8 @@ def main() -> None:
         # way further down.
         logger.exception("startup: failed to initialise active database")
         splash.hide()
+        if _report_app_control_block(e):
+            sys.exit(1)
         from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
         from opensak.config import get_log_path
         from opensak.lang import tr
@@ -379,8 +381,18 @@ def main() -> None:
     # Opret hovedvindue
     splash_msg("Starter OpenSAK...")
     logger.info("startup: building main window (+%.2fs)", time.monotonic() - _startup_t0)
-    from opensak.gui.mainwindow import MainWindow
-    window = MainWindow()
+    try:
+        from opensak.gui.mainwindow import MainWindow
+        window = MainWindow()
+    except ImportError as e:
+        # Issue #904: en blokeret DLL kan også dukke op her (fx lxml eller
+        # shapely). Kun den særlige App Control-situation håndteres; alt
+        # andet propagerer som hidtil.
+        logger.exception("startup: failed to build main window")
+        if _report_app_control_block(e):
+            splash.hide()
+            sys.exit(1)
+        raise
     logger.info("startup: main window built (+%.2fs total)", time.monotonic() - _startup_t0)
 
     # Vent til cache-tabellen er loadet før splash lukkes
@@ -392,6 +404,31 @@ def main() -> None:
 
     window.show()
     sys.exit(app.exec())
+
+
+def _report_app_control_block(exc: BaseException) -> bool:
+    """
+    Issue #904: hvis *exc* skyldes Windows Smart App Control, vis en besked
+    der forklarer det og peger mod Microsoft Store-versionen, og returnér
+    True. Ellers False — kalderen viser så sin almindelige fejlbesked.
+
+    Store-versionen (MSIX) er signeret af Microsoft og blokeres ikke; skulle
+    den alligevel ramme noget lignende, giver det ingen mening at henvise til
+    sig selv, så dér vises den almindelige besked.
+    """
+    from opensak.app_control import is_app_control_block
+    from opensak.msix import is_msix_packaged
+    if not is_app_control_block(exc) or is_msix_packaged():
+        return False
+    logger.error("startup: blocked by Windows Smart App Control (issue #904)")
+    from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
+    from opensak.config import get_log_path
+    from opensak.lang import tr
+    QMessageBox.critical(
+        None, tr("startup_app_control_title"),
+        tr("startup_app_control_msg", error=str(exc), path=str(get_log_path())),
+    )
+    return True
 
 
 if __name__ == "__main__":

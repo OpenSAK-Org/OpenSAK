@@ -966,6 +966,8 @@ STRINGS: dict[str, str] = {
     "map_nearby_label":             "Visar närmaste {shown} av {total} inom {radius} {unit}",
     "startup_db_error_title":       "OpenSAK kunde inte starta",
     "startup_db_error_msg":         "OpenSAK kunde inte öppna din databas och kan inte starta.\n\n{error}\n\nEn detaljerad felllogg har sparats här:\n{path}\n\nDela gärna denna loggfil på github.com/OpenSAK-Org/OpenSAK/issues eller hello@opensak.com så vi kan hjälpa till.",
+    "startup_app_control_title":    "Blockerad av Windows Smart App Control",
+    "startup_app_control_msg":      "Windows Smart App Control har hindrat en del av OpenSAK från att läsas in, så OpenSAK kan inte starta.\n\nDet kan hända med den direkta nedladdningen från GitHub. Installera i stället OpenSAK från Microsoft Store (se opensak.com) — den versionen är signerad av Microsoft, blockeras inte och håller sig själv uppdaterad.\n\n{error}\n\nEn detaljerad logg har sparats här:\n{path}",
     "map_ctx_copy_coords":          "Kopiera {coords}",
     "map_ctx_copy_as":              "Kopiera som...",
     "map_ctx_set_corrected":        "Ange korrigerade koordinater",

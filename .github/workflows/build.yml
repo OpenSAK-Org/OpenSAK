@@ -43,12 +43,36 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[build]"
+      # Issue #904: Windows Smart App Control blocks unsigned binaries that
+      # Microsoft hasn't seen before. SQLAlchemy 2.1's compiled *_cy.pyd
+      # speedups were blocked, and OpenSAK couldn't open its database. The
+      # direct download therefore uses SQLAlchemy's own pure-Python modules
+      # (same version, officially supported via DISABLE_SQLALCHEMY_CEXT).
+      # The Microsoft Store (MSIX) build is signed by Microsoft and keeps the
+      # compiled modules.
+      - name: Use pure-Python SQLAlchemy (Smart App Control, issue #904)
+        shell: pwsh
+        env:
+          DISABLE_SQLALCHEMY_CEXT: "1"
+        run: |
+          $v = python -c "import sqlalchemy; print(sqlalchemy.__version__)"
+          pip install --force-reinstall --no-deps --no-binary sqlalchemy "sqlalchemy==$v"
+          python -c "import sys; from sqlalchemy.util._has_cython import HAS_CYEXTENSION as h; print('SQLAlchemy compiled extensions:', h); sys.exit(1 if h else 0)"
       - name: Fetch boundary baseline
         run: python scripts/fetch_boundary_baseline.py
       - name: Build .exe
         run: pyinstaller opensak.spec --clean --noconfirm
         env:
           PYTHONPATH: src
+      - name: Verify no compiled SQLAlchemy modules are bundled (issue #904)
+        shell: pwsh
+        run: |
+          $found = Get-ChildItem dist/OpenSAK -Recurse -Filter "*_cy*.pyd" | Where-Object { $_.FullName -match "sqlalchemy" }
+          if ($found) {
+            $found | ForEach-Object { Write-Host "::error::Compiled SQLAlchemy module in bundle: $($_.FullName)" }
+            exit 1
+          }
+          Write-Host "OK: no compiled SQLAlchemy modules in the Windows bundle"
       - name: Create ZIP
         shell: powershell
         run: Compress-Archive -Path dist/OpenSAK -DestinationPath dist/OpenSAK-${{ github.ref_name }}-Windows.zip
