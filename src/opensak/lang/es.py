@@ -642,6 +642,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Aplicar",
     "filter_reset_all_btn":         "↺  Restablecer todo",
     "filter_reset_tab_btn":         "↺  Restablecer pestaña",
+    "filter_invert":                "Invertir filtro",
+    "filter_invert_tooltip":        "Mostrar exactamente los cachés que este filtro ocultaría",
     "filter_name_label":            "Nombre de la caché:",
     "filter_contains_placeholder":  "Contiene el texto…",
     "filter_gc_label":              "Código GC:",

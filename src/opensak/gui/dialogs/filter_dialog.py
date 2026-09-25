@@ -845,8 +845,6 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
-        self._connect_highlight_signals()
-        self._refresh_highlights()
 
         # ── Knapper ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -864,6 +862,11 @@ class FilterDialog(QDialog):
         reset_tab_btn.clicked.connect(self._reset_current_tab)
         btn_row.addWidget(reset_tab_btn)
 
+        # Global invert: show exactly the caches the filter would hide.
+        self._invert_cb = QCheckBox(tr("filter_invert"))
+        self._invert_cb.setToolTip(tr("filter_invert_tooltip"))
+        btn_row.addWidget(self._invert_cb)
+
         btn_row.addStretch()
 
         cancel_btn = QPushButton(tr("cancel"))
@@ -871,6 +874,10 @@ class FilterDialog(QDialog):
         btn_row.addWidget(cancel_btn)
 
         layout.addLayout(btn_row)
+
+        # After the button row, so the invert checkbox is connected too.
+        self._connect_highlight_signals()
+        self._refresh_highlights()
 
     def _build_general_tab(self) -> QWidget:
         """Generelt filter fane.
@@ -2107,6 +2114,9 @@ class FilterDialog(QDialog):
             for i in range(self._tabs.count()):
                 tab_bar.set_tab_highlighted(i, self._tabs.widget(i) in changed_tabs)
 
+        # The invert checkbox sits outside the tabs, so it isn't a spec.
+        set_highlighted(self._invert_cb, self._invert_cb.isChecked())
+
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
         show_where_info(self)
@@ -2411,6 +2421,7 @@ class FilterDialog(QDialog):
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
+        self._invert_cb.setChecked(False)
         self._refresh_highlights()
 
     def _reset_current_tab(self) -> None:
@@ -2456,7 +2467,7 @@ class FilterDialog(QDialog):
         ]
 
     def _build_filterset(self) -> FilterSet:
-        fs = FilterSet(mode="AND")
+        fs = FilterSet(mode="AND", negate=self._invert_cb.isChecked())
 
         # Navn / GC kode / Udlagt af / Owner name
         for row, cls in self._general_text_rows():
@@ -2784,6 +2795,7 @@ class FilterDialog(QDialog):
         """
         # Først: ryd UI så vi starter fra en kendt tilstand
         self._reset_all()
+        self._invert_cb.setChecked(fs.negate)
 
         # Saml filtre — hvis der er en nested OR-gruppe (fx attributter i OR-mode),
         # flad den ud, men husk at attributmode skal sættes.

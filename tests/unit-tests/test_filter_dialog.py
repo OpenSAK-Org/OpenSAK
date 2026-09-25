@@ -1291,6 +1291,51 @@ class TestApply:
         assert not dlg._where_error_label.isHidden()
 
 
+# ── global "Invert filter" ──────────────────────────────────────────────────────
+
+class TestInvertFilter:
+    def test_default_off(self, dlg):
+        assert not dlg._invert_cb.isChecked()
+        assert dlg._build_filterset().negate is False
+
+    def test_build_sets_negate(self, dlg):
+        dlg._name_filter.setText("church")
+        dlg._invert_cb.setChecked(True)
+        fs = dlg._build_filterset()
+        assert fs.negate is True
+        assert any(isinstance(f, NameFilter) for f in fs._filters)
+
+    def test_load_restores_checkbox(self, dlg):
+        dlg._load_filterset(FilterSet(negate=True).add(FoundFilter()))
+        assert dlg._invert_cb.isChecked()
+        dlg._load_filterset(FilterSet().add(FoundFilter()))
+        assert not dlg._invert_cb.isChecked()
+
+    def test_reset_all_clears(self, dlg):
+        dlg._invert_cb.setChecked(True)
+        dlg._reset_all()
+        assert not dlg._invert_cb.isChecked()
+
+    def test_reset_tab_keeps_it(self, dlg):
+        # Global setting — not owned by any tab.
+        dlg._invert_cb.setChecked(True)
+        dlg._reset_current_tab()
+        assert dlg._invert_cb.isChecked()
+
+    def test_highlighted_when_checked(self, dlg):
+        assert not _lit(dlg._invert_cb)
+        dlg._invert_cb.setChecked(True)
+        assert _lit(dlg._invert_cb)
+        assert _lit_tabs(dlg) == set()
+        dlg._invert_cb.setChecked(False)
+        assert not _lit(dlg._invert_cb)
+
+    def test_dialog_opened_with_inverted_filterset(self, qtbot):
+        d = FilterDialog(current_filterset=FilterSet(negate=True).add(FoundFilter()))
+        qtbot.addWidget(d)
+        assert d._invert_cb.isChecked()
+
+
 # ── distance unit preference (#327) ─────────────────────────────────────────────
 
 class TestDistanceUnitPref:

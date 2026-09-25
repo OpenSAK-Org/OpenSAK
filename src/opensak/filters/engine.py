@@ -2842,12 +2842,17 @@ class FilterSet:
           - FilterSet(OR) containing:
               - DifficultyFilter(max=2.0)
               - TerrainFilter(max=2.0)
+
+    negate=True inverts the whole set: a cache is included exactly when it
+    would otherwise be excluded (the filter dialog's global "Invert filter").
+    An empty set still shows everything — there is nothing to invert.
     """
 
-    def __init__(self, mode: str = "AND"):
+    def __init__(self, mode: str = "AND", negate: bool = False):
         if mode not in ("AND", "OR"):
             raise ValueError(f"mode must be 'AND' or 'OR', got {mode!r}")
         self.mode = mode
+        self.negate = negate
         self._filters: list[BaseFilter | FilterSet] = []
 
     def add(self, f: "BaseFilter | FilterSet") -> "FilterSet":
@@ -2882,19 +2887,24 @@ class FilterSet:
             return True  # empty filter set = show everything
 
         if self.mode == "AND":
-            return all(f.matches(cache) for f in self._filters)
+            matched = all(f.matches(cache) for f in self._filters)
         else:
-            return any(f.matches(cache) for f in self._filters)
+            matched = any(f.matches(cache) for f in self._filters)
+        return not matched if self.negate else matched
 
     def to_dict(self) -> dict:
-        return {
+        data: dict = {
             "mode": self.mode,
             "filters": [f.to_dict() for f in self._filters],
         }
+        # Only written when set, so existing profiles stay byte-identical.
+        if self.negate:
+            data["negate"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "FilterSet":
-        fs = cls(mode=data.get("mode", "AND"))
+        fs = cls(mode=data.get("mode", "AND"), negate=bool(data.get("negate", False)))
         for fdata in data.get("filters", []):
             if "mode" in fdata:
                 # Nested FilterSet
@@ -2906,7 +2916,8 @@ class FilterSet:
         return fs
 
     def __repr__(self) -> str:
-        return f"<FilterSet mode={self.mode} filters={self._filters}>"
+        negate = " negate" if self.negate else ""
+        return f"<FilterSet mode={self.mode}{negate} filters={self._filters}>"
 
 
 # ── Sort spec ─────────────────────────────────────────────────────────────────
@@ -3100,17 +3111,21 @@ def _sql_pushdown_candidates(filterset: "FilterSet"):
     descending into it — that whole subtree must be evaluated in Python by the
     OR FilterSet's matches(), or we would incorrectly turn an OR into an AND.
 
+    A negated FilterSet is treated like an OR one: AND-ing its filters into the
+    WHERE clause would select the very caches the inversion must exclude, so
+    its whole subtree is left to Python.
+
     Filters whose apply_to_query() returns None (no SQL form, or e.g. an empty
     text filter) simply fall back to Python matches() — that is handled by the
     caller, not here.
     """
-    if filterset.mode != "AND":
+    if filterset.mode != "AND" or filterset.negate:
         return
     for f in filterset._filters:
         if isinstance(f, FilterSet):
-            if f.mode == "AND":
+            if f.mode == "AND" and not f.negate:
                 yield from _sql_pushdown_candidates(f)
-            # OR subtree: leave entirely to Python matches()
+            # OR / negated subtree: leave entirely to Python matches()
         else:
             yield f
 

@@ -642,6 +642,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Zastosuj",
     "filter_reset_all_btn":         "↺  Resetuj wszystko",
     "filter_reset_tab_btn":         "↺  Resetuj zakładkę",
+    "filter_invert":                "Odwróć filtr",
+    "filter_invert_tooltip":        "Pokaż dokładnie te skrzynki, które ten filtr by ukrył",
     "filter_name_label":            "Nazwa skrytki:",
     "filter_contains_placeholder":  "Zawiera tekst…",
     "filter_gc_label":              "Kod GC:",

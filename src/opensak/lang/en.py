@@ -640,6 +640,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Apply",
     "filter_reset_all_btn":         "↺  Reset all",
     "filter_reset_tab_btn":         "↺  Reset tab",
+    "filter_invert":                "Invert filter",
+    "filter_invert_tooltip":        "Show exactly the caches this filter would hide",
     "filter_name_label":            "Cache name:",
     "filter_contains_placeholder":  "Contains text…",
     "filter_gc_label":              "GC Code:",

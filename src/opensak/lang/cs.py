@@ -641,6 +641,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Použít",
     "filter_reset_all_btn":         "↺  Resetovat vše",
     "filter_reset_tab_btn":         "↺  Resetovat záložku",
+    "filter_invert":                "Invertovat filtr",
+    "filter_invert_tooltip":        "Zobrazit právě ty keše, které by tento filtr skryl",
     "filter_name_label":            "Název keše:",
     "filter_contains_placeholder":  "Obsahuje text…",
     "filter_gc_label":              "GC kód:",

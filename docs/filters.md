@@ -20,6 +20,20 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ---
 
+## Invert filter
+
+Tick **Invert filter** (next to the Reset buttons) to flip the whole filter:
+the list then shows exactly the caches the filter would otherwise hide. For
+example, "Traditional Cache, difficulty ≤ 2" inverted shows every cache that
+is *not* an easy Traditional.
+
+The checkbox is highlighted while it is on, is saved with a filter profile, and
+is cleared by **Reset all** (but not by **Reset tab**, since it belongs to no
+tab). With no filter conditions set, inverting has no effect — all caches are
+shown.
+
+---
+
 ## Filter tabs
 
 The filter dialog is split across ten tabs:

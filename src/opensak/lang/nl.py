@@ -644,6 +644,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Toepassen",
     "filter_reset_all_btn":         "↺  Alles resetten",
     "filter_reset_tab_btn":         "↺  Tabblad resetten",
+    "filter_invert":                "Filter omkeren",
+    "filter_invert_tooltip":        "Toon precies de caches die dit filter zou verbergen",
     "filter_name_label":            "Cachenaam:",
     "filter_contains_placeholder":  "Bevat tekst…",
     "filter_gc_label":              "GC-code:",

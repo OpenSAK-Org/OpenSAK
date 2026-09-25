@@ -641,6 +641,8 @@ STRINGS: dict[str, str] = {
     "filter_apply_btn":             "⚡  Använd",
     "filter_reset_all_btn":         "↺  Återställ allt",
     "filter_reset_tab_btn":         "↺  Återställ flik",
+    "filter_invert":                "Invertera filter",
+    "filter_invert_tooltip":        "Visa exakt de cachar som detta filter skulle dölja",
     "filter_name_label":            "Cache namn:",
     "filter_contains_placeholder":  "Innehåller text…",
     "filter_gc_label":              "GC Kod:",
