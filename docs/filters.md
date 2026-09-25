@@ -38,6 +38,21 @@ The filter dialog is split across nine tabs:
 
 ---
 
+## Seeing what a filter actually does
+
+Every filter element that differs from its default is highlighted in yellow,
+and so is any tab that holds one. Open a saved filter and you can tell at a
+glance what it sets — a narrowed difficulty range highlights the **Difficulty**
+label, an enabled distance limit highlights the **Distance from centre point**
+group, an attribute set to Yes or No highlights that attribute's row, and the
+**General**, **Attributes** or any other affected tab is highlighted in the tab
+bar. Anything left at its default stays unhighlighted, so what you see marked
+is exactly what the filter restricts.
+
+**Reset all** and **Reset tab** clear the highlighting along with the values.
+
+---
+
 ## Filter types
 
 ### Cache type

@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 pytest.importorskip("pytestqt")
 
 from PySide6.QtWidgets import QInputDialog
-from PySide6.QtCore import QDate, QTime
+from PySide6.QtCore import QDate, QTime, Qt
 
 from opensak.gui.dialogs import filter_dialog as fd
 from opensak.gui.dialogs.filter_dialog import FilterDialog, TriStateBox, DTSpinBox
@@ -1276,7 +1276,229 @@ class TestCenterPointIntegration:
         dlg._reset_general()
         assert dlg._center_picker.to_state() == {"kind": "home"}
 
+# ── #610: General tab fits without scrolling ───────────────────────────────────
 
+class TestGeneralTabFitsWithoutScrolling:
+    """Issue #610: the General tab was one tall column of group boxes needing
+    ~1220 px in a ~730 px viewport, so it always scrolled. Re-laid out in two
+    columns, it has to fit the dialog's default size."""
+
+    def test_content_fits_the_default_dialog_size(self, qtbot):
+        from PySide6.QtWidgets import QScrollArea
+        d = FilterDialog()
+        qtbot.addWidget(d)
+        d.resize(1000, 850)
+        d.show()
+        qtbot.waitExposed(d)
+        scroll = d._general_tab.findChild(QScrollArea)
+        assert scroll is not None
+        assert scroll.widget().sizeHint().height() <= scroll.viewport().height()
+        # Width is deliberately not asserted: no language is loaded in unit
+        # tests, so tr() hands back the raw keys, which are far longer than
+        # any real translation.
+
+    def test_every_general_control_survived_the_relayout(self, dlg):
+        # The relayout moved widgets around; none of them may have been lost.
+        from opensak.utils.constants import CONTAINER_SIZES
+        assert len(dlg._type_checks) > 0
+        assert len(dlg._cont_checks) == len(CONTAINER_SIZES)
+        for attr in ("_name_row", "_gc_row", "_placed_row", "_owner_row",
+                     "_diff_min", "_diff_max", "_terr_min", "_terr_max",
+                     "_found_cb", "_notfound_cb", "_avail_cb", "_unavail_cb",
+                     "_archived_cb", "_dist_enabled", "_dist_min", "_dist_max",
+                     "_center_picker", "_prem_yes", "_prem_no", "_tb_yes",
+                     "_tb_no", "_cc_yes", "_cc_no"):
+            assert getattr(dlg, attr) is not None, attr
+
+    def test_default_state_still_builds_an_empty_filterset(self, dlg):
+        assert dlg._build_filterset()._filters == []
+
+
+# ── #610: highlight changed filter elements ────────────────────────────────────
+
+def _lit(widget) -> bool:
+    """True when *widget* carries the changed-filter-element style."""
+    return "background" in widget.styleSheet()
+
+
+def _lit_tabs(dlg) -> set:
+    bar = dlg._tabs.tabBar()
+    return {dlg._tabs.tabText(i) for i in range(dlg._tabs.count())
+            if bar.is_tab_highlighted(i)}
+
+
+def _tab(dlg, widget) -> str:
+    """Text of the tab holding *widget* — keeps tests independent of tab order."""
+    return dlg._tabs.tabText(dlg._tabs.indexOf(widget))
+
+
+class TestHighlightChangedElements:
+    """Issue #610: filter elements that differ from their default are painted
+    yellow, as is any tab holding one."""
+
+    def test_untouched_dialog_highlights_nothing(self, dlg):
+        assert _lit_tabs(dlg) == set()
+        for widget in (dlg._name_row.label, dlg._type_group, dlg._cont_group,
+                       dlg._diff_label, dlg._terr_label, dlg._found_label,
+                       dlg._avail_label, dlg._dist_group, dlg._prem_label,
+                       dlg._tb_label, dlg._cc_label):
+            assert not _lit(widget)
+
+    def test_text_row_lights_up_with_its_tab(self, dlg):
+        dlg._name_filter.setText("church")
+        assert _lit(dlg._name_row.label)
+        assert not _lit(dlg._gc_row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab)}
+
+    def test_valueless_operator_counts_as_set(self, dlg):
+        # "Is empty" filters without any text — still a condition.
+        dlg._gc_row.set_op("empty")
+        assert _lit(dlg._gc_row.label)
+
+    def test_difficulty_and_terrain_are_separate(self, dlg):
+        dlg._diff_max.setValue(2.5)
+        assert _lit(dlg._diff_label)
+        assert not _lit(dlg._terr_label)
+        dlg._terr_min.setValue(2.0)
+        assert _lit(dlg._terr_label)
+
+    def test_distance_group_title(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        assert _lit(dlg._dist_group)
+        assert "QGroupBox::title" in dlg._dist_group.styleSheet()
+        dlg._dist_enabled.setChecked(False)
+        assert not _lit(dlg._dist_group)
+
+    def test_unchecking_one_cache_type_lights_the_group(self, dlg):
+        next(iter(dlg._type_checks.values())).setChecked(False)
+        assert _lit(dlg._type_group)
+        dlg._enable_all_types()
+        assert not _lit(dlg._type_group)
+
+    def test_archived_off_lights_availability(self, dlg):
+        dlg._archived_cb.setChecked(False)
+        assert _lit(dlg._avail_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab)}
+
+    def test_date_row_lights_its_own_label_and_tab(self, dlg):
+        row = dlg._date_rows["hidden_date"]
+        row.op_combo.setCurrentIndex(1)  # anything but "Any"
+        assert _lit(row.label)
+        assert not _lit(dlg._date_rows["dnf_date"].label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._dates_tab)}
+
+    def test_misc_tab_groups(self, dlg):
+        dlg._fav_enabled.setChecked(True)
+        assert _lit(dlg._fav_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+
+    def test_line_polygon_points(self, dlg):
+        dlg._lp_text.setPlainText("55.0, 12.0\n55.1, 12.1\n55.2, 12.0")
+        assert _lit(dlg._lp_points_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._line_polygon_tab)}
+
+    def test_log_date_row_and_tab(self, dlg):
+        dlg._log_date_row.op_combo.setCurrentIndex(1)  # anything but "Any"
+        assert _lit(dlg._log_date_row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._logs_tab)}
+
+    def test_log_scope_lights_only_the_tab(self, dlg):
+        next(iter(dlg._log_categories.values())).setChecked(False)
+        assert not _lit(dlg._log_date_row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._logs_tab)}
+
+    def test_waypoint_text_row_and_tab(self, dlg):
+        row = next(iter(dlg._wp_text_rows.values()))
+        row.edit.setText("parking")
+        assert _lit(row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._waypoints_tab)}
+        dlg._reset_waypoints()
+        assert not _lit(row.label)
+        assert _lit_tabs(dlg) == set()
+
+    def test_attribute_cell_and_tab(self, dlg):
+        attr_id, (ja_cb, _nej, ingen_cb) = next(iter(dlg._attr_boxes.items()))
+        ja_cb.setChecked(True)
+        item = dlg._attr_rows[attr_id][1]
+        assert item.background().style() != Qt.BrushStyle.NoBrush
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._attributes_tab)}
+        ingen_cb.setChecked(True)  # exclusive — clears "Ja"
+        assert item.background().style() == Qt.BrushStyle.NoBrush
+        assert _lit_tabs(dlg) == set()
+
+    def test_text_search(self, dlg):
+        dlg._text_search_input.setText("spoiler")
+        assert _lit(dlg._text_search_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._text_search_tab)}
+
+    def test_where_sql_lights_only_the_tab(self, dlg):
+        dlg._where_sql_general.setPlainText("found = 0")
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._where_tab)}
+
+    def test_several_tabs_at_once(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        dlg._text_search_input.setText("spoiler")
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab), _tab(dlg, dlg._text_search_tab)}
+
+    def test_reset_all_clears_every_highlight(self, dlg):
+        dlg._name_filter.setText("church")
+        dlg._diff_max.setValue(2.5)
+        dlg._dist_enabled.setChecked(True)
+        dlg._date_rows["hidden_date"].op_combo.setCurrentIndex(1)
+        dlg._where_sql_general.setPlainText("found = 0")
+        dlg._reset_all()
+        assert _lit_tabs(dlg) == set()
+        assert not _lit(dlg._name_row.label)
+        assert not _lit(dlg._diff_label)
+        assert not _lit(dlg._dist_group)
+
+    def test_loading_a_saved_filter_highlights_what_it_sets(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(NameFilter("church"))
+        fs.add(DifficultyFilter(1.0, 2.5))
+        dlg._load_filterset(fs)
+        assert _lit(dlg._name_row.label)
+        assert _lit(dlg._diff_label)
+        assert not _lit(dlg._terr_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab)}
+
+
+class TestHighlightTabBar:
+    def test_set_and_query(self, qtbot):
+        bar = fd.HighlightTabBar()
+        qtbot.addWidget(bar)
+        bar.addTab("a")
+        bar.addTab("b")
+        assert not bar.is_tab_highlighted(0)
+        bar.set_tab_highlighted(0, True)
+        assert bar.is_tab_highlighted(0)
+        assert not bar.is_tab_highlighted(1)
+        bar.set_tab_highlighted(0, False)
+        assert not bar.is_tab_highlighted(0)
+
+    def test_paints_without_error(self, qtbot):
+        bar = fd.HighlightTabBar()
+        qtbot.addWidget(bar)
+        bar.addTab("a")
+        bar.addTab("b")
+        bar.set_tab_highlighted(1, True)
+        bar.resize(200, 30)
+        bar.grab()  # exercises paintEvent for both branches
+
+
+class TestHighlightTheme:
+    """The highlight colour has to follow the app theme — bright yellow with
+    black text is glaring on a dark background (same reasoning as #613)."""
+
+    def test_light_and_dark_differ(self):
+        from opensak.gui.theme import highlight_colors
+        assert highlight_colors("light") != highlight_colors("dark")
+
+    def test_style_targets_a_selector(self):
+        from opensak.gui.theme import highlight_style
+        assert highlight_style("QGroupBox::title", theme="light").startswith("QGroupBox::title {")
+        assert "{" not in highlight_style(theme="light")
+        
 # ── issue #671: saving filter improvements ───────────────────────────────────
 
 @pytest.fixture
@@ -1407,3 +1629,4 @@ class TestSaveKeepsAvailabilityState:
         assert (dlg._avail_cb.isChecked(),
                 dlg._unavail_cb.isChecked(),
                 dlg._archived_cb.isChecked()) == (avail, unavail, archived)
+        

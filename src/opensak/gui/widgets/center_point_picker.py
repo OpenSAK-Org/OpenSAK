@@ -37,7 +37,7 @@ from opensak.lang import tr
 from opensak.gui.theme import hint_style
 
 # Combo item data is a tuple whose first element identifies the kind:
-#   ("home",)
+#   ("home", name)      — det aktive hjemmepunkt (navnet er kun til visning)
 #   ("point", lat, lon, name)
 #   ("cache",)
 #   ("custom",)
@@ -161,6 +161,7 @@ class CenterPointPicker(QWidget):
                 if d and d[0] == _KIND_POINT and d[3] == target_name:
                     self._combo.setCurrentIndex(i)
                     return
+            # Punktet er siden blevet det aktive hjemmepunkt — samme sted.
         elif kind == _KIND_CUSTOM:
             for i in range(self._combo.count()):
                 d = self._combo.itemData(i)
@@ -174,8 +175,13 @@ class CenterPointPicker(QWidget):
                 if d and d[0] == _KIND_CACHE:
                     self._combo.setCurrentIndex(i)
                     return
-        # Ukendt/utilgængeligt valg → Home (indeks 0, findes altid)
-        self._combo.setCurrentIndex(0)
+        # Ukendt/utilgængeligt valg → Home (findes altid, men ikke
+        # nødvendigvis på indeks 0 — den følger hjemmepunkternes rækkefølge)
+        for i in range(self._combo.count()):
+            d = self._combo.itemData(i)
+            if d and d[0] == _KIND_HOME:
+                self._combo.setCurrentIndex(i)
+                return
 
     # ── Intern ────────────────────────────────────────────────────────────
 
@@ -189,9 +195,25 @@ class CenterPointPicker(QWidget):
 
         self._combo.blockSignals(True)
         self._combo.clear()
-        self._combo.addItem(tr("center_point_home"), (_KIND_HOME,))
-        for p in s.home_points:
-            self._combo.addItem(f"★ {p.name}", (_KIND_POINT, p.lat, p.lon, p.name))
+        # Samme liste som hjem-dropdownen i toolbaren: ét punkt pr. gemt
+        # hjemmepunkt, med sit eget navn. Det aktive punkt ER "Home" (følger
+        # home_lat/home_lon), så det får ikke en ekstra post — ellers stod
+        # "★ Home" der to gange (og "★ ★ Home", fordi navnet selv har en ★).
+        active = getattr(s, "active_home_name", "") or ""
+        points = list(s.home_points)
+        if not any(p.name == active for p in points):
+            self._combo.addItem(active or tr("center_point_home"), (_KIND_HOME, active))
+        for p in points:
+            if p.name == active:
+                self._combo.addItem(p.name, (_KIND_HOME, p.name))
+                continue
+            lat, lon = p.lat, p.lon
+            if p.name == "★ Home":
+                # Pladsholder — de rigtige koordinater ligger i gc_home_location
+                real = getattr(s, "get_gc_home_point", lambda: None)()
+                if real:
+                    lat, lon = real.lat, real.lon
+            self._combo.addItem(p.name, (_KIND_POINT, lat, lon, p.name))
         if self._current_cache is not None:
             gc = getattr(self._current_cache, "gc_code", "") or ""
             name = getattr(self._current_cache, "name", "") or ""
@@ -200,12 +222,15 @@ class CenterPointPicker(QWidget):
         self._combo.addItem(tr("center_point_custom"), (_KIND_CUSTOM,))
         self._combo.blockSignals(False)
 
-        if keep_kind:
-            for i in range(self._combo.count()):
-                d = self._combo.itemData(i)
-                if d and d[0] == keep_kind:
-                    self._combo.setCurrentIndex(i)
-                    break
+        # Home står ikke nødvendigvis først, så vælg den eksplicit som standard
+        for kind in (keep_kind, _KIND_HOME):
+            idx = next((i for i in range(self._combo.count())
+                        if (d := self._combo.itemData(i)) and d[0] == kind), -1)
+            if idx >= 0:
+                self._combo.blockSignals(True)
+                self._combo.setCurrentIndex(idx)
+                self._combo.blockSignals(False)
+                break
         self._on_combo_changed(self._combo.currentIndex())
 
     def _on_combo_changed(self, index: int) -> None:

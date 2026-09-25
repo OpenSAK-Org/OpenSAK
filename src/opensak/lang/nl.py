@@ -233,7 +233,6 @@ STRINGS: dict[str, str] = {
     "filter_text_search_label":       "Zoektekst",
     "filter_text_search_placeholder": "Zoekwoorden invoeren",
     "filter_text_search_notes":       "Persoonlijke notities",
-    "filter_geo_group":            "Geografische locatie",
     "filter_state_label":          "Staat/Regio",
     "filter_county_label":         "Gemeente",
     "filter_user_flag_group":      "Gebruikersvlag",
