@@ -1047,7 +1047,7 @@ class FilterDialog(QDialog):
 
         layout.addWidget(self._dist_group)
 
-        # ── Ja/nej-valg: fem etiket-rækker i to kolonner ─────────────────────
+        # ── Ja/nej-valg: fire etiket-rækker i to kolonner ─────────────────────
         # Tidligere fem QGroupBox'e under hinanden — hver med ~24 px indhold i
         # en ~70 px ramme. Etiketterne er selve highlight-målet (#610).
         status_grid = QGridLayout()
@@ -1082,12 +1082,6 @@ class FilterDialog(QDialog):
         self._prem_label, prem_widget = _status_row(
             tr("col_premium"), self._prem_yes, self._prem_no)
 
-        # Trackables
-        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
-        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
-        self._tb_label, tb_widget = _status_row(
-            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
-
         # Corrected Coordinates
         self._cc_yes = QCheckBox(tr("filter_has_corrected"))
         self._cc_no  = QCheckBox(tr("filter_no_corrected"))
@@ -1098,7 +1092,6 @@ class FilterDialog(QDialog):
             (self._found_label, found_widget),
             (self._prem_label, prem_widget),
             (self._avail_label, avail_widget),
-            (self._tb_label, tb_widget),
             (self._cc_label, cc_widget),
         )):
             r, c = divmod(i, 2)
@@ -1167,10 +1160,13 @@ class FilterDialog(QDialog):
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
-        # Retning fra centerpunkt (GSAK "Richtung") — kompasrose-gitter
-        self._dir_group = QGroupBox(tr("filter_direction_group"))
-        dir_layout = QHBoxLayout(self._dir_group)
+        # Retning fra centerpunkt (GSAK "Richtung") — kompakt kompasrose-gitter
+        # på én etiket-række. Tidligere en QGroupBox, der fyldte ~350 px i
+        # højden; etiketten er highlight-målet (#610).
         dir_grid = QGridLayout()
+        dir_grid.setContentsMargins(0, 0, 0, 0)
+        dir_grid.setHorizontalSpacing(8)
+        dir_grid.setVerticalSpacing(2)
         # (row, col) for each direction in a 3x3 compass rose, centre empty
         dir_cells = {
             "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
@@ -1184,18 +1180,25 @@ class FilterDialog(QDialog):
             cb.setChecked(True)
             self._dir_checks[d] = cb
             dir_grid.addWidget(cb, *dir_cells[d])
-        dir_layout.addLayout(dir_grid)
         dir_btns = QVBoxLayout()
-        dir_none = QPushButton(tr("filter_type_disable_all"))
-        dir_none.clicked.connect(lambda: self._set_all_directions(False))
+        dir_btns.setSpacing(2)
         dir_all = QPushButton(tr("filter_type_enable_all"))
         dir_all.clicked.connect(lambda: self._set_all_directions(True))
-        dir_btns.addWidget(dir_none)
+        dir_none = QPushButton(tr("filter_type_disable_all"))
+        dir_none.clicked.connect(lambda: self._set_all_directions(False))
         dir_btns.addWidget(dir_all)
-        dir_btns.addStretch()
-        dir_layout.addLayout(dir_btns)
-        dir_layout.addStretch()
-        layout.addWidget(self._dir_group)
+        dir_btns.addWidget(dir_none)
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(16)
+        self._dir_label = hug_label(QLabel(tr("filter_direction_group")))
+        dir_row.addWidget(self._dir_label, 0, Qt.AlignmentFlag.AlignTop)
+        # Ingen addStretch() i dir_btns — en vertikal spacer gør hele rækken
+        # "expanding" og spreder kompasrosen ud over fanens fulde højde.
+        dir_row.addLayout(dir_grid)
+        dir_row.addLayout(dir_btns)
+        dir_row.setAlignment(dir_btns, Qt.AlignmentFlag.AlignTop)
+        dir_row.addStretch()
+        layout.addLayout(dir_row)
 
         # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
         def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
@@ -1597,6 +1600,15 @@ class FilterDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
+        # Har trackables ja/nej (flyttet hertil fra Generelt-fanen)
+        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
+        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
+        self._tb_label, tb_widget = labeled_row(
+            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
+        layout.addRow(self._tb_label, tb_widget)
+
         self._tb_text_rows: dict[str, TextFilterRow] = {}
         for field, key in _TB_TEXT_LABELS:
             row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
@@ -1993,7 +2005,7 @@ class FilterDialog(QDialog):
                           and self._archived_cb.isChecked())),
             (general, self._prem_label,
              lambda: not (self._prem_yes.isChecked() and self._prem_no.isChecked())),
-            (general, self._tb_label,
+            (self._trackables_tab, self._tb_label,
              lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
             (general, self._cc_label,
              lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
@@ -2015,7 +2027,7 @@ class FilterDialog(QDialog):
         for tb_row in self._tb_text_rows.values():
             specs.append((self._trackables_tab, tb_row.label, tb_row.is_set))
         specs += [
-            (misc, self._dir_group,
+            (misc, self._dir_label,
              lambda: not all(cb.isChecked() for cb in self._dir_checks.values())),
             (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
@@ -2306,8 +2318,6 @@ class FilterDialog(QDialog):
         self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
-        self._tb_yes.setChecked(True)
-        self._tb_no.setChecked(True)
         self._cc_yes.setChecked(True)
         self._cc_no.setChecked(True)
 
@@ -2354,6 +2364,8 @@ class FilterDialog(QDialog):
         self._wp_count2.setValue(0)
 
     def _reset_trackables(self) -> None:
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
         for row in self._tb_text_rows.values():
             row.reset()
         self._tb_count_op.setCurrentIndex(0)

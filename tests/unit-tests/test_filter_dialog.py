@@ -1531,13 +1531,21 @@ class TestHighlightChangedElements:
         assert _lit(dlg._fav_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
 
+    def test_has_trackables_row_lives_on_trackables_tab(self, dlg):
+        dlg._tb_no.setChecked(False)
+        assert _lit(dlg._tb_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._trackables_tab)}
+        dlg._tabs.setCurrentWidget(dlg._trackables_tab)
+        dlg._reset_current_tab()
+        assert dlg._tb_yes.isChecked() and dlg._tb_no.isChecked()
+        assert _lit_tabs(dlg) == set()
+
     def test_unchecking_one_direction_lights_the_group(self, dlg):
         dlg._dir_checks["N"].setChecked(False)
-        assert _lit(dlg._dir_group)
-        assert "QGroupBox::title" in dlg._dir_group.styleSheet()
+        assert _lit(dlg._dir_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
         dlg._set_all_directions(True)
-        assert not _lit(dlg._dir_group)
+        assert not _lit(dlg._dir_label)
         assert _lit_tabs(dlg) == set()
 
     def test_personal_note_row(self, dlg):
