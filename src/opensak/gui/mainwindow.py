@@ -582,6 +582,12 @@ class MainWindow(QMainWindow):
         act_open_previous_log.triggered.connect(self._open_previous_log_file)
         help_menu.addAction(act_open_previous_log)
 
+        # Issue #907: vis alle steder OpenSAK gemmer data, så brugeren selv
+        # kan finde/rydde op i dem (fx rester efter en afinstallation).
+        act_file_locations = QAction(tr("action_file_locations"), self)
+        act_file_locations.triggered.connect(self._open_file_locations)
+        help_menu.addAction(act_file_locations)
+
         help_menu.addSeparator()
 
         act_support = QAction(tr("action_support_opensak"), self)
@@ -3159,6 +3165,12 @@ class MainWindow(QMainWindow):
             )
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
+
+    def _open_file_locations(self) -> None:
+        """Vis alle OpenSAK-lagringssteder (issue #907)."""
+        from opensak.gui.dialogs.storage_locations_dialog import StorageLocationsDialog
+
+        StorageLocationsDialog(self).exec()
 
     # ── AppImage selv-integration (#835) ─────────────────────────────────────
 
