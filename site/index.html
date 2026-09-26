@@ -442,6 +442,32 @@
     }
     .download-card:hover .dl-arrow { color: var(--accent2); }
 
+    .download-card.recommended {
+      border-color: var(--accent2);
+      box-shadow: 0 0 0 1px var(--accent2) inset;
+    }
+
+    .dl-badge {
+      align-self: flex-start;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent2);
+      border: 1px solid var(--accent2);
+      border-radius: 2px;
+      padding: 0.1rem 0.4rem;
+    }
+
+    .download-note {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 1.25rem;
+      max-width: 60rem;
+      line-height: 1.6;
+    }
+    .download-note a { color: var(--accent2); }
+
     /* ── OPEN SOURCE STRIP ── */
     .oss-strip {
       background: var(--surface);
@@ -599,7 +625,7 @@
     <div class="feature-card">
       <div class="feature-icon">🔍</div>
       <h3>Advanced Filter Engine</h3>
-      <p>18 filter types with AND/OR nesting. Save and reuse filter profiles. Filter by D/T, type, size, attributes, date, distance, and more.</p>
+      <p>A GSAK-style filter dialog: text and date operators, logs, child waypoints, attributes, lines and polygons, and raw SQL. AND/OR logic and saved filter profiles.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🗺️</div>
@@ -609,7 +635,7 @@
     <div class="feature-card">
       <div class="feature-icon">📡</div>
       <h3>Garmin GPS Export</h3>
-      <p>Send your filtered cache selection directly to a connected Garmin device via USB — ready for offline field use.</p>
+      <p>Send your filtered cache selection directly to a connected Garmin device via USB — including newer models that use MTP — as GPX or GGZ, ready for offline field use.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🧮</div>
@@ -634,7 +660,12 @@
     <div class="feature-card">
       <div class="feature-icon">🌍</div>
       <h3>Multilingual</h3>
-      <p>Full interface in 8 languages: English, Danish, Dutch, French, Portuguese, Czech, Swedish, and German. Community translations welcome.</p>
+      <p>Full interface in 11 languages: English, Danish, Dutch, French, Portuguese, Czech, Swedish, German, Swiss German, Polish, and Spanish. Community translations welcome.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">✉️</div>
+      <h3>Pocket Queries by E-mail</h3>
+      <p>Point OpenSAK at the mailbox that receives your Pocket Queries and import them straight from there — no downloading and unzipping by hand.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🗄️</div>
@@ -733,34 +764,49 @@
 <section id="download">
   <p class="section-label">// Download</p>
   <h2>Get OpenSAK</h2>
-  <p class="section-intro">Pre-built packages for all platforms. No installation wizard, no license key, no nonsense.</p>
+  <p class="section-intro">Pre-built packages for all platforms. Free, no license key, no nonsense.</p>
 
   <div class="download-grid fade-in">
-    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
+    <a href="https://apps.microsoft.com/detail/9p4nbmm84h2d" class="download-card recommended">
+      <span class="dl-badge">Recommended for Windows</span>
       <span class="dl-os">🪟 Windows</span>
-      <span class="dl-name">OpenSAK.exe</span>
-      <span class="dl-format">Standalone installer · 64-bit</span>
+      <span class="dl-name">Microsoft Store</span>
+      <span class="dl-format">Free · Signed by Microsoft · Updates automatically</span>
+      <span class="dl-arrow">↗</span>
+    </a>
+    <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
+      <span class="dl-os">🪟 Windows (direct download)</span>
+      <span class="dl-name">OpenSAK-…-Windows.zip</span>
+      <span class="dl-format">Portable ZIP · 64-bit · Alternative to the Store</span>
       <span class="dl-arrow">↗</span>
     </a>
     <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🐧 Linux</span>
-      <span class="dl-name">OpenSAK.AppImage</span>
-      <span class="dl-format">AppImage · No install needed</span>
+      <span class="dl-name">OpenSAK-…-Linux-x86_64.AppImage</span>
+      <span class="dl-format">AppImage · Adds itself to your app menu · Updates itself</span>
       <span class="dl-arrow">↗</span>
     </a>
     <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🍎 macOS (Apple Silicon)</span>
-      <span class="dl-name">OpenSAK-arm64.dmg</span>
-      <span class="dl-format">DMG · M1 / M2 / M3</span>
+      <span class="dl-name">OpenSAK-…-macOS-arm64.dmg</span>
+      <span class="dl-format">DMG · M1 / M2 / M3 / M4 · Signed &amp; notarized</span>
       <span class="dl-arrow">↗</span>
     </a>
     <a href="https://github.com/OpenSAK-Org/OpenSAK/releases/latest" class="download-card">
       <span class="dl-os">🍎 macOS (Intel)</span>
-      <span class="dl-name">OpenSAK-x86_64.dmg</span>
-      <span class="dl-format">DMG · Intel Mac</span>
+      <span class="dl-name">OpenSAK-…-macOS-x86_64.dmg</span>
+      <span class="dl-format">DMG · Intel Mac · Signed &amp; notarized</span>
       <span class="dl-arrow">↗</span>
     </a>
   </div>
+
+  <p class="download-note">
+    <strong>Windows:</strong> the Microsoft Store version is the easiest and safest choice — it is signed by Microsoft,
+    trusted by Windows' Smart App Control, and keeps itself up to date. The direct download from GitHub is still available,
+    but on PCs where <strong>Smart App Control</strong> is switched on (the default on many newer Windows 11 PCs), Windows
+    may block it from starting. If that happens, install OpenSAK from the Store instead.
+    See the <a href="/user-guide.html#installation">User Guide</a> for details.
+  </p>
 </section>
 
 <!-- OSS STRIP -->
