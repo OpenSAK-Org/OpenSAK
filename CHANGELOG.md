@@ -4,6 +4,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.11] — 2026-09-26
+
+> A documentation release: opensak.com and the User Guide now recommend the
+> Microsoft Store on Windows, and the User Guide has been brought up to date
+> with everything added in the 1.19 and 1.20 cycles. No changes to the app
+> itself compared to beta.10.
+
+### Changed
+
+- **opensak.com and the User Guide recommend the Microsoft Store on Windows
+  (#904)** — The Store version is free, signed by Microsoft, never blocked by
+  Windows' Smart App Control, and updates itself automatically, so it is now
+  listed first on the download page and in the User Guide. The direct
+  download from GitHub is still available as an alternative, with a short
+  note that Smart App Control may block it. The download page also no longer
+  describes the Windows download as an installer — it is a ZIP file.
+- **User Guide brought up to date** — New and updated sections for:
+  uninstalling on each platform (your data is never removed unless you choose
+  to), adding the Linux AppImage to your application menu, importing Pocket
+  Queries by e-mail, the **Where** field in the search toolbar, all nine tabs
+  of the Filter dialog (text and date operators, Logs, Child Waypoints,
+  Line/Polygon, highlighting of what a filter restricts, and the warning
+  before overwriting a saved filter), the extra fields and child-waypoint
+  editing in **Edit cache**, how updates work for each way of installing,
+  **Help → OpenSAK File Locations…**, and all 11 UI languages. The location
+  of saved filter profiles is also corrected.
+- **opensak.com feature list updated** — Filter engine, MTP support for
+  newer Garmin devices, Pocket Queries by e-mail, and 11 languages.
+
+---
+
 ## [1.20.0-beta.10] — 2026-09-26
 
 > A new overview of every place OpenSAK stores files, a more thorough clean-up
