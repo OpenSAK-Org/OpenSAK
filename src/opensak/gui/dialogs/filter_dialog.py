@@ -52,7 +52,7 @@ from opensak.filters.engine import (
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
-    CorrectedDistanceFilter, CORRECTED_DISTANCE_OPS,
+    CorrectedDistanceFilter, DISTANCE_OPS,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, UserNoteFilter,
@@ -528,9 +528,10 @@ _LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
 _LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
 _M_TO_FT = 3.28084  # højdefilteret gemmer meter; vises i ft når use_miles
 
-# Afstand rettede ↔ oprindelige koordinater. Nøglerne står som literals, så
-# test_no_unused_keys kan finde dem.
-_CC_DIST_OP_LABELS: tuple[tuple[str, str], ...] = (
+# Afstandsbetingelser — delt af afstand fra center-punkt og afstand rettede ↔
+# oprindelige koordinater. Nøglerne står som literals, så test_no_unused_keys
+# kan finde dem.
+_DISTANCE_OP_LABELS: tuple[tuple[str, str], ...] = (
     ("equal",       "filter_date_op_equal"),
     ("less_than",   "filter_op_less_than"),
     ("at_most",     "filter_wp_count_at_most"),
@@ -539,7 +540,8 @@ _CC_DIST_OP_LABELS: tuple[tuple[str, str], ...] = (
     ("between",     "filter_date_op_between"),
     ("not_between", "filter_op_not_between"),
 )
-assert tuple(op for op, _ in _CC_DIST_OP_LABELS) == CORRECTED_DISTANCE_OPS
+assert tuple(op for op, _ in _DISTANCE_OP_LABELS) == DISTANCE_OPS
+_DIST_DEFAULT_KM = 50.0  # afstand fra center-punkt, i brugerens enhed
 _CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
 
 
@@ -1037,26 +1039,27 @@ class FilterDialog(QDialog):
         dist_outer.setContentsMargins(8, 4, 8, 4)
         dist_outer.setSpacing(4)
 
+        # Samme betingelser som afstand rettede ↔ oprindelige koordinater;
+        # værdierne vises i brugerens enhed (km / mi), gemmes i km.
         dist_row = QHBoxLayout()
         self._dist_enabled = QCheckBox(tr("filter_enable"))
         self._dist_enabled.toggled.connect(self._on_dist_toggled)
         dist_row.addWidget(self._dist_enabled)
-        dist_row.addWidget(QLabel(tr("filter_min")))
-        self._dist_min = QDoubleSpinBox()
-        self._dist_min.setRange(0.0, 9999.0)
-        self._dist_min.setValue(0.0)
-        from opensak.gui.settings import get_settings as _gs
-        _unit = " mi" if _gs().use_miles else " km"
-        self._dist_min.setSuffix(_unit)
-        self._dist_min.setEnabled(False)
-        dist_row.addWidget(self._dist_min)
-        dist_row.addWidget(QLabel(tr("filter_max")))
-        self._dist_max = QDoubleSpinBox()
-        self._dist_max.setRange(0.1, 9999.0)
-        self._dist_max.setValue(50.0)
-        self._dist_max.setSuffix(_unit)
-        self._dist_max.setEnabled(False)
-        dist_row.addWidget(self._dist_max)
+        self._dist_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dist_op.addItem(tr(key), op)
+        self._dist_op.currentIndexChanged.connect(self._update_dist_inputs)
+        dist_row.addWidget(self._dist_op)
+        _unit = " mi" if self._use_miles() else " km"
+        self._dist1 = QDoubleSpinBox()
+        self._dist2 = QDoubleSpinBox()
+        for spin in (self._dist1, self._dist2):
+            spin.setRange(0.0, 20_100.0)  # > halvdelen af jordens omkreds
+            spin.setSuffix(_unit)
+        self._dist_and = QLabel("–")
+        dist_row.addWidget(self._dist1)
+        dist_row.addWidget(self._dist_and)
+        dist_row.addWidget(self._dist2)
         dist_row.addSpacing(16)
 
         # Center-punkt (issue #511) — genbrugelig widget, delt med den
@@ -1068,6 +1071,7 @@ class FilterDialog(QDialog):
         self._center_picker.setEnabled(False)
         dist_row.addWidget(self._center_picker, 1)
         dist_outer.addLayout(dist_row)
+        self._reset_dist()
 
         layout.addWidget(self._dist_group)
 
@@ -1117,7 +1121,7 @@ class FilterDialog(QDialog):
         self._ccd_enabled = QCheckBox(tr("filter_enable"))
         self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
         self._ccd_op = QComboBox()
-        for op, key in _CC_DIST_OP_LABELS:
+        for op, key in _DISTANCE_OP_LABELS:
             self._ccd_op.addItem(tr(key), op)
         self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
         self._ccd_dist1 = QDoubleSpinBox()
@@ -2350,9 +2354,37 @@ class FilterDialog(QDialog):
         )
 
     def _on_dist_toggled(self, checked: bool) -> None:
-        self._dist_max.setEnabled(checked)
-        self._dist_min.setEnabled(checked)
-        self._center_picker.setEnabled(checked)
+        self._update_dist_inputs()
+
+    def _update_dist_inputs(self) -> None:
+        enabled = self._dist_enabled.isChecked()
+        between = self._dist_op.currentData() in ("between", "not_between")
+        self._dist_op.setEnabled(enabled)
+        self._dist1.setEnabled(enabled)
+        self._dist2.setEnabled(enabled)
+        self._center_picker.setEnabled(enabled)
+        self._dist_and.setVisible(between)
+        self._dist2.setVisible(between)
+
+    def _set_dist_values(self, op: str, dist1_km: float, dist2_km: float) -> None:
+        """Show a centre-distance condition given in km, in the display unit."""
+        factor = 0.621371 if self._use_miles() else 1.0
+        self._dist_op.setCurrentIndex(max(self._dist_op.findData(op), 0))
+        self._dist1.setValue(dist1_km * factor)
+        self._dist2.setValue(dist2_km * factor)
+        self._update_dist_inputs()
+
+    def _dist_values_km(self) -> tuple[float, float]:
+        """The centre-distance values entered, converted back to km."""
+        factor = 1.60934 if self._use_miles() else 1.0
+        return self._dist1.value() * factor, self._dist2.value() * factor
+
+    def _reset_dist(self) -> None:
+        self._dist_enabled.setChecked(False)
+        self._dist_op.setCurrentIndex(self._dist_op.findData("at_most"))
+        self._dist1.setValue(_DIST_DEFAULT_KM)
+        self._dist2.setValue(_DIST_DEFAULT_KM)
+        self._update_dist_inputs()
 
     def _on_fav_toggled(self, checked: bool) -> None:
         self._fav_min.setEnabled(checked)
@@ -2436,9 +2468,7 @@ class FilterDialog(QDialog):
         self._avail_cb.setChecked(True)
         self._unavail_cb.setChecked(True)
         self._archived_cb.setChecked(True)  # issue #576 — GSAK-style default
-        self._dist_enabled.setChecked(False)
-        self._dist_max.setValue(50.0)
-        self._dist_min.setValue(0.0)
+        self._reset_dist()
         self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
@@ -2588,7 +2618,25 @@ class FilterDialog(QDialog):
             (self._user_note_row, UserNoteFilter),
         ]
 
+    def _order_distance_ranges(self) -> None:
+        """Put the smaller value first in a (not) between distance range.
+
+        The filter accepts the bounds in either order, but "Between 70 – 50"
+        left on screen looks like an empty range while it filters 50–70.
+        Only called when the filter is applied or saved, never while typing.
+        """
+        for op_combo, spin1, spin2 in (
+            (self._dist_op, self._dist1, self._dist2),
+            (self._ccd_op, self._ccd_dist1, self._ccd_dist2),
+        ):
+            if op_combo.currentData() in ("between", "not_between") \
+                    and spin1.value() > spin2.value():
+                low, high = spin2.value(), spin1.value()
+                spin1.setValue(low)
+                spin2.setValue(high)
+
     def _build_filterset(self) -> FilterSet:
+        self._order_distance_ranges()
         fs = FilterSet(mode="AND", negate=self._invert_cb.isChecked())
 
         # Navn / GC kode / Udlagt af / Owner name
@@ -2643,20 +2691,17 @@ class FilterDialog(QDialog):
 
         # Afstand
         if self._dist_enabled.isChecked():
-            from opensak.gui.settings import get_settings
-            s = get_settings()
             center = self._center_picker.get_center()
             if center is None:
                 QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
             else:
                 lat, lon = center
-                dist_val = self._dist_max.value()
-                min_val = self._dist_min.value()
-                max_km = dist_val * 1.60934 if s.use_miles else dist_val
-                min_km = min_val * 1.60934 if s.use_miles else min_val
+                dist1_km, dist2_km = self._dist_values_km()
                 fs.add(DistanceFilter(
-                    lat, lon, max_km, min_km,
+                    lat, lon,
                     center_state=self._center_picker.to_state(),
+                    op=self._dist_op.currentData(),
+                    dist1_km=dist1_km, dist2_km=dist2_km,
                 ))
 
         # Premium
@@ -2991,12 +3036,11 @@ class FilterDialog(QDialog):
                 self._archived_cb.setChecked(True)
             elif ftype == "distance":
                 self._dist_enabled.setChecked(True)
-                from opensak.gui.settings import get_settings as _gs
-                _use_mi = _gs().use_miles
-                saved_km = getattr(f, "max_km", 10.0)
-                self._dist_max.setValue(saved_km * 0.621371 if _use_mi else saved_km)
-                saved_min_km = getattr(f, "min_km", 0.0)
-                self._dist_min.setValue(saved_min_km * 0.621371 if _use_mi else saved_min_km)
+                self._set_dist_values(
+                    getattr(f, "op", "at_most"),
+                    getattr(f, "dist1_km", _DIST_DEFAULT_KM),
+                    getattr(f, "dist2_km", 0.0),
+                )
                 center_state = getattr(f, "center_state", None)
                 if center_state:
                     self._center_picker.set_state(center_state)

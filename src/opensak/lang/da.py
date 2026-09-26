@@ -676,8 +676,6 @@ STRINGS: dict[str, str] = {
     "filter_unavailable":           "Midl. utilgængelig",
     "filter_distance_group":        "Afstand fra centerpunkt",
     "filter_enable":                "Aktiver",
-    "filter_min":                   "Min:",
-    "filter_max":                   "Max:",
     "center_point_label":                 "Centerpunkt:",
     "center_point_home":                  "★ Hjem",
     "center_point_selected_cache":        "📍 Valgt cache: {cache}",

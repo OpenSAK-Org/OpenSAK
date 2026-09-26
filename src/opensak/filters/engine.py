@@ -754,31 +754,91 @@ class GcNoteFilter(TextMatchFilter):
     column = "gc_note"
 
 
+# Distance conditions shared by DistanceFilter and CorrectedDistanceFilter.
+DISTANCE_OPS = (
+    "equal", "less_than", "at_most", "more_than", "at_least", "between", "not_between",
+)
+
+
+def _distance_op_ok(op: str, dist: float, a: float, b: float, tolerance: float) -> bool:
+    """Whether *dist* satisfies distance condition *op* against *a* (and *b*
+    for "between" / "not_between", in either order). "equal" allows
+    ±*tolerance*, since two computed distances are practically never equal."""
+    if op == "equal":
+        return abs(dist - a) <= tolerance
+    if op == "less_than":
+        return dist < a
+    if op == "at_most":
+        return dist <= a
+    if op == "more_than":
+        return dist > a
+    if op == "at_least":
+        return dist >= a
+    lo, hi = min(a, b), max(a, b)
+    inside = lo <= dist <= hi
+    return inside if op == "between" else not inside
+
+
+def _distance_op_upper_bound(op: str, a: float, b: float, tolerance: float) -> Optional[float]:
+    """The largest distance *op* can match, or None when it is unbounded."""
+    if op == "equal":
+        return a + tolerance
+    if op in ("less_than", "at_most"):
+        return a
+    if op == "between":
+        return max(a, b)
+    return None
+
+
+# "equal" compares to the dialog's two decimals (0.01 km) — ±5 m.
+_DISTANCE_EQUAL_TOLERANCE_KM = 0.005
+
+
 class DistanceFilter(BaseFilter):
     """
-    Keep caches within *max_km* kilometres of a reference coordinate.
-    Optionally also enforce a *min_km* to exclude very nearby caches.
+    Keep caches whose distance (km) from a reference coordinate satisfies
+    *op* against *dist1_km* (and *dist2_km* for "between" / "not_between") —
+    see DISTANCE_OPS.
+
+    The older *max_km* / *min_km* form is still accepted, both as arguments
+    and in saved filter profiles: it becomes "at_most max_km", or "between
+    min_km and max_km" when *min_km* > 0 — exactly the old inclusive
+    min_km <= d <= max_km test.
     """
     filter_type = "distance"
 
     # apply_to_query() below only pushes a bounding-box pre-narrowing (a
-    # conservative superset of the max_km circle, and it doesn't account for
-    # min_km at all) — matches() is still required for an exact result. See
-    # BaseFilter.sql_exact.
+    # conservative superset of the circle the condition can reach, and it
+    # doesn't account for a lower bound at all) — matches() is still required
+    # for an exact result. See BaseFilter.sql_exact.
     sql_exact = False
 
     def __init__(
         self,
         lat: float,
         lon: float,
-        max_km: float,
+        max_km: Optional[float] = None,
         min_km: float = 0.0,
         center_state: Optional[dict] = None,
+        *,
+        op: Optional[str] = None,
+        dist1_km: float = 0.0,
+        dist2_km: float = 0.0,
     ):
+        if op is None:
+            if max_km is None:
+                raise ValueError("DistanceFilter needs either op or max_km")
+            if min_km > 0:
+                op, dist1_km, dist2_km = "between", min_km, max_km
+            else:
+                op, dist1_km, dist2_km = "at_most", max_km, 0.0
+        if op not in DISTANCE_OPS:
+            raise ValueError(f"Unknown distance operator {op!r}")
         self.lat = lat
         self.lon = lon
-        self.max_km = max_km
-        self.min_km = min_km
+        self.op = op
+        self.dist1_km = dist1_km
+        self.dist2_km = dist2_km
         # Serialized CenterPointPicker selection (issue #511) — e.g.
         # {"kind": "point", "name": "Cabin"} or {"kind": "cache"}. Purely for
         # re-populating the picker's combo box when a saved filter is
@@ -791,20 +851,25 @@ class DistanceFilter(BaseFilter):
     def apply_to_query(self, query):
         """Pre-narrow with a lat/lon bounding box that *contains* the circle.
 
-        The box is a conservative superset of the max_km circle, so SQLite can
-        discard far-away caches (using the (latitude, longitude) index) before
-        any Python object is built, while matches() still applies the exact
-        haversine test — results are therefore identical. Skipped (returns None,
-        i.e. pure Python) for max_km<=0 or near the poles / antimeridian, where
-        a simple box could wrap and wrongly drop matches.
+        The box is a conservative superset of the circle of radius max_dist
+        (the farthest distance *op* can match), so SQLite can discard
+        far-away caches (using the (latitude, longitude) index) before any
+        Python object is built, while matches() still applies the exact
+        haversine test — results are therefore identical. Skipped (returns
+        None, i.e. pure Python) for unbounded conditions ("more than", "at
+        least", "not between"), max_dist<=0 or near the poles / antimeridian,
+        where a simple box could wrap and wrongly drop matches.
         """
-        if self.max_km <= 0 or not (-89.0 < self.lat < 89.0):
+        max_dist = _distance_op_upper_bound(
+            self.op, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
+        )
+        if max_dist is None or max_dist <= 0 or not (-89.0 < self.lat < 89.0):
             return None
-        dlat = self.max_km / 111.0  # ~111 km per degree of latitude
+        dlat = max_dist / 111.0  # ~111 km per degree of latitude
         coslat = math.cos(math.radians(self.lat))
         if coslat <= 1e-6:
             return None
-        dlon = self.max_km / (111.0 * coslat)
+        dlon = max_dist / (111.0 * coslat)
         if dlon >= 180.0 or self.lon - dlon < -180.0 or self.lon + dlon > 180.0:
             return None  # box would wrap the antimeridian — let Python handle it
         from sqlalchemy import and_
@@ -817,24 +882,37 @@ class DistanceFilter(BaseFilter):
         if cache.latitude is None or cache.longitude is None:
             return False
         dist = _haversine_km(self.lat, self.lon, cache.latitude, cache.longitude)
-        return self.min_km <= dist <= self.max_km
+        return _distance_op_ok(
+            self.op, dist, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
+        )
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
             "lat": self.lat,
             "lon": self.lon,
-            "max_km": self.max_km,
-            "min_km": self.min_km,
+            "op": self.op,
+            "dist1_km": self.dist1_km,
+            "dist2_km": self.dist2_km,
             "center_state": self.center_state,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DistanceFilter":
+        if "op" not in data:
+            # Profile saved before the distance conditions — min/max form.
+            return cls(
+                data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
+                data.get("center_state"),
+            )
         return cls(
-            data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
-            data.get("center_state"),
+            data["lat"], data["lon"], center_state=data.get("center_state"),
+            op=data["op"], dist1_km=data.get("dist1_km", 0.0),
+            dist2_km=data.get("dist2_km", 0.0),
         )
+
+    def __repr__(self) -> str:
+        return f"<DistanceFilter {self.to_dict()}>"
 
 
 # Compass directions in clockwise order from north — index i is the 45° sector
@@ -1166,9 +1244,7 @@ class NoCorrectedFilter(BaseFilter):
         return cls()
 
 
-CORRECTED_DISTANCE_OPS = (
-    "equal", "less_than", "at_most", "more_than", "at_least", "between", "not_between",
-)
+CORRECTED_DISTANCE_OPS = DISTANCE_OPS
 # "equal" compares distances to whole metres — the dialog enters them without
 # decimals, and two float distances are never exactly equal otherwise.
 _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M = 0.5
@@ -1198,22 +1274,6 @@ class CorrectedDistanceFilter(BaseFilter):
     def apply_to_query(self, query):
         return HasCorrectedFilter().apply_to_query(query)
 
-    def distance_ok(self, dist_m: float) -> bool:
-        a, b = self.dist1_m, self.dist2_m
-        if self.op == "equal":
-            return abs(dist_m - a) <= _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M
-        if self.op == "less_than":
-            return dist_m < a
-        if self.op == "at_most":
-            return dist_m <= a
-        if self.op == "more_than":
-            return dist_m > a
-        if self.op == "at_least":
-            return dist_m >= a
-        lo, hi = min(a, b), max(a, b)
-        inside = lo <= dist_m <= hi
-        return inside if self.op == "between" else not inside
-
     def matches(self, cache: Cache) -> bool:
         note = cache.user_note
         if not (note and note.is_corrected):
@@ -1223,7 +1283,9 @@ class CorrectedDistanceFilter(BaseFilter):
         dist_m = _haversine_km(
             cache.latitude, cache.longitude, note.corrected_lat, note.corrected_lon,
         ) * 1000.0
-        return self.distance_ok(dist_m)
+        return _distance_op_ok(
+            self.op, dist_m, self.dist1_m, self.dist2_m, _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M,
+        )
 
     def to_dict(self) -> dict:
         return {

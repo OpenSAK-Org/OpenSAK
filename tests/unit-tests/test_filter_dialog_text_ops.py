@@ -254,6 +254,15 @@ class TestCorrectedDistance:
         assert reopened._ccd_op.currentData() == "between"
         assert (reopened._ccd_dist1.value(), reopened._ccd_dist2.value()) == (100, 3219)
 
+    def test_reversed_range_is_swapped_on_apply(self, dlg):
+        dlg._ccd_enabled.setChecked(True)
+        dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("between"))
+        dlg._ccd_dist1.setValue(3219)
+        dlg._ccd_dist2.setValue(100)
+        [f] = _by_type(dlg._build_filterset(), "corrected_distance")
+        assert (f.dist1_m, f.dist2_m) == (100, 3219)
+        assert (dlg._ccd_dist1.value(), dlg._ccd_dist2.value()) == (100, 3219)
+
     def test_feet_are_stored_in_metres(self, dlg, monkeypatch):
         from opensak.utils.types import DateFormat, CoordFormat
         monkeypatch.setattr("opensak.gui.settings.get_settings",

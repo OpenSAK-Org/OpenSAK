@@ -151,7 +151,11 @@ All three can be toggled independently. Default: available only.
 
 ### Distance
 
-Show only caches within a certain radius of your active home point. The unit (km or mi) follows your preference set in Settings.
+Filter on the distance from a centre point — your home point, a saved point, the selected cache or a custom coordinate. Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance. The unit (km or mi) follows your preference set in Settings. *Equal* matches within ±5 m. For *Between* / *Not between* the two values may be entered in either order; the smaller one is moved to the first box when the filter is applied.
+
+Examples: *At most 10 km* is the classic radius; *Between 5 and 20 km* skips the caches right around you; *More than 100 km* finds caches far from home.
+
+Filter profiles saved with the older *Min* / *Max* fields load as *At most Max*, or *Between Min and Max* when a minimum was set — the same caches as before.
 
 ---
 
@@ -289,7 +293,7 @@ Both text criteria must hold for the **same** trackable. Count is the number of 
 | Has corrected | Only caches where you have stored corrected (puzzle-solved) coordinates |
 | No corrected | Only caches without corrected coordinates |
 
-**Distance corrected ↔ posted** — check **Enable** to filter on how far a cache's corrected coordinates lie from its posted coordinates. Pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance in metres (feet when miles are selected in Settings). *Equal* compares to the whole metre. Caches without corrected coordinates never match.
+**Distance corrected ↔ posted** — check **Enable** to filter on how far a cache's corrected coordinates lie from its posted coordinates. Pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance in metres (feet when miles are selected in Settings). *Equal* compares to the whole metre. As with the centre-point distance, a reversed *Between* range is put in order when applied. Caches without corrected coordinates never match.
 
 Examples: *More than 3219 m* finds solved finals outside the 2-mile rule (often a typo); *Equal 0 m* finds caches whose corrected coordinates are just the posted ones.
 

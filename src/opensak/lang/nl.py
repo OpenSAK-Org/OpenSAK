@@ -679,8 +679,6 @@ STRINGS: dict[str, str] = {
     "filter_unavailable":           "Tijdelijk niet beschikbaar",
     "filter_distance_group":        "Afstand van middelpunt",
     "filter_enable":                "Inschakelen",
-    "filter_min":                   "Min:",
-    "filter_max":                   "Max:",
     "center_point_label":                 "Middelpunt:",
     "center_point_home":                  "★ Thuis",
     "center_point_selected_cache":        "📍 Geselecteerde cache: {cache}",

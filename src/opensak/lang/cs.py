@@ -676,8 +676,6 @@ STRINGS: dict[str, str] = {
     "filter_unavailable":           "Dočasně nedostupné",
     "filter_distance_group":        "Vzdálenost od středového bodu",
     "filter_enable":                "Povolit",
-    "filter_min":                   "Min:",
-    "filter_max":                   "Max:",
     "center_point_label":                 "Středový bod:",
     "center_point_home":                  "★ Domov",
     "center_point_selected_cache":        "📍 Vybraná keš: {cache}",

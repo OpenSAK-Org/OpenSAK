@@ -675,8 +675,6 @@ STRINGS: dict[str, str] = {
     "filter_unavailable":           "Temporarily unavailable",
     "filter_distance_group":        "Distance from centre point",
     "filter_enable":                "Enable",
-    "filter_min":                   "Min:",
-    "filter_max":                   "Max:",
     "center_point_label":                 "Center point:",
     "center_point_home":                  "★ Home",
     "center_point_selected_cache":        "📍 Selected cache: {cache}",
