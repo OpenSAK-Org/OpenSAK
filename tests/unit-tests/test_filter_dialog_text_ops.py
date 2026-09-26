@@ -45,7 +45,7 @@ def _by_type(fs, ftype):
 class TestOperatorDropdown:
     def test_every_text_row_offers_every_operator(self, dlg):
         rows = _text_rows(dlg)
-        assert len(rows) == 12
+        assert len(rows) == 13
         for row, _cls in rows:
             assert [row.combo.itemData(i) for i in range(row.combo.count())] == list(TEXT_OPS)
             assert row.op() == "contains"

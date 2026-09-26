@@ -236,7 +236,7 @@ STRINGS: dict[str, str] = {
     "filter_locked_group":          "Låst",
     "filter_dnf_group":            "DNF (Hittades ej)",
     "filter_ftf_group":            "FTF (First to Find) 🥇",
-    "filter_personal_note_group":  "Har personlig anteckning",
+    "filter_user_note_label":      "Personlig anteckning",
     "filter_direction_group":      "Riktning från mittpunkt",
     "filter_fav_points_group":     "Favoritpoäng",
     "filter_found_date_group":     "Datum funnet av mig",

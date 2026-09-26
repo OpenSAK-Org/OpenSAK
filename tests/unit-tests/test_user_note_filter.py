@@ -1,9 +1,10 @@
-"""tests/unit-tests/test_personal_note_filter.py — PersonalNoteFilter (GSAK "Has user notes").
+"""tests/unit-tests/test_user_note_filter.py — UserNoteFilter (personal note text match).
 
-Keeps caches that do / don't have a non-blank UserNote.note. SQL pushdown must
-agree with matches() for every shape of note: no UserNote row, a row with only
-corrected coordinates, NULL / empty / whitespace-only text, and a real note —
-on both apply_filters() and apply_filters_lightweight().
+Matches UserNote.note (whitespace-stripped) with the TextMatchFilter operators.
+SQL pushdown must agree with matches() for every shape of note: no UserNote
+row, a row with only corrected coordinates, NULL / empty / whitespace-only
+text, and real notes — on both apply_filters() and apply_filters_lightweight().
+Profiles saved with the old yes/no PersonalNoteFilter must migrate.
 """
 
 import pytest
@@ -11,7 +12,7 @@ import pytest
 from opensak.db.database import get_session
 from opensak.db.models import Cache, UserNote
 from opensak.filters.engine import (
-    FILTER_REGISTRY, FilterSet, PersonalNoteFilter, UserFlagFilter,
+    FILTER_REGISTRY, FilterSet, UserFlagFilter, UserNoteFilter,
     apply_filters, apply_filters_lightweight,
 )
 
@@ -24,8 +25,9 @@ _NOTES = {
     "GCPN04": {"note": "  \t\r\n "},
     "GCPN05": {"note": "Final is behind the tree"},
     "GCPN06": {"note": "\n  padded  \n"},
+    "GCPN07": {"note": "Solved: N 47° Zürich"},
 }
-_WITH_NOTE = {"GCPN05", "GCPN06"}
+_WITH_NOTE = {"GCPN05", "GCPN06", "GCPN07"}
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -53,24 +55,51 @@ def _run(fs):
     return pushed & set(_NOTES)
 
 
-def test_has_note():
-    assert _run(FilterSet().add(PersonalNoteFilter(True))) == _WITH_NOTE
+def test_not_empty():
+    assert _run(FilterSet().add(UserNoteFilter(op="not_empty"))) == _WITH_NOTE
 
 
-def test_has_no_note():
-    assert _run(FilterSet().add(PersonalNoteFilter(False))) == set(_NOTES) - _WITH_NOTE
+def test_empty():
+    assert _run(FilterSet().add(UserNoteFilter(op="empty"))) == set(_NOTES) - _WITH_NOTE
+
+
+@pytest.mark.parametrize("text, op, expected", [
+    ("TREE", "contains", {"GCPN05"}),
+    ("tree", "not_contains", set(_NOTES) - {"GCPN05"}),
+    ("padded", "equals", {"GCPN06"}),          # compared whitespace-stripped
+    ("final", "starts_with", {"GCPN05"}),
+    ("zürich", "contains", {"GCPN07"}),         # non-ASCII: pre-narrowed in SQL
+    (r"N \d+°", "regex", {"GCPN07"}),           # Python-only
+    ("", "contains", set(_NOTES)),              # no-op
+])
+def test_text_ops(text, op, expected):
+    assert _run(FilterSet().add(UserNoteFilter(text, op))) == expected
 
 
 def test_in_or_group_uses_python_path():
     fs = FilterSet().add(FilterSet(mode="OR")
-                         .add(PersonalNoteFilter(True))
+                         .add(UserNoteFilter(op="not_empty"))
                          .add(UserFlagFilter(True)))
     assert _run(fs) == _WITH_NOTE | {"GCPN01"}
 
 
-@pytest.mark.parametrize("has_note", [True, False])
-def test_serialisation_roundtrip(has_note):
-    data = PersonalNoteFilter(has_note).to_dict()
-    assert data == {"filter_type": "personal_note", "has_note": has_note}
-    restored = FILTER_REGISTRY["personal_note"].from_dict(data)
+def test_serialisation_roundtrip():
+    data = UserNoteFilter("tree", "not_contains").to_dict()
+    assert data == {"filter_type": "user_note", "text": "tree", "op": "not_contains"}
+    restored = FILTER_REGISTRY["user_note"].from_dict(data)
     assert restored.to_dict() == data
+
+
+@pytest.mark.parametrize("has_note, op", [(True, "not_empty"), (False, "empty")])
+def test_legacy_personal_note_profile_migrates(has_note, op):
+    fs = FilterSet.from_dict({
+        "mode": "AND",
+        "filters": [{"filter_type": "personal_note", "has_note": has_note}],
+    })
+    (f,) = fs._filters
+    assert isinstance(f, UserNoteFilter)
+    assert f.op == op
+    # Re-saving writes the new format.
+    assert fs.to_dict()["filters"] == [{"filter_type": "user_note", "text": "", "op": op}]
+    expected = _WITH_NOTE if has_note else set(_NOTES) - _WITH_NOTE
+    assert _run(fs) == expected

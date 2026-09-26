@@ -54,7 +54,7 @@ from opensak.filters.engine import (
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, PersonalNoteFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, UserNoteFilter,
     FavoritePointsFilter, ElevationFilter,
     UserData1Filter, UserData2Filter, UserData3Filter, UserData4Filter, GcNoteFilter,
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
@@ -1155,12 +1155,14 @@ class FilterDialog(QDialog):
         self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
         self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
-        # GSAK UserData1–4 + GC.com's synced personal note (gc_note)
+        # GSAK UserData1–4 + GC.com's synced personal note (gc_note) + the
+        # local personal note (UserNote.note)
         self._ud_rows = [
             TextFilterRow(tr(f"col_user_data_{i}"), tr("filter_contains_placeholder"))
             for i in range(1, 5)
         ]
         self._gc_note_row = TextFilterRow(tr("col_gc_note"), tr("filter_contains_placeholder"))
+        self._user_note_row = TextFilterRow(tr("filter_user_note_label"), tr("filter_contains_placeholder"))
         geo_grid = QGridLayout()
         geo_grid.setHorizontalSpacing(12)
         geo_grid.setVerticalSpacing(4)
@@ -1234,9 +1236,6 @@ class FilterDialog(QDialog):
         self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
             _yes_no_row("filter_ftf_group")
 
-        # Personlig note (GSAK "Has user notes")
-        self._pnote_yes, self._pnote_no, self._pnote_label, pnote_widget =             _yes_no_row("filter_personal_note_group")
-
         # Favorit points
         self._fav_enabled = QCheckBox(tr("filter_enable"))
         self._fav_enabled.toggled.connect(self._on_fav_toggled)
@@ -1283,7 +1282,6 @@ class FilterDialog(QDialog):
             (self._locked_label, locked_widget),
             (self._dnf_label, dnf_widget),
             (self._ftf_label, ftf_widget),
-            (self._pnote_label, pnote_widget),
             (self._fav_label, fav_widget),
             (self._elev_label, elev_widget),
         )):
@@ -2071,8 +2069,6 @@ class FilterDialog(QDialog):
              lambda: not (self._dnf_yes.isChecked() and self._dnf_no.isChecked())),
             (misc, self._ftf_label,
              lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
-            (misc, self._pnote_label,
-             lambda: not (self._pnote_yes.isChecked() and self._pnote_no.isChecked())),
             (misc, self._fav_label, self._fav_enabled.isChecked),
             (misc, self._elev_label, self._elev_enabled.isChecked),
             # Logs/Waypoints: the date row labels light up on their own; the
@@ -2397,8 +2393,6 @@ class FilterDialog(QDialog):
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
         self._ftf_no.setChecked(True)
-        self._pnote_yes.setChecked(True)
-        self._pnote_no.setChecked(True)
         self._fav_enabled.setChecked(False)
         self._fav_min.setValue(0)
         self._fav_max.setValue(9999)
@@ -2522,6 +2516,7 @@ class FilterDialog(QDialog):
             (ud3, UserData3Filter),
             (ud4, UserData4Filter),
             (self._gc_note_row, GcNoteFilter),
+            (self._user_note_row, UserNoteFilter),
         ]
 
     def _build_filterset(self) -> FilterSet:
@@ -2624,7 +2619,7 @@ class FilterDialog(QDialog):
             if date_filter is not None:
                 fs.add(date_filter)
 
-        # Øvrigt — Land / Stat / Kommune / UserData1–4 / GC-note
+        # Øvrigt — Land / Stat / Kommune / UserData1–4 / GC-note / personlig note
         for row, cls in self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is not None:
@@ -2666,14 +2661,6 @@ class FilterDialog(QDialog):
             fs.add(FtfFilter(has_ftf=True))
         elif ftf_no and not ftf_yes:
             fs.add(FtfFilter(has_ftf=False))
-
-        # Personlig note
-        pnote_yes = self._pnote_yes.isChecked()
-        pnote_no  = self._pnote_no.isChecked()
-        if pnote_yes and not pnote_no:
-            fs.add(PersonalNoteFilter(has_note=True))
-        elif pnote_no and not pnote_yes:
-            fs.add(PersonalNoteFilter(has_note=False))
 
         # Favorit points
         if self._fav_enabled.isChecked():
@@ -3008,10 +2995,6 @@ class FilterDialog(QDialog):
                 has_ftf = getattr(f, "has_ftf", True)
                 self._ftf_yes.setChecked(has_ftf)
                 self._ftf_no.setChecked(not has_ftf)
-            elif ftype == "personal_note":
-                has_note = getattr(f, "has_note", True)
-                self._pnote_yes.setChecked(has_note)
-                self._pnote_no.setChecked(not has_note)
             elif ftype == "favorite_points":
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
