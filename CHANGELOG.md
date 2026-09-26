@@ -4,6 +4,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.10] — 2026-09-26
+
+> A new overview of every place OpenSAK stores files, a more thorough clean-up
+> when uninstalling the Linux AppImage with data removal, and a fix for
+> databases that could disappear after changing the installation folder in the
+> Welcome Wizard.
+
+### Added
+
+- **Help → OpenSAK File Locations… (#907)** — Shows every place OpenSAK keeps
+  files on your computer: settings and application data, the startup
+  configuration, your database folder, databases opened from other locations,
+  older settings (keyboard shortcuts), the saved PQ Email password and, on
+  Linux, the application menu files. Each row shows whether the location
+  exists and how much space it uses, with an **Open folder** button. Handy for
+  backups, for moving to a new computer, or for tidying up after uninstalling.
+  **Copy all to clipboard** gives you a text summary to paste into a bug
+  report. The window only shows information — it never deletes anything.
+
+### Fixed
+
+- **Linux: uninstalling with "also remove my data" left files behind (#906)**
+  — The in-app uninstall of the AppImage now also removes the startup
+  configuration in `~/.config/opensak/`, the older settings file in
+  `~/.config/OpenSAK Project/`, and the saved PQ Email password in your
+  system's keyring. Previously a leftover settings file could also bring back
+  your old database list the next time OpenSAK was installed. Databases you
+  opened from other locations (e.g. a USB drive) are still never removed
+  automatically.
+- **Welcome Wizard: databases could disappear after changing only the
+  installation folder (#908)** — When the Welcome Wizard was run again from
+  **Settings → Advanced** and only the installation folder was changed, your
+  database files were moved along with it, but OpenSAK kept looking for them
+  in the old place. Databases now stay where your database folder setting
+  says they are, and if you change both folders you are asked whether to move
+  your databases, as intended. Your data was never deleted — if this happened
+  to you, your databases are in the new installation folder and can be added
+  back with **Open existing…** in **File → Manage databases…**.
+
+---
+
 ## [1.20.0-beta.9] — 2026-09-25
 
 > Fixes a startup failure in the direct Windows download on PCs where
