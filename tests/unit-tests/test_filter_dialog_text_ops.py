@@ -1,5 +1,6 @@
 # tests/unit-tests/test_filter_dialog_text_ops.py — operator dropdowns on the
-# filter dialog's text filters (name, GC code, placed by, owner, country, state, county).
+# filter dialog's text filters (name, GC code, placed by, owner, country, state, county,
+# user data 1-4, GC.com note).
 
 from types import SimpleNamespace
 
@@ -34,7 +35,7 @@ def dlg(qtbot):
 
 
 def _text_rows(dlg):
-    return dlg._general_text_rows() + dlg._geo_text_rows()
+    return dlg._general_text_rows() + dlg._misc_text_rows()
 
 
 def _by_type(fs, ftype):
@@ -44,7 +45,7 @@ def _by_type(fs, ftype):
 class TestOperatorDropdown:
     def test_every_text_row_offers_every_operator(self, dlg):
         rows = _text_rows(dlg)
-        assert len(rows) == 7
+        assert len(rows) == 13
         for row, _cls in rows:
             assert [row.combo.itemData(i) for i in range(row.combo.count())] == list(TEXT_OPS)
             assert row.op() == "contains"
@@ -157,3 +158,130 @@ class TestRegexValidation:
         dlg._apply()
         [f] = _by_type(applied[0], "name")
         assert (f.op, f.regex_error) == ("not_regex", None)
+
+
+class TestUserDataGcNoteElevation:
+    def test_user_data_and_gc_note_rows_build_their_filters(self, dlg):
+        for i, row in enumerate(dlg._ud_rows, start=1):
+            row.edit.setText(f"ud{i}")
+        dlg._gc_note_row.set_op("not_empty")
+        fs = dlg._build_filterset()
+        for i in range(1, 5):
+            [f] = _by_type(fs, f"user_data_{i}")
+            assert (f.op, f.text) == ("contains", f"ud{i}")
+        [note] = _by_type(fs, "gc_note")
+        assert note.op == "not_empty"
+
+    def test_user_data_and_gc_note_round_trip(self, dlg, qtbot):
+        dlg._ud_rows[2].set_op("equals")
+        dlg._ud_rows[2].edit.setText("solved")
+        dlg._gc_note_row.edit.setText("final")
+        reopened = FilterDialog()
+        qtbot.addWidget(reopened)
+        reopened._load_filterset(dlg._build_filterset())
+        assert (reopened._ud_rows[2].op(), reopened._ud_rows[2].edit.text()) == ("equals", "solved")
+        assert reopened._gc_note_row.edit.text() == "final"
+
+    def test_elevation_off_by_default(self, dlg):
+        assert not dlg._elev_enabled.isChecked()
+        assert _by_type(dlg._build_filterset(), "elevation") == []
+
+    def test_elevation_builds_and_round_trips(self, dlg, qtbot):
+        dlg._elev_enabled.setChecked(True)
+        dlg._elev_min.setValue(400)
+        dlg._elev_max.setValue(1200)
+        fs = dlg._build_filterset()
+        [f] = _by_type(fs, "elevation")
+        assert (f.min_m, f.max_m) == (400, 1200)
+        reopened = FilterDialog()
+        qtbot.addWidget(reopened)
+        reopened._load_filterset(fs)
+        assert reopened._elev_enabled.isChecked()
+        assert (reopened._elev_min.value(), reopened._elev_max.value()) == (400, 1200)
+
+    def test_elevation_in_feet_is_stored_in_metres(self, dlg, monkeypatch):
+        from opensak.utils.types import DateFormat, CoordFormat
+        monkeypatch.setattr("opensak.gui.settings.get_settings",
+                            lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True,
+                                                   date_format=DateFormat.YMD,
+                                                   coord_format=CoordFormat.DD, home_points=[],
+                                                   theme="light"))
+        dlg._elev_enabled.setChecked(True)
+        dlg._elev_min.setValue(3281)   # ~1000 m
+        dlg._elev_max.setValue(6562)   # ~2000 m
+        [f] = _by_type(dlg._build_filterset(), "elevation")
+        assert f.min_m == pytest.approx(1000, abs=0.1)
+        assert f.max_m == pytest.approx(2000, abs=0.1)
+
+    def test_reset_misc_clears_new_rows(self, dlg):
+        dlg._ud_rows[0].edit.setText("x")
+        dlg._gc_note_row.edit.setText("y")
+        dlg._elev_enabled.setChecked(True)
+        dlg._elev_min.setValue(100)
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
+        dlg._reset_current_tab()
+        assert dlg._ud_rows[0].edit.text() == ""
+        assert dlg._gc_note_row.edit.text() == ""
+        assert not dlg._elev_enabled.isChecked()
+        assert dlg._elev_min.value() == -500
+
+
+class TestCorrectedDistance:
+    def test_off_by_default(self, dlg):
+        assert not dlg._ccd_enabled.isChecked()
+        assert not dlg._ccd_op.isEnabled()
+        assert _by_type(dlg._build_filterset(), "corrected_distance") == []
+
+    def test_second_value_only_for_between(self, dlg):
+        dlg._ccd_enabled.setChecked(True)
+        for op, shown in (("more_than", False), ("between", True),
+                          ("not_between", True), ("equal", False)):
+            dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData(op))
+            assert dlg._ccd_dist2.isVisibleTo(dlg) is shown, op
+
+    def test_builds_and_round_trips(self, dlg, qtbot):
+        dlg._ccd_enabled.setChecked(True)
+        dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("between"))
+        dlg._ccd_dist1.setValue(100)
+        dlg._ccd_dist2.setValue(3219)
+        fs = dlg._build_filterset()
+        [f] = _by_type(fs, "corrected_distance")
+        assert (f.op, f.dist1_m, f.dist2_m) == ("between", 100, 3219)
+        reopened = FilterDialog()
+        qtbot.addWidget(reopened)
+        reopened._load_filterset(fs)
+        assert reopened._ccd_enabled.isChecked()
+        assert reopened._ccd_op.currentData() == "between"
+        assert (reopened._ccd_dist1.value(), reopened._ccd_dist2.value()) == (100, 3219)
+
+    def test_reversed_range_is_swapped_on_apply(self, dlg):
+        dlg._ccd_enabled.setChecked(True)
+        dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("between"))
+        dlg._ccd_dist1.setValue(3219)
+        dlg._ccd_dist2.setValue(100)
+        [f] = _by_type(dlg._build_filterset(), "corrected_distance")
+        assert (f.dist1_m, f.dist2_m) == (100, 3219)
+        assert (dlg._ccd_dist1.value(), dlg._ccd_dist2.value()) == (100, 3219)
+
+    def test_feet_are_stored_in_metres(self, dlg, monkeypatch):
+        from opensak.utils.types import DateFormat, CoordFormat
+        monkeypatch.setattr("opensak.gui.settings.get_settings",
+                            lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True,
+                                                   date_format=DateFormat.YMD,
+                                                   coord_format=CoordFormat.DD, home_points=[],
+                                                   theme="light"))
+        dlg._ccd_enabled.setChecked(True)
+        dlg._ccd_dist1.setValue(10560)  # 2 miles
+        [f] = _by_type(dlg._build_filterset(), "corrected_distance")
+        assert f.op == "more_than"
+        assert f.dist1_m == pytest.approx(3218.7, abs=0.1)
+
+    def test_reset_general_clears_it(self, dlg):
+        dlg._ccd_enabled.setChecked(True)
+        dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("equal"))
+        dlg._ccd_dist1.setValue(0)
+        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._reset_current_tab()
+        assert not dlg._ccd_enabled.isChecked()
+        assert dlg._ccd_op.currentData() == "more_than"
+        assert dlg._ccd_dist1.value() == 3219

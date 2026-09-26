@@ -1,16 +1,17 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Ni faner:
+Ti faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
 4. Logs        — caches efter deres logs (type, dato, logger, antal …)
 5. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
 6. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
-7. Attributter — alle Groundspeak attributter
-8. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-9. Where       — rå SQL WHERE-betingelse
+7. Trackables  — caches efter deres trackables (navn, tracking code, antal)
+8. Attributter — alle Groundspeak attributter
+9. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+10. Where      — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -18,7 +19,7 @@ Understøtter gem/indlæs filterprofiler.
 from __future__ import annotations
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
@@ -40,23 +41,27 @@ from opensak.gui.widgets.center_point_picker import CenterPointPicker
 from opensak.gui.theme import highlight_colors, highlight_style
 from opensak.lang import tr
 from opensak.filters.engine import (
-    FilterSet, SortSpec,
+    BaseFilter, FilterSet, SortSpec,
     CacheTypeFilter, ContainerFilter,
     DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter,
     AvailableFilter, ArchivedFilter, AvailabilityFilter,
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
-    PlacedByFilter, OwnerFilter, DistanceFilter,
+    PlacedByFilter, OwnerFilter, DistanceFilter, DirectionFilter, DIRECTIONS,
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
+    CorrectedDistanceFilter, DISTANCE_OPS,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, UserNoteFilter,
+    FavoritePointsFilter, ElevationFilter,
+    UserData1Filter, UserData2Filter, UserData3Filter, UserData4Filter, GcNoteFilter,
     DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
     WaypointFilter, WAYPOINT_TEXT_FIELDS,
+    TrackableFilter, TRACKABLE_TEXT_FIELDS,
     LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
@@ -345,6 +350,9 @@ _TEXT_OP_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+_F = TypeVar("_F", bound=BaseFilter)
+
+
 class TextFilterRow(QWidget):
     """Operator dropdown + value field for one text filter (name, owner, …).
 
@@ -381,8 +389,11 @@ class TextFilterRow(QWidget):
         self.set_op("contains")
         self.edit.clear()
 
-    def build(self, cls: type[TextMatchFilter]) -> Optional[TextMatchFilter]:
-        """Filter for the current input, or None when the row is not set."""
+    def build(self, cls: Callable[[str, str], _F]) -> Optional[_F]:
+        """Filter for the current input, or None when the row is not set.
+
+        *cls* is called as ``cls(text, op)`` — a TextMatchFilter subclass, or
+        a factory like the Text Search tab's."""
         op = self.op()
         if op in TEXT_OPS_VALUELESS:
             return cls("", op)
@@ -474,6 +485,16 @@ _WP_COUNT_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+# ── Trackables-fanen ──────────────────────────────────────────────────────────
+
+# (felt, oversættelsesnøgle) for tekstrækkerne; antal bruger _WP_COUNT_LABELS.
+_TB_TEXT_LABELS: tuple[tuple[str, str], ...] = (
+    ("name",          "col_name"),
+    ("tracking_code", "filter_tb_tracking_code"),
+)
+assert tuple(f for f, _ in _TB_TEXT_LABELS) == TRACKABLE_TEXT_FIELDS
+
+
 # ── Logs-fanen ────────────────────────────────────────────────────────────────
 
 # (kategori, oversættelsesnøgle) for "Zu durchsuchende Logs", i GSAK's
@@ -505,6 +526,23 @@ _LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
     ("points",  "filter_lp_type_points"),
 )
 _LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
+_M_TO_FT = 3.28084  # højdefilteret gemmer meter; vises i ft når use_miles
+
+# Afstandsbetingelser — delt af afstand fra center-punkt og afstand rettede ↔
+# oprindelige koordinater. Nøglerne står som literals, så test_no_unused_keys
+# kan finde dem.
+_DISTANCE_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",       "filter_date_op_equal"),
+    ("less_than",   "filter_op_less_than"),
+    ("at_most",     "filter_wp_count_at_most"),
+    ("more_than",   "filter_op_more_than"),
+    ("at_least",    "filter_wp_count_at_least"),
+    ("between",     "filter_date_op_between"),
+    ("not_between", "filter_op_not_between"),
+)
+assert tuple(op for op, _ in _DISTANCE_OP_LABELS) == DISTANCE_OPS
+_DIST_DEFAULT_KM = 50.0  # afstand fra center-punkt, i brugerens enhed
+_CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
 
 
 def _format_lp_point(point: tuple[float, float]) -> str:
@@ -812,6 +850,7 @@ class FilterDialog(QDialog):
         self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
         self._waypoints_tab = self._build_waypoints_tab()
+        self._trackables_tab = self._build_trackables_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
@@ -820,12 +859,11 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._logs_tab, tr("detail_tab_logs"))
         self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
         self._tabs.addTab(self._waypoints_tab, tr("filter_tab_waypoints"))
+        self._tabs.addTab(self._trackables_tab, tr("filter_trackables_group"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
-        self._connect_highlight_signals()
-        self._refresh_highlights()
 
         # ── Knapper ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
@@ -843,6 +881,11 @@ class FilterDialog(QDialog):
         reset_tab_btn.clicked.connect(self._reset_current_tab)
         btn_row.addWidget(reset_tab_btn)
 
+        # Global invert: show exactly the caches the filter would hide.
+        self._invert_cb = QCheckBox(tr("filter_invert"))
+        self._invert_cb.setToolTip(tr("filter_invert_tooltip"))
+        btn_row.addWidget(self._invert_cb)
+
         btn_row.addStretch()
 
         cancel_btn = QPushButton(tr("cancel"))
@@ -850,6 +893,10 @@ class FilterDialog(QDialog):
         btn_row.addWidget(cancel_btn)
 
         layout.addLayout(btn_row)
+
+        # After the button row, so the invert checkbox is connected too.
+        self._connect_highlight_signals()
+        self._refresh_highlights()
 
     def _build_general_tab(self) -> QWidget:
         """Generelt filter fane.
@@ -992,26 +1039,27 @@ class FilterDialog(QDialog):
         dist_outer.setContentsMargins(8, 4, 8, 4)
         dist_outer.setSpacing(4)
 
+        # Samme betingelser som afstand rettede ↔ oprindelige koordinater;
+        # værdierne vises i brugerens enhed (km / mi), gemmes i km.
         dist_row = QHBoxLayout()
         self._dist_enabled = QCheckBox(tr("filter_enable"))
         self._dist_enabled.toggled.connect(self._on_dist_toggled)
         dist_row.addWidget(self._dist_enabled)
-        dist_row.addWidget(QLabel(tr("filter_min")))
-        self._dist_min = QDoubleSpinBox()
-        self._dist_min.setRange(0.0, 9999.0)
-        self._dist_min.setValue(0.0)
-        from opensak.gui.settings import get_settings as _gs
-        _unit = " mi" if _gs().use_miles else " km"
-        self._dist_min.setSuffix(_unit)
-        self._dist_min.setEnabled(False)
-        dist_row.addWidget(self._dist_min)
-        dist_row.addWidget(QLabel(tr("filter_max")))
-        self._dist_max = QDoubleSpinBox()
-        self._dist_max.setRange(0.1, 9999.0)
-        self._dist_max.setValue(50.0)
-        self._dist_max.setSuffix(_unit)
-        self._dist_max.setEnabled(False)
-        dist_row.addWidget(self._dist_max)
+        self._dist_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dist_op.addItem(tr(key), op)
+        self._dist_op.currentIndexChanged.connect(self._update_dist_inputs)
+        dist_row.addWidget(self._dist_op)
+        _unit = " mi" if self._use_miles() else " km"
+        self._dist1 = QDoubleSpinBox()
+        self._dist2 = QDoubleSpinBox()
+        for spin in (self._dist1, self._dist2):
+            spin.setRange(0.0, 20_100.0)  # > halvdelen af jordens omkreds
+            spin.setSuffix(_unit)
+        self._dist_and = QLabel("–")
+        dist_row.addWidget(self._dist1)
+        dist_row.addWidget(self._dist_and)
+        dist_row.addWidget(self._dist2)
         dist_row.addSpacing(16)
 
         # Center-punkt (issue #511) — genbrugelig widget, delt med den
@@ -1023,10 +1071,11 @@ class FilterDialog(QDialog):
         self._center_picker.setEnabled(False)
         dist_row.addWidget(self._center_picker, 1)
         dist_outer.addLayout(dist_row)
+        self._reset_dist()
 
         layout.addWidget(self._dist_group)
 
-        # ── Ja/nej-valg: fem etiket-rækker i to kolonner ─────────────────────
+        # ── Ja/nej-valg: fire etiket-rækker i to kolonner ─────────────────────
         # Tidligere fem QGroupBox'e under hinanden — hver med ~24 px indhold i
         # en ~70 px ramme. Etiketterne er selve highlight-målet (#610).
         status_grid = QGridLayout()
@@ -1061,28 +1110,45 @@ class FilterDialog(QDialog):
         self._prem_label, prem_widget = _status_row(
             tr("col_premium"), self._prem_yes, self._prem_no)
 
-        # Trackables
-        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
-        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
-        self._tb_label, tb_widget = _status_row(
-            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
-
         # Corrected Coordinates
         self._cc_yes = QCheckBox(tr("filter_has_corrected"))
         self._cc_no  = QCheckBox(tr("filter_no_corrected"))
         self._cc_label, cc_widget = _status_row(
             tr("filter_corrected_group"), self._cc_yes, self._cc_no)
 
+        # Afstand mellem rettede og oprindelige koordinater (m, eller ft når
+        # use_miles) — caches uden rettede koordinater matcher aldrig
+        self._ccd_enabled = QCheckBox(tr("filter_enable"))
+        self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
+        self._ccd_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._ccd_op.addItem(tr(key), op)
+        self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
+        self._ccd_dist1 = QDoubleSpinBox()
+        self._ccd_dist2 = QDoubleSpinBox()
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setDecimals(0)
+        self._ccd_and = QLabel("–")
+        self._ccd_label, ccd_widget = labeled_row(
+            tr("filter_cc_distance"),
+            self._ccd_enabled, self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+        self._reset_ccd()
+
         for i, (label, widget) in enumerate((
             (self._found_label, found_widget),
             (self._prem_label, prem_widget),
             (self._avail_label, avail_widget),
-            (self._tb_label, tb_widget),
             (self._cc_label, cc_widget),
         )):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
             status_grid.addWidget(widget, r, c * 2 + 1)
+        ccd_row = status_grid.rowCount()
+        status_grid.addWidget(self._ccd_label, ccd_row, 0)
+        status_grid.addWidget(ccd_widget, ccd_row, 1, 1, 3)
         status_grid.setColumnStretch(1, 1)
         status_grid.setColumnStretch(3, 1)
         layout.addLayout(status_grid)
@@ -1132,10 +1198,18 @@ class FilterDialog(QDialog):
         self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
         self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
+        # GSAK UserData1–4 + GC.com's synced personal note (gc_note) + the
+        # local personal note (UserNote.note)
+        self._ud_rows = [
+            TextFilterRow(tr(f"col_user_data_{i}"), tr("filter_contains_placeholder"))
+            for i in range(1, 5)
+        ]
+        self._gc_note_row = TextFilterRow(tr("col_gc_note"), tr("filter_contains_placeholder"))
+        self._user_note_row = TextFilterRow(tr("filter_user_note_label"), tr("filter_contains_placeholder"))
         geo_grid = QGridLayout()
         geo_grid.setHorizontalSpacing(12)
         geo_grid.setVerticalSpacing(4)
-        for i, row in enumerate((self._country_row, self._state_row, self._county_row)):
+        for i, (row, _cls) in enumerate(self._misc_text_rows()):
             r, c = divmod(i, 2)
             geo_grid.addWidget(row.label, r, c * 2)
             geo_grid.addWidget(row, r, c * 2 + 1)
@@ -1145,6 +1219,46 @@ class FilterDialog(QDialog):
         self._country_filter = self._country_row.edit
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
+
+        # Retning fra centerpunkt (GSAK "Richtung") — kompakt kompasrose-gitter
+        # på én etiket-række. Tidligere en QGroupBox, der fyldte ~350 px i
+        # højden; etiketten er highlight-målet (#610).
+        dir_grid = QGridLayout()
+        dir_grid.setContentsMargins(0, 0, 0, 0)
+        dir_grid.setHorizontalSpacing(8)
+        dir_grid.setVerticalSpacing(2)
+        # (row, col) for each direction in a 3x3 compass rose, centre empty
+        dir_cells = {
+            "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
+            "W":  (1, 0),              "E":  (1, 2),
+            "SW": (2, 0), "S": (2, 1), "SE": (2, 2),
+        }
+        dir_labels = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
+        self._dir_checks: dict[str, QCheckBox] = {}
+        for d in DIRECTIONS:
+            cb = QCheckBox(dir_labels.get(d, d))
+            cb.setChecked(True)
+            self._dir_checks[d] = cb
+            dir_grid.addWidget(cb, *dir_cells[d])
+        dir_btns = QVBoxLayout()
+        dir_btns.setSpacing(2)
+        dir_all = QPushButton(tr("filter_type_enable_all"))
+        dir_all.clicked.connect(lambda: self._set_all_directions(True))
+        dir_none = QPushButton(tr("filter_type_disable_all"))
+        dir_none.clicked.connect(lambda: self._set_all_directions(False))
+        dir_btns.addWidget(dir_all)
+        dir_btns.addWidget(dir_none)
+        dir_row = QHBoxLayout()
+        dir_row.setSpacing(16)
+        self._dir_label = hug_label(QLabel(tr("filter_direction_group")))
+        dir_row.addWidget(self._dir_label, 0, Qt.AlignmentFlag.AlignTop)
+        # Ingen addStretch() i dir_btns — en vertikal spacer gør hele rækken
+        # "expanding" og spreder kompasrosen ud over fanens fulde højde.
+        dir_row.addLayout(dir_grid)
+        dir_row.addLayout(dir_btns)
+        dir_row.setAlignment(dir_btns, Qt.AlignmentFlag.AlignTop)
+        dir_row.addStretch()
+        layout.addLayout(dir_row)
 
         # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
         def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
@@ -1185,6 +1299,24 @@ class FilterDialog(QDialog):
             QLabel(tr("filter_to")), self._fav_max,
         )
 
+        # Højde (m, eller ft når use_miles) — ukendt højde matcher aldrig
+        self._elev_enabled = QCheckBox(tr("filter_enable"))
+        self._elev_enabled.toggled.connect(self._on_elev_toggled)
+        self._elev_min = QDoubleSpinBox()
+        self._elev_min.setDecimals(0)
+        self._elev_min.setEnabled(False)
+        self._elev_max = QDoubleSpinBox()
+        self._elev_max.setDecimals(0)
+        self._elev_max.setEnabled(False)
+        self._set_elev_range(-500.0, 9000.0)
+        self._elev_label, elev_widget = labeled_row(
+            tr("col_elevation"),
+            self._elev_enabled,
+            QLabel(tr("filter_from")), self._elev_min,
+            QLabel(tr("filter_to")), self._elev_max,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+
         status_grid = QGridLayout()
         status_grid.setHorizontalSpacing(16)
         status_grid.setVerticalSpacing(4)
@@ -1194,6 +1326,7 @@ class FilterDialog(QDialog):
             (self._dnf_label, dnf_widget),
             (self._ftf_label, ftf_widget),
             (self._fav_label, fav_widget),
+            (self._elev_label, elev_widget),
         )):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
@@ -1534,6 +1667,78 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(f.count1)
         self._wp_count2.setValue(f.count2)
 
+    def _build_trackables_tab(self) -> QWidget:
+        """Trackables fane — caches efter deres trackables. Tekstkriterierne
+        skal gælde for samme trackable; Antal tæller dem, der opfylder dem."""
+        widget = QWidget()
+        layout = QFormLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Har trackables ja/nej (flyttet hertil fra Generelt-fanen)
+        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
+        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
+        self._tb_label, tb_widget = labeled_row(
+            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
+        layout.addRow(self._tb_label, tb_widget)
+
+        self._tb_text_rows: dict[str, TextFilterRow] = {}
+        for field, key in _TB_TEXT_LABELS:
+            row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
+            self._tb_text_rows[field] = row
+            layout.addRow(row.label, row)
+
+        count = QWidget()
+        count_layout = QHBoxLayout(count)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self._tb_count_op = QComboBox()
+        for op, key in _WP_COUNT_LABELS:
+            self._tb_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._tb_count_op)
+        self._tb_count1 = QSpinBox()
+        self._tb_count1.setRange(0, 9999)
+        self._tb_count2 = QSpinBox()
+        self._tb_count2.setRange(0, 9999)
+        count_layout.addWidget(self._tb_count1)
+        count_layout.addWidget(self._tb_count2)
+        count_layout.addStretch()
+        layout.addRow(tr("filter_wp_count"), count)
+        self._tb_count_op.currentIndexChanged.connect(self._update_tb_count_inputs)
+        self._update_tb_count_inputs()
+
+        return widget
+
+    def _update_tb_count_inputs(self) -> None:
+        op = self._tb_count_op.currentData()
+        self._tb_count1.setVisible(op != "any")
+        self._tb_count2.setVisible(op == "between")
+
+    def _build_trackable_filter(self) -> Optional[TrackableFilter]:
+        """TrackableFilter for the trackables tab, or None when nothing is set."""
+        texts = {}
+        for field, row in self._tb_text_rows.items():
+            op = row.op()
+            text = row.edit.text().strip()
+            if op in TEXT_OPS_VALUELESS or text:
+                texts[field] = (text, op)
+        f = TrackableFilter(
+            texts=texts,
+            count_op=self._tb_count_op.currentData(),
+            count1=self._tb_count1.value(),
+            count2=self._tb_count2.value(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_trackable_filter(self, f: TrackableFilter) -> None:
+        for field, match in f.texts.items():
+            self._tb_text_rows[field].load(match)
+        index = self._tb_count_op.findData(f.count_op)
+        self._tb_count_op.setCurrentIndex(max(index, 0))
+        self._tb_count1.setValue(f.count1)
+        self._tb_count2.setValue(f.count2)
+
     def _build_logs_tab(self) -> QWidget:
         """Logs fane — caches efter deres logs (GSAK's "Logs"). Øverst vælges
         hvilke logs der søges i, nederst hvad de skal opfylde."""
@@ -1766,10 +1971,10 @@ class FilterDialog(QDialog):
         group_layout = QFormLayout(group)
         group_layout.setSpacing(8)
 
-        self._text_search_input = QLineEdit()
-        self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
-        self._text_search_label = hug_label(QLabel(tr("filter_text_search_label")))
-        group_layout.addRow(self._text_search_label, self._text_search_input)
+        # Same operators as the other text filters, regex included.
+        self._text_search_row = TextFilterRow(tr("filter_text_search_label"),
+                                              tr("filter_text_search_placeholder"))
+        group_layout.addRow(self._text_search_row.label, self._text_search_row)
 
         self._text_search_description = QCheckBox(tr("detail_tab_desc"))
         self._text_search_description.setChecked(True)
@@ -1875,10 +2080,11 @@ class FilterDialog(QDialog):
                           and self._archived_cb.isChecked())),
             (general, self._prem_label,
              lambda: not (self._prem_yes.isChecked() and self._prem_no.isChecked())),
-            (general, self._tb_label,
+            (self._trackables_tab, self._tb_label,
              lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
             (general, self._cc_label,
              lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
+            (general, self._ccd_label, self._ccd_enabled.isChecked),
             (general, self._dist_group, self._dist_enabled.isChecked),
         ]
 
@@ -1890,11 +2096,15 @@ class FilterDialog(QDialog):
         for date_row in self._date_rows.values():
             specs.append((self._dates_tab, date_row.label, date_is_set(date_row)))
 
-        for row, _cls in self._geo_text_rows():
+        for row, _cls in self._misc_text_rows():
             specs.append((misc, row.label, row.is_set))
         for wp_row in self._wp_text_rows.values():
             specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
+        for tb_row in self._tb_text_rows.values():
+            specs.append((self._trackables_tab, tb_row.label, tb_row.is_set))
         specs += [
+            (misc, self._dir_label,
+             lambda: not all(cb.isChecked() for cb in self._dir_checks.values())),
             (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
             (misc, self._locked_label,
@@ -1904,6 +2114,7 @@ class FilterDialog(QDialog):
             (misc, self._ftf_label,
              lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
             (misc, self._fav_label, self._fav_enabled.isChecked),
+            (misc, self._elev_label, self._elev_enabled.isChecked),
             # Logs/Waypoints: the date row labels light up on their own; the
             # tab follows the whole filter, so scope, types, count etc. count too.
             (self._logs_tab, self._log_date_row.label,
@@ -1915,11 +2126,13 @@ class FilterDialog(QDialog):
              date_is_set(self._wp_date_row)),
             (self._waypoints_tab, None,
              lambda: self._build_waypoint_filter() is not None),
+            (self._trackables_tab, None,
+             lambda: self._build_trackable_filter() is not None),
             # The attribute rows are cells, not widgets — painted by
             # _on_attr_state_changed; this entry only drives the tab itself.
             (self._attributes_tab, None, self._attributes_changed),
-            (self._text_search_tab, self._text_search_label,
-             lambda: bool(self._text_search_input.text().strip())),
+            (self._text_search_tab, self._text_search_row.label,
+             self._text_search_row.is_set),
             # Nothing on the Where tab is a label worth painting — the SQL box
             # already shows plainly whether it holds anything.
             (self._where_tab, None,
@@ -1969,6 +2182,9 @@ class FilterDialog(QDialog):
             for i in range(self._tabs.count()):
                 tab_bar.set_tab_highlighted(i, self._tabs.widget(i) in changed_tabs)
 
+        # The invert checkbox sits outside the tabs, so it isn't a spec.
+        set_highlighted(self._invert_cb, self._invert_cb.isChecked())
+
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
         show_where_info(self)
@@ -1985,7 +2201,7 @@ class FilterDialog(QDialog):
 
     def _validate_text_filters(self) -> bool:
         """Warn about, and focus, the first text filter with an invalid regex."""
-        for row, cls in self._general_text_rows() + self._geo_text_rows():
+        for row, cls in self._general_text_rows() + self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is None or text_filter.regex_error is None:
                 continue
@@ -2000,16 +2216,29 @@ class FilterDialog(QDialog):
                    error=text_filter.regex_error),
             )
             return False
-        for row in self._wp_text_rows.values():
-            text_filter = row.build(TextMatchFilter)
-            if text_filter is None or text_filter.regex_error is None:
-                continue
-            self._tabs.setCurrentWidget(self._waypoints_tab)
-            row.edit.setFocus()
+        for tab, rows in ((self._waypoints_tab, self._wp_text_rows),
+                          (self._trackables_tab, self._tb_text_rows)):
+            for row in rows.values():
+                text_filter = row.build(TextMatchFilter)
+                if text_filter is None or text_filter.regex_error is None:
+                    continue
+                self._tabs.setCurrentWidget(tab)
+                row.edit.setFocus()
+                QMessageBox.warning(
+                    self, tr("warning"),
+                    tr("filter_regex_invalid", field=row.label,
+                       error=text_filter.regex_error),
+                )
+                return False
+        text_search = self._build_text_search_filter()
+        if text_search is not None and text_search.regex_error is not None:
+            self._tabs.setCurrentWidget(self._text_search_tab)
+            self._text_search_row.edit.setFocus()
             QMessageBox.warning(
                 self, tr("warning"),
-                tr("filter_regex_invalid", field=row.label,
-                   error=text_filter.regex_error),
+                tr("filter_regex_invalid",
+                   field=self._text_search_row.label.text().rstrip(":"),
+                   error=text_search.regex_error),
             )
             return False
         log_filter = self._build_log_filter()
@@ -2125,13 +2354,95 @@ class FilterDialog(QDialog):
         )
 
     def _on_dist_toggled(self, checked: bool) -> None:
-        self._dist_max.setEnabled(checked)
-        self._dist_min.setEnabled(checked)
-        self._center_picker.setEnabled(checked)
+        self._update_dist_inputs()
+
+    def _update_dist_inputs(self) -> None:
+        enabled = self._dist_enabled.isChecked()
+        between = self._dist_op.currentData() in ("between", "not_between")
+        self._dist_op.setEnabled(enabled)
+        self._dist1.setEnabled(enabled)
+        self._dist2.setEnabled(enabled)
+        self._center_picker.setEnabled(enabled)
+        self._dist_and.setVisible(between)
+        self._dist2.setVisible(between)
+
+    def _set_dist_values(self, op: str, dist1_km: float, dist2_km: float) -> None:
+        """Show a centre-distance condition given in km, in the display unit."""
+        factor = 0.621371 if self._use_miles() else 1.0
+        self._dist_op.setCurrentIndex(max(self._dist_op.findData(op), 0))
+        self._dist1.setValue(dist1_km * factor)
+        self._dist2.setValue(dist2_km * factor)
+        self._update_dist_inputs()
+
+    def _dist_values_km(self) -> tuple[float, float]:
+        """The centre-distance values entered, converted back to km."""
+        factor = 1.60934 if self._use_miles() else 1.0
+        return self._dist1.value() * factor, self._dist2.value() * factor
+
+    def _reset_dist(self) -> None:
+        self._dist_enabled.setChecked(False)
+        self._dist_op.setCurrentIndex(self._dist_op.findData("at_most"))
+        self._dist1.setValue(_DIST_DEFAULT_KM)
+        self._dist2.setValue(_DIST_DEFAULT_KM)
+        self._update_dist_inputs()
 
     def _on_fav_toggled(self, checked: bool) -> None:
         self._fav_min.setEnabled(checked)
         self._fav_max.setEnabled(checked)
+
+    def _update_ccd_inputs(self) -> None:
+        enabled = self._ccd_enabled.isChecked()
+        between = self._ccd_op.currentData() in ("between", "not_between")
+        self._ccd_op.setEnabled(enabled)
+        self._ccd_dist1.setEnabled(enabled)
+        self._ccd_dist2.setEnabled(enabled)
+        self._ccd_and.setVisible(between)
+        self._ccd_dist2.setVisible(between)
+
+    def _set_ccd_distances(self, dist1_m: float, dist2_m: float) -> None:
+        """Show corrected-distance bounds given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setRange(0, 20_100_000 * factor)  # > halvdelen af jordens omkreds
+        self._ccd_dist1.setValue(dist1_m * factor)
+        self._ccd_dist2.setValue(dist2_m * factor)
+
+    def _ccd_distances_m(self) -> tuple[float, float]:
+        """The corrected-distance bounds entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._ccd_dist1.value() / factor, self._ccd_dist2.value() / factor
+
+    def _reset_ccd(self) -> None:
+        self._ccd_enabled.setChecked(False)
+        self._ccd_op.setCurrentIndex(self._ccd_op.findData("more_than"))
+        self._set_ccd_distances(_CC_DIST_DEFAULT_M, _CC_DIST_DEFAULT_M)
+        self._update_ccd_inputs()
+
+    def _on_elev_toggled(self, checked: bool) -> None:
+        self._elev_min.setEnabled(checked)
+        self._elev_max.setEnabled(checked)
+
+    @staticmethod
+    def _use_miles() -> bool:
+        from opensak.gui.settings import get_settings
+        return get_settings().use_miles
+
+    def _set_elev_range(self, min_m: float, max_m: float) -> None:
+        """Show an elevation range given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._elev_min, self._elev_max):
+            spin.setRange(-2000 * factor, 9000 * factor)
+        self._elev_min.setValue(min_m * factor)
+        self._elev_max.setValue(max_m * factor)
+
+    def _elev_range_m(self) -> tuple[float, float]:
+        """The elevation range entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._elev_min.value() / factor, self._elev_max.value() / factor
+
+    def _set_all_directions(self, checked: bool) -> None:
+        for cb in self._dir_checks.values():
+            cb.setChecked(checked)
 
     def _enable_all_types(self) -> None:
         for cb in self._type_checks.values():
@@ -2157,24 +2468,22 @@ class FilterDialog(QDialog):
         self._avail_cb.setChecked(True)
         self._unavail_cb.setChecked(True)
         self._archived_cb.setChecked(True)  # issue #576 — GSAK-style default
-        self._dist_enabled.setChecked(False)
-        self._dist_max.setValue(50.0)
-        self._dist_min.setValue(0.0)
+        self._reset_dist()
         self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
-        self._tb_yes.setChecked(True)
-        self._tb_no.setChecked(True)
         self._cc_yes.setChecked(True)
         self._cc_no.setChecked(True)
+        self._reset_ccd()
 
     def _reset_dates(self) -> None:
         for row in self._date_rows.values():
             row.reset()
 
     def _reset_misc(self) -> None:
-        for row, _cls in self._geo_text_rows():
+        for row, _cls in self._misc_text_rows():
             row.reset()
+        self._set_all_directions(True)
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
         self._locked_yes.setChecked(True)
@@ -2186,6 +2495,8 @@ class FilterDialog(QDialog):
         self._fav_enabled.setChecked(False)
         self._fav_min.setValue(0)
         self._fav_max.setValue(9999)
+        self._elev_enabled.setChecked(False)
+        self._set_elev_range(-500.0, 9000.0)
 
     def _reset_attributes(self) -> None:
         self._attr_mode_all.setChecked(True)
@@ -2207,8 +2518,29 @@ class FilterDialog(QDialog):
         self._wp_count1.setValue(0)
         self._wp_count2.setValue(0)
 
+    def _reset_trackables(self) -> None:
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
+        for row in self._tb_text_rows.values():
+            row.reset()
+        self._tb_count_op.setCurrentIndex(0)
+        self._tb_count1.setValue(0)
+        self._tb_count2.setValue(0)
+
+    def _build_text_search_filter(self) -> Optional[TextSearchFilter]:
+        """The Text Search tab's filter, or None when its row is not set."""
+        return self._text_search_row.build(
+            lambda text, op: TextSearchFilter(
+                text,
+                search_description=self._text_search_description.isChecked(),
+                search_logs=self._text_search_logs.isChecked(),
+                search_notes=self._text_search_notes.isChecked(),
+                search_hint=self._text_search_hint.isChecked(),
+                op=op,
+            ))
+
     def _reset_text_search(self) -> None:
-        self._text_search_input.clear()
+        self._text_search_row.reset()
         self._text_search_description.setChecked(True)
         self._text_search_logs.setChecked(True)
         self._text_search_notes.setChecked(True)
@@ -2229,10 +2561,12 @@ class FilterDialog(QDialog):
         self._reset_line_polygon()
         self._reset_attributes()
         self._reset_waypoints()
+        self._reset_trackables()
         self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
+        self._invert_cb.setChecked(False)
         self._refresh_highlights()
 
     def _reset_current_tab(self) -> None:
@@ -2254,6 +2588,8 @@ class FilterDialog(QDialog):
             self._reset_attributes()
         elif tab is self._waypoints_tab:
             self._reset_waypoints()
+        elif tab is self._trackables_tab:
+            self._reset_trackables()
         elif tab is self._text_search_tab:
             self._reset_text_search()
         self._refresh_highlights()
@@ -2268,15 +2604,40 @@ class FilterDialog(QDialog):
             (self._owner_row, OwnerFilter),
         ]
 
-    def _geo_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+    def _misc_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+        ud1, ud2, ud3, ud4 = self._ud_rows
         return [
             (self._country_row, CountryFilter),
             (self._state_row, StateFilter),
             (self._county_row, CountyFilter),
+            (ud1, UserData1Filter),
+            (ud2, UserData2Filter),
+            (ud3, UserData3Filter),
+            (ud4, UserData4Filter),
+            (self._gc_note_row, GcNoteFilter),
+            (self._user_note_row, UserNoteFilter),
         ]
 
+    def _order_distance_ranges(self) -> None:
+        """Put the smaller value first in a (not) between distance range.
+
+        The filter accepts the bounds in either order, but "Between 70 – 50"
+        left on screen looks like an empty range while it filters 50–70.
+        Only called when the filter is applied or saved, never while typing.
+        """
+        for op_combo, spin1, spin2 in (
+            (self._dist_op, self._dist1, self._dist2),
+            (self._ccd_op, self._ccd_dist1, self._ccd_dist2),
+        ):
+            if op_combo.currentData() in ("between", "not_between") \
+                    and spin1.value() > spin2.value():
+                low, high = spin2.value(), spin1.value()
+                spin1.setValue(low)
+                spin2.setValue(high)
+
     def _build_filterset(self) -> FilterSet:
-        fs = FilterSet(mode="AND")
+        self._order_distance_ranges()
+        fs = FilterSet(mode="AND", negate=self._invert_cb.isChecked())
 
         # Navn / GC kode / Udlagt af / Owner name
         for row, cls in self._general_text_rows():
@@ -2330,20 +2691,17 @@ class FilterDialog(QDialog):
 
         # Afstand
         if self._dist_enabled.isChecked():
-            from opensak.gui.settings import get_settings
-            s = get_settings()
             center = self._center_picker.get_center()
             if center is None:
                 QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
             else:
                 lat, lon = center
-                dist_val = self._dist_max.value()
-                min_val = self._dist_min.value()
-                max_km = dist_val * 1.60934 if s.use_miles else dist_val
-                min_km = min_val * 1.60934 if s.use_miles else min_val
+                dist1_km, dist2_km = self._dist_values_km()
                 fs.add(DistanceFilter(
-                    lat, lon, max_km, min_km,
+                    lat, lon,
                     center_state=self._center_picker.to_state(),
+                    op=self._dist_op.currentData(),
+                    dist1_km=dist1_km, dist2_km=dist2_km,
                 ))
 
         # Premium
@@ -2369,17 +2727,29 @@ class FilterDialog(QDialog):
             fs.add(NoCorrectedFilter())
         # Begge valgt (eller ingen) = vis alt = intet filter
 
+        # Afstand rettede ↔ oprindelige koordinater
+        if self._ccd_enabled.isChecked():
+            dist1_m, dist2_m = self._ccd_distances_m()
+            fs.add(CorrectedDistanceFilter(
+                op=self._ccd_op.currentData(), dist1_m=dist1_m, dist2_m=dist2_m,
+            ))
+
         # Datoer — én DateFilter pr. datofelt med en valgt operator
         for date_row in self._date_rows.values():
             date_filter = date_row.build()
             if date_filter is not None:
                 fs.add(date_filter)
 
-        # Øvrigt — Land / Stat / Kommune
-        for row, cls in self._geo_text_rows():
+        # Øvrigt — Land / Stat / Kommune / UserData1–4 / GC-note / personlig note
+        for row, cls in self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is not None:
                 fs.add(text_filter)
+
+        # Retning — alle eller ingen valgt = intet filter (samme som Container)
+        selected_dirs = [d for d, cb in self._dir_checks.items() if cb.isChecked()]
+        if selected_dirs and len(selected_dirs) < len(DIRECTIONS):
+            fs.add(DirectionFilter(selected_dirs))
 
         # User Flag
         flag_yes = self._flag_yes.isChecked()
@@ -2420,6 +2790,11 @@ class FilterDialog(QDialog):
                 max_pts=int(self._fav_max.value()),
             ))
 
+        # Højde
+        if self._elev_enabled.isChecked():
+            min_m, max_m = self._elev_range_m()
+            fs.add(ElevationFilter(min_m=min_m, max_m=max_m))
+
         # Linje/Polygon
         lp_filter = self._build_line_polygon_filter()
         if lp_filter is not None:
@@ -2454,16 +2829,15 @@ class FilterDialog(QDialog):
         if wp_filter is not None:
             fs.add(wp_filter)
 
+        # Trackables
+        tb_filter = self._build_trackable_filter()
+        if tb_filter is not None:
+            fs.add(tb_filter)
+
         # Tekstsøgning
-        ts_text = self._text_search_input.text().strip()
-        if ts_text:
-            fs.add(TextSearchFilter(
-                text=ts_text,
-                search_description=self._text_search_description.isChecked(),
-                search_logs=self._text_search_logs.isChecked(),
-                search_notes=self._text_search_notes.isChecked(),
-                search_hint=self._text_search_hint.isChecked(),
-            ))
+        text_search = self._build_text_search_filter()
+        if text_search is not None:
+            fs.add(text_search)
 
         # WHERE clause
         if self._where_tab is not None:
@@ -2592,6 +2966,7 @@ class FilterDialog(QDialog):
         """
         # Først: ryd UI så vi starter fra en kendt tilstand
         self._reset_all()
+        self._invert_cb.setChecked(fs.negate)
 
         # Saml filtre — hvis der er en nested OR-gruppe (fx attributter i OR-mode),
         # flad den ud, men husk at attributmode skal sættes.
@@ -2615,7 +2990,7 @@ class FilterDialog(QDialog):
 
         text_rows = {
             cls.filter_type: row
-            for row, cls in self._general_text_rows() + self._geo_text_rows()
+            for row, cls in self._general_text_rows() + self._misc_text_rows()
         }
         for f in flat_filters:
             ftype = getattr(f, "filter_type", None)
@@ -2630,6 +3005,10 @@ class FilterDialog(QDialog):
                 sizes = getattr(f, "sizes", [])
                 for cs, cb in self._cont_checks.items():
                     cb.setChecked(cs in sizes)
+            elif ftype == "direction":
+                dirs = getattr(f, "directions", [])
+                for d, cb in self._dir_checks.items():
+                    cb.setChecked(d in dirs)
             elif ftype == "difficulty":
                 self._diff_min.setValue(getattr(f, "min_difficulty", 1.0))
                 self._diff_max.setValue(getattr(f, "max_difficulty", 5.0))
@@ -2657,12 +3036,11 @@ class FilterDialog(QDialog):
                 self._archived_cb.setChecked(True)
             elif ftype == "distance":
                 self._dist_enabled.setChecked(True)
-                from opensak.gui.settings import get_settings as _gs
-                _use_mi = _gs().use_miles
-                saved_km = getattr(f, "max_km", 10.0)
-                self._dist_max.setValue(saved_km * 0.621371 if _use_mi else saved_km)
-                saved_min_km = getattr(f, "min_km", 0.0)
-                self._dist_min.setValue(saved_min_km * 0.621371 if _use_mi else saved_min_km)
+                self._set_dist_values(
+                    getattr(f, "op", "at_most"),
+                    getattr(f, "dist1_km", _DIST_DEFAULT_KM),
+                    getattr(f, "dist2_km", 0.0),
+                )
                 center_state = getattr(f, "center_state", None)
                 if center_state:
                     self._center_picker.set_state(center_state)
@@ -2689,6 +3067,11 @@ class FilterDialog(QDialog):
             elif ftype == "no_corrected":
                 self._cc_yes.setChecked(False)
                 self._cc_no.setChecked(True)
+            elif ftype == "corrected_distance":
+                self._ccd_enabled.setChecked(True)
+                index = self._ccd_op.findData(getattr(f, "op", "more_than"))
+                self._ccd_op.setCurrentIndex(max(index, 0))
+                self._set_ccd_distances(getattr(f, "dist1_m", 0.0), getattr(f, "dist2_m", 0.0))
             elif ftype == "line_polygon":
                 self._lp_text.setPlainText(
                     f.text or "\n".join(_format_lp_point(p) for p in f.points)
@@ -2710,8 +3093,10 @@ class FilterDialog(QDialog):
                         nej_cb.setChecked(True)
             elif ftype == "waypoint":
                 self._load_waypoint_filter(f)
+            elif ftype == "trackable":
+                self._load_trackable_filter(f)
             elif ftype == "text_search":
-                self._text_search_input.setText(getattr(f, "text", ""))
+                self._text_search_row.load(f)
                 self._text_search_description.setChecked(getattr(f, "search_description", True))
                 self._text_search_logs.setChecked(getattr(f, "search_logs", True))
                 self._text_search_notes.setChecked(getattr(f, "search_notes", True))
@@ -2739,6 +3124,9 @@ class FilterDialog(QDialog):
                 self._fav_enabled.setChecked(True)
                 self._fav_min.setValue(getattr(f, "min_pts", 0))
                 self._fav_max.setValue(getattr(f, "max_pts", 9999))
+            elif ftype == "elevation":
+                self._elev_enabled.setChecked(True)
+                self._set_elev_range(getattr(f, "min_m", -500.0), getattr(f, "max_m", 9000.0))
             elif ftype == "log":
                 self._load_log_filter(f)
             elif ftype == "date":
