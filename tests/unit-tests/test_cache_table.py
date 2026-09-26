@@ -1100,7 +1100,7 @@ class TestView:
         fired = []
         view.sort_changed.connect(lambda c, a: fired.append((c, a)))
         view.apply_sort("name", True)
-        assert view._last_sort_col == ALL_COLUMNS.index("name")
+        assert view._last_sort_col_id == "name"
         assert view._last_sort_asc is True
         # apply_sort blocks signals, so a user sort exercises the relay
         view._model.sort(ALL_COLUMNS.index("gc_code"), Qt.SortOrder.AscendingOrder)
