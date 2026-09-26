@@ -154,9 +154,12 @@ def get_all_storage_locations() -> list[StorageLocation]:
     raw_db_dir = settings_store.get_store().get("databases.dir")
     db_dir = Path(raw_db_dir) if raw_db_dir else None
 
+    # INSTALL_DIR før BOOTSTRAP_DIR: på Windows (ikke-MSIX) og macOS er de
+    # SAMME mappe, og dedupliceringen nedenfor beholder den første — og
+    # "installationsmappe" er den mest sigende betegnelse for brugeren.
     locations: list[StorageLocation] = [
-        StorageLocation(LocationKind.BOOTSTRAP_DIR, str(bootstrap_dir)),
         StorageLocation(LocationKind.INSTALL_DIR, str(install_dir)),
+        StorageLocation(LocationKind.BOOTSTRAP_DIR, str(bootstrap_dir)),
     ]
     covered = [bootstrap_dir, install_dir]
 
@@ -182,8 +185,9 @@ def get_all_storage_locations() -> list[StorageLocation]:
 
     locations += _appimage_locations()
 
-    # Windows (ikke-MSIX): bootstrap- og install-mappen er den SAMME
-    # (%APPDATA%\opensak) — vis den kun én gang.
+    # Windows (ikke-MSIX) og macOS: bootstrap- og install-mappen er den
+    # SAMME (%APPDATA%\opensak / ~/Library/Application Support/opensak)
+    # — vis den kun én gang.
     unique: list[StorageLocation] = []
     seen: set[tuple[bool, str]] = set()
     for loc in locations:

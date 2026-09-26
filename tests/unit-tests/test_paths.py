@@ -38,28 +38,34 @@ def fake_keyring(monkeypatch):
 
 # ── get_all_storage_locations() ──────────────────────────────────────────────
 
-def test_lists_bootstrap_and_install_dir():
+def test_lists_install_dir_and_bootstrap_dir():
     set_install_dir(get_install_dir())  # sørg for at bootstrap.json findes
+    install_dir = get_install_dir()
+    bootstrap_dir = _bootstrap_path().parent
 
-    bootstrap = _by_kind(LocationKind.BOOTSTRAP_DIR)
     install = _by_kind(LocationKind.INSTALL_DIR)
+    bootstrap = _by_kind(LocationKind.BOOTSTRAP_DIR)
 
-    assert [loc.location for loc in bootstrap] == [str(_bootstrap_path().parent)]
-    assert [loc.location for loc in install] == [str(get_install_dir())]
-    assert bootstrap[0].removed_on_purge is True
+    assert [loc.location for loc in install] == [str(install_dir)]
     assert install[0].removed_on_purge is True
 
+    # Windows (ikke-MSIX) og macOS: samme mappe → kun vist som INSTALL_DIR.
+    # Linux: ~/.config/opensak vs. ~/.local/share/opensak → begge vises.
+    if bootstrap_dir == install_dir:
+        assert bootstrap == []
+    else:
+        assert [loc.location for loc in bootstrap] == [str(bootstrap_dir)]
+        assert bootstrap[0].removed_on_purge is True
 
-def test_same_bootstrap_and_install_dir_listed_once(monkeypatch):
-    # Windows (ikke-MSIX): %APPDATA%\opensak er både bootstrap- og install-mappe.
+
+def test_same_dir_is_kept_as_install_dir(monkeypatch):
     import opensak.settings_store as ss
 
     install_dir = get_install_dir()
     monkeypatch.setattr(ss, "_bootstrap_path", lambda: install_dir / "bootstrap.json")
 
-    locs = get_all_storage_locations()
-    matching = [loc for loc in locs if loc.location == str(install_dir)]
-    assert len(matching) == 1
+    assert [loc.location for loc in _by_kind(LocationKind.INSTALL_DIR)] == [str(install_dir)]
+    assert _by_kind(LocationKind.BOOTSTRAP_DIR) == []
 
 
 def test_custom_database_dir_outside_install_dir_is_listed(tmp_path):
