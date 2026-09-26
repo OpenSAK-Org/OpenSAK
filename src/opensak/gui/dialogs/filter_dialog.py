@@ -52,6 +52,7 @@ from opensak.filters.engine import (
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
+    CorrectedDistanceFilter, CORRECTED_DISTANCE_OPS,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
     UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, UserNoteFilter,
@@ -526,6 +527,20 @@ _LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
 )
 _LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
 _M_TO_FT = 3.28084  # højdefilteret gemmer meter; vises i ft når use_miles
+
+# Afstand rettede ↔ oprindelige koordinater. Nøglerne står som literals, så
+# test_no_unused_keys kan finde dem.
+_CC_DIST_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",       "filter_date_op_equal"),
+    ("less_than",   "filter_op_less_than"),
+    ("at_most",     "filter_wp_count_at_most"),
+    ("more_than",   "filter_op_more_than"),
+    ("at_least",    "filter_wp_count_at_least"),
+    ("between",     "filter_date_op_between"),
+    ("not_between", "filter_op_not_between"),
+)
+assert tuple(op for op, _ in _CC_DIST_OP_LABELS) == CORRECTED_DISTANCE_OPS
+_CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
 
 
 def _format_lp_point(point: tuple[float, float]) -> str:
@@ -1097,6 +1112,27 @@ class FilterDialog(QDialog):
         self._cc_label, cc_widget = _status_row(
             tr("filter_corrected_group"), self._cc_yes, self._cc_no)
 
+        # Afstand mellem rettede og oprindelige koordinater (m, eller ft når
+        # use_miles) — caches uden rettede koordinater matcher aldrig
+        self._ccd_enabled = QCheckBox(tr("filter_enable"))
+        self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
+        self._ccd_op = QComboBox()
+        for op, key in _CC_DIST_OP_LABELS:
+            self._ccd_op.addItem(tr(key), op)
+        self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
+        self._ccd_dist1 = QDoubleSpinBox()
+        self._ccd_dist2 = QDoubleSpinBox()
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setDecimals(0)
+        self._ccd_and = QLabel("–")
+        self._ccd_label, ccd_widget = labeled_row(
+            tr("filter_cc_distance"),
+            self._ccd_enabled, self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+        self._reset_ccd()
+
         for i, (label, widget) in enumerate((
             (self._found_label, found_widget),
             (self._prem_label, prem_widget),
@@ -1106,6 +1142,9 @@ class FilterDialog(QDialog):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
             status_grid.addWidget(widget, r, c * 2 + 1)
+        ccd_row = status_grid.rowCount()
+        status_grid.addWidget(self._ccd_label, ccd_row, 0)
+        status_grid.addWidget(ccd_widget, ccd_row, 1, 1, 3)
         status_grid.setColumnStretch(1, 1)
         status_grid.setColumnStretch(3, 1)
         layout.addLayout(status_grid)
@@ -2041,6 +2080,7 @@ class FilterDialog(QDialog):
              lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
             (general, self._cc_label,
              lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
+            (general, self._ccd_label, self._ccd_enabled.isChecked),
             (general, self._dist_group, self._dist_enabled.isChecked),
         ]
 
@@ -2318,6 +2358,34 @@ class FilterDialog(QDialog):
         self._fav_min.setEnabled(checked)
         self._fav_max.setEnabled(checked)
 
+    def _update_ccd_inputs(self) -> None:
+        enabled = self._ccd_enabled.isChecked()
+        between = self._ccd_op.currentData() in ("between", "not_between")
+        self._ccd_op.setEnabled(enabled)
+        self._ccd_dist1.setEnabled(enabled)
+        self._ccd_dist2.setEnabled(enabled)
+        self._ccd_and.setVisible(between)
+        self._ccd_dist2.setVisible(between)
+
+    def _set_ccd_distances(self, dist1_m: float, dist2_m: float) -> None:
+        """Show corrected-distance bounds given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setRange(0, 20_100_000 * factor)  # > halvdelen af jordens omkreds
+        self._ccd_dist1.setValue(dist1_m * factor)
+        self._ccd_dist2.setValue(dist2_m * factor)
+
+    def _ccd_distances_m(self) -> tuple[float, float]:
+        """The corrected-distance bounds entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._ccd_dist1.value() / factor, self._ccd_dist2.value() / factor
+
+    def _reset_ccd(self) -> None:
+        self._ccd_enabled.setChecked(False)
+        self._ccd_op.setCurrentIndex(self._ccd_op.findData("more_than"))
+        self._set_ccd_distances(_CC_DIST_DEFAULT_M, _CC_DIST_DEFAULT_M)
+        self._update_ccd_inputs()
+
     def _on_elev_toggled(self, checked: bool) -> None:
         self._elev_min.setEnabled(checked)
         self._elev_max.setEnabled(checked)
@@ -2376,6 +2444,7 @@ class FilterDialog(QDialog):
         self._prem_no.setChecked(True)
         self._cc_yes.setChecked(True)
         self._cc_no.setChecked(True)
+        self._reset_ccd()
 
     def _reset_dates(self) -> None:
         for row in self._date_rows.values():
@@ -2612,6 +2681,13 @@ class FilterDialog(QDialog):
         elif cc_no and not cc_yes:
             fs.add(NoCorrectedFilter())
         # Begge valgt (eller ingen) = vis alt = intet filter
+
+        # Afstand rettede ↔ oprindelige koordinater
+        if self._ccd_enabled.isChecked():
+            dist1_m, dist2_m = self._ccd_distances_m()
+            fs.add(CorrectedDistanceFilter(
+                op=self._ccd_op.currentData(), dist1_m=dist1_m, dist2_m=dist2_m,
+            ))
 
         # Datoer — én DateFilter pr. datofelt med en valgt operator
         for date_row in self._date_rows.values():
@@ -2947,6 +3023,11 @@ class FilterDialog(QDialog):
             elif ftype == "no_corrected":
                 self._cc_yes.setChecked(False)
                 self._cc_no.setChecked(True)
+            elif ftype == "corrected_distance":
+                self._ccd_enabled.setChecked(True)
+                index = self._ccd_op.findData(getattr(f, "op", "more_than"))
+                self._ccd_op.setCurrentIndex(max(index, 0))
+                self._set_ccd_distances(getattr(f, "dist1_m", 0.0), getattr(f, "dist2_m", 0.0))
             elif ftype == "line_polygon":
                 self._lp_text.setPlainText(
                     f.text or "\n".join(_format_lp_point(p) for p in f.points)

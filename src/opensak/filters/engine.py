@@ -1166,6 +1166,85 @@ class NoCorrectedFilter(BaseFilter):
         return cls()
 
 
+CORRECTED_DISTANCE_OPS = (
+    "equal", "less_than", "at_most", "more_than", "at_least", "between", "not_between",
+)
+# "equal" compares distances to whole metres — the dialog enters them without
+# decimals, and two float distances are never exactly equal otherwise.
+_CORRECTED_DISTANCE_EQUAL_TOLERANCE_M = 0.5
+
+
+class CorrectedDistanceFilter(BaseFilter):
+    """Keep caches whose corrected coordinates lie a given distance (metres)
+    from their posted coordinates — e.g. finals more than 3.2 km off (outside
+    the 2-mile rule, likely a typo) or exactly 0 m (corrected = posted).
+
+    Caches without corrected coordinates never match: there is no distance
+    to compare. *dist2_m* is only used by "between" / "not_between".
+    """
+    filter_type = "corrected_distance"
+
+    # apply_to_query() only narrows to caches that have corrected coordinates;
+    # the distance itself is computed in matches(). See BaseFilter.sql_exact.
+    sql_exact = False
+
+    def __init__(self, op: str = "more_than", dist1_m: float = 0.0, dist2_m: float = 0.0):
+        if op not in CORRECTED_DISTANCE_OPS:
+            raise ValueError(f"Unknown corrected distance operator {op!r}")
+        self.op = op
+        self.dist1_m = dist1_m
+        self.dist2_m = dist2_m
+
+    def apply_to_query(self, query):
+        return HasCorrectedFilter().apply_to_query(query)
+
+    def distance_ok(self, dist_m: float) -> bool:
+        a, b = self.dist1_m, self.dist2_m
+        if self.op == "equal":
+            return abs(dist_m - a) <= _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M
+        if self.op == "less_than":
+            return dist_m < a
+        if self.op == "at_most":
+            return dist_m <= a
+        if self.op == "more_than":
+            return dist_m > a
+        if self.op == "at_least":
+            return dist_m >= a
+        lo, hi = min(a, b), max(a, b)
+        inside = lo <= dist_m <= hi
+        return inside if self.op == "between" else not inside
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        if not (note and note.is_corrected):
+            return False
+        if None in (cache.latitude, cache.longitude, note.corrected_lat, note.corrected_lon):
+            return False
+        dist_m = _haversine_km(
+            cache.latitude, cache.longitude, note.corrected_lat, note.corrected_lon,
+        ) * 1000.0
+        return self.distance_ok(dist_m)
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "op": self.op,
+            "dist1_m": self.dist1_m,
+            "dist2_m": self.dist2_m,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CorrectedDistanceFilter":
+        return cls(
+            op=data.get("op", "more_than"),
+            dist1_m=data.get("dist1_m", 0.0),
+            dist2_m=data.get("dist2_m", 0.0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<CorrectedDistanceFilter {self.to_dict()}>"
+
+
 class UserFlagFilter(BaseFilter):
     """Keep caches based on user_flag value."""
     filter_type = "user_flag"
@@ -2881,7 +2960,8 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
     "no_corrected":  NoCorrectedFilter,
-    "premium":       PremiumFilter,
+    "corrected_distance": CorrectedDistanceFilter,
+    "premium":      PremiumFilter,
     "non_premium":   NonPremiumFilter,
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
