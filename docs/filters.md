@@ -42,7 +42,7 @@ The filter dialog is split across ten tabs:
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, direction, user flag, DNF, FTF, personal note, favourite points, locked |
+| **Other** | Country / State / County, user data 1–4, GC.com note, personal note, direction, user flag, DNF, FTF, favourite points, elevation, locked |
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
@@ -329,10 +329,23 @@ Filter by First to Find status. Available on the **Other** tab.
 
 | Filter | Shows |
 |---|---|
-| Yes | Only caches with a personal note (the note on the cache's **Notes** tab) |
-| No | Only caches without one |
+Filter on the text of your personal note (the note on the cache's **Notes** tab), with the same text operators as *Name*, all case-insensitive. Available on the **Other** tab.
 
-A note containing only whitespace counts as no note; GC.com's synced personal cache note is not considered. Both are checked by default, so the filter has no effect until you uncheck one. Available on the **Other** tab.
+Surrounding whitespace is ignored, so a note containing only whitespace counts as empty. Use *is empty* / *is not empty* for the old yes/no check — filter profiles saved with the former **Yes** / **No** checkboxes load as exactly that. GC.com's synced personal cache note is not considered; it has its own filter, below.
+
+---
+
+### User data 1–4 / GC.com note
+
+Text filters on GSAK's four **User data** fields and on the **GC.com note** (the personal cache note synced from geocaching.com), with the same text operators as *Name*, all case-insensitive. Available on the **Other** tab.
+
+Example: *User data 1* equals `solved` finds the mysteries you've marked as solved in GSAK.
+
+---
+
+### Elevation
+
+Check **Enable** and enter a range to show only caches whose elevation lies within it (inclusive). The unit is metres, or feet when miles are selected in Settings. Caches whose elevation is unknown never match. Available on the **Other** tab.
 
 ---
 

@@ -1278,11 +1278,11 @@ class CorrectedDistanceFilter(BaseFilter):
         note = cache.user_note
         if not (note and note.is_corrected):
             return False
-        if None in (cache.latitude, cache.longitude, note.corrected_lat, note.corrected_lon):
+        lat, lon = cache.latitude, cache.longitude
+        clat, clon = note.corrected_lat, note.corrected_lon
+        if lat is None or lon is None or clat is None or clon is None:
             return False
-        dist_m = _haversine_km(
-            cache.latitude, cache.longitude, note.corrected_lat, note.corrected_lon,
-        ) * 1000.0
+        dist_m = _haversine_km(lat, lon, clat, clon) * 1000.0
         return _distance_op_ok(
             self.op, dist_m, self.dist1_m, self.dist2_m, _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M,
         )
