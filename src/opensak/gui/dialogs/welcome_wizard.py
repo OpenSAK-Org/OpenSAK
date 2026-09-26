@@ -330,6 +330,11 @@ class WelcomeWizard(QDialog):
         # (inkl. databases.list) ser ud til at "forsvinde", selvom den
         # gamle opensak.json stadig ligger uberørt i den gamle mappe.
         if install_dir != old_install_dir:
+            # Issue #908: beregnes FØR opensak.json flyttes, mens den gamle
+            # store (med databases.list) stadig er den aktive.
+            db_entries_to_keep = self._database_entries_to_keep(
+                old_install_dir, old_db_dir
+            )
             old_settings_existed = (old_install_dir / "opensak.json").exists()
             moved = self._move_settings_file(old_install_dir, install_dir)
             if old_settings_existed and not moved:
@@ -345,7 +350,9 @@ class WelcomeWizard(QDialog):
             # kendte filnavne enkeltvis ramte ikke icons/, så mappen kunne
             # aldrig blive helt tom og dermed aldrig fjernet. Flyt i stedet
             # ALT tilbageværende (filer og undermapper) generisk.
-            self._move_remaining_install_dir_contents(old_install_dir, install_dir)
+            self._move_remaining_install_dir_contents(
+                old_install_dir, install_dir, keep=db_entries_to_keep
+            )
             self._cleanup_old_dir(old_install_dir)
 
         # Gem installationsmappe i bootstrap.json
@@ -422,7 +429,78 @@ class WelcomeWizard(QDialog):
             pass
 
     @staticmethod
-    def _move_remaining_install_dir_contents(old_install_dir: Path, new_install_dir: Path) -> None:
+    def _database_entries_to_keep(old_install_dir: Path, old_db_dir: Path) -> set[Path]:
+        """
+        Find de elementer i den gamle installationsmappe, der hører til
+        databaserne og derfor IKKE må flyttes af den generiske flytning.
+
+        Issue #908: _move_remaining_install_dir_contents() flyttede ALT —
+        også .db-filerne (eller en indlejret databasemappe som "…/Data"),
+        når databasemappen lå i installationsmappen. databases.dir,
+        databases.list og databases.active pegede derefter stadig på den
+        gamle placering, så databaserne "forsvandt" fra OpenSAK. Databaser
+        flyttes i stedet udelukkende af _offer_move_databases() /
+        move_databases_to(), som opdaterer stierne korrekt og spørger
+        brugeren først.
+
+        Returnerer resolvede stier på ØVERSTE niveau under old_install_dir:
+          - databasemappen selv (eller dens øverste forfader), hvis den er
+            en undermappe af installationsmappen,
+          - registrerede databasefiler (+ -shm/-wal) direkte i mappen, og
+            øverste undermappe for registrerede databaser dybere nede,
+          - alle *.db(-shm/-wal)-filer, hvis databasemappen ER
+            installationsmappen (standard-layoutet) — også uregistrerede.
+        """
+        from opensak.settings_store import get_store
+
+        keep: set[Path] = set()
+        try:
+            root = old_install_dir.resolve()
+            db_dir = old_db_dir.resolve()
+        except OSError:
+            return keep
+
+        def _top_level(path: Path) -> Path | None:
+            if path == root or not path.is_relative_to(root):
+                return None
+            return root / path.relative_to(root).parts[0]
+
+        top = _top_level(db_dir)
+        if top is not None:
+            keep.add(top)
+
+        for entry in get_store().get("databases.list", []) or []:
+            raw = entry.get("path") if isinstance(entry, dict) else None
+            if not raw:
+                continue
+            try:
+                db_path = Path(raw).resolve()
+            except OSError:
+                continue
+            if db_path.parent == root:
+                for suffix in ("", "-shm", "-wal"):
+                    keep.add(db_path.with_name(db_path.name + suffix))
+            else:
+                top = _top_level(db_path)
+                if top is not None:
+                    keep.add(top)
+
+        if db_dir == root:
+            try:
+                for f in root.iterdir():
+                    if f.is_file() and f.name.endswith((".db", ".db-shm", ".db-wal")):
+                        keep.add(f.resolve())
+            except OSError:
+                pass
+
+        return keep
+
+    @staticmethod
+    def _move_remaining_install_dir_contents(
+        old_install_dir: Path,
+        new_install_dir: Path,
+        keep: set[Path] | frozenset[Path] = frozenset(),
+    ) -> None:
         """
         Flyt alt tilbageværende indhold i den gamle installationsmappe til
         den nye — fx den brugerdefinerede icons/-mappe (#519), gc_token.json
@@ -447,12 +525,15 @@ class WelcomeWizard(QDialog):
         destinationen, for ikke at overskrive noget der kan være bevidst
         (fx hvis den nye mappe allerede har sin egen icons/-mappe).
 
+        Springer over alt i `keep` (databaser, se
+        _database_entries_to_keep(), issue #908) og bootstrap.json.
+
         Best-effort: enkelte filer/mapper der ikke kan flyttes (i brug,
         navnekollision) springes stille over — resten flyttes stadig, og
         den efterfølgende _cleanup_old_dir()-oprydning fjerner kun selve
         mappen hvis den reelt endte helt tom.
         """
-        for name in ("opensak.log", "opensak.log.1"):
+        for name in ("opensak.log", "opensak.log.1", "opensak.log.previous"):
             f = old_install_dir / name
             try:
                 if f.exists():
@@ -465,7 +546,23 @@ class WelcomeWizard(QDialog):
         except OSError:
             return
 
+        # Issue #908: bootstrap.json må aldrig flyttes — på Windows
+        # (ikke-MSIX) og macOS ligger den i SAMME mappe som standard-
+        # installationsmappen, og set_install_dir() skriver den altid på
+        # sin faste plads bagefter; en flyttet kopi ville blot ligge
+        # ubrugt i den nye mappe.
+        from opensak.settings_store import _bootstrap_path
+        try:
+            skip = {p.resolve() for p in keep} | {_bootstrap_path().resolve()}
+        except OSError:
+            skip = set(keep)
+
         for entry in entries:
+            try:
+                if entry.resolve() in skip:
+                    continue
+            except OSError:
+                continue
             target = new_install_dir / entry.name
             if target.exists():
                 continue  # kollision — rør det ikke, behold begge som de er
