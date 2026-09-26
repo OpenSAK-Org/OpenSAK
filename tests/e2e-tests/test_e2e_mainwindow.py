@@ -1491,7 +1491,21 @@ class TestAboutUpdates:
         monkeypatch.setattr(icon_mod.QMessageBox, "exec", lambda self: None)
         monkeypatch.setattr(icon_mod.QMessageBox, "clickedButton", _clicked)
 
+    def _force_update_platform(self, monkeypatch, platform):
+        """Pin the platform the update dialog branches on.
+
+        The primary button depends on sys.platform (#572 self-download on
+        win32/darwin) and on AppImage integration (#836), so without this
+        the tests only pass on a plain Linux checkout.
+        """
+        import sys
+        from opensak import appimage
+        monkeypatch.setattr(sys, "platform", platform)
+        monkeypatch.setattr(appimage, "is_running_as_appimage", lambda: False)
+        monkeypatch.setattr(appimage, "is_appimage_integrated", lambda: False)
+
     def test_on_update_available_open_releases_opens_url(self, seeded_window, monkeypatch):
+        self._force_update_platform(monkeypatch, "linux")
         opened = []
         monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
         self._click_update_dialog_button(monkeypatch, tr("update_open_releases"))
@@ -1499,6 +1513,25 @@ class TestAboutUpdates:
         seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
 
         assert opened == ["http://example.com/release"]
+
+    @pytest.mark.parametrize("platform", ["win32", "darwin"])
+    def test_on_update_available_download_button_self_downloads(
+        self, seeded_window, monkeypatch, platform
+    ):
+        # Issue #572: Windows/macOS get "Download new version" instead of
+        # "Open releases page", and it must not fall back to the browser.
+        self._force_update_platform(monkeypatch, platform)
+        opened, started = [], []
+        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+        monkeypatch.setattr(
+            seeded_window, "_start_self_download_update", lambda tag: started.append(tag)
+        )
+        self._click_update_dialog_button(monkeypatch, tr("update_download_button"))
+
+        seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
+
+        assert started == ["v9.9.9"]
+        assert opened == []
 
     def test_on_update_available_skip_sets_skipped_version(
         self, seeded_window, monkeypatch, iso_settings
