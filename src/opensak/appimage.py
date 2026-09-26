@@ -116,6 +116,21 @@ def get_integrated_appimage_path() -> Path:
     return Path.home() / ".local" / "bin" / _INTEGRATED_FILENAME
 
 
+def get_desktop_file_path() -> Path:
+    """Stien til den .desktop-fil integrate_appimage() genererer."""
+    return Path.home() / ".local" / "share" / "applications" / _DESKTOP_FILENAME
+
+
+def get_icon_paths() -> list[Path]:
+    """De ikon-filer integrate_appimage() installerer (kun 256x256, se
+    _find_bundled_icon()). Bruges også af paths.py (issue #906)."""
+    return [
+        Path.home() / ".local" / "share" / "icons" / "hicolor"
+        / "256x256" / "apps" / "opensak.png",
+        Path.home() / ".local" / "share" / "pixmaps" / "opensak.png",
+    ]
+
+
 # ── Status (gemt via settings_store) ────────────────────────────────────────
 
 def is_appimage_integrated() -> bool:
@@ -324,19 +339,13 @@ def integrate_appimage() -> IntegrationResult:
 # ── In-app afinstaller (issue #837, Step C i epic #824) ─────────────────────
 
 def _remove_desktop_file() -> None:
-    desktop_path = Path.home() / ".local" / "share" / "applications" / _DESKTOP_FILENAME
-    desktop_path.unlink(missing_ok=True)
+    get_desktop_file_path().unlink(missing_ok=True)
 
 
 def _remove_icons() -> None:
     """Fjern præcis de ikon-filer integrate_appimage() selv installerede."""
-    hicolor_path = (
-        Path.home() / ".local" / "share" / "icons" / "hicolor"
-        / "256x256" / "apps" / "opensak.png"
-    )
-    hicolor_path.unlink(missing_ok=True)
-    pixmap_path = Path.home() / ".local" / "share" / "pixmaps" / "opensak.png"
-    pixmap_path.unlink(missing_ok=True)
+    for icon_path in get_icon_paths():
+        icon_path.unlink(missing_ok=True)
 
 
 def _reset_integration_flags() -> None:
@@ -365,33 +374,18 @@ def _reset_integration_flags() -> None:
 
 def _purge_user_data() -> None:
     """
-    Slet OpenSAKs installations- og database-mapper (settings, databases).
+    Slet ALLE OpenSAK-brugerdata.
 
-    Bruger settings_store.get_install_dir()/get_db_dir() — de PRÆCISE
-    stier OpenSAK selv bruger (inkl. en evt. brugertilpasset database-
-    placering fra velkomst-wizarden), i stedet for at gætte stier selv
-    (det var netop svagheden ved en ekstern bash-uninstaller, se §4.3 i
-    designdokumentet).
+    Issue #906: delegerer til paths.purge_user_data(), som bruger den samme
+    samlede liste over lagringssteder som "OpenSAK File Locations…"-
+    dialogen (#907). Den tidligere lokale liste her dækkede kun install-
+    og database-mappen, og efterlod derfor bootstrap-mappen
+    (~/.config/opensak/), den gamle QSettings-fil og PQ Email-kodeordet
+    i OS-keyringen.
     """
-    from opensak.settings_store import get_db_dir, get_install_dir
+    from opensak.paths import purge_user_data
 
-    home = Path.home().resolve()
-    dirs_to_remove: set[Path] = set()
-    for getter in (get_install_dir, get_db_dir):
-        try:
-            d = getter().resolve()
-        except OSError:
-            continue
-        # Sikkerhedstjek — slet aldrig hjemmemappen eller filsystemroden
-        # selv, uanset hvad en fejlkonfigureret sti måtte pege på.
-        if d == home or d == Path(d.anchor):
-            log.warning("Springer over mistænkelig sti ved data-oprydning: %s", d)
-            continue
-        dirs_to_remove.add(d)
-
-    for d in dirs_to_remove:
-        if d.is_dir():
-            shutil.rmtree(d, ignore_errors=True)
+    purge_user_data()
 
 
 def uninstall_appimage(*, purge_data: bool) -> UninstallResult:
