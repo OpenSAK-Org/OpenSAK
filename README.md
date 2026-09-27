@@ -10,15 +10,19 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ---
 
-> **⚠️ Hobby Project Notice**
+> **ℹ️ Built by volunteers, for geocachers**
 >
-> This project is developed in my spare time as a personal hobby project.
-> Bug reports and suggestions are welcome via GitHub Issues, but responses
-> and updates are not guaranteed. Development happens when time and interest allow.
+> OpenSAK is developed by a small international team of volunteers — geocachers
+> building the tool they want to use themselves. There's no company behind it and
+> no paid support, so while we read every issue and review every pull request,
+> we can't promise when (or whether) a particular request will be addressed.
 >
-> Pull requests are welcome, though they may not always be reviewed or merged.
+> The best way to move something forward is to get involved: report bugs with
+> clear steps to reproduce, test the betas, help with translations, or open a
+> pull request.
 >
-> The software is provided as-is, without warranty or guaranteed support.
+> OpenSAK is provided as-is, under the MIT License, without warranty or
+> guaranteed support.
 
 ---
 
