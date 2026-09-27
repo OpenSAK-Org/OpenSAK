@@ -26,7 +26,9 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ### Import & Database
 - 📥 **Import** GPX files and Pocket Query ZIP files from Geocaching.com
-- 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus)
+- 📧 **Pocket Queries by e-mail** — fetch PQ ZIP attachments straight from your own IMAP mailbox; the password is kept in your OS keyring, never in plain text
+- 🔁 **Import GSAK databases** — read a GSAK database directly, including personal notes, corrected coordinates, child waypoints, attributes and the full log history
+- 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus), and move caches between them
 - 📍 **Home points** — save multiple named home points (Home, Cottage, Hotel…) and switch instantly from the toolbar
 - ✅ **Update finds** from a reference database (e.g. your "My Finds" PQ)
 
@@ -40,13 +42,16 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ### View & Navigation
 - 🗺️ **Interactive map** with OpenStreetMap and colour-coded cache pins with clustering
-- 🔍 **Advanced filter dialog** — 6 tabs: General, Dates, Other, Attributes (~70 Groundspeak attributes), Text Search, and a raw SQL WHERE tab
+- 🔍 **Advanced filter dialog** modelled on GSAK's — 10 tabs: General, Dates, Other, Logs, Line/Polygon, Child Waypoints, Trackables, Attributes (~70 Groundspeak attributes), Text Search, and a raw SQL WHERE tab
+  - 12 text operators on every text field (contains, equals, starts/ends with, in list, empty, regex — and their negations)
+  - Date conditions, distance from any centre point, compass direction, caches along a route or inside a polygon
+  - AND/OR logic, a global **Invert filter**, and saved filter profiles in the toolbar
 - 📊 **Configurable columns** — 17+ columns, toggle on/off
 - 🎨 **Color-coded status** — found (yellow) and your own caches (green) in the GC Code column and info bar, archived/disabled caches in red; clickable info-bar counts filter the list instantly
 - 🔗 **Click GC code** → opens cache page on geocaching.com
 - 🗺️ **Click coordinates** → opens in Google Maps or OpenStreetMap
 - 🖥️ **Full-screen / popout map** — enlarge the map to a bigger, dedicated view
-- 🌍 **Offline Country/State/County lookup** — automatic reverse-geocoding on import, no internet connection required
+- 🌍 **Offline Country/State/County lookup** — automatic reverse-geocoding on import, no internet connection required; optional downloadable boundary packs for more detail
 
 ### Cache Details
 - 📋 **Cache details** — description, hints, logs, attributes, personal notes, and child waypoints, each in their own tab
@@ -68,9 +73,10 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - ⇄ Open coordinate converter directly from the cache list
 
 ### GPS Export
-- 📤 **Send to Garmin GPS** — auto-detects USB-mounted and Windows MTP Garmin devices
+- 📤 **Send to Garmin GPS** — auto-detects USB-mounted Garmin devices, and newer MTP-only devices on both Windows and Linux
+- 📦 **GGZ export** — Garmin's compressed format, lifting the 10,000-cache device limit
 - 🗑️ **Optional: delete existing GPX files** on device before upload
-- 💾 **Save as GPX file** — export to any location
+- 💾 **Save as GPX, LOC, GGZ or KML** — export to any location
 
 ### Geocaching Tools
 - **⇄ Coordinate Converter** — convert between DD, DMM and DMS formats with one click
@@ -80,8 +86,15 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - **📏 Distance & Bearing** — distance and azimuth between two coordinates
 - All tools open pre-filled with the currently selected cache's coordinates
 
+### Installation & Updates
+- 🪟 **Windows** — available from the [Microsoft Store](https://apps.microsoft.com/detail/9p4nbmm84h2d) (free, signed, updates itself automatically), or as a direct download from GitHub
+- 🍎 **macOS** — signed and notarized `.dmg` for Apple Silicon and Intel
+- 🐧 **Linux** — AppImage that adds itself to your application menu, can update itself in place, and can uninstall itself from within the app
+- 🔔 **Update check** — OpenSAK tells you when a new version is available, optionally including betas
+- 🛡️ **Your data is never removed** by an update or uninstall unless you explicitly choose to
+
 ### Language Support
-- 🌍 **Danish, English, French, Dutch, Portuguese, German, Czech and Swedish** built in
+- 🌍 **11 languages** built in: Danish, English, French, Dutch, Portuguese, German, Swiss German, Czech, Swedish, Polish and Spanish
 - 🔧 **Easy to add new languages** — copy one file, translate, done
 
 ---
@@ -90,8 +103,9 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 - Favourite points cannot be imported from GPX/PQ files (requires Geocaching.com API)
 - No Geocaching.com Live API integration
-- GPS auto-detection on Linux may not find all Garmin devices automatically
-- Windows builds are not yet signed with a code-signing certificate (SmartScreen may warn on first launch)
+- GPS auto-detection may not find every Garmin model automatically
+- The direct Windows download from GitHub is not code-signed, so SmartScreen or Smart App Control may warn or block it — the Microsoft Store version is signed and avoids this
+- Pocket Queries by e-mail don't yet support Gmail or Outlook.com (both require OAuth2)
 
 ---
 
@@ -99,9 +113,12 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 | Guide | Description |
 |---|---|
+| [User Guide](https://opensak.com/user-guide.html) | The complete, illustrated guide to using OpenSAK |
 | [Installation](docs/installation.md) | All platforms, automatic and manual methods, updating, uninstalling |
+| [Uninstalling](docs/Uninstalling-OpenSAK.md) | What OpenSAK creates on disk, and how to remove it |
 | [Getting Started](docs/getting-started.md) | First launch, importing, filtering, GPS export, multiple databases |
-| [Filter Reference](docs/filters.md) | All filter types across 5 tabs, AND/OR logic, filter profiles |
+| [Filter Reference](docs/filters.md) | All filter types across 10 tabs, text operators, AND/OR logic, invert, filter profiles |
+| [Update Locations](docs/update-location.md) | Filling in country/state/county via offline and online reverse geocoding |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Full shortcut reference |
 | [Feature Flags](docs/feature-flags.md) | Developer feature flag system |
 | [CLI --version flag](docs/cli-version-flag.md) | Print version or run a specific release |
@@ -109,6 +126,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 | [CHANGELOG](CHANGELOG.md) | Version history |
 | [CONTRIBUTING](CONTRIBUTING.md) | Development setup, code style, translations, PR workflow |
 | [Contributing with an AI Assistant](docs/CONTRIBUTING-with-AI.md) | Step-by-step guide to contributing code using an AI coding assistant |
+| [Reverse-geocoding data](docs/reverse-geocoding-data.md) | Developer notes on the offline boundary data (OpenSAK-Data) |
 
 ---
 
@@ -116,52 +134,33 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ```bash
 # Linux / macOS (from source)
-git clone https://github.com/OpenSAK-Org/opensak.git
-cd opensak
+git clone https://github.com/OpenSAK-Org/OpenSAK.git
+cd OpenSAK
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 python run.py
 ```
 
-For Windows, macOS bundles, and AppImage downloads see [docs/installation.md](docs/installation.md).
+This runs the latest stable version. To try the newest features, clone the `beta` branch instead (`git clone --branch beta …`).
+
+For the Microsoft Store, macOS `.dmg` and Linux AppImage downloads see [docs/installation.md](docs/installation.md) or the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases).
 
 ---
 
 ## Reporting Bugs
 
-Please use [GitHub Issues](https://github.com/OpenSAK-Org/opensak/issues) and include:
+Please use [GitHub Issues](https://github.com/OpenSAK-Org/OpenSAK/issues) and include:
+- Your OpenSAK version (**Help → About**) and how you installed it (Microsoft Store, direct download, AppImage, `.dmg`, or from source)
 - Your platform (Linux / Windows / macOS + version)
-- Python version: `python3 --version`
-- The error message from the terminal (if any)
+- The error message, or the log file (**Help → Open log file**)
+
+Questions and ideas are also welcome in [GitHub Discussions](https://github.com/OpenSAK-Org/OpenSAK/discussions) and the OpenSAK Facebook group.
 
 ---
 
 ## Roadmap
 
-- [ ] HTML/PDF reports and statistics
-- [ ] GPS export — improve auto-detection on all Linux distros
-- [ ] Favourite points (requires Geocaching.com API)
-- [ ] More languages (Finnish, Polish, …)
-- [x] **GGZ export** — Garmin's compressed GPX container format (lifts the 10,000-cache device limit)
-- [x] **Lock caches** — protect against being overwritten by a later import
-- [x] **Personal notes** — round-trippable with GSAK
-- [x] **Child waypoints** — visible in the cache list, detail panel, and on the map
-- [x] **Cache attributes tab** in the detail panel
-- [x] **Full-text search** across descriptions, logs, and notes
-- [x] **In-app Keyboard Shortcuts dialog** — customizable bindings, reset to defaults
-- [x] **Trip Planner** — radius and multi-point route corridor with map preview
-- [x] **Home points list** — named locations with toolbar quick-switch
-- [x] **Corrected coordinates** — store and use solved puzzle coordinates
-- [x] **Full-screen / popout map** — enlarge the map to a bigger, dedicated view
-- [x] **Offline Country/State/County lookup** — automatic reverse-geocoding on import
-- [x] Geocaching Tools menu — coordinate converter, projection, checksum, midpoint, distance & bearing
-- [x] Coordinate format preference (DMM / DMS / DD)
-- [x] French language — contributed by @theyoungstone
-- [x] German, Czech, Swedish and Dutch languages added
-- [x] Windows installer (.exe) — built automatically via GitHub Actions
-- [x] Linux AppImage — built automatically via GitHub Actions
-- [x] macOS installer (.dmg) — arm64 and x86_64, built automatically via GitHub Actions
-- [x] GitHub Actions CI/CD pipeline
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features and their current priority, and [GitHub Issues](https://github.com/OpenSAK-Org/OpenSAK/issues) for what's being worked on right now. The [CHANGELOG](CHANGELOG.md) lists everything that has landed.
 
 ---
 
