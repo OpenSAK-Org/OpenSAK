@@ -239,3 +239,51 @@ class TestStatistics:
         listed = [ln for ln in text.splitlines() if ln.strip().startswith("F0")]
         assert len(listed) == fdlg.MAX_LISTED_FILTERS
         assert f"… {60 - fdlg.MAX_LISTED_FILTERS}" in text
+
+
+# ── Imported profiles survive the Set Filter dialog ───────────────────────────
+
+def test_imported_rows_round_trip_through_filter_dialog(qtbot, monkeypatch):
+    """Every criterion the importer now maps onto a native row (user data,
+    user note, elevation, direction, open distance, reverse) must load into
+    the Set Filter dialog and come back out unchanged."""
+    from types import SimpleNamespace
+
+    from opensak.gui.dialogs import filter_dialog as fd
+    from opensak.importer.gsak_filter_importer import convert, parse_filter_blob
+    from opensak.utils.types import CoordFormat, DateFormat
+
+    monkeypatch.setattr(fd.FilterProfile, "list_profiles", staticmethod(lambda: []))
+    monkeypatch.setattr("opensak.gui.settings.get_settings",
+                        lambda: SimpleNamespace(home_lat=47.0, home_lon=8.0, use_miles=False,
+                                                date_format=DateFormat.YMD,
+                                                coord_format=CoordFormat.DD, home_points=[],
+                                                theme="light"))
+    quadrants = {k: "False" for k in ("cbxN", "cbxNE", "cbxE", "cbxSE",
+                                      "cbxS", "cbxSW", "cbxW", "cbxNW")}
+    quadrants.update(cbxN="True", cbxE="True")
+    blob = _blob({
+        "cbxUserData": "0", "edtUserData": "solved",
+        "cbxUser3": "7", "edtUser3": "^GC",
+        "chkNoteYes": "True", "chkNoteNo": "False",
+        "cbxElevation": "4", "edtElevation": "500", "edtElevation2": "1500",
+        "cbxDistance": "2", "edtDistance": "10",
+        "chkReverse": "True",
+        **quadrants,
+    })
+    c = convert(parse_filter_blob("T", blob), Options(center=(47.0, 8.0)))
+    fs = c.build_filterset()
+
+    d = fd.FilterDialog(current_filterset=fs)
+    qtbot.addWidget(d)
+    rebuilt = d._build_filterset()
+
+    def by_type(f_set):
+        return {f["filter_type"]: f for f in f_set.to_dict()["filters"]
+                if f.get("filter_type") in ("user_data_1", "user_data_3", "user_note",
+                                            "elevation", "direction", "distance")}
+
+    assert rebuilt.negate is True
+    assert by_type(rebuilt) == by_type(fs)
+    assert set(by_type(fs)) == {"user_data_1", "user_data_3", "user_note",
+                                "elevation", "direction", "distance"}

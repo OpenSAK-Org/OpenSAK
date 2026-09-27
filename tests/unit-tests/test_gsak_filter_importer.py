@@ -217,20 +217,91 @@ class TestSqlFallbacks:
         assert c.sql_parts == [("Watch list", "coalesce(watch, 0) = 1")]
         assert c.coverage == 1.0        # SQL still counts as migrated
 
+    def test_distance_without_centre_stays_sql(self):
+        c = _convert({"cbxDistance": "2", "edtDistance": "5"})
+        assert c.sql_parts == [("Distance", "distance >= 5.0")]
+
+
+# ── Criteria that used to need SQL and now have a filter row ─────────────────
+
+class TestNewNativeRows:
     def test_user_data_column(self):
         c = _convert({"cbxUserData": "0", "edtUserData": "solved"})
-        label, sql = c.sql_parts[0]
-        assert label == "User data 1"
-        assert "user_data_1" in sql and "'%solved%'" in sql
+        assert _statuses(c) == {"User data 1": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.text, f.op) == ("user_data_1", "solved", "contains")
 
-    def test_user_data_regex_cannot_run_anywhere(self):
+    def test_user_data_4(self):
+        c = _convert({"cbxUser4": "0", "edtUser4": "x"})
+        assert c.filters[0].filter_type == "user_data_4"
+
+    def test_user_data_regex_now_runs(self):
         c = _convert({"cbxUserData": "7", "edtUserData": "^x"})
-        assert _statuses(c) == {"User data 1": COMMENT}
+        assert _statuses(c) == {"User data 1": NATIVE}
+        assert c.filters[0].op == "regex"
 
     def test_elevation_range(self):
         c = _convert({"cbxElevation": "4", "edtElevation": "1000",
                       "edtElevation2": "2000"})
-        assert c.sql_parts == [("Elevation", "elevation between 1000 and 2000")]
+        assert _statuses(c) == {"Elevation": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.min_m, f.max_m) == ("elevation", 1000, 2000)
+
+    def test_elevation_at_least(self):
+        c = _convert({"cbxElevation": "2", "edtElevation": "1500"})
+        f = c.filters[0]
+        assert (f.min_m, f.max_m) == (1500, 9000)
+
+    @pytest.mark.parametrize("yes,no,op", [("True", "False", "not_empty"),
+                                           ("False", "True", "empty")])
+    def test_user_note_yes_no(self, yes, no, op):
+        c = _convert({"chkNoteYes": yes, "chkNoteNo": no})
+        assert _statuses(c) == {"User note": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.op) == ("user_note", op)
+
+    def test_compass_quadrants_become_direction_filter(self):
+        pairs = {k: "False" for k in ("cbxN", "cbxNE", "cbxE", "cbxSE",
+                                      "cbxS", "cbxSW", "cbxW", "cbxNW")}
+        pairs.update(cbxN="True", cbxNW="True")
+        c = _convert(pairs)
+        assert _statuses(c) == {"Compass quadrants": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.directions) == ("direction", ["N", "NW"])
+
+    def test_all_quadrants_ticked_is_no_restriction(self):
+        c = _convert({k: "True" for k in ("cbxN", "cbxNE", "cbxE", "cbxSE",
+                                          "cbxS", "cbxSW", "cbxW", "cbxNW")})
+        assert c.criteria == []
+
+    def test_reverse_filter_negates_filterset(self):
+        c = _convert({"chkFound": "False", "chkNotFound": "True", "chkReverse": "True"})
+        assert _statuses(c)["Reverse filter"] == NATIVE
+        fs = c.build_filterset()
+        assert fs.negate is True
+        assert FilterSet.from_dict(fs.to_dict()).negate is True
+
+    def test_no_reverse_leaves_filterset_positive(self):
+        c = _convert({"chkFound": "False", "chkNotFound": "True"})
+        assert "negate" not in c.build_filterset().to_dict()
+
+    @pytest.mark.parametrize("op_idx,v1,v2,op,d1,d2", [
+        ("1", "5", "", "at_most", 5.0, 0.0),
+        ("2", "5", "", "at_least", 5.0, 0.0),
+        ("3", "5", "", "equal", 5.0, 0.0),
+        ("4", "2", "7", "between", 2.0, 7.0),
+    ])
+    def test_distance_ops(self, op_idx, v1, v2, op, d1, d2):
+        c = _convert({"cbxDistance": op_idx, "edtDistance": v1, "edtDistance2": v2},
+                     opts=Options(center=(47.0, 8.0)))
+        assert _statuses(c) == {"Distance": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.op, f.dist1_km, f.dist2_km) == ("distance", op, d1, d2)
+
+    def test_distance_in_miles_is_converted(self):
+        c = _convert({"cbxDistance": "2", "edtDistance": "1"},
+                     opts=Options(center=(47.0, 8.0), miles=True))
+        assert c.filters[0].dist1_km == pytest.approx(1.609, abs=1e-3)
 
 
 # ── Where clause ──────────────────────────────────────────────────────────────

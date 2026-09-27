@@ -55,8 +55,10 @@ from opensak.filters.engine import (
     CountyFilter,
     DateFilter,
     DifficultyFilter,
+    DirectionFilter,
     DistanceFilter,
     DnfFilter,
+    ElevationFilter,
     FavoritePointsFilter,
     FilterProfile,
     FilterSet,
@@ -78,7 +80,12 @@ from opensak.filters.engine import (
     StateFilter,
     TerrainFilter,
     TextSearchFilter,
+    UserData1Filter,
+    UserData2Filter,
+    UserData3Filter,
+    UserData4Filter,
     UserFlagFilter,
+    UserNoteFilter,
     WaypointFilter,
     WhereClauseFilter,
 )
@@ -249,18 +256,17 @@ WP_TYPE_BY_INDEX: tuple[str, ...] = (
     "Virtual Stage",
 )
 
-# GSAK compass-quadrant checkbox → the bearing range it covers, in degrees
-# clockwise from north. The eight 45° sectors are centred on their compass
-# point, so N spans 337.5°–22.5° and wraps around 0.
-_QUADRANTS: dict[str, tuple[float, float]] = {
-    "cbxN":  (337.5, 22.5),
-    "cbxNe": (22.5, 67.5),   "cbxNE": (22.5, 67.5),
-    "cbxE":  (67.5, 112.5),
-    "cbxSE": (112.5, 157.5),
-    "cbxS":  (157.5, 202.5),
-    "cbxSW": (202.5, 247.5),
-    "cbxW":  (247.5, 292.5),
-    "cbxNW": (292.5, 337.5),
+# GSAK compass-quadrant checkbox → OpenSAK DirectionFilter code. Both use the
+# eight 45° sectors centred on their compass point (N = 337.5°–22.5°).
+_QUADRANTS: dict[str, str] = {
+    "cbxN":  "N",
+    "cbxNe": "NE", "cbxNE": "NE",
+    "cbxE":  "E",
+    "cbxSE": "SE",
+    "cbxS":  "S",
+    "cbxSW": "SW",
+    "cbxW":  "W",
+    "cbxNW": "NW",
 }
 
 
@@ -1067,6 +1073,7 @@ class Conversion:
         # (label, reason, extra body lines) — what where_text() writes out
         self.comment_lines: list[tuple[str, str, list[str]]] = []
         self.notes: list[str] = []                    # assumptions worth keeping
+        self.negate = False                           # GSAK's "reverse filter"
 
     @property
     def comments(self) -> list[tuple[str, str]]:
@@ -1167,7 +1174,7 @@ class Conversion:
         return "\n".join(lines)
 
     def build_filterset(self) -> FilterSet:
-        fs = FilterSet(mode="AND")
+        fs = FilterSet(mode="AND", negate=self.negate)
         for f in self.filters:
             fs.add(f)
         where = self.where_text()
@@ -1579,13 +1586,14 @@ def _convert_text_fields(gf: GsakFilter, c: Conversion) -> None:
         _text_criterion(gf, c, op_key, val_key, label, cls=cls)
 
     # GSAK's four free-text user fields map 1:1 onto OpenSAK's user_data_1-4
-    # columns, but OpenSAK has no filter row for them — hence SQL.
-    for n, (op_key, val_key) in enumerate(
-        (("cbxUserData", "edtUserData"), ("cbxUser2", "EdtUser2"),
-         ("cbxUser3", "edtUser3"), ("cbxUser4", "edtUser4")), start=1
+    # columns, each with its own row on the Other tab.
+    for n, (op_key, val_key, ud_cls) in enumerate(
+        (("cbxUserData", "edtUserData", UserData1Filter),
+         ("cbxUser2", "EdtUser2", UserData2Filter),
+         ("cbxUser3", "edtUser3", UserData3Filter),
+         ("cbxUser4", "edtUser4", UserData4Filter)), start=1
     ):
-        _text_criterion(gf, c, op_key, val_key, f"User data {n}",
-                        column=f"user_data_{n}")
+        _text_criterion(gf, c, op_key, val_key, f"User data {n}", cls=ud_cls)
 
 
 def _convert_favorites(gf: GsakFilter, c: Conversion) -> None:
@@ -1633,29 +1641,27 @@ def _convert_distance(gf: GsakFilter, c: Conversion, opts: Options) -> None:
             return
         lo_km, hi_km = min(d1, d2), max(d1, d2)
 
-    if hi_km is None:
-        # Open-ended ("at least X") — the GUI's distance row always has an
-        # upper bound, so this goes to SQL on the `distance` pseudo-column,
-        # which OpenSAK rewrites to a haversine call against the ACTIVE centre
-        # point (closer to GSAK, which never froze a centre either).
-        c.sql("Distance", f"distance >= {round(lo_km / factor, 3)}")
-        c.note(f"Distance: \"at least {v1} {unit}\" has no upper bound, so it became SQL on "
-               f"the `distance` column, which OpenSAK measures from the active centre point "
-               f"in your own unit — rescale the number if your unit is not {unit}")
-        return
-
     if opts.center is None:
-        c.sql("Distance", f"distance between {round(lo_km / factor, 3)} "
-                          f"and {round(hi_km / factor, 3)}")
+        c.sql("Distance", f"distance >= {round(lo_km / factor, 3)}" if hi_km is None
+              else f"distance between {round(lo_km / factor, 3)} "
+                   f"and {round(hi_km / factor, 3)}")
         c.note(f"Distance: no centre point was available, so the radius became SQL on the "
                f"`distance` column, which OpenSAK measures from the active centre point in "
                f"your own unit — rescale the numbers if your unit is not {unit}")
         return
 
     lat, lon = opts.center
+    if hi_km is None:
+        op, dist1_km, dist2_km = "at_least", lo_km, 0.0
+    elif bounds_op == "equals":
+        op, dist1_km, dist2_km = "equal", lo_km, 0.0
+    elif lo_km > 0:
+        op, dist1_km, dist2_km = "between", lo_km, hi_km
+    else:
+        op, dist1_km, dist2_km = "at_most", hi_km, 0.0
     c.native("Distance", DistanceFilter(
         lat=round(lat, 6), lon=round(lon, 6),
-        max_km=round(hi_km, 3), min_km=round(lo_km, 3),
+        op=op, dist1_km=round(dist1_km, 3), dist2_km=round(dist2_km, 3),
         center_state={"kind": "home"},
     ))
     c.note(f"Distance: GSAK stores only the radius ({v1} {unit}) and measures it from "
@@ -1702,9 +1708,7 @@ def _convert_flags(gf: GsakFilter, c: Conversion) -> None:
 
     note = _tri_flag(gf, "chkNoteYes", "chkNoteNo")
     if note is not None:
-        op = "<>" if note else "="
-        c.sql("User note", f"coalesce((SELECT note FROM user_notes "
-                           f"WHERE user_notes.cache_id = caches.id), '') {op} ''")
+        c.native("User note", UserNoteFilter(op="not_empty" if note else "empty"))
 
     # OpenSAK does store the watch list (caches.watch, filled from GSAK's own
     # Watch column by gsak_importer.py) but has no GUI filter for it.
@@ -2097,9 +2101,15 @@ def _convert_waypoint_tab(gf: GsakFilter, c: Conversion) -> None:
 
 
 def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
+    bounds = _num_bounds(gf, c, "Elevation", "cbxElevation", "edtElevation", "edtElevation2")
+    if bounds is not None:
+        op, v1, v2 = bounds
+        lo, hi = {"at_most": (-500, v1), "at_least": (v1, 9000),
+                  "equals": (v1, v1)}.get(op, (v1, v2))
+        c.native("Elevation", ElevationFilter(min_m=lo, max_m=hi))
+
     # Numeric criteria OpenSAK stores as a column but has no filter row for.
     for label, op_key, v1_key, v2_key, column, extra in (
-        ("Elevation", "cbxElevation", "edtElevation", "edtElevation2", "elevation", ""),
         ("User sort", "cbxUsort", "edtUsort", "edtUsort2", "user_sort", ""),
         # GSAK's FoundCount turned out to be a 0/1 "found by me" flag rather
         # than a community find count (verified by the cache importer against a
@@ -2134,29 +2144,21 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
     _convert_quadrants(gf, c)
 
     if gf.flag("chkReverse", False):
-        c.comment("Reverse filter", (
-            "GSAK's \"reverse filter\" inverts the whole result. OpenSAK cannot negate a "
-            "filter set, so everything above matches the NON-inverted criteria"
-        ))
+        # The filter dialog's global "Invert filter" (FilterSet.negate).
+        c.negate = True
+        c.criteria.append(Criterion("Reverse filter", NATIVE))
 
 
 def _convert_quadrants(gf: GsakFilter, c: Conversion) -> None:
-    """Compass-quadrant tick boxes → a bearing range in SQL."""
+    """Compass-quadrant tick boxes → a DirectionFilter."""
     present = [k for k in _QUADRANTS if k in gf.kv]
     if not present:
         return
     selected = [k for k in present if gf.flag(k)]
     if len(selected) == len(present) or not selected:
         return   # all ticked (or none recorded) = no restriction
-    tests: list[str] = []
-    for key in selected:
-        lo, hi = _QUADRANTS[key]
-        tests.append(f"(bearing >= {lo} OR bearing < {hi})" if lo > hi
-                     else f"(bearing >= {lo} AND bearing < {hi})")
-    c.sql("Compass quadrants (" + ", ".join(k[3:] for k in selected) + ")",
-          "bearing IS NOT NULL AND (" + " OR ".join(tests) + ")")
-    c.note("Compass quadrants: assumed to be the eight 45° sectors centred on their compass "
-           "point (N = 337.5°-22.5°), measured from the ACTIVE centre point")
+    c.native("Compass quadrants", DirectionFilter([_QUADRANTS[k] for k in selected]))
+    c.note("Compass quadrants: measured from the ACTIVE centre point, like GSAK")
 
 
 def _trackable_name_criterion(gf: GsakFilter, c: Conversion) -> None:
