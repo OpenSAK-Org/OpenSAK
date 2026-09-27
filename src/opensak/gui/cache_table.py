@@ -1644,15 +1644,24 @@ class CacheTableView(QTableView):
             for visual_pos in range(len(columns))
         ]
         set_visible_columns(new_order)
+        # Model-reset nulstiller rækkevalget — husk valgt cache og vælg den
+        # igen bagefter uden at trigge cache_selected (samme som
+        # _reset_model_preserving_selection).
+        current = self._model.cache_at(self.currentIndex().row())
+        selected_gc = current.gc_code if current else None
+        self.selectionModel().blockSignals(True)
         # Genindlæs model med ny logisk rækkefølge, og nulstil header til
         # identitets-rækkefølge (0..n-1) så fremtidige resizes/sorts matcher.
         self._applying_widths = True
         try:
             self._model.reload_columns()
             self._apply_column_widths()
+            self._reapply_last_sort()
         finally:
             self._applying_widths = False
-        self._reapply_last_sort()
+            if selected_gc:
+                self.select_by_gc_code(selected_gc)
+            self.selectionModel().blockSignals(False)
 
     def reload_columns(self) -> None:
         """Opdatér kolonner fra indstillinger."""
