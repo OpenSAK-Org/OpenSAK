@@ -245,7 +245,7 @@ class TestStatistics:
 
 def test_imported_rows_round_trip_through_filter_dialog(qtbot, monkeypatch):
     """Every criterion the importer now maps onto a native row (user data,
-    user note, elevation, direction, open distance, reverse) must load into
+    user note, elevation, direction, open distance, TB name, reverse) must load into
     the Set Filter dialog and come back out unchanged."""
     from types import SimpleNamespace
 
@@ -268,6 +268,7 @@ def test_imported_rows_round_trip_through_filter_dialog(qtbot, monkeypatch):
         "chkNoteYes": "True", "chkNoteNo": "False",
         "cbxElevation": "4", "edtElevation": "500", "edtElevation2": "1500",
         "cbxDistance": "2", "edtDistance": "10",
+        "cbxTbugName": "0", "edtTbugName": "coin",
         "chkReverse": "True",
         **quadrants,
     })
@@ -281,9 +282,10 @@ def test_imported_rows_round_trip_through_filter_dialog(qtbot, monkeypatch):
     def by_type(f_set):
         return {f["filter_type"]: f for f in f_set.to_dict()["filters"]
                 if f.get("filter_type") in ("user_data_1", "user_data_3", "user_note",
-                                            "elevation", "direction", "distance")}
+                                            "elevation", "direction", "distance",
+                                            "trackable")}
 
     assert rebuilt.negate is True
     assert by_type(rebuilt) == by_type(fs)
     assert set(by_type(fs)) == {"user_data_1", "user_data_3", "user_note",
-                                "elevation", "direction", "distance"}
+                                "elevation", "direction", "distance", "trackable"}

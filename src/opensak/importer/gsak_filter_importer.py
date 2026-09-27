@@ -80,6 +80,7 @@ from opensak.filters.engine import (
     StateFilter,
     TerrainFilter,
     TextSearchFilter,
+    TrackableFilter,
     UserData1Filter,
     UserData2Filter,
     UserData3Filter,
@@ -1702,9 +1703,8 @@ def _convert_flags(gf: GsakFilter, c: Conversion) -> None:
     if trackables is True:
         c.native("Has trackables", HasTrackableFilter())
     elif trackables is False:
-        c.sql("Has trackables", "coalesce(trackable_count, 0) = 0")
-        c.note("Trackables: GSAK filtered to caches WITHOUT trackables; OpenSAK's GUI only "
-               "offers \"has trackables\", so the negative became SQL on trackable_count")
+        # The Trackables tab's count row: "equal 0" = no trackables at all.
+        c.native("Has trackables", TrackableFilter(count_op="equal", count1=0))
 
     note = _tri_flag(gf, "chkNoteYes", "chkNoteNo")
     if note is not None:
@@ -2162,7 +2162,7 @@ def _convert_quadrants(gf: GsakFilter, c: Conversion) -> None:
 
 
 def _trackable_name_criterion(gf: GsakFilter, c: Conversion) -> None:
-    """GSAK's TB/coin name box → an EXISTS on OpenSAK's trackables table."""
+    """GSAK's TB/coin name box → the Trackables tab's name row."""
     raw_op = gf.num("cbxTbugName") or 0
     op = TEXT_OP.get(raw_op)
     value = gf.text("edtTbugName")
@@ -2173,20 +2173,17 @@ def _trackable_name_criterion(gf: GsakFilter, c: Conversion) -> None:
         return
     if not value and op not in TEXT_OP_VALUELESS:
         return
-    if op in TEXT_OP_NO_SQL:
+    if _tri_flag(gf, "cbxBugs", "chkBugNo") is False:
+        # The filter dialog holds one trackable row; "no trackables" already
+        # took it, and no cache can pass both conditions anyway.
         c.comment("TB/coin name", (
-            f"GSAK matched \"{value}\" with a regular expression; OpenSAK keeps trackables in "
-            f"their own table and its SQLite connection registers no REGEXP operator"
+            f"GSAK also required the cache to have NO trackables, so the name test "
+            f"(\"{value}\") could never match and was dropped"
         ))
         return
-    test = _sql_text_test("t.name", op, value)
-    if test is None:
-        c.comment("TB/coin name", f"GSAK comparison \"{op}\" could not be expressed in SQL")
-        return
-    c.sql("TB/coin name",
-          f"EXISTS (SELECT 1 FROM trackables t WHERE t.cache_id = caches.id AND {test})")
+    c.native("TB/coin name", TrackableFilter(texts={"name": (value, op)}))
     c.note("TB/coin name: GSAK matched the cache's travel-bug list as one text field; "
-           "OpenSAK keeps trackables in their own table, so the test looks for any "
+           "OpenSAK keeps trackables in their own table, so the filter looks for any "
            "trackable whose name matches")
 
 

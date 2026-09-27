@@ -298,6 +298,26 @@ class TestNewNativeRows:
         f = c.filters[0]
         assert (f.filter_type, f.op, f.dist1_km, f.dist2_km) == ("distance", op, d1, d2)
 
+    def test_no_trackables_is_trackable_count_zero(self):
+        c = _convert({"cbxBugs": "False", "chkBugNo": "True"})
+        assert _statuses(c) == {"Has trackables": NATIVE}
+        f = c.filters[0]
+        assert (f.filter_type, f.count_op, f.count1, f.texts) == ("trackable", "equal", 0, {})
+
+    @pytest.mark.parametrize("op_idx", ["0", "7"])   # contains, regex
+    def test_tb_name_is_trackable_name_row(self, op_idx):
+        c = _convert({"cbxTbugName": op_idx, "edtTbugName": "coin"})
+        assert _statuses(c) == {"TB/coin name": NATIVE}
+        f = c.filters[0]
+        assert f.filter_type == "trackable" and f.count_op == "any"
+        assert f.texts["name"].text == "coin"
+
+    def test_tb_name_with_no_trackables_is_dropped(self):
+        c = _convert({"cbxBugs": "False", "chkBugNo": "True",
+                      "cbxTbugName": "0", "edtTbugName": "coin"})
+        assert _statuses(c) == {"Has trackables": NATIVE, "TB/coin name": COMMENT}
+        assert [f.filter_type for f in c.filters] == ["trackable"]
+
     def test_distance_in_miles_is_converted(self):
         c = _convert({"cbxDistance": "2", "edtDistance": "1"},
                      opts=Options(center=(47.0, 8.0), miles=True))
