@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSAK User Guide — v1.20.0-beta.11</title>
+<title>OpenSAK User Guide — v1.20.0-beta.12</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -473,7 +473,7 @@
 <nav>
   <div class="nav-header">
     <span class="nav-logo">OpenSAK</span>
-    <div class="nav-version">User Guide · v1.20.0-beta.11</div>
+    <div class="nav-version">User Guide · v1.20.0-beta.12</div>
   </div>
 
   <div class="nav-section-heading">Getting Started</div>
@@ -535,7 +535,7 @@
     <div class="hero-eyebrow">Complete User Guide</div>
     <h1>OpenSAK</h1>
     <p class="hero-sub">The open-source geocache management tool for Windows, Linux, and macOS.</p>
-    <div class="hero-meta">Version 1.20.0-beta.11 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
+    <div class="hero-meta">Version 1.20.0-beta.12 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
   </div>
 
   <figure class="screenshot" style="margin-top:-0.5rem;">
@@ -931,16 +931,17 @@ python run.py</code></pre>
     <p>All filters default to <strong>AND</strong> mode — a cache must pass every active filter to appear. Switch the group to <strong>OR</strong> to show caches matching <em>any</em> filter. Groups can be nested for complex conditions.</p>
 
     <h3>Filter Tabs</h3>
-    <p>The filter dialog has nine tabs, modelled on GSAK's filter dialog:</p>
+    <p>The filter dialog has ten tabs, modelled on GSAK's filter dialog:</p>
     <ul>
-      <li><strong>General</strong> — name, GC code, placed by, owner, type, container, difficulty, terrain, distance, found/not found, availability, trackables, premium, corrected coords</li>
+      <li><strong>General</strong> — name, GC code, placed by, owner, type, container, difficulty, terrain, distance from a centre point, found/not found, availability, premium, corrected coords (including how far they lie from the posted ones)</li>
       <li><strong>Dates</strong> — eight date fields (see <a href="#filter-types">All Filter Types</a>), each with its own condition</li>
-      <li><strong>Other</strong> — country, state, county, user flag, DNF flag, FTF flag, locked, favorite points range</li>
+      <li><strong>Other</strong> — country, state, county, user data 1–4, GC.com note, personal note, direction, user flag, DNF flag, FTF flag, favorite points range, elevation, locked</li>
       <li><strong>Logs</strong> — filter by the logs on a cache: which logs, what type, who logged them, and how many</li>
       <li><strong>Line/Polygon</strong> — caches near a route or track, near a set of points, or inside a polygon</li>
       <li><strong>Child Waypoints</strong> — filter by a cache's child waypoints (code, type, name, comment, date, count)</li>
+      <li><strong>Trackables</strong> — has / has no trackables, and filter by trackable name, tracking code and count</li>
       <li><strong>Attributes</strong> — all ~70 standard Groundspeak attributes, with Yes/No/Any per attribute, a search box, and AND/OR matching</li>
-      <li><strong>Text Search</strong> — search descriptions, logs, and personal notes</li>
+      <li><strong>Text Search</strong> — search descriptions, logs, and personal notes with the full set of text operators, including RegEx</li>
       <li><strong>Where</strong> — raw SQL WHERE clause against the caches table (advanced)</li>
     </ul>
 
@@ -951,6 +952,10 @@ python run.py</code></pre>
       <img src="assets/screenshots/filter-dialog-attributes.png" alt="Filter dialog Attributes tab showing a list of Groundspeak attributes with Yes/No/Any checkboxes">
       <figcaption>The Attributes tab — match on any combination of the ~70 Groundspeak attributes.</figcaption>
     </figure>
+
+    <h3>Inverting a Filter</h3>
+    <p>Tick <strong>Invert filter</strong> (next to the Reset buttons) to flip the whole filter: the list then shows exactly the caches the filter would otherwise hide. For example, <em>Traditional, difficulty ≤ 2</em> inverted shows every cache that is <em>not</em> an easy Traditional. The checkbox is highlighted while it is on, is saved with a filter profile, and is cleared by <strong>Reset all</strong> (not by <strong>Reset tab</strong>, since it belongs to no tab). With no conditions set, inverting has no effect.</p>
+    <p>An inverted filter is checked cache by cache rather than in the database, so on very large databases it can take a little longer to apply.</p>
 
     <h3>Clearing the Filter</h3>
     <p>Click the red <strong>✕</strong> button in the toolbar, or go to <strong>View → Clear filter</strong>. The button turns grey when no filter is active.</p>
@@ -969,33 +974,38 @@ python run.py</code></pre>
         <tr><td>Terrain</td><td>Range 1.0–5.0 in 0.5 steps</td></tr>
         <tr><td>Found / Not found</td><td>Filter on found status</td></tr>
         <tr><td>Availability</td><td>Available, Unavailable (disabled), Archived — toggled independently</td></tr>
-        <tr><td>Distance</td><td>Min/max km from active home point</td></tr>
+        <tr><td>Distance</td><td>Distance from a centre point — your home point, a saved point, the selected cache or a custom coordinate — with Equal, Less than, At most, More than, At least, Between or Not between. Unit follows your km/mi setting. Filters saved with the older Min/Max fields still select the same caches</td></tr>
         <tr><td>Name</td><td>Cache name — any of the 12 text operators (below)</td></tr>
         <tr><td>GC code</td><td>GC code — any of the 12 text operators</td></tr>
         <tr><td>Placed by</td><td>"Placed by" name — any of the 12 text operators</td></tr>
         <tr><td>Owner</td><td>Owner username — any of the 12 text operators</td></tr>
         <tr><td>Country / State / County</td><td>Any of the 12 text operators</td></tr>
+        <tr><td>User data 1–4 / GC.com note</td><td>GSAK's four User data fields and the personal cache note synced from geocaching.com — any of the 12 text operators</td></tr>
+        <tr><td>Personal note</td><td>The text of your own note (Notes tab) — any of the 12 text operators. Use <em>empty</em> / <em>not empty</em> for a simple yes/no check; filters saved with the old Yes/No checkboxes are converted automatically</td></tr>
+        <tr><td>Direction</td><td>Compass directions (N, NE, E … NW) from your active home point — the same bearing as the Bearing column. All eight are ticked by default</td></tr>
         <tr><td>Attribute</td><td>Any of ~70 Groundspeak attributes, Yes/No/Any — all must match (AND) or any may match (OR)</td></tr>
-        <tr><td>Has trackable</td><td>Cache currently has ≥1 trackable</td></tr>
+        <tr><td>Trackables</td><td>Has / has no trackables, plus trackable name and tracking code (text operators) and count (Any, Equal, At least, At most, Between). Name and code must match on the same trackable; <em>Count equal 0</em> finds caches without a matching trackable</td></tr>
         <tr><td>Premium / Non-premium</td><td>Membership requirement</td></tr>
         <tr><td>Has corrected coords</td><td>Caches with solved coordinates set</td></tr>
         <tr><td>No corrected coords</td><td>Caches without solved coordinates set</td></tr>
+        <tr><td>Distance corrected ↔ posted</td><td>How far the corrected coordinates lie from the posted ones, in metres (feet with miles selected), with the same operators as Distance. Caches without corrected coordinates never match</td></tr>
         <tr><td>User flag</td><td>🚩 flagged / not flagged</td></tr>
         <tr><td>DNF</td><td>Did Not Find flag set/not set</td></tr>
         <tr><td>FTF</td><td>First to Find flag set/not set</td></tr>
         <tr><td>Locked</td><td>Cache is locked against import overwrites — yes/no</td></tr>
         <tr><td>Favorite points</td><td>Community favorites in a numeric range</td></tr>
+        <tr><td>Elevation</td><td>Elevation within a range, in metres (feet with miles selected). Caches with unknown elevation never match</td></tr>
         <tr><td>Dates</td><td>Last found, Hidden date, Found by me date, DNF date, Creation date, Last GPX update, Latest log date, Changed date — each with on or before / on or after / equal / between, "during" or "not during" the last N days/weeks/months/years, or compared with another date field. Creation, Last GPX update and Changed date also accept a time</td></tr>
         <tr><td>Logs</td><td>Which logs are searched (all, or only each cache's latest / last <em>N</em>), log type or Found / Not found / Other, log date, who logged it (text operators or numeric user ID), and how many matching logs are required (at least / at most / equal / between), with Include/Exclude</td></tr>
         <tr><td>Child waypoints</td><td>Code, type, name, comment, date, created-by-user, and count — all criteria must hold for the same waypoint</td></tr>
         <tr><td>Line / Polygon / Points</td><td>Caches within a distance of a line (route or track) or of a set of points, or inside a polygon. Enter points by hand, read them from a GPX/KML/TXT/CSV file, or add all user-flagged caches. Can be inverted with <em>Exclude</em></td></tr>
-        <tr><td>Text search</td><td>Searches cache descriptions, logs, and personal notes (hint text excluded by default)</td></tr>
+        <tr><td>Text search</td><td>Searches cache descriptions, logs, and personal notes (hint text excluded by default) with any of the 12 text operators. A positive operator matches if any searched field matches; a negated one (e.g. <em>not contains</em>) only if none does. RegEx searches are slower than plain text</td></tr>
         <tr><td>WHERE clause</td><td>Raw SQLite expression against the caches table</td></tr>
       </tbody>
     </table>
 
     <h3>Text Operators</h3>
-    <p>Name, GC code, Placed by, Owner, Country, State, County, the child-waypoint text fields and the Logs tab's "logged by" field all offer the same 12 operators:</p>
+    <p>Name, GC code, Placed by, Owner, Country, State, County, User data 1–4, GC.com note, Personal note, the child-waypoint and trackable text fields, the Logs tab's "logged by" field and Text Search all offer the same 12 operators:</p>
     <table>
       <thead><tr><th>Operator</th><th>Matches when the field…</th></tr></thead>
       <tbody>
@@ -1024,6 +1034,10 @@ python run.py</code></pre>
         <tr><td>Latest log is a DNF</td><td>Logs tab: Logs to search = Latest + Not found only</td></tr>
         <tr><td>Caches without a parking waypoint</td><td>Child Waypoints tab: Type contains "Parking" + Count equal 0</td></tr>
         <tr><td>Caches along a route</td><td>Line/Polygon tab: Line, load the route from a GPX file, distance 0.5 km</td></tr>
+        <tr><td>Solved finals outside the 2-mile rule</td><td>General tab: Distance corrected ↔ posted, More than 3219 m</td></tr>
+        <tr><td>Caches north of home</td><td>Other tab: Direction, untick everything except NW, N and NE</td></tr>
+        <tr><td>Caches without a geocoin</td><td>Trackables tab: Name contains "coin" + Count equal 0</td></tr>
+        <tr><td>Everything except easy traditionals</td><td>Type = Traditional + Difficulty ≤ 2, then tick <strong>Invert filter</strong></td></tr>
       </tbody>
     </table>
   </section>
@@ -1560,7 +1574,7 @@ python run.py</code></pre>
         <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/OpenSAK-Org/opensak/issues">github.com/OpenSAK-Org/opensak/issues</a></td></tr>
         <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/opensak">Facebook group: OpenSAK</a></td></tr>
         <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
-        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.20.0-beta.11/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
+        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.20.0-beta.12/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
         <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
         <tr><td>Support the project</td><td><a href="https://opencollective.com/opensak">opencollective.com/opensak</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
@@ -1570,7 +1584,7 @@ python run.py</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.20.0-beta.11). Last updated September 2026.
+      This guide was generated from the OpenSAK source code (v1.20.0-beta.12). Last updated September 2026.
     </p>
   </section>
 

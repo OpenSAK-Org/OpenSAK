@@ -4,6 +4,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.12] — 2026-09-27
+
+> The Filter dialog takes another big step towards GSAK parity (#821): a
+> global *Invert filter* checkbox, a new Trackables tab, filtering by compass
+> direction, full text operators on Text Search, and several new fields. Also
+> fixes a column sort that could be lost after reopening a database when a
+> saved filter was in use.
+
+### Added
+
+- **Filter dialog: Invert filter (#911, part of #821)** — A new global
+  checkbox shows exactly the caches the current filter would hide. It is
+  saved with the filter profile and cleared by **Reset all**.
+- **Filter dialog: new Trackables tab (#911, part of #821)** — Filter by
+  trackable name, tracking code and count. Name and code must match on the
+  same trackable, and *Count equal 0* finds caches without a matching
+  trackable.
+- **Filter dialog: Direction filter (#911, part of #821)** — Show only caches
+  in the selected compass directions (N, NE, E … NW) from your home point.
+- **Filter dialog: distance between corrected and posted coordinates (#911,
+  part of #821)** — Filters on how far the corrected coordinates are from the
+  posted ones, e.g. to find solved finals outside the 2-mile rule.
+- **Filter dialog: new text filters for User Data 1–4 and the GC.com note,
+  and a new Elevation filter (#911)**.
+
+### Changed
+
+- **Filter dialog: Distance from centre point uses the same conditions as the
+  other distance filters (#911)** — Equal, Less than, At most, More than, At
+  least, Between and Not between. The centre point can be your home point, a
+  saved point, the selected cache or a custom coordinate. Saved filters that
+  use the old Min/Max still select the same caches.
+- **Filter dialog: Text Search supports all text operators (#911, part of
+  #821)** — Including RegEx and negated operators such as *does not
+  contain*. Previously it only matched plain substrings.
+- **Filter dialog: personal note is now a text filter (#911, part of #821)**
+  — Replaces the old yes/no filter, so you can also search the note's
+  content. Saved filters using the yes/no filter are converted automatically.
+- **The new filter elements follow the #610 filter design** and are
+  highlighted when active. `docs/filters.md` has been updated to match.
+- **User Guide updated for the new filters** — The Filter Dialog and All
+  Filter Types sections now cover all ten tabs, the Invert filter checkbox,
+  the new filters, and a few new recipes (solved finals outside the 2-mile
+  rule, caches in a given direction, caches without a geocoin).
+
+### Fixed
+
+- **Column sort was lost after reopening a database with a saved filter
+  (#912)** — Sorting by e.g. Distance could reset to Name after restarting
+  OpenSAK or switching databases, or as soon as a saved filter was selected.
+  Filters no longer change the sort order; the column you sort by is
+  remembered per database. The sort is now also kept after you move a column
+  or switch to a database with different columns.
+- **Update dialog test failed on Windows and macOS (#914)** — A test assumed
+  the Linux-only "Open releases page" button. It now covers each platform's
+  button explicitly. No change to the app itself.
+
+> Contributed by nagisml.
+
+---
+
 ## [1.20.0-beta.11] — 2026-09-26
 
 > A documentation release: opensak.com and the User Guide now recommend the
