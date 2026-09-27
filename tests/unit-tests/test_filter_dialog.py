@@ -20,10 +20,11 @@ from opensak.filters.engine import (
     FoundFilter, NotFoundFilter, AvailabilityFilter, DistanceFilter,
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
-    FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter,
+    FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter, DirectionFilter,
+    UserNoteFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
-    TextSearchFilter, WaypointFilter,
+    TextSearchFilter, WaypointFilter, TrackableFilter,
     LogFilter, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
@@ -121,8 +122,8 @@ class TestHelperWidgets:
 # ── construction ────────────────────────────────────────────────────────────────
 
 class TestConstruction:
-    def test_nine_tabs(self, dlg):
-        assert dlg._tabs.count() == 9
+    def test_ten_tabs(self, dlg):
+        assert dlg._tabs.count() == 10
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -253,10 +254,11 @@ class TestBuildFilterset:
         dlg._locked_no.setChecked(False)  # locked yes only (issue #202)
         dlg._dnf_no.setChecked(False)
         dlg._ftf_no.setChecked(False)
+        dlg._user_note_row.edit.setText("final")
         dlg._fav_enabled.setChecked(True)
         types = _types(dlg._build_filterset())
         assert {"country", "state", "county", "user_flag", "locked", "dnf", "ftf",
-                "favorite_points"} <= set(types)
+                "user_note", "favorite_points"} <= set(types)
 
     def test_loads_locked_filter(self, dlg):
         # Issue #202: round-trip a saved "Locked = No" profile.
@@ -271,6 +273,58 @@ class TestBuildFilterset:
         dlg._reset_misc()
         assert dlg._locked_yes.isChecked() is True
         assert dlg._locked_no.isChecked() is True
+
+    def test_user_note_empty_adds_no_filter(self, dlg):
+        assert "user_note" not in _types(dlg._build_filterset())
+
+    def test_user_note_text(self, dlg):
+        dlg._user_note_row.edit.setText("final")
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "user_note")
+        assert isinstance(f, UserNoteFilter)
+        assert (f.text, f.op) == ("final", "contains")
+
+    def test_loads_legacy_personal_note_filter(self, dlg):
+        # Profiles saved with the old yes/no "Has personal note" load into
+        # the text row as the equivalent empty / not-empty operator.
+        fs = FilterSet.from_dict({
+            "mode": "AND",
+            "filters": [{"filter_type": "personal_note", "has_note": False}],
+        })
+        dlg._load_filterset(fs)
+        assert dlg._user_note_row.op() == "empty"
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "user_note")
+        assert f.op == "empty"
+
+    def test_reset_misc_clears_user_note(self, dlg):
+        dlg._user_note_row.edit.setText("final")
+        dlg._reset_misc()
+        assert "user_note" not in _types(dlg._build_filterset())
+
+    def test_all_directions_adds_no_filter(self, dlg):
+        assert "direction" not in _types(dlg._build_filterset())
+
+    def test_no_directions_adds_no_filter(self, dlg):
+        # Same as Container: an empty selection is treated as "no filter".
+        dlg._set_all_directions(False)
+        assert "direction" not in _types(dlg._build_filterset())
+
+    def test_direction_subset(self, dlg):
+        dlg._set_all_directions(False)
+        dlg._dir_checks["N"].setChecked(True)
+        dlg._dir_checks["SW"].setChecked(True)
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.directions == ["N", "SW"]
+
+    def test_loads_direction_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(["E", "NW"]))
+        dlg._load_filterset(fs)
+        assert {d for d, cb in dlg._dir_checks.items() if cb.isChecked()} == {"E", "NW"}
+
+    def test_reset_misc_checks_all_directions(self, dlg):
+        dlg._set_all_directions(False)
+        dlg._reset_misc()
+        assert all(cb.isChecked() for cb in dlg._dir_checks.values())
 
     def test_date_rows_default_to_any(self, dlg):
         assert set(dlg._date_rows) == set(DATE_FILTER_FIELDS)
@@ -488,26 +542,53 @@ class TestBuildFilterset:
         assert "where_clause" in _types(dlg._build_filterset())
 
     def test_text_search_builds_filter(self, dlg):
-        dlg._text_search_input.setText("waterfall")
+        dlg._text_search_row.edit.setText("waterfall")
         types = _types(dlg._build_filterset())
         assert "text_search" in types
 
     def test_text_search_empty_text_no_filter(self, dlg):
-        dlg._text_search_input.setText("  ")
+        dlg._text_search_row.edit.setText("  ")
         assert "text_search" not in _types(dlg._build_filterset())
 
     def test_text_search_hint_flag_propagates(self, dlg):
-        dlg._text_search_input.setText("rock")
+        dlg._text_search_row.edit.setText("rock")
         dlg._text_search_hint.setChecked(True)
         fs = dlg._build_filterset()
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
         assert f.search_hint is True
 
     def test_text_search_logs_enabled_by_default(self, dlg):
-        dlg._text_search_input.setText("TFTC")
+        dlg._text_search_row.edit.setText("TFTC")
         fs = dlg._build_filterset()
         f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
         assert f.search_logs is True
+
+    def test_text_search_op_propagates(self, dlg):
+        dlg._text_search_row.set_op("regex")
+        dlg._text_search_row.edit.setText(r"N\s*47")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert (f.op, f.text) == ("regex", r"N\s*47")
+
+    def test_text_search_valueless_op_needs_no_text(self, dlg):
+        dlg._text_search_row.set_op("empty")
+        fs = dlg._build_filterset()
+        f = next(f for f in fs._filters if getattr(f, "filter_type", None) == "text_search")
+        assert f.op == "empty"
+
+    def test_text_search_loads_op(self, dlg):
+        dlg._load_filterset(FilterSet().add(TextSearchFilter("x", op="not_contains")))
+        assert dlg._text_search_row.op() == "not_contains"
+        assert dlg._text_search_row.edit.text() == "x"
+
+    def test_text_search_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._text_search_row.set_op("regex")
+        dlg._text_search_row.edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._text_search_tab
 
 
 # ── load_filterset roundtrip ────────────────────────────────────────────────────
@@ -658,7 +739,7 @@ class TestLoadFilterset:
         fs.add(TextSearchFilter("waterfall", search_description=True,
                                 search_logs=False, search_notes=False, search_hint=True))
         dlg._load_filterset(fs)
-        assert dlg._text_search_input.text() == "waterfall"
+        assert dlg._text_search_row.edit.text() == "waterfall"
         assert dlg._text_search_description.isChecked() is True
         assert dlg._text_search_logs.isChecked() is False
         assert dlg._text_search_notes.isChecked() is False
@@ -723,8 +804,8 @@ class TestReset:
         assert all(cb.isChecked() for cb in dlg._type_checks.values())
 
     def test_toggles(self, dlg):
-        dlg._on_dist_toggled(True)
-        assert dlg._dist_max.isEnabled()
+        dlg._dist_enabled.setChecked(True)
+        assert dlg._dist1.isEnabled() and dlg._dist_op.isEnabled()
         dlg._on_fav_toggled(True)
         assert dlg._fav_min.isEnabled() and dlg._fav_max.isEnabled()
 
@@ -791,6 +872,68 @@ class TestWaypointsTab:
         assert dlg._validate_text_filters() is False
         warned.assert_called_once()
         assert dlg._tabs.currentWidget() is dlg._waypoints_tab
+
+
+# ── trackables tab ────────────────────────────────────────────────────────────
+
+def _trackable_filters(fs) -> list:
+    return [f for f in fs._filters if isinstance(f, TrackableFilter)]
+
+
+class TestTrackablesTab:
+    def test_default_builds_nothing(self, dlg):
+        assert _trackable_filters(dlg._build_filterset()) == []
+        assert not dlg._tb_count1.isVisibleTo(dlg)
+
+    def test_build_all_criteria(self, dlg):
+        dlg._tb_text_rows["name"].set_op("contains")
+        dlg._tb_text_rows["name"].edit.setText("coin")
+        dlg._tb_text_rows["tracking_code"].set_op("starts_with")
+        dlg._tb_text_rows["tracking_code"].edit.setText("TB")
+        dlg._tb_count_op.setCurrentIndex(dlg._tb_count_op.findData("between"))
+        dlg._tb_count1.setValue(1)
+        dlg._tb_count2.setValue(3)
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert {k: (m.text, m.op) for k, m in f.texts.items()} == {
+            "name": ("coin", "contains"), "tracking_code": ("TB", "starts_with")}
+        assert (f.count_op, f.count1, f.count2) == ("between", 1, 3)
+
+    def test_count_alone_builds_filter(self, dlg):
+        dlg._tb_count_op.setCurrentIndex(dlg._tb_count_op.findData("at_least"))
+        dlg._tb_count1.setValue(2)
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert (f.count_op, f.count1) == ("at_least", 2)
+        assert not f.texts
+
+    def test_load_roundtrip_and_reset(self, dlg):
+        original = TrackableFilter(
+            texts={"name": ("bug", "not_contains"), "tracking_code": ("", "not_empty")},
+            count_op="at_most", count1=4,
+        )
+        dlg._load_filterset(FilterSet().add(original))
+        [f] = _trackable_filters(dlg._build_filterset())
+        assert f.to_dict() == original.to_dict()
+        dlg._tabs.setCurrentWidget(dlg._trackables_tab)
+        dlg._reset_current_tab()
+        assert _trackable_filters(dlg._build_filterset()) == []
+
+    def test_text_row_and_tab_highlight(self, dlg):
+        row = dlg._tb_text_rows["tracking_code"]
+        row.edit.setText("TB")
+        assert _lit(row.label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._trackables_tab)}
+        dlg._reset_trackables()
+        assert not _lit(row.label)
+        assert _lit_tabs(dlg) == set()
+
+    def test_invalid_regex_blocks_apply(self, dlg, monkeypatch):
+        warned = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warned)
+        dlg._tb_text_rows["name"].set_op("regex")
+        dlg._tb_text_rows["name"].edit.setText("(")
+        assert dlg._validate_text_filters() is False
+        warned.assert_called_once()
+        assert dlg._tabs.currentWidget() is dlg._trackables_tab
 
 
 # ── logs tab ──────────────────────────────────────────────────────────────────
@@ -1152,6 +1295,51 @@ class TestApply:
         assert not dlg._where_error_label.isHidden()
 
 
+# ── global "Invert filter" ──────────────────────────────────────────────────────
+
+class TestInvertFilter:
+    def test_default_off(self, dlg):
+        assert not dlg._invert_cb.isChecked()
+        assert dlg._build_filterset().negate is False
+
+    def test_build_sets_negate(self, dlg):
+        dlg._name_filter.setText("church")
+        dlg._invert_cb.setChecked(True)
+        fs = dlg._build_filterset()
+        assert fs.negate is True
+        assert any(isinstance(f, NameFilter) for f in fs._filters)
+
+    def test_load_restores_checkbox(self, dlg):
+        dlg._load_filterset(FilterSet(negate=True).add(FoundFilter()))
+        assert dlg._invert_cb.isChecked()
+        dlg._load_filterset(FilterSet().add(FoundFilter()))
+        assert not dlg._invert_cb.isChecked()
+
+    def test_reset_all_clears(self, dlg):
+        dlg._invert_cb.setChecked(True)
+        dlg._reset_all()
+        assert not dlg._invert_cb.isChecked()
+
+    def test_reset_tab_keeps_it(self, dlg):
+        # Global setting — not owned by any tab.
+        dlg._invert_cb.setChecked(True)
+        dlg._reset_current_tab()
+        assert dlg._invert_cb.isChecked()
+
+    def test_highlighted_when_checked(self, dlg):
+        assert not _lit(dlg._invert_cb)
+        dlg._invert_cb.setChecked(True)
+        assert _lit(dlg._invert_cb)
+        assert _lit_tabs(dlg) == set()
+        dlg._invert_cb.setChecked(False)
+        assert not _lit(dlg._invert_cb)
+
+    def test_dialog_opened_with_inverted_filterset(self, qtbot):
+        d = FilterDialog(current_filterset=FilterSet(negate=True).add(FoundFilter()))
+        qtbot.addWidget(d)
+        assert d._invert_cb.isChecked()
+
+
 # ── distance unit preference (#327) ─────────────────────────────────────────────
 
 class TestDistanceUnitPref:
@@ -1169,44 +1357,46 @@ class TestDistanceUnitPref:
         return d
 
     def test_suffix_km_by_default(self, dlg):
-        assert dlg._dist_max.suffix() == " km"
+        assert dlg._dist1.suffix() == " km"
 
     def test_suffix_mi_when_use_miles(self, dlg_mi):
-        assert dlg_mi._dist_max.suffix() == " mi"
+        assert dlg_mi._dist1.suffix() == " mi"
 
     def test_build_converts_mi_to_km(self, dlg_mi):
         dlg_mi._dist_enabled.setChecked(True)
-        dlg_mi._dist_max.setValue(50.0)
+        dlg_mi._dist1.setValue(50.0)
         fs = dlg_mi._build_filterset()
         f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
-        assert abs(f.max_km - 50.0 * 1.60934) < 0.01
+        assert f.op == "at_most"
+        assert abs(f.dist1_km - 50.0 * 1.60934) < 0.01
 
     def test_build_km_passthrough(self, dlg):
         dlg._dist_enabled.setChecked(True)
-        dlg._dist_max.setValue(50.0)
+        dlg._dist1.setValue(50.0)
         fs = dlg._build_filterset()
         f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
-        assert abs(f.max_km - 50.0) < 0.01
+        assert abs(f.dist1_km - 50.0) < 0.01
 
     def test_load_converts_km_to_mi(self, dlg_mi):
         fs = FilterSet(mode="AND")
         fs.add(DistanceFilter(55.0, 12.0, 80.0))
         dlg_mi._load_filterset(fs)
-        assert abs(dlg_mi._dist_max.value() - 80.0 * 0.621371) < 0.01
+        assert dlg_mi._dist_op.currentData() == "at_most"
+        assert abs(dlg_mi._dist1.value() - 80.0 * 0.621371) < 0.01
 
     def test_load_km_passthrough(self, dlg):
         fs = FilterSet(mode="AND")
         fs.add(DistanceFilter(55.0, 12.0, 25.0))
         dlg._load_filterset(fs)
-        assert abs(dlg._dist_max.value() - 25.0) < 0.01
+        assert abs(dlg._dist1.value() - 25.0) < 0.01
 
     def test_roundtrip_mi(self, dlg_mi):
         # Enter 50 mi → build → DistanceFilter stores km → load back → should show 50 mi.
         dlg_mi._dist_enabled.setChecked(True)
-        dlg_mi._dist_max.setValue(50.0)
+        dlg_mi._dist1.setValue(50.0)
         fs = dlg_mi._build_filterset()
         dlg_mi._load_filterset(fs)
-        assert abs(dlg_mi._dist_max.value() - 50.0) < 0.1
+        assert abs(dlg_mi._dist1.value() - 50.0) < 0.1
 
 
 # ── center point picker integration (#511) ───────────────────────────────────
@@ -1248,13 +1438,64 @@ class TestCenterPointIntegration:
         assert "distance" not in _types(fs)
         assert warned
 
-    def test_min_distance_included(self, dlg):
+    def test_between_distance_included(self, dlg):
         dlg._dist_enabled.setChecked(True)
-        dlg._dist_min.setValue(2.0)
-        dlg._dist_max.setValue(50.0)
+        dlg._dist_op.setCurrentIndex(dlg._dist_op.findData("between"))
+        dlg._dist1.setValue(2.0)
+        dlg._dist2.setValue(50.0)
         fs = dlg._build_filterset()
         f = next(x for x in fs._filters if getattr(x, "filter_type", None) == "distance")
-        assert abs(f.min_km - 2.0) < 0.01
+        assert (f.op, round(f.dist1_km, 2), round(f.dist2_km, 2)) == ("between", 2.0, 50.0)
+
+    @pytest.mark.parametrize("op", ["between", "not_between"])
+    def test_reversed_range_is_swapped_on_apply(self, dlg, op):
+        dlg._dist_enabled.setChecked(True)
+        dlg._dist_op.setCurrentIndex(dlg._dist_op.findData(op))
+        dlg._dist1.setValue(70.0)
+        dlg._dist2.setValue(50.0)
+        f = next(x for x in dlg._build_filterset()._filters
+                 if getattr(x, "filter_type", None) == "distance")
+        assert (f.dist1_km, f.dist2_km) == (50.0, 70.0)
+        assert (dlg._dist1.value(), dlg._dist2.value()) == (50.0, 70.0)
+
+    def test_single_value_ops_are_not_reordered(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        dlg._dist_op.setCurrentIndex(dlg._dist_op.findData("at_most"))
+        dlg._dist1.setValue(70.0)
+        dlg._dist2.setValue(50.0)
+        dlg._build_filterset()
+        assert (dlg._dist1.value(), dlg._dist2.value()) == (70.0, 50.0)
+
+    def test_second_value_only_for_between(self, dlg):
+        dlg._dist_enabled.setChecked(True)
+        for op, shown in (("at_most", False), ("between", True),
+                          ("not_between", True), ("more_than", False)):
+            dlg._dist_op.setCurrentIndex(dlg._dist_op.findData(op))
+            assert dlg._dist2.isVisibleTo(dlg) is shown, op
+
+    def test_every_condition_round_trips(self, dlg):
+        from opensak.filters.engine import DISTANCE_OPS
+        for op in DISTANCE_OPS:
+            fs = FilterSet(mode="AND")
+            fs.add(DistanceFilter(55.0, 12.0, op=op, dist1_km=3.0, dist2_km=7.5))
+            dlg._load_filterset(fs)
+            f = next(x for x in dlg._build_filterset()._filters
+                     if getattr(x, "filter_type", None) == "distance")
+            assert (f.op, f.dist1_km, f.dist2_km) == (op, 3.0, 7.5)
+
+    def test_legacy_min_max_profile_loads_as_between(self, dlg):
+        legacy = {"filter_type": "distance", "lat": 55.0, "lon": 12.0,
+                  "max_km": 40.0, "min_km": 5.0}
+        dlg._load_filterset(FilterSet.from_dict({"mode": "AND", "filters": [legacy]}))
+        assert dlg._dist_enabled.isChecked()
+        assert dlg._dist_op.currentData() == "between"
+        assert (dlg._dist1.value(), dlg._dist2.value()) == (5.0, 40.0)
+
+    def test_legacy_max_only_profile_loads_as_at_most(self, dlg):
+        legacy = {"filter_type": "distance", "lat": 55.0, "lon": 12.0, "max_km": 40.0}
+        dlg._load_filterset(FilterSet.from_dict({"mode": "AND", "filters": [legacy]}))
+        assert dlg._dist_op.currentData() == "at_most"
+        assert dlg._dist1.value() == 40.0
 
     def test_load_restores_center_state(self, dlg):
         fs = FilterSet(mode="AND")
@@ -1305,7 +1546,7 @@ class TestGeneralTabFitsWithoutScrolling:
         for attr in ("_name_row", "_gc_row", "_placed_row", "_owner_row",
                      "_diff_min", "_diff_max", "_terr_min", "_terr_max",
                      "_found_cb", "_notfound_cb", "_avail_cb", "_unavail_cb",
-                     "_archived_cb", "_dist_enabled", "_dist_min", "_dist_max",
+                     "_archived_cb", "_dist_enabled", "_dist_op", "_dist1", "_dist2",
                      "_center_picker", "_prem_yes", "_prem_no", "_tb_yes",
                      "_tb_no", "_cc_yes", "_cc_no"):
             assert getattr(dlg, attr) is not None, attr
@@ -1392,6 +1633,31 @@ class TestHighlightChangedElements:
         assert _lit(dlg._fav_label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
 
+    def test_has_trackables_row_lives_on_trackables_tab(self, dlg):
+        dlg._tb_no.setChecked(False)
+        assert _lit(dlg._tb_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._trackables_tab)}
+        dlg._tabs.setCurrentWidget(dlg._trackables_tab)
+        dlg._reset_current_tab()
+        assert dlg._tb_yes.isChecked() and dlg._tb_no.isChecked()
+        assert _lit_tabs(dlg) == set()
+
+    def test_unchecking_one_direction_lights_the_group(self, dlg):
+        dlg._dir_checks["N"].setChecked(False)
+        assert _lit(dlg._dir_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+        dlg._set_all_directions(True)
+        assert not _lit(dlg._dir_label)
+        assert _lit_tabs(dlg) == set()
+
+    def test_user_note_row(self, dlg):
+        dlg._user_note_row.edit.setText("final")
+        assert _lit(dlg._user_note_row.label)
+        assert not _lit(dlg._ftf_label)
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+        dlg._reset_misc()
+        assert not _lit(dlg._user_note_row.label)
+
     def test_line_polygon_points(self, dlg):
         dlg._lp_text.setPlainText("55.0, 12.0\n55.1, 12.1\n55.2, 12.0")
         assert _lit(dlg._lp_points_label)
@@ -1427,9 +1693,13 @@ class TestHighlightChangedElements:
         assert _lit_tabs(dlg) == set()
 
     def test_text_search(self, dlg):
-        dlg._text_search_input.setText("spoiler")
-        assert _lit(dlg._text_search_label)
+        dlg._text_search_row.edit.setText("spoiler")
+        assert _lit(dlg._text_search_row.label)
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._text_search_tab)}
+
+    def test_text_search_valueless_op(self, dlg):
+        dlg._text_search_row.set_op("not_empty")
+        assert _lit(dlg._text_search_row.label)
 
     def test_where_sql_lights_only_the_tab(self, dlg):
         dlg._where_sql_general.setPlainText("found = 0")
@@ -1437,7 +1707,7 @@ class TestHighlightChangedElements:
 
     def test_several_tabs_at_once(self, dlg):
         dlg._dist_enabled.setChecked(True)
-        dlg._text_search_input.setText("spoiler")
+        dlg._text_search_row.edit.setText("spoiler")
         assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab), _tab(dlg, dlg._text_search_tab)}
 
     def test_reset_all_clears_every_highlight(self, dlg):

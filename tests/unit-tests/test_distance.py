@@ -122,6 +122,87 @@ def test_distance_filter_bbox_skipped_for_zero_radius():
         assert f.apply_to_query(s.query(Cache)) is None
 
 
+# ── Distance conditions (same as the corrected ↔ posted distance filter) ────
+
+@pytest.mark.parametrize("op, d1, d2", [
+    ("equal", 0.0, 0.0),
+    ("less_than", 25.0, 0.0),
+    ("at_most", 25.0, 0.0),
+    ("more_than", 25.0, 0.0),
+    ("at_least", 25.0, 0.0),
+    ("between", 50.0, 5.0),
+    ("not_between", 5.0, 50.0),
+])
+def test_distance_filter_conditions_match_python(op, d1, d2):
+    fs = FilterSet().add(DistanceFilter(55.6761, 12.5683, op=op, dist1_km=d1, dist2_km=d2))
+    assert _via_apply_filters(fs) == _python_only(fs)
+
+
+def test_distance_filter_condition_semantics():
+    def f(op, d1, d2=0.0):
+        return DistanceFilter(0.0, 0.0, op=op, dist1_km=d1, dist2_km=d2)
+    at = Cache(gc_code="GCX", name="x", latitude=0.0, longitude=0.0)        # 0 km
+    near = Cache(gc_code="GCY", name="y", latitude=0.09, longitude=0.0)     # ~10 km
+    assert f("equal", 0).matches(at) and not f("equal", 0).matches(near)
+    assert f("less_than", 10.0).matches(at) and not f("less_than", 0).matches(at)
+    assert f("at_most", 0).matches(at)
+    assert f("more_than", 5).matches(near) and not f("more_than", 5).matches(at)
+    assert f("at_least", 0).matches(at)
+    assert f("between", 20, 5).matches(near) and not f("between", 5, 20).matches(at)
+    assert f("not_between", 5, 20).matches(at) and not f("not_between", 5, 20).matches(near)
+
+
+def test_distance_filter_unbounded_conditions_skip_bbox():
+    with get_session() as s:
+        for op in ("more_than", "at_least", "not_between"):
+            f = DistanceFilter(55.0, 12.0, op=op, dist1_km=5.0, dist2_km=10.0)
+            assert f.apply_to_query(s.query(Cache)) is None, op
+
+
+def test_distance_filter_unknown_op_rejected():
+    with pytest.raises(ValueError):
+        DistanceFilter(55.0, 12.0, op="near")
+    with pytest.raises(ValueError):
+        DistanceFilter(55.0, 12.0)  # neither op nor max_km
+
+
+@pytest.mark.parametrize("legacy, expected", [
+    ({"max_km": 50.0}, ("at_most", 50.0, 0.0)),
+    ({"max_km": 50.0, "min_km": 0.0}, ("at_most", 50.0, 0.0)),
+    ({"max_km": 50.0, "min_km": 5.0}, ("between", 5.0, 50.0)),
+])
+def test_legacy_min_max_dict_is_converted(legacy, expected):
+    f = DistanceFilter.from_dict({"filter_type": "distance", "lat": 55.6, "lon": 12.5, **legacy})
+    assert (f.op, f.dist1_km, f.dist2_km) == expected
+    data = f.to_dict()
+    assert "max_km" not in data and "min_km" not in data
+    assert data["op"] == expected[0]
+
+
+def test_legacy_profile_file_converted_on_load_and_resave(tmp_path):
+    import json
+    from opensak.filters.engine import FilterProfile
+    path = tmp_path / "Old.json"
+    path.write_text(json.dumps({
+        "name": "Old",
+        "filterset": {"mode": "AND", "filters": [
+            {"filter_type": "distance", "lat": 55.6761, "lon": 12.5683,
+             "max_km": 200.0, "min_km": 1.0, "center_state": {"kind": "home"}},
+        ]},
+        "sort": {},
+    }), encoding="utf-8")
+    profile = FilterProfile.load(path)
+    [f] = profile.filterset._filters
+    assert (f.op, f.dist1_km, f.dist2_km) == ("between", 1.0, 200.0)
+    assert f.center_state == {"kind": "home"}
+    # Same caches as the old min_km <= d <= max_km test.
+    legacy_set = {c for c in _python_only(FilterSet().add(f))}
+    assert legacy_set == _via_apply_filters(profile.filterset)
+    profile.save(tmp_path)
+    saved = json.loads(path.read_text(encoding="utf-8"))["filterset"]["filters"][0]
+    assert saved["op"] == "between" and "max_km" not in saved
+
+
 # ── Index exists ──────────────────────────────────────────────────────────────
 
 def test_lat_lon_index_created(tmp_db):
