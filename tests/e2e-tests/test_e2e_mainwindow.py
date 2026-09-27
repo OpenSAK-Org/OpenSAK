@@ -1099,6 +1099,29 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
         assert seeded_window._active_filter_name == "MyProfile"
 
+    def test_saved_profile_does_not_override_column_sort(
+            self, seeded_window, monkeypatch, iso_settings):
+        # Regression: the profile's embedded sort (always "name") used to
+        # replace the per-DB column sort on reopen and was then saved back,
+        # so e.g. a Distance sort was lost after restarting.
+        from opensak.db.manager import get_db_manager
+        from opensak.filters.engine import FilterSet, SortSpec
+        from opensak.settings_store import get_store
+        key = f"sort.{get_db_manager().active.path}"
+        get_store().set_many({f"{key}.field": "distance",
+                              f"{key}.ascending": True,
+                              f"{key}.filter_profile": "MyProfile"})
+        prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
+                               sort=SortSpec("name"))
+        monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
+                            staticmethod(lambda: [Path("/x/p.json")]))
+        monkeypatch.setattr("opensak.filters.engine.FilterProfile.load",
+                            staticmethod(lambda p: prof))
+        seeded_window._load_sort_for_active_db()
+        assert seeded_window._current_sort.field == "distance"
+        seeded_window._on_filter_applied(FilterSet(), SortSpec("name"), "MyProfile")
+        assert get_store().get(f"{key}.field") == "distance"
+
     def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
         # Regression for #498: opensak.json deles på tværs af alle installerede
         # versioner. Hvis en nyere version har gemt et sort-felt denne version

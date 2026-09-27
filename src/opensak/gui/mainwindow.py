@@ -2516,7 +2516,9 @@ class MainWindow(QMainWindow):
                     profile = FilterProfile.load(path)
                     if profile.name == profile_name:
                         self._current_filterset = profile.filterset
-                        self._current_sort = profile.sort
+                        # Behold databasens gemte kolonne-sortering — profilens
+                        # sort er altid "name" (filter-dialogen har ingen
+                        # sort-valg) og ville ellers overskrive brugerens valg.
                         self._active_filter_name = profile.name
                         self._set_clear_filter_active(True)
                         if hasattr(self, "_filter_lbl"):
@@ -2579,8 +2581,10 @@ class MainWindow(QMainWindow):
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
+            # `sort` from the dialog is always SortSpec("name") — ignore it
+            # and keep the user's column sort for this database.
             caches = apply_filters_auto(
-                session, filterset, sort,
+                session, filterset, self._current_sort,
                 columns=self._visible_table_columns(),
             )
 
@@ -2597,7 +2601,6 @@ class MainWindow(QMainWindow):
             return
 
         self._current_filterset = filterset
-        self._current_sort = sort
         self._active_filter_name = profile_name
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
@@ -2782,7 +2785,7 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(str(exc), 4000)
             return
         self._current_filterset = profile.filterset
-        self._current_sort = profile.sort
+        # Profilens sort ignoreres bevidst — se _load_sort_for_active_db().
         self._active_filter_name = profile.name
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
@@ -2790,7 +2793,7 @@ class MainWindow(QMainWindow):
         self._quick_filter.setCurrentIndex(0)
         with get_session() as session:
             caches = apply_filters_auto(
-                session, profile.filterset, profile.sort,
+                session, profile.filterset, self._current_sort,
                 columns=self._visible_table_columns(),
             )
         self._cache_table.load_caches(caches)
