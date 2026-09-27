@@ -1519,11 +1519,14 @@ class TestAboutUpdates:
 
         The primary button depends on sys.platform (#572 self-download on
         win32/darwin) and on AppImage integration (#836), so without this
-        the tests only pass on a plain Linux checkout.
+        the tests only pass on a plain Linux checkout. MSIX is pinned off
+        too: with manual=True a packaged install returns early with an info
+        box (#874) before any of the buttons exist.
         """
         import sys
-        from opensak import appimage
+        from opensak import appimage, msix
         monkeypatch.setattr(sys, "platform", platform)
+        monkeypatch.setattr(msix, "is_msix_packaged", lambda: False)
         monkeypatch.setattr(appimage, "is_running_as_appimage", lambda: False)
         monkeypatch.setattr(appimage, "is_appimage_integrated", lambda: False)
 
@@ -1560,6 +1563,7 @@ class TestAboutUpdates:
         self, seeded_window, monkeypatch, iso_settings
     ):
         from opensak.gui.settings import get_settings
+        self._force_update_platform(monkeypatch, "linux")
         self._click_update_dialog_button(monkeypatch, tr("update_skip_version"))
 
         seeded_window._on_update_available("v9.9.9", "http://x", manual=True)
@@ -1572,6 +1576,7 @@ class TestAboutUpdates:
         # New "Support OpenSAK" button on the update-available dialog:
         # a more visible spot than the Help menu, which users who never
         # open Help would otherwise never see.
+        self._force_update_platform(monkeypatch, "linux")
         calls = []
         monkeypatch.setattr(seeded_window, "_open_support_page", lambda: calls.append(True))
         self._click_update_dialog_button(monkeypatch, tr("action_support_opensak"))
@@ -1586,6 +1591,7 @@ class TestAboutUpdates:
         # Clicking Support must not also record a skipped version or open
         # the release page — it's an independent, non-committal action.
         from opensak.gui.settings import get_settings
+        self._force_update_platform(monkeypatch, "linux")
         opened = []
         monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
         monkeypatch.setattr(seeded_window, "_open_support_page", lambda: None)
@@ -1607,6 +1613,7 @@ class TestAboutUpdates:
         what a hardcoded 'blob/main/CHANGELOG.md' caused before. Fail this
         test before reinstating any literal branch name in the link.
         """
+        self._force_update_platform(monkeypatch, "linux")
         captured: dict[str, str] = {}
 
         def fake_exec(self):
