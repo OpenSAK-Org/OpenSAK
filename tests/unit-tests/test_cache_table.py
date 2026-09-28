@@ -1110,6 +1110,25 @@ class TestView:
         view.load_caches([_cache()])
         view.apply_sort("does_not_exist", True)  # no crash
 
+    def test_column_move_keeps_selection_and_sort(self, view, monkeypatch):
+        cols = list(ALL_COLUMNS)
+        monkeypatch.setattr(ct, "_get_active_columns", lambda: list(cols))
+        monkeypatch.setattr("opensak.gui.dialogs.column_dialog.set_visible_columns",
+                            lambda order: cols.__setitem__(slice(None), order))
+        view.load_caches([_cache(gc_code="A", difficulty=3.0),
+                          _cache(gc_code="B", difficulty=1.0),
+                          _cache(gc_code="C", difficulty=2.0)])
+        view.apply_sort("difficulty", False)
+        view.select_by_gc_code("C")
+        fired = []
+        view.cache_selected.connect(lambda c: fired.append(c.gc_code))
+        header = view.horizontalHeader()
+        header.moveSection(header.visualIndex(ALL_COLUMNS.index("terrain")), 0)
+        assert view._model._columns[0] == "terrain"
+        assert view.selected_cache().gc_code == "C"
+        assert fired == []
+        assert view._model._columns[header.sortIndicatorSection()] == "difficulty"
+
     def test_double_click_corrected_opens_editor(self, view, monkeypatch):
         view.load_caches([_cache(gc_code="A")])
         called = []
