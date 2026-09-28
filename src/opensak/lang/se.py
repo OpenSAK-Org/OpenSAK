@@ -1336,6 +1336,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK kunde inte avinstalleras helt: {error}",
     "appimage_uninstall_done_title":          "Avinstallerad",
     "appimage_uninstall_done_msg":            "OpenSAK har tagits bort. Programmet stängs nu.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Avinstallation",
+    "settings_macos_uninstall_hint":         "Flyttar OpenSAK till papperskorgen. Du väljer själv om dina cacher, databaser och inställningar ska behållas eller också raderas.",
+    "macos_uninstall_closing_msg":           "OpenSAK stängs nu och flyttar sig själv till papperskorgen.",
+    "macos_uninstall_blocked_title":         "Kan inte avinstallera härifrån",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK körs från skivavbilden eller en tillfällig plats, så det finns inget installerat att ta bort. Avsluta OpenSAK och dra det i stället från mappen Program till papperskorgen.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK har inte behörighet att ta bort sig själv från {folder}. Avsluta OpenSAK och dra det i stället till papperskorgen i Finder — Finder frågar efter ett administratörslösenord.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK kunde inte flytta sig själv till papperskorgen: {error}\n\nAvsluta OpenSAK och dra det i stället till papperskorgen i Finder.",
 
     # ── Fliken PQ Email (issue #443, session 1 — IMAP-konto + test) ───────────
     "settings_tab_pq_email":            "PQ Email",

@@ -160,6 +160,31 @@ with `ls` first, as shown above.)
 
 ## macOS
 
+### The easy way: uninstall from inside OpenSAK (1.20.0 and later)
+
+Open **Settings → Settings… → Advanced** and click **Uninstall OpenSAK** in the
+*Uninstall* section. You choose between:
+
+- **Remove program only** — OpenSAK is moved to the Trash; your caches,
+  databases and settings are kept, so a later reinstall picks them up again.
+- **Remove program and all data** — also deletes every place OpenSAK keeps
+  data (the ones listed under **Help → OpenSAK File Locations…**, including a
+  database folder you chose yourself and the PQ Email password in your
+  Keychain). You're asked to confirm a second time, because this can't be
+  undone. Databases you opened from other places, such as an external drive,
+  are never deleted.
+
+OpenSAK then closes. The program goes to the **Trash** (so you can still put
+it back until you empty it); deleted data does not.
+
+If OpenSAK is running straight from the `.dmg`, or your user account isn't
+allowed to change the folder it's in, OpenSAK tells you so and you use the
+manual steps below instead — Finder will ask for an administrator password
+if needed.
+
+The manual steps below are also what to do if you have already dragged
+OpenSAK to the Trash.
+
 ### 1. Remove the program
 
 If you haven't already, drag **OpenSAK.app** out of `/Applications` and into

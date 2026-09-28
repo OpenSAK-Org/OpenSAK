@@ -1334,6 +1334,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK kon niet volledig worden verwijderd: {error}",
     "appimage_uninstall_done_title":          "Verwijderd",
     "appimage_uninstall_done_msg":            "OpenSAK is verwijderd. De toepassing wordt nu afgesloten.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Verwijderen",
+    "settings_macos_uninstall_hint":         "Verplaatst OpenSAK naar de prullenmand. U kiest zelf of uw caches, databases en instellingen behouden blijven of ook worden verwijderd.",
+    "macos_uninstall_closing_msg":           "OpenSAK wordt nu afgesloten en verplaatst zichzelf naar de prullenmand.",
+    "macos_uninstall_blocked_title":         "Verwijderen is hier niet mogelijk",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK draait vanaf de schijfkopie of een tijdelijke locatie, dus er is niets geïnstalleerd om te verwijderen. Sluit OpenSAK af en sleep het in plaats daarvan vanuit de map Apps naar de prullenmand.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK heeft geen toestemming om zichzelf uit {folder} te verwijderen. Sluit OpenSAK af en sleep het in plaats daarvan in de Finder naar de prullenmand — de Finder vraagt om een beheerderswachtwoord.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK kon zichzelf niet naar de prullenmand verplaatsen: {error}\n\nSluit OpenSAK af en sleep het in plaats daarvan in de Finder naar de prullenmand.",
 
     # ── Tabblad PQ Email (issue #443, session 1 — IMAP-account + test) ────────
     "settings_tab_pq_email":            "PQ Email",

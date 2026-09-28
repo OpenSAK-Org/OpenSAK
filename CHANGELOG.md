@@ -4,6 +4,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **macOS: uninstall OpenSAK from inside the app (#859, part of #824)** —
+  **Settings → Advanced → Uninstall OpenSAK** now works on macOS the same way
+  it does for the Linux AppImage: choose *Remove program only* or *Remove
+  program and all data*. OpenSAK moves itself to the Trash and closes. Data
+  removal covers every location listed under *Help → OpenSAK File
+  Locations…*, and databases opened from other places are never deleted.
+
+### Fixed
+
+- **"Remove program and all data" could leave settings behind (#859)** — On
+  Linux, closing OpenSAK right after uninstalling wrote the window layout
+  back to disk, which recreated the settings folder with the old settings
+  in it. Nothing is written anymore once your data has been deleted.
+
+---
+
 ## [1.20.0-beta.12] — 2026-09-27
 
 > The Filter dialog takes another big step towards GSAK parity (#821): a

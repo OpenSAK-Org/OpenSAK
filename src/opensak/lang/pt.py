@@ -1337,6 +1337,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "Não foi possível desinstalar completamente o OpenSAK: {error}",
     "appimage_uninstall_done_title":          "Desinstalado",
     "appimage_uninstall_done_msg":            "O OpenSAK foi removido. A aplicação irá agora fechar.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Desinstalação",
+    "settings_macos_uninstall_hint":         "Move o OpenSAK para o Lixo. Escolhe se pretende manter as suas caches, bases de dados e definições, ou eliminá-las também.",
+    "macos_uninstall_closing_msg":           "O OpenSAK vai agora fechar e mover-se para o Lixo.",
+    "macos_uninstall_blocked_title":         "Não é possível desinstalar a partir daqui",
+    "macos_uninstall_blocked_transient_msg": "O OpenSAK está a ser executado a partir da imagem de disco ou de uma localização temporária, pelo que não há nada instalado para remover. Saia do OpenSAK e arraste-o da pasta Aplicações para o Lixo.",
+    "macos_uninstall_blocked_not_writable_msg": "O OpenSAK não tem permissão para se remover de {folder}. Saia do OpenSAK e arraste-o para o Lixo no Finder — o Finder irá pedir uma palavra-passe de administrador.",
+    "macos_uninstall_trash_error_msg":       "O OpenSAK não conseguiu mover-se para o Lixo: {error}\n\nSaia do OpenSAK e arraste-o para o Lixo no Finder.",
 
     # ── Separador PQ Email (issue #443, session 1 — conta IMAP + teste) ───────
     "settings_tab_pq_email":            "PQ Email",

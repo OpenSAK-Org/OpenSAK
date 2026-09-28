@@ -261,8 +261,18 @@ def purge_user_data() -> None:
     Alle steder samles FØR noget slettes: install_dir læses fra
     bootstrap.json, og keyring-brugernavnet fra opensak.json — begge er
     væk, når først mapperne er slettet.
+
+    Derefter spærres settings_store for skrivning (#859), så intet kan
+    genskabe de slettede mapper, før processen lukker.
     """
+    from opensak import settings_store
+
     locations = [loc for loc in get_all_storage_locations() if loc.removed_on_purge]
+
+    # Issue #859: efter en purge lukker appen, og hovedvinduets closeEvent
+    # gemmer vinduesgeometri via settings_store. Uden spærren genskabes
+    # installations-mappen med en opensak.json fuld af de gamle indstillinger.
+    settings_store.get_store().disable_writes()
 
     for loc in locations:
         if loc.kind is LocationKind.KEYRING_ENTRY:

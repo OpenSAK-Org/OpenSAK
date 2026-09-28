@@ -635,10 +635,10 @@ python run.py</code></pre>
         <tr><td>Microsoft Store</td><td><strong>Settings → Apps → Installed apps</strong> in Windows, find OpenSAK, and choose <strong>Uninstall</strong></td></tr>
         <tr><td>Windows direct download</td><td>Delete the folder you unzipped OpenSAK into</td></tr>
         <tr><td>Linux AppImage</td><td><strong>Settings → Settings… → Advanced → AppImage → Uninstall OpenSAK</strong>. Choose <em>Remove program only</em> (keeps your data) or <em>Remove program and all data</em>, which asks you to confirm a second time</td></tr>
-        <tr><td>macOS</td><td>Drag <strong>OpenSAK</strong> from Applications to the Trash</td></tr>
+        <tr><td>macOS</td><td><strong>Settings → Settings… → Advanced → Uninstall → Uninstall OpenSAK</strong>. Choose <em>Remove program only</em> (keeps your data) or <em>Remove program and all data</em>, which asks you to confirm a second time. OpenSAK closes and moves itself to the Trash. Dragging <strong>OpenSAK</strong> from Applications to the Trash also works, but leaves your data behind</td></tr>
       </tbody>
     </table>
-    <div class="callout tip"><div class="callout-icon">💡</div><div>Want to remove your data too, back it up, or move it to a new computer? <strong>Help → OpenSAK File Locations…</strong> lists every place OpenSAK keeps files, with an <strong>Open folder</strong> button for each. Do this <em>before</em> uninstalling on Windows or macOS.</div></div>
+    <div class="callout tip"><div class="callout-icon">💡</div><div>Want to remove your data too, back it up, or move it to a new computer? <strong>Help → OpenSAK File Locations…</strong> lists every place OpenSAK keeps files, with an <strong>Open folder</strong> button for each. Do this <em>before</em> uninstalling on Windows.</div></div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1415,6 +1415,9 @@ python run.py</code></pre>
 
     <h4>AppImage (Linux only)</h4>
     <p>Shown only when running the Linux AppImage. <strong>Install in application menu</strong> adds OpenSAK to your menu (useful if you chose <em>Don't ask again</em> on first launch), and <strong>Uninstall OpenSAK</strong> removes it again — see <a href="#installation">Uninstalling</a>.</p>
+
+    <h4>Uninstall (macOS only)</h4>
+    <p>Shown only in the macOS app. <strong>Uninstall OpenSAK</strong> moves OpenSAK to the Trash and lets you choose whether to keep or delete your caches, databases and settings — see <a href="#installation">Uninstalling</a>. If OpenSAK is running straight from the disk image, or you don't have permission to change the folder it's in, you'll be asked to drag it to the Trash in Finder instead.</p>
 
     <h4>Custom Icon Packs</h4>
     <p>Want cache-type or found-smiley icons that look different from the bundled set? Click <strong>Open icons folder</strong> to reveal a folder alongside your settings file where you can drop replacement SVG files — no code changes or rebuilding required. File names must match the bundled assets exactly; click <strong>View icon naming guide</strong> for the full list of file names, recommended canvas sizes, and export tips. A missing or invalid custom file automatically falls back to the bundled default — it's never a crash. This folder lives alongside your settings, so it survives future OpenSAK updates.</p>

@@ -1337,6 +1337,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK konnte nicht vollständig deinstalliert werden: {error}",
     "appimage_uninstall_done_title":          "Deinstalliert",
     "appimage_uninstall_done_msg":            "OpenSAK wurde entfernt. Die Anwendung wird nun geschlossen.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Deinstallation",
+    "settings_macos_uninstall_hint":         "Verschiebt OpenSAK in den Papierkorb. Sie entscheiden, ob Ihre Caches, Datenbanken und Einstellungen erhalten bleiben oder ebenfalls gelöscht werden.",
+    "macos_uninstall_closing_msg":           "OpenSAK wird jetzt geschlossen und verschiebt sich selbst in den Papierkorb.",
+    "macos_uninstall_blocked_title":         "Deinstallation von hier nicht möglich",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK wird vom Disk-Image oder von einem temporären Ort ausgeführt, daher ist nichts installiert, das entfernt werden könnte. Beenden Sie OpenSAK und ziehen Sie es stattdessen aus dem Ordner „Programme“ in den Papierkorb.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK hat keine Berechtigung, sich selbst aus {folder} zu entfernen. Beenden Sie OpenSAK und ziehen Sie es stattdessen im Finder in den Papierkorb — der Finder fragt nach einem Administratorpasswort.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK konnte sich nicht selbst in den Papierkorb verschieben: {error}\n\nBeenden Sie OpenSAK und ziehen Sie es stattdessen im Finder in den Papierkorb.",
 
     # ── Reiter PQ Email (issue #443, session 1 — IMAP-Konto + Test) ───────────
     "settings_tab_pq_email":            "PQ Email",

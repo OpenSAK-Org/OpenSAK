@@ -1336,6 +1336,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK kunne ikke afinstalleres fuldstændigt: {error}",
     "appimage_uninstall_done_title":          "Afinstalleret",
     "appimage_uninstall_done_msg":            "OpenSAK er blevet fjernet. Programmet lukker nu.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Afinstallation",
+    "settings_macos_uninstall_hint":         "Flytter OpenSAK til papirkurven. Du vælger selv, om dine caches, databaser og indstillinger skal beholdes eller også slettes.",
+    "macos_uninstall_closing_msg":           "OpenSAK lukker nu og flytter sig selv til papirkurven.",
+    "macos_uninstall_blocked_title":         "Kan ikke afinstallere herfra",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK kører fra disk-image'et eller en midlertidig placering, så der er intet installeret at fjerne. Afslut OpenSAK og træk den i stedet fra mappen Programmer til papirkurven.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK har ikke tilladelse til at fjerne sig selv fra {folder}. Afslut OpenSAK og træk den i stedet til papirkurven i Finder — Finder beder om en administratoradgangskode.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK kunne ikke flytte sig selv til papirkurven: {error}\n\nAfslut OpenSAK og træk den i stedet til papirkurven i Finder.",
 
     # ── PQ Email-fane i indstillinger (issue #443, session 1 — IMAP-konto + test) ──
     "settings_tab_pq_email":            "PQ Email",

@@ -208,6 +208,12 @@ class SettingsStore:
     def __init__(self) -> None:
         self._data: dict[str, Any] | None = None   # None = ikke indlæst endnu
         self._path: Path | None = None
+        # Issue #859: sat af paths.purge_user_data(). Efter en "slet alle
+        # data"-afinstallation lukker appen, og closeEvent gemmer
+        # vinduesgeometri m.m. — uden denne spærre genskabte det
+        # installations-mappen med en opensak.json fuld af de gamle
+        # indstillinger (også på Linux, #837).
+        self._writes_disabled = False
 
     def _settings_path(self) -> Path:
         """Returner (og cache) stien til opensak.json."""
@@ -268,8 +274,23 @@ class SettingsStore:
                 result[k[len(search):]] = v
         return result
 
+    def disable_writes(self) -> None:
+        """
+        Spær for alle fremtidige skrivninger til disk for resten af
+        processens levetid (issue #859). Læsning virker stadig.
+
+        Kaldes af paths.purge_user_data() lige før data slettes, så intet
+        — heller ikke hovedvinduets closeEvent — kan genskabe de slettede
+        mapper bagefter. Der findes bevidst ingen enable_writes(): efter en
+        purge skal processen lukke.
+        """
+        self._writes_disabled = True
+
     def _flush(self) -> None:
         """Skriv data til disk atomisk."""
+        if self._writes_disabled:
+            _log.debug("Skrivning til opensak.json undertrykt efter data-sletning")
+            return
         import base64
 
         def _make_serializable(obj):

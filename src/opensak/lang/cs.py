@@ -1332,6 +1332,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK se nepodařilo zcela odinstalovat: {error}",
     "appimage_uninstall_done_title":          "Odinstalováno",
     "appimage_uninstall_done_msg":            "OpenSAK byl odebrán. Aplikace se nyní zavře.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Odinstalace",
+    "settings_macos_uninstall_hint":         "Přesune OpenSAK do Koše. Sami zvolíte, zda si ponecháte své keše, databáze a nastavení, nebo je také smažete.",
+    "macos_uninstall_closing_msg":           "OpenSAK se nyní zavře a přesune se do Koše.",
+    "macos_uninstall_blocked_title":         "Odsud nelze odinstalovat",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK běží z obrazu disku nebo z dočasného umístění, takže není nic nainstalováno k odebrání. Ukončete OpenSAK a přetáhněte ho místo toho ze složky Aplikace do Koše.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK nemá oprávnění odebrat se z {folder}. Ukončete OpenSAK a přetáhněte ho místo toho do Koše ve Finderu — Finder si vyžádá heslo správce.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK se nepodařilo přesunout do Koše: {error}\n\nUkončete OpenSAK a přetáhněte ho místo toho do Koše ve Finderu.",
 
     # ── Záložka PQ Email (issue #443, session 1 — účet IMAP + test) ───────────
     "settings_tab_pq_email":            "PQ Email",

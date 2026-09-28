@@ -1335,6 +1335,14 @@ STRINGS: dict[str, str] = {
     "appimage_uninstall_error_msg":           "OpenSAK could not be fully uninstalled: {error}",
     "appimage_uninstall_done_title":          "Uninstalled",
     "appimage_uninstall_done_msg":            "OpenSAK has been removed. The application will now close.",
+    # macOS in-app uninstall (#859)
+    "settings_group_macos_uninstall":        "Uninstall",
+    "settings_macos_uninstall_hint":         "Moves OpenSAK to the Trash. You choose whether to keep your caches, databases and settings, or delete them too.",
+    "macos_uninstall_closing_msg":           "OpenSAK will now close and move itself to the Trash.",
+    "macos_uninstall_blocked_title":         "Cannot uninstall from here",
+    "macos_uninstall_blocked_transient_msg": "OpenSAK is running from the disk image or a temporary location, so there is nothing installed to remove. Quit OpenSAK and drag it from your Applications folder to the Trash instead.",
+    "macos_uninstall_blocked_not_writable_msg": "OpenSAK does not have permission to remove itself from {folder}. Quit OpenSAK and drag it to the Trash in Finder instead — Finder will ask for an administrator password.",
+    "macos_uninstall_trash_error_msg":       "OpenSAK could not move itself to the Trash: {error}\n\nQuit OpenSAK and drag it to the Trash in Finder instead.",
 
     # ── PQ Email settings tab (issue #443, session 1 — IMAP account + test) ───
     "settings_tab_pq_email":            "PQ Email",
