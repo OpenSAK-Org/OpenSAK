@@ -4,6 +4,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.14] — 2026-09-28
+
+### Fixed
+
+- **Button labels were cut off in several dialogs (#927)** — In some
+  languages, longer button texts were clipped, for example *Durchsuchen…*
+  (Browse…) in the German **New Database** dialog. Buttons now always fit
+  their translated text. This affected the Browse, Scan, Save, Copy and
+  Decode hint buttons in the New Database, Send to GPS, Filter, Columns,
+  Coordinate Converter, Projection, Midpoint and Corrected Coordinates
+  dialogs, the Welcome Wizard and the cache details panel. Thanks to the
+  Facebook group member who reported it.
+
+---
+
 ## [1.20.0-beta.13] — 2026-09-28
 
 ### Added
