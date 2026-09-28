@@ -305,6 +305,7 @@ class TestCorrectedDistance:
         assert _by_type(dlg._build_filterset(), "corrected_distance") == []
 
     def test_second_value_only_for_between(self, dlg):
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._ccd_enabled.setChecked(True)
         for op, shown in (("more_than", False), ("between", True),
                           ("not_between", True), ("equal", False)):
@@ -348,11 +349,11 @@ class TestCorrectedDistance:
         assert f.op == "more_than"
         assert f.dist1_m == pytest.approx(3218.7, abs=0.1)
 
-    def test_reset_general_clears_it(self, dlg):
+    def test_reset_misc_clears_it(self, dlg):
         dlg._ccd_enabled.setChecked(True)
         dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("equal"))
         dlg._ccd_dist1.setValue(0)
-        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._reset_current_tab()
         assert not dlg._ccd_enabled.isChecked()
         assert dlg._ccd_op.currentData() == "more_than"

@@ -240,6 +240,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (pierwszy odkrywca) 🥇",
     "filter_user_note_label":      "Notatka osobista",
     "filter_direction_group":      "Kierunek od punktu centralnego",
+    "filter_direction_info":       'Kierunek można ustawić na dwa sposoby:\n\n• Stopnie: wybierz warunek i wpisz azymut — 0° = północ, 90° = wschód, zgodnie z ruchem wskazówek zegara. "Pomiędzy" biegnie zgodnie z ruchem wskazówek zegara, więc 315° – 45° to sektor przez północ.\n\n• Kompas: kliknij kierunki (N, NE, E …). Nadpisuje to wartości w stopniach odpowiednim zakresem. Kierunków, które ze sobą nie sąsiadują, nie da się zapisać jako jednego zakresu — wartości w stopniach są wtedy wyszarzone.\n\nPonowna zmiana wartości w stopniach zastępuje kliknięte kierunki. Kierunek jest mierzony od punktu centralnego powyżej.',
     "filter_fav_points_group":     "Punkty ulubione",
     "filter_found_date_group":     "Data znalezienia przeze mnie",
     "filter_where_description":     "Filtruj skrytki za pomocą surowej klauzuli SQL WHERE na tabeli caches.",

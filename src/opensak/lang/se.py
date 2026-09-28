@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (First to Find) 🥇",
     "filter_user_note_label":      "Personlig anteckning",
     "filter_direction_group":      "Riktning från mittpunkt",
+    "filter_direction_info":       'Riktningen kan anges på två sätt:\n\n• Grader: välj ett villkor och ange bäringen — 0° = norr, 90° = öster, medurs. "Mellan" går medurs, så 315° – 45° är sektorn genom norr.\n\n• Kompass: klicka på riktningarna (N, NÖ, Ö …). Det skriver över gradtalen med motsvarande intervall. Riktningar som inte ligger bredvid varandra kan inte skrivas som ett intervall — gradtalen blir då grå.\n\nÄndrar du gradtalen igen ersätter de de klickade riktningarna. Riktningen mäts från mittpunkten ovan.',
     "filter_fav_points_group":     "Favoritpoäng",
     "filter_found_date_group":     "Datum funnet av mig",
     "filter_where_description":     "Filtrera geocacher med en SQL WHERE-sats direkt mot tabellen caches.",

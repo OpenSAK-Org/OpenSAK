@@ -241,6 +241,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (First to Find) 🥇",
     "filter_user_note_label":      "Persoonlijke notitie",
     "filter_direction_group":      "Richting vanaf middelpunt",
+    "filter_direction_info":       'De richting kan op twee manieren worden ingesteld:\n\n• Graden: kies een voorwaarde en voer de peiling in — 0° = noord, 90° = oost, met de klok mee. "Tussen" loopt met de klok mee, dus 315° – 45° is de sector door het noorden.\n\n• Kompas: klik op de richtingen (N, NO, O …). Dit overschrijft de graden met het bijbehorende bereik. Richtingen die niet naast elkaar liggen, zijn niet als één bereik te schrijven — de graden worden dan grijs.\n\nPas je de graden daarna weer aan, dan vervangen ze de aangeklikte richtingen. De richting wordt gemeten vanaf het middelpunt hierboven.',
     "filter_fav_points_group":     "Favorietpunten",
     "filter_found_date_group":     "Door mij gevonden datum",
     "filter_where_description":     "Filter caches met een SQL WHERE-clausule op de caches-tabel.",

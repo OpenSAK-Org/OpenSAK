@@ -240,6 +240,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (primer descubridor) 🥇",
     "filter_user_note_label":      "Nota personal",
     "filter_direction_group":      "Dirección desde el punto central",
+    "filter_direction_info":       'La dirección se puede fijar de dos formas:\n\n• Grados: elige una condición e introduce el rumbo — 0° = norte, 90° = este, en sentido horario. "Entre" va en sentido horario, así que 315° – 45° es el sector que pasa por el norte.\n\n• Brújula: haz clic en las direcciones (N, NE, E …). Esto sobrescribe los grados con el rango correspondiente. Las direcciones que no son contiguas no se pueden escribir como un solo rango; los grados se muestran entonces en gris.\n\nSi vuelves a cambiar los grados, sustituyen a las direcciones marcadas. La dirección se mide desde el punto central de arriba.',
     "filter_fav_points_group":     "Puntos favoritos",
     "filter_found_date_group":     "Fecha en que la encontré",
     "filter_where_description":     "Filtra cachés con una cláusula SQL WHERE sin procesar sobre la tabla caches.",
