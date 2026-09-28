@@ -1282,7 +1282,11 @@ class FilterDialog(QDialog):
         self._center_picker = CenterPointPicker(self)
         self._center_picker.set_current_cache(self._current_cache)
         self._center_picker.setEnabled(False)
-        grid.addWidget(hug_label(QLabel(tr("center_point_label"))), 0, 0)
+        # Pickeren har en hint-linje under dropdownen — etiketten lægges i
+        # toppen med dropdownens højde, så den flugter med dropdownen.
+        center_label = hug_label(QLabel(tr("center_point_label")))
+        center_label.setMinimumHeight(self._center_picker.combo_height())
+        grid.addWidget(center_label, 0, 0, Qt.AlignmentFlag.AlignTop)
         grid.addWidget(self._center_picker, 0, 1, 1, 2)
 
         # Afstand fra center-punkt — værdierne vises i brugerens enhed

@@ -83,6 +83,12 @@ class CenterPointPicker(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────
 
+    def combo_height(self) -> int:
+        """Height of the dropdown row, so a label beside the picker can line
+        up with the combo rather than centre on the whole (hint-carrying)
+        widget."""
+        return self._combo.sizeHint().height()
+
     def set_current_cache(self, cache) -> None:
         """Gør en cache valgbar som centrum (None = ingen valgt cache lige nu).
 
