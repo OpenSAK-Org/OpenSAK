@@ -1047,7 +1047,7 @@ class DirectionFilter(BaseFilter):
         return inside if self.op == "between" else and_(col.isnot(None), not_(inside))
 
     def _cache_bearing(self, cache: Cache) -> Optional[float]:
-        if not self._has_center():
+        if self.lat is None or self.lon is None:
             return cache.bearing
         if cache.latitude is None or cache.longitude is None:
             return None
@@ -1063,7 +1063,9 @@ class DirectionFilter(BaseFilter):
 
     def to_dict(self) -> dict:
         if self.op is None:
-            data = {"filter_type": self.filter_type, "directions": self.directions}
+            data: dict[str, Any] = {
+                "filter_type": self.filter_type, "directions": self.directions,
+            }
             if self._has_center():
                 data.update(lat=self.lat, lon=self.lon, center_state=self.center_state)
             return data

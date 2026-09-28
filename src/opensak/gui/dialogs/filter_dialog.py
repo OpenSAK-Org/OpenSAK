@@ -2447,7 +2447,8 @@ class FilterDialog(QDialog):
     def _sync_dir_values_from_sectors(self) -> bool:
         """Write the degree inputs matching _dir_sectors. False when no
         single degree condition expresses them."""
-        selected = [d in self._dir_sectors for d in DIRECTIONS]
+        sectors = self._dir_sectors or []
+        selected = [d in sectors for d in DIRECTIONS]
         if all(selected):
             values = ("at_least", 0.0, 0.0)
         else:
