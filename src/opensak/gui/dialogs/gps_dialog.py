@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QGroupBox, QRadioButton,
     QFileDialog, QButtonGroup, QSpinBox,
     QCheckBox, QMessageBox, QInputDialog,
-    QScrollArea, QWidget
+    QScrollArea, QWidget, QSizePolicy
 )
 
 
@@ -194,7 +194,11 @@ class GpsExportDialog(QDialog):
         device_row.addWidget(self._device_combo)
 
         self._scan_btn = QPushButton(tr("gps_scan_btn"))
-        self._scan_btn.setMaximumWidth(80)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        self._scan_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         self._scan_btn.clicked.connect(self._scan_devices)
         device_row.addWidget(self._scan_btn)
         dest_layout.addLayout(device_row)
@@ -214,7 +218,11 @@ class GpsExportDialog(QDialog):
         self._file_path.setReadOnly(True)
         file_row.addWidget(self._file_path)
         browse_btn = QPushButton(tr("gps_browse"))
-        browse_btn.setMaximumWidth(80)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        browse_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         browse_btn.clicked.connect(self._browse_file)
         file_row.addWidget(browse_btn)
         dest_layout.addLayout(file_row)

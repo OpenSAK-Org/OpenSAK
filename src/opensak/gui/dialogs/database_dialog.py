@@ -49,7 +49,11 @@ class NewDatabaseDialog(QDialog):
         self._path_edit.setReadOnly(True)
         path_row.addWidget(self._path_edit)
         browse_btn = QPushButton(tr("gps_browse"))
-        browse_btn.setMaximumWidth(80)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        browse_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         browse_btn.clicked.connect(self._browse)
         path_row.addWidget(browse_btn)
         layout.addLayout(path_row)

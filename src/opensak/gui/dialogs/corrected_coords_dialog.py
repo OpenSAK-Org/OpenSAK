@@ -14,7 +14,7 @@ from typing import Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QLineEdit, QPushButton, QDialogButtonBox, QFrame, QApplication
+    QLineEdit, QPushButton, QDialogButtonBox, QFrame, QApplication, QSizePolicy
 )
 from PySide6.QtGui import QFont
 
@@ -87,7 +87,11 @@ class CorrectedCoordsDialog(QDialog):
             grid.addWidget(val, row, 1)
 
             btn = QPushButton(tr("coord_conv_copy_btn"))
-            btn.setFixedWidth(70)
+            # #927: size to the translated label instead of a hardcoded width,
+            # so longer translations are never clipped.
+            btn.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
             btn.setToolTip(tr("corrected_dialog_copy_tooltip"))
             btn.clicked.connect(lambda checked=False, s=coord_str: self._copy(s))
             grid.addWidget(btn, row, 2)

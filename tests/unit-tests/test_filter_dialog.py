@@ -1261,17 +1261,19 @@ class TestProfiles:
 class TestDefaultButton:
     def test_apply_is_default_and_save_is_not(self, dlg):
         from PySide6.QtWidgets import QPushButton
+        from opensak.lang import tr
         buttons = dlg.findChildren(QPushButton)
         default_buttons = [b for b in buttons if b.isDefault()]
-        # exactly one default button, and it is not the narrow save button (maxWidth 110)
+        # exactly one default button, and it is not the save-profile button
         assert len(default_buttons) == 1
-        assert default_buttons[0].maximumWidth() != 110
+        assert default_buttons[0].text() != tr("filter_save_btn")
 
     def test_save_btn_not_autodefault(self, dlg):
         from PySide6.QtWidgets import QPushButton
-        # the save button is the only one with maxWidth 110
+        from opensak.lang import tr
+        # Located by its label, not a hardcoded width (#927 removed those).
         buttons = dlg.findChildren(QPushButton)
-        save_btn = next(b for b in buttons if b.maximumWidth() == 110)
+        save_btn = next(b for b in buttons if b.text() == tr("filter_save_btn"))
         assert not save_btn.autoDefault()
 
 

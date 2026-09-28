@@ -17,7 +17,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QPushButton,
-    QDialogButtonBox, QComboBox, QInputDialog
+    QDialogButtonBox, QComboBox, QInputDialog, QSizePolicy
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
@@ -390,7 +390,11 @@ class ColumnChooserDialog(QDialog):
         view_row.addWidget(self._view_combo)
 
         save_view_btn = QPushButton(tr("filter_save_btn"))
-        save_view_btn.setMaximumWidth(110)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        save_view_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         save_view_btn.setAutoDefault(False)
         save_view_btn.clicked.connect(self._save_view)
         view_row.addWidget(save_view_btn)

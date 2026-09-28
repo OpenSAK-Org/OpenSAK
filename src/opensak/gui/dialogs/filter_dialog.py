@@ -825,7 +825,11 @@ class FilterDialog(QDialog):
         profile_row.addWidget(self._profile_combo)
 
         save_btn = QPushButton(tr("filter_save_btn"))
-        save_btn.setMaximumWidth(110)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        save_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         save_btn.setAutoDefault(False)
         save_btn.clicked.connect(self._save_profile)
         profile_row.addWidget(save_btn)
