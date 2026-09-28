@@ -543,6 +543,8 @@ _DISTANCE_OP_LABELS: tuple[tuple[str, str], ...] = (
 assert tuple(op for op, _ in _DISTANCE_OP_LABELS) == DISTANCE_OPS
 _DIST_DEFAULT_KM = 50.0  # afstand fra center-punkt, i brugerens enhed
 _CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
+_FAV_DEFAULT_OP, _FAV_DEFAULT_PTS = "at_least", 10
+_ELEV_DEFAULT_OP, _ELEV_DEFAULT_M = "at_least", 1000.0
 
 
 def _format_lp_point(point: tuple[float, float]) -> str:
@@ -1283,43 +1285,45 @@ class FilterDialog(QDialog):
         self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
             _yes_no_row("filter_ftf_group")
 
-        # Favorit points
+        # Favorit points — samme betingelser som afstandsfiltrene
         self._fav_enabled = QCheckBox(tr("filter_enable"))
-        self._fav_enabled.toggled.connect(self._on_fav_toggled)
-        self._fav_min = QDoubleSpinBox()
-        self._fav_min.setRange(0, 9999)
-        self._fav_min.setDecimals(0)
-        self._fav_min.setValue(0)
-        self._fav_min.setEnabled(False)
-        self._fav_max = QDoubleSpinBox()
-        self._fav_max.setRange(0, 9999)
-        self._fav_max.setDecimals(0)
-        self._fav_max.setValue(9999)
-        self._fav_max.setEnabled(False)
+        self._fav_enabled.toggled.connect(self._update_fav_inputs)
+        self._fav_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._fav_op.addItem(tr(key), op)
+        self._fav_op.currentIndexChanged.connect(self._update_fav_inputs)
+        self._fav_val1 = QDoubleSpinBox()
+        self._fav_val2 = QDoubleSpinBox()
+        for spin in (self._fav_val1, self._fav_val2):
+            spin.setRange(0, 999_999)
+            spin.setDecimals(0)
+        self._fav_and = QLabel("–")
         self._fav_label, fav_widget = labeled_row(
             tr("filter_fav_points_group"),
-            self._fav_enabled,
-            QLabel(tr("filter_from")), self._fav_min,
-            QLabel(tr("filter_to")), self._fav_max,
+            self._fav_enabled, self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
         )
+        self._reset_fav()
 
         # Højde (m, eller ft når use_miles) — ukendt højde matcher aldrig
         self._elev_enabled = QCheckBox(tr("filter_enable"))
-        self._elev_enabled.toggled.connect(self._on_elev_toggled)
-        self._elev_min = QDoubleSpinBox()
-        self._elev_min.setDecimals(0)
-        self._elev_min.setEnabled(False)
-        self._elev_max = QDoubleSpinBox()
-        self._elev_max.setDecimals(0)
-        self._elev_max.setEnabled(False)
-        self._set_elev_range(-500.0, 9000.0)
+        self._elev_enabled.toggled.connect(self._update_elev_inputs)
+        self._elev_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._elev_op.addItem(tr(key), op)
+        self._elev_op.currentIndexChanged.connect(self._update_elev_inputs)
+        self._elev_val1 = QDoubleSpinBox()
+        self._elev_val2 = QDoubleSpinBox()
+        for spin in (self._elev_val1, self._elev_val2):
+            spin.setDecimals(0)
+        self._elev_and = QLabel("–")
         self._elev_label, elev_widget = labeled_row(
             tr("col_elevation"),
-            self._elev_enabled,
-            QLabel(tr("filter_from")), self._elev_min,
-            QLabel(tr("filter_to")), self._elev_max,
+            self._elev_enabled, self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
             QLabel("ft" if self._use_miles() else "m"),
         )
+        self._reset_elev()
 
         status_grid = QGridLayout()
         status_grid.setHorizontalSpacing(16)
@@ -1329,12 +1333,18 @@ class FilterDialog(QDialog):
             (self._locked_label, locked_widget),
             (self._dnf_label, dnf_widget),
             (self._ftf_label, ftf_widget),
-            (self._fav_label, fav_widget),
-            (self._elev_label, elev_widget),
         )):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
             status_grid.addWidget(widget, r, c * 2 + 1)
+        # Operator-rækkerne er for brede til to pr. række (især ved "mellem")
+        for label, widget in (
+            (self._fav_label, fav_widget),
+            (self._elev_label, elev_widget),
+        ):
+            r = status_grid.rowCount()
+            status_grid.addWidget(label, r, 0)
+            status_grid.addWidget(widget, r, 1, 1, 3)
         status_grid.setColumnStretch(1, 1)
         status_grid.setColumnStretch(3, 1)
         layout.addLayout(status_grid)
@@ -2390,18 +2400,34 @@ class FilterDialog(QDialog):
         self._dist2.setValue(_DIST_DEFAULT_KM)
         self._update_dist_inputs()
 
-    def _on_fav_toggled(self, checked: bool) -> None:
-        self._fav_min.setEnabled(checked)
-        self._fav_max.setEnabled(checked)
+    @staticmethod
+    def _update_op_inputs(enabled: bool, op_combo: QComboBox, spin1, and_label: QLabel, spin2) -> None:
+        """Enable an operator row; show its second value only for (not) between."""
+        between = op_combo.currentData() in ("between", "not_between")
+        op_combo.setEnabled(enabled)
+        spin1.setEnabled(enabled)
+        spin2.setEnabled(enabled)
+        and_label.setVisible(between)
+        spin2.setVisible(between)
+
+    def _update_fav_inputs(self) -> None:
+        self._update_op_inputs(
+            self._fav_enabled.isChecked(), self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
+        )
+
+    def _reset_fav(self) -> None:
+        self._fav_enabled.setChecked(False)
+        self._fav_op.setCurrentIndex(self._fav_op.findData(_FAV_DEFAULT_OP))
+        self._fav_val1.setValue(_FAV_DEFAULT_PTS)
+        self._fav_val2.setValue(_FAV_DEFAULT_PTS)
+        self._update_fav_inputs()
 
     def _update_ccd_inputs(self) -> None:
-        enabled = self._ccd_enabled.isChecked()
-        between = self._ccd_op.currentData() in ("between", "not_between")
-        self._ccd_op.setEnabled(enabled)
-        self._ccd_dist1.setEnabled(enabled)
-        self._ccd_dist2.setEnabled(enabled)
-        self._ccd_and.setVisible(between)
-        self._ccd_dist2.setVisible(between)
+        self._update_op_inputs(
+            self._ccd_enabled.isChecked(), self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+        )
 
     def _set_ccd_distances(self, dist1_m: float, dist2_m: float) -> None:
         """Show corrected-distance bounds given in metres, in the display unit."""
@@ -2422,27 +2448,35 @@ class FilterDialog(QDialog):
         self._set_ccd_distances(_CC_DIST_DEFAULT_M, _CC_DIST_DEFAULT_M)
         self._update_ccd_inputs()
 
-    def _on_elev_toggled(self, checked: bool) -> None:
-        self._elev_min.setEnabled(checked)
-        self._elev_max.setEnabled(checked)
+    def _update_elev_inputs(self) -> None:
+        self._update_op_inputs(
+            self._elev_enabled.isChecked(), self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
+        )
+
+    def _reset_elev(self) -> None:
+        self._elev_enabled.setChecked(False)
+        self._elev_op.setCurrentIndex(self._elev_op.findData(_ELEV_DEFAULT_OP))
+        self._set_elev_values(_ELEV_DEFAULT_M, _ELEV_DEFAULT_M)
+        self._update_elev_inputs()
 
     @staticmethod
     def _use_miles() -> bool:
         from opensak.gui.settings import get_settings
         return get_settings().use_miles
 
-    def _set_elev_range(self, min_m: float, max_m: float) -> None:
-        """Show an elevation range given in metres, in the display unit."""
+    def _set_elev_values(self, elev1_m: float, elev2_m: float) -> None:
+        """Show elevation bounds given in metres, in the display unit."""
         factor = _M_TO_FT if self._use_miles() else 1.0
-        for spin in (self._elev_min, self._elev_max):
+        for spin in (self._elev_val1, self._elev_val2):
             spin.setRange(-2000 * factor, 9000 * factor)
-        self._elev_min.setValue(min_m * factor)
-        self._elev_max.setValue(max_m * factor)
+        self._elev_val1.setValue(elev1_m * factor)
+        self._elev_val2.setValue(elev2_m * factor)
 
-    def _elev_range_m(self) -> tuple[float, float]:
-        """The elevation range entered, converted back to metres."""
+    def _elev_values_m(self) -> tuple[float, float]:
+        """The elevation bounds entered, converted back to metres."""
         factor = _M_TO_FT if self._use_miles() else 1.0
-        return self._elev_min.value() / factor, self._elev_max.value() / factor
+        return self._elev_val1.value() / factor, self._elev_val2.value() / factor
 
     def _set_all_directions(self, checked: bool) -> None:
         for cb in self._dir_checks.values():
@@ -2496,11 +2530,8 @@ class FilterDialog(QDialog):
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
         self._ftf_no.setChecked(True)
-        self._fav_enabled.setChecked(False)
-        self._fav_min.setValue(0)
-        self._fav_max.setValue(9999)
-        self._elev_enabled.setChecked(False)
-        self._set_elev_range(-500.0, 9000.0)
+        self._reset_fav()
+        self._reset_elev()
 
     def _reset_attributes(self) -> None:
         self._attr_mode_all.setChecked(True)
@@ -2632,6 +2663,8 @@ class FilterDialog(QDialog):
         for op_combo, spin1, spin2 in (
             (self._dist_op, self._dist1, self._dist2),
             (self._ccd_op, self._ccd_dist1, self._ccd_dist2),
+            (self._fav_op, self._fav_val1, self._fav_val2),
+            (self._elev_op, self._elev_val1, self._elev_val2),
         ):
             if op_combo.currentData() in ("between", "not_between") \
                     and spin1.value() > spin2.value():
@@ -2790,14 +2823,17 @@ class FilterDialog(QDialog):
         # Favorit points
         if self._fav_enabled.isChecked():
             fs.add(FavoritePointsFilter(
-                min_pts=int(self._fav_min.value()),
-                max_pts=int(self._fav_max.value()),
+                op=self._fav_op.currentData(),
+                pts1=int(self._fav_val1.value()),
+                pts2=int(self._fav_val2.value()),
             ))
 
         # Højde
         if self._elev_enabled.isChecked():
-            min_m, max_m = self._elev_range_m()
-            fs.add(ElevationFilter(min_m=min_m, max_m=max_m))
+            elev1_m, elev2_m = self._elev_values_m()
+            fs.add(ElevationFilter(
+                op=self._elev_op.currentData(), elev1_m=elev1_m, elev2_m=elev2_m,
+            ))
 
         # Linje/Polygon
         lp_filter = self._build_line_polygon_filter()
@@ -3126,11 +3162,15 @@ class FilterDialog(QDialog):
                 self._ftf_no.setChecked(not has_ftf)
             elif ftype == "favorite_points":
                 self._fav_enabled.setChecked(True)
-                self._fav_min.setValue(getattr(f, "min_pts", 0))
-                self._fav_max.setValue(getattr(f, "max_pts", 9999))
+                index = self._fav_op.findData(getattr(f, "op", _FAV_DEFAULT_OP))
+                self._fav_op.setCurrentIndex(max(index, 0))
+                self._fav_val1.setValue(getattr(f, "pts1", 0))
+                self._fav_val2.setValue(getattr(f, "pts2", 0))
             elif ftype == "elevation":
                 self._elev_enabled.setChecked(True)
-                self._set_elev_range(getattr(f, "min_m", -500.0), getattr(f, "max_m", 9000.0))
+                index = self._elev_op.findData(getattr(f, "op", _ELEV_DEFAULT_OP))
+                self._elev_op.setCurrentIndex(max(index, 0))
+                self._set_elev_values(getattr(f, "elev1_m", 0.0), getattr(f, "elev2_m", 0.0))
             elif ftype == "log":
                 self._load_log_filter(f)
             elif ftype == "date":

@@ -624,6 +624,8 @@ class TestLoadFilterset:
         assert dlg._dist_enabled.isChecked()
         assert dlg._country_filter.text() == "DK"
         assert dlg._fav_enabled.isChecked()
+        assert dlg._fav_op.currentData() == "between"
+        assert (dlg._fav_val1.value(), dlg._fav_val2.value()) == (10, 200)
         assert dlg._where_sql_general.toPlainText() == "found = 0"
 
     def test_loads_types_and_container(self, dlg):
@@ -806,8 +808,8 @@ class TestReset:
     def test_toggles(self, dlg):
         dlg._dist_enabled.setChecked(True)
         assert dlg._dist1.isEnabled() and dlg._dist_op.isEnabled()
-        dlg._on_fav_toggled(True)
-        assert dlg._fav_min.isEnabled() and dlg._fav_max.isEnabled()
+        dlg._fav_enabled.setChecked(True)
+        assert dlg._fav_op.isEnabled() and dlg._fav_val1.isEnabled()
 
 
 # ── waypoints tab ─────────────────────────────────────────────────────────────

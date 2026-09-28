@@ -61,11 +61,23 @@ class TestRegistry:
         assert (type(f), f.text, f.op) == (cls, "abc", "starts_with")
 
     def test_elevation_round_trip(self):
-        f = ElevationFilter.from_dict(ElevationFilter(100.0, 1500.0).to_dict())
-        assert (f.min_m, f.max_m) == (100.0, 1500.0)
+        f = ElevationFilter.from_dict(ElevationFilter("not_between", 100.0, 1500.0).to_dict())
+        assert (f.op, f.elev1_m, f.elev2_m) == ("not_between", 100.0, 1500.0)
+
+    @pytest.mark.parametrize("legacy, expected", [
+        ({"min_m": -500.0, "max_m": 9000.0}, ("at_least", -500.0, 0.0)),
+        ({"min_m": 1000.0, "max_m": 9000.0}, ("at_least", 1000.0, 0.0)),
+        ({"min_m": -500.0, "max_m": 400.0}, ("at_most", 400.0, 0.0)),
+        ({"min_m": 0.0, "max_m": 0.0}, ("equal", 0.0, 0.0)),
+        ({"min_m": 412.0, "max_m": 3454.5}, ("between", 412.0, 3454.5)),
+    ])
+    def test_elevation_legacy_profile_is_converted(self, legacy, expected):
+        f = ElevationFilter.from_dict({"filter_type": "elevation", **legacy})
+        assert (f.op, f.elev1_m, f.elev2_m) == expected
+        assert set(f.to_dict()) == {"filter_type", "op", "elev1_m", "elev2_m"}
 
     def test_filterset_round_trip(self):
-        fs = FilterSet().add(UserData2Filter("N47")).add(ElevationFilter(0, 500))
+        fs = FilterSet().add(UserData2Filter("N47")).add(ElevationFilter("at_most", 500))
         restored = FilterSet.from_dict(fs.to_dict())
         assert [type(f) for f in restored._filters] == [UserData2Filter, ElevationFilter]
 
@@ -111,15 +123,30 @@ class TestGcNoteFilter:
 
 
 class TestElevationFilter:
-    def test_default_range_excludes_unknown(self):
+    def test_default_excludes_unknown(self):
         codes = assert_parity(FilterSet().add(ElevationFilter()))
         assert codes == {"GCUD0001", "GCUD0002", "GCUD0004"}
 
     def test_zero_is_a_real_elevation(self):
-        assert assert_parity(FilterSet().add(ElevationFilter(0, 0))) == {"GCUD0002"}
+        assert assert_parity(FilterSet().add(ElevationFilter("equal", 0))) == {"GCUD0002"}
 
-    def test_bounds_are_inclusive(self):
-        assert assert_parity(FilterSet().add(ElevationFilter(412, 3454.5))) == {"GCUD0001", "GCUD0004"}
+    def test_equal_is_to_whole_metres(self):
+        assert assert_parity(FilterSet().add(ElevationFilter("equal", 3453))) == set()
+        assert assert_parity(FilterSet().add(ElevationFilter("equal", 3454.2))) == {"GCUD0004"}
 
-    def test_high_only(self):
-        assert assert_parity(FilterSet().add(ElevationFilter(1000, 9000))) == {"GCUD0004"}
+    def test_between_bounds_are_inclusive(self):
+        assert assert_parity(FilterSet().add(ElevationFilter("between", 412, 3454.5))) == \
+            {"GCUD0001", "GCUD0004"}
+
+    def test_at_least(self):
+        assert assert_parity(FilterSet().add(ElevationFilter("at_least", 1000))) == {"GCUD0004"}
+
+    def test_less_than_excludes_unknown(self):
+        assert assert_parity(FilterSet().add(ElevationFilter("less_than", 412))) == {"GCUD0002"}
+
+    def test_not_between_excludes_unknown(self):
+        assert assert_parity(FilterSet().add(ElevationFilter("not_between", 1, 1000))) == \
+            {"GCUD0002", "GCUD0004"}
+
+    def test_legacy_range(self):
+        assert assert_parity(FilterSet().add(ElevationFilter(min_m=1000, max_m=9000))) == {"GCUD0004"}

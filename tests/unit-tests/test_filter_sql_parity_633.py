@@ -143,20 +143,29 @@ class TestBooleanFlagFilters:
 
 
 class TestFavoritePointsFilter:
-    def test_default_range(self):
+    def test_default(self):
         assert_parity(FilterSet().add(FavoritePointsFilter()))
 
-    def test_narrow_range_excludes_none_as_zero(self):
+    def test_at_least_one_excludes_none_as_zero(self):
         # AllNone has favorite_points=None -> treated as 0 by matches().
-        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=1, max_pts=9999)))
-        assert "GC6330003" not in codes  # None -> 0, excluded by min_pts=1
-        assert "GC6330002" not in codes  # explicit 0, excluded by min_pts=1
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter("at_least", 1)))
+        assert "GC6330003" not in codes  # None -> 0, excluded by at least 1
+        assert "GC6330002" not in codes  # explicit 0, excluded by at least 1
         assert "GC6330001" in codes      # 10, included
 
-    def test_zero_inclusive_range_includes_none(self):
-        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=0, max_pts=0)))
+    def test_equal_zero_includes_none(self):
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter("equal", 0)))
         assert "GC6330003" in codes  # None -> 0
         assert "GC6330002" in codes  # explicit 0
+
+    @pytest.mark.parametrize("op", ["equal", "less_than", "at_most", "more_than",
+                                    "at_least", "between", "not_between"])
+    def test_every_op(self, op):
+        assert_parity(FilterSet().add(FavoritePointsFilter(op, 10, 0)))
+
+    def test_legacy_range(self):
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=1, max_pts=9999)))
+        assert "GC6330001" in codes and "GC6330003" not in codes
 
 
 class TestHasCorrectedFilter:
