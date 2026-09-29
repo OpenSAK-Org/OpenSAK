@@ -450,6 +450,8 @@ class CacheDetailPanel(QWidget):
         from opensak.gui.dialogs.corrected_coords_dialog import CorrectedCoordsDialog
         dlg = CorrectedCoordsDialog(
             gc_code=self._current_gc_code,
+            orig_lat=self._current_lat,
+            orig_lon=self._current_lon,
             corrected_lat=self._corrected_lat,
             corrected_lon=self._corrected_lon,
             parent=self,
