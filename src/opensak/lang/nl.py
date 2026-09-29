@@ -137,6 +137,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Extra's",
+    "menu_macros":                  "&Macro's",
     "action_coord_converter":       "⇄  &Coördinaatconverter…",
     "action_projection":            "📐  &Coördinaatprojectie…",
     "action_checksum":              "🔢  &Cijfersom…",

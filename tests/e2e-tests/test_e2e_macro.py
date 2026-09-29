@@ -27,6 +27,25 @@ def test_macro_filter_without_match_keeps_view(seeded_window):
     assert seeded_window._cache_table.row_count() == before
 
 
+def test_macro_count_is_current_right_after_clear_filter(seeded_window):
+    # clear_filter() reloads the table asynchronously, so count() must not
+    # read the table's (still filtered) row count.
+    out = _run_macro(seeded_window, """
+        local all = opensak.count()
+        opensak.filter{ code = "GCAAA0" }
+        local filtered = opensak.count()
+        opensak.clear_filter()
+        print(filtered, opensak.count() == all, all > filtered)
+    """)
+    assert out.splitlines()[0] == "2\ttrue\ttrue"
+
+
+def test_macro_menu_follows_tools_menu(seeded_window):
+    from opensak.lang import tr
+    titles = [a.text() for a in seeded_window.menuBar().actions()]
+    assert titles.index(tr("menu_macros")) == titles.index(tr("menu_gc_tools")) + 1
+
+
 def test_macro_error_is_shown_in_output(seeded_window):
     out = _run_macro(seeded_window, "opensak.filter{ bogus = 1 }")
     assert "Macro error" in out and "unknown filter key" in out

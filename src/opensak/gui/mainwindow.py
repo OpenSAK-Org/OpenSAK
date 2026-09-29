@@ -507,12 +507,6 @@ class MainWindow(QMainWindow):
         act_found_update.triggered.connect(self._open_found_updater)
         tools_menu.addAction(act_found_update)
 
-        tools_menu.addSeparator()
-
-        act_run_macro = QAction(tr("action_run_macro"), self)
-        act_run_macro.triggered.connect(self._open_macro_dialog)
-        tools_menu.addAction(act_run_macro)
-
         # ── GPS ───────────────────────────────────────────────────────────────
         gps_menu = menubar.addMenu("&GPS")
 
@@ -552,6 +546,13 @@ class MainWindow(QMainWindow):
         act_dist_bearing = QAction(tr("action_dist_bearing"), self)
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
+
+        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        macros_menu = menubar.addMenu(tr("menu_macros"))
+
+        act_run_macro = QAction(tr("action_run_macro"), self)
+        act_run_macro.triggered.connect(self._open_macro_dialog)
+        macros_menu.addAction(act_run_macro)
 
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
