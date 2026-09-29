@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (První u keše) 🥇",
     "filter_user_note_label":      "Osobní poznámka",
     "filter_direction_group":      "Směr od středového bodu",
+    "filter_direction_info":       'Směr lze nastavit dvěma způsoby:\n\n• Stupně: zvolte podmínku a zadejte azimut — 0° = sever, 90° = východ, po směru hodinových ručiček. "Mezi" běží po směru hodinových ručiček, takže 315° – 45° je výseč přes sever.\n\n• Kompas: klikněte na směry (S, SV, V …). Tím se hodnoty ve stupních přepíší odpovídajícím rozsahem. Směry, které spolu nesousedí, nelze zapsat jako jeden rozsah — hodnoty ve stupních pak zešednou.\n\nOpětovná změna hodnot ve stupních nahradí kliknuté směry. Směr se měří od středového bodu výše.',
     "filter_fav_points_group":     "Oblíbené body",
     "filter_found_date_group":     "Datum nalezení mnou",
     "filter_where_description":     "Filtrujte cache pomocí SQL klauzule WHERE přímo nad tabulkou caches.",

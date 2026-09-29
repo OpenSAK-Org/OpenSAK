@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (Primeiro a encontrar) 🥇",
     "filter_user_note_label":      "Nota pessoal",
     "filter_direction_group":      "Direção a partir do ponto central",
+    "filter_direction_info":       'A direção pode ser definida de duas formas:\n\n• Graus: escolha uma condição e introduza o rumo — 0° = norte, 90° = este, no sentido horário. "Entre" segue o sentido horário, por isso 315° – 45° é o setor que passa pelo norte.\n\n• Bússola: clique nas direções (N, NE, L …). Isto substitui os graus pelo intervalo correspondente. Direções que não são adjacentes não podem ser escritas como um só intervalo — os graus ficam então a cinzento.\n\nAlterar novamente os graus substitui as direções clicadas. A direção é medida a partir do ponto central acima.',
     "filter_fav_points_group":     "Pontos favoritos",
     "filter_found_date_group":     "Data encontrado por mim",
     "filter_where_description":     "Filtre geocaches com uma cláusula SQL WHERE diretamente na tabela caches.",

@@ -930,23 +930,91 @@ def bearing_direction(deg: float) -> str:
     return DIRECTIONS[int(((deg % 360.0) + 22.5) // 45.0) % 8]
 
 
-class DirectionFilter(BaseFilter):
-    """GSAK's "Direction" filter: keep caches lying in one of the selected
-    compass sectors (N/NE/E/SE/S/SW/W/NW) as seen from the centre point.
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle bearing (0–360°, clockwise from north) from
+    (lat1, lon1) to (lat2, lon2) — the same formula recalculate_distances()
+    uses for Cache.bearing."""
+    la1, la2 = math.radians(lat1), math.radians(lat2)
+    dlon = math.radians(lon2 - lon1)
+    x = math.sin(dlon) * math.cos(la2)
+    y = math.cos(la1) * math.sin(la2) - math.sin(la1) * math.cos(la2) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
 
-    Uses the persisted Cache.bearing column — the bearing from the active
-    home point, maintained by recalculate_distances() and shown in the
-    Bearing column — so it always agrees with what the list displays and is
-    fully pushable to SQL. Caches without a bearing (no coordinates, or not
-    yet recalculated) never match.
+
+def bearing_op_ok(op: str, bearing: float, a: float, b: float) -> bool:
+    """Whether *bearing* satisfies condition *op* (see DISTANCE_OPS) against
+    *a* (and *b*). Like _distance_op_ok(), except that "between" / "not
+    between" run clockwise from *a* to *b*, so 315–45 is the sector through
+    north rather than the 90 degrees opposite it."""
+    if op not in ("between", "not_between"):
+        return _distance_op_ok(op, bearing, a, b, _BEARING_EQUAL_TOLERANCE_DEG)
+    a, b, bearing = a % 360.0, b % 360.0, bearing % 360.0
+    inside = a <= bearing <= b if a <= b else (bearing >= a or bearing <= b)
+    return inside if op == "between" else not inside
+
+
+# "equal" compares whole degrees, like the dialog shows them — ±0.5°.
+_BEARING_EQUAL_TOLERANCE_DEG = 0.5
+
+
+class DirectionFilter(BaseFilter):
+    """GSAK's "Direction" filter: keep caches lying in a given direction as
+    seen from the centre point.
+
+    Two forms:
+
+    * bearing condition (*op* set) — the bearing in degrees satisfies *op*
+      against *deg1* (and *deg2*), see bearing_op_ok().
+    * compass sectors (*directions*, the original form) — the cache lies in
+      one of the selected sectors (N/NE/E/SE/S/SW/W/NW). The dialog still
+      builds it for directions picked on its compass rose that aren't
+      adjacent, which no single degree range can express.
+
+    Either way, with a centre (*lat*, *lon*) the bearing is computed from
+    that point, like DistanceFilter's distance; without one (every profile
+    saved before the centre existed) it is the persisted Cache.bearing from
+    the active home point.
+
+    Cache.bearing is maintained by recalculate_distances() and shown in the
+    Bearing column, so the home-point forms always agree with what the list
+    displays and are fully pushable to SQL. Caches without a bearing (no
+    coordinates, or not yet recalculated) never match.
     """
     filter_type = "direction"
 
-    def __init__(self, directions: list[str]):
-        self.directions = [d for d in DIRECTIONS if d in {x.strip().upper() for x in directions}]
+    def __init__(
+        self,
+        directions: Optional[list[str]] = None,
+        *,
+        op: Optional[str] = None,
+        deg1: float = 0.0,
+        deg2: float = 0.0,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        center_state: Optional[dict] = None,
+    ):
+        if op is not None and op not in DISTANCE_OPS:
+            raise ValueError(f"Unknown bearing operator {op!r}")
+        wanted = {x.strip().upper() for x in directions or []}
+        self.directions = [d for d in DIRECTIONS if d in wanted]
+        self.op = op
+        self.deg1 = deg1
+        self.deg2 = deg2
+        self.lat = lat
+        self.lon = lon
+        # Serialized CenterPointPicker selection, only for re-populating the
+        # dialog — see DistanceFilter.center_state.
+        self.center_state = center_state
+
+    def _has_center(self) -> bool:
+        return self.lat is not None and self.lon is not None
 
     def apply_to_query(self, query):
         from sqlalchemy import and_, false, or_
+        if self._has_center():
+            return None  # bearing from an arbitrary point — Python only
+        if self.op is not None:
+            return query.filter(self._bearing_clause())
         terms = []
         for d in self.directions:
             lo = (DIRECTIONS.index(d) * 45.0 - 22.5) % 360.0
@@ -957,20 +1025,76 @@ class DirectionFilter(BaseFilter):
                 terms.append(and_(Cache.bearing >= lo, Cache.bearing < hi))
         return query.filter(or_(*terms) if terms else false())
 
+    def _bearing_clause(self):
+        """SQL form of bearing_op_ok() on Cache.bearing."""
+        from sqlalchemy import and_, not_, or_
+        col, a, b = Cache.bearing, self.deg1, self.deg2
+        if self.op == "equal":
+            tol = _BEARING_EQUAL_TOLERANCE_DEG
+            return col.between(a - tol, a + tol)
+        if self.op == "less_than":
+            return col < a
+        if self.op == "at_most":
+            return col <= a
+        if self.op == "more_than":
+            return col > a
+        if self.op == "at_least":
+            return col >= a
+        a, b = a % 360.0, b % 360.0
+        inside = and_(col >= a, col <= b) if a <= b else or_(col >= a, col <= b)
+        # Guard the NULL bearings explicitly — NOT (NULL ...) is NULL anyway,
+        # but this states the intent.
+        return inside if self.op == "between" else and_(col.isnot(None), not_(inside))
+
+    def _cache_bearing(self, cache: Cache) -> Optional[float]:
+        if self.lat is None or self.lon is None:
+            return cache.bearing
+        if cache.latitude is None or cache.longitude is None:
+            return None
+        return _bearing_deg(self.lat, self.lon, cache.latitude, cache.longitude)
+
     def matches(self, cache: Cache) -> bool:
-        if cache.bearing is None:
+        bearing = self._cache_bearing(cache)
+        if bearing is None:
             return False
-        return bearing_direction(cache.bearing) in self.directions
+        if self.op is not None:
+            return bearing_op_ok(self.op, bearing, self.deg1, self.deg2)
+        return bearing_direction(bearing) in self.directions
 
     def to_dict(self) -> dict:
-        return {"filter_type": self.filter_type, "directions": self.directions}
+        if self.op is None:
+            data: dict[str, Any] = {
+                "filter_type": self.filter_type, "directions": self.directions,
+            }
+            if self._has_center():
+                data.update(lat=self.lat, lon=self.lon, center_state=self.center_state)
+            return data
+        return {
+            "filter_type": self.filter_type,
+            "op": self.op,
+            "deg1": self.deg1,
+            "deg2": self.deg2,
+            "lat": self.lat,
+            "lon": self.lon,
+            "center_state": self.center_state,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DirectionFilter":
-        return cls(data.get("directions", []))
+        if "op" not in data:
+            # Compass sectors — from Home when saved before the centre point.
+            return cls(
+                data.get("directions", []), lat=data.get("lat"),
+                lon=data.get("lon"), center_state=data.get("center_state"),
+            )
+        return cls(
+            op=data["op"], deg1=data.get("deg1", 0.0), deg2=data.get("deg2", 0.0),
+            lat=data.get("lat"), lon=data.get("lon"),
+            center_state=data.get("center_state"),
+        )
 
     def __repr__(self) -> str:
-        return f"<DirectionFilter directions={self.directions}>"
+        return f"<DirectionFilter {self.to_dict()}>"
 
 
 class LinePolygonFilter(BaseFilter):
@@ -1461,66 +1585,201 @@ class UserNoteFilter(TextMatchFilter):
         return super().from_dict(data)
 
 
+def _op_sql(expr, op: str, a: float, b: float, tolerance: float = 0.0):
+    """SQL counterpart of _distance_op_ok() for a numeric column expression."""
+    from sqlalchemy import not_
+    if op == "equal":
+        if tolerance:
+            return expr.between(a - tolerance, a + tolerance)
+        return expr == a
+    if op == "less_than":
+        return expr < a
+    if op == "at_most":
+        return expr <= a
+    if op == "more_than":
+        return expr > a
+    if op == "at_least":
+        return expr >= a
+    inside = expr.between(min(a, b), max(a, b))
+    return inside if op == "between" else not_(inside)
+
+
+def _legacy_range_to_op(lo: float, hi: float, lo_open: float, hi_open: float):
+    """Convert an old inclusive [lo, hi] range filter to (op, value1, value2).
+
+    *lo_open* / *hi_open* are the old dialog's default bounds, which meant
+    "no limit on this side": a range starting at the lowest default becomes
+    "at most hi", one ending at the highest default becomes "at least lo".
+    """
+    if hi >= hi_open:
+        return "at_least", lo, 0
+    if lo <= lo_open:
+        return "at_most", hi, 0
+    if lo == hi:
+        return "equal", lo, 0
+    return "between", lo, hi
+
+
+# Conditions for the favorite points and elevation filters — the same set
+# (and dialog labels) as the distance filters.
+NUMBER_OPS = DISTANCE_OPS
+
+
 class FavoritePointsFilter(BaseFilter):
-    """Keep caches with favorite_points within [min_pts, max_pts]."""
+    """Keep caches whose favorite points satisfy *op* against *pts1* (and
+    *pts2* for "between" / "not_between") — see NUMBER_OPS. A cache without
+    favorite points (NULL) counts as 0.
+
+    The older *min_pts* / *max_pts* range is still accepted, both as
+    arguments and in saved filter profiles, and converted to a condition —
+    see _legacy_range_to_op().
+    """
     filter_type = "favorite_points"
 
-    def __init__(self, min_pts: int = 0, max_pts: int = 9999):
-        self.min_pts = min_pts
-        self.max_pts = max_pts
+    # The old dialog's defaults for "no limit".
+    _LEGACY_MIN, _LEGACY_MAX = 0, 9999
+
+    def __init__(
+        self,
+        op: Optional[str] = None,
+        pts1: int = 0,
+        pts2: int = 0,
+        *,
+        min_pts: Optional[int] = None,
+        max_pts: Optional[int] = None,
+    ):
+        if op is None:
+            if min_pts is None and max_pts is None:
+                op, pts1, pts2 = "at_least", 0, 0
+            else:
+                op, pts1, pts2 = _legacy_range_to_op(
+                    self._LEGACY_MIN if min_pts is None else min_pts,
+                    self._LEGACY_MAX if max_pts is None else max_pts,
+                    self._LEGACY_MIN, self._LEGACY_MAX,
+                )
+        if op not in NUMBER_OPS:
+            raise ValueError(f"Unknown favorite points operator {op!r}")
+        self.op = op
+        self.pts1 = int(pts1)
+        self.pts2 = int(pts2)
 
     def apply_to_query(self, query):
         # #633: mirror matches()'s `cache.favorite_points or 0` (NULL treated
         # as 0) via coalesce.
         from sqlalchemy import func
-        return query.filter(func.coalesce(Cache.favorite_points, 0).between(self.min_pts, self.max_pts))
+        return query.filter(_op_sql(
+            func.coalesce(Cache.favorite_points, 0), self.op, self.pts1, self.pts2,
+        ))
 
     def matches(self, cache: Cache) -> bool:
         pts = cache.favorite_points or 0
-        return self.min_pts <= pts <= self.max_pts
+        return _distance_op_ok(self.op, pts, self.pts1, self.pts2, 0)
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
-            "min_pts": self.min_pts,
-            "max_pts": self.max_pts,
+            "op": self.op,
+            "pts1": self.pts1,
+            "pts2": self.pts2,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "FavoritePointsFilter":
-        return cls(min_pts=data.get("min_pts", 0), max_pts=data.get("max_pts", 9999))
+        if "op" not in data:
+            # Profile saved before the favorite points conditions — min/max form.
+            return cls(
+                min_pts=data.get("min_pts", cls._LEGACY_MIN),
+                max_pts=data.get("max_pts", cls._LEGACY_MAX),
+            )
+        return cls(op=data["op"], pts1=data.get("pts1", 0), pts2=data.get("pts2", 0))
+
+    def __repr__(self) -> str:
+        return f"<FavoritePointsFilter {self.to_dict()}>"
+
+
+# "equal" compares elevations to whole metres — the dialog enters them
+# without decimals, while stored elevations can have them.
+_ELEVATION_EQUAL_TOLERANCE_M = 0.5
 
 
 class ElevationFilter(BaseFilter):
-    """Keep caches whose elevation (metres) is within [min_m, max_m].
+    """Keep caches whose elevation (metres) satisfies *op* against *elev1_m*
+    (and *elev2_m* for "between" / "not_between") — see NUMBER_OPS.
 
     A cache with unknown elevation (NULL — not yet looked up) never matches:
     unlike favorite points, NULL can't be read as 0, which is a real
     elevation at sea level.
+
+    The older *min_m* / *max_m* range is still accepted, both as arguments
+    and in saved filter profiles, and converted to a condition — see
+    _legacy_range_to_op().
     """
     filter_type = "elevation"
 
-    def __init__(self, min_m: float = -500.0, max_m: float = 9000.0):
-        self.min_m = min_m
-        self.max_m = max_m
+    # The old dialog's defaults for "no limit".
+    _LEGACY_MIN, _LEGACY_MAX = -500.0, 9000.0
+
+    def __init__(
+        self,
+        op: Optional[str] = None,
+        elev1_m: float = 0.0,
+        elev2_m: float = 0.0,
+        *,
+        min_m: Optional[float] = None,
+        max_m: Optional[float] = None,
+    ):
+        if op is None:
+            if min_m is None and max_m is None:
+                op, elev1_m, elev2_m = "at_least", self._LEGACY_MIN, 0.0
+            else:
+                op, elev1_m, elev2_m = _legacy_range_to_op(
+                    self._LEGACY_MIN if min_m is None else min_m,
+                    self._LEGACY_MAX if max_m is None else max_m,
+                    self._LEGACY_MIN, self._LEGACY_MAX,
+                )
+        if op not in NUMBER_OPS:
+            raise ValueError(f"Unknown elevation operator {op!r}")
+        self.op = op
+        self.elev1_m = float(elev1_m)
+        self.elev2_m = float(elev2_m)
 
     def apply_to_query(self, query):
-        # BETWEEN on NULL is NULL, so unknown elevations drop out here too.
-        return query.filter(Cache.elevation.between(self.min_m, self.max_m))
+        # Comparisons (and BETWEEN / NOT BETWEEN) on NULL are NULL, so
+        # unknown elevations drop out here too.
+        return query.filter(_op_sql(
+            Cache.elevation, self.op, self.elev1_m, self.elev2_m,
+            _ELEVATION_EQUAL_TOLERANCE_M,
+        ))
 
     def matches(self, cache: Cache) -> bool:
-        return cache.elevation is not None and self.min_m <= cache.elevation <= self.max_m
+        return cache.elevation is not None and _distance_op_ok(
+            self.op, cache.elevation, self.elev1_m, self.elev2_m,
+            _ELEVATION_EQUAL_TOLERANCE_M,
+        )
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
-            "min_m": self.min_m,
-            "max_m": self.max_m,
+            "op": self.op,
+            "elev1_m": self.elev1_m,
+            "elev2_m": self.elev2_m,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "ElevationFilter":
-        return cls(min_m=data.get("min_m", -500.0), max_m=data.get("max_m", 9000.0))
+        if "op" not in data:
+            # Profile saved before the elevation conditions — min/max form.
+            return cls(
+                min_m=data.get("min_m", cls._LEGACY_MIN),
+                max_m=data.get("max_m", cls._LEGACY_MAX),
+            )
+        return cls(
+            op=data["op"], elev1_m=data.get("elev1_m", 0.0),
+            elev2_m=data.get("elev2_m", 0.0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<ElevationFilter {self.to_dict()}>"
 
 
 class FoundByMeDateFilter(BaseFilter):

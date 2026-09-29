@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (First to Find) 🥇",
     "filter_user_note_label":      "Personlig note",
     "filter_direction_group":      "Retning fra centerpunkt",
+    "filter_direction_info":       'Retningen kan angives på to måder:\n\n• Grader: vælg en betingelse og indtast pejlingen — 0° = nord, 90° = øst, med uret. "Mellem" går med uret, så 315° – 45° er sektoren gennem nord.\n\n• Kompas: klik på retningerne (N, NØ, Ø …). Det overskriver gradtallene med det tilsvarende interval. Retninger, der ikke ligger ved siden af hinanden, kan ikke skrives som ét interval — gradtallene bliver så grå.\n\nÆndrer du gradtallene igen, erstatter de de valgte retninger. Retningen måles fra centerpunktet ovenfor.',
     "filter_fav_points_group":     "Favorit points",
     "filter_found_date_group":     "Fundet af mig dato",
     "filter_where_description":     "Filtrer geocaches med en rå SQL WHERE-betingelse mod caches-tabellen.",

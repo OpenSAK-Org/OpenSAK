@@ -188,16 +188,34 @@ class TestUserDataGcNoteElevation:
 
     def test_elevation_builds_and_round_trips(self, dlg, qtbot):
         dlg._elev_enabled.setChecked(True)
-        dlg._elev_min.setValue(400)
-        dlg._elev_max.setValue(1200)
+        dlg._elev_op.setCurrentIndex(dlg._elev_op.findData("between"))
+        dlg._elev_val1.setValue(400)
+        dlg._elev_val2.setValue(1200)
         fs = dlg._build_filterset()
         [f] = _by_type(fs, "elevation")
-        assert (f.min_m, f.max_m) == (400, 1200)
+        assert (f.op, f.elev1_m, f.elev2_m) == ("between", 400, 1200)
         reopened = FilterDialog()
         qtbot.addWidget(reopened)
         reopened._load_filterset(fs)
         assert reopened._elev_enabled.isChecked()
-        assert (reopened._elev_min.value(), reopened._elev_max.value()) == (400, 1200)
+        assert reopened._elev_op.currentData() == "between"
+        assert (reopened._elev_val1.value(), reopened._elev_val2.value()) == (400, 1200)
+
+    def test_elevation_second_value_only_for_between(self, dlg):
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
+        dlg._elev_enabled.setChecked(True)
+        for op, shown in (("at_least", False), ("between", True),
+                          ("not_between", True), ("less_than", False)):
+            dlg._elev_op.setCurrentIndex(dlg._elev_op.findData(op))
+            assert dlg._elev_val2.isVisibleTo(dlg) is shown, op
+
+    def test_elevation_legacy_range_loads_as_condition(self, dlg):
+        fs = FilterSet.from_dict({"filters": [
+            {"filter_type": "elevation", "min_m": 1000.0, "max_m": 9000.0}]})
+        dlg._load_filterset(fs)
+        assert dlg._elev_enabled.isChecked()
+        assert dlg._elev_op.currentData() == "at_least"
+        assert dlg._elev_val1.value() == 1000
 
     def test_elevation_in_feet_is_stored_in_metres(self, dlg, monkeypatch):
         from opensak.utils.types import DateFormat, CoordFormat
@@ -207,23 +225,77 @@ class TestUserDataGcNoteElevation:
                                                    coord_format=CoordFormat.DD, home_points=[],
                                                    theme="light"))
         dlg._elev_enabled.setChecked(True)
-        dlg._elev_min.setValue(3281)   # ~1000 m
-        dlg._elev_max.setValue(6562)   # ~2000 m
+        dlg._elev_op.setCurrentIndex(dlg._elev_op.findData("between"))
+        dlg._elev_val1.setValue(3281)   # ~1000 m
+        dlg._elev_val2.setValue(6562)   # ~2000 m
         [f] = _by_type(dlg._build_filterset(), "elevation")
-        assert f.min_m == pytest.approx(1000, abs=0.1)
-        assert f.max_m == pytest.approx(2000, abs=0.1)
+        assert f.elev1_m == pytest.approx(1000, abs=0.1)
+        assert f.elev2_m == pytest.approx(2000, abs=0.1)
 
     def test_reset_misc_clears_new_rows(self, dlg):
         dlg._ud_rows[0].edit.setText("x")
         dlg._gc_note_row.edit.setText("y")
         dlg._elev_enabled.setChecked(True)
-        dlg._elev_min.setValue(100)
+        dlg._elev_op.setCurrentIndex(dlg._elev_op.findData("equal"))
+        dlg._elev_val1.setValue(100)
+        dlg._fav_enabled.setChecked(True)
+        dlg._fav_val1.setValue(500)
         dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._reset_current_tab()
         assert dlg._ud_rows[0].edit.text() == ""
         assert dlg._gc_note_row.edit.text() == ""
         assert not dlg._elev_enabled.isChecked()
-        assert dlg._elev_min.value() == -500
+        assert dlg._elev_op.currentData() == "at_least"
+        assert dlg._elev_val1.value() == 1000
+        assert not dlg._fav_enabled.isChecked()
+        assert dlg._fav_op.currentData() == "at_least"
+        assert dlg._fav_val1.value() == 10
+
+
+class TestFavoritePoints:
+    def test_off_by_default(self, dlg):
+        assert not dlg._fav_enabled.isChecked()
+        assert not dlg._fav_op.isEnabled()
+        assert _by_type(dlg._build_filterset(), "favorite_points") == []
+
+    def test_second_value_only_for_between(self, dlg):
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
+        dlg._fav_enabled.setChecked(True)
+        for op, shown in (("at_least", False), ("between", True),
+                          ("not_between", True), ("equal", False)):
+            dlg._fav_op.setCurrentIndex(dlg._fav_op.findData(op))
+            assert dlg._fav_val2.isVisibleTo(dlg) is shown, op
+
+    def test_builds_and_round_trips(self, dlg, qtbot):
+        dlg._fav_enabled.setChecked(True)
+        dlg._fav_op.setCurrentIndex(dlg._fav_op.findData("not_between"))
+        dlg._fav_val1.setValue(5)
+        dlg._fav_val2.setValue(50)
+        fs = dlg._build_filterset()
+        [f] = _by_type(fs, "favorite_points")
+        assert (f.op, f.pts1, f.pts2) == ("not_between", 5, 50)
+        reopened = FilterDialog()
+        qtbot.addWidget(reopened)
+        reopened._load_filterset(fs)
+        assert reopened._fav_enabled.isChecked()
+        assert reopened._fav_op.currentData() == "not_between"
+        assert (reopened._fav_val1.value(), reopened._fav_val2.value()) == (5, 50)
+
+    def test_reversed_range_is_swapped_on_apply(self, dlg):
+        dlg._fav_enabled.setChecked(True)
+        dlg._fav_op.setCurrentIndex(dlg._fav_op.findData("between"))
+        dlg._fav_val1.setValue(50)
+        dlg._fav_val2.setValue(5)
+        [f] = _by_type(dlg._build_filterset(), "favorite_points")
+        assert (f.pts1, f.pts2) == (5, 50)
+
+    def test_legacy_range_loads_as_condition(self, dlg):
+        fs = FilterSet.from_dict({"filters": [
+            {"filter_type": "favorite_points", "min_pts": 0, "max_pts": 25}]})
+        dlg._load_filterset(fs)
+        assert dlg._fav_enabled.isChecked()
+        assert dlg._fav_op.currentData() == "at_most"
+        assert dlg._fav_val1.value() == 25
 
 
 class TestCorrectedDistance:
@@ -233,6 +305,7 @@ class TestCorrectedDistance:
         assert _by_type(dlg._build_filterset(), "corrected_distance") == []
 
     def test_second_value_only_for_between(self, dlg):
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._ccd_enabled.setChecked(True)
         for op, shown in (("more_than", False), ("between", True),
                           ("not_between", True), ("equal", False)):
@@ -276,11 +349,11 @@ class TestCorrectedDistance:
         assert f.op == "more_than"
         assert f.dist1_m == pytest.approx(3218.7, abs=0.1)
 
-    def test_reset_general_clears_it(self, dlg):
+    def test_reset_misc_clears_it(self, dlg):
         dlg._ccd_enabled.setChecked(True)
         dlg._ccd_op.setCurrentIndex(dlg._ccd_op.findData("equal"))
         dlg._ccd_dist1.setValue(0)
-        dlg._tabs.setCurrentWidget(dlg._general_tab)
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._reset_current_tab()
         assert not dlg._ccd_enabled.isChecked()
         assert dlg._ccd_op.currentData() == "more_than"

@@ -345,13 +345,15 @@ Example: *User data 1* equals `solved` finds the mysteries you've marked as solv
 
 ### Elevation
 
-Check **Enable** and enter a range to show only caches whose elevation lies within it (inclusive). The unit is metres, or feet when miles are selected in Settings. Caches whose elevation is unknown never match. Available on the **Other** tab.
+Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the elevation. The unit is metres, or feet when miles are selected in Settings. *Equal* compares to the whole metre. A reversed *Between* range is put in order when applied. Caches whose elevation is unknown never match. Available on the **Other** tab.
 
 ---
 
 ### Favourite points
 
-Filter by a minimum and/or maximum favourite point count. Available on the **Other** tab.
+Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the favourite point count. Caches without favourite points count as 0. A reversed *Between* range is put in order when applied. Available on the **Other** tab.
+
+Filter profiles saved with the older from/to range for elevation or favourite points are converted when loaded: a range open at the top (e.g. favourite points 10 – 9999) becomes *At least*, one open at the bottom becomes *At most*, a single value becomes *Equal*, and anything else *Between*. Saving the profile again stores the new form.
 
 ---
 

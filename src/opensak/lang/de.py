@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (First to Find) 🥇",
     "filter_user_note_label":      "Persönliche Notiz",
     "filter_direction_group":      "Richtung vom Zentrum",
+    "filter_direction_info":       'Die Richtung lässt sich auf zwei Arten festlegen:\n\n• Grad: Bedingung wählen und Peilung eingeben — 0° = Norden, 90° = Osten, im Uhrzeigersinn. "Zwischen" läuft im Uhrzeigersinn, 315° – 45° ist also der Sektor durch Norden.\n\n• Kompass: Richtungen anklicken (N, NO, O …). Das überschreibt die Gradwerte mit dem passenden Bereich. Nicht benachbarte Richtungen lassen sich nicht als ein Bereich schreiben — die Gradwerte werden dann ausgegraut.\n\nWerden die Gradwerte wieder geändert, ersetzen sie die angeklickten Richtungen. Die Richtung wird vom Zentrum oben aus gemessen.',
     "filter_fav_points_group":     "Favoritenpunkte",
     "filter_found_date_group":     "Von mir gefunden am",
     "filter_where_description":     "Geocaches mit einer SQL-WHERE-Klausel gegen die caches-Tabelle filtern.",

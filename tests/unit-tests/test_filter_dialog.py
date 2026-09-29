@@ -21,6 +21,7 @@ from opensak.filters.engine import (
     PremiumFilter, NonPremiumFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CountryFilter, StateFilter, CountyFilter, UserFlagFilter, LockedFilter, DnfFilter,
     FtfFilter, FavoritePointsFilter, AttributeFilter, WhereClauseFilter, DirectionFilter,
+    DIRECTIONS,
     UserNoteFilter,
     FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
     DateFilter, DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
@@ -300,30 +301,208 @@ class TestBuildFilterset:
         dlg._reset_misc()
         assert "user_note" not in _types(dlg._build_filterset())
 
-    def test_all_directions_adds_no_filter(self, dlg):
+    def test_direction_off_adds_no_filter(self, dlg):
         assert "direction" not in _types(dlg._build_filterset())
 
-    def test_no_directions_adds_no_filter(self, dlg):
-        # Same as Container: an empty selection is treated as "no filter".
-        dlg._set_all_directions(False)
-        assert "direction" not in _types(dlg._build_filterset())
-
-    def test_direction_subset(self, dlg):
-        dlg._set_all_directions(False)
-        dlg._dir_checks["N"].setChecked(True)
-        dlg._dir_checks["SW"].setChecked(True)
+    def test_direction_bearing_condition_uses_shared_center(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "56.5, 10.1"})
+        dlg._dir_enabled.setChecked(True)
+        dlg._set_dir_values("between", 315, 45)
         f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
-        assert f.directions == ["N", "SW"]
+        assert (f.op, f.deg1, f.deg2) == ("between", 315, 45)
+        assert (f.lat, f.lon) == pytest.approx((56.5, 10.1))
+        assert f.center_state == {"kind": "custom", "text": "56.5, 10.1"}
 
-    def test_loads_direction_filter(self, dlg):
+    def test_direction_between_is_not_reordered(self, dlg):
+        # Clockwise 315 → 45 is the sector through north; swapping would
+        # turn it into the opposite 90–270° sector.
+        dlg._dir_enabled.setChecked(True)
+        dlg._set_dir_values("between", 315, 45)
+        dlg._build_filterset()
+        assert (dlg._dir_deg1.value(), dlg._dir_deg2.value()) == (315, 45)
+
+    def test_distance_and_direction_share_center(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        dlg._dist_enabled.setChecked(True)
+        dlg._dir_enabled.setChecked(True)
+        fs = dlg._build_filterset()
+        dist = next(f for f in fs._filters if f.filter_type == "distance")
+        direc = next(f for f in fs._filters if f.filter_type == "direction")
+        assert (dist.lat, dist.lon) == (direc.lat, direc.lon) == pytest.approx((60.0, 10.0))
+
+    def test_center_picker_enabled_by_distance_or_direction(self, dlg):
+        assert not dlg._center_picker.isEnabled()
+        dlg._dir_enabled.setChecked(True)
+        assert dlg._center_picker.isEnabled()
+        dlg._dir_enabled.setChecked(False)
+        dlg._dist_enabled.setChecked(True)
+        assert dlg._center_picker.isEnabled()
+
+    def test_compass_rose_displays_condition(self, dlg):
+        def shown():
+            return {d for d, cb in dlg._dir_checks.items() if cb.isChecked()}
+        assert shown() == set(DIRECTIONS)  # filter off: everything
+        dlg._dir_enabled.setChecked(True)
+        dlg._set_dir_values("between", 315, 45)
+        assert shown() == {"NW", "N", "NE"}
+        dlg._set_dir_values("equal", 90, 0)
+        assert shown() == {"E"}
+        dlg._set_dir_values("at_least", 180, 0)
+        assert shown() == {"S", "SW", "W", "NW", "N"}
+
+    def _dir_values(self, dlg):
+        return dlg._dir_op.currentData(), dlg._dir_deg1.value(), dlg._dir_deg2.value()
+
+    def _shown_dirs(self, dlg):
+        return {d for d, cb in dlg._dir_checks.items() if cb.isChecked()}
+
+    def test_first_rose_click_picks_just_that_direction(self, dlg):
+        # Filter off, all ticked: clicking N means "north", not "all but N".
+        dlg._dir_checks["N"].click()
+        assert dlg._dir_enabled.isChecked()
+        assert self._shown_dirs(dlg) == {"N"}
+        assert self._dir_values(dlg) == ("between", 337.5, 22.5)
+
+    def test_rose_clicks_overwrite_degree_values(self, dlg):
+        dlg._dir_enabled.setChecked(True)
+        dlg._set_dir_values("equal", 200, 0)
+        assert self._shown_dirs(dlg) == {"S"}
+        dlg._dir_checks["E"].click()   # E + S: not adjacent
+        assert not dlg._dir_op.isEnabled()
+        dlg._dir_checks["SE"].click()  # E + SE + S
+        assert self._shown_dirs(dlg) == {"E", "SE", "S"}
+        assert self._dir_values(dlg) == ("between", 67.5, 202.5)
+        assert dlg._dir_op.isEnabled() and dlg._dir_deg1.isEnabled()
+
+    def test_rose_all_directions_is_at_least_zero(self, dlg):
+        dlg._dir_checks["N"].click()
+        for d in DIRECTIONS:
+            if d != "N":
+                dlg._dir_checks[d].click()
+        assert self._dir_values(dlg)[:2] == ("at_least", 0.0)
+
+    def test_non_adjacent_rose_directions_grey_out_degrees(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        dlg._dir_checks["E"].click()
+        dlg._dir_checks["W"].click()
+        assert self._shown_dirs(dlg) == {"E", "W"}
+        assert not dlg._dir_op.isEnabled()
+        assert not dlg._dir_deg1.isEnabled()
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.op is None and f.directions == ["E", "W"]
+        assert (f.lat, f.lon) == pytest.approx((60.0, 10.0))
+
+    def test_rose_directions_build_sector_filter_from_center(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        dlg._dir_checks["NE"].click()
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.directions == ["NE"]
+        assert f.center_state == {"kind": "custom", "text": "60.0, 10.0"}
+
+    def test_editing_degrees_replaces_rose_directions(self, dlg):
+        dlg._dir_checks["E"].click()
+        dlg._dir_checks["W"].click()
+        dlg._dir_enabled.setChecked(False)
+        dlg._dir_enabled.setChecked(True)  # picked directions survive a toggle
+        assert self._shown_dirs(dlg) == {"E", "W"}
+        dlg._dir_checks["W"].click()        # adjacent again -> degrees usable
+        dlg._dir_deg2.setValue(135.0)
+        assert dlg._dir_sectors is None
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert (f.op, f.deg1, f.deg2) == ("between", 67.5, 135.0)
+        assert self._shown_dirs(dlg) == {"E", "SE"}
+
+    def test_rose_directions_round_trip(self, dlg):
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        dlg._dir_checks["E"].click()
+        dlg._dir_checks["W"].click()
+        fs = dlg._build_filterset()
+        dlg._reset_all()
+        dlg._load_filterset(fs)
+        assert self._shown_dirs(dlg) == {"E", "W"}
+        assert dlg._legacy_dir_filter is None  # has a centre: rebuilt, not reused
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.to_dict() == next(
+            x for x in fs._filters if x.filter_type == "direction").to_dict()
+
+    def test_direction_info_button(self, dlg, monkeypatch):
+        shown = []
+        monkeypatch.setattr(fd.QMessageBox, "information",
+                            lambda *args: shown.append(args))
+        dlg._show_direction_info()
+        assert shown and shown[0][2] == fd.tr("filter_direction_info")
+
+    def test_loads_direction_bearing_filter(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(op="at_most", deg1=120, lat=60.0, lon=10.0,
+                               center_state={"kind": "custom", "text": "60.0, 10.0"}))
+        dlg._load_filterset(fs)
+        assert dlg._dir_enabled.isChecked()
+        assert dlg._dir_op.currentData() == "at_most"
+        assert dlg._dir_deg1.value() == 120
+        assert dlg._center_picker.to_state() == {"kind": "custom", "text": "60.0, 10.0"}
+
+    @pytest.mark.parametrize("dirs, arc", [
+        (["N"], (337.5, 22.5)),
+        (["E", "SE", "S"], (67.5, 202.5)),
+        (["NW", "N", "NE"], (292.5, 67.5)),
+        (["N", "NE", "E", "SE", "S", "SW", "W"], (337.5, 292.5)),
+    ])
+    def test_loads_contiguous_legacy_sectors_as_arc(self, dlg, dirs, arc):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(dirs))
+        dlg._load_filterset(fs)
+        assert dlg._dir_enabled.isChecked()
+        assert dlg._dir_op.currentData() == "between"
+        assert (dlg._dir_deg1.value(), dlg._dir_deg2.value()) == arc
+        assert {d for d, cb in dlg._dir_checks.items() if cb.isChecked()} == set(dirs)
+
+    @pytest.mark.parametrize("dirs", [["N"], ["E", "NW"], ["N", "S", "W"]])
+    def test_untouched_legacy_sectors_rebuild_unchanged(self, dlg, dirs):
+        # Exact migration: re-applying a pre-bearing profile must match the
+        # very same caches, so the saved sector filter is kept as it is.
+        legacy = DirectionFilter(dirs)
+        fs = FilterSet(mode="AND")
+        fs.add(legacy)
+        dlg._load_filterset(fs)
+        dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.to_dict() == legacy.to_dict()
+        assert {d for d, cb in dlg._dir_checks.items() if cb.isChecked()} == set(dirs)
+
+    def test_editing_migrated_direction_switches_to_bearing(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(["E", "SE"]))
+        dlg._load_filterset(fs)
+        dlg._dir_deg2.setValue(180.0)
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert (f.op, f.deg1, f.deg2) == ("between", 67.5, 180.0)
+        assert f.lat is not None
+
+    def test_disabling_migrated_direction_drops_it(self, dlg):
         fs = FilterSet(mode="AND")
         fs.add(DirectionFilter(["E", "NW"]))
         dlg._load_filterset(fs)
-        assert {d for d, cb in dlg._dir_checks.items() if cb.isChecked()} == {"E", "NW"}
+        dlg._dir_enabled.setChecked(False)
+        assert "direction" not in _types(dlg._build_filterset())
 
-    def test_reset_misc_checks_all_directions(self, dlg):
-        dlg._set_all_directions(False)
+    def test_reset_clears_migrated_direction(self, dlg):
+        fs = FilterSet(mode="AND")
+        fs.add(DirectionFilter(["E", "NW"]))
+        dlg._load_filterset(fs)
         dlg._reset_misc()
+        dlg._dir_enabled.setChecked(True)
+        f = next(f for f in dlg._build_filterset()._filters if f.filter_type == "direction")
+        assert f.op is not None
+
+    def test_reset_misc_turns_direction_off(self, dlg):
+        dlg._dir_enabled.setChecked(True)
+        dlg._dist_enabled.setChecked(True)
+        dlg._ccd_enabled.setChecked(True)
+        dlg._reset_misc()
+        assert not dlg._dir_enabled.isChecked()
+        assert not dlg._dist_enabled.isChecked()
+        assert not dlg._ccd_enabled.isChecked()
         assert all(cb.isChecked() for cb in dlg._dir_checks.values())
 
     def test_date_rows_default_to_any(self, dlg):
@@ -624,6 +803,8 @@ class TestLoadFilterset:
         assert dlg._dist_enabled.isChecked()
         assert dlg._country_filter.text() == "DK"
         assert dlg._fav_enabled.isChecked()
+        assert dlg._fav_op.currentData() == "between"
+        assert (dlg._fav_val1.value(), dlg._fav_val2.value()) == (10, 200)
         assert dlg._where_sql_general.toPlainText() == "found = 0"
 
     def test_loads_types_and_container(self, dlg):
@@ -806,8 +987,8 @@ class TestReset:
     def test_toggles(self, dlg):
         dlg._dist_enabled.setChecked(True)
         assert dlg._dist1.isEnabled() and dlg._dist_op.isEnabled()
-        dlg._on_fav_toggled(True)
-        assert dlg._fav_min.isEnabled() and dlg._fav_max.isEnabled()
+        dlg._fav_enabled.setChecked(True)
+        assert dlg._fav_op.isEnabled() and dlg._fav_val1.isEnabled()
 
 
 # ── waypoints tab ─────────────────────────────────────────────────────────────
@@ -1469,6 +1650,7 @@ class TestCenterPointIntegration:
         assert (dlg._dist1.value(), dlg._dist2.value()) == (70.0, 50.0)
 
     def test_second_value_only_for_between(self, dlg):
+        dlg._tabs.setCurrentWidget(dlg._misc_tab)
         dlg._dist_enabled.setChecked(True)
         for op, shown in (("at_most", False), ("between", True),
                           ("not_between", True), ("more_than", False)):
@@ -1516,7 +1698,7 @@ class TestCenterPointIntegration:
 
     def test_reset_returns_center_to_home(self, dlg):
         dlg._center_picker.set_state({"kind": "custom", "text": "60.0, 10.0"})
-        dlg._reset_general()
+        dlg._reset_misc()
         assert dlg._center_picker.to_state() == {"kind": "home"}
 
 # ── #610: General tab fits without scrolling ───────────────────────────────────
@@ -1548,8 +1730,7 @@ class TestGeneralTabFitsWithoutScrolling:
         for attr in ("_name_row", "_gc_row", "_placed_row", "_owner_row",
                      "_diff_min", "_diff_max", "_terr_min", "_terr_max",
                      "_found_cb", "_notfound_cb", "_avail_cb", "_unavail_cb",
-                     "_archived_cb", "_dist_enabled", "_dist_op", "_dist1", "_dist2",
-                     "_center_picker", "_prem_yes", "_prem_no", "_tb_yes",
+                     "_archived_cb", "_prem_yes", "_prem_no", "_tb_yes",
                      "_tb_no", "_cc_yes", "_cc_no"):
             assert getattr(dlg, attr) is not None, attr
 
@@ -1583,8 +1764,8 @@ class TestHighlightChangedElements:
         assert _lit_tabs(dlg) == set()
         for widget in (dlg._name_row.label, dlg._type_group, dlg._cont_group,
                        dlg._diff_label, dlg._terr_label, dlg._found_label,
-                       dlg._avail_label, dlg._dist_group, dlg._prem_label,
-                       dlg._tb_label, dlg._cc_label):
+                       dlg._avail_label, dlg._dist_label, dlg._dir_label,
+                       dlg._ccd_label, dlg._prem_label, dlg._tb_label, dlg._cc_label):
             assert not _lit(widget)
 
     def test_text_row_lights_up_with_its_tab(self, dlg):
@@ -1605,12 +1786,15 @@ class TestHighlightChangedElements:
         dlg._terr_min.setValue(2.0)
         assert _lit(dlg._terr_label)
 
-    def test_distance_group_title(self, dlg):
-        dlg._dist_enabled.setChecked(True)
-        assert _lit(dlg._dist_group)
-        assert "QGroupBox::title" in dlg._dist_group.styleSheet()
-        dlg._dist_enabled.setChecked(False)
-        assert not _lit(dlg._dist_group)
+    def test_center_block_rows_light_the_misc_tab(self, dlg):
+        for enabled, label in ((dlg._dist_enabled, dlg._dist_label),
+                               (dlg._dir_enabled, dlg._dir_label),
+                               (dlg._ccd_enabled, dlg._ccd_label)):
+            enabled.setChecked(True)
+            assert _lit(label)
+            assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
+            enabled.setChecked(False)
+            assert not _lit(label)
 
     def test_unchecking_one_cache_type_lights_the_group(self, dlg):
         next(iter(dlg._type_checks.values())).setChecked(False)
@@ -1642,14 +1826,6 @@ class TestHighlightChangedElements:
         dlg._tabs.setCurrentWidget(dlg._trackables_tab)
         dlg._reset_current_tab()
         assert dlg._tb_yes.isChecked() and dlg._tb_no.isChecked()
-        assert _lit_tabs(dlg) == set()
-
-    def test_unchecking_one_direction_lights_the_group(self, dlg):
-        dlg._dir_checks["N"].setChecked(False)
-        assert _lit(dlg._dir_label)
-        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab)}
-        dlg._set_all_directions(True)
-        assert not _lit(dlg._dir_label)
         assert _lit_tabs(dlg) == set()
 
     def test_user_note_row(self, dlg):
@@ -1710,7 +1886,7 @@ class TestHighlightChangedElements:
     def test_several_tabs_at_once(self, dlg):
         dlg._dist_enabled.setChecked(True)
         dlg._text_search_row.edit.setText("spoiler")
-        assert _lit_tabs(dlg) == {_tab(dlg, dlg._general_tab), _tab(dlg, dlg._text_search_tab)}
+        assert _lit_tabs(dlg) == {_tab(dlg, dlg._misc_tab), _tab(dlg, dlg._text_search_tab)}
 
     def test_reset_all_clears_every_highlight(self, dlg):
         dlg._name_filter.setText("church")
@@ -1722,7 +1898,7 @@ class TestHighlightChangedElements:
         assert _lit_tabs(dlg) == set()
         assert not _lit(dlg._name_row.label)
         assert not _lit(dlg._diff_label)
-        assert not _lit(dlg._dist_group)
+        assert not _lit(dlg._dist_label)
 
     def test_loading_a_saved_filter_highlights_what_it_sets(self, dlg):
         fs = FilterSet(mode="AND")

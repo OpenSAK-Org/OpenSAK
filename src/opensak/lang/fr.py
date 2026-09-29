@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (Premier trouveur) 🥇",
     "filter_user_note_label":      "Note personnelle",
     "filter_direction_group":      "Direction depuis le point central",
+    "filter_direction_info":       "La direction peut être définie de deux façons :\n\n• Degrés : choisissez une condition et saisissez le cap — 0° = nord, 90° = est, dans le sens horaire. « Entre » va dans le sens horaire : 315° – 45° est donc le secteur passant par le nord.\n\n• Boussole : cliquez sur les directions (N, NE, E …). Cela remplace les degrés par la plage correspondante. Des directions non adjacentes ne peuvent pas s'écrire en une seule plage — les degrés sont alors grisés.\n\nModifier à nouveau les degrés remplace les directions cliquées. La direction est mesurée depuis le point central ci-dessus.",
     "filter_fav_points_group":     "Points favoris",
     "filter_found_date_group":     "Date de découverte par moi",
     "filter_where_description":     "Filtrer les caches avec une clause SQL WHERE brute sur la table caches.",

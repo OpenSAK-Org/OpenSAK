@@ -917,12 +917,46 @@ class TestFlagFilters:
         assert FtfFilter.from_dict(f.to_dict()).has_ftf is True
 
     def test_favorite_points(self):
-        f = FavoritePointsFilter(min_pts=5, max_pts=10)
+        f = FavoritePointsFilter("between", 5, 10)
         assert f.matches(_cache(favorite_points=7)) is True
         assert f.matches(_cache(favorite_points=2)) is False
         assert f.matches(_cache(favorite_points=None)) is False
         restored = FavoritePointsFilter.from_dict(f.to_dict())
-        assert (restored.min_pts, restored.max_pts) == (5, 10)
+        assert (restored.op, restored.pts1, restored.pts2) == ("between", 5, 10)
+
+    @pytest.mark.parametrize("op, pts, expected", [
+        ("equal", 10, True), ("equal", 9, False),
+        ("less_than", 9, True), ("less_than", 10, False),
+        ("at_most", 10, True), ("at_most", 11, False),
+        ("more_than", 11, True), ("more_than", 10, False),
+        ("at_least", 10, True), ("at_least", 9, False),
+    ])
+    def test_favorite_points_ops(self, op, pts, expected):
+        assert FavoritePointsFilter(op, 10).matches(_cache(favorite_points=pts)) is expected
+
+    def test_favorite_points_not_between(self):
+        f = FavoritePointsFilter("not_between", 5, 10)
+        assert f.matches(_cache(favorite_points=4)) is True
+        assert f.matches(_cache(favorite_points=5)) is False
+        assert f.matches(_cache(favorite_points=None)) is True  # None counts as 0
+
+    def test_favorite_points_unknown_op(self):
+        with pytest.raises(ValueError):
+            FavoritePointsFilter("roughly", 5)
+
+    @pytest.mark.parametrize("legacy, expected", [
+        ({"min_pts": 0, "max_pts": 9999}, ("at_least", 0, 0)),
+        ({"min_pts": 10, "max_pts": 9999}, ("at_least", 10, 0)),
+        ({"min_pts": 0, "max_pts": 25}, ("at_most", 25, 0)),
+        ({"min_pts": 7, "max_pts": 7}, ("equal", 7, 0)),
+        ({"min_pts": 5, "max_pts": 50}, ("between", 5, 50)),
+        ({}, ("at_least", 0, 0)),
+    ])
+    def test_favorite_points_legacy_profile_is_converted(self, legacy, expected):
+        f = FavoritePointsFilter.from_dict({"filter_type": "favorite_points", **legacy})
+        assert (f.op, f.pts1, f.pts2) == expected
+        # Re-saving writes the new form only.
+        assert set(f.to_dict()) == {"filter_type", "op", "pts1", "pts2"}
 
 
 class TestDateFilters:

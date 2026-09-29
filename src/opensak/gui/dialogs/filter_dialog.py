@@ -49,6 +49,7 @@ from opensak.filters.engine import (
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
     PlacedByFilter, OwnerFilter, DistanceFilter, DirectionFilter, DIRECTIONS,
+    bearing_op_ok,
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
@@ -542,7 +543,10 @@ _DISTANCE_OP_LABELS: tuple[tuple[str, str], ...] = (
 )
 assert tuple(op for op, _ in _DISTANCE_OP_LABELS) == DISTANCE_OPS
 _DIST_DEFAULT_KM = 50.0  # afstand fra center-punkt, i brugerens enhed
+_DIR_DEFAULT_OP, _DIR_DEFAULT_DEG = "between", (0.0, 90.0)  # pejling i grader
 _CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
+_FAV_DEFAULT_OP, _FAV_DEFAULT_PTS = "at_least", 10
+_ELEV_DEFAULT_OP, _ELEV_DEFAULT_M = "at_least", 1000.0
 
 
 def _format_lp_point(point: tuple[float, float]) -> str:
@@ -775,6 +779,17 @@ class FilterDialog(QDialog):
         # the "Afstand"-fanens center-punkt-vælger tilbyde "denne cache" som
         # centrum (issue #511). None if nothing is selected.
         self._current_cache = current_cache
+        # A direction filter from a profile saved before the bearing
+        # condition (compass sectors, from Home). Rebuilt unchanged until the
+        # direction row is edited, so loading and re-applying such a profile
+        # never changes what it matches. See _load_direction_filter().
+        self._legacy_dir_filter: Optional[DirectionFilter] = None
+        # Compass directions picked on the rose (or loaded as sectors); None
+        # while the direction is set by degree values. See _on_dir_clicked().
+        self._dir_sectors: Optional[list[str]] = None
+        # True while the degree inputs are written from _dir_sectors, so that
+        # doesn't count as the user editing them.
+        self._dir_syncing = False
         # Startsstørrelse: 70% af skærm, aldrig større end 1000x850
         from PySide6.QtWidgets import QApplication
         # Issue #580: brugte tidligere altid QApplication.primaryScreen(),
@@ -1037,48 +1052,6 @@ class FilterDialog(QDialog):
         middle.addLayout(right_col, 2)
         layout.addLayout(middle)
 
-        # ── Afstand — i fuld bredde, center-punktvælgeren er bred ────────────
-        self._dist_group = QGroupBox(tr("filter_distance_group"))
-        dist_outer = QVBoxLayout(self._dist_group)
-        dist_outer.setContentsMargins(8, 4, 8, 4)
-        dist_outer.setSpacing(4)
-
-        # Samme betingelser som afstand rettede ↔ oprindelige koordinater;
-        # værdierne vises i brugerens enhed (km / mi), gemmes i km.
-        dist_row = QHBoxLayout()
-        self._dist_enabled = QCheckBox(tr("filter_enable"))
-        self._dist_enabled.toggled.connect(self._on_dist_toggled)
-        dist_row.addWidget(self._dist_enabled)
-        self._dist_op = QComboBox()
-        for op, key in _DISTANCE_OP_LABELS:
-            self._dist_op.addItem(tr(key), op)
-        self._dist_op.currentIndexChanged.connect(self._update_dist_inputs)
-        dist_row.addWidget(self._dist_op)
-        _unit = " mi" if self._use_miles() else " km"
-        self._dist1 = QDoubleSpinBox()
-        self._dist2 = QDoubleSpinBox()
-        for spin in (self._dist1, self._dist2):
-            spin.setRange(0.0, 20_100.0)  # > halvdelen af jordens omkreds
-            spin.setSuffix(_unit)
-        self._dist_and = QLabel("–")
-        dist_row.addWidget(self._dist1)
-        dist_row.addWidget(self._dist_and)
-        dist_row.addWidget(self._dist2)
-        dist_row.addSpacing(16)
-
-        # Center-punkt (issue #511) — genbrugelig widget, delt med den
-        # planlagte quick "Where"-boks i toolbaren (#558). Ligger nu på samme
-        # række som min/max i stedet for sin egen.
-        dist_row.addWidget(QLabel(tr("center_point_label")))
-        self._center_picker = CenterPointPicker(self)
-        self._center_picker.set_current_cache(self._current_cache)
-        self._center_picker.setEnabled(False)
-        dist_row.addWidget(self._center_picker, 1)
-        dist_outer.addLayout(dist_row)
-        self._reset_dist()
-
-        layout.addWidget(self._dist_group)
-
         # ── Ja/nej-valg: fire etiket-rækker i to kolonner ─────────────────────
         # Tidligere fem QGroupBox'e under hinanden — hver med ~24 px indhold i
         # en ~70 px ramme. Etiketterne er selve highlight-målet (#610).
@@ -1120,27 +1093,6 @@ class FilterDialog(QDialog):
         self._cc_label, cc_widget = _status_row(
             tr("filter_corrected_group"), self._cc_yes, self._cc_no)
 
-        # Afstand mellem rettede og oprindelige koordinater (m, eller ft når
-        # use_miles) — caches uden rettede koordinater matcher aldrig
-        self._ccd_enabled = QCheckBox(tr("filter_enable"))
-        self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
-        self._ccd_op = QComboBox()
-        for op, key in _DISTANCE_OP_LABELS:
-            self._ccd_op.addItem(tr(key), op)
-        self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
-        self._ccd_dist1 = QDoubleSpinBox()
-        self._ccd_dist2 = QDoubleSpinBox()
-        for spin in (self._ccd_dist1, self._ccd_dist2):
-            spin.setDecimals(0)
-        self._ccd_and = QLabel("–")
-        self._ccd_label, ccd_widget = labeled_row(
-            tr("filter_cc_distance"),
-            self._ccd_enabled, self._ccd_op,
-            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
-            QLabel("ft" if self._use_miles() else "m"),
-        )
-        self._reset_ccd()
-
         for i, (label, widget) in enumerate((
             (self._found_label, found_widget),
             (self._prem_label, prem_widget),
@@ -1150,9 +1102,6 @@ class FilterDialog(QDialog):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
             status_grid.addWidget(widget, r, c * 2 + 1)
-        ccd_row = status_grid.rowCount()
-        status_grid.addWidget(self._ccd_label, ccd_row, 0)
-        status_grid.addWidget(ccd_widget, ccd_row, 1, 1, 3)
         status_grid.setColumnStretch(1, 1)
         status_grid.setColumnStretch(3, 1)
         layout.addLayout(status_grid)
@@ -1224,45 +1173,7 @@ class FilterDialog(QDialog):
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
-        # Retning fra centerpunkt (GSAK "Richtung") — kompakt kompasrose-gitter
-        # på én etiket-række. Tidligere en QGroupBox, der fyldte ~350 px i
-        # højden; etiketten er highlight-målet (#610).
-        dir_grid = QGridLayout()
-        dir_grid.setContentsMargins(0, 0, 0, 0)
-        dir_grid.setHorizontalSpacing(8)
-        dir_grid.setVerticalSpacing(2)
-        # (row, col) for each direction in a 3x3 compass rose, centre empty
-        dir_cells = {
-            "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
-            "W":  (1, 0),              "E":  (1, 2),
-            "SW": (2, 0), "S": (2, 1), "SE": (2, 2),
-        }
-        dir_labels = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
-        self._dir_checks: dict[str, QCheckBox] = {}
-        for d in DIRECTIONS:
-            cb = QCheckBox(dir_labels.get(d, d))
-            cb.setChecked(True)
-            self._dir_checks[d] = cb
-            dir_grid.addWidget(cb, *dir_cells[d])
-        dir_btns = QVBoxLayout()
-        dir_btns.setSpacing(2)
-        dir_all = QPushButton(tr("filter_type_enable_all"))
-        dir_all.clicked.connect(lambda: self._set_all_directions(True))
-        dir_none = QPushButton(tr("filter_type_disable_all"))
-        dir_none.clicked.connect(lambda: self._set_all_directions(False))
-        dir_btns.addWidget(dir_all)
-        dir_btns.addWidget(dir_none)
-        dir_row = QHBoxLayout()
-        dir_row.setSpacing(16)
-        self._dir_label = hug_label(QLabel(tr("filter_direction_group")))
-        dir_row.addWidget(self._dir_label, 0, Qt.AlignmentFlag.AlignTop)
-        # Ingen addStretch() i dir_btns — en vertikal spacer gør hele rækken
-        # "expanding" og spreder kompasrosen ud over fanens fulde højde.
-        dir_row.addLayout(dir_grid)
-        dir_row.addLayout(dir_btns)
-        dir_row.setAlignment(dir_btns, Qt.AlignmentFlag.AlignTop)
-        dir_row.addStretch()
-        layout.addLayout(dir_row)
+        layout.addWidget(self._build_center_block())
 
         # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
         def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
@@ -1283,43 +1194,45 @@ class FilterDialog(QDialog):
         self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
             _yes_no_row("filter_ftf_group")
 
-        # Favorit points
+        # Favorit points — samme betingelser som afstandsfiltrene
         self._fav_enabled = QCheckBox(tr("filter_enable"))
-        self._fav_enabled.toggled.connect(self._on_fav_toggled)
-        self._fav_min = QDoubleSpinBox()
-        self._fav_min.setRange(0, 9999)
-        self._fav_min.setDecimals(0)
-        self._fav_min.setValue(0)
-        self._fav_min.setEnabled(False)
-        self._fav_max = QDoubleSpinBox()
-        self._fav_max.setRange(0, 9999)
-        self._fav_max.setDecimals(0)
-        self._fav_max.setValue(9999)
-        self._fav_max.setEnabled(False)
+        self._fav_enabled.toggled.connect(self._update_fav_inputs)
+        self._fav_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._fav_op.addItem(tr(key), op)
+        self._fav_op.currentIndexChanged.connect(self._update_fav_inputs)
+        self._fav_val1 = QDoubleSpinBox()
+        self._fav_val2 = QDoubleSpinBox()
+        for spin in (self._fav_val1, self._fav_val2):
+            spin.setRange(0, 999_999)
+            spin.setDecimals(0)
+        self._fav_and = QLabel("–")
         self._fav_label, fav_widget = labeled_row(
             tr("filter_fav_points_group"),
-            self._fav_enabled,
-            QLabel(tr("filter_from")), self._fav_min,
-            QLabel(tr("filter_to")), self._fav_max,
+            self._fav_enabled, self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
         )
+        self._reset_fav()
 
         # Højde (m, eller ft når use_miles) — ukendt højde matcher aldrig
         self._elev_enabled = QCheckBox(tr("filter_enable"))
-        self._elev_enabled.toggled.connect(self._on_elev_toggled)
-        self._elev_min = QDoubleSpinBox()
-        self._elev_min.setDecimals(0)
-        self._elev_min.setEnabled(False)
-        self._elev_max = QDoubleSpinBox()
-        self._elev_max.setDecimals(0)
-        self._elev_max.setEnabled(False)
-        self._set_elev_range(-500.0, 9000.0)
+        self._elev_enabled.toggled.connect(self._update_elev_inputs)
+        self._elev_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._elev_op.addItem(tr(key), op)
+        self._elev_op.currentIndexChanged.connect(self._update_elev_inputs)
+        self._elev_val1 = QDoubleSpinBox()
+        self._elev_val2 = QDoubleSpinBox()
+        for spin in (self._elev_val1, self._elev_val2):
+            spin.setDecimals(0)
+        self._elev_and = QLabel("–")
         self._elev_label, elev_widget = labeled_row(
             tr("col_elevation"),
-            self._elev_enabled,
-            QLabel(tr("filter_from")), self._elev_min,
-            QLabel(tr("filter_to")), self._elev_max,
+            self._elev_enabled, self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
             QLabel("ft" if self._use_miles() else "m"),
         )
+        self._reset_elev()
 
         status_grid = QGridLayout()
         status_grid.setHorizontalSpacing(16)
@@ -1329,12 +1242,18 @@ class FilterDialog(QDialog):
             (self._locked_label, locked_widget),
             (self._dnf_label, dnf_widget),
             (self._ftf_label, ftf_widget),
-            (self._fav_label, fav_widget),
-            (self._elev_label, elev_widget),
         )):
             r, c = divmod(i, 2)
             status_grid.addWidget(label, r, c * 2)
             status_grid.addWidget(widget, r, c * 2 + 1)
+        # Operator-rækkerne er for brede til to pr. række (især ved "mellem")
+        for label, widget in (
+            (self._fav_label, fav_widget),
+            (self._elev_label, elev_widget),
+        ):
+            r = status_grid.rowCount()
+            status_grid.addWidget(label, r, 0)
+            status_grid.addWidget(widget, r, 1, 1, 3)
         status_grid.setColumnStretch(1, 1)
         status_grid.setColumnStretch(3, 1)
         layout.addLayout(status_grid)
@@ -1344,6 +1263,145 @@ class FilterDialog(QDialog):
         scroll.setWidget(inner)
         outer_layout.addWidget(scroll)
         return outer
+
+    def _build_center_block(self) -> QGroupBox:
+        """Øvrigt-fanens blok med de positionsbaserede filtre: afstand og
+        retning fra ét fælles center-punkt, plus afstand rettede ↔ oprindelige
+        koordinater. Etiketterne er highlight-målene (#610); kompasrosen til
+        højre viser kun, hvilke retninger retningsbetingelsen dækker.
+        """
+        box = QGroupBox()
+        grid = QGridLayout(box)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(4)
+
+        # Center-punkt (issue #511) — genbrugelig widget, delt med den
+        # planlagte quick "Where"-boks i toolbaren (#558). Ét valg for både
+        # afstand og retning.
+        self._center_picker = CenterPointPicker(self)
+        self._center_picker.set_current_cache(self._current_cache)
+        self._center_picker.setEnabled(False)
+        # Pickeren har en hint-linje under dropdownen — etiketten lægges i
+        # toppen med dropdownens højde, så den flugter med dropdownen.
+        center_label = hug_label(QLabel(tr("center_point_label")))
+        center_label.setMinimumHeight(self._center_picker.combo_height())
+        grid.addWidget(center_label, 0, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self._center_picker, 0, 1, 1, 2)
+
+        # Afstand fra center-punkt — værdierne vises i brugerens enhed
+        # (km / mi), gemmes i km.
+        self._dist_enabled = QCheckBox(tr("filter_enable"))
+        self._dist_enabled.toggled.connect(self._on_dist_toggled)
+        self._dist_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dist_op.addItem(tr(key), op)
+        self._dist_op.currentIndexChanged.connect(self._update_dist_inputs)
+        _unit = " mi" if self._use_miles() else " km"
+        self._dist1 = QDoubleSpinBox()
+        self._dist2 = QDoubleSpinBox()
+        for spin in (self._dist1, self._dist2):
+            spin.setRange(0.0, 20_100.0)  # > halvdelen af jordens omkreds
+            spin.setSuffix(_unit)
+        self._dist_and = QLabel("–")
+        self._dist_label, dist_widget = labeled_row(
+            tr("filter_distance_group"),
+            self._dist_enabled, self._dist_op,
+            self._dist1, self._dist_and, self._dist2,
+        )
+
+        # Retning fra center-punkt (GSAK "Richtung") — enten pejling i grader
+        # med samme betingelser som de øvrige talfiltre ("mellem" går med
+        # uret, så 315°–45° er sektoren gennem nord), eller retninger valgt
+        # på kompasrosen, som så overskriver gradtallene.
+        self._dir_enabled = QCheckBox(tr("filter_enable"))
+        self._dir_enabled.toggled.connect(self._update_dir_inputs)
+        self._dir_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dir_op.addItem(tr(key), op)
+        self._dir_op.currentIndexChanged.connect(self._on_dir_edited)
+        self._dir_deg1 = QDoubleSpinBox()
+        self._dir_deg2 = QDoubleSpinBox()
+        for spin in (self._dir_deg1, self._dir_deg2):
+            spin.setRange(0.0, 360.0)
+            # One decimal, so the compass-sector edges (22.5°, 67.5°, …) of
+            # a migrated sector filter show exactly.
+            spin.setDecimals(1)
+            spin.setSuffix("°")
+            spin.valueChanged.connect(self._on_dir_edited)
+        self._dir_and = QLabel("–")
+        dir_info = QPushButton("ⓘ")
+        dir_info.setMaximumWidth(32)
+        dir_info.setFlat(True)
+        dir_info.setAutoDefault(False)
+        dir_info.setToolTip(tr("filter_direction_info"))
+        dir_info.clicked.connect(self._show_direction_info)
+        self._dir_label, dir_widget = labeled_row(
+            tr("filter_direction_group"),
+            self._dir_enabled, self._dir_op,
+            self._dir_deg1, self._dir_and, self._dir_deg2, dir_info,
+        )
+
+        # Afstand mellem rettede og oprindelige koordinater (m, eller ft når
+        # use_miles) — caches uden rettede koordinater matcher aldrig
+        self._ccd_enabled = QCheckBox(tr("filter_enable"))
+        self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
+        self._ccd_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._ccd_op.addItem(tr(key), op)
+        self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
+        self._ccd_dist1 = QDoubleSpinBox()
+        self._ccd_dist2 = QDoubleSpinBox()
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setDecimals(0)
+        self._ccd_and = QLabel("–")
+        self._ccd_label, ccd_widget = labeled_row(
+            tr("filter_cc_distance"),
+            self._ccd_enabled, self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+        self._reset_ccd()
+
+        for r, (label, widget) in enumerate((
+            (self._dist_label, dist_widget),
+            (self._dir_label, dir_widget),
+            (self._ccd_label, ccd_widget),
+        ), start=1):
+            grid.addWidget(label, r, 0)
+            grid.addWidget(widget, r, 1)
+
+        # Kompasrose — viser de retninger, som retningsbetingelsen (helt
+        # eller delvist) dækker; et klik vælger retninger og overskriver
+        # gradtallene (_on_dir_clicked).
+        rose = QGridLayout()
+        rose.setContentsMargins(0, 0, 0, 0)
+        rose.setHorizontalSpacing(8)
+        rose.setVerticalSpacing(2)
+        # (row, col) for each direction in a 3x3 compass rose, centre empty
+        dir_cells = {
+            "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
+            "W":  (1, 0),              "E":  (1, 2),
+            "SW": (2, 0), "S": (2, 1), "SE": (2, 2),
+        }
+        dir_labels = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
+        self._dir_checks: dict[str, QCheckBox] = {}
+        for d in DIRECTIONS:
+            cb = QCheckBox(dir_labels.get(d, d))
+            cb.setChecked(True)
+            # clicked, not toggled: only a user's click picks directions —
+            # _update_dir_display() ticks the boxes programmatically.
+            cb.clicked.connect(lambda _checked, d=d: self._on_dir_clicked(d))
+            self._dir_checks[d] = cb
+            rose.addWidget(cb, *dir_cells[d])
+        grid.addLayout(rose, 1, 2, 3, 1, Qt.AlignmentFlag.AlignTop)
+        grid.setColumnStretch(1, 1)
+
+        # Først her — begge nulstillinger slår center-vælgeren til/fra ud
+        # fra både afstand og retning, så alle tre rækker skal findes.
+        self._reset_dist()
+        self._reset_dir()
+        return box
 
     def _build_line_polygon_tab(self) -> QWidget:
         """Linje/Polygon fane — GSAK's linje-/polygonfilter: caches langs en
@@ -2088,8 +2146,6 @@ class FilterDialog(QDialog):
              lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
             (general, self._cc_label,
              lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
-            (general, self._ccd_label, self._ccd_enabled.isChecked),
-            (general, self._dist_group, self._dist_enabled.isChecked),
         ]
 
         def date_is_set(row: DateFilterRow) -> Callable[[], bool]:
@@ -2107,8 +2163,9 @@ class FilterDialog(QDialog):
         for tb_row in self._tb_text_rows.values():
             specs.append((self._trackables_tab, tb_row.label, tb_row.is_set))
         specs += [
-            (misc, self._dir_label,
-             lambda: not all(cb.isChecked() for cb in self._dir_checks.values())),
+            (misc, self._dist_label, self._dist_enabled.isChecked),
+            (misc, self._dir_label, self._dir_enabled.isChecked),
+            (misc, self._ccd_label, self._ccd_enabled.isChecked),
             (misc, self._flag_label,
              lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
             (misc, self._locked_label,
@@ -2361,14 +2418,114 @@ class FilterDialog(QDialog):
         self._update_dist_inputs()
 
     def _update_dist_inputs(self) -> None:
-        enabled = self._dist_enabled.isChecked()
-        between = self._dist_op.currentData() in ("between", "not_between")
-        self._dist_op.setEnabled(enabled)
-        self._dist1.setEnabled(enabled)
-        self._dist2.setEnabled(enabled)
-        self._center_picker.setEnabled(enabled)
-        self._dist_and.setVisible(between)
-        self._dist2.setVisible(between)
+        self._update_op_inputs(
+            self._dist_enabled.isChecked(), self._dist_op,
+            self._dist1, self._dist_and, self._dist2,
+        )
+        self._update_center_picker()
+
+    def _update_center_picker(self) -> None:
+        """The shared centre point matters to both distance and direction."""
+        self._center_picker.setEnabled(
+            self._dist_enabled.isChecked() or self._dir_enabled.isChecked()
+        )
+
+    def _update_dir_inputs(self) -> None:
+        enabled = self._dir_enabled.isChecked()
+        numeric = True
+        if enabled and self._dir_sectors is not None:
+            numeric = self._sync_dir_values_from_sectors()
+        # Directions that no single degree range can express (not adjacent,
+        # or none at all) grey the degree inputs out — the rose rules.
+        self._update_op_inputs(
+            enabled and numeric, self._dir_op,
+            self._dir_deg1, self._dir_and, self._dir_deg2,
+        )
+        self._update_center_picker()
+        self._update_dir_display()
+
+    def _sync_dir_values_from_sectors(self) -> bool:
+        """Write the degree inputs matching _dir_sectors. False when no
+        single degree condition expresses them."""
+        sectors = self._dir_sectors or []
+        selected = [d in sectors for d in DIRECTIONS]
+        if all(selected):
+            values = ("at_least", 0.0, 0.0)
+        else:
+            arc = self._sector_arc(selected)
+            if arc is None:
+                return False
+            values = ("between", *arc)
+        self._dir_syncing = True
+        try:
+            op, deg1, deg2 = values
+            self._dir_op.setCurrentIndex(max(self._dir_op.findData(op), 0))
+            self._dir_deg1.setValue(deg1)
+            self._dir_deg2.setValue(deg2)
+        finally:
+            self._dir_syncing = False
+        return True
+
+    def _on_dir_edited(self) -> None:
+        """Editing the degree condition replaces picked compass directions,
+        and a migrated sector filter."""
+        if self._dir_syncing:
+            return
+        self._legacy_dir_filter = None
+        self._dir_sectors = None
+        self._update_dir_inputs()
+
+    def _on_dir_clicked(self, direction: str) -> None:
+        """A click on the compass rose picks directions, overwriting the
+        degree values. With the filter still off, the click switches it on
+        with just that direction — not "everything except it"."""
+        if self._dir_enabled.isChecked():
+            picked = {d for d, cb in self._dir_checks.items() if cb.isChecked()}
+        else:
+            picked = {direction}
+        self._legacy_dir_filter = None
+        self._dir_sectors = [d for d in DIRECTIONS if d in picked]
+        self._dir_enabled.setChecked(True)
+        self._update_dir_inputs()
+
+    def _show_direction_info(self) -> None:
+        QMessageBox.information(
+            self, tr("filter_direction_group"), tr("filter_direction_info"),
+        )
+
+    def _update_dir_display(self) -> None:
+        """Tick the compass-rose sectors the direction condition reaches.
+
+        Picked (or loaded) directions are shown as they are. For a degree
+        condition a sector counts when any bearing inside it satisfies it
+        (sampled every ½°, fine enough for "equal" ±0.5°). With the
+        direction filter off, every direction is shown.
+        """
+        enabled = self._dir_enabled.isChecked()
+        if enabled and self._dir_sectors is not None:
+            for d, cb in self._dir_checks.items():
+                cb.setChecked(d in self._dir_sectors)
+            return
+        op = self._dir_op.currentData()
+        a, b = self._dir_deg1.value(), self._dir_deg2.value()
+        for i, d in enumerate(DIRECTIONS):
+            lo = i * 45.0 - 22.5
+            on = not enabled or any(
+                bearing_op_ok(op, (lo + k * 0.5) % 360.0, a, b) for k in range(90)
+            )
+            self._dir_checks[d].setChecked(on)
+
+    def _reset_dir(self) -> None:
+        self._legacy_dir_filter = None
+        self._dir_sectors = None
+        self._dir_enabled.setChecked(False)
+        self._set_dir_values(_DIR_DEFAULT_OP, *_DIR_DEFAULT_DEG)
+
+    def _set_dir_values(self, op: str, deg1: float, deg2: float) -> None:
+        self._dir_op.setCurrentIndex(max(self._dir_op.findData(op), 0))
+        self._dir_deg1.setValue(deg1)
+        self._dir_deg2.setValue(deg2)
+        self._update_dir_inputs()
 
     def _set_dist_values(self, op: str, dist1_km: float, dist2_km: float) -> None:
         """Show a centre-distance condition given in km, in the display unit."""
@@ -2390,18 +2547,34 @@ class FilterDialog(QDialog):
         self._dist2.setValue(_DIST_DEFAULT_KM)
         self._update_dist_inputs()
 
-    def _on_fav_toggled(self, checked: bool) -> None:
-        self._fav_min.setEnabled(checked)
-        self._fav_max.setEnabled(checked)
+    @staticmethod
+    def _update_op_inputs(enabled: bool, op_combo: QComboBox, spin1, and_label: QLabel, spin2) -> None:
+        """Enable an operator row; show its second value only for (not) between."""
+        between = op_combo.currentData() in ("between", "not_between")
+        op_combo.setEnabled(enabled)
+        spin1.setEnabled(enabled)
+        spin2.setEnabled(enabled)
+        and_label.setVisible(between)
+        spin2.setVisible(between)
+
+    def _update_fav_inputs(self) -> None:
+        self._update_op_inputs(
+            self._fav_enabled.isChecked(), self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
+        )
+
+    def _reset_fav(self) -> None:
+        self._fav_enabled.setChecked(False)
+        self._fav_op.setCurrentIndex(self._fav_op.findData(_FAV_DEFAULT_OP))
+        self._fav_val1.setValue(_FAV_DEFAULT_PTS)
+        self._fav_val2.setValue(_FAV_DEFAULT_PTS)
+        self._update_fav_inputs()
 
     def _update_ccd_inputs(self) -> None:
-        enabled = self._ccd_enabled.isChecked()
-        between = self._ccd_op.currentData() in ("between", "not_between")
-        self._ccd_op.setEnabled(enabled)
-        self._ccd_dist1.setEnabled(enabled)
-        self._ccd_dist2.setEnabled(enabled)
-        self._ccd_and.setVisible(between)
-        self._ccd_dist2.setVisible(between)
+        self._update_op_inputs(
+            self._ccd_enabled.isChecked(), self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+        )
 
     def _set_ccd_distances(self, dist1_m: float, dist2_m: float) -> None:
         """Show corrected-distance bounds given in metres, in the display unit."""
@@ -2422,31 +2595,79 @@ class FilterDialog(QDialog):
         self._set_ccd_distances(_CC_DIST_DEFAULT_M, _CC_DIST_DEFAULT_M)
         self._update_ccd_inputs()
 
-    def _on_elev_toggled(self, checked: bool) -> None:
-        self._elev_min.setEnabled(checked)
-        self._elev_max.setEnabled(checked)
+    def _update_elev_inputs(self) -> None:
+        self._update_op_inputs(
+            self._elev_enabled.isChecked(), self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
+        )
+
+    def _reset_elev(self) -> None:
+        self._elev_enabled.setChecked(False)
+        self._elev_op.setCurrentIndex(self._elev_op.findData(_ELEV_DEFAULT_OP))
+        self._set_elev_values(_ELEV_DEFAULT_M, _ELEV_DEFAULT_M)
+        self._update_elev_inputs()
 
     @staticmethod
     def _use_miles() -> bool:
         from opensak.gui.settings import get_settings
         return get_settings().use_miles
 
-    def _set_elev_range(self, min_m: float, max_m: float) -> None:
-        """Show an elevation range given in metres, in the display unit."""
+    def _set_elev_values(self, elev1_m: float, elev2_m: float) -> None:
+        """Show elevation bounds given in metres, in the display unit."""
         factor = _M_TO_FT if self._use_miles() else 1.0
-        for spin in (self._elev_min, self._elev_max):
+        for spin in (self._elev_val1, self._elev_val2):
             spin.setRange(-2000 * factor, 9000 * factor)
-        self._elev_min.setValue(min_m * factor)
-        self._elev_max.setValue(max_m * factor)
+        self._elev_val1.setValue(elev1_m * factor)
+        self._elev_val2.setValue(elev2_m * factor)
 
-    def _elev_range_m(self) -> tuple[float, float]:
-        """The elevation range entered, converted back to metres."""
+    def _elev_values_m(self) -> tuple[float, float]:
+        """The elevation bounds entered, converted back to metres."""
         factor = _M_TO_FT if self._use_miles() else 1.0
-        return self._elev_min.value() / factor, self._elev_max.value() / factor
+        return self._elev_val1.value() / factor, self._elev_val2.value() / factor
 
-    def _set_all_directions(self, checked: bool) -> None:
-        for cb in self._dir_checks.values():
-            cb.setChecked(checked)
+    def _load_center_state(self, f: DirectionFilter) -> None:
+        if f.center_state:
+            self._center_picker.set_state(f.center_state)
+        elif f.lat is not None and f.lon is not None:
+            self._center_picker.set_state({
+                "kind": "custom", "text": f"{f.lat:.6f}, {f.lon:.6f}",
+            })
+
+    def _load_direction_filter(self, f: DirectionFilter) -> None:
+        if f.op is not None:
+            self._dir_enabled.setChecked(True)
+            self._set_dir_values(f.op, f.deg1, f.deg2)
+            self._load_center_state(f)
+            return
+        # Kompassektorer. Uden center er det en profil gemt før
+        # pejlingsbetingelsen (set fra Home): selve filteret genbruges
+        # uændret (se _legacy_dir_filter). Rækken viser den tilsvarende
+        # gradbue, når sektorerne hænger sammen, og kompasrosen de gemte
+        # sektorer.
+        legacy = f.lat is None or f.lon is None
+        selected = [d in f.directions for d in DIRECTIONS]
+        if legacy and (all(selected) or not any(selected)):
+            return  # the old dialog never saved these — nothing to show
+        self._dir_enabled.setChecked(True)
+        if not legacy:
+            self._load_center_state(f)
+        self._dir_sectors = list(f.directions)
+        self._legacy_dir_filter = f if legacy else None
+        self._update_dir_inputs()
+
+    @staticmethod
+    def _sector_arc(selected: list[bool]) -> Optional[tuple[float, float]]:
+        """Clockwise (from°, to°) covering the selected compass sectors when
+        they form one contiguous run, else None."""
+        n = len(selected)
+        starts = [i for i in range(n) if selected[i] and not selected[i - 1]]
+        if len(starts) != 1:
+            return None
+        first = starts[0]
+        last = first
+        while selected[(last + 1) % n]:
+            last = (last + 1) % n
+        return (first * 45.0 - 22.5) % 360.0, (last * 45.0 + 22.5) % 360.0
 
     def _enable_all_types(self) -> None:
         for cb in self._type_checks.values():
@@ -2472,13 +2693,10 @@ class FilterDialog(QDialog):
         self._avail_cb.setChecked(True)
         self._unavail_cb.setChecked(True)
         self._archived_cb.setChecked(True)  # issue #576 — GSAK-style default
-        self._reset_dist()
-        self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
         self._cc_yes.setChecked(True)
         self._cc_no.setChecked(True)
-        self._reset_ccd()
 
     def _reset_dates(self) -> None:
         for row in self._date_rows.values():
@@ -2487,7 +2705,10 @@ class FilterDialog(QDialog):
     def _reset_misc(self) -> None:
         for row, _cls in self._misc_text_rows():
             row.reset()
-        self._set_all_directions(True)
+        self._reset_dist()
+        self._reset_dir()
+        self._reset_ccd()
+        self._center_picker.set_state({"kind": "home"})
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
         self._locked_yes.setChecked(True)
@@ -2496,11 +2717,8 @@ class FilterDialog(QDialog):
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
         self._ftf_no.setChecked(True)
-        self._fav_enabled.setChecked(False)
-        self._fav_min.setValue(0)
-        self._fav_max.setValue(9999)
-        self._elev_enabled.setChecked(False)
-        self._set_elev_range(-500.0, 9000.0)
+        self._reset_fav()
+        self._reset_elev()
 
     def _reset_attributes(self) -> None:
         self._attr_mode_all.setChecked(True)
@@ -2632,6 +2850,8 @@ class FilterDialog(QDialog):
         for op_combo, spin1, spin2 in (
             (self._dist_op, self._dist1, self._dist2),
             (self._ccd_op, self._ccd_dist1, self._ccd_dist2),
+            (self._fav_op, self._fav_val1, self._fav_val2),
+            (self._elev_op, self._elev_val1, self._elev_val2),
         ):
             if op_combo.currentData() in ("between", "not_between") \
                     and spin1.value() > spin2.value():
@@ -2693,20 +2913,40 @@ class FilterDialog(QDialog):
                 show_archived=archived,
             ))
 
-        # Afstand
-        if self._dist_enabled.isChecked():
+        # Afstand og retning fra det fælles center-punkt. En uændret,
+        # migreret sektor-retning (fra Home) genbruges som den er.
+        legacy_dir = self._legacy_dir_filter if self._dir_enabled.isChecked() else None
+        if legacy_dir is not None:
+            fs.add(legacy_dir)
+        if self._dist_enabled.isChecked() or (
+                self._dir_enabled.isChecked() and legacy_dir is None):
             center = self._center_picker.get_center()
             if center is None:
                 QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
             else:
                 lat, lon = center
-                dist1_km, dist2_km = self._dist_values_km()
-                fs.add(DistanceFilter(
-                    lat, lon,
-                    center_state=self._center_picker.to_state(),
-                    op=self._dist_op.currentData(),
-                    dist1_km=dist1_km, dist2_km=dist2_km,
-                ))
+                center_state = self._center_picker.to_state()
+                if self._dist_enabled.isChecked():
+                    dist1_km, dist2_km = self._dist_values_km()
+                    fs.add(DistanceFilter(
+                        lat, lon,
+                        center_state=center_state,
+                        op=self._dist_op.currentData(),
+                        dist1_km=dist1_km, dist2_km=dist2_km,
+                    ))
+                if self._dir_enabled.isChecked() and legacy_dir is None:
+                    if self._dir_sectors is not None:
+                        # Picked on the rose — exactly those sectors.
+                        fs.add(DirectionFilter(
+                            self._dir_sectors,
+                            lat=lat, lon=lon, center_state=center_state,
+                        ))
+                    else:
+                        fs.add(DirectionFilter(
+                            op=self._dir_op.currentData(),
+                            deg1=self._dir_deg1.value(), deg2=self._dir_deg2.value(),
+                            lat=lat, lon=lon, center_state=center_state,
+                        ))
 
         # Premium
         prem_yes = self._prem_yes.isChecked()
@@ -2750,11 +2990,6 @@ class FilterDialog(QDialog):
             if text_filter is not None:
                 fs.add(text_filter)
 
-        # Retning — alle eller ingen valgt = intet filter (samme som Container)
-        selected_dirs = [d for d, cb in self._dir_checks.items() if cb.isChecked()]
-        if selected_dirs and len(selected_dirs) < len(DIRECTIONS):
-            fs.add(DirectionFilter(selected_dirs))
-
         # User Flag
         flag_yes = self._flag_yes.isChecked()
         flag_no  = self._flag_no.isChecked()
@@ -2790,14 +3025,17 @@ class FilterDialog(QDialog):
         # Favorit points
         if self._fav_enabled.isChecked():
             fs.add(FavoritePointsFilter(
-                min_pts=int(self._fav_min.value()),
-                max_pts=int(self._fav_max.value()),
+                op=self._fav_op.currentData(),
+                pts1=int(self._fav_val1.value()),
+                pts2=int(self._fav_val2.value()),
             ))
 
         # Højde
         if self._elev_enabled.isChecked():
-            min_m, max_m = self._elev_range_m()
-            fs.add(ElevationFilter(min_m=min_m, max_m=max_m))
+            elev1_m, elev2_m = self._elev_values_m()
+            fs.add(ElevationFilter(
+                op=self._elev_op.currentData(), elev1_m=elev1_m, elev2_m=elev2_m,
+            ))
 
         # Linje/Polygon
         lp_filter = self._build_line_polygon_filter()
@@ -3010,9 +3248,7 @@ class FilterDialog(QDialog):
                 for cs, cb in self._cont_checks.items():
                     cb.setChecked(cs in sizes)
             elif ftype == "direction":
-                dirs = getattr(f, "directions", [])
-                for d, cb in self._dir_checks.items():
-                    cb.setChecked(d in dirs)
+                self._load_direction_filter(f)
             elif ftype == "difficulty":
                 self._diff_min.setValue(getattr(f, "min_difficulty", 1.0))
                 self._diff_max.setValue(getattr(f, "max_difficulty", 5.0))
@@ -3126,11 +3362,15 @@ class FilterDialog(QDialog):
                 self._ftf_no.setChecked(not has_ftf)
             elif ftype == "favorite_points":
                 self._fav_enabled.setChecked(True)
-                self._fav_min.setValue(getattr(f, "min_pts", 0))
-                self._fav_max.setValue(getattr(f, "max_pts", 9999))
+                index = self._fav_op.findData(getattr(f, "op", _FAV_DEFAULT_OP))
+                self._fav_op.setCurrentIndex(max(index, 0))
+                self._fav_val1.setValue(getattr(f, "pts1", 0))
+                self._fav_val2.setValue(getattr(f, "pts2", 0))
             elif ftype == "elevation":
                 self._elev_enabled.setChecked(True)
-                self._set_elev_range(getattr(f, "min_m", -500.0), getattr(f, "max_m", 9000.0))
+                index = self._elev_op.findData(getattr(f, "op", _ELEV_DEFAULT_OP))
+                self._elev_op.setCurrentIndex(max(index, 0))
+                self._set_elev_values(getattr(f, "elev1_m", 0.0), getattr(f, "elev2_m", 0.0))
             elif ftype == "log":
                 self._load_log_filter(f)
             elif ftype == "date":

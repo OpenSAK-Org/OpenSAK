@@ -238,6 +238,7 @@ STRINGS: dict[str, str] = {
     "filter_ftf_group":            "FTF (First to Find) 🥇",
     "filter_user_note_label":      "Personal note",
     "filter_direction_group":      "Direction from center point",
+    "filter_direction_info":       'Set the direction in one of two ways:\n\n• Degrees: pick a condition and enter the bearing — 0° = north, 90° = east, clockwise. "Between" runs clockwise, so 315° – 45° is the sector through north.\n\n• Compass: click the directions (N, NE, E …). This overwrites the degree values with the matching range. Directions that are not next to each other cannot be written as one range — the degree values are then greyed out.\n\nChanging the degree values again replaces the clicked directions. The direction is measured from the center point above.',
     "filter_fav_points_group":     "Favorite points",
     "filter_found_date_group":     "Found by me date",
     "filter_where_description":     "Filter caches with a raw SQL WHERE clause against the caches table.",
