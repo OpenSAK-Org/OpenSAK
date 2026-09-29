@@ -1848,49 +1848,12 @@ class CacheTableView(QTableView):
         self._save_corrected(cache, None, None)
 
     def _save_corrected(self, cache: Cache, lat, lon) -> None:
-        from opensak.db.database import get_session
-        from opensak.db.models import UserNote, Cache as CacheModel
-        from sqlalchemy.orm import joinedload, selectinload
-        with get_session() as session:
-            cache_row = session.query(CacheModel).options(
-                joinedload(CacheModel.user_note)
-            ).filter_by(gc_code=cache.gc_code).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-                session.flush()
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
-
-        # Reload det fulde cache-objekt fra DB med user_note eager-loaded,
-        # og erstat det detachede objekt i modellen direkte.
-        # Det undgår alle problemer med at skrive til detached ORM-relationer.
-        with get_session() as session:
-            fresh = session.query(CacheModel).options(
-                joinedload(CacheModel.user_note),
-                selectinload(CacheModel.waypoints),
-                selectinload(CacheModel.attributes),
-                selectinload(CacheModel.trackables),
-            ).filter_by(gc_code=cache.gc_code).first()
-            if fresh is None:
-                return
-
-        # Erstat objektet i listen — find det via gc_code
-        caches = self._model._caches
-        for i, c in enumerate(caches):
-            if c.gc_code == cache.gc_code:
-                caches[i] = fresh
-                break
-
-        self._reset_model_preserving_selection()
-        # Issue #474: map wasn't refreshed when corrected coords were set/cleared
-        # via this (context menu) path — only the "Add corrected coordinates..."
-        # button in the cache detail panel emitted a change signal. Emit here too
-        # so mainwindow can update the map pin the same way for both entry points.
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(cache.gc_code, lat, lon):
+            return
+        # Issue #474: mainwindow refreshes the table row (refresh_cache_row),
+        # map pin and detail panel from this signal — the same handler for
+        # every entry point, so no row reload here.
         self.corrected_coords_changed.emit(cache.gc_code)
 
     def _open_converter(self, lat: float, lon: float) -> None:

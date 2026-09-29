@@ -1009,6 +1009,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Original coordinates:",
     "corrected_dialog_corrected":   "Corrected coordinates:",
     "corrected_dialog_copy_tooltip": "Copy to clipboard",
+    "corrected_dialog_offset":      "Distance from original: {distance}  ·  Bearing: {bearing}",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Distance & Bearing",

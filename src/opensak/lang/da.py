@@ -1010,6 +1010,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Originale koordinater:",
     "corrected_dialog_corrected":   "Korrigerede koordinater:",
     "corrected_dialog_copy_tooltip": "Kopiér til udklipsholder",
+    "corrected_dialog_offset":      "Afstand fra original: {distance}  ·  Retning: {bearing}",
 
     # ── Afstand & retning dialog ──────────────────────────────────────────────
     "dist_title":                   "Afstand & Retning",

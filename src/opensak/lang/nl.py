@@ -1012,6 +1012,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Originele coördinaten:",
     "corrected_dialog_corrected":   "Gecorrigeerde coördinaten:",
     "corrected_dialog_copy_tooltip": "Kopiëren naar klembord",
+    "corrected_dialog_offset":      "Afstand tot origineel: {distance}  ·  Richting: {bearing}",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Afstand & Richting",

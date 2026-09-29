@@ -1636,26 +1636,12 @@ class MainWindow(QMainWindow):
 
     def _on_set_corrected_from_map(self, gc_code: GcCode, lat: float, lon: float) -> None:
         """Sæt korrigerede koordinater på en cache via højreklik på kortet."""
-        from opensak.db.database import get_session
-        from opensak.db.models import UserNote
+        from opensak.db.corrected_coords import set_corrected_coords
         from opensak.coords import format_coords
         from opensak.gui.settings import get_settings
-        from sqlalchemy.orm import joinedload
 
-        with get_session() as session:
-            cache = session.query(Cache).options(
-                joinedload(Cache.user_note)
-            ).filter_by(gc_code=gc_code).first()
-            if not cache:
-                return
-            note = cache.user_note
-            if note is None:
-                note = UserNote(cache_id=cache.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = True
-            session.commit()
+        if not set_corrected_coords(gc_code, lat, lon):
+            return
 
         coords = format_coords(lat, lon, get_settings().coord_format)
         self._statusbar.showMessage(
@@ -1664,11 +1650,15 @@ class MainWindow(QMainWindow):
         self._on_corrected_coords_changed(gc_code)
 
     def _on_corrected_coords_changed(self, gc_code: GcCode) -> None:
-        """Update the map pin and table row after corrected coordinates change."""
+        """Update the map pin, table row and detail panel (if this cache is
+        currently shown) after corrected coordinates change — whichever entry
+        point (detail panel, table context menu, map context menu) made it."""
         self._cache_table.refresh_cache_row(gc_code)
         full = self._load_full_cache(gc_code)
         if full:
             self._map_widget.update_cache(full)
+            if getattr(self._detail_panel, "_current_gc_code", None) == gc_code:
+                self._detail_panel.show_cache(full)
 
     def _on_found_status_changed(self, gc_code: GcCode) -> None:
         """Issue #649: refresh table row, map pin, detail panel (if this

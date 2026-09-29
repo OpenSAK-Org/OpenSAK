@@ -1011,6 +1011,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Coordonnées d'origine :",
     "corrected_dialog_corrected":   "Coordonnées corrigées :",
     "corrected_dialog_copy_tooltip": "Copier dans le presse-papiers",
+    "corrected_dialog_offset":      "Distance depuis l'original : {distance}  ·  Cap : {bearing}",
 
     # ── Distance & cap ────────────────────────────────────────────────────────
     "dist_title":                   "Distance & Cap",

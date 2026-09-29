@@ -877,3 +877,31 @@ class TestDescriptionEscaping:
         )
         assert "Real" in panel._desc_view.toPlainText()
         assert "HTML" in panel._desc_view.toPlainText()
+
+
+# ── Corrected coordinates dialog ──────────────────────────────────────────────
+
+def test_edit_corrected_passes_original_coords(monkeypatch, tmp_path, qapp):
+    # The detail panel must pass the cache's original coordinates so the
+    # dialog shows the same "Original coordinates" panel as the table and
+    # Edit Cache entry points.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    captured = {}
+
+    class FakeDlg:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def exec(self):
+            return False
+
+    monkeypatch.setattr(
+        "opensak.gui.dialogs.corrected_coords_dialog.CorrectedCoordsDialog", FakeDlg
+    )
+    panel = CacheDetailPanel()
+    panel.show_cache(_load_cache(tmp_path, db_suffix="corr"))
+    panel._edit_corrected_coords()
+
+    assert captured["gc_code"] == "GCNOTES1"
+    assert captured["orig_lat"] == pytest.approx(55.0)
+    assert captured["orig_lon"] == pytest.approx(10.0)

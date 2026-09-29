@@ -450,6 +450,8 @@ class CacheDetailPanel(QWidget):
         from opensak.gui.dialogs.corrected_coords_dialog import CorrectedCoordsDialog
         dlg = CorrectedCoordsDialog(
             gc_code=self._current_gc_code,
+            orig_lat=self._current_lat,
+            orig_lon=self._current_lon,
             corrected_lat=self._corrected_lat,
             corrected_lon=self._corrected_lon,
             parent=self,
@@ -462,27 +464,17 @@ class CacheDetailPanel(QWidget):
         self._save_corrected_coords(None, None)
 
     def _save_corrected_coords(self, lat, lon) -> None:
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache as CacheModel, UserNote
-        with get_session() as session:
-            cache_row = session.query(CacheModel).filter_by(
-                gc_code=self._current_gc_code
-            ).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
+        gc_code = self._current_gc_code
+        if not gc_code:
+            return
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(gc_code, lat, lon):
+            return
 
         self._corrected_lat = lat
         self._corrected_lon = lon
         self._update_corrected_ui()
-        if self._current_gc_code:
-            self.corrected_coords_changed.emit(self._current_gc_code)
+        self.corrected_coords_changed.emit(gc_code)
 
     def eventFilter(self, obj, event) -> bool:
         note_editor = getattr(self, "_note_editor", None)

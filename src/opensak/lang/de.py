@@ -1011,6 +1011,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Originalkoordinaten:",
     "corrected_dialog_corrected":   "Korrigierte Koordinaten:",
     "corrected_dialog_copy_tooltip": "In die Zwischenablage kopieren",
+    "corrected_dialog_offset":      "Entfernung vom Original: {distance}  ·  Richtung: {bearing}",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Entfernung & Peilung",
