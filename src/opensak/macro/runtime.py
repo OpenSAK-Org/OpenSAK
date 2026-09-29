@@ -33,6 +33,19 @@ Example:
 
     local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
     print("Easy unfound traditionals: " .. n)
+
+
+Known limitation (#938 step 4): the instruction limit only counts Lua VM
+instructions, not work inside C functions. Lua pattern matching backtracks
+in C, so e.g. string.rep("a", 100):find(".-.-.-.-.-b") runs ~12 s despite
+instruction_limit=100_000, and longer subjects take minutes. The memory
+limit does not help either (matching allocates nothing). Consequences:
+  * Planned regex functions should use a linear-time engine (google-re2) or
+    the `regex` module with its timeout= argument, not Python's `re`.
+  * A worker thread keeps the GUI responsive and lets a Cancel button
+    abandon the run, but cannot stop a call that is already running; only a
+    subprocess can be terminated hard. This belongs to the threading decision.
+
 """
 
 from __future__ import annotations
@@ -75,7 +88,16 @@ _TEXT_FILTERS = {
     "county": CountyFilter,
 }
 FILTER_KEYS = sorted(
-    {"type", "container", "difficulty", "terrain", "found", "available", "where", "label"}
+    {
+        "type",
+        "container",
+        "difficulty",
+        "terrain",
+        "found",
+        "available",
+        "where",
+        "label",
+    }
     | set(_TEXT_FILTERS)
 )
 
@@ -170,6 +192,7 @@ class MacroHost(Protocol):
 
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
 
+
 def _as_list(value: Any) -> list:
     """A Lua value that may be a scalar or an array table → Python list."""
     if isinstance(value, (list, tuple)):
@@ -213,7 +236,9 @@ def build_filterset(spec: dict) -> tuple[FilterSet, str]:
 
     fs = FilterSet(mode="AND")
     if "type" in spec:
-        fs.add(CacheTypeFilter([_resolve_cache_type(t) for t in _as_list(spec["type"])]))
+        fs.add(
+            CacheTypeFilter([_resolve_cache_type(t) for t in _as_list(spec["type"])])
+        )
     if "container" in spec:
         fs.add(ContainerFilter([str(c) for c in _as_list(spec["container"])]))
     if "difficulty" in spec:
@@ -236,6 +261,7 @@ def build_filterset(spec: dict) -> tuple[FilterSet, str]:
 
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
+
 
 class MacroRuntime:
     """Run Lua macros against a MacroHost.
@@ -262,7 +288,9 @@ class MacroRuntime:
 
     def _filter(self, spec=None) -> int:
         if spec is None or not hasattr(spec, "items"):
-            raise MacroError("opensak.filter expects a table, e.g. opensak.filter{ found = false }")
+            raise MacroError(
+                "opensak.filter expects a table, e.g. opensak.filter{ found = false }"
+            )
         fs, label = build_filterset(dict(spec.items()))
         return self._host.apply_filter(fs, label)
 
@@ -299,7 +327,7 @@ class MacroRuntime:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
             raise MacroError(
-                "Lua support is not installed — run: pip install \"lupa>=2.0,<3\""
+                'Lua support is not installed — run: pip install "lupa>=2.0,<3"'
             ) from exc
 
         lua = LuaRuntime(
@@ -315,13 +343,15 @@ class MacroRuntime:
 
         g = lua.globals()
         g.print = self._lua_print
-        g.opensak = lua.table_from({
-            "filter": self._wrap(self._filter),
-            "filter_profile": self._wrap(self._filter_profile),
-            "clear_filter": self._wrap(self._host.clear_filter),
-            "count": self._wrap(self._host.cache_count),
-            "profiles": self._wrap(lambda: lua.table_from(self._profile_names())),
-        })
+        g.opensak = lua.table_from(
+            {
+                "filter": self._wrap(self._filter),
+                "filter_profile": self._wrap(self._filter_profile),
+                "clear_filter": self._wrap(self._host.clear_filter),
+                "count": self._wrap(self._host.cache_count),
+                "profiles": self._wrap(lambda: lua.table_from(self._profile_names())),
+            }
+        )
 
         try:
             fn = lua.compile(source, name=f"={chunk_name}")
@@ -353,6 +383,7 @@ class MacroRuntime:
                 return func(*args)
             except MacroError as exc:
                 raise LuaError(str(exc)) from None
+
         return call
 
     def _lua_print(self, *args) -> None:
