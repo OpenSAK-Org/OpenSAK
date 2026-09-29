@@ -549,6 +549,8 @@ class MainWindow(QMainWindow):
 
         # ── Macros (Lua, proof of concept) ────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
+        # Beta-only until the macro API is settled (#938 step 4).
+        macros_menu.menuAction().setVisible(flags.lua_macros)
 
         act_run_macro = QAction(tr("action_run_macro"), self)
         act_run_macro.triggered.connect(self._open_macro_dialog)
