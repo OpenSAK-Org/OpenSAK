@@ -13,7 +13,7 @@ Lua API (POC):
                                      -- (0 = nothing matched, view unchanged)
     opensak.filter_profile("Name")   -- apply a saved filter profile; returns count
     opensak.clear_filter()           -- show all caches again
-    opensak.count()                  -- caches currently shown in the list
+    opensak.count()                  -- caches matching the active filter
     opensak.profiles()               -- list of saved filter profile names
     print(...)                       -- write to the macro output pane
 
@@ -160,7 +160,12 @@ class MacroHost(Protocol):
         """Remove the active filter."""
 
     def cache_count(self) -> int:
-        """Number of caches currently shown."""
+        """Number of caches matching the active filter.
+
+        Must be up to date right after apply_filter()/clear_filter(), even if
+        the host refreshes its view asynchronously — i.e. ask the database,
+        not the UI.
+        """
 
 
 # ── Lua table → FilterSet ────────────────────────────────────────────────────

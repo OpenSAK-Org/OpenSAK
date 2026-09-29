@@ -3063,8 +3063,13 @@ class MainWindow(QMainWindow):
         self._clear_filter()
 
     def cache_count(self) -> int:
-        """MacroHost: number of caches currently in the list."""
-        return self._cache_table.row_count()
+        """MacroHost: number of caches matching the active filter.
+
+        Asks the database rather than the table: clear_filter() (and any
+        other _refresh_cache_list()) reloads the table asynchronously, so its
+        row count would still be stale right after the call."""
+        with get_session() as session:
+            return len(apply_filters_auto(session, self._build_active_filterset()))
 
     def _open_found_updater(self) -> None:
         if self._trip_planner_active():
