@@ -464,15 +464,17 @@ class CacheDetailPanel(QWidget):
         self._save_corrected_coords(None, None)
 
     def _save_corrected_coords(self, lat, lon) -> None:
+        gc_code = self._current_gc_code
+        if not gc_code:
+            return
         from opensak.db.corrected_coords import set_corrected_coords
-        if not set_corrected_coords(self._current_gc_code, lat, lon):
+        if not set_corrected_coords(gc_code, lat, lon):
             return
 
         self._corrected_lat = lat
         self._corrected_lon = lon
         self._update_corrected_ui()
-        if self._current_gc_code:
-            self.corrected_coords_changed.emit(self._current_gc_code)
+        self.corrected_coords_changed.emit(gc_code)
 
     def eventFilter(self, obj, event) -> bool:
         note_editor = getattr(self, "_note_editor", None)
