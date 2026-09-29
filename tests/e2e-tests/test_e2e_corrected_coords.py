@@ -245,3 +245,36 @@ def test_change_on_other_cache_leaves_detail_panel_alone(seeded_window, qtbot):
 
     assert panel._current_gc_code == "GC12345"
     assert panel._corrected_lat is None
+
+
+def test_remove_button_clears_corrected_coords(seeded_window, qtbot, monkeypatch):
+    # The dialog's "Clear corrected coordinates" button removes them from the
+    # DB and the detail panel.
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache as CacheModel
+    from opensak.gui.dialogs.corrected_coords_dialog import CorrectedCoordsDialog
+
+    window = seeded_window
+    _select_cache(window, qtbot, "GC12345")
+    panel = window._detail_panel
+    window._on_set_corrected_from_map("GC12345", 56.5, 13.5)
+    qtbot.wait(100)
+    assert panel._corrected_lat is not None
+
+    class _Remove(CorrectedCoordsDialog):
+        def exec(self):
+            assert self._remove_btn.isVisibleTo(self)
+            self._remove_btn.click()
+            return self.result()
+
+    monkeypatch.setattr(
+        "opensak.gui.dialogs.corrected_coords_dialog.CorrectedCoordsDialog", _Remove
+    )
+    panel._edit_corrected_coords()
+    qtbot.wait(100)
+
+    with get_session() as session:
+        note = session.query(CacheModel).filter_by(gc_code="GC12345").one().user_note
+        assert note.is_corrected is False
+        assert note.corrected_lat is None
+    assert panel._corrected_lat is None

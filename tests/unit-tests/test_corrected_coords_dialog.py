@@ -150,3 +150,28 @@ class TestOffsetFromOriginal:
         qtbot.addWidget(dlg)
         dlg._input.setText("47.01, 8.0")
         assert not dlg._offset_lbl.isVisibleTo(dlg)
+
+
+class TestRemoveButton:
+    def test_hidden_without_existing_corrected(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog("GC123", orig_lat=47.0, orig_lon=8.0)
+        qtbot.addWidget(dlg)
+        assert not dlg._remove_btn.isVisibleTo(dlg)
+
+    def test_shown_with_existing_corrected(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog(
+            "GC123", orig_lat=47.0, orig_lon=8.0,
+            corrected_lat=47.01, corrected_lon=8.0,
+        )
+        qtbot.addWidget(dlg)
+        assert dlg._remove_btn.isVisibleTo(dlg)
+
+    def test_remove_accepts_with_no_coords(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog(
+            "GC123", corrected_lat=47.01, corrected_lon=8.0,
+        )
+        qtbot.addWidget(dlg)
+        assert dlg.get_coords() != (None, None)
+        dlg._remove_btn.click()
+        assert dlg.result() == QDialog.DialogCode.Accepted
+        assert dlg.get_coords() == (None, None)

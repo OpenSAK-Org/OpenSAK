@@ -184,6 +184,17 @@ class CorrectedCoordsDialog(QDialog):
         btn_box.rejected.connect(self.reject)
         self._ok_btn = btn_box.button(QDialogButtonBox.StandardButton.Ok)
         self._ok_btn.setEnabled(False)
+
+        # Fjern-knap — kun når cachen allerede har korrigerede koordinater.
+        # Accepterer dialogen med (None, None), som alle kaldere gemmer som "ryd".
+        self._remove_btn = btn_box.addButton(
+            tr("ctx_clear_corrected"), QDialogButtonBox.ButtonRole.ResetRole
+        )
+        self._remove_btn.setToolTip(tr("detail_corrected_clear_tooltip"))
+        self._remove_btn.clicked.connect(self._on_remove)
+        self._remove_btn.setVisible(
+            current_lat is not None and current_lon is not None
+        )
         layout.addWidget(btn_box)
 
         self._input.textChanged.connect(self._on_input_changed)
@@ -266,6 +277,12 @@ class CorrectedCoordsDialog(QDialog):
     def _on_accept(self) -> None:
         if self._lat is not None and self._lon is not None:
             self.accept()
+
+    def _on_remove(self) -> None:
+        """Ryd korrigerede koordinater: accepter med (None, None)."""
+        self._lat = None
+        self._lon = None
+        self.accept()
 
     def get_coords(self) -> Tuple[Optional[float], Optional[float]]:
         """Returner de parsede koordinater."""
