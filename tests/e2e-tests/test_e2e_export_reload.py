@@ -54,7 +54,7 @@ def test_table_caches_are_detached_and_deferred(seeded_window):
 
 def test_file_export_reloads_full_caches(seeded_window, tmp_path):
     """Exporting table caches to GPX no longer crashes, and the output includes
-    the hint (deferred) and log text (noload'ed) that were absent at load time."""
+    the hint (deferred) and log text (raiseload'ed) that were absent at load time."""
     from opensak.gui.dialogs.file_export_dialog import _ExportWorker
 
     caches = _table_caches(seeded_window)
@@ -68,4 +68,4 @@ def test_file_export_reloads_full_caches(seeded_window, tmp_path):
     assert not errors, errors
     content = out.read_text(encoding="utf-8")
     assert "Under a rock." in content      # encoded_hints (deferred) reloaded
-    assert "TFTC! Great hide." in content   # log text (noload'ed) reloaded
+    assert "TFTC! Great hide." in content   # log text (raiseload'ed) reloaded

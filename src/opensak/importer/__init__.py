@@ -849,9 +849,9 @@ def _insert_extra_wpts(session: Session, extra_wpts: list, commit_every: int = 5
     # Build suffix→cache_id and suffix→gc_code once.
     suffix_to_cache_id: dict[str, int] = {}
     suffix_to_gc_code: dict[str, str] = {}
-    for cache_id, gc_code in session.query(Cache.id, Cache.gc_code):
+    for cid, gc_code in session.query(Cache.id, Cache.gc_code):
         if gc_code and len(gc_code) > 2:
-            suffix_to_cache_id[gc_code[2:]] = cache_id
+            suffix_to_cache_id[gc_code[2:]] = cid
             suffix_to_gc_code[gc_code[2:]] = gc_code
 
     # Group waypoints per suffix.
@@ -1213,7 +1213,7 @@ def _upsert_cache(
     cache.last_found_date = max(found_log_dates) if found_log_dates else None
 
     # ── Issue #716: last_four_logs (cached summary — logs relationship is
-    # noload'ed in the grid, same reasoning as last_log_date above) ────────
+    # not loaded in the grid, same reasoning as last_log_date above) ──────
     _recent = sorted(
         (lg for lg in existing_logs_by_id.values() if lg.log_date),
         key=lambda lg: _as_aware_utc(lg.log_date), reverse=True,

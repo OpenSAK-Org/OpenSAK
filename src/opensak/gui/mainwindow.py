@@ -225,6 +225,11 @@ class MainWindow(QMainWindow):
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
         self._active_refresh_workers: list[RefreshWorker] = []
+        # Issue #558: the toolbar Where box's expression currently in
+        # effect — only set once validated on Enter, so a half-typed
+        # expression never leaks into refreshes triggered elsewhere.
+        self._where_sql_applied: str = ""
+        self._where_error: str | None = None
         self._setup_ui()
         self._setup_menu()
         self._setup_toolbar()
@@ -577,6 +582,12 @@ class MainWindow(QMainWindow):
         act_open_previous_log.triggered.connect(self._open_previous_log_file)
         help_menu.addAction(act_open_previous_log)
 
+        # Issue #907: vis alle steder OpenSAK gemmer data, så brugeren selv
+        # kan finde/rydde op i dem (fx rester efter en afinstallation).
+        act_file_locations = QAction(tr("action_file_locations"), self)
+        act_file_locations.triggered.connect(self._open_file_locations)
+        help_menu.addAction(act_file_locations)
+
         help_menu.addSeparator()
 
         act_support = QAction(tr("action_support_opensak"), self)
@@ -861,6 +872,43 @@ class MainWindow(QMainWindow):
         self._search_box.setClearButtonEnabled(True)
         self._search_box.textChanged.connect(self._on_search_changed)
         row.addWidget(self._search_box)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        row.addWidget(sep2)
+
+        # Quick "Where" box (issue #558) — GSAK-style editable combo with
+        # history; same SQL syntax as the Where tab in the filter dialog.
+        where_lbl = QLabel(tr("search_where_label") + ":")
+        where_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        row.addWidget(where_lbl)
+
+        self._where_combo = QComboBox()
+        self._where_combo.setEditable(True)
+        # History is managed by _remember_where(), not by Qt's own insert.
+        self._where_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # No inline autocompletion — Enter must apply exactly what was typed
+        # (e.g. "distance < 1" must not silently become "distance < 10").
+        self._where_combo.setCompleter(None)  # type: ignore[arg-type]  # Qt: None disables
+        self._where_combo.setFixedWidth(260)
+        self._where_combo.setToolTip(tr("search_where_tooltip"))
+        self._where_combo.addItems(get_settings().quick_where_history)
+        self._where_combo.setCurrentIndex(-1)
+        where_edit = cast(QLineEdit, self._where_combo.lineEdit())
+        where_edit.setPlaceholderText(tr("search_where_placeholder"))
+        where_edit.setClearButtonEnabled(True)
+        where_edit.returnPressed.connect(self._apply_quick_where)
+        self._where_combo.activated.connect(lambda _idx: self._apply_quick_where())
+        self._where_combo.editTextChanged.connect(self._on_where_text_changed)
+        row.addWidget(self._where_combo)
+
+        where_info_btn = QPushButton("ⓘ")
+        where_info_btn.setFlat(True)
+        where_info_btn.setFixedWidth(26)
+        where_info_btn.setToolTip(tr("filter_where_info_tooltip"))
+        where_info_btn.clicked.connect(self._show_where_info)
+        row.addWidget(where_info_btn)
 
         # Spacer — skubber felterne til venstre (issue #125)
         row.addStretch()
@@ -1457,6 +1505,11 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import NameFilter
             fs.add(NameFilter(name_search))
 
+        # Quick "Where" box (issue #558) — only the validated expression
+        if self._where_sql_applied:
+            from opensak.filters.engine import WhereClauseFilter
+            fs.add(WhereClauseFilter(self._where_sql_applied))
+
         return fs
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -1465,8 +1518,8 @@ class MainWindow(QMainWindow):
         """
         Indlæs en enkelt cache fra DB med alle relationer eager-loaded.
 
-        apply_filters() bruger noload() på logs/waypoints/user_note for
-        performance ved store databaser. Denne hjælper bruges når brugeren
+        apply_filters() indlæser ikke logs/waypoints/attributes/trackables
+        (raiseload(), #898) for performance ved store databaser. Denne hjælper bruges når brugeren
         vælger en cache, så detaljepanelet altid får komplette data.
 
         Bruger selectinload() (ikke joinedload()) på de fire samtidige
@@ -1621,13 +1674,27 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
         self._update_info_bar()
 
-    def _on_search_changed(self, text: str) -> None:
-        has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
-        if has_search:
+    def _has_quick_search(self) -> bool:
+        """True if any toolbar search box (GC code / Name / Where) is in effect."""
+        if not hasattr(self, "_search_gc") or not hasattr(self, "_search_box"):
+            return False
+        return bool(
+            self._search_gc.text().strip()
+            or self._search_box.text().strip()
+            or self._where_sql_applied
+        )
+
+    def _update_quick_search_state(self) -> None:
+        """Sync the Clear button and the profile dropdown's 'None' / 'Active
+        (unsaved)' entry with the toolbar search boxes."""
+        if self._has_quick_search():
             self._set_clear_filter_active(True)
         elif not self._active_filter_name:
             self._set_clear_filter_active(False)
         self._update_filter_combo_placeholder()
+
+    def _on_search_changed(self, text: str) -> None:
+        self._update_quick_search_state()
         min_chars, debounce_ms = self._search_thresholds()
         if text == "":
             # Clearing always fires immediately
@@ -1659,6 +1726,70 @@ class MainWindow(QMainWindow):
     def _on_quick_filter_changed(self, index: int) -> None:
         self._update_filter_combo_placeholder()
         self._refresh_cache_list()
+
+    # ── Quick "Where" box (issue #558) ────────────────────────────────────────
+
+    _WHERE_HISTORY_MAX = 20
+
+    def _apply_quick_where(self) -> None:
+        """Enter in the Where box, or picking a history entry: validate and
+        apply the expression. Invalid SQL is reported inline and leaves the
+        current list untouched, instead of silently showing zero rows."""
+        sql = self._where_combo.currentText().strip()
+        if sql == self._where_sql_applied and not self._where_error:
+            return  # e.g. activated + returnPressed for the same Enter
+        if sql:
+            from opensak.filters.engine import validate_where_sql
+            with get_session() as session:
+                error = validate_where_sql(session, sql)
+            if error:
+                self._set_where_error(error)
+                return
+            self._remember_where(sql)
+        self._set_where_error(None)
+        self._where_sql_applied = sql
+        self._update_quick_search_state()
+        self._refresh_cache_list()
+
+    def _on_where_text_changed(self, text: str) -> None:
+        if self._where_error:
+            self._set_where_error(None)
+        if not text.strip() and self._where_sql_applied:
+            # Clearing the box removes the filter immediately, same as the
+            # GC code / Name boxes.
+            self._apply_quick_where()
+
+    def _remember_where(self, sql: str) -> None:
+        """Move *sql* to the top of the persisted history and the dropdown."""
+        s = get_settings()
+        history = [sql] + [h for h in s.quick_where_history if h != sql]
+        history = history[:self._WHERE_HISTORY_MAX]
+        s.quick_where_history = history
+        self._where_combo.blockSignals(True)
+        self._where_combo.clear()
+        self._where_combo.addItems(history)
+        self._where_combo.setCurrentIndex(0)
+        self._where_combo.blockSignals(False)
+
+    def _set_where_error(self, error: str | None) -> None:
+        """Lightweight inline feedback for the Where box — red text, the
+        error in the tooltip and the status bar (no dialog to host a label)."""
+        self._where_error = error
+        edit = cast(QLineEdit, self._where_combo.lineEdit())
+        if error:
+            from opensak.gui.theme import effective_theme
+            color = "#ff8a80" if effective_theme(get_settings().theme) == "dark" else "#cc0000"
+            edit.setStyleSheet(f"QLineEdit {{ color: {color}; }}")
+            message = tr("search_where_invalid", error=error)
+            self._where_combo.setToolTip(message)
+            self._statusbar.showMessage(message, 8000)
+        else:
+            edit.setStyleSheet("")
+            self._where_combo.setToolTip(tr("search_where_tooltip"))
+
+    def _show_where_info(self) -> None:
+        from opensak.gui.dialogs.filter_dialog import show_where_info
+        show_where_info(self)
 
     # ── Drag & drop ───────────────────────────────────────────────────────────
 
@@ -2085,6 +2216,8 @@ class MainWindow(QMainWindow):
                     return
                 cache = Cache(**data)
                 session.add(cache)
+                session.flush()   # save_related() har brug for cache.id
+                dlg.save_related(session, cache)
             # Issue #662: a newly added cache/custom waypoint had no
             # distance/bearing computed, so it sorted to the bottom of the
             # list (as if distance were unset) until the user switched the
@@ -2136,6 +2269,8 @@ class MainWindow(QMainWindow):
                     for field, value in data.items():
                         if field != "gc_code":
                             setattr(c, field, value)
+                    # UserNote (note + korrigerede koordinater) og child-waypoints
+                    dlg.save_related(session, c)
             # Issue #662 follow-up: same stale-distance issue as adding a
             # new cache — editing coordinates left Cache.distance/bearing
             # unchanged until the center/home point was switched away and
@@ -2150,6 +2285,9 @@ class MainWindow(QMainWindow):
                 from opensak.db.database import recalculate_distances
                 recalculate_distances(s.home_lat, s.home_lon)
             self._refresh_cache_list()
+            # Detaljepanel/kort viser ellers de gamle waypoints, noter og
+            # korrigerede koordinater indtil cachen vælges igen.
+            self._on_found_status_changed(data["gc_code"])
             self._statusbar.showMessage(
                 tr("status_cache_updated", gc_code=data["gc_code"]), 3000
             )
@@ -2378,7 +2516,9 @@ class MainWindow(QMainWindow):
                     profile = FilterProfile.load(path)
                     if profile.name == profile_name:
                         self._current_filterset = profile.filterset
-                        self._current_sort = profile.sort
+                        # Behold databasens gemte kolonne-sortering — profilens
+                        # sort er altid "name" (filter-dialogen har ingen
+                        # sort-valg) og ville ellers overskrive brugerens valg.
                         self._active_filter_name = profile.name
                         self._set_clear_filter_active(True)
                         if hasattr(self, "_filter_lbl"):
@@ -2441,8 +2581,10 @@ class MainWindow(QMainWindow):
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
+            # `sort` from the dialog is always SortSpec("name") — ignore it
+            # and keep the user's column sort for this database.
             caches = apply_filters_auto(
-                session, filterset, sort,
+                session, filterset, self._current_sort,
                 columns=self._visible_table_columns(),
             )
 
@@ -2459,7 +2601,6 @@ class MainWindow(QMainWindow):
             return
 
         self._current_filterset = filterset
-        self._current_sort = sort
         self._active_filter_name = profile_name
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
@@ -2504,8 +2645,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
-            has_search = bool(self._search_gc.text().strip() or self._search_box.text().strip())
-            self._set_clear_filter_active(has_search)
+            self._set_clear_filter_active(self._has_quick_search())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
             self._refresh_cache_list()
@@ -2541,6 +2681,12 @@ class MainWindow(QMainWindow):
             field.blockSignals(True)
             field.clear()
             field.blockSignals(False)
+        self._where_combo.blockSignals(True)
+        self._where_combo.setCurrentIndex(-1)
+        self._where_combo.setEditText("")
+        self._where_combo.blockSignals(False)
+        self._where_sql_applied = ""
+        self._set_where_error(None)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -2571,9 +2717,8 @@ class MainWindow(QMainWindow):
             return False  # a saved profile is selected — not "unsaved"
         if self._current_filterset.active_count() > 0:
             return True
-        if hasattr(self, "_search_gc") and hasattr(self, "_search_box"):
-            if self._search_gc.text().strip() or self._search_box.text().strip():
-                return True
+        if self._has_quick_search():
+            return True
         if hasattr(self, "_quick_filter") and self._quick_filter.currentIndex() != 0:
             return True
         return False
@@ -2640,7 +2785,7 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(str(exc), 4000)
             return
         self._current_filterset = profile.filterset
-        self._current_sort = profile.sort
+        # Profilens sort ignoreres bevidst — se _load_sort_for_active_db().
         self._active_filter_name = profile.name
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
@@ -2648,7 +2793,7 @@ class MainWindow(QMainWindow):
         self._quick_filter.setCurrentIndex(0)
         with get_session() as session:
             caches = apply_filters_auto(
-                session, profile.filterset, profile.sort,
+                session, profile.filterset, self._current_sort,
                 columns=self._visible_table_columns(),
             )
         self._cache_table.load_caches(caches)
@@ -3024,6 +3169,12 @@ class MainWindow(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(log_path)))
 
+    def _open_file_locations(self) -> None:
+        """Vis alle OpenSAK-lagringssteder (issue #907)."""
+        from opensak.gui.dialogs.storage_locations_dialog import StorageLocationsDialog
+
+        StorageLocationsDialog(self).exec()
+
     # ── AppImage selv-integration (#835) ─────────────────────────────────────
 
     def _maybe_offer_appimage_integration(self) -> None:
@@ -3037,6 +3188,18 @@ class MainWindow(QMainWindow):
         from opensak import __version__
         from opensak.gui.settings import get_settings
         if not get_settings().updates_check_enabled:
+            return
+        # Issue #874: Microsoft Store/MSIX-installs opdaterer sig selv
+        # automatisk i baggrunden — vores eget tjek her ville blot vise en
+        # forvirrende "ny version tilgængelig, download her"-besked om
+        # noget brugeren hverken skal eller bør handle på selv (se #883
+        # for et reelt eksempel: en Store-bruger fik denne besked ved
+        # hver opstart). Springes derfor helt over for MSIX-builds; et
+        # manuelt "Check for updates"-klik (_check_update_manual) tjekker
+        # stadig, men viser en anden, ikke-handlingsorienteret besked —
+        # se _on_update_available().
+        from opensak import msix
+        if msix.is_msix_packaged():
             return
         self._update_worker = UpdateCheckWorker(
             __version__, parent=self,
@@ -3086,6 +3249,23 @@ class MainWindow(QMainWindow):
                 return
 
         from opensak import __version__
+
+        # Issue #874: baggrunds-tjekket springes helt over for MSIX (se
+        # _check_update_background()), så denne gren nås kun via et
+        # manuelt "Check for updates"-klik. Store/MSIX-installs opdaterer
+        # allerede automatisk i baggrunden — at tilbyde samme "download og
+        # kør selv"-dialog som portable/.exe-brugere får risikerer at
+        # blande installationsmetoder på samme maskine. Vis i stedet en
+        # simpel infobesked uden nogen handlingsknap.
+        from opensak import msix
+        if manual and msix.is_msix_packaged():
+            QMessageBox.information(
+                self,
+                tr("update_msix_managed_title"),
+                tr("update_msix_managed_msg", latest=latest_tag, current=__version__),
+            )
+            return
+
         # Point at the specific release tag, not always `main` — betas live on
         # the `beta` branch and aren't merged to `main` until they go stable,
         # so a hardcoded main link showed the wrong (older) changelog entry
@@ -3099,23 +3279,55 @@ class MainWindow(QMainWindow):
         else:
             msg.setWindowTitle(tr("update_available_title"))
             msg.setText(tr("update_available_msg", latest=latest_tag, current=__version__))
-        msg.setInformativeText(
-            tr("update_available_info")
-            + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
-        )
-        msg.setTextFormat(Qt.TextFormat.RichText)
 
         # AppImage-integrerede brugere får "Opgrader nu" (selv-opdatering,
         # issue #836) i stedet for "Åbn releases-side". Kun en billig
         # lokal statustjek her — selve asset-URL-opslaget sker først i
         # AppImageUpdateWorker, når brugeren rent faktisk klikker knappen.
         from opensak import appimage
-        can_self_update = (
+        can_appimage_self_update = (
             appimage.is_running_as_appimage() and appimage.is_appimage_integrated()
         )
-        if can_self_update:
+        # Issue #572: Windows/macOS kan ikke erstatte en kørende .exe/.app
+        # atomisk som Linux kan (se SelfUpdateWorker's docstring i
+        # updater.py) — men vi kan stadig downloade det rigtige,
+        # checksum-verificerede asset for brugeren og "åbne" det, i stedet
+        # for at sende dem til en browser til at vælge selv.
+        import sys
+        can_self_download = (
+            not can_appimage_self_update and sys.platform in ("win32", "darwin")
+        )
+
+        # Bug fundet via feedback fra Mike Wood (GSAK-forum, 22/9): denne
+        # infotekst blev tidligere sat ÉN gang, uafhængigt af hvilken
+        # primærknap der reelt vises nedenfor — så en macOS/Windows-bruger
+        # med #572's "Download & Install"-knap så teksten "Klik 'Download'
+        # for at åbne GitHub-releases-siden", selvom knappen rent faktisk
+        # downloadede automatisk. Teksten skal nu matche den sti brugeren
+        # faktisk får.
+        if can_appimage_self_update:
+            info_text = tr("update_available_info_appimage")
+        elif can_self_download and sys.platform == "darwin":
+            # Issue #893: macOS installerer nu selv og lukker derefter OpenSAK.
+            info_text = tr("update_available_info_self_install_mac")
+        elif can_self_download:
+            info_text = tr("update_available_info_self_download")
+        else:
+            info_text = tr("update_available_info")
+
+        msg.setInformativeText(
+            info_text
+            + f'  <a href="{changelog_url}">{tr("update_changelog")}</a>'
+        )
+        msg.setTextFormat(Qt.TextFormat.RichText)
+
+        if can_appimage_self_update:
             btn_primary = msg.addButton(
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
+            )
+        elif can_self_download:
+            btn_primary = msg.addButton(
+                tr("update_download_button"), QMessageBox.ButtonRole.AcceptRole
             )
         else:
             btn_primary = msg.addButton(
@@ -3131,8 +3343,10 @@ class MainWindow(QMainWindow):
 
         clicked = msg.clickedButton()
         if clicked == btn_primary:
-            if can_self_update:
+            if can_appimage_self_update:
                 self._start_appimage_self_update(latest_tag)
+            elif can_self_download:
+                self._start_self_download_update(latest_tag)
             else:
                 import webbrowser
                 webbrowser.open(url)
@@ -3183,4 +3397,85 @@ class MainWindow(QMainWindow):
         self._appimage_update_worker.finished_ok.connect(_on_ok)
         self._appimage_update_worker.finished_error.connect(_on_error)
         self._appimage_update_worker.start()
+
+    def _start_self_download_update(self, tag: str) -> None:
+        """
+        Kald ved klik på "Download & Install" for Windows/macOS-brugere
+        (issue #572). Til forskel fra AppImage-flowets ubestemte
+        "Henter…"-indikator kender vi her den faktiske downloadstørrelse
+        via Content-Length, så fremskridtslinjen viser en reel procent.
+
+        Windows: SelfUpdateWorker erstatter ikke den kørende .exe — når
+        download og checksum-verifikation er gennemført, "åbnes" filen
+        blot i Explorer, og brugeren fuldfører selv installationen.
+
+        macOS (issue #893): SelfUpdateWorker installerer selv og emitter
+        `installed`; OpenSAK lukkes så pænt (se _on_installed). Fejler den
+        automatiske installation, kommer `finished_ok` i stedet, med DMG'en
+        flyttet til ~/Downloads og åbnet for manuel installation.
+        """
+        import sys
+
+        from opensak.updater import SelfUpdateWorker
+
+        progress = QProgressDialog(tr("update_downloading"), "", 0, 100, self)
+        progress.setWindowTitle(tr("update_downloading_title"))
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        self._self_update_worker = SelfUpdateWorker(tag, parent=self)
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            if total > 0:
+                percent = min(100, int(downloaded * 100 / total))
+                progress.setValue(percent)
+                progress.setLabelText(tr("update_downloading_percent", percent=percent))
+
+        def _on_ok(opened_path: str) -> None:
+            progress.close()
+            if sys.platform == "darwin":
+                # #893-fallback: automatisk installation fejlede — fortæl
+                # hvor DMG'en ligger, så den kan findes og slettes bagefter.
+                msg = tr("update_download_saved_msg_mac", path=opened_path)
+            else:
+                msg = tr("update_download_done_msg")
+            QMessageBox.information(self, tr("update_download_done_title"), msg)
+
+        def _on_installed(_app_path: str) -> None:
+            progress.close()
+            QMessageBox.information(
+                self,
+                tr("update_appimage_done_title"),
+                tr("update_installed_msg_mac"),
+            )
+            # Issue #893: den kørende .app-bundle er nu udskiftet på disken.
+            # PyInstaller indlæser moduler/plugins dovent fra bundlen, så en
+            # videre kørsel ville blande gammel kode i hukommelsen med den
+            # nye versions filer. Luk derfor pænt via den normale closeEvent
+            # (gemmer layout osv.) — ingen automatisk genstart (uden for
+            # scope i #893); brugeren åbner selv den nye version.
+            self.close()
+
+        _ERROR_MESSAGES = {
+            "unsupported_platform": "unsupported platform",
+            "asset_not_found": "no matching release asset found",
+            "checksum_unavailable": "checksum verification unavailable for this release",
+            "checksum_mismatch": "downloaded file failed checksum verification",
+        }
+
+        def _on_error(error: str) -> None:
+            progress.close()
+            QMessageBox.warning(
+                self,
+                tr("update_download_error_title"),
+                tr("update_download_error_msg", error=_ERROR_MESSAGES.get(error, error)),
+            )
+
+        self._self_update_worker.progress.connect(_on_progress)
+        self._self_update_worker.installed.connect(_on_installed)
+        self._self_update_worker.finished_ok.connect(_on_ok)
+        self._self_update_worker.finished_error.connect(_on_error)
+        self._self_update_worker.start()
 

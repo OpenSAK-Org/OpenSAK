@@ -6,11 +6,15 @@ Tjekker i baggrunden om der er en ny version af OpenSAK tilgængelig.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
+import plistlib
 import shutil
-import ssl
 import stat
+import subprocess
+import sys
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -19,34 +23,15 @@ from urllib.error import URLError
 from PySide6.QtCore import QThread, Signal
 
 from opensak.logger import get_logger
+from opensak.net import SSL_CONTEXT, build_ssl_context
 
 log = get_logger("updater")
 
 
-def _build_ssl_context() -> ssl.SSLContext:
-    """
-    Byg en SSL-kontekst der eksplicit bruger certifi's certifikat-bundt.
-
-    Uden dette kan HTTPS-kald fejle med CERTIFICATE_VERIFY_FAILED i en
-    PyInstaller-bundlet .exe på Windows, fordi Python's standard SSL-
-    verifikation falder tilbage til systemets certifikat-store, som ikke
-    altid er korrekt tilgængelig i en bundlet kontekst. certifi's
-    cacert.pem bundles eksplicit med .spec-filen og bruges her i stedet
-    for at stole på systemets opslag.
-
-    Falder tilbage til Python's standard SSL-kontekst hvis certifi af en
-    eller anden grund ikke er tilgængeligt — bedre at forsøge med
-    systemets certifikater end at crashe helt.
-    """
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        log.debug("certifi ikke tilgængeligt — falder tilbage til systemets SSL-kontekst")
-        return ssl.create_default_context()
-
-
-_SSL_CONTEXT = _build_ssl_context()
+# Issue #901: den certifi-baserede SSL-kontekst bor nu i opensak.net, så alle
+# HTTPS-kald deler den. De gamle navne bevares som aliaser.
+_build_ssl_context = build_ssl_context
+_SSL_CONTEXT = SSL_CONTEXT
 
 GITHUB_API_URL          = "https://api.github.com/repos/OpenSAK-Org/opensak/releases/latest"
 GITHUB_API_ALL_URL      = "https://api.github.com/repos/OpenSAK-Org/opensak/releases"
@@ -329,6 +314,475 @@ def find_linux_appimage_asset_url(tag: str) -> str | None:
             return asset.get("browser_download_url")
     log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
     return None
+
+
+# ── Windows/macOS selv-download (issue #572) ────────────────────────────────
+#
+# Til forskel fra Linux (AppImageUpdateWorker ovenfor, som atomisk kan
+# erstatte en kørende fils inode) understøtter hverken Windows eller macOS
+# at erstatte et kørende program på samme måde — Windows låser en kørende
+# .exe, og macOS-installation er drag-to-Applications, ikke en enkelt fil.
+# Denne sektion downloader i stedet det korrekte platform-specifikke asset,
+# verificerer dets SHA256-checksum, og "åbner" det for brugeren (samme
+# sidste skridt som ved et manuelt download) — se SelfUpdateWorker's
+# docstring. På Windows er det stadig sådan.
+#
+# Issue #893: på macOS installerer vi nu selv — at udskifte en kørende
+# .app-bundle på disken er sikkert (det er præcis hvad Sparkle gør); #572's
+# forsigtighed byggede på en Windows-analogi der ikke holder her. Se
+# install_macos_update() nedenfor. Kun hvis det fejler (fx en skrivebeskyttet
+# /Applications på en administreret Mac) falder vi tilbage til det manuelle
+# flow — nu med DMG'en lagt i ~/Downloads, hvor brugeren kan finde den.
+
+def find_windows_asset_url(tag: str) -> str | None:
+    """
+    Find download-URL'en for Windows-asset'et i en given release.
+
+    Matcher navnemønsteret build.yml rent faktisk bruger:
+    'OpenSAK-<tag>-Windows.zip' (verificeret mod
+    .github/workflows/build.yml).
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+    expected_name = windows_asset_name(tag)
+    for asset in release["assets"]:
+        if asset.get("name") == expected_name:
+            return asset.get("browser_download_url")
+    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    return None
+
+
+def windows_asset_name(tag: str) -> str:
+    """Filnavnet build.yml giver Windows-asset'et for et givet tag."""
+    return f"OpenSAK-{tag}-Windows.zip"
+
+
+def macos_arch_suffix() -> str:
+    """
+    Returner 'arm64' eller 'x86_64' ud fra platform.machine().
+
+    build.yml bygger separate .dmg-filer for Apple Silicon og Intel — dette
+    afgør hvilken af de to den kørende Mac faktisk skal bruge.
+    """
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return "x86_64"
+
+
+def macos_asset_name(tag: str) -> str:
+    """Filnavnet build.yml giver macOS-asset'et for et givet tag, arkitektur-korrekt."""
+    return f"OpenSAK-{tag}-macOS-{macos_arch_suffix()}.dmg"
+
+
+def find_macos_asset_url(tag: str) -> str | None:
+    """
+    Find download-URL'en for det arkitektur-korrekte macOS .dmg-asset i en
+    given release — matcher build.yml's
+    'OpenSAK-<tag>-macOS-<arm64|x86_64>.dmg'-navnemønster.
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+    expected_name = macos_asset_name(tag)
+    for asset in release["assets"]:
+        if asset.get("name") == expected_name:
+            return asset.get("browser_download_url")
+    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    return None
+
+
+SHA256SUMS_ASSET_NAME = "SHA256SUMS.txt"
+
+
+def fetch_checksums(tag: str) -> dict[str, str] | None:
+    """
+    Hent og parse SHA256SUMS.txt fra en release.
+
+    Filen forventes i standard `sha256sum`-format: "<hex-digest>  <filnavn>"
+    pr. linje (én linje pr. asset — genereret af create-release-jobbet i
+    build.yml). Returnerer None hvis release'en ikke findes, eller den
+    (endnu) ikke har en SHA256SUMS.txt — fx en ældre release fra før dette
+    blev tilføjet.
+    """
+    release = fetch_release_by_tag(tag)
+    if release is None:
+        return None
+
+    checksums_url = None
+    for asset in release["assets"]:
+        if asset.get("name") == SHA256SUMS_ASSET_NAME:
+            checksums_url = asset.get("browser_download_url")
+            break
+    if checksums_url is None:
+        log.debug("Ingen %s fundet i release %s", SHA256SUMS_ASSET_NAME, tag)
+        return None
+
+    try:
+        req = urllib.request.Request(
+            checksums_url, headers={"User-Agent": "OpenSAK-self-update"}
+        )
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
+            text = resp.read().decode("utf-8")
+    except (URLError, OSError, UnicodeDecodeError) as exc:
+        log.debug("Kunne ikke hente/læse %s for %s: %s", SHA256SUMS_ASSET_NAME, tag, exc)
+        return None
+
+    checksums: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            continue
+        digest, filename = parts
+        # sha256sum-formatet kan prefixe filnavnet med '*' (binær-mode)
+        filename = filename.lstrip("*").strip()
+        checksums[filename] = digest.lower()
+    return checksums
+
+
+def _sha256_of_file(path: Path) -> str:
+    """SHA256-hex-digest af en fil, læst i chunks (ikke hele filen i RAM)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# ── macOS-installation (issue #893) ──────────────────────────────────────────
+
+MACOS_APP_NAME = "OpenSAK.app"
+_MACOS_DEFAULT_TARGET = Path("/Applications") / MACOS_APP_NAME
+
+
+class MacInstallError(Exception):
+    """Automatisk macOS-installation kunne ikke gennemføres (issue #893)."""
+
+
+def _running_app_bundle() -> Path | None:
+    """
+    Stien til den .app-bundle den kørende OpenSAK ligger i, eller None når
+    vi ikke kører som en frosset (PyInstaller) app — fx fra kildekoden.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve()
+    for parent in exe.parents:
+        if parent.suffix == ".app":
+            return parent
+    return None
+
+
+def _is_transient_location(bundle: Path) -> bool:
+    """
+    True når bundlen ikke ligger et sted, man kan installere oven i: direkte
+    fra en monteret DMG (/Volumes/...) eller en Gatekeeper "App Translocation"-
+    kopi (en skrivebeskyttet, tilfældig sti macOS bruger for apps startet fra
+    en download-placering).
+    """
+    text = bundle.as_posix()
+    return text.startswith("/Volumes/") or "/AppTranslocation/" in text
+
+
+def macos_install_target() -> Path:
+    """
+    Hvor opdateringen skal installeres: der hvor den kørende app ligger, så
+    en bruger der har OpenSAK i fx ~/Applications ikke får en ekstra kopi i
+    /Applications. /Applications/OpenSAK.app bruges når placeringen ikke kan
+    afgøres eller er midlertidig (se _is_transient_location).
+    """
+    bundle = _running_app_bundle()
+    if bundle is not None and not _is_transient_location(bundle):
+        return bundle
+    return _MACOS_DEFAULT_TARGET
+
+
+def _hdiutil_attach(dmg: Path) -> Path:
+    """
+    Montér DMG'en usynligt (-nobrowse: intet Finder-vindue, ingen ikon på
+    skrivebordet) og returnér mountpunktet.
+
+    hdiutil vælger selv et ledigt mountpunkt ("/Volumes/OpenSAK 1" osv.), så
+    en efterladt montering fra et tidligere mislykket forsøg giver ingen
+    navnekonflikt — vi læser bare det faktiske punkt ud af -plist-outputtet.
+    """
+    result = subprocess.run(
+        ["hdiutil", "attach", "-nobrowse", "-noautoopen", "-plist", str(dmg)],
+        capture_output=True, check=True, timeout=120,
+    )
+    out = result.stdout
+    # hdiutil kan skrive tekst før selve plist'en — start ved XML-headeren.
+    start = out.find(b"<?xml")
+    try:
+        data = plistlib.loads(out[start:] if start >= 0 else out)
+    except Exception as exc:  # InvalidFileException, ValueError, ExpatError, ...
+        raise MacInstallError(f"could not read hdiutil output: {exc}") from exc
+    if not isinstance(data, dict):
+        raise MacInstallError("unexpected hdiutil output")
+    for entity in data.get("system-entities", []):
+        mount_point = entity.get("mount-point")
+        if mount_point:
+            return Path(mount_point)
+    raise MacInstallError("hdiutil reported no mount point")
+
+
+def _hdiutil_detach(mount_point: Path) -> None:
+    """Afmontér — med -force som fallback. Kaster aldrig: kaldes fra finally."""
+    for args in (["hdiutil", "detach", str(mount_point)],
+                 ["hdiutil", "detach", "-force", str(mount_point)]):
+        try:
+            subprocess.run(args, capture_output=True, check=True, timeout=60)
+            return
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            log.debug("hdiutil detach fejlede (%s): %s", args, exc)
+    log.warning("Kunne ikke afmontere %s", mount_point)
+
+
+def _find_app_in_volume(mount_point: Path) -> Path:
+    """Find .app-bundlen på den monterede DMG (ikke Applications-genvejen)."""
+    preferred = mount_point / MACOS_APP_NAME
+    if preferred.is_dir():
+        return preferred
+    candidates = sorted(
+        p for p in mount_point.glob("*.app") if p.is_dir() and not p.is_symlink()
+    )
+    if candidates:
+        return candidates[0]
+    raise MacInstallError(f"no .app bundle found in {mount_point}")
+
+
+def _replace_app_bundle(source_app: Path, target: Path) -> None:
+    """
+    Kopiér *source_app* ind som *target* uden nogensinde at efterlade en
+    halvkopieret app:
+
+    1. ditto til en skjult '.<navn>.new' ved siden af målet — ditto er
+       macOS' anbefalede værktøj til .app-bundles (bevarer symlinks,
+       udvidede attributter og kodesignaturen); shutil.copytree er ikke
+       pålidelig nok til det.
+    2. Den gamle bundle omdøbes til '.<navn>.old', den nye til målnavnet
+       (samme mappe, så begge omdøbninger er atomiske).
+    3. Den gamle slettes først til sidst. Fejler omdøbningen, rulles tilbage.
+
+    Kaster PermissionError før noget kopieres, hvis mappen ikke er skrivbar.
+    """
+    parent = target.parent
+    if not os.access(parent, os.W_OK) or (target.exists() and not os.access(target, os.W_OK)):
+        raise PermissionError(f"{parent} is not writable")
+
+    staged = parent / f".{target.name}.new"
+    old = parent / f".{target.name}.old"
+    for leftover in (staged, old):
+        shutil.rmtree(leftover, ignore_errors=True)
+
+    try:
+        subprocess.run(
+            ["ditto", str(source_app), str(staged)],
+            capture_output=True, check=True, timeout=600,
+        )
+    except BaseException:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+
+    had_old = target.exists()
+    if had_old:
+        os.rename(target, old)
+    try:
+        os.rename(staged, target)
+    except OSError:
+        if had_old:
+            os.rename(old, target)
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def install_macos_update(dmg: Path, target: Path) -> Path:
+    """
+    Installér .app'en fra *dmg* som *target* (issue #893): montér usynligt,
+    kopiér sikkert, afmontér altid igen. Returnerer den installerede sti.
+
+    Kaster MacInstallError, OSError (inkl. PermissionError),
+    subprocess.CalledProcessError eller subprocess.TimeoutExpired ved fejl —
+    SelfUpdateWorker falder så tilbage til det manuelle flow.
+    """
+    mount_point = _hdiutil_attach(dmg)
+    try:
+        source_app = _find_app_in_volume(mount_point)
+        _replace_app_bundle(source_app, target)
+    finally:
+        _hdiutil_detach(mount_point)
+    return target
+
+
+def _macos_downloads_dir() -> Path:
+    """Brugerens Downloads-mappe (egen funktion så tests kan omdirigere den)."""
+    return Path.home() / "Downloads"
+
+
+def _move_to_downloads(path: Path) -> Path:
+    """
+    Flyt den downloadede fil til ~/Downloads, med ' (1)', ' (2)' ... ved
+    navnekonflikt, og returnér den nye sti — så brugeren kan finde (og selv
+    slette) den, i stedet for at den forsvinder i /private/var/folders.
+    """
+    downloads = _macos_downloads_dir()
+    downloads.mkdir(parents=True, exist_ok=True)
+    dest = downloads / path.name
+    n = 1
+    while dest.exists():
+        dest = downloads / f"{path.stem} ({n}){path.suffix}"
+        n += 1
+    shutil.move(str(path), str(dest))
+    return dest
+
+
+class SelfUpdateWorker(QThread):
+    """
+    Baggrundsthread der downloader og verificerer den korrekte
+    platform-specifikke Windows/macOS-asset for en given release (issue
+    #572), og derefter:
+
+    - Windows: "åbner" den for brugeren i Explorer (den kørende .exe er
+      låst og kan ikke erstattes).
+    - macOS (issue #893): installerer den selv via install_macos_update()
+      og emitter `installed`. Fejler det, flyttes DMG'en til ~/Downloads,
+      åbnes for brugeren, og `finished_ok` emittes med den nye sti.
+
+    Signals:
+        progress(downloaded, total):  Fremskridt under download, i bytes.
+                                       `total` er 0 hvis serveren ikke
+                                       sender Content-Length.
+        installed(app_path):          macOS: ny version installeret —
+                                       OpenSAK skal genstartes.
+        finished_ok(opened_path):     Download + åbning gennemført (Windows,
+                                       eller macOS-fallback til manuel
+                                       installation).
+        finished_error(error_code):   "unsupported_platform" | "asset_not_found" |
+                                       "checksum_unavailable" | "checksum_mismatch",
+                                       eller en rå OSError/URLError-strengbesked
+                                       for netværks-/filsystemfejl.
+    """
+
+    progress       = Signal(int, int)   # (downloaded_bytes, total_bytes)
+    installed      = Signal(str)
+    finished_ok    = Signal(str)
+    finished_error = Signal(str)
+
+    def __init__(self, tag: str, parent=None):
+        super().__init__(parent)
+        self._tag = tag
+
+    def run(self) -> None:
+        # mypy antager (korrekt, når selve mypy-kørslen sker på Linux) at
+        # `sys.platform == "win32"`/`"darwin"` er statisk uopnåelige grene
+        # her, og udelader dem derfor fra sin definitiv-tildelings-analyse
+        # — prædeklarér variablerne så "Name not defined" ikke opstår.
+        download_url: str | None
+        asset_name: str
+        if sys.platform == "win32":
+            download_url = find_windows_asset_url(self._tag)
+            asset_name = windows_asset_name(self._tag)
+        elif sys.platform == "darwin":
+            download_url = find_macos_asset_url(self._tag)
+            asset_name = macos_asset_name(self._tag)
+        else:
+            self.finished_error.emit("unsupported_platform")
+            return
+
+        if download_url is None:
+            self.finished_error.emit("asset_not_found")
+            return
+
+        checksums = fetch_checksums(self._tag)
+        if not checksums or asset_name not in checksums:
+            self.finished_error.emit("checksum_unavailable")
+            return
+        expected_digest = checksums[asset_name]
+
+        tmp_dir = Path(tempfile.mkdtemp(prefix="opensak-update-"))
+        downloaded_path = tmp_dir / asset_name
+        try:
+            log.debug("Downloader selv-opdatering fra %s", download_url)
+            req = urllib.request.Request(
+                download_url, headers={"User-Agent": "OpenSAK-self-update"}
+            )
+            with urllib.request.urlopen(req, timeout=120, context=_SSL_CONTEXT) as resp:
+                total = int(resp.headers.get("Content-Length", 0) or 0)
+                downloaded = 0
+                with open(downloaded_path, "wb") as out:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded += len(chunk)
+                        self.progress.emit(downloaded, total)
+
+            actual_digest = _sha256_of_file(downloaded_path)
+            if actual_digest.lower() != expected_digest.lower():
+                log.warning(
+                    "Checksum-mismatch for %s: forventede %s, fik %s",
+                    asset_name, expected_digest, actual_digest,
+                )
+                self.finished_error.emit("checksum_mismatch")
+                return
+
+            if sys.platform == "darwin":
+                self._finish_macos(downloaded_path, tmp_dir)
+                return
+
+            self._reveal(downloaded_path)
+            log.debug("Selv-opdatering downloadet og åbnet: %s", downloaded_path)
+            self.finished_ok.emit(str(downloaded_path))
+
+        except (URLError, OSError) as exc:
+            log.warning("Selv-opdatering fejlede: %s", exc)
+            self.finished_error.emit(str(exc))
+
+    def _finish_macos(self, dmg: Path, tmp_dir: Path) -> None:
+        """
+        Issue #893: installér DMG'ens .app automatisk. Ved succes slettes
+        download-mappen (og dermed DMG'en); ved fejl flyttes DMG'en til
+        ~/Downloads og åbnes, så brugeren kan fuldføre manuelt og selv
+        finde filen bagefter.
+        """
+        target = macos_install_target()
+        try:
+            installed_at = install_macos_update(dmg, target)
+        except (MacInstallError, OSError,
+                subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            log.warning("Automatisk macOS-installation til %s fejlede: %s", target, exc)
+            saved = _move_to_downloads(dmg)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            self._reveal(saved)
+            self.finished_ok.emit(str(saved))
+            return
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        log.debug("Selv-opdatering installeret: %s", installed_at)
+        self.installed.emit(str(installed_at))
+
+    def _reveal(self, path: Path) -> None:
+        """
+        "Åbn" den downloadede fil for brugeren.
+
+        Splittet ud som egen metode udelukkende for testbarhed — tests
+        monkeypatcher denne i stedet for rent faktisk at åbne et
+        Explorer/Finder-vindue.
+        """
+        import subprocess
+        if sys.platform == "win32":
+            # /select fremhæver filen i en åben Explorer-mappe, i stedet
+            # for at forsøge at åbne/udpakke .zip'en direkte.
+            subprocess.run(["explorer", f"/select,{path}"])
+        elif sys.platform == "darwin":
+            # "open" på en .dmg monterer den og åbner et Finder-vindue —
+            # samme resultat som et manuelt dobbeltklik.
+            subprocess.run(["open", str(path)])
 
 
 class AppImageUpdateWorker(QThread):

@@ -325,7 +325,11 @@ class CacheDetailPanel(QWidget):
 
         hint_btn_row = QHBoxLayout()
         self._decode_btn = QPushButton(tr("detail_decode_btn"))
-        self._decode_btn.setMaximumWidth(200)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        self._decode_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         self._decode_btn.clicked.connect(self._toggle_hint_decode)
         self._hint_decoded = False
         self._hint_plain = ""

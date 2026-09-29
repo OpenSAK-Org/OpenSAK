@@ -64,6 +64,14 @@ def _isolated_app_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(fake_home / ".local" / "share"))
     ss.reset_store()
 
+    # Issue #906: Qt cacher sin config-mappe pr. proces og respekterer derfor
+    # IKKE den monkeypatchede XDG_CONFIG_HOME ovenfor — uden denne patch
+    # ville en purge-test rydde udviklerens RIGTIGE QSettings-fil
+    # (~/.config/OpenSAK Project/OpenSAK.conf / registreringsdatabasen).
+    import opensak.paths as paths_mod
+    fake_qsettings = fake_home / ".config" / "OpenSAK Project" / "OpenSAK.conf"
+    monkeypatch.setattr(paths_mod, "qsettings_location", lambda: str(fake_qsettings))
+
     logmod.reset_logging()
 
     monkeypatch.setattr(dbmanager, "_manager", None)

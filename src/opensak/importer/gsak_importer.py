@@ -910,7 +910,7 @@ def _upsert_cache_from_gsak(
     cache.last_found_date = max(found_log_dates) if found_log_dates else None
 
     # ── Issue #716: last_four_logs (cached summary — logs relationship is
-    # noload'ed in the grid, same reasoning as last_log_date above) ────────
+    # not loaded in the grid, same reasoning as last_log_date above) ──────
     _recent = sorted(
         (lg for lg in log_rows if lg["log_date"] is not None),
         key=lambda lg: lg["log_date"], reverse=True,

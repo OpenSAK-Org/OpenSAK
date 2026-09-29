@@ -52,6 +52,9 @@ def fake_dialog(*, exec_result=0, signals=(), data=None, attrs=None):
 
         def get_data(self):
             return data
+
+        def save_related(self, session, cache):
+            pass
     return _Fake
 
 
@@ -642,6 +645,81 @@ class TestSearch:
 
 # ── drag & drop ───────────────────────────────────────────────────────────────
 
+# ── quick Where box (issue #558) ──────────────────────────────────────────────
+
+class TestQuickWhere:
+    @staticmethod
+    def _apply(window, text):
+        window._where_combo.setEditText(text)
+        window._apply_quick_where()
+        wait_for_refresh(window)
+
+    @staticmethod
+    def _codes(window):
+        return {c.gc_code for c in window._cache_table.get_all_caches()}
+
+    def test_valid_expression_filters_and_is_remembered(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        self._apply(seeded_window, "difficulty >= 4")
+        assert self._codes(seeded_window) == {"GC99999", "GCAAA02"}
+        assert seeded_window._where_error is None
+        assert get_settings().quick_where_history[0] == "difficulty >= 4"
+        assert seeded_window._where_combo.itemText(0) == "difficulty >= 4"
+        assert seeded_window._btn_clear_filter.isEnabled()
+        assert (seeded_window._filter_profile_combo.itemText(0)
+                == tr("toolbar_filter_combo_active"))
+
+    def test_invalid_expression_reports_error_and_keeps_list(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        before = self._codes(seeded_window)
+        seeded_window._where_combo.setEditText("no_such_column = 1")
+        seeded_window._apply_quick_where()
+        assert seeded_window._where_error
+        assert seeded_window._where_sql_applied == ""
+        assert self._codes(seeded_window) == before
+        assert "no_such_column = 1" not in get_settings().quick_where_history
+
+    def test_editing_clears_error(self, seeded_window):
+        seeded_window._where_combo.setEditText("difficulty >")
+        seeded_window._apply_quick_where()
+        assert seeded_window._where_error
+        seeded_window._where_combo.setEditText("difficulty > 1")
+        assert seeded_window._where_error is None
+
+    def test_clearing_box_removes_filter(self, seeded_window):
+        self._apply(seeded_window, "difficulty >= 4")
+        seeded_window._where_combo.setEditText("")
+        wait_for_refresh(seeded_window)
+        assert seeded_window._where_sql_applied == ""
+        assert len(self._codes(seeded_window)) == 4
+
+    def test_clear_filter_resets_where_box(self, seeded_window):
+        self._apply(seeded_window, "difficulty >= 4")
+        seeded_window._clear_filter()
+        wait_for_refresh(seeded_window)
+        assert seeded_window._where_combo.currentText() == ""
+        assert seeded_window._where_sql_applied == ""
+        assert len(self._codes(seeded_window)) == 4
+
+    def test_history_is_deduplicated_and_capped(self, seeded_window):
+        from opensak.gui.settings import get_settings
+        cap = seeded_window._WHERE_HISTORY_MAX
+        for i in range(cap + 5):
+            seeded_window._remember_where(f"difficulty >= {i}")
+        seeded_window._remember_where("difficulty >= 3")
+        history = get_settings().quick_where_history
+        assert len(history) == cap
+        assert history[0] == "difficulty >= 3"
+        assert history.count("difficulty >= 3") == 1
+
+    def test_distance_expression_validates(self, seeded_window):
+        from opensak.db.database import get_session
+        from opensak.filters.engine import validate_where_sql
+        with get_session() as session:
+            assert validate_where_sql(session, "distance < 5") is None
+            assert validate_where_sql(session, "distance <") is not None
+
+
 def _evt(paths, accept, ignore):
     urls = [SimpleNamespace(toLocalFile=lambda p=p: p) for p in paths]
     mime = SimpleNamespace(hasUrls=lambda: bool(urls), urls=lambda: urls)
@@ -1020,6 +1098,29 @@ class TestSort:
                             staticmethod(lambda p: prof))
         seeded_window._load_sort_for_active_db()
         assert seeded_window._active_filter_name == "MyProfile"
+
+    def test_saved_profile_does_not_override_column_sort(
+            self, seeded_window, monkeypatch, iso_settings):
+        # Regression: the profile's embedded sort (always "name") used to
+        # replace the per-DB column sort on reopen and was then saved back,
+        # so e.g. a Distance sort was lost after restarting.
+        from opensak.db.manager import get_db_manager
+        from opensak.filters.engine import FilterSet, SortSpec
+        from opensak.settings_store import get_store
+        key = f"sort.{get_db_manager().active.path}"
+        get_store().set_many({f"{key}.field": "distance",
+                              f"{key}.ascending": True,
+                              f"{key}.filter_profile": "MyProfile"})
+        prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
+                               sort=SortSpec("name"))
+        monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
+                            staticmethod(lambda: [Path("/x/p.json")]))
+        monkeypatch.setattr("opensak.filters.engine.FilterProfile.load",
+                            staticmethod(lambda p: prof))
+        seeded_window._load_sort_for_active_db()
+        assert seeded_window._current_sort.field == "distance"
+        seeded_window._on_filter_applied(FilterSet(), SortSpec("name"), "MyProfile")
+        assert get_store().get(f"{key}.field") == "distance"
 
     def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
         # Regression for #498: opensak.json deles på tværs af alle installerede
@@ -1413,7 +1514,24 @@ class TestAboutUpdates:
         monkeypatch.setattr(icon_mod.QMessageBox, "exec", lambda self: None)
         monkeypatch.setattr(icon_mod.QMessageBox, "clickedButton", _clicked)
 
+    def _force_update_platform(self, monkeypatch, platform):
+        """Pin the platform the update dialog branches on.
+
+        The primary button depends on sys.platform (#572 self-download on
+        win32/darwin) and on AppImage integration (#836), so without this
+        the tests only pass on a plain Linux checkout. MSIX is pinned off
+        too: with manual=True a packaged install returns early with an info
+        box (#874) before any of the buttons exist.
+        """
+        import sys
+        from opensak import appimage, msix
+        monkeypatch.setattr(sys, "platform", platform)
+        monkeypatch.setattr(msix, "is_msix_packaged", lambda: False)
+        monkeypatch.setattr(appimage, "is_running_as_appimage", lambda: False)
+        monkeypatch.setattr(appimage, "is_appimage_integrated", lambda: False)
+
     def test_on_update_available_open_releases_opens_url(self, seeded_window, monkeypatch):
+        self._force_update_platform(monkeypatch, "linux")
         opened = []
         monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
         self._click_update_dialog_button(monkeypatch, tr("update_open_releases"))
@@ -1422,10 +1540,30 @@ class TestAboutUpdates:
 
         assert opened == ["http://example.com/release"]
 
+    @pytest.mark.parametrize("platform", ["win32", "darwin"])
+    def test_on_update_available_download_button_self_downloads(
+        self, seeded_window, monkeypatch, platform
+    ):
+        # Issue #572: Windows/macOS get "Download new version" instead of
+        # "Open releases page", and it must not fall back to the browser.
+        self._force_update_platform(monkeypatch, platform)
+        opened, started = [], []
+        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+        monkeypatch.setattr(
+            seeded_window, "_start_self_download_update", lambda tag: started.append(tag)
+        )
+        self._click_update_dialog_button(monkeypatch, tr("update_download_button"))
+
+        seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
+
+        assert started == ["v9.9.9"]
+        assert opened == []
+
     def test_on_update_available_skip_sets_skipped_version(
         self, seeded_window, monkeypatch, iso_settings
     ):
         from opensak.gui.settings import get_settings
+        self._force_update_platform(monkeypatch, "linux")
         self._click_update_dialog_button(monkeypatch, tr("update_skip_version"))
 
         seeded_window._on_update_available("v9.9.9", "http://x", manual=True)
@@ -1438,6 +1576,7 @@ class TestAboutUpdates:
         # New "Support OpenSAK" button on the update-available dialog:
         # a more visible spot than the Help menu, which users who never
         # open Help would otherwise never see.
+        self._force_update_platform(monkeypatch, "linux")
         calls = []
         monkeypatch.setattr(seeded_window, "_open_support_page", lambda: calls.append(True))
         self._click_update_dialog_button(monkeypatch, tr("action_support_opensak"))
@@ -1452,6 +1591,7 @@ class TestAboutUpdates:
         # Clicking Support must not also record a skipped version or open
         # the release page — it's an independent, non-committal action.
         from opensak.gui.settings import get_settings
+        self._force_update_platform(monkeypatch, "linux")
         opened = []
         monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
         monkeypatch.setattr(seeded_window, "_open_support_page", lambda: None)
@@ -1473,6 +1613,7 @@ class TestAboutUpdates:
         what a hardcoded 'blob/main/CHANGELOG.md' caused before. Fail this
         test before reinstating any literal branch name in the link.
         """
+        self._force_update_platform(monkeypatch, "linux")
         captured: dict[str, str] = {}
 
         def fake_exec(self):

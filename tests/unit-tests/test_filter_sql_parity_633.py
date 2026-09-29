@@ -10,13 +10,15 @@ these to None explicitly (not just relying on defaults) to simulate legacy
 data, since none of these columns are nullable=False at the DB level.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache, UserNote
+from opensak.filters import engine
 from opensak.filters.engine import (
+    DATE_COMPARE_OPS, DATE_FILTER_FIELDS, DateFilter,
     DnfDateFilter, DnfFilter, FavoritePointsFilter, FilterSet, FoundByMeDateFilter,
     FtfFilter, HasCorrectedFilter, HiddenDateFilter, LastLogDateFilter, LockedFilter,
     NoCorrectedFilter, UserFlagFilter, apply_filters,
@@ -76,6 +78,15 @@ def seed_633_data(tmp_db):
         Cache(gc_code="GC6330012", name="NoHiddenDate", cache_type="Traditional Cache",
               latitude=56.1, longitude=13.1,
               hidden_date=None),
+        # Several dates on one cache, with times of day, for DateFilter's
+        # calendar-day comparisons: last found on the hidden day but earlier
+        # in the day, last log 3 calendar days (2.6 x 24h) after hiding.
+        Cache(gc_code="GC6330013", name="ManyDates", cache_type="Traditional Cache",
+              latitude=56.2, longitude=13.2,
+              hidden_date=datetime(2026, 5, 1, 18, 30),
+              last_found_date=datetime(2026, 5, 1, 8, 0),
+              last_log_date=datetime(2026, 5, 4, 9, 0),
+              last_updated=datetime(2026, 4, 1, 23, 59, 59)),
     ]
     with get_session() as s:
         for c in caches:
@@ -132,20 +143,29 @@ class TestBooleanFlagFilters:
 
 
 class TestFavoritePointsFilter:
-    def test_default_range(self):
+    def test_default(self):
         assert_parity(FilterSet().add(FavoritePointsFilter()))
 
-    def test_narrow_range_excludes_none_as_zero(self):
+    def test_at_least_one_excludes_none_as_zero(self):
         # AllNone has favorite_points=None -> treated as 0 by matches().
-        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=1, max_pts=9999)))
-        assert "GC6330003" not in codes  # None -> 0, excluded by min_pts=1
-        assert "GC6330002" not in codes  # explicit 0, excluded by min_pts=1
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter("at_least", 1)))
+        assert "GC6330003" not in codes  # None -> 0, excluded by at least 1
+        assert "GC6330002" not in codes  # explicit 0, excluded by at least 1
         assert "GC6330001" in codes      # 10, included
 
-    def test_zero_inclusive_range_includes_none(self):
-        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=0, max_pts=0)))
+    def test_equal_zero_includes_none(self):
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter("equal", 0)))
         assert "GC6330003" in codes  # None -> 0
         assert "GC6330002" in codes  # explicit 0
+
+    @pytest.mark.parametrize("op", ["equal", "less_than", "at_most", "more_than",
+                                    "at_least", "between", "not_between"])
+    def test_every_op(self, op):
+        assert_parity(FilterSet().add(FavoritePointsFilter(op, 10, 0)))
+
+    def test_legacy_range(self):
+        codes = assert_parity(FilterSet().add(FavoritePointsFilter(min_pts=1, max_pts=9999)))
+        assert "GC6330001" in codes and "GC6330003" not in codes
 
 
 class TestHasCorrectedFilter:
@@ -224,6 +244,92 @@ class TestHiddenDateFilter:
         )))
         assert "GC6330011" not in codes  # May 15th, before the range
         assert "GC6330012" not in codes  # NULL, always excluded
+
+
+class TestDateFilter:
+    # GSAK-style DateFilter: SQL pushdown (day-boundary ranges, and
+    # date()/julianday() for compare) must agree with Python matches().
+
+    @pytest.fixture(autouse=True)
+    def fixed_today(self, monkeypatch):
+        monkeypatch.setattr(engine, "_today", lambda: date(2026, 5, 10))
+
+    @pytest.mark.parametrize("field", list(DATE_FILTER_FIELDS))
+    @pytest.mark.parametrize("op, kwargs", [
+        ("on_or_before", {"date1": date(2026, 4, 1)}),
+        ("on_or_after",  {"date1": date(2026, 4, 1)}),
+        ("equal",        {"date1": date(2026, 5, 1)}),
+        ("between",      {"date1": date(2026, 5, 15), "date2": date(2026, 3, 15)}),
+        ("during",       {"amount": 10, "unit": "days"}),
+        ("not_during",   {"amount": 10, "unit": "days"}),
+        ("during",       {"amount": 2, "unit": "months"}),
+        ("not_during",   {"amount": 1, "unit": "years"}),
+    ])
+    def test_range_ops(self, field, op, kwargs):
+        assert_parity(FilterSet().add(DateFilter(field, op, **kwargs)))
+
+    @pytest.mark.parametrize("compare_op", DATE_COMPARE_OPS)
+    @pytest.mark.parametrize("days", [2, 3])
+    def test_compare_ops(self, compare_op, days):
+        assert_parity(FilterSet().add(DateFilter(
+            "last_log_date", "compare", other_field="hidden_date",
+            compare_op=compare_op, compare_days=days,
+        )))
+
+    @pytest.mark.parametrize("op, kwargs", [
+        ("on_or_before", {"date1": datetime(2026, 4, 1, 23, 58)}),
+        ("on_or_before", {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("on_or_after",  {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("equal",        {"date1": datetime(2026, 4, 1, 23, 59)}),
+        ("between",      {"date1": datetime(2026, 4, 2, 0, 0), "date2": datetime(2026, 4, 1, 12, 0)}),
+    ])
+    def test_time_bounds(self, op, kwargs):
+        codes = assert_parity(FilterSet().add(DateFilter("changed_date", op, **kwargs)))
+        expected = not (op == "on_or_before" and kwargs["date1"].minute == 58)
+        assert ("GC6330013" in codes) is expected  # last_updated 23:59:59
+
+    def test_equal_ignores_time_of_day(self):
+        codes = assert_parity(FilterSet().add(DateFilter("hidden_date", "equal", date1=date(2026, 5, 1))))
+        assert codes == {"GC6330013"}
+
+    def test_on_or_before_includes_end_of_day(self):
+        codes = assert_parity(FilterSet().add(DateFilter("changed_date", "on_or_before", date1=date(2026, 4, 1))))
+        assert "GC6330013" in codes  # last_updated 23:59:59 on that day
+
+    def test_compare_equal_by_calendar_day(self):
+        codes = assert_parity(FilterSet().add(DateFilter(
+            "last_found_date", "compare", other_field="hidden_date", compare_op="equal",
+        )))
+        assert codes == {"GC6330013"}
+
+    def test_compare_within_counts_calendar_days(self):
+        # 1 May 18:30 -> 4 May 09:00 is 2.6 x 24h but 3 calendar days.
+        within_3 = assert_parity(FilterSet().add(DateFilter(
+            "last_log_date", "compare", other_field="hidden_date",
+            compare_op="within", compare_days=3,
+        )))
+        within_2 = assert_parity(FilterSet().add(DateFilter(
+            "last_log_date", "compare", other_field="hidden_date",
+            compare_op="within", compare_days=2,
+        )))
+        assert "GC6330013" in within_3
+        assert "GC6330013" not in within_2
+
+    def test_not_during_includes_missing_date(self):
+        codes = assert_parity(FilterSet().add(DateFilter("last_log_date", "not_during", amount=10)))
+        assert "GC6330010" in codes      # NULL last_log_date
+        assert "GC6330009" not in codes  # 1 May — within 10 days of 10 May
+        assert "GC6330013" not in codes  # 4 May
+
+    def test_lightweight_path(self):
+        from opensak.filters.engine import apply_filters_lightweight
+        fs = FilterSet()
+        fs.add(DateFilter("hidden_date", "during", amount=1, unit="months"))
+        fs.add(DateFilter("last_log_date", "compare", other_field="hidden_date",
+                          compare_op="newer"))
+        with get_session() as s:
+            codes = {c.gc_code for c in apply_filters_lightweight(s, fs)}
+        assert codes == assert_parity(fs) == {"GC6330013"}
 
 
 class TestComposition:

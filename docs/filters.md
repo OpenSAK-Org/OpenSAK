@@ -20,18 +20,51 @@ Filters can also be **nested**: an outer AND group can contain an inner OR group
 
 ---
 
+## Invert filter
+
+Tick **Invert filter** (next to the Reset buttons) to flip the whole filter:
+the list then shows exactly the caches the filter would otherwise hide. For
+example, "Traditional Cache, difficulty ≤ 2" inverted shows every cache that
+is *not* an easy Traditional.
+
+The checkbox is highlighted while it is on, is saved with a filter profile, and
+is cleared by **Reset all** (but not by **Reset tab**, since it belongs to no
+tab). With no filter conditions set, inverting has no effect — all caches are
+shown.
+
+---
+
 ## Filter tabs
 
-The filter dialog is split across six tabs:
+The filter dialog is split across ten tabs:
 
 | Tab | What's on it |
 |---|---|
-| **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
+| **General** | Cache type, container, D/T, found status, availability, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, user flag, DNF, FTF, favourite points, locked |
+| **Other** | Country / State / County, user data 1–4, GC.com note, personal note, user flag, DNF, FTF, favourite points, elevation, locked — plus one block with a shared **centre point** for distance, direction, and distance corrected ↔ posted |
+| **Logs** | Caches by their logs — log date, log type, who logged, how many |
+| **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
+| **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
+| **Trackables** | Caches by their trackables — name, tracking code, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
+
+---
+
+## Seeing what a filter actually does
+
+Every filter element that differs from its default is highlighted in yellow,
+and so is any tab that holds one. Open a saved filter and you can tell at a
+glance what it sets — a narrowed difficulty range highlights the **Difficulty**
+label, an enabled distance limit highlights the **Distance from centre point**
+group, an attribute set to Yes or No highlights that attribute's row, and the
+**General**, **Attributes** or any other affected tab is highlighted in the tab
+bar. Anything left at its default stays unhighlighted, so what you see marked
+is exactly what the filter restricts.
+
+**Reset all** and **Reset tab** clear the highlighting along with the values.
 
 ---
 
@@ -118,7 +151,11 @@ All three can be toggled independently. Default: available only.
 
 ### Distance
 
-Show only caches within a certain radius of your active home point. The unit (km or mi) follows your preference set in Settings.
+Filter on the distance from a centre point — your home point, a saved point, the selected cache or a custom coordinate. The centre point is chosen once, at the top of the centre-point block on the **Other** tab, and is shared with the Direction filter. Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance. The unit (km or mi) follows your preference set in Settings. *Equal* matches within ±5 m. For *Between* / *Not between* the two values may be entered in either order; the smaller one is moved to the first box when the filter is applied.
+
+Examples: *At most 10 km* is the classic radius; *Between 5 and 20 km* skips the caches right around you; *More than 100 km* finds caches far from home.
+
+Filter profiles saved with the older *Min* / *Max* fields load as *At most Max*, or *Between Min and Max* when a minimum was set — the same caches as before.
 
 ---
 
@@ -164,9 +201,79 @@ The filter dialog shows the ~70 standard Groundspeak attributes on the **Attribu
 
 ---
 
+### Child waypoints
+
+Filter caches by their child waypoints (parking, stages, final, …). Available on the **Child Waypoints** tab.
+
+| Field | Matches |
+|---|---|
+| Code | The waypoint code (GSAK imports), or the two-letter prefix for GPX imports — same text operators as Name |
+| Type | Waypoint type, e.g. `Parking Area`, `Physical Stage` |
+| Date | Waypoint date — same operators as the **Dates** tab, except comparing with another date |
+| Name / Comment | Waypoint name and comment |
+| Created by user | Yes = only waypoints you added yourself, No = only imported ones |
+| Count | Any, Equal, At least, At most, or Between |
+
+All criteria must hold for the **same** waypoint. Count is the number of waypoints that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Type contains `Parking` and Count equal 0 shows caches without a parking waypoint. Count alone filters on the total number of waypoints.
+
+---
+
+### Logs
+
+Filter caches by the logs on them, on the **Logs** tab. It mirrors GSAK's Logs tab and is read top to bottom in three steps.
+
+**1. Which logs are searched**
+
+| Setting | Effect |
+|---|---|
+| Logs to search | *All logs*, or only each cache's *N* most recent ones (Latest, Last 2 … Last 100) |
+| Include / exclude | Whether the caches that match are kept or dropped |
+
+The window counts **every** log the cache has, not just the ones the criteria below look for. So *Logs to search: Last 2* with **Not found** ticked means "a DNF among the cache's two most recent logs" — a cache whose only DNF sits under three newer finds does *not* match.
+
+**2. What a log has to be**
+
+| Field | Matches |
+|---|---|
+| Found / Not found / Other | The kind of log. *Found* covers Found it, Attended and Webcam Photo Taken; *Not found* covers Didn't find it; *Other* is everything else |
+| Log date | The log's date — the same operators as the **Dates** tab, except comparing with another date |
+| Log types | The ticked types. Untick **All** to choose individual ones; `"Other"` matches any type not in the list |
+| Logged by | The log's finder — the same text operators as *Name*. Tick **Match the user ID** to compare the numeric user ID instead of the display name |
+
+All of these must hold for the **same** log. Leaving **Logged by** empty matches a log by *anyone* — to find your own logs, type your geocaching name there.
+
+**3. How many such logs**
+
+**Required count** is the number of logs that met the criteria: *At least one log*, *At most*, *At least*, *Equal* or *Between*. Together with **Exclude** this is what makes negative conditions expressible:
+
+| To find | Set |
+|---|---|
+| Caches with no find in the last year | Log types = Found it, Log date During 1 years, Exclude |
+| Caches whose most recent log is a DNF | Logs to search = Latest, Not found only |
+| Caches you have never logged yourself | Logged by = equals *your name*, Exclude |
+| Caches with at least 5 favourite-worthy finds | Log types = Found it, Required count At least 5 |
+| Caches with a recent maintenance request | Logs to search = Last 5, Log types = Needs Maintenance |
+| Caches you have DNFed in their last 2 logs | Logs to search = Last 2, Not found only, Logged by equals *your name* |
+
+---
+
 ### Has trackable
 
 Show only caches that currently have at least one trackable logged as in the cache.
+
+---
+
+### Trackables
+
+Filter caches by the trackables (travel bugs, geocoins) in them. Available on the **Trackables** tab.
+
+| Field | Matches |
+|---|---|
+| Name | Trackable name — same text operators as Name |
+| Tracking code | The trackable's tracking code — same text operators as Name |
+| Count | Any, Equal, At least, At most, or Between |
+
+Both text criteria must hold for the **same** trackable. Count is the number of trackables that meet them: with **Any**, a cache needs at least one; **Equal 0** finds caches with none — e.g. Name contains `coin` and Count equal 0 shows caches without a geocoin. Count alone filters on the total number of trackables, e.g. **At least 3**.
 
 ---
 
@@ -185,6 +292,23 @@ Show only caches that currently have at least one trackable logged as in the cac
 |---|---|
 | Has corrected | Only caches where you have stored corrected (puzzle-solved) coordinates |
 | No corrected | Only caches without corrected coordinates |
+
+**Distance corrected ↔ posted** — check **Enable** to filter on how far a cache's corrected coordinates lie from its posted coordinates. Pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance in metres (feet when miles are selected in Settings). *Equal* compares to the whole metre. As with the centre-point distance, a reversed *Between* range is put in order when applied. Caches without corrected coordinates never match. Available in the centre-point block on the **Other** tab.
+
+Examples: *More than 3219 m* finds solved finals outside the 2-mile rule (often a typo); *Equal 0 m* finds caches whose corrected coordinates are just the posted ones.
+
+---
+
+### Direction
+
+Show only caches lying in a given direction as seen from the centre point (see *Distance* above). Available in the centre-point block on the **Other** tab. There are two ways to set it:
+
+- **Degrees** — check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the bearing: 0° = north, 90° = east, clockwise. *Between* runs clockwise, so 315° – 45° is the sector through north.
+- **Compass** — click the directions (N, NE, E, SE, S, SW, W, NW) on the compass rose. Each covers a 45° sector centred on it (N = 337.5°–22.5°), and clicking fills in the matching degree range. Directions that aren't next to each other can't be written as one range; the degree values are then greyed out. Changing the degree values again replaces the clicked directions.
+
+The ⓘ button next to the filter explains both modes. Caches without coordinates never match.
+
+Direction filters saved in earlier versions keep matching exactly as before — measured from your active home point, the same bearing as the **Bearing** column — until you edit them.
 
 ---
 
@@ -206,9 +330,35 @@ Filter by First to Find status. Available on the **Other** tab.
 
 ---
 
+### Personal note
+
+| Filter | Shows |
+|---|---|
+Filter on the text of your personal note (the note on the cache's **Notes** tab), with the same text operators as *Name*, all case-insensitive. Available on the **Other** tab.
+
+Surrounding whitespace is ignored, so a note containing only whitespace counts as empty. Use *is empty* / *is not empty* for the old yes/no check — filter profiles saved with the former **Yes** / **No** checkboxes load as exactly that. GC.com's synced personal cache note is not considered; it has its own filter, below.
+
+---
+
+### User data 1–4 / GC.com note
+
+Text filters on GSAK's four **User data** fields and on the **GC.com note** (the personal cache note synced from geocaching.com), with the same text operators as *Name*, all case-insensitive. Available on the **Other** tab.
+
+Example: *User data 1* equals `solved` finds the mysteries you've marked as solved in GSAK.
+
+---
+
+### Elevation
+
+Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the elevation. The unit is metres, or feet when miles are selected in Settings. *Equal* compares to the whole metre. A reversed *Between* range is put in order when applied. Caches whose elevation is unknown never match. Available on the **Other** tab.
+
+---
+
 ### Favourite points
 
-Filter by a minimum and/or maximum favourite point count. Available on the **Other** tab.
+Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the favourite point count. Caches without favourite points count as 0. A reversed *Between* range is put in order when applied. Available on the **Other** tab.
+
+Filter profiles saved with the older from/to range for elevation or favourite points are converted when loaded: a range open at the top (e.g. favourite points 10 – 9999) becomes *At least*, one open at the bottom becomes *At most*, a single value becomes *Equal*, and anything else *Between*. Saving the profile again stores the new form.
 
 ---
 
@@ -245,9 +395,39 @@ Filter by the date of the most recent log entry for the cache.
 
 ---
 
+## Line / polygon filter
+
+The **Line/Polygon** tab works like GSAK's filter of the same name. Enter one point per line in the text box:
+
+```text
+53.18346, 8.71113
+N 53 23.613, E 008 00.941
+W,GC12345
+```
+
+- Any coordinate format OpenSAK understands works (decimal degrees, DMM, DMS), with or without a comma between latitude and longitude.
+- `W,<code>` takes the coordinates of a cache (its corrected coordinates when set) or a waypoint in the current database.
+- Text after `#` is ignored, so you can annotate the list.
+- **Add flagged (user flag)** appends a `W,<code>` line for every cache with the user flag set.
+- **Read points from file** loads a GPX file (track points, else route points, else waypoints), a KML file, or a text file in the format above — replacing or appending to the list.
+
+Choose the filter type:
+
+| Type | Includes caches… | Needs |
+|---|---|---|
+| Line | within the distance of the line through the points (a route or track) | 2+ points and a distance |
+| Polygon | inside the area the points outline (closed automatically); a distance above 0 also includes caches that close to the outline | 3+ points |
+| Points | within the distance of any single point | 1+ point and a distance |
+
+Check **Exclude** to invert the filter and keep only the caches that do *not* match. The filter uses a cache's corrected coordinates when set. Distances are measured along the Earth's surface; polygon edges are straight lines in latitude/longitude. Shapes that cross the ±180° meridian are not supported.
+
+---
+
 ## Text search filter
 
-The **Text Search** tab searches free-text fields for a word or phrase, rather than an exact match like the *Name* or *GC code* filters.
+The **Text Search** tab searches free-text fields for a word, phrase or pattern. It has the same operators as *Name* (contains, equals, starts/ends with, in list, empty, regex, and their negations), all case-insensitive.
+
+A positive operator matches when **any** of the searched fields — or any single log — matches. A negated operator (*does not contain*, *not regex*, …) and *is empty* match when **none** of them does, so *does not contain* `spoiler` keeps caches that mention "spoiler" in none of the ticked fields.
 
 | Field | Searched by default |
 |---|---|
@@ -256,7 +436,7 @@ The **Text Search** tab searches free-text fields for a word or phrase, rather t
 | Personal notes | ✓ |
 | Hint | ✗ (off — enable it explicitly if you want hint text included) |
 
-The search uses SQL `LIKE` pushdown rather than loading every cache into Python, so it stays fast even on large databases.
+The search uses SQL `LIKE` pushdown rather than loading every cache into Python, so it stays fast even on large databases. Regex searches can't be pushed to SQL and are checked cache by cache, so they are slower — especially with *Logs* ticked.
 
 ---
 

@@ -150,6 +150,33 @@ def test_uninstall_purge_removes_separate_custom_db_dir(monkeypatch, tmp_path):
     assert not custom_db_dir.exists()
 
 
+def test_uninstall_purge_removes_bootstrap_dir(monkeypatch, tmp_path):
+    # Issue #906: ~/.config/opensak/bootstrap.json overlevede altid purge.
+    from opensak.settings_store import _bootstrap_path, set_install_dir
+
+    _integrate_fake_appimage(monkeypatch, tmp_path)
+    set_install_dir(get_install_dir())
+    bootstrap = _bootstrap_path()
+    assert bootstrap.exists()
+
+    result = appimage.uninstall_appimage(purge_data=True)
+
+    assert result.success is True
+    assert not bootstrap.parent.exists()
+
+
+def test_uninstall_program_only_keeps_bootstrap_dir(monkeypatch, tmp_path):
+    from opensak.settings_store import _bootstrap_path, set_install_dir
+
+    _integrate_fake_appimage(monkeypatch, tmp_path)
+    set_install_dir(get_install_dir())
+
+    result = appimage.uninstall_appimage(purge_data=False)
+
+    assert result.success is True
+    assert _bootstrap_path().exists()
+
+
 def test_uninstall_purge_never_deletes_home_directory(monkeypatch, tmp_path):
     _integrate_fake_appimage(monkeypatch, tmp_path)
     sentinel = Path.home() / "do-not-delete-me.txt"

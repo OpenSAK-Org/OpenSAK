@@ -25,6 +25,8 @@ _qt_translator: "QTranslator | None" = None
 # hedder qtbase_sv.qm (ISO 639-1 for svensk er "sv", ikke "se").
 _QT_LOCALE_OVERRIDES: dict[str, str] = {
     "se": "sv",
+    # Schweizertysk har ingen egen qtbase_de_CH.qm — brug den tyske.
+    "de_CH": "de",
 }
 
 
@@ -257,8 +259,44 @@ def main() -> None:
     app.setOrganizationName("OpenSAK Project")
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
+    # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
+    # alt der sker under resten af opstarten, inkl. migration og wizard.
+    from opensak.logger import setup_logging
+    setup_logging()
+    logger.info("startup: main() begin, version=%s", _ver)
+    _startup_t0 = time.monotonic()
+
+    # Kør macOS-sti-migreringen (issue #825) FØR NOGET ANDET rører
+    # settings-systemet — inklusive apply_theme() nedenfor.
+    #
+    # Issue #878: denne migrering lå tidligere efter apply_theme(app), som
+    # så ud til at være uden afhængighed af den (ren UI-palette-opsætning).
+    # Men apply_theme() slår internt "display.theme" op via
+    # get_settings().theme → get_store() — og SettingsStore cacher BÅDE sin
+    # opløste fil-sti (_path) OG sit indlæste indhold (_data) permanent ved
+    # første tilgang (_load() kører aldrig igen, jf. dens egen
+    # "if self._data is not None: return"-guard). Når apply_theme() kørte
+    # FØR migreringen, ramte denne første tilgang en sti hvor den endnu
+    # ikke-migrerede opensak.json ikke fandtes endnu — singletonen cachede
+    # `{}` for resten af processens levetid, og fortsatte med at gøre det
+    # selvom migreringen et øjeblik senere fysisk flyttede den rigtige fil
+    # ind på præcis den sti. Den efterfølgende migrate_from_qsettings()
+    # (og enhver anden settings-læsning under resten af opstarten) arvede
+    # dermed en permanent tom store, uanset hvad der reelt lå på disken —
+    # den synlige effekt var at brugerens database, brugernavn og
+    # hjem-koordinater så ud til at være forsvundet efter opdatering.
+    #
+    # Ingen effekt på Windows/Linux (funktionen er selv et no-op der).
+    from opensak.settings_store import (
+        get_store, migrate_from_qsettings, migrate_macos_default_paths,
+        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
+    )
+    migrate_macos_default_paths()
+
     # Anvend Fusion stil + platform-tilpasset font + brugertema
-    # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt)
+    # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
+    # Skal køre EFTER migrate_macos_default_paths() ovenfor — se
+    # kommentaren der.
     from opensak.gui.theme import apply_theme
     apply_theme(app)
 
@@ -275,26 +313,9 @@ def main() -> None:
         )
         app.processEvents()
 
-    # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
-    # alt der sker under resten af opstarten, inkl. migration og wizard.
-    from opensak.logger import setup_logging
-    setup_logging()
-    logger.info("startup: main() begin, version=%s", _ver)
-    _startup_t0 = time.monotonic()
-
     # Indlæs sprog FØR noget UI oprettes
     splash_msg("Indlæser sprog...")
     # Kør én-gangs migration fra QSettings → opensak.json (issue #209)
-    from opensak.settings_store import (
-        get_store, migrate_from_qsettings, migrate_macos_default_paths,
-        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
-    )
-    # Issue #825: macOS brugte fejlagtigt Linux-stierne (~/.config,
-    # ~/.local/share) i stedet for ~/Library/Application Support. Skal
-    # køres FØR get_store() kaldes nedenfor, så SettingsStore-singletonen
-    # aldrig når at slå op i (og cache) den gamle, forkerte sti. Ingen
-    # effekt på Windows/Linux.
-    migrate_macos_default_paths()
     did_migrate = migrate_from_qsettings(get_store())
     # Reparér evt. boolean-værdier korrumperet af en tidligere bug i
     # _flush() — kører altid, uafhængigt af om migration var nødvendig,
@@ -345,6 +366,8 @@ def main() -> None:
         # way further down.
         logger.exception("startup: failed to initialise active database")
         splash.hide()
+        if _report_app_control_block(e):
+            sys.exit(1)
         from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
         from opensak.config import get_log_path
         from opensak.lang import tr
@@ -358,8 +381,18 @@ def main() -> None:
     # Opret hovedvindue
     splash_msg("Starter OpenSAK...")
     logger.info("startup: building main window (+%.2fs)", time.monotonic() - _startup_t0)
-    from opensak.gui.mainwindow import MainWindow
-    window = MainWindow()
+    try:
+        from opensak.gui.mainwindow import MainWindow
+        window = MainWindow()
+    except ImportError as e:
+        # Issue #904: en blokeret DLL kan også dukke op her (fx lxml eller
+        # shapely). Kun den særlige App Control-situation håndteres; alt
+        # andet propagerer som hidtil.
+        logger.exception("startup: failed to build main window")
+        if _report_app_control_block(e):
+            splash.hide()
+            sys.exit(1)
+        raise
     logger.info("startup: main window built (+%.2fs total)", time.monotonic() - _startup_t0)
 
     # Vent til cache-tabellen er loadet før splash lukkes
@@ -371,6 +404,31 @@ def main() -> None:
 
     window.show()
     sys.exit(app.exec())
+
+
+def _report_app_control_block(exc: BaseException) -> bool:
+    """
+    Issue #904: hvis *exc* skyldes Windows Smart App Control, vis en besked
+    der forklarer det og peger mod Microsoft Store-versionen, og returnér
+    True. Ellers False — kalderen viser så sin almindelige fejlbesked.
+
+    Store-versionen (MSIX) er signeret af Microsoft og blokeres ikke; skulle
+    den alligevel ramme noget lignende, giver det ingen mening at henvise til
+    sig selv, så dér vises den almindelige besked.
+    """
+    from opensak.app_control import is_app_control_block
+    from opensak.msix import is_msix_packaged
+    if not is_app_control_block(exc) or is_msix_packaged():
+        return False
+    logger.error("startup: blocked by Windows Smart App Control (issue #904)")
+    from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
+    from opensak.config import get_log_path
+    from opensak.lang import tr
+    QMessageBox.critical(
+        None, tr("startup_app_control_title"),
+        tr("startup_app_control_msg", error=str(exc), path=str(get_log_path())),
+    )
+    return True
 
 
 if __name__ == "__main__":

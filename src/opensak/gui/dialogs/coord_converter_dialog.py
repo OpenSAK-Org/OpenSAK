@@ -12,7 +12,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QGroupBox,
-    QDialogButtonBox, QApplication, QFrame
+    QDialogButtonBox, QApplication, QFrame, QSizePolicy
 )
 from PySide6.QtGui import QFont, QFontMetrics
 
@@ -134,7 +134,11 @@ class CoordConverterDialog(QDialog):
             QFontMetrics(font).horizontalAdvance(_WIDEST_COORD) + 16
         )
         copy_btn = QPushButton(tr("coord_conv_copy_btn"))
-        copy_btn.setMaximumWidth(70)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        copy_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         copy_btn.setEnabled(False)
         copy_btn.setAutoDefault(False)
         copy_btn.clicked.connect(lambda: self._copy(edit.text()))

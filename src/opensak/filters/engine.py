@@ -24,13 +24,15 @@ import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from opensak.db.models import Cache, UserNote
+from opensak.db.models import Cache, Log, Trackable, UserNote, Waypoint
+from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
+from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -564,12 +566,21 @@ class TextMatchFilter(BaseFilter):
     def apply_to_query(self, query):
         if self._is_noop():
             return query
-        from sqlalchemy import and_, func, or_
-        col = getattr(Cache, self.column)
+        cond = self.sql_condition(getattr(Cache, self.column))
+        return None if cond is None else query.filter(cond)
+
+    def sql_condition(self, col):
+        """SQL condition applying this match to column expression *col*, or
+        None when it can't be expressed in SQL (see apply_to_query). A no-op
+        filter yields true(). Shared with WaypointFilter, which matches the
+        same operators against waypoint columns."""
+        from sqlalchemy import and_, func, or_, true
+        if self._is_noop():
+            return true()
         if self.op == "empty":
-            return query.filter(or_(col.is_(None), col == ""))
+            return or_(col.is_(None), col == "")
         if self.op == "not_empty":
-            return query.filter(and_(col.is_not(None), col != ""))
+            return and_(col.is_not(None), col != "")
         positive = _TEXT_OP_NEGATIONS.get(self._match_op, self._match_op)
         negated = positive != self._match_op
         if positive == "regex":
@@ -595,12 +606,16 @@ class TextMatchFilter(BaseFilter):
             # NOT on a NULL column is NULL (row dropped) in SQL, but NULL is
             # "" for matches() — which a negated operator lets through.
             cond = or_(col.is_(None), ~cond)
-        return query.filter(cond)
+        return cond
 
     def matches(self, cache: Cache) -> bool:
+        return self.match_value(getattr(cache, self.column))
+
+    def match_value(self, value: Optional[str]) -> bool:
+        """Whether *value* (None counts as "") passes this match."""
         if self._is_noop():
             return True
-        value = getattr(cache, self.column) or ""
+        value = value or ""
         if self.op == "empty":
             return not value
         if self.op == "not_empty":
@@ -707,31 +722,123 @@ class OwnerFilter(TextMatchFilter):
     column = "owner_name"
 
 
+class UserData1Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData1 matches *text* (case-insensitive)."""
+    filter_type = "user_data_1"
+    column = "user_data_1"
+
+
+class UserData2Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData2 matches *text* (case-insensitive)."""
+    filter_type = "user_data_2"
+    column = "user_data_2"
+
+
+class UserData3Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData3 matches *text* (case-insensitive)."""
+    filter_type = "user_data_3"
+    column = "user_data_3"
+
+
+class UserData4Filter(TextMatchFilter):
+    """Keep caches whose GSAK UserData4 matches *text* (case-insensitive)."""
+    filter_type = "user_data_4"
+    column = "user_data_4"
+
+
+class GcNoteFilter(TextMatchFilter):
+    """Keep caches whose GC.com personal note (the synced gc_note, not the
+    local UserNote.note that UserNoteFilter and TextSearchFilter look at)
+    matches *text* (case-insensitive)."""
+    filter_type = "gc_note"
+    column = "gc_note"
+
+
+# Distance conditions shared by DistanceFilter and CorrectedDistanceFilter.
+DISTANCE_OPS = (
+    "equal", "less_than", "at_most", "more_than", "at_least", "between", "not_between",
+)
+
+
+def _distance_op_ok(op: str, dist: float, a: float, b: float, tolerance: float) -> bool:
+    """Whether *dist* satisfies distance condition *op* against *a* (and *b*
+    for "between" / "not_between", in either order). "equal" allows
+    ±*tolerance*, since two computed distances are practically never equal."""
+    if op == "equal":
+        return abs(dist - a) <= tolerance
+    if op == "less_than":
+        return dist < a
+    if op == "at_most":
+        return dist <= a
+    if op == "more_than":
+        return dist > a
+    if op == "at_least":
+        return dist >= a
+    lo, hi = min(a, b), max(a, b)
+    inside = lo <= dist <= hi
+    return inside if op == "between" else not inside
+
+
+def _distance_op_upper_bound(op: str, a: float, b: float, tolerance: float) -> Optional[float]:
+    """The largest distance *op* can match, or None when it is unbounded."""
+    if op == "equal":
+        return a + tolerance
+    if op in ("less_than", "at_most"):
+        return a
+    if op == "between":
+        return max(a, b)
+    return None
+
+
+# "equal" compares to the dialog's two decimals (0.01 km) — ±5 m.
+_DISTANCE_EQUAL_TOLERANCE_KM = 0.005
+
+
 class DistanceFilter(BaseFilter):
     """
-    Keep caches within *max_km* kilometres of a reference coordinate.
-    Optionally also enforce a *min_km* to exclude very nearby caches.
+    Keep caches whose distance (km) from a reference coordinate satisfies
+    *op* against *dist1_km* (and *dist2_km* for "between" / "not_between") —
+    see DISTANCE_OPS.
+
+    The older *max_km* / *min_km* form is still accepted, both as arguments
+    and in saved filter profiles: it becomes "at_most max_km", or "between
+    min_km and max_km" when *min_km* > 0 — exactly the old inclusive
+    min_km <= d <= max_km test.
     """
     filter_type = "distance"
 
     # apply_to_query() below only pushes a bounding-box pre-narrowing (a
-    # conservative superset of the max_km circle, and it doesn't account for
-    # min_km at all) — matches() is still required for an exact result. See
-    # BaseFilter.sql_exact.
+    # conservative superset of the circle the condition can reach, and it
+    # doesn't account for a lower bound at all) — matches() is still required
+    # for an exact result. See BaseFilter.sql_exact.
     sql_exact = False
 
     def __init__(
         self,
         lat: float,
         lon: float,
-        max_km: float,
+        max_km: Optional[float] = None,
         min_km: float = 0.0,
         center_state: Optional[dict] = None,
+        *,
+        op: Optional[str] = None,
+        dist1_km: float = 0.0,
+        dist2_km: float = 0.0,
     ):
+        if op is None:
+            if max_km is None:
+                raise ValueError("DistanceFilter needs either op or max_km")
+            if min_km > 0:
+                op, dist1_km, dist2_km = "between", min_km, max_km
+            else:
+                op, dist1_km, dist2_km = "at_most", max_km, 0.0
+        if op not in DISTANCE_OPS:
+            raise ValueError(f"Unknown distance operator {op!r}")
         self.lat = lat
         self.lon = lon
-        self.max_km = max_km
-        self.min_km = min_km
+        self.op = op
+        self.dist1_km = dist1_km
+        self.dist2_km = dist2_km
         # Serialized CenterPointPicker selection (issue #511) — e.g.
         # {"kind": "point", "name": "Cabin"} or {"kind": "cache"}. Purely for
         # re-populating the picker's combo box when a saved filter is
@@ -744,20 +851,25 @@ class DistanceFilter(BaseFilter):
     def apply_to_query(self, query):
         """Pre-narrow with a lat/lon bounding box that *contains* the circle.
 
-        The box is a conservative superset of the max_km circle, so SQLite can
-        discard far-away caches (using the (latitude, longitude) index) before
-        any Python object is built, while matches() still applies the exact
-        haversine test — results are therefore identical. Skipped (returns None,
-        i.e. pure Python) for max_km<=0 or near the poles / antimeridian, where
-        a simple box could wrap and wrongly drop matches.
+        The box is a conservative superset of the circle of radius max_dist
+        (the farthest distance *op* can match), so SQLite can discard
+        far-away caches (using the (latitude, longitude) index) before any
+        Python object is built, while matches() still applies the exact
+        haversine test — results are therefore identical. Skipped (returns
+        None, i.e. pure Python) for unbounded conditions ("more than", "at
+        least", "not between"), max_dist<=0 or near the poles / antimeridian,
+        where a simple box could wrap and wrongly drop matches.
         """
-        if self.max_km <= 0 or not (-89.0 < self.lat < 89.0):
+        max_dist = _distance_op_upper_bound(
+            self.op, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
+        )
+        if max_dist is None or max_dist <= 0 or not (-89.0 < self.lat < 89.0):
             return None
-        dlat = self.max_km / 111.0  # ~111 km per degree of latitude
+        dlat = max_dist / 111.0  # ~111 km per degree of latitude
         coslat = math.cos(math.radians(self.lat))
         if coslat <= 1e-6:
             return None
-        dlon = self.max_km / (111.0 * coslat)
+        dlon = max_dist / (111.0 * coslat)
         if dlon >= 180.0 or self.lon - dlon < -180.0 or self.lon + dlon > 180.0:
             return None  # box would wrap the antimeridian — let Python handle it
         from sqlalchemy import and_
@@ -770,24 +882,320 @@ class DistanceFilter(BaseFilter):
         if cache.latitude is None or cache.longitude is None:
             return False
         dist = _haversine_km(self.lat, self.lon, cache.latitude, cache.longitude)
-        return self.min_km <= dist <= self.max_km
+        return _distance_op_ok(
+            self.op, dist, self.dist1_km, self.dist2_km, _DISTANCE_EQUAL_TOLERANCE_KM,
+        )
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
             "lat": self.lat,
             "lon": self.lon,
-            "max_km": self.max_km,
-            "min_km": self.min_km,
+            "op": self.op,
+            "dist1_km": self.dist1_km,
+            "dist2_km": self.dist2_km,
             "center_state": self.center_state,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DistanceFilter":
+        if "op" not in data:
+            # Profile saved before the distance conditions — min/max form.
+            return cls(
+                data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
+                data.get("center_state"),
+            )
         return cls(
-            data["lat"], data["lon"], data["max_km"], data.get("min_km", 0.0),
-            data.get("center_state"),
+            data["lat"], data["lon"], center_state=data.get("center_state"),
+            op=data["op"], dist1_km=data.get("dist1_km", 0.0),
+            dist2_km=data.get("dist2_km", 0.0),
         )
+
+    def __repr__(self) -> str:
+        return f"<DistanceFilter {self.to_dict()}>"
+
+
+# Compass directions in clockwise order from north — index i is the 45° sector
+# centred on i*45° (N = 337.5°–22.5°). Language-independent codes; the dialog
+# shows them via tr("bearing_dirs"), which lists the same eight in this order.
+DIRECTIONS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def bearing_direction(deg: float) -> str:
+    """Compass direction code (see DIRECTIONS) for a bearing in degrees.
+
+    Sectors are half-open [lo, hi) — a bearing of exactly 22.5° is NE —
+    matching DirectionFilter.apply_to_query()'s SQL ranges.
+    """
+    return DIRECTIONS[int(((deg % 360.0) + 22.5) // 45.0) % 8]
+
+
+def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Initial great-circle bearing (0–360°, clockwise from north) from
+    (lat1, lon1) to (lat2, lon2) — the same formula recalculate_distances()
+    uses for Cache.bearing."""
+    la1, la2 = math.radians(lat1), math.radians(lat2)
+    dlon = math.radians(lon2 - lon1)
+    x = math.sin(dlon) * math.cos(la2)
+    y = math.cos(la1) * math.sin(la2) - math.sin(la1) * math.cos(la2) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360.0) % 360.0
+
+
+def bearing_op_ok(op: str, bearing: float, a: float, b: float) -> bool:
+    """Whether *bearing* satisfies condition *op* (see DISTANCE_OPS) against
+    *a* (and *b*). Like _distance_op_ok(), except that "between" / "not
+    between" run clockwise from *a* to *b*, so 315–45 is the sector through
+    north rather than the 90 degrees opposite it."""
+    if op not in ("between", "not_between"):
+        return _distance_op_ok(op, bearing, a, b, _BEARING_EQUAL_TOLERANCE_DEG)
+    a, b, bearing = a % 360.0, b % 360.0, bearing % 360.0
+    inside = a <= bearing <= b if a <= b else (bearing >= a or bearing <= b)
+    return inside if op == "between" else not inside
+
+
+# "equal" compares whole degrees, like the dialog shows them — ±0.5°.
+_BEARING_EQUAL_TOLERANCE_DEG = 0.5
+
+
+class DirectionFilter(BaseFilter):
+    """GSAK's "Direction" filter: keep caches lying in a given direction as
+    seen from the centre point.
+
+    Two forms:
+
+    * bearing condition (*op* set) — the bearing in degrees satisfies *op*
+      against *deg1* (and *deg2*), see bearing_op_ok().
+    * compass sectors (*directions*, the original form) — the cache lies in
+      one of the selected sectors (N/NE/E/SE/S/SW/W/NW). The dialog still
+      builds it for directions picked on its compass rose that aren't
+      adjacent, which no single degree range can express.
+
+    Either way, with a centre (*lat*, *lon*) the bearing is computed from
+    that point, like DistanceFilter's distance; without one (every profile
+    saved before the centre existed) it is the persisted Cache.bearing from
+    the active home point.
+
+    Cache.bearing is maintained by recalculate_distances() and shown in the
+    Bearing column, so the home-point forms always agree with what the list
+    displays and are fully pushable to SQL. Caches without a bearing (no
+    coordinates, or not yet recalculated) never match.
+    """
+    filter_type = "direction"
+
+    def __init__(
+        self,
+        directions: Optional[list[str]] = None,
+        *,
+        op: Optional[str] = None,
+        deg1: float = 0.0,
+        deg2: float = 0.0,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        center_state: Optional[dict] = None,
+    ):
+        if op is not None and op not in DISTANCE_OPS:
+            raise ValueError(f"Unknown bearing operator {op!r}")
+        wanted = {x.strip().upper() for x in directions or []}
+        self.directions = [d for d in DIRECTIONS if d in wanted]
+        self.op = op
+        self.deg1 = deg1
+        self.deg2 = deg2
+        self.lat = lat
+        self.lon = lon
+        # Serialized CenterPointPicker selection, only for re-populating the
+        # dialog — see DistanceFilter.center_state.
+        self.center_state = center_state
+
+    def _has_center(self) -> bool:
+        return self.lat is not None and self.lon is not None
+
+    def apply_to_query(self, query):
+        from sqlalchemy import and_, false, or_
+        if self._has_center():
+            return None  # bearing from an arbitrary point — Python only
+        if self.op is not None:
+            return query.filter(self._bearing_clause())
+        terms = []
+        for d in self.directions:
+            lo = (DIRECTIONS.index(d) * 45.0 - 22.5) % 360.0
+            hi = lo + 45.0
+            if hi > 360.0:  # N wraps around 0°
+                terms.append(or_(Cache.bearing >= lo, Cache.bearing < hi - 360.0))
+            else:
+                terms.append(and_(Cache.bearing >= lo, Cache.bearing < hi))
+        return query.filter(or_(*terms) if terms else false())
+
+    def _bearing_clause(self):
+        """SQL form of bearing_op_ok() on Cache.bearing."""
+        from sqlalchemy import and_, not_, or_
+        col, a, b = Cache.bearing, self.deg1, self.deg2
+        if self.op == "equal":
+            tol = _BEARING_EQUAL_TOLERANCE_DEG
+            return col.between(a - tol, a + tol)
+        if self.op == "less_than":
+            return col < a
+        if self.op == "at_most":
+            return col <= a
+        if self.op == "more_than":
+            return col > a
+        if self.op == "at_least":
+            return col >= a
+        a, b = a % 360.0, b % 360.0
+        inside = and_(col >= a, col <= b) if a <= b else or_(col >= a, col <= b)
+        # Guard the NULL bearings explicitly — NOT (NULL ...) is NULL anyway,
+        # but this states the intent.
+        return inside if self.op == "between" else and_(col.isnot(None), not_(inside))
+
+    def _cache_bearing(self, cache: Cache) -> Optional[float]:
+        if self.lat is None or self.lon is None:
+            return cache.bearing
+        if cache.latitude is None or cache.longitude is None:
+            return None
+        return _bearing_deg(self.lat, self.lon, cache.latitude, cache.longitude)
+
+    def matches(self, cache: Cache) -> bool:
+        bearing = self._cache_bearing(cache)
+        if bearing is None:
+            return False
+        if self.op is not None:
+            return bearing_op_ok(self.op, bearing, self.deg1, self.deg2)
+        return bearing_direction(bearing) in self.directions
+
+    def to_dict(self) -> dict:
+        if self.op is None:
+            data: dict[str, Any] = {
+                "filter_type": self.filter_type, "directions": self.directions,
+            }
+            if self._has_center():
+                data.update(lat=self.lat, lon=self.lon, center_state=self.center_state)
+            return data
+        return {
+            "filter_type": self.filter_type,
+            "op": self.op,
+            "deg1": self.deg1,
+            "deg2": self.deg2,
+            "lat": self.lat,
+            "lon": self.lon,
+            "center_state": self.center_state,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DirectionFilter":
+        if "op" not in data:
+            # Compass sectors — from Home when saved before the centre point.
+            return cls(
+                data.get("directions", []), lat=data.get("lat"),
+                lon=data.get("lon"), center_state=data.get("center_state"),
+            )
+        return cls(
+            op=data["op"], deg1=data.get("deg1", 0.0), deg2=data.get("deg2", 0.0),
+            lat=data.get("lat"), lon=data.get("lon"),
+            center_state=data.get("center_state"),
+        )
+
+    def __repr__(self) -> str:
+        return f"<DirectionFilter {self.to_dict()}>"
+
+
+class LinePolygonFilter(BaseFilter):
+    """GSAK's line/polygon filter: keep caches along a line, inside a polygon
+    or near a set of points (see line_polygon.LineShape) — or, with
+    *exclude*, only the caches that don't match.
+
+    Tests each cache's effective_coords() (corrected coordinates when set,
+    as on the map). *points* is a frozen snapshot taken when the filter was
+    built, like DistanceFilter's centre; *text* is the dialog's point list
+    as entered ("W,<code>" lines and comments included), kept only to
+    re-populate the dialog.
+    """
+    filter_type = "line_polygon"
+
+    # apply_to_query() below only pushes a bounding-box pre-narrowing —
+    # matches() makes the exact decision. See BaseFilter.sql_exact.
+    sql_exact = False
+
+    def __init__(
+        self,
+        points: list[tuple[float, float]],
+        mode: str = "line",
+        distance_km: float = 0.0,
+        exclude: bool = False,
+        text: str = "",
+    ):
+        if mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        self.points = [(float(lat), float(lon)) for lat, lon in points]
+        self.mode = mode
+        self.distance_km = max(0.0, float(distance_km))
+        self.exclude = bool(exclude)
+        self.text = text
+        self._shape = LineShape(self.points, mode, self.distance_km)
+
+    def apply_to_query(self, query):
+        """Pre-narrow to the shape's bounding box (grown by the distance).
+
+        Checked against the raw coordinates OR the corrected ones, since
+        matches() uses whichever applies — a puzzle whose final lies on the
+        line but whose posted coordinates don't must still come through.
+        Nothing is pushed for *exclude* (the complement of a box narrows
+        nothing) or when the shape has no box (poles / antimeridian).
+        """
+        bbox = self._shape.bbox
+        if self.exclude or bbox is None:
+            return None
+        from sqlalchemy import and_, exists, or_
+        lat_lo, lat_hi, lon_lo, lon_hi = bbox
+        # .correlate(Cache) — see HasCorrectedFilter.apply_to_query().
+        corrected_in_box = (
+            exists()
+            .where(
+                UserNote.cache_id == Cache.id,
+                UserNote.is_corrected == True,  # noqa: E712
+                UserNote.corrected_lat.between(lat_lo, lat_hi),
+                UserNote.corrected_lon.between(lon_lo, lon_hi),
+            )
+            .correlate(Cache)
+        )
+        return query.filter(or_(
+            and_(
+                Cache.latitude.between(lat_lo, lat_hi),
+                Cache.longitude.between(lon_lo, lon_hi),
+            ),
+            corrected_in_box,
+        ))
+
+    def matches(self, cache: Cache) -> bool:
+        lat, lon = effective_coords(cache)
+        if lat is None or lon is None:
+            return False
+        return self._shape.contains(lat, lon) != self.exclude
+
+    def to_dict(self) -> dict:
+        # "shape_type", not "mode": FilterSet.from_dict() reads any dict
+        # with a "mode" key as a nested FilterSet.
+        return {
+            "filter_type": self.filter_type,
+            "shape_type": self.mode,
+            "points": [[lat, lon] for lat, lon in self.points],
+            "distance_km": self.distance_km,
+            "exclude": self.exclude,
+            "text": self.text,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LinePolygonFilter":
+        return cls(
+            points=data.get("points", []),
+            mode=data.get("shape_type", "line"),
+            distance_km=data.get("distance_km", 0.0),
+            exclude=data.get("exclude", False),
+            text=data.get("text", ""),
+        )
+
+    def __repr__(self) -> str:
+        exclude = " exclude" if self.exclude else ""
+        return (f"<LinePolygonFilter {self.mode} points={len(self.points)} "
+                f"{self.distance_km} km{exclude}>")
 
 
 class AttributeFilter(BaseFilter):
@@ -960,6 +1368,69 @@ class NoCorrectedFilter(BaseFilter):
         return cls()
 
 
+CORRECTED_DISTANCE_OPS = DISTANCE_OPS
+# "equal" compares distances to whole metres — the dialog enters them without
+# decimals, and two float distances are never exactly equal otherwise.
+_CORRECTED_DISTANCE_EQUAL_TOLERANCE_M = 0.5
+
+
+class CorrectedDistanceFilter(BaseFilter):
+    """Keep caches whose corrected coordinates lie a given distance (metres)
+    from their posted coordinates — e.g. finals more than 3.2 km off (outside
+    the 2-mile rule, likely a typo) or exactly 0 m (corrected = posted).
+
+    Caches without corrected coordinates never match: there is no distance
+    to compare. *dist2_m* is only used by "between" / "not_between".
+    """
+    filter_type = "corrected_distance"
+
+    # apply_to_query() only narrows to caches that have corrected coordinates;
+    # the distance itself is computed in matches(). See BaseFilter.sql_exact.
+    sql_exact = False
+
+    def __init__(self, op: str = "more_than", dist1_m: float = 0.0, dist2_m: float = 0.0):
+        if op not in CORRECTED_DISTANCE_OPS:
+            raise ValueError(f"Unknown corrected distance operator {op!r}")
+        self.op = op
+        self.dist1_m = dist1_m
+        self.dist2_m = dist2_m
+
+    def apply_to_query(self, query):
+        return HasCorrectedFilter().apply_to_query(query)
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        if not (note and note.is_corrected):
+            return False
+        lat, lon = cache.latitude, cache.longitude
+        clat, clon = note.corrected_lat, note.corrected_lon
+        if lat is None or lon is None or clat is None or clon is None:
+            return False
+        dist_m = _haversine_km(lat, lon, clat, clon) * 1000.0
+        return _distance_op_ok(
+            self.op, dist_m, self.dist1_m, self.dist2_m, _CORRECTED_DISTANCE_EQUAL_TOLERANCE_M,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "op": self.op,
+            "dist1_m": self.dist1_m,
+            "dist2_m": self.dist2_m,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CorrectedDistanceFilter":
+        return cls(
+            op=data.get("op", "more_than"),
+            dist1_m=data.get("dist1_m", 0.0),
+            dist2_m=data.get("dist2_m", 0.0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<CorrectedDistanceFilter {self.to_dict()}>"
+
+
 class UserFlagFilter(BaseFilter):
     """Keep caches based on user_flag value."""
     filter_type = "user_flag"
@@ -1062,34 +1533,253 @@ class FtfFilter(BaseFilter):
         return cls(has_ftf=data["has_ftf"])
 
 
+# Characters stripped from a personal note before it is matched — used both
+# as SQLite's trim() set and Python's str.strip() argument so UserNoteFilter's
+# SQL pushdown and matches() agree exactly.
+_NOTE_BLANK_CHARS = " \t\r\n"
+
+
+class UserNoteFilter(TextMatchFilter):
+    """Keep caches whose personal note (UserNote.note — the local note edited
+    on the detail panel's Notes tab, not GC.com's synced gc_note) matches
+    *text* (case-insensitive).
+
+    The note is matched with surrounding whitespace stripped, so a
+    whitespace-only note, a missing UserNote row and a row that only carries
+    corrected coordinates all count as empty. GSAK's "Has user notes" yes/no
+    is op="not_empty" / op="empty".
+    """
+    filter_type = "user_note"
+
+    def apply_to_query(self, query):
+        if self._is_noop():
+            return query
+        # Correlated scalar subquery (UserNote.cache_id is unique) — NULL when
+        # the cache has no UserNote row, which sql_condition() treats as "".
+        # Explicit .correlate(Cache) for the lightweight path, same as
+        # HasCorrectedFilter.
+        from sqlalchemy import func, select
+
+        from opensak.db.models import UserNote
+        note = (
+            select(func.trim(UserNote.note, _NOTE_BLANK_CHARS))
+            .where(UserNote.cache_id == Cache.id)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        cond = self.sql_condition(note)
+        return None if cond is None else query.filter(cond)
+
+    def matches(self, cache: Cache) -> bool:
+        note = cache.user_note
+        text = note.note if note is not None else None
+        return self.match_value(text.strip(_NOTE_BLANK_CHARS) if text else None)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TextMatchFilter":
+        # Profiles saved with the old yes/no PersonalNoteFilter
+        # ({"filter_type": "personal_note", "has_note": bool}) migrate to the
+        # equivalent not_empty / empty text match.
+        if "has_note" in data:
+            return cls(op="not_empty" if data["has_note"] else "empty")
+        return super().from_dict(data)
+
+
+def _op_sql(expr, op: str, a: float, b: float, tolerance: float = 0.0):
+    """SQL counterpart of _distance_op_ok() for a numeric column expression."""
+    from sqlalchemy import not_
+    if op == "equal":
+        if tolerance:
+            return expr.between(a - tolerance, a + tolerance)
+        return expr == a
+    if op == "less_than":
+        return expr < a
+    if op == "at_most":
+        return expr <= a
+    if op == "more_than":
+        return expr > a
+    if op == "at_least":
+        return expr >= a
+    inside = expr.between(min(a, b), max(a, b))
+    return inside if op == "between" else not_(inside)
+
+
+def _legacy_range_to_op(lo: float, hi: float, lo_open: float, hi_open: float):
+    """Convert an old inclusive [lo, hi] range filter to (op, value1, value2).
+
+    *lo_open* / *hi_open* are the old dialog's default bounds, which meant
+    "no limit on this side": a range starting at the lowest default becomes
+    "at most hi", one ending at the highest default becomes "at least lo".
+    """
+    if hi >= hi_open:
+        return "at_least", lo, 0
+    if lo <= lo_open:
+        return "at_most", hi, 0
+    if lo == hi:
+        return "equal", lo, 0
+    return "between", lo, hi
+
+
+# Conditions for the favorite points and elevation filters — the same set
+# (and dialog labels) as the distance filters.
+NUMBER_OPS = DISTANCE_OPS
+
+
 class FavoritePointsFilter(BaseFilter):
-    """Keep caches with favorite_points within [min_pts, max_pts]."""
+    """Keep caches whose favorite points satisfy *op* against *pts1* (and
+    *pts2* for "between" / "not_between") — see NUMBER_OPS. A cache without
+    favorite points (NULL) counts as 0.
+
+    The older *min_pts* / *max_pts* range is still accepted, both as
+    arguments and in saved filter profiles, and converted to a condition —
+    see _legacy_range_to_op().
+    """
     filter_type = "favorite_points"
 
-    def __init__(self, min_pts: int = 0, max_pts: int = 9999):
-        self.min_pts = min_pts
-        self.max_pts = max_pts
+    # The old dialog's defaults for "no limit".
+    _LEGACY_MIN, _LEGACY_MAX = 0, 9999
+
+    def __init__(
+        self,
+        op: Optional[str] = None,
+        pts1: int = 0,
+        pts2: int = 0,
+        *,
+        min_pts: Optional[int] = None,
+        max_pts: Optional[int] = None,
+    ):
+        if op is None:
+            if min_pts is None and max_pts is None:
+                op, pts1, pts2 = "at_least", 0, 0
+            else:
+                op, pts1, pts2 = _legacy_range_to_op(
+                    self._LEGACY_MIN if min_pts is None else min_pts,
+                    self._LEGACY_MAX if max_pts is None else max_pts,
+                    self._LEGACY_MIN, self._LEGACY_MAX,
+                )
+        if op not in NUMBER_OPS:
+            raise ValueError(f"Unknown favorite points operator {op!r}")
+        self.op = op
+        self.pts1 = int(pts1)
+        self.pts2 = int(pts2)
 
     def apply_to_query(self, query):
         # #633: mirror matches()'s `cache.favorite_points or 0` (NULL treated
         # as 0) via coalesce.
         from sqlalchemy import func
-        return query.filter(func.coalesce(Cache.favorite_points, 0).between(self.min_pts, self.max_pts))
+        return query.filter(_op_sql(
+            func.coalesce(Cache.favorite_points, 0), self.op, self.pts1, self.pts2,
+        ))
 
     def matches(self, cache: Cache) -> bool:
         pts = cache.favorite_points or 0
-        return self.min_pts <= pts <= self.max_pts
+        return _distance_op_ok(self.op, pts, self.pts1, self.pts2, 0)
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
-            "min_pts": self.min_pts,
-            "max_pts": self.max_pts,
+            "op": self.op,
+            "pts1": self.pts1,
+            "pts2": self.pts2,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "FavoritePointsFilter":
-        return cls(min_pts=data.get("min_pts", 0), max_pts=data.get("max_pts", 9999))
+        if "op" not in data:
+            # Profile saved before the favorite points conditions — min/max form.
+            return cls(
+                min_pts=data.get("min_pts", cls._LEGACY_MIN),
+                max_pts=data.get("max_pts", cls._LEGACY_MAX),
+            )
+        return cls(op=data["op"], pts1=data.get("pts1", 0), pts2=data.get("pts2", 0))
+
+    def __repr__(self) -> str:
+        return f"<FavoritePointsFilter {self.to_dict()}>"
+
+
+# "equal" compares elevations to whole metres — the dialog enters them
+# without decimals, while stored elevations can have them.
+_ELEVATION_EQUAL_TOLERANCE_M = 0.5
+
+
+class ElevationFilter(BaseFilter):
+    """Keep caches whose elevation (metres) satisfies *op* against *elev1_m*
+    (and *elev2_m* for "between" / "not_between") — see NUMBER_OPS.
+
+    A cache with unknown elevation (NULL — not yet looked up) never matches:
+    unlike favorite points, NULL can't be read as 0, which is a real
+    elevation at sea level.
+
+    The older *min_m* / *max_m* range is still accepted, both as arguments
+    and in saved filter profiles, and converted to a condition — see
+    _legacy_range_to_op().
+    """
+    filter_type = "elevation"
+
+    # The old dialog's defaults for "no limit".
+    _LEGACY_MIN, _LEGACY_MAX = -500.0, 9000.0
+
+    def __init__(
+        self,
+        op: Optional[str] = None,
+        elev1_m: float = 0.0,
+        elev2_m: float = 0.0,
+        *,
+        min_m: Optional[float] = None,
+        max_m: Optional[float] = None,
+    ):
+        if op is None:
+            if min_m is None and max_m is None:
+                op, elev1_m, elev2_m = "at_least", self._LEGACY_MIN, 0.0
+            else:
+                op, elev1_m, elev2_m = _legacy_range_to_op(
+                    self._LEGACY_MIN if min_m is None else min_m,
+                    self._LEGACY_MAX if max_m is None else max_m,
+                    self._LEGACY_MIN, self._LEGACY_MAX,
+                )
+        if op not in NUMBER_OPS:
+            raise ValueError(f"Unknown elevation operator {op!r}")
+        self.op = op
+        self.elev1_m = float(elev1_m)
+        self.elev2_m = float(elev2_m)
+
+    def apply_to_query(self, query):
+        # Comparisons (and BETWEEN / NOT BETWEEN) on NULL are NULL, so
+        # unknown elevations drop out here too.
+        return query.filter(_op_sql(
+            Cache.elevation, self.op, self.elev1_m, self.elev2_m,
+            _ELEVATION_EQUAL_TOLERANCE_M,
+        ))
+
+    def matches(self, cache: Cache) -> bool:
+        return cache.elevation is not None and _distance_op_ok(
+            self.op, cache.elevation, self.elev1_m, self.elev2_m,
+            _ELEVATION_EQUAL_TOLERANCE_M,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "op": self.op,
+            "elev1_m": self.elev1_m,
+            "elev2_m": self.elev2_m,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ElevationFilter":
+        if "op" not in data:
+            # Profile saved before the elevation conditions — min/max form.
+            return cls(
+                min_m=data.get("min_m", cls._LEGACY_MIN),
+                max_m=data.get("max_m", cls._LEGACY_MAX),
+            )
+        return cls(
+            op=data["op"], elev1_m=data.get("elev1_m", 0.0),
+            elev2_m=data.get("elev2_m", 0.0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<ElevationFilter {self.to_dict()}>"
 
 
 class FoundByMeDateFilter(BaseFilter):
@@ -1310,11 +2000,333 @@ class HiddenDateFilter(BaseFilter):
         )
 
 
+# ── GSAK-style date filter ────────────────────────────────────────────────────
+
+# Filterable date fields: filter key -> Cache attribute. The keys are the
+# cache table's column IDs (changed_date/creation_date display
+# last_updated/imported_at there as well).
+DATE_FILTER_FIELDS: dict[str, str] = {
+    "last_found_date": "last_found_date",
+    "hidden_date":     "hidden_date",
+    "found_date":      "found_date",
+    "dnf_date":        "dnf_date",
+    "creation_date":   "imported_at",
+    "last_gpx_update": "last_gpx_update",
+    "last_log_date":   "last_log_date",
+    "changed_date":    "last_updated",
+}
+# Fields whose DateFilter bounds may carry a time of day (to the minute) —
+# timestamps OpenSAK records itself, where the time is meaningful.
+DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "changed_date")
+DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
+            "during", "not_during", "compare")
+DATE_UNITS = ("days", "weeks", "months", "years")
+DATE_COMPARE_OPS = ("equal", "older", "older_or_equal", "newer",
+                    "newer_or_equal", "within", "outside")
+
+# filter_type of the older from/to-only date filters -> the field they cover.
+LEGACY_DATE_FILTER_FIELDS: dict[str, str] = {
+    "hidden_date_range": "hidden_date",
+    "found_by_me_date":  "found_date",
+    "dnf_date":          "dnf_date",
+    "last_log_date":     "last_log_date",
+}
+
+
+def _to_date(value) -> Optional[date]:
+    """Calendar date of a datetime (tz dropped, like the other date filters)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None).date()
+    return value
+
+
+def _parse_iso_date(value: Optional[str]) -> Optional[date]:
+    """Parse a saved date; accepts both 'YYYY-MM-DD' and full ISO datetimes."""
+    return datetime.fromisoformat(value).date() if value else None
+
+
+def _parse_iso_bound(value: Optional[str]) -> Optional[date]:
+    """Parse a saved DateFilter bound: a date for 'YYYY-MM-DD', a datetime
+    when the string carries a time."""
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    return parsed if "T" in value or " " in value else parsed.date()
+
+
+def _to_bound(value, with_time: bool) -> Optional[date]:
+    """A DateFilter bound: a naive datetime truncated to the minute when
+    *with_time* and *value* has a time, otherwise its calendar date."""
+    if with_time and isinstance(value, datetime):
+        return value.replace(tzinfo=None, second=0, microsecond=0)
+    return _to_date(value)
+
+
+def _day_start(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day)
+
+
+def _bound_start(b: date) -> datetime:
+    """First instant covered by bound *b* (a date or a to-the-minute datetime)."""
+    return b if isinstance(b, datetime) else _day_start(b)
+
+
+def _bound_end(b: date) -> Optional[datetime]:
+    """First instant after bound *b* (None if that overflows)."""
+    try:
+        if isinstance(b, datetime):
+            return b + timedelta(minutes=1)
+        return _day_start(b + timedelta(days=1))
+    except OverflowError:
+        return None
+
+
+def _months_back(d: date, months: int) -> date:
+    """*d* moved back *months* calendar months, clamped to the month's last day."""
+    import calendar
+    year, month0 = divmod(d.year * 12 + d.month - 1 - months, 12)
+    month = month0 + 1
+    return date(year, month, min(d.day, calendar.monthrange(year, month)[1]))
+
+
+def _shift_back(d: date, amount: int, unit: str) -> date:
+    """*d* moved back *amount* days/weeks/months/years (date.min on underflow)."""
+    try:
+        if unit == "weeks":
+            return d - timedelta(weeks=amount)
+        if unit == "months":
+            return _months_back(d, amount)
+        if unit == "years":
+            return _months_back(d, amount * 12)
+        return d - timedelta(days=amount)
+    except (ValueError, OverflowError):
+        return date.min
+
+
+def _today() -> date:
+    """Reference day for the relative "during the last N …" operators."""
+    return date.today()
+
+
+def _compare_diff(op: str, diff, days: int, absolute=abs):
+    """Evaluate a DateFilter compare op on *diff* = this date - other date (in
+    days). Works on ints and on SQL expressions (pass absolute=func.abs)."""
+    if op == "equal":
+        return diff == 0
+    if op == "older":
+        return diff < 0
+    if op == "older_or_equal":
+        return diff <= 0
+    if op == "newer":
+        return diff > 0
+    if op == "newer_or_equal":
+        return diff >= 0
+    if op == "within":
+        return absolute(diff) <= days
+    return absolute(diff) > days  # outside
+
+
+def _date_op_range(
+    op: str, date1: Optional[date], date2: Optional[date], amount: int, unit: str,
+) -> tuple[Optional[date], Optional[date]]:
+    """Inclusive (lo, hi) bounds of a DateFilter operator other than compare."""
+    if op == "on_or_before":
+        return None, date1
+    if op == "on_or_after":
+        return date1, None
+    if op == "equal":
+        return date1, date1
+    if op == "between":
+        assert date1 is not None and date2 is not None  # enforced by callers
+        return min(date1, date2, key=_bound_start), max(date1, date2, key=_bound_start)
+    today = _today()  # during / not_during
+    return _shift_back(today, amount, unit), today
+
+
+def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date]):
+    """SQL form of _date_in_range() on datetime column *col*. Compares the raw
+    column against day (or minute) boundaries, so an index on it stays usable."""
+    from sqlalchemy import and_, not_, or_
+    conditions = [col.is_not(None)]
+    if lo is not None:
+        conditions.append(col >= _bound_start(lo))
+    end = _bound_end(hi) if hi is not None else None
+    if end is not None:
+        conditions.append(col < end)
+    inside = and_(*conditions)
+    if op == "not_during":
+        return or_(col.is_(None), not_(inside))
+    return inside
+
+
+def _date_in_range(value, op: str, lo: Optional[date], hi: Optional[date]) -> bool:
+    """Whether *value* (a date or datetime) passes a range operator: inside
+    [lo, hi], or — for not_during — outside it or missing. Date bounds cover
+    whole days, datetime bounds whole minutes."""
+    if isinstance(value, datetime):
+        value = value.replace(tzinfo=None)
+    elif value is not None:
+        value = _day_start(value)
+    end = _bound_end(hi) if hi is not None else None
+    inside = (
+        value is not None
+        and (lo is None or value >= _bound_start(lo))
+        and (end is None or value < end)
+    )
+    return not inside if op == "not_during" else inside
+
+
+class DateFilter(BaseFilter):
+    """GSAK-style filter on one of the cache's date fields (DATE_FILTER_FIELDS).
+
+    Operators — all compare calendar dates, ignoring the time of day:
+      on_or_before / on_or_after / equal   relative to *date1*
+                   (for DATETIME_FILTER_FIELDS, *date1*/*date2* may be
+                   datetimes: the bound is then that minute instead of a day)
+      between      *date1*..*date2* inclusive (in either order)
+      during       within the last *amount* *unit*s, up to and including today
+      not_during   the complement of "during": also matches caches without a
+                   date, so "last found not during the last 2 years" keeps
+                   never-found caches
+      compare      against *other_field* of the same cache using *compare_op*;
+                   "within"/"outside" take *compare_days*
+    Apart from not_during, a cache without a date never matches.
+
+    Supersedes the from/to-only HiddenDateFilter/FoundByMeDateFilter/
+    DnfDateFilter/LastLogDateFilter, which stay registered so filter profiles
+    saved before this still load; from_legacy() converts them.
+    """
+    filter_type = "date"
+
+    def __init__(
+        self,
+        field: str,
+        op: str,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        amount: int = 1,
+        unit: str = "days",
+        other_field: str = "hidden_date",
+        compare_op: str = "equal",
+        compare_days: int = 0,
+    ):
+        if field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {field!r}")
+        if op not in DATE_OPS:
+            raise ValueError(f"Unknown date operator {op!r}")
+        if unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {unit!r}")
+        if other_field not in DATE_FILTER_FIELDS:
+            raise ValueError(f"Unknown date field {other_field!r}")
+        if compare_op not in DATE_COMPARE_OPS:
+            raise ValueError(f"Unknown date compare operator {compare_op!r}")
+        self.field = field
+        self.op = op
+        with_time = field in DATETIME_FILTER_FIELDS
+        self.date1 = _to_bound(date1, with_time)
+        self.date2 = _to_bound(date2, with_time)
+        if op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {op!r} needs date1")
+        if op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.amount = max(0, int(amount))
+        self.unit = unit
+        self.other_field = other_field
+        self.compare_op = compare_op
+        self.compare_days = max(0, int(compare_days))
+
+    def _range(self) -> tuple[Optional[date], Optional[date]]:
+        """Inclusive (lo, hi) bounds for every op except compare."""
+        return _date_op_range(self.op, self.date1, self.date2, self.amount, self.unit)
+
+    def apply_to_query(self, query):
+        # Mirrors matches() exactly. Range bounds compare the raw column
+        # against day boundaries (index-friendly); compare uses SQLite's
+        # date()/julianday() so both sides are reduced to calendar dates.
+        from sqlalchemy import func
+        col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
+        if self.op == "compare":
+            other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
+            diff = func.julianday(func.date(col)) - func.julianday(func.date(other))
+            return query.filter(
+                col.is_not(None), other.is_not(None),
+                _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
+            )
+        return query.filter(_date_range_sql(col, self.op, *self._range()))
+
+    def matches(self, cache: Cache) -> bool:
+        raw = getattr(cache, DATE_FILTER_FIELDS[self.field], None)
+        value = _to_date(raw)
+        if self.op == "compare":
+            other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
+            if value is None or other is None:
+                return False
+            return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
+        return _date_in_range(raw, self.op, *self._range())
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "field": self.field,
+            "op": self.op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "amount": self.amount,
+            "unit": self.unit,
+            "other_field": self.other_field,
+            "compare_op": self.compare_op,
+            "compare_days": self.compare_days,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DateFilter":
+        return cls(
+            field=data["field"],
+            op=data["op"],
+            date1=_parse_iso_bound(data.get("date1")),
+            date2=_parse_iso_bound(data.get("date2")),
+            amount=data.get("amount", 1),
+            unit=data.get("unit", "days"),
+            other_field=data.get("other_field", "hidden_date"),
+            compare_op=data.get("compare_op", "equal"),
+            compare_days=data.get("compare_days", 0),
+        )
+
+    @classmethod
+    def from_legacy(cls, legacy: BaseFilter) -> Optional["DateFilter"]:
+        """Equivalent DateFilter for an older from/to range filter
+        (LEGACY_DATE_FILTER_FIELDS), or None if it has no date bounds.
+
+        Not an exact match for FoundByMeDateFilter/DnfDateFilter, which also
+        let found/DNF caches without a date through — DateFilter never
+        matches a missing date."""
+        field = LEGACY_DATE_FILTER_FIELDS.get(legacy.filter_type)
+        from_date = getattr(legacy, "from_date", None)
+        to_date = getattr(legacy, "to_date", None)
+        if field is None or not (from_date or to_date):
+            return None
+        if from_date and to_date:
+            return cls(field, "between", date1=from_date, date2=to_date)
+        if from_date:
+            return cls(field, "on_or_after", date1=from_date)
+        return cls(field, "on_or_before", date1=to_date)
+
+    def __repr__(self) -> str:
+        return f"<DateFilter {self.to_dict()}>"
+
+
 class TextSearchFilter(BaseFilter):
-    """Keep caches whose text fields contain *text* (case-insensitive).
+    """Keep caches whose free-text fields match *text* under operator *op*.
 
     Searches any combination of: short/long description, log texts,
-    personal user notes, and the encoded hint.
+    personal user notes, and the encoded hint. *op* is one of TEXT_OPS, the
+    same operators (and case-insensitive semantics) as the single-column
+    text filters. A positive operator matches when *any* searched field (or
+    any one log) matches; a negated one — and "empty" — when *none* does, so
+    "not contains X" keeps caches that mention X nowhere in the searched
+    fields. With no field selected nothing matches.
     """
     filter_type = "text_search"
 
@@ -1325,70 +2337,99 @@ class TextSearchFilter(BaseFilter):
         search_logs: bool = True,
         search_notes: bool = True,
         search_hint: bool = False,
+        op: str = "contains",
     ):
-        self.text = text.strip()
+        match = TextMatchFilter(text, op)
+        self.text = match.text
+        self.op = op
+        self.regex_error = match.regex_error
         self.search_description = search_description
         self.search_logs = search_logs
         self.search_notes = search_notes
         self.search_hint = search_hint
+        # Evaluate the positive operator per field and negate the combined
+        # result: "empty" is the negation of "not_empty".
+        positive = "not_empty" if op == "empty" else _TEXT_OP_NEGATIONS.get(op, op)
+        self._negated = positive != op
+        self._positive = TextMatchFilter(text, positive)
+        # A non-ASCII needle is only pushed as a pre-narrowing LIKE — see
+        # TextMatchFilter.sql_exact.
+        self.sql_exact = self._positive.sql_exact
+
+    def _is_noop(self) -> bool:
+        """Nothing to compare against (empty text) — every cache matches."""
+        return self._positive._is_noop()
+
+    def _has_fields(self) -> bool:
+        return (self.search_description or self.search_logs
+                or self.search_notes or self.search_hint)
 
     def apply_to_query(self, query):
-        if not self.text:
+        if self._is_noop() or not self._has_fields():
             return None
-        from sqlalchemy import func, exists, or_
+        from sqlalchemy import and_, exists, or_
         from opensak.db.models import Log, UserNote
 
-        pattern = f"%{self.text.lower()}%"
+        if self._negated and not self.sql_exact:
+            return None  # a pre-narrowing superset can't be negated
+        if self._positive.sql_condition(Cache.short_description) is None:
+            return None  # regex, or a needle LIKE can't handle — matches() only
+
+        def column_cond(col):
+            # NULL-safe: a NULL column never matches the positive operator,
+            # and must not turn the negation below into NULL.
+            return and_(col.is_not(None), self._positive.sql_condition(col))
+
         conditions = []
         if self.search_description:
-            conditions.append(func.lower(Cache.short_description).like(pattern))
-            conditions.append(func.lower(Cache.long_description).like(pattern))
+            conditions.append(column_cond(Cache.short_description))
+            conditions.append(column_cond(Cache.long_description))
         if self.search_hint:
-            conditions.append(func.lower(Cache.encoded_hints).like(pattern))
+            conditions.append(column_cond(Cache.encoded_hints))
         if self.search_logs:
             conditions.append(
                 exists().where(
-                    (Log.cache_id == Cache.id)
-                    & func.lower(Log.text).like(pattern)
+                    (Log.cache_id == Cache.id) & column_cond(Log.text)
                 )
             )
         if self.search_notes:
             conditions.append(
                 exists().where(
-                    (UserNote.cache_id == Cache.id)
-                    & func.lower(UserNote.note).like(pattern)
+                    (UserNote.cache_id == Cache.id) & column_cond(UserNote.note)
                 )
             )
-        if not conditions:
-            return None
-        return query.filter(or_(*conditions))
+        cond = or_(*conditions)
+        return query.filter(~cond if self._negated else cond)
 
-    def matches(self, cache: Cache) -> bool:
-        if not self.text:
-            return True
-        needle = self.text.lower()
+    def _values(self, cache: Cache):
+        """The searched field values of *cache* (None for an unset field)."""
         if self.search_description:
-            if cache.short_description and needle in cache.short_description.lower():
-                return True
-            if cache.long_description and needle in cache.long_description.lower():
-                return True
+            yield cache.short_description
+            yield cache.long_description
         if self.search_hint:
-            if cache.encoded_hints and needle in cache.encoded_hints.lower():
-                return True
-        if self.search_notes:
-            if cache.user_note and cache.user_note.note:
-                if needle in cache.user_note.note.lower():
-                    return True
+            yield cache.encoded_hints
+        if self.search_notes and cache.user_note is not None:
+            yield cache.user_note.note
         if self.search_logs:
             for log in cache.logs:
-                if log.text and needle in log.text.lower():
-                    return True
-        return False
+                yield log.text
+
+    def matches(self, cache: Cache) -> bool:
+        if self._is_noop():
+            return True
+        if not self._has_fields():
+            return False
+        found = any(
+            value and self._positive.match_value(value)
+            for value in self._values(cache)
+        )
+        return not found if self._negated else found
 
     def to_dict(self) -> dict:
         return {
             "filter_type": self.filter_type,
             "text": self.text,
+            "op": self.op,
             "search_description": self.search_description,
             "search_logs": self.search_logs,
             "search_notes": self.search_notes,
@@ -1397,13 +2438,816 @@ class TextSearchFilter(BaseFilter):
 
     @classmethod
     def from_dict(cls, data: dict) -> "TextSearchFilter":
+        # Profiles saved before the operator existed have no "op" — they
+        # were always "contains".
         return cls(
             text=data.get("text", ""),
             search_description=data.get("search_description", True),
             search_logs=data.get("search_logs", True),
             search_notes=data.get("search_notes", True),
             search_hint=data.get("search_hint", False),
+            op=data.get("op", "contains"),
         )
+
+    def __repr__(self) -> str:
+        return f"<TextSearchFilter {self.op} {self.text!r}>"
+
+
+# ── Child waypoint filter ─────────────────────────────────────────────────────
+
+# Text criteria of WaypointFilter, in GSAK's order: code, type, name, comment.
+WAYPOINT_TEXT_FIELDS = ("code", "wp_type", "name", "comment")
+# DateFilter's operators, minus compare (a waypoint has only the one date).
+WAYPOINT_DATE_OPS = tuple(op for op in DATE_OPS if op != "compare")
+WAYPOINT_COUNT_OPS = ("any", "equal", "at_least", "at_most", "between")
+
+
+def _waypoint_text_column(field_name: str):
+    from sqlalchemy import func
+    if field_name == "code":
+        return func.coalesce(Waypoint.wp_code, Waypoint.prefix)
+    return getattr(Waypoint, field_name)
+
+
+def _waypoint_text_value(wp, field_name: str) -> Optional[str]:
+    if field_name == "code":
+        return wp.wp_code or wp.prefix
+    return getattr(wp, field_name)
+
+
+class WaypointFilter(BaseFilter):
+    """Keep caches by their child waypoints (GSAK's "Child waypoints" tab).
+
+    A waypoint qualifies when it passes every criterion that is set: text
+    matches on code/type/name/comment (same operators as TextMatchFilter), a
+    date operator on wp_date (DateFilter's, except compare) and whether the
+    user created it. The cache matches when the number of qualifying
+    waypoints passes the count operator — "any" meaning at least one, so
+    "count equal 0" together with e.g. type "Parking Area" finds caches
+    without a parking waypoint. Code is the GSAK waypoint code (wp_code),
+    falling back to the two-letter prefix for GPX imports, which have none.
+
+    apply_filters() calls prepare() first, which counts the qualifying
+    waypoints per cache in one query; matches() then only looks up the
+    count, so it also works for LightweightCache rows. Without prepare()
+    (e.g. on in-memory objects) matches() walks cache.waypoints instead.
+    """
+    filter_type = "waypoint"
+
+    def __init__(
+        self,
+        texts: Optional[dict[str, tuple[str, str]]] = None,
+        date_op: Optional[str] = None,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        date_amount: int = 1,
+        date_unit: str = "days",
+        by_user: Optional[bool] = None,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+    ):
+        # texts: field -> (text, op); a match with nothing to compare is dropped.
+        self.texts: dict[str, TextMatchFilter] = {}
+        for field_name, (text, op) in (texts or {}).items():
+            if field_name not in WAYPOINT_TEXT_FIELDS:
+                raise ValueError(f"Unknown waypoint field {field_name!r}")
+            match = TextMatchFilter(text, op)
+            if not match._is_noop():
+                self.texts[field_name] = match
+        if date_op is not None and date_op not in WAYPOINT_DATE_OPS:
+            raise ValueError(f"Unknown waypoint date operator {date_op!r}")
+        if date_unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {date_unit!r}")
+        if count_op not in WAYPOINT_COUNT_OPS:
+            raise ValueError(f"Unknown waypoint count operator {count_op!r}")
+        self.date_op = date_op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if date_op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {date_op!r} needs date1")
+        if date_op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.date_amount = max(0, int(date_amount))
+        self.date_unit = date_unit
+        self.by_user = by_user
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        # cache id -> qualifying waypoint count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """First invalid regular expression among the text criteria, if any."""
+        return next((m.regex_error for m in self.texts.values() if m.regex_error), None)
+
+    def has_waypoint_criteria(self) -> bool:
+        return bool(self.texts) or self.date_op is not None or self.by_user is not None
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.has_waypoint_criteria()
+
+    # ── Per-waypoint criteria ────────────────────────────────────────────────
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        assert self.date_op is not None
+        return _date_op_range(self.date_op, self.date1, self.date2,
+                              self.date_amount, self.date_unit)
+
+    def waypoint_matches(self, wp) -> bool:
+        """Whether waypoint *wp* (ORM object or row with the same fields) qualifies."""
+        if self.by_user is not None and bool(wp.created_by_user) != self.by_user:
+            return False
+        if self.date_op is not None and not _date_in_range(
+                _to_date(wp.wp_date), self.date_op, *self._date_range()):
+            return False
+        return all(
+            match.match_value(_waypoint_text_value(wp, field_name))
+            for field_name, match in self.texts.items()
+        )
+
+    def _sql_waypoint_conditions(self) -> tuple[list, bool]:
+        """SQL conditions on the waypoints table plus whether they are exact.
+        Inexact ones (regex, non-ASCII text) only pre-narrow the rows, and
+        waypoint_matches() has to decide."""
+        conditions: list = []
+        exact = True
+        if self.by_user is not None:
+            conditions.append(Waypoint.created_by_user == self.by_user)
+        if self.date_op is not None:
+            conditions.append(_date_range_sql(Waypoint.wp_date, self.date_op, *self._date_range()))
+        for field_name, match in self.texts.items():
+            cond = match.sql_condition(_waypoint_text_column(field_name))
+            if cond is None or not match.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    # ── Count ────────────────────────────────────────────────────────────────
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying waypoint count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.has_waypoint_criteria() else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    # ── BaseFilter ───────────────────────────────────────────────────────────
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying waypoints (see the class docstring)."""
+        from sqlalchemy import func, select
+        conditions, exact = self._sql_waypoint_conditions()
+        if exact:
+            rows = session.execute(
+                select(Waypoint.cache_id, func.count(Waypoint.id))
+                .where(*conditions)
+                .group_by(Waypoint.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        rows = session.execute(
+            select(
+                Waypoint.cache_id, Waypoint.wp_code, Waypoint.prefix,
+                Waypoint.wp_type, Waypoint.name, Waypoint.comment,
+                Waypoint.wp_date, Waypoint.created_by_user,
+            ).where(*conditions)
+        )
+        for row in rows:
+            if self.waypoint_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        conditions, exact = self._sql_waypoint_conditions()
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import exists, func, select
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying waypoint.
+            return query.filter(
+                exists().where(Waypoint.cache_id == Cache.id, *conditions).correlate(Cache)
+            )
+        count = (
+            select(func.count(Waypoint.id))
+            .where(Waypoint.cache_id == Cache.id, *conditions)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        if lo > 0:
+            query = query.filter(count >= lo)
+        if hi is not None:
+            query = query.filter(count <= hi)
+        return query
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for wp in cache.waypoints if self.waypoint_matches(wp))
+        return self._count_ok(count)
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "texts": {f: {"text": m.text, "op": m.op} for f, m in self.texts.items()},
+            "date_op": self.date_op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "date_amount": self.date_amount,
+            "date_unit": self.date_unit,
+            "by_user": self.by_user,
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WaypointFilter":
+        return cls(
+            texts={
+                f: (spec.get("text", ""), spec.get("op", "contains"))
+                for f, spec in (data.get("texts") or {}).items()
+            },
+            date_op=data.get("date_op"),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            date_amount=data.get("date_amount", 1),
+            date_unit=data.get("date_unit", "days"),
+            by_user=data.get("by_user"),
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<WaypointFilter {self.to_dict()}>"
+
+
+# ── Trackable filter ──────────────────────────────────────────────────────────
+
+# Text criteria of TrackableFilter.
+TRACKABLE_TEXT_FIELDS = ("name", "tracking_code")
+TRACKABLE_COUNT_OPS = WAYPOINT_COUNT_OPS
+
+
+class TrackableFilter(BaseFilter):
+    """Keep caches by the trackables (travel bugs, geocoins) in them.
+
+    Works like WaypointFilter: a trackable qualifies when it passes every
+    text criterion that is set (name / tracking_code, same operators as
+    TextMatchFilter), and the cache matches when the number of qualifying
+    trackables passes the count operator — "any" meaning at least one, so
+    "count equal 0" together with e.g. name contains "coin" finds caches
+    without a geocoin. Count alone filters on the total number of trackables.
+
+    apply_filters() calls prepare() first, which counts the qualifying
+    trackables per cache in one query; matches() then only looks up the
+    count, so it also works for LightweightCache rows. Without prepare()
+    (e.g. on in-memory objects) matches() walks cache.trackables instead.
+    """
+    filter_type = "trackable"
+
+    def __init__(
+        self,
+        texts: Optional[dict[str, tuple[str, str]]] = None,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+    ):
+        # texts: field -> (text, op); a match with nothing to compare is dropped.
+        self.texts: dict[str, TextMatchFilter] = {}
+        for field_name, (text, op) in (texts or {}).items():
+            if field_name not in TRACKABLE_TEXT_FIELDS:
+                raise ValueError(f"Unknown trackable field {field_name!r}")
+            match = TextMatchFilter(text, op)
+            if not match._is_noop():
+                self.texts[field_name] = match
+        if count_op not in TRACKABLE_COUNT_OPS:
+            raise ValueError(f"Unknown trackable count operator {count_op!r}")
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        # cache id -> qualifying trackable count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """First invalid regular expression among the text criteria, if any."""
+        return next((m.regex_error for m in self.texts.values() if m.regex_error), None)
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.texts
+
+    def trackable_matches(self, tb) -> bool:
+        """Whether trackable *tb* (ORM object or row with the same fields) qualifies."""
+        return all(
+            match.match_value(getattr(tb, field_name))
+            for field_name, match in self.texts.items()
+        )
+
+    def _sql_trackable_conditions(self) -> tuple[list, bool]:
+        """SQL conditions on the trackables table plus whether they are exact
+        — see WaypointFilter._sql_waypoint_conditions()."""
+        conditions: list = []
+        exact = True
+        for field_name, match in self.texts.items():
+            cond = match.sql_condition(getattr(Trackable, field_name))
+            if cond is None or not match.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying trackable count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.texts else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying trackables (see the class docstring)."""
+        from sqlalchemy import func, select
+        conditions, exact = self._sql_trackable_conditions()
+        if exact:
+            rows = session.execute(
+                select(Trackable.cache_id, func.count(Trackable.id))
+                .where(*conditions)
+                .group_by(Trackable.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        rows = session.execute(
+            select(Trackable.cache_id, Trackable.name, Trackable.tracking_code)
+            .where(*conditions)
+        )
+        for row in rows:
+            if self.trackable_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        conditions, exact = self._sql_trackable_conditions()
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import exists, func, select
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying trackable.
+            return query.filter(
+                exists().where(Trackable.cache_id == Cache.id, *conditions).correlate(Cache)
+            )
+        count = (
+            select(func.count(Trackable.id))
+            .where(Trackable.cache_id == Cache.id, *conditions)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        if lo > 0:
+            query = query.filter(count >= lo)
+        if hi is not None:
+            query = query.filter(count <= hi)
+        return query
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for tb in cache.trackables if self.trackable_matches(tb))
+        return self._count_ok(count)
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "texts": {f: {"text": m.text, "op": m.op} for f, m in self.texts.items()},
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "TrackableFilter":
+        return cls(
+            texts={
+                f: (spec.get("text", ""), spec.get("op", "contains"))
+                for f, spec in (data.get("texts") or {}).items()
+            },
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+        )
+
+    def __repr__(self) -> str:
+        return f"<TrackableFilter {self.to_dict()}>"
+
+
+# ── Log filter ────────────────────────────────────────────────────────────────
+
+# "Logtypen" checkbox for a log whose type is none of constants.LOG_TYPES —
+# GSAK spells it "Other" (in quotes) in the same list.
+LOG_TYPE_OTHER = '"Other"'
+# The three log categories of GSAK's "Zu durchsuchende Logs" row: a log is
+# "found" when its type is in FOUND_LOG_TYPES, "not_found" for DNF_LOG_TYPES,
+# and "other" for everything else.
+LOG_CATEGORIES = ("found", "not_found", "other")
+# DateFilter's operators, minus compare (a log has only the one date).
+LOG_DATE_OPS = tuple(op for op in DATE_OPS if op != "compare")
+LOG_COUNT_OPS = ("any", "equal", "at_least", "at_most", "between")
+# How many of a cache's most recent logs to search; 0 = all of them. GSAK's
+# "Zu durchsuchende Logs" dropdown offers exactly these.
+LOG_SCOPE_CHOICES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30, 40, 50, 100)
+
+_FOUND_TYPES_LOWER = frozenset(t.lower() for t in FOUND_LOG_TYPES)
+_DNF_TYPES_LOWER = frozenset(t.lower() for t in DNF_LOG_TYPES)
+_LOG_TYPES_LOWER = frozenset(t.lower() for t in LOG_TYPES)
+
+
+def log_category(log_type: Optional[str]) -> str:
+    """Which of LOG_CATEGORIES log type *log_type* belongs to."""
+    lowered = (log_type or "").strip().lower()
+    if lowered in _FOUND_TYPES_LOWER:
+        return "found"
+    if lowered in _DNF_TYPES_LOWER:
+        return "not_found"
+    return "other"
+
+
+class LogFilter(BaseFilter):
+    """Keep caches by their logs (GSAK's "Logs" tab).
+
+    Evaluated in three steps, mirroring how the GSAK tab reads top to bottom:
+
+    1. **Scope** — which of the cache's logs are searched at all: the *last_n*
+       most recent ones, counted over *every* log the cache has (0 = all of
+       them). The window is deliberately not narrowed by the criteria below,
+       so "last_n=2, categories=['not_found']" means "a DNF among the cache's
+       last two logs" — not "the last two DNFs", which would match a cache
+       whose only DNF is ancient.
+    2. **Criteria** — a scoped log *qualifies* when it passes every criterion
+       that is set: its category is among *categories* (found / not found /
+       other), its type is among *types* (empty = every type), its date passes
+       *date_op* (LOG_DATE_OPS, DateFilter's operators minus compare), and its
+       finder matches *finder_text*/*finder_op* — against Log.finder, or
+       Log.finder_id when *finder_by_id*.
+    3. **Count** — the cache matches when the number of qualifying logs passes
+       *count_op*, "any" meaning at least one. *exclude* then inverts that
+       per-cache verdict, which is what makes "no Needs Maintenance log among
+       the last 5 logs" expressible.
+
+    apply_filters() calls prepare() first, which counts each cache's
+    qualifying logs in one query; matches() then only looks up the count, so
+    it also works for LightweightCache rows. Without prepare() (e.g. on
+    in-memory objects) matches() walks cache.logs instead.
+    """
+    filter_type = "log"
+
+    def __init__(
+        self,
+        date_op: Optional[str] = None,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        date_amount: int = 1,
+        date_unit: str = "days",
+        categories: Optional[list[str]] = None,
+        last_n: int = 0,
+        types: Optional[list[str]] = None,
+        finder_text: str = "",
+        finder_op: str = "contains",
+        finder_by_id: bool = False,
+        count_op: str = "any",
+        count1: int = 0,
+        count2: int = 0,
+        exclude: bool = False,
+    ):
+        if date_op is not None and date_op not in LOG_DATE_OPS:
+            raise ValueError(f"Unknown log date operator {date_op!r}")
+        if date_unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {date_unit!r}")
+        if count_op not in LOG_COUNT_OPS:
+            raise ValueError(f"Unknown log count operator {count_op!r}")
+        self.date_op = date_op
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if date_op in ("on_or_before", "on_or_after", "equal", "between") and self.date1 is None:
+            raise ValueError(f"Date operator {date_op!r} needs date1")
+        if date_op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.date_amount = max(0, int(date_amount))
+        self.date_unit = date_unit
+
+        chosen = list(LOG_CATEGORIES if categories is None else categories)
+        for category in chosen:
+            if category not in LOG_CATEGORIES:
+                raise ValueError(f"Unknown log category {category!r}")
+        # Keep LOG_CATEGORIES' order and drop duplicates, so to_dict() is stable.
+        self.categories = [c for c in LOG_CATEGORIES if c in chosen]
+
+        self.last_n = max(0, int(last_n))
+        self.types = list(types or [])
+        # A text match with nothing to compare against is dropped.
+        finder = TextMatchFilter(finder_text, finder_op)
+        self.finder: Optional[TextMatchFilter] = None if finder._is_noop() else finder
+        self.finder_text = finder.text
+        self.finder_op = finder.op
+        self.finder_by_id = bool(finder_by_id)
+        self.count_op = count_op
+        self.count1 = max(0, int(count1))
+        self.count2 = max(0, int(count2))
+        self.exclude = bool(exclude)
+        # cache id -> qualifying log count, filled by prepare()
+        self._counts: Optional[dict[int, int]] = None
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        """The finder match's invalid regular expression, if it has one."""
+        return self.finder.regex_error if self.finder is not None else None
+
+    def _searches_every_category(self) -> bool:
+        return len(self.categories) == len(LOG_CATEGORIES)
+
+    def has_log_criteria(self) -> bool:
+        """Whether anything narrows the logs — the scope counts too, since
+        "the last 3 logs" already says which logs the count is about."""
+        return (
+            not self._searches_every_category()
+            or bool(self.last_n)
+            or bool(self.types)
+            or self.date_op is not None
+            or self.finder is not None
+        )
+
+    def is_noop(self) -> bool:
+        return self.count_op == "any" and not self.has_log_criteria()
+
+    # ── Scope: the last-N window ─────────────────────────────────────────────
+
+    @staticmethod
+    def _recency_key(log):
+        """Sort key putting the newest log first and undated logs last —
+        the order SQLite's "log_date DESC" produces."""
+        return (log.log_date is not None, log.log_date or datetime.min)
+
+    def _scoped_logs(self, cache) -> list:
+        """The cache's logs this filter searches — its last_n most recent
+        ones, over every log it has (see the class docstring)."""
+        if not self.last_n:
+            return list(cache.logs)
+        logs = sorted(cache.logs, key=self._recency_key, reverse=True)
+        return logs[:self.last_n]
+
+    def _scoped_select(self):
+        """Subquery over the logs this filter searches: every log, narrowed
+        per cache to the last_n most recent."""
+        from sqlalchemy import func, select
+        base = select(
+            Log.cache_id.label("cache_id"),
+            Log.log_type.label("log_type"),
+            Log.log_date.label("log_date"),
+            Log.finder.label("finder"),
+            Log.finder_id.label("finder_id"),
+        )
+        if not self.last_n:
+            return base.subquery()
+        # Ties on log_date are broken by id, so the window is deterministic.
+        ranked = base.add_columns(
+            func.row_number().over(
+                partition_by=Log.cache_id,
+                order_by=(Log.log_date.desc(), Log.id.desc()),
+            ).label("rn")
+        ).subquery()
+        return select(ranked).where(ranked.c.rn <= self.last_n).subquery()
+
+    # ── Per-log criteria ─────────────────────────────────────────────────────
+
+    def _category_condition(self, c):
+        """SQL condition keeping only the enabled categories of *c* (the Log
+        class or a subquery's columns), or None when all are enabled."""
+        from sqlalchemy import false, func, or_
+        if self._searches_every_category():
+            return None
+        lowered = func.lower(c.log_type)
+        named = sorted(_FOUND_TYPES_LOWER | _DNF_TYPES_LOWER)
+        conditions = []
+        if "found" in self.categories:
+            conditions.append(lowered.in_(sorted(_FOUND_TYPES_LOWER)))
+        if "not_found" in self.categories:
+            conditions.append(lowered.in_(sorted(_DNF_TYPES_LOWER)))
+        if "other" in self.categories:
+            conditions.append(~lowered.in_(named))
+        if not conditions:
+            return false()  # no category enabled — no log can qualify
+        return or_(*conditions) if len(conditions) > 1 else conditions[0]
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        assert self.date_op is not None
+        return _date_op_range(self.date_op, self.date1, self.date2,
+                              self.date_amount, self.date_unit)
+
+    def _type_matches(self, log_type: Optional[str]) -> bool:
+        if not self.types:
+            return True
+        lowered = (log_type or "").strip().lower()
+        if lowered in {t.lower() for t in self.types}:
+            return True
+        return LOG_TYPE_OTHER in self.types and lowered not in _LOG_TYPES_LOWER
+
+    def _finder_value(self, log) -> Optional[str]:
+        return log.finder_id if self.finder_by_id else log.finder
+
+    def log_matches(self, log) -> bool:
+        """Whether log *log* (ORM object or row with the same fields)
+        qualifies. The last-N window is not re-checked here — _scoped_logs()
+        and _scoped_select() have already applied it."""
+        if log_category(log.log_type) not in self.categories:
+            return False
+        if not self._type_matches(log.log_type):
+            return False
+        if self.date_op is not None and not _date_in_range(
+                log.log_date, self.date_op, *self._date_range()):
+            return False
+        return self.finder is None or self.finder.match_value(self._finder_value(log))
+
+    def _criteria_conditions(self, c) -> tuple[list, bool]:
+        """SQL conditions for the per-log criteria on *c* (the Log class or a
+        subquery's columns), plus whether they are exact. Inexact ones (regex,
+        non-ASCII text) only pre-narrow the rows, and log_matches() has to
+        decide — the same contract as WaypointFilter._sql_waypoint_conditions()."""
+        from sqlalchemy import func, or_
+        conditions: list = []
+        exact = True
+        category = self._category_condition(c)
+        if category is not None:
+            conditions.append(category)
+        if self.types:
+            lowered = func.lower(c.log_type)
+            named = [t for t in self.types if t != LOG_TYPE_OTHER]
+            parts = []
+            if named:
+                parts.append(lowered.in_(sorted(t.lower() for t in named)))
+            if LOG_TYPE_OTHER in self.types:
+                parts.append(~lowered.in_(sorted(_LOG_TYPES_LOWER)))
+            conditions.append(or_(*parts) if len(parts) > 1 else parts[0])
+        if self.date_op is not None:
+            conditions.append(_date_range_sql(c.log_date, self.date_op, *self._date_range()))
+        if self.finder is not None:
+            column = c.finder_id if self.finder_by_id else c.finder
+            cond = self.finder.sql_condition(column)
+            if cond is None or not self.finder.sql_exact:
+                exact = False
+            if cond is not None:
+                conditions.append(cond)
+        return conditions, exact
+
+    # ── Count ────────────────────────────────────────────────────────────────
+
+    def _count_bounds(self) -> tuple[int, Optional[int]]:
+        """Inclusive (lo, hi) bounds on the qualifying log count."""
+        if self.count_op == "equal":
+            return self.count1, self.count1
+        if self.count_op == "at_least":
+            return self.count1, None
+        if self.count_op == "at_most":
+            return 0, self.count1
+        if self.count_op == "between":
+            return min(self.count1, self.count2), max(self.count1, self.count2)
+        return (1 if self.has_log_criteria() else 0), None  # any
+
+    def _count_ok(self, count: int) -> bool:
+        lo, hi = self._count_bounds()
+        return count >= lo and (hi is None or count <= hi)
+
+    # ── BaseFilter ───────────────────────────────────────────────────────────
+
+    def prepare(self, session: Session) -> None:
+        """Count every cache's qualifying logs (see the class docstring)."""
+        from sqlalchemy import func, select
+        scoped = self._scoped_select()
+        conditions, exact = self._criteria_conditions(scoped.c)
+        if exact:
+            rows = session.execute(
+                select(scoped.c.cache_id, func.count())
+                .where(*conditions)
+                .group_by(scoped.c.cache_id)
+            )
+            self._counts = {cache_id: count for cache_id, count in rows}
+            return
+        counts: dict[int, int] = {}
+        for row in session.execute(select(scoped).where(*conditions)):
+            if self.log_matches(row):
+                counts[row.cache_id] = counts.get(row.cache_id, 0) + 1
+        self._counts = counts
+
+    def apply_to_query(self, query):
+        if self.is_noop():
+            return query
+        if self.last_n:
+            return None  # the per-cache window needs prepare()'s counts
+        conditions, exact = self._criteria_conditions(Log)
+        if not exact:
+            return None  # matches() decides, from prepare()'s counts
+        from sqlalchemy import and_, exists, false, func, select
+        lo, hi = self._count_bounds()
+        if lo == 1 and hi is None:
+            # "at least one" — EXISTS stops at the first qualifying log.
+            cond = exists().where(Log.cache_id == Cache.id, *conditions).correlate(Cache)
+            return query.filter(~cond if self.exclude else cond)
+        count = (
+            select(func.count(Log.id))
+            .where(Log.cache_id == Cache.id, *conditions)
+            .correlate(Cache)
+            .scalar_subquery()
+        )
+        bounds = ([count >= lo] if lo > 0 else []) + ([count <= hi] if hi is not None else [])
+        if not bounds:
+            # Every count passes ("at least 0"), so excluding drops everything.
+            return query.filter(false()) if self.exclude else query
+        cond = and_(*bounds) if len(bounds) > 1 else bounds[0]
+        return query.filter(~cond if self.exclude else cond)
+
+    def matches(self, cache: Cache) -> bool:
+        if self.is_noop():
+            return True
+        if self._counts is not None:
+            count = self._counts.get(cache.id, 0)
+        else:
+            count = sum(1 for log in self._scoped_logs(cache) if self.log_matches(log))
+        passed = self._count_ok(count)
+        return not passed if self.exclude else passed
+
+    def to_dict(self) -> dict:
+        return {
+            "filter_type": self.filter_type,
+            "date_op": self.date_op,
+            "date1": self.date1.isoformat() if self.date1 else None,
+            "date2": self.date2.isoformat() if self.date2 else None,
+            "date_amount": self.date_amount,
+            "date_unit": self.date_unit,
+            "categories": list(self.categories),
+            "last_n": self.last_n,
+            "types": list(self.types),
+            "finder_text": self.finder_text,
+            "finder_op": self.finder_op,
+            "finder_by_id": self.finder_by_id,
+            "count_op": self.count_op,
+            "count1": self.count1,
+            "count2": self.count2,
+            "exclude": self.exclude,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LogFilter":
+        return cls(
+            date_op=data.get("date_op"),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            date_amount=data.get("date_amount", 1),
+            date_unit=data.get("date_unit", "days"),
+            categories=data.get("categories"),
+            last_n=data.get("last_n", 0),
+            types=data.get("types"),
+            finder_text=data.get("finder_text", ""),
+            finder_op=data.get("finder_op", "contains"),
+            finder_by_id=data.get("finder_by_id", False),
+            count_op=data.get("count_op", "any"),
+            count1=data.get("count1", 0),
+            count2=data.get("count2", 0),
+            exclude=data.get("exclude", False),
+        )
+
+    def __repr__(self) -> str:
+        return f"<LogFilter {self.to_dict()}>"
 
 
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
@@ -1425,24 +3269,40 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "gc_code":       GcCodeFilter,
     "placed_by":     PlacedByFilter,
     "owner_name":    OwnerFilter,
+    "user_data_1":   UserData1Filter,
+    "user_data_2":   UserData2Filter,
+    "user_data_3":   UserData3Filter,
+    "user_data_4":   UserData4Filter,
+    "gc_note":       GcNoteFilter,
     "distance":      DistanceFilter,
+    "direction":     DirectionFilter,
+    "line_polygon":  LinePolygonFilter,
     "attribute":     AttributeFilter,
     "has_trackable": HasTrackableFilter,
     "has_corrected": HasCorrectedFilter,
     "no_corrected":  NoCorrectedFilter,
-    "premium":       PremiumFilter,
+    "corrected_distance": CorrectedDistanceFilter,
+    "premium":      PremiumFilter,
     "non_premium":   NonPremiumFilter,
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
     "locked":             LockedFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
+    "user_note":          UserNoteFilter,
+    # Legacy yes/no "Has personal note" — UserNoteFilter.from_dict migrates it.
+    "personal_note":      UserNoteFilter,
     "favorite_points":    FavoritePointsFilter,
+    "elevation":          ElevationFilter,
     "found_by_me_date":   FoundByMeDateFilter,
     "dnf_date":           DnfDateFilter,
     "last_log_date":      LastLogDateFilter,
     "hidden_date_range":  HiddenDateFilter,
+    "date":               DateFilter,
     "text_search":        TextSearchFilter,
+    "waypoint":           WaypointFilter,
+    "trackable":          TrackableFilter,
+    "log":                LogFilter,
 }
 
 
@@ -1461,12 +3321,17 @@ class FilterSet:
           - FilterSet(OR) containing:
               - DifficultyFilter(max=2.0)
               - TerrainFilter(max=2.0)
+
+    negate=True inverts the whole set: a cache is included exactly when it
+    would otherwise be excluded (the filter dialog's global "Invert filter").
+    An empty set still shows everything — there is nothing to invert.
     """
 
-    def __init__(self, mode: str = "AND"):
+    def __init__(self, mode: str = "AND", negate: bool = False):
         if mode not in ("AND", "OR"):
             raise ValueError(f"mode must be 'AND' or 'OR', got {mode!r}")
         self.mode = mode
+        self.negate = negate
         self._filters: list[BaseFilter | FilterSet] = []
 
     def add(self, f: "BaseFilter | FilterSet") -> "FilterSet":
@@ -1501,19 +3366,24 @@ class FilterSet:
             return True  # empty filter set = show everything
 
         if self.mode == "AND":
-            return all(f.matches(cache) for f in self._filters)
+            matched = all(f.matches(cache) for f in self._filters)
         else:
-            return any(f.matches(cache) for f in self._filters)
+            matched = any(f.matches(cache) for f in self._filters)
+        return not matched if self.negate else matched
 
     def to_dict(self) -> dict:
-        return {
+        data: dict = {
             "mode": self.mode,
             "filters": [f.to_dict() for f in self._filters],
         }
+        # Only written when set, so existing profiles stay byte-identical.
+        if self.negate:
+            data["negate"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "FilterSet":
-        fs = cls(mode=data.get("mode", "AND"))
+        fs = cls(mode=data.get("mode", "AND"), negate=bool(data.get("negate", False)))
         for fdata in data.get("filters", []):
             if "mode" in fdata:
                 # Nested FilterSet
@@ -1525,7 +3395,8 @@ class FilterSet:
         return fs
 
     def __repr__(self) -> str:
-        return f"<FilterSet mode={self.mode} filters={self._filters}>"
+        negate = " negate" if self.negate else ""
+        return f"<FilterSet mode={self.mode}{negate} filters={self._filters}>"
 
 
 # ── Sort spec ─────────────────────────────────────────────────────────────────
@@ -1719,17 +3590,21 @@ def _sql_pushdown_candidates(filterset: "FilterSet"):
     descending into it — that whole subtree must be evaluated in Python by the
     OR FilterSet's matches(), or we would incorrectly turn an OR into an AND.
 
+    A negated FilterSet is treated like an OR one: AND-ing its filters into the
+    WHERE clause would select the very caches the inversion must exclude, so
+    its whole subtree is left to Python.
+
     Filters whose apply_to_query() returns None (no SQL form, or e.g. an empty
     text filter) simply fall back to Python matches() — that is handled by the
     caller, not here.
     """
-    if filterset.mode != "AND":
+    if filterset.mode != "AND" or filterset.negate:
         return
     for f in filterset._filters:
         if isinstance(f, FilterSet):
-            if f.mode == "AND":
+            if f.mode == "AND" and not f.negate:
                 yield from _sql_pushdown_candidates(f)
-            # OR subtree: leave entirely to Python matches()
+            # OR / negated subtree: leave entirely to Python matches()
         else:
             yield f
 
@@ -1747,12 +3622,17 @@ def _prepare_where_clause_filters(
     distance_from: Optional[tuple[float, float]],
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
-    SQL directly against the database. Must run before any Python-level
-    matches() call touches a WhereClauseFilter. Mutates the filter objects
-    in place; returns nothing.
+    SQL directly against the database, and every WaypointFilter's waypoint
+    counts, TrackableFilter's trackable counts and LogFilter's log counts
+    (their prepare()). Must run
+    before any Python-level matches() call touches one of those filters.
+    Mutates the filter objects in place; returns nothing.
     """
     if not filterset:
         return
+    for _f in _iter_filters(filterset):
+        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter)):
+            _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
         _f for _f in _iter_filters(filterset)
@@ -1760,28 +3640,7 @@ def _prepare_where_clause_filters(
     ]
     _dist_udf_ready = False
     if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
-        # The "distance" column in the caches table is never persisted — it
-        # is always NULL. Register a SQLite UDF so WHERE clauses can use
-        # "distance" as haversine distance from the home point. SQL
-        # references to "distance" are rewritten to the UDF call below.
-        _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
-        try:
-            from opensak.gui.settings import get_settings as _gs
-            _st = _gs()
-            _home_lat, _home_lon = _st.home_lat, _st.home_lon
-            _use_miles = _st.use_miles
-        except Exception:
-            pass
-        if distance_from:
-            _home_lat, _home_lon = distance_from
-        _factor = 0.621371 if _use_miles else 1.0
-        def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
-            if lat is None or lon is None:
-                return None
-            return _haversine_km(_h, _o, lat, lon) * _k
-        _dbapi = session.connection().connection.dbapi_connection
-        assert _dbapi is not None
-        _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+        _register_distance_udf(session, distance_from)
         _dist_udf_ready = True
 
     for _f in _where_filters:
@@ -1797,6 +3656,53 @@ def _prepare_where_clause_filters(
             _f._matching_ids = {row[0] for row in _result}
         except Exception:
             _f._matching_ids = set()  # invalid SQL → no matches
+
+
+def _register_distance_udf(
+    session: Session,
+    distance_from: Optional[tuple[float, float]],
+) -> None:
+    """The "distance" column in the caches table is never persisted — it is
+    always NULL. Register a SQLite UDF so WHERE clauses can use "distance"
+    as haversine distance from the home point (or *distance_from*). SQL
+    references to "distance" are rewritten to the UDF call by the callers.
+    """
+    _home_lat, _home_lon, _use_miles = 0.0, 0.0, False
+    try:
+        from opensak.gui.settings import get_settings as _gs
+        _st = _gs()
+        _home_lat, _home_lon = _st.home_lat, _st.home_lon
+        _use_miles = _st.use_miles
+    except Exception:
+        pass
+    if distance_from:
+        _home_lat, _home_lon = distance_from
+    _factor = 0.621371 if _use_miles else 1.0
+    def _dist_udf(lat, lon, _h=_home_lat, _o=_home_lon, _k=_factor):
+        if lat is None or lon is None:
+            return None
+        return _haversine_km(_h, _o, lat, lon) * _k
+    _dbapi = session.connection().connection.dbapi_connection
+    assert _dbapi is not None
+    _dbapi.create_function("_opensak_dist", 2, _dist_udf)
+
+
+def validate_where_sql(session: Session, sql: str) -> Optional[str]:
+    """Return an error message if *sql* is not a valid WHERE clause for
+    WhereClauseFilter, or None if it is valid. Rewrites "distance" exactly
+    like _prepare_where_clause_filters() does, so what validates here is
+    what actually runs. Shared by the Set Filter dialog's Where tab and the
+    toolbar's quick Where box (#558).
+    """
+    from sqlalchemy import text as _sa_text
+    try:
+        if _DISTANCE_RE.search(sql):
+            _register_distance_udf(session, None)
+            sql = _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", sql)
+        session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
+        return None
+    except Exception as exc:
+        return str(exc)
 
 
 def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):
@@ -1831,7 +3737,7 @@ def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):
 class _RelationshipNeeds:
     """Which relationships/deferred fields a filterset actually touches.
 
-    apply_filters() uses this to decide what to joinedload/noload/defer.
+    apply_filters() uses this to decide what to joinedload/raiseload/defer.
     apply_filters_lightweight() uses it to decide whether it can serve the
     request at all — LightweightCache has none of these, so any True flag
     means falling back to the full apply_filters() ORM path.
@@ -1860,7 +3766,7 @@ def _filterset_relationship_needs(filterset: Optional["FilterSet"]) -> _Relation
     )
     _text_filters = [
         f for f in _iter_filters(filterset)
-        if isinstance(f, TextSearchFilter) and f.text
+        if isinstance(f, TextSearchFilter) and not f._is_noop()
     ] if filterset is not None else []
     needs_description = any(f.search_description for f in _text_filters)
     needs_hint = any(f.search_hint for f in _text_filters)
@@ -1877,6 +3783,12 @@ def _filterset_relationship_needs(filterset: Optional["FilterSet"]) -> _Relation
     # routes notes-only searches to the full ORM path instead, which
     # already handles the same exists() subquery correctly.
     needs_notes = any(f.search_notes for f in _text_filters)
+    # UserNoteFilter.matches() reads UserNote.note, which
+    # LightweightUserNote doesn't carry — an OR group left to Python would
+    # hit an AttributeError on the lightweight path.
+    needs_notes = needs_notes or (filterset is not None and any(
+        isinstance(f, UserNoteFilter) for f in _iter_filters(filterset)
+    ))
     return _RelationshipNeeds(
         attributes=needs_attributes, trackables=needs_trackables,
         logs=needs_logs, description=needs_description, hint=needs_hint,
@@ -1928,15 +3840,23 @@ def apply_filters(
     _needs = _filterset_relationship_needs(filterset)
     needs_hint_column = columns is not None and "hints" in columns
 
-    from sqlalchemy.orm import defer, joinedload, noload
+    # Issue #898: relationships no filter needs use raiseload() (was the
+    # deprecated noload()). The returned caches are handed to the GUI after
+    # the session has closed (see refresh_worker.py), so nothing may lazy-load
+    # them there — noload() made such access silently return an empty list,
+    # raiseload() makes it fail loudly instead. Code that needs the full
+    # relationships must reload the cache (reload_caches_full() /
+    # MainWindow._load_full_cache()); the grid uses the cached count/date
+    # columns (log_count, waypoint_count, last_log_date, ...).
+    from sqlalchemy.orm import defer, joinedload, raiseload
     _opts: list = [
-        joinedload(Cache.attributes) if _needs.attributes else noload(Cache.attributes),
-        joinedload(Cache.trackables) if _needs.trackables else noload(Cache.trackables),
-        # Logs are loaded via the SQL EXISTS pushdown; avoid a joinedload that
-        # would pull all logs for all caches. Python matches() will lazy-load
-        # logs only for the already-filtered result set.
-        joinedload(Cache.logs)       if _needs.logs        else noload(Cache.logs),
-        noload(Cache.waypoints),
+        joinedload(Cache.attributes) if _needs.attributes else raiseload(Cache.attributes),
+        joinedload(Cache.trackables) if _needs.trackables else raiseload(Cache.trackables),
+        # Log/Waypoint filters count via their prepare() query, not the
+        # relationship, so logs are only joinedloaded for a text search in
+        # log text — never for all logs of all caches otherwise.
+        joinedload(Cache.logs)       if _needs.logs        else raiseload(Cache.logs),
+        raiseload(Cache.waypoints),
         joinedload(Cache.user_note),
     ]
     # Defer the large free-text blobs unless text search needs them.
@@ -2376,6 +4296,58 @@ def effective_coords(cache) -> tuple[Optional[float], Optional[float]]:
     return cache.latitude, cache.longitude
 
 
+def lookup_code_coords(session: Session, code: str) -> Optional[tuple[float, float]]:
+    """Coordinates for a GSAK-style "W,<code>" point of the line/polygon filter.
+
+    A cache code gives that cache's effective_coords() (corrected when set);
+    otherwise a waypoint is looked up by its own code — wp_code (GSAK
+    imports), else prefix + the parent cache's code without "GC" (PK12345
+    for a GC12345 parking waypoint, as GPX files name them). None for an
+    unknown code or a waypoint without coordinates.
+    """
+    code = code.strip().upper()
+    if not code:
+        return None
+    cache = session.query(Cache).filter(Cache.gc_code == code).first()
+    if cache is not None:
+        lat, lon = effective_coords(cache)
+        return (lat, lon) if lat is not None and lon is not None else None
+    from sqlalchemy import func
+    has_coords = (Waypoint.latitude.is_not(None), Waypoint.longitude.is_not(None))
+    wp = (
+        session.query(Waypoint)
+        .filter(func.upper(Waypoint.wp_code) == code, *has_coords)
+        .first()
+    )
+    if wp is None and len(code) > 2:
+        wp = (
+            session.query(Waypoint)
+            .join(Cache, Waypoint.cache_id == Cache.id)
+            .filter(
+                func.upper(Waypoint.prefix) == code[:2],
+                Cache.gc_code == "GC" + code[2:],
+                *has_coords,
+            )
+            .first()
+        )
+    if wp is None or wp.latitude is None or wp.longitude is None:
+        return None
+    return wp.latitude, wp.longitude
+
+
+def user_flagged_codes(session: Session) -> list[str]:
+    """GC codes of every cache with the user flag set, in user sort order
+    (then by code) — for the line/polygon filter's "Add flagged" button."""
+    from sqlalchemy import func
+    rows = (
+        session.query(Cache.gc_code)
+        .filter(Cache.user_flag == True)  # noqa: E712
+        .order_by(func.coalesce(Cache.user_sort, 999999), Cache.gc_code)
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
 def get_nearby_caches(
     session: Session,
     lat: float,
@@ -2470,15 +4442,26 @@ class FilterProfile:
         self.filterset = filterset
         self.sort = sort or SortSpec()
 
-    def save(self, profiles_dir: Optional[Path] = None) -> Path:
-        """Save this profile to disk as JSON. Returns the saved file path."""
+    @classmethod
+    def profile_path(cls, name: str, profiles_dir: Optional[Path] = None) -> Path:
+        """Return the JSON path a profile called *name* is stored at.
+
+        Split out of save() (issue #671) so callers can ask "would saving
+        under this name overwrite an existing profile?" without writing
+        anything. The answer must be derived from the sanitised filename,
+        not from the name the user typed: 'My/Filter' and 'My_Filter' are
+        two different display names but the same file on disk.
+        """
         if profiles_dir is None:
             from opensak.config import get_app_data_dir
             profiles_dir = get_app_data_dir() / "filters"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name)
+        return profiles_dir / f"{safe_name}.json"
 
-        safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in self.name)
-        path = profiles_dir / f"{safe_name}.json"
+    def save(self, profiles_dir: Optional[Path] = None) -> Path:
+        """Save this profile to disk as JSON. Returns the saved file path."""
+        path = self.profile_path(self.name, profiles_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
             "name": self.name,

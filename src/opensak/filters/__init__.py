@@ -5,7 +5,7 @@ from opensak.filters.engine import (
     CacheTypeFilter, ContainerFilter, DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter, AvailableFilter, ArchivedFilter,
     CountryFilter, StateFilter, CountyFilter, NameFilter, GcCodeFilter, PlacedByFilter,
-    DistanceFilter, AttributeFilter, HasTrackableFilter,
+    DistanceFilter, LinePolygonFilter, AttributeFilter, HasTrackableFilter,
     PremiumFilter, NonPremiumFilter,
     FilterSet, SortSpec, SORT_FIELDS, FILTER_REGISTRY,
     FilterProfile, apply_filters,

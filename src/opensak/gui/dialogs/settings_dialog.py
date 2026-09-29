@@ -63,7 +63,7 @@ class _ImapTestWorker(QThread):
     """Tester PQ-mailkontoens IMAP-login i baggrunden (issue #443), så
     GUI'en ikke fryser mens forbindelsen forsøges oprettet."""
     success = Signal()
-    error   = Signal(str, str)   # (kind: "auth" | "network" | "other", detail)
+    error   = Signal(str, str)   # (kind: "auth" | "certificate" | "network" | "other", detail)
 
     def __init__(self, config, password: str, parent=None):
         super().__init__(parent)
@@ -72,13 +72,15 @@ class _ImapTestWorker(QThread):
 
     def run(self):
         from opensak.email.connection import (
-            ImapAuthError, ImapNetworkError, check_connection,
+            ImapAuthError, ImapCertificateError, ImapNetworkError, check_connection,
         )
         try:
             check_connection(self._config, self._password)
             self.success.emit()
         except ImapAuthError as exc:
             self.error.emit("auth", str(exc))
+        except ImapCertificateError as exc:   # #902 — før ImapNetworkError (subklasse)
+            self.error.emit("certificate", str(exc))
         except ImapNetworkError as exc:
             self.error.emit("network", str(exc))
         except Exception as exc:
@@ -591,6 +593,27 @@ class SettingsDialog(QDialog):
 
             layout.addWidget(appimage_group)
 
+        # ── macOS: afinstallér (kun synlig i den frosne .app — issue #859) ────
+        from opensak import macos_uninstall as _macos_uninstall_mod
+
+        if _macos_uninstall_mod.is_supported():
+            macos_group = QGroupBox(tr("settings_group_macos_uninstall"))
+            macos_layout = QVBoxLayout(macos_group)
+
+            macos_btn_row = QHBoxLayout()
+            self._macos_uninstall_btn = QPushButton(tr("settings_appimage_uninstall_button"))
+            self._macos_uninstall_btn.clicked.connect(self._on_macos_uninstall_clicked)
+            macos_btn_row.addWidget(self._macos_uninstall_btn)
+            macos_btn_row.addStretch()
+            macos_layout.addLayout(macos_btn_row)
+
+            macos_hint = QLabel(tr("settings_macos_uninstall_hint"))
+            macos_hint.setWordWrap(True)
+            macos_hint.setStyleSheet(hint_style())
+            macos_layout.addWidget(macos_hint)
+
+            layout.addWidget(macos_group)
+
         # ── Search behaviour ──────────────────────────────────────────────────
         search_group = QGroupBox(tr("settings_group_search"))
         search_layout = QVBoxLayout(search_group)
@@ -784,6 +807,19 @@ class SettingsDialog(QDialog):
         ved succes, jf. §4.3 i designdokumentet ("Luk applikationen").
         """
         from opensak.gui.dialogs.appimage_uninstall_dialog import confirm_and_uninstall
+
+        if confirm_and_uninstall(self):
+            self.accept()
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()
+
+    def _on_macos_uninstall_clicked(self) -> None:
+        """
+        Flyt OpenSAK til papirkurven (og valgfrit slet alle data) — issue
+        #859. Ved succes lukkes applikationen STRAKS og uden mere UI: bundlen
+        er flyttet, og PyInstaller må ikke indlæse flere filer fra den.
+        """
+        from opensak.gui.dialogs.macos_uninstall_dialog import confirm_and_uninstall
 
         if confirm_and_uninstall(self):
             self.accept()
@@ -1027,6 +1063,8 @@ class SettingsDialog(QDialog):
         self._pq_email_test_btn.setEnabled(True)
         if kind == "auth":
             msg = tr("pq_email_test_error_auth", detail=detail)
+        elif kind == "certificate":
+            msg = tr("pq_email_test_error_certificate", detail=detail)
         elif kind == "network":
             msg = tr("pq_email_test_error_network", detail=detail)
         else:

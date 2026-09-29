@@ -208,6 +208,12 @@ class SettingsStore:
     def __init__(self) -> None:
         self._data: dict[str, Any] | None = None   # None = ikke indlæst endnu
         self._path: Path | None = None
+        # Issue #859: sat af paths.purge_user_data(). Efter en "slet alle
+        # data"-afinstallation lukker appen, og closeEvent gemmer
+        # vinduesgeometri m.m. — uden denne spærre genskabte det
+        # installations-mappen med en opensak.json fuld af de gamle
+        # indstillinger (også på Linux, #837).
+        self._writes_disabled = False
 
     def _settings_path(self) -> Path:
         """Returner (og cache) stien til opensak.json."""
@@ -268,8 +274,23 @@ class SettingsStore:
                 result[k[len(search):]] = v
         return result
 
+    def disable_writes(self) -> None:
+        """
+        Spær for alle fremtidige skrivninger til disk for resten af
+        processens levetid (issue #859). Læsning virker stadig.
+
+        Kaldes af paths.purge_user_data() lige før data slettes, så intet
+        — heller ikke hovedvinduets closeEvent — kan genskabe de slettede
+        mapper bagefter. Der findes bevidst ingen enable_writes(): efter en
+        purge skal processen lukke.
+        """
+        self._writes_disabled = True
+
     def _flush(self) -> None:
         """Skriv data til disk atomisk."""
+        if self._writes_disabled:
+            _log.debug("Skrivning til opensak.json undertrykt efter data-sletning")
+            return
         import base64
 
         def _make_serializable(obj):
@@ -351,18 +372,49 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
 
     Gemmer migrerings-flag i opensak.json så det kun sker én gang.
     """
-    if store.get("_migrated_from_qsettings", False):
+    # Issue #878: log den EKSAKTE tilstand af store._data FØR første .get()
+    # (som trigger _load()), samt selve _settings_path(), så vi kan se om
+    # _load() rent faktisk fandt/læste den forventede fil, eller startede
+    # fra en tom dict.
+    _log.debug(
+        "migrate_from_qsettings: FØR store.get() — id(store)=%s, "
+        "store._data (pre-load)=%r, store._path (cached)=%r",
+        id(store), store._data, store._path,
+    )
+    already_migrated = store.get("_migrated_from_qsettings", False)
+    _log.debug(
+        "migrate_from_qsettings: EFTER _load() — settings_path=%s "
+        "(findes=%s), already_migrated=%r, fuld store._data=%r",
+        store._settings_path(), store._settings_path().exists(),
+        already_migrated, store._data,
+    )
+    if already_migrated:
         return False
 
     try:
         from PySide6.QtCore import QSettings
         qs = QSettings("OpenSAK Project", "OpenSAK")
         all_keys = qs.allKeys()
-        if not all_keys:
-            store.set("_migrated_from_qsettings", True)
-            return False
+        _log.debug(
+            "migrate_from_qsettings: QSettings('OpenSAK Project','OpenSAK') "
+            "all_keys=%r (fileName()=%r)", all_keys, qs.fileName(),
+        )
 
-        updates: dict[str, Any] = {"_migrated_from_qsettings": True}
+        # Issue #882: `all_keys` alene er IKKE et pålideligt signal på
+        # macOS. Qt's QSettings falder tavst tilbage til OS'ets globale
+        # preference-domæne (tastatur, sprog, trackpad m.v.) når appens
+        # eget domæne ("OpenSAK Project"/"OpenSAK") ingen nøgler har — så
+        # en helt frisk macOS-installation kan sagtens få 40-50 nøgler
+        # tilbage her (AppleLanguages, AppleLocale, com/apple/trackpad/...),
+        # uden at nogen af dem er OpenSAK-data. At bruge "all_keys er
+        # ikke-tom" som betingelse for "der findes gammelt OpenSAK-data at
+        # migrere" satte derfor `_wizard_completed` forkert på en frisk
+        # install (se issuets beskrivelse). Afgør i stedet ud fra `updates`
+        # selv, længere nede — dvs. om mindst én nøgle vi faktisk kender
+        # (key_map, window/*, databases-arrayet, eller db_/sort/-præfikset)
+        # havde en reel værdi.
+
+        updates: dict[str, Any] = {}
 
         # Mapping fra QSettings nøgler → opensak.json nøgler
         # (kun nøgler vi kender og ønsker at migrere)
@@ -467,9 +519,20 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
         if active_db:
             updates["databases.active"] = active_db
 
+        # Issue #882: se kommentaren ovenfor — det er `updates` (det vi
+        # faktisk fandt), ikke `all_keys` (om QSettings-domænet overhovedet
+        # svarede noget), der afgør om der var reel OpenSAK-data at
+        # migrere. `_migrated_from_qsettings`-flaget sættes altid, uanset
+        # udfald, så vi kun kører dette tjek én gang pr. installation.
+        found_real_data = bool(updates)
+        updates["_migrated_from_qsettings"] = True
         store.set_many(updates)
-        print(f"[settings] Migrerede {len(updates)-1} nøgler fra QSettings → opensak.json")
-        return True
+
+        if found_real_data:
+            print(f"[settings] Migrerede {len(updates)-1} nøgler fra QSettings → opensak.json")
+        else:
+            print("[settings] Ingen OpenSAK-data fundet i QSettings — ingen migration nødvendig")
+        return found_real_data
 
     except Exception as e:
         print(f"[settings] Migration fra QSettings fejlede: {e}")
@@ -875,7 +938,14 @@ def is_first_run() -> bool:
     Tjekker om _wizard_completed er sat i opensak.json.
     Bruges af app.py til at beslutte om wizard skal vises.
     """
-    return not get_store().get("_wizard_completed", False)
+    store = get_store()
+    val = store.get("_wizard_completed", False)
+    _log.debug(
+        "is_first_run: id(store)=%s, _wizard_completed=%r, settings_path=%s, "
+        "fuld store._data=%r", id(store), val, store._settings_path(),
+        store._data,
+    )
+    return not val
 
 
 def mark_wizard_completed() -> None:

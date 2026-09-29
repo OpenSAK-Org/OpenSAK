@@ -9,25 +9,49 @@ description = "OpenSAK — Open Source geocaching management tool (GSAK successo
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
+# ── Dependency bounds (issue #897) ───────────────────────────────────────────
+# Every dependency has an upper bound, set just above the version CI was last
+# verified green against. CI and the release builds (build.yml,
+# build-msix.yml) install from these ranges, so an upstream release can no
+# longer break `beta` or change what ships inside the binaries without us
+# choosing it.
+#
+# Upgrading a dependency is a deliberate change: raise the bound in its own
+# PR, let CI run, fix whatever breaks there — not in the middle of an
+# unrelated merge.
+#
+# Deliberately left without an upper bound:
+#   certifi  — CA bundle; must always be the newest to stay secure.
+#   pywin32  — plain build numbers (306, 307, …), no semver to cap on.
+#
+# Fast-moving tools that routinely add new checks/behaviour in minor releases
+# (SQLAlchemy, PySide6, mypy) are capped at the next MINOR version; the rest
+# at the next MAJOR.
+#
+# Before lifting sqlalchemy past <2.2: replace the deprecated noload() (#898).
 dependencies = [
-    "sqlalchemy>=2.0",
-    "alembic>=1.13",
-    "lxml>=5.0",
-    "PySide6>=6.6",
-    "numpy>=1.24",
+    "sqlalchemy>=2.0,<2.2",
+    "alembic>=1.13,<2",
+    "lxml>=5.0,<7",
+    "PySide6>=6.6,<6.12",
+    "numpy>=1.24,<3",
     "certifi>=2024.2.2",
-    "shapely>=2.0",
+    "shapely>=2.0,<3",
     "pywin32>=306; platform_system == 'Windows'",
-    "keyring>=25.0",
+    "keyring>=25.0,<26",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-cov",
-    "pytest-qt>=4.0",
-    "mypy>=1.8",
-    "pillow>=10.0",
+    "pytest>=8.0,<10",
+    "pytest-cov>=5.0,<8",
+    "pytest-qt>=4.0,<5",
+    "mypy>=1.8,<2.4",
+    "pillow>=10.0,<13",
+]
+# Release builds only (build.yml, build-msix.yml): `pip install -e ".[build]"`
+build = [
+    "pyinstaller>=6.0,<7",
 ]
 
 [tool.setuptools.packages.find]

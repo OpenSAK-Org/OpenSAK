@@ -31,7 +31,12 @@ class TestConnect:
 
         result = connect(_CFG_SSL, "pw")
 
-        mock_ssl_cls.assert_called_once_with("imap.example.com", 993, timeout=10.0)
+        # Issue #902: always with the verifying context, never imaplib's
+        # unverified default.
+        from opensak.net import SSL_CONTEXT
+        mock_ssl_cls.assert_called_once_with(
+            "imap.example.com", 993, timeout=10.0, ssl_context=SSL_CONTEXT,
+        )
         mock_conn.login.assert_called_once_with("alice", "pw")
         assert result is mock_conn
 

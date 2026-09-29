@@ -281,6 +281,40 @@ FOUND_LOG_TYPES: frozenset[str] = frozenset({
     "Webcam Photo Taken",
 })
 
+# ── "Not found" log types ─────────────────────────────────────────────────────
+# The counterpart to FOUND_LOG_TYPES: log types that record a failed search.
+# Kept as a set (rather than a bare string) so the log filter's three log
+# categories — found / not found / other — are all defined the same way.
+DNF_LOG_TYPES: frozenset[str] = frozenset({
+    "Didn't find it",
+})
+
+# ── Groundspeak log types ─────────────────────────────────────────────────────
+# Every log type the log filter offers as a checkbox, in GSAK's order (its
+# "Logtypen" list on the Logs tab). A log whose type is not in this list is
+# matched by the filter's "Other" entry instead — see LOG_TYPE_OTHER in
+# filters/engine.py.
+LOG_TYPES: tuple[str, ...] = (
+    "Announcement",
+    "Archive",
+    "Attended",
+    "Didn't find it",
+    "Enable Listing",
+    "Found it",
+    "Needs Archived",
+    "Needs Maintenance",
+    "Owner Maintenance",
+    "Post Reviewer Note",
+    "Publish Listing",
+    "Retract Listing",
+    "Temporarily Disable Listing",
+    "Unarchive",
+    "Update Coordinates",
+    "Webcam Photo Taken",
+    "Will Attend",
+    "Write note",
+)
+
 # ── Cache types that log "Attended" instead of "Found it" (issue #649) ──────
 # Used by the manual "Mark as Found" flow (cache_table.py::_toggle_found())
 # to decide which log_type to synthesize for the new Log row — mirrors how

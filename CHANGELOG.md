@@ -4,6 +4,256 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0] — 2026-09-29
+
+> First stable release of the 1.20.0 cycle. Replaces the `1.20.0-beta.1`
+> … `1.20.0-beta.15` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: the Filter dialog comes close
+> to GSAK parity (Logs, Child Waypoints and Trackables tabs, Invert filter,
+> and many new fields and conditions); OpenSAK now updates itself on
+> Windows and macOS, and can be uninstalled from inside the app on macOS
+> and Linux; the Microsoft Store is the recommended way to install on
+> Windows; a much more capable Edit Cache dialog; and Swiss German as the
+> 11th UI language.
+
+### Added
+
+- **Filter dialog: many new tabs and filters, continuing the GSAK
+  filter-parity work (#821, #557, #866, #889, #911, #921)** —
+  - **Logs tab** — filter by the logs on a cache: which logs are searched
+    (all, or only the latest *N*), log type and date, who logged it, and
+    how many such logs are required. Makes negative conditions possible,
+    e.g. "no find in the last year" or "latest log is a DNF".
+  - **Child Waypoints tab** — filter by waypoint code, type, name,
+    comment, date, created-by-user and count, e.g. caches *without* a
+    parking waypoint.
+  - **Trackables tab** — filter by trackable name, tracking code and
+    count.
+  - **Invert filter** — a global checkbox that shows exactly the caches
+    the current filter would hide. Saved with the filter profile.
+  - **Direction from centre point** — by compass direction or by bearing
+    in degrees; *Between* runs clockwise, so 315°–45° is the sector
+    through north.
+  - **Distance between corrected and posted coordinates** — e.g. to find
+    solved finals outside the 2-mile rule.
+  - **Date operators** (before / after / between / empty …), including
+    time of day on the created, changed and last GPX update dates.
+  - **Line/Point/Polygon filtering**, **OR matching for attributes**, and
+    an attribute **search box** with a "Show only selected" toggle.
+  - **New fields:** User Data 1–4, the GC.com note and Elevation.
+  - **Highlighting of what a filter restricts** — every element that
+    differs from its default, and every tab that holds one, is
+    highlighted, as in GSAK (#610).
+  - **Warning before overwriting a saved filter** (#671).
+- **Quick Where filter in the top bar (#887, implements #558)** — type a
+  raw SQL WHERE condition (e.g. `distance < 5`) and apply it without
+  opening the Filter dialog. Recent entries are remembered.
+- **Edit Cache dialog: many more editable fields (#890, addresses #873)**
+  — owner name, hidden/found/DNF dates, county, elevation, "Contains
+  HTML", and a new **Personal** tab with user flag, user data 1–4, GC
+  note, watch, personal note and corrected coordinates. Child waypoints
+  can now be added, edited and deleted.
+- **Windows and macOS: updates download and install from inside the app
+  (#572, #893)** — **Download & Install** fetches the right file for your
+  system and verifies its checksum against the new `SHA256SUMS.txt`
+  published with every release. On macOS, OpenSAK then replaces the
+  installed app safely (the old version is only removed once the new one
+  is in place), cleans up after itself and closes — open it again to
+  start the new version. On Windows, the verified download is shown in
+  Explorer.
+- **macOS: uninstall OpenSAK from inside the app (#859)** — **Settings →
+  Advanced → Uninstall OpenSAK**, as on Linux: choose *Remove program
+  only* or *Remove program and all data*. OpenSAK moves itself to the
+  Trash and closes.
+- **Help → OpenSAK File Locations… (#907)** — shows every place OpenSAK
+  keeps files, with size and an **Open folder** button for each. Handy for
+  backups and for moving to a new computer. It never deletes anything.
+- **Swiss German (de_CH) UI language (#886)** — 11 UI languages in total.
+
+### Changed
+
+- **Microsoft Store is the recommended way to install on Windows (#904)**
+  — it is signed by Microsoft, never blocked by Windows' Smart App
+  Control, and updates itself automatically. opensak.com and the User
+  Guide list it first; the direct download from GitHub is still
+  available.
+- **Microsoft Store installs no longer show an update popup (#874)** — the
+  Store already updates OpenSAK in the background, so the "download this
+  yourself" notification was misleading. A manual **Check for updates**
+  still works.
+- **Filter dialog: distance, favourite points and elevation use the same
+  conditions** — Equal, Less than, At most, More than, At least, Between
+  and Not between, instead of a from/to range. The centre-point filters
+  (distance, direction, corrected ↔ posted) are grouped on the Other tab
+  with one shared centre-point picker, which can be your home point, a
+  saved point, the selected cache or a custom coordinate.
+- **Filter dialog: Text Search supports all text operators, including
+  RegEx**, and the personal note is now a text filter instead of yes/no.
+- **Filter dialog: General and Other tabs redesigned** to fit without
+  scrolling.
+- **Saved filter profiles are converted automatically** to the new
+  filters and keep selecting the same caches.
+- **Edit Cache: found/DNF dates follow their checkboxes**, and the detail
+  panel and map refresh immediately after editing.
+- **User Guide and opensak.com brought up to date** for everything added
+  in the 1.19 and 1.20 cycles.
+- **Dependency versions are now bounded (#897)**, so an upstream release
+  can't silently change what ships inside OpenSAK.
+
+### Fixed
+
+- **Windows: the direct download could fail to start with Smart App
+  Control switched on (#904)** — it stopped after the Welcome Wizard with
+  a misleading database error. If Smart App Control ever blocks a part of
+  OpenSAK again, you now get a clear explanation instead.
+- **PQ email: the mail server's certificate was never checked (#902)** —
+  on an untrusted network, your mail password could have been
+  intercepted. OpenSAK now verifies the server before logging in. **Note:**
+  mail servers with a self-signed certificate, or a server name that
+  doesn't match its certificate, are now refused.
+- **macOS: Boundary Data Updates always failed with "no network
+  connection" (#901)** — HTTPS certificate verification now works on
+  macOS, fresh Windows installs, more Linux distributions and company
+  networks that inspect encrypted traffic.
+- **Uninstalling with "Remove program and all data" left data behind
+  (#906, #859)** — the Linux AppImage uninstall now also removes the
+  startup configuration, older settings files and the saved PQ Email
+  password, and closing OpenSAK afterwards no longer recreates the
+  settings folder.
+- **Welcome Wizard: databases could disappear after changing only the
+  installation folder (#908)** — databases now stay where your database
+  folder setting says. No data was ever deleted.
+- **macOS: a fresh install could skip the Welcome Wizard (#882)**.
+- **Column sort was lost after reopening a database with a saved filter
+  (#912)** — the sort column is now remembered per database.
+- **Deleting a database could fail with "file in use" on Windows** — also
+  affected database paths with non-ASCII characters (e.g. æ/ø/å) on all
+  platforms.
+- **Button labels were cut off in several dialogs in some languages
+  (#927)**.
+- **Update dialog showed instructions that didn't match its button**, and
+  **"Home" appeared twice in the centre-point list**.
+
+Thanks to **nagisml** for the large majority of the filter and Edit Cache
+work, to **Mike Wood** for testing and reporting the macOS update flow, and
+to everyone in the Facebook group who tested the 1.20 betas and reported
+bugs.
+
+---
+
+## [1.19.6] — 2026-09-20
+
+> Bugfix-only release on the 1.19.0 stable line. This is believed to be the
+> actual root-cause fix for #878, found using the diagnostic logging added
+> in v1.19.5 while testing on real Mac hardware — a deeper, earlier bug
+> than the guard added in v1.19.4, which remains in place but was not
+> sufficient on its own.
+
+### Fixed
+
+- **Settings could be permanently, silently emptied in memory before the
+  macOS #825 migration ever ran, because startup read them one step too
+  early (fixes #878)** — `main()` called `apply_theme(app)` — pure UI
+  palette setup — before running the macOS path migration. `apply_theme()`
+  turned out to indirectly read the `display.theme` setting, which
+  creates and loads the settings store on first use. `SettingsStore`
+  caches both the file path it resolves and the data it reads from that
+  path exactly once, by design, and never re-reads either afterward. At
+  the point `apply_theme()` ran, the correct (post-migration) settings
+  file didn't exist yet, so the store cached an empty result — and kept
+  serving that same empty result for the rest of the session, even though
+  the migration, moments later, moved the user's real `opensak.json`
+  (databases, username, home location, everything) to exactly the path
+  the store had already given up on. Every setting read for the rest of
+  that session — including `DatabaseManager`'s database list — saw this
+  permanently empty store, regardless of what the migration had actually
+  done or what was genuinely sitting on disk. `main()` now runs logging
+  setup and the macOS path migration first, before anything (including
+  theme setup) can read a setting for the first time. No effect on
+  Windows/Linux, where the migration step is already a no-op.
+
+### Known follow-up (not fixed here)
+
+- **`migrate_from_qsettings()`'s "no legacy data" check is unreliable on
+  macOS.** It treats `QSettings.allKeys()` being non-empty as "found an
+  old installation to migrate", but on macOS `QSettings` transparently
+  falls back to the OS's own global preference domain (keyboard, trackpad,
+  language settings, etc.) when the app's own domain has no keys of its
+  own — so the check sees a non-empty list on a genuinely fresh install
+  too. With this release's fix, that no longer loses any data (real
+  settings are already loaded by the time this check runs, so the
+  incorrect "already migrated" flag it sets is merged in rather than
+  overwriting anything) — but it still incorrectly marks the welcome
+  wizard as already completed on a first-ever run, so a new macOS user
+  can be shown the "set your username and home location" reminder instead
+  of the wizard itself. Tracked separately, to be filed as its own issue.
+
+---
+
+## [1.19.5] — 2026-09-20
+
+> Diagnostics-only release on the 1.19.0 stable line — no behavior changes.
+> Added while continuing to verify v1.19.4/#878 on real Mac hardware: that
+> testing turned up evidence of a second, deeper issue than #878 itself
+> (`DatabaseManager` seeing an unexpectedly empty settings store right
+> after a successful, verified macOS migration), which needs direct
+> runtime evidence rather than further code reading to pin down.
+
+### Added
+
+- **More detail in the existing `settings_migration` debug-log channel
+  (#878)** — `migrate_from_qsettings()` now logs the settings store's
+  in-memory state both immediately before and immediately after its first
+  read of `opensak.json` (including the resolved settings path, whether
+  that path exists on disk, and the legacy `QSettings` key list and file
+  name it checks), and `is_first_run()` now logs the same in-memory state
+  at the point it decides whether to show the welcome wizard. No behavior
+  changes — this is purely additional visibility into a discrepancy where
+  the settings file on disk has been confirmed (by size and by explicit
+  move-verification logging) to hold real data moments before
+  `DatabaseManager` reads an unexpectedly near-empty in-memory copy of it.
+
+---
+
+## [1.19.4] — 2026-09-20
+
+> Bugfix-only release on the 1.19.0 stable line. Found while verifying the
+> v1.19.3/#870 fix on real Mac hardware: a second, distinct bug that could
+> still make it look like a user's databases and settings had vanished,
+> even though the #870 migration itself now completes correctly.
+
+### Fixed
+
+- **`DatabaseManager` could overwrite known databases and user settings
+  with an empty fallback state right after a correct migration (fixes
+  #878)** — `_load_from_settings()` called `_save_to_settings()`
+  unconditionally immediately after parsing `databases.list`/
+  `databases.active`, before checking whether any databases had actually
+  been found. In the real, packaged/signed macOS app (not reproduced yet
+  in an isolated test), `self._databases` was observed to sometimes be
+  empty at that exact point even though the just-migrated `opensak.json`
+  on disk provably held the correct data a moment earlier. That premature
+  save wrote the empty state back to disk, and the fallback logic that
+  runs immediately afterward then created and saved a fresh, empty
+  "Default" database over it — the user-visible result being a "please
+  set your username and home location" prompt and a lost custom database,
+  despite #870's migration itself having worked. The save now happens
+  exactly once, after all fallback logic has run, so an empty intermediate
+  state can never reach disk. The underlying reason `self._databases` was
+  briefly empty in the packaged app is still unconfirmed; this closes the
+  persistence hole regardless of that trigger.
+
+### Added
+
+- **More detail in the existing `db_manager` debug-log channel (#878)** —
+  now also logs `id()` of the settings store and its full in-memory
+  contents at the top of `_load_from_settings()`, to help determine
+  whether a future reproduction involves the same `SettingsStore`
+  singleton seeing empty data (a real read failure) or a second, separate
+  instance (a singleton/caching bug).
+
+---
+
 ## [1.19.3] — 2026-09-17
 
 > Bugfix-only release on the 1.19.0 stable line. Closes the root cause

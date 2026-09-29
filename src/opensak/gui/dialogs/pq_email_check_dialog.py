@@ -30,7 +30,7 @@ from opensak.lang import tr
 class PQEmailCheckWorker(QThread):
     """Kører selve mailboks-gennemgangen i baggrunden (issue #443)."""
     result_ready = Signal(object)     # PQScanResult
-    error        = Signal(str, str)   # (kind: "auth" | "network" | "other", detail)
+    error        = Signal(str, str)   # (kind: "auth" | "certificate" | "network" | "other", detail)
     # Se ImportWorker/GsakImportWorker for begrundelsen om ikke at emitte
     # et selvstændigt "done"-signal fra run() — QThread.finished bruges i stedet.
 
@@ -42,7 +42,9 @@ class PQEmailCheckWorker(QThread):
         self._only_unseen = only_unseen
 
     def run(self) -> None:
-        from opensak.email.connection import ImapAuthError, ImapNetworkError
+        from opensak.email.connection import (
+            ImapAuthError, ImapCertificateError, ImapNetworkError,
+        )
         from opensak.email.service import scan_and_import
         try:
             result = scan_and_import(
@@ -53,6 +55,8 @@ class PQEmailCheckWorker(QThread):
             self.result_ready.emit(result)
         except ImapAuthError as exc:
             self.error.emit("auth", str(exc))
+        except ImapCertificateError as exc:   # #902 — før ImapNetworkError (subklasse)
+            self.error.emit("certificate", str(exc))
         except ImapNetworkError as exc:
             self.error.emit("network", str(exc))
         except Exception as exc:
@@ -214,6 +218,8 @@ class PQEmailCheckDialog(QDialog):
     def _on_error(self, kind: str, detail: str) -> None:
         if kind == "auth":
             msg = tr("pq_check_error_auth", detail=detail)
+        elif kind == "certificate":
+            msg = tr("pq_check_error_certificate", detail=detail)
         elif kind == "network":
             msg = tr("pq_check_error_network", detail=detail)
         else:

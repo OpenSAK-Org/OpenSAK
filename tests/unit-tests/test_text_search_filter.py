@@ -229,3 +229,86 @@ def test_apply_filters_sql_python_parity():
             all_rows  = s.query(Cache).all()
             py_codes  = {c.gc_code for c in all_rows if fs.matches(c)}
         assert sql_codes == py_codes, f"parity failed for {text!r}"
+
+
+# ── Operators (same set as the single-column text filters) ────────────────────
+
+def _desc_only(text, op):
+    return TextSearchFilter(text, search_description=True, search_logs=False,
+                            search_notes=False, search_hint=False, op=op)
+
+
+@pytest.mark.parametrize("op, text, description, expected", [
+    ("contains",     "fall",          "Near a waterfall", True),
+    ("not_contains", "fall",          "Near a waterfall", False),
+    ("not_contains", "bridge",        "Near a waterfall", True),
+    ("equals",       "near a waterfall", "Near a waterfall", True),
+    ("equals",       "waterfall",     "Near a waterfall", False),
+    ("not_equals",   "waterfall",     "Near a waterfall", True),
+    ("starts_with",  "near",          "Near a waterfall", True),
+    ("ends_with",    "FALL",          "Near a waterfall", True),
+    ("in_list",      "x;near a waterfall", "Near a waterfall", True),
+    ("not_in_list",  "x;y",           "Near a waterfall", True),
+    ("empty",        "",              None,               True),
+    ("empty",        "",              "Near a waterfall", False),
+    ("not_empty",    "",              "Near a waterfall", True),
+    ("not_empty",    "",              None,               False),
+    ("regex",        r"N\w+r\s+a\b",  "Near a waterfall", True),
+    ("regex",        r"^waterfall",   "Near a waterfall", False),
+    ("not_regex",    r"^waterfall",   "Near a waterfall", True),
+])
+def test_matches_operator(op, text, description, expected):
+    c = _cache_with_note("GC8", description, None, None)
+    assert _desc_only(text, op).matches(c) is expected
+
+
+def test_negated_op_requires_no_field_to_match():
+    # "not contains" means the text appears in none of the searched fields.
+    c = _cache_with_note("GC9", "Near a waterfall", "Easy find", "My note")
+    assert not TextSearchFilter("easy", op="not_contains").matches(c)
+    assert TextSearchFilter("bridge", op="not_contains").matches(c)
+
+
+def test_regex_matches_any_log():
+    f = TextSearchFilter(r"\bTFTC\b", search_description=False, search_logs=True,
+                         search_notes=False, op="regex")
+    c = _cache_with_note("GC10", None, None, None)
+    c.logs = [Log(log_type="Found it", text="Nice"), Log(log_type="Found it", text="tftc!")]
+    assert f.matches(c)
+
+
+def test_invalid_regex_reports_error_and_matches_nothing():
+    f = TextSearchFilter("(", op="regex")
+    assert f.regex_error is not None
+    assert not f.matches(_cache_with_note("GC11", "(", "(", "("))
+
+
+def test_round_trip_op():
+    f = TextSearchFilter.from_dict(TextSearchFilter("a.b", op="not_regex").to_dict())
+    assert (f.op, f.text) == ("not_regex", "a.b")
+
+
+def test_from_dict_without_op_is_contains():
+    assert TextSearchFilter.from_dict({"text": "x"}).op == "contains"
+
+
+@pytest.mark.parametrize("op, text", [
+    ("contains", "water"), ("not_contains", "water"), ("not_contains", "bridge"),
+    ("equals", "easy find"), ("not_equals", "easy find"),
+    ("starts_with", "hidden"), ("ends_with", "cache"),
+    ("in_list", "bring a pen;easy find"), ("not_in_list", "bring a pen;easy find"),
+    ("empty", ""), ("not_empty", ""),
+    ("regex", r"w\w+fall"), ("not_regex", r"w\w+fall"),
+])
+@pytest.mark.parametrize("fields", [
+    dict(search_description=True, search_logs=True, search_notes=True, search_hint=True),
+    dict(search_description=True, search_logs=False, search_notes=False, search_hint=False),
+    dict(search_description=False, search_logs=True, search_notes=False, search_hint=False),
+    dict(search_description=False, search_logs=False, search_notes=True, search_hint=False),
+])
+def test_apply_filters_operator_parity(op, text, fields):
+    fs = FilterSet().add(TextSearchFilter(text, op=op, **fields))
+    with get_session() as s:
+        sql_codes = {c.gc_code for c in apply_filters(s, fs)}
+        py_codes = {c.gc_code for c in s.query(Cache).all() if fs.matches(c)}
+    assert sql_codes == py_codes

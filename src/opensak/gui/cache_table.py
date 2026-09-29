@@ -1068,8 +1068,8 @@ class CacheTableModel(QAbstractTableModel):
             return _format_date(cache.last_log_date) if cache.last_log_date else ""
         if col == "log_count":
             # Issue #87: use cached log_count column instead of len(cache.logs)
-            # because logs are noload'ed for performance and would always be
-            # an empty list here. log_count is maintained on import.
+            # because logs aren't loaded here for performance (accessing them
+            # raises since #898). log_count is maintained on import.
             return str(cache.log_count or 0)
         if col == "dnf":
             return "DNF" if cache.dnf else ""
@@ -1202,12 +1202,12 @@ class CacheTableModel(QAbstractTableModel):
                 reverse=reverse,
             )
         elif col == "log_count":
-            # Issue #87: sort on cached log_count column (logs are noload'ed)
+            # Issue #87: sort on cached log_count column (logs aren't loaded)
             self._caches.sort(
                 key=lambda c: c.log_count or 0, reverse=reverse
             )
         elif col == "last_log":
-            # Issue #186: sort on cached last_log_date column (logs are noload'ed)
+            # Issue #186: sort on cached last_log_date column (logs aren't loaded)
             self._caches.sort(
                 key=lambda c: c.last_log_date or datetime.min, reverse=reverse
             )
@@ -1444,7 +1444,9 @@ class CacheTableView(QTableView):
         self.setModel(self._model)
         self._model.flags_changed.connect(self.flags_changed)
         self._model.sort_changed.connect(self._on_model_sort_changed)
-        self._last_sort_col: Optional[int] = None
+        # Gemmes som col_id, ikke indeks — indekset bliver forældet når
+        # kolonner flyttes eller en database med andre kolonner åbnes.
+        self._last_sort_col_id: Optional[str] = None
         self._last_sort_asc: bool = True
         self._setup_ui()
 
@@ -1642,39 +1644,54 @@ class CacheTableView(QTableView):
             for visual_pos in range(len(columns))
         ]
         set_visible_columns(new_order)
+        # Model-reset nulstiller rækkevalget — husk valgt cache og vælg den
+        # igen bagefter uden at trigge cache_selected (samme som
+        # _reset_model_preserving_selection).
+        current = self._model.cache_at(self.currentIndex().row())
+        selected_gc = current.gc_code if current else None
+        self.selectionModel().blockSignals(True)
         # Genindlæs model med ny logisk rækkefølge, og nulstil header til
         # identitets-rækkefølge (0..n-1) så fremtidige resizes/sorts matcher.
         self._applying_widths = True
         try:
             self._model.reload_columns()
             self._apply_column_widths()
+            self._reapply_last_sort()
         finally:
             self._applying_widths = False
+            if selected_gc:
+                self.select_by_gc_code(selected_gc)
+            self.selectionModel().blockSignals(False)
 
     def reload_columns(self) -> None:
         """Opdatér kolonner fra indstillinger."""
         self._model.reload_columns()
         self._apply_column_widths()
+        self._reapply_last_sort()
 
     def _on_model_sort_changed(self, col_id: str, ascending: bool) -> None:
         """Store last sort so we can re-apply after reload."""
-        cols = self._model._columns
-        if col_id in cols:
-            self._last_sort_col = cols.index(col_id)
-            self._last_sort_asc = ascending
+        self._last_sort_col_id = col_id
+        self._last_sort_asc = ascending
         self.sort_changed.emit(col_id, ascending)
 
     def apply_sort(self, col_id: str, ascending: bool) -> None:
         """Genanvend sortering - kaldes fra mainwindow ved opstart/db-skift."""
-        cols = self._model._columns
-        if col_id not in cols:
-            return
-        col_idx = cols.index(col_id)
-        order = (Qt.SortOrder.AscendingOrder if ascending
-                 else Qt.SortOrder.DescendingOrder)
-        self._last_sort_col = col_idx
+        # Husk sorteringen selv om kolonnen ikke er synlig endnu (fx ved
+        # db-skift, hvor apply_sort kaldes før reload_columns).
+        self._last_sort_col_id = col_id
         self._last_sort_asc = ascending
-        # Bloker sort_changed så apply_sort ikke trigger _save_sort_for_active_db
+        self._reapply_last_sort()
+
+    def _reapply_last_sort(self) -> None:
+        """Sortér modellen efter den huskede kolonne uden at udsende sort_changed."""
+        cols = self._model._columns
+        if self._last_sort_col_id not in cols:
+            return
+        col_idx = cols.index(self._last_sort_col_id)
+        order = (Qt.SortOrder.AscendingOrder if self._last_sort_asc
+                 else Qt.SortOrder.DescendingOrder)
+        # Bloker sort_changed så gendan-kald ikke trigger _save_sort_for_active_db
         # (dette er et internt gendan-kald, ikke en bruger-handling)
         self._model.blockSignals(True)
         self._model.sort(col_idx, order)
@@ -1690,16 +1707,7 @@ class CacheTableView(QTableView):
         self.selectionModel().blockSignals(True)
         self._model.load(caches)
         # Genanvend sortering - beginResetModel() nulstiller Qt sort-indikatoren
-        # Bloker sort_changed så load ikke trigger _save_sort_for_active_db
-        if self._last_sort_col is not None:
-            order = (Qt.SortOrder.AscendingOrder if self._last_sort_asc
-                     else Qt.SortOrder.DescendingOrder)
-            self._model.blockSignals(True)
-            self._model.sort(self._last_sort_col, order)
-            self._model.blockSignals(False)
-            self.horizontalHeader().blockSignals(True)
-            self.horizontalHeader().setSortIndicator(self._last_sort_col, order)
-            self.horizontalHeader().blockSignals(False)
+        self._reapply_last_sort()
         self.clearSelection()
         self.setCurrentIndex(self._model.index(-1, -1))
         self.selectionModel().blockSignals(False)

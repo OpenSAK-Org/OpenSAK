@@ -10,7 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QPushButton, QWidget,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QPushButton,
+    QSizePolicy, QWidget,
 )
 
 from opensak.lang import tr
@@ -73,7 +74,11 @@ class DirRow(QWidget):
         lay.addWidget(self._edit)
         if browsable:
             self._btn = QPushButton(tr("wizard_browse"))
-            self._btn.setFixedWidth(100)
+            # #927: size to the translated label instead of a hardcoded width,
+            # so longer translations are never clipped.
+            self._btn.setSizePolicy(
+                QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+            )
             lay.addWidget(self._btn)
             self._btn.clicked.connect(self._browse)
 

@@ -6,6 +6,7 @@
 # settings and databases after the folders were changed.
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -613,3 +614,159 @@ class TestSaveAllCleansUpOldFolders:
 
         assert not old_install.exists()
         assert (new_install / "icons" / "traditional_cache.svg").exists()
+
+
+# ── Issue #908: changing only the install dir must not strand databases ─────
+
+def _setup_old_install(tmp_path, nested: bool):
+    """Old install dir with one registered database, flat or in old/Data."""
+    old_install = tmp_path / "old"
+    old_db_dir = old_install / "Data" if nested else old_install
+    old_db_dir.mkdir(parents=True)
+    db_file = old_db_dir / "Default.db"
+    db_file.write_text("precious", encoding="utf-8")
+    (old_db_dir / "Default.db-wal").write_text("wal", encoding="utf-8")
+    (old_install / "gc_token.json").write_text("token", encoding="utf-8")
+    (old_install / "opensak.json").write_text(json.dumps({
+        "databases.dir": str(old_db_dir),
+        "databases.list": [{"name": "Default", "path": str(db_file)}],
+        "databases.active": str(db_file),
+    }), encoding="utf-8")
+    ss.set_install_dir(old_install)
+    ss.reset_store()
+    return old_install, old_db_dir, db_file
+
+
+class TestSaveAllKeepsDatabasesReachable:
+    @pytest.mark.parametrize("nested", [False, True], ids=["flat", "nested"])
+    def test_changing_only_install_dir_keeps_databases_reachable(
+        self, tmp_path, qtbot, nested
+    ):
+        old_install, old_db_dir, db_file = _setup_old_install(tmp_path, nested)
+        new_install = tmp_path / "new"
+
+        w = ww.WelcomeWizard()
+        qtbot.addWidget(w)
+        w._install_row.set_path(new_install)  # database folder left unchanged
+
+        w._save_all(use_defaults=False)
+
+        store = ss.get_store()
+        # Settings and files agree: the database is where settings say it is.
+        assert Path(store.get("databases.dir")) == old_db_dir
+        assert Path(store.get("databases.list")[0]["path"]) == db_file
+        assert db_file.read_text(encoding="utf-8") == "precious"
+        assert (old_db_dir / "Default.db-wal").exists()
+        assert not (new_install / "Default.db").exists()
+        assert not (new_install / "Data").exists()
+        # Everything else still follows the install dir.
+        assert (new_install / "opensak.json").exists()
+        assert (new_install / "gc_token.json").exists()
+
+    def test_changing_both_dirs_still_offers_to_move_databases(
+        self, tmp_path, qtbot, monkeypatch
+    ):
+        # Before #908 the generic move had already carried Default.db away,
+        # so _offer_move_databases() counted zero databases and never asked.
+        old_install, _old_db_dir, db_file = _setup_old_install(tmp_path, nested=False)
+        new_install = tmp_path / "new"
+        new_db = tmp_path / "new-db"
+
+        w = ww.WelcomeWizard()
+        qtbot.addWidget(w)
+        w._install_row.set_path(new_install)
+        w._db_row.set_path(new_db)
+
+        manager = _FakeManager(databases=[_FakeDbInfo("Default")])
+        monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
+        _click_button_with_text(monkeypatch, "settings_move_keep_originals")
+
+        w._save_all(use_defaults=False)
+
+        assert manager.move_calls == [(new_db, False)]
+        assert db_file.exists()  # left for move_databases_to(), not the generic move
+
+
+class TestDatabaseEntriesToKeep:
+    def test_flat_layout_keeps_registered_db_and_sidecars(self, tmp_path):
+        old_install, _db_dir, db_file = _setup_old_install(tmp_path, nested=False)
+
+        keep = ww.WelcomeWizard._database_entries_to_keep(old_install, old_install)
+
+        assert db_file.resolve() in keep
+        assert (old_install / "Default.db-wal").resolve() in keep
+        assert (old_install / "gc_token.json").resolve() not in keep
+
+    def test_flat_layout_keeps_unregistered_db_files(self, tmp_path):
+        old_install = tmp_path / "old"
+        old_install.mkdir()
+        (old_install / "Forgotten.db").write_text("x", encoding="utf-8")
+        ss.set_install_dir(old_install)
+        ss.reset_store()
+
+        keep = ww.WelcomeWizard._database_entries_to_keep(old_install, old_install)
+
+        assert (old_install / "Forgotten.db").resolve() in keep
+
+    def test_nested_db_dir_keeps_top_level_subfolder(self, tmp_path):
+        old_install, old_db_dir, _db = _setup_old_install(tmp_path, nested=True)
+
+        keep = ww.WelcomeWizard._database_entries_to_keep(old_install, old_db_dir)
+
+        assert keep == {old_db_dir.resolve()}
+
+    def test_db_dir_outside_install_dir_keeps_nothing(self, tmp_path):
+        old_install = tmp_path / "old"
+        old_install.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        ss.set_install_dir(old_install)
+        ss.reset_store()
+
+        keep = ww.WelcomeWizard._database_entries_to_keep(old_install, elsewhere)
+
+        assert keep == set()
+
+
+class TestMoveRemainingSkips:
+    def test_never_moves_bootstrap_json(self, tmp_path, monkeypatch):
+        # Windows (non-MSIX) / macOS: bootstrap.json lives in the default install dir.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        bootstrap = old_dir / "bootstrap.json"
+        bootstrap.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(ss, "_bootstrap_path", lambda: bootstrap)
+
+        ww.WelcomeWizard._move_remaining_install_dir_contents(old_dir, new_dir)
+
+        assert bootstrap.exists()
+        assert not (new_dir / "bootstrap.json").exists()
+
+    def test_skips_entries_in_keep(self, tmp_path):
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        (old_dir / "Default.db").write_text("db", encoding="utf-8")
+        (old_dir / "gc_token.json").write_text("token", encoding="utf-8")
+
+        ww.WelcomeWizard._move_remaining_install_dir_contents(
+            old_dir, new_dir, keep={(old_dir / "Default.db").resolve()}
+        )
+
+        assert (old_dir / "Default.db").exists()
+        assert (new_dir / "gc_token.json").exists()
+
+    def test_deletes_previous_log_instead_of_moving_it(self, tmp_path):
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        (old_dir / "opensak.log.previous").write_text("old log", encoding="utf-8")
+
+        ww.WelcomeWizard._move_remaining_install_dir_contents(old_dir, new_dir)
+
+        assert not (old_dir / "opensak.log.previous").exists()
+        assert not (new_dir / "opensak.log.previous").exists()

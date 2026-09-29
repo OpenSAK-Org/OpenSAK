@@ -1,6 +1,6 @@
 """tests/unit-tests/test_log_count.py — cache.log_count column behaviour (issue #87).
 
-log_count caches len(logs) because logs is noload'ed for the table view, where len(cache.logs) would read 0.
+log_count caches len(logs) because logs isn't loaded for the table view (raiseload, #898), so len(cache.logs) can't be used there.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import noload, sessionmaker
+from sqlalchemy.orm import raiseload, sessionmaker
 
 from opensak.db.models import Base, Cache, Log
 
@@ -67,7 +67,7 @@ def test_log_count_readable_without_loading_logs(session):
     session.commit()
     cid = cache.id
     session.expunge_all()
-    fresh = session.query(Cache).options(noload(Cache.logs)).filter_by(id=cid).first()
+    fresh = session.query(Cache).options(raiseload(Cache.logs)).filter_by(id=cid).first()
     assert fresh.log_count == 42
 
 

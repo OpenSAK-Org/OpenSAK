@@ -1,54 +1,72 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Seks faner:
+Ti faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
-4. Attributter — alle Groundspeak attributter
-5. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-6. Where       — rå SQL WHERE-betingelse
+4. Logs        — caches efter deres logs (type, dato, logger, antal …)
+5. Linje/Polygon — caches langs en linje, i et polygon eller nær punkter
+6. Waypoints   — caches efter deres waypoints (kode, type, dato, antal …)
+7. Trackables  — caches efter deres trackables (navn, tracking code, antal)
+8. Attributter — alle Groundspeak attributter
+9. Tekstsøgning — søg i beskrivelse, logs, noter og hint
+10. Where      — rå SQL WHERE-betingelse
 
 Understøtter gem/indlæs filterprofiler.
 """
 
 from __future__ import annotations
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from pathlib import Path
+from typing import Callable, Optional, TypeVar
 
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QPushButton,
-    QComboBox, QDoubleSpinBox, QTabWidget, QWidget,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QRadioButton,
+    QComboBox, QDoubleSpinBox, QSpinBox, QTabWidget, QTabBar, QWidget,
     QGroupBox, QScrollArea, QGridLayout,
-    QDialogButtonBox, QMessageBox, QInputDialog,
-    QDateEdit, QSizePolicy, QFrame, QPlainTextEdit,
+    QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
+    QDateEdit, QDateTimeEdit, QSizePolicy, QFrame, QPlainTextEdit,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
+    QStyle, QStyleOptionTab, QStylePainter,
 )
+from PySide6.QtGui import QBrush, QColor, QPalette
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QDateTime, QTime
+import unicodedata
 
 from opensak.gui.widgets.center_point_picker import CenterPointPicker
+from opensak.gui.theme import highlight_colors, highlight_style
 from opensak.lang import tr
 from opensak.filters.engine import (
-    FilterSet, SortSpec,
+    BaseFilter, FilterSet, SortSpec,
     CacheTypeFilter, ContainerFilter,
     DifficultyFilter, TerrainFilter,
     FoundFilter, NotFoundFilter,
     AvailableFilter, ArchivedFilter, AvailabilityFilter,
     CountryFilter, StateFilter, CountyFilter,
     NameFilter, GcCodeFilter,
-    PlacedByFilter, OwnerFilter, DistanceFilter,
+    PlacedByFilter, OwnerFilter, DistanceFilter, DirectionFilter, DIRECTIONS,
+    bearing_op_ok,
+    LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
+    CorrectedDistanceFilter, DISTANCE_OPS,
     PremiumFilter, NonPremiumFilter,
     WhereClauseFilter,
-    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, FavoritePointsFilter,
-    FoundByMeDateFilter, DnfDateFilter, LastLogDateFilter, HiddenDateFilter,
+    UserFlagFilter, LockedFilter, DnfFilter, FtfFilter, UserNoteFilter,
+    FavoritePointsFilter, ElevationFilter,
+    UserData1Filter, UserData2Filter, UserData3Filter, UserData4Filter, GcNoteFilter,
+    DateFilter, LEGACY_DATE_FILTER_FIELDS, DATETIME_FILTER_FIELDS,
     TextSearchFilter,
+    WaypointFilter, WAYPOINT_TEXT_FIELDS,
+    TrackableFilter, TRACKABLE_TEXT_FIELDS,
+    LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
+from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
 
 
 # ── Groundspeak attribut definitioner ─────────────────────────────────────────
@@ -153,10 +171,120 @@ from opensak.filters.engine import (
 #   8=scenic, 9=hiking, 10=climbing, 11=wading, 12=swimming, 13=available, 14=night,
 #   15=winter, 17=poisonoak, 18=dangerousanimals, 19=ticks, 20=mine, 21=cliff)
 
-from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES
+from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES, CONTAINER_SIZES, LOG_TYPES
 from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.gui.icon_provider import get_cache_type_icon
 from opensak.gui.settings import get_settings
+
+
+# ── Attribute search helpers ──────────────────────────────────────────────────
+
+def _fold(text: str) -> str:
+    """Case- and accent-insensitive form used for attribute search matching."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+class _AttrSearchEdit(QLineEdit):
+    """Search field for the attributes tab.
+
+    Return/Enter/Down jump into the table instead of triggering the dialog's
+    default (Apply) button, so typing a search and hitting Enter out of habit
+    does not close the dialog.
+    """
+
+    jump_requested = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Down):
+            self.jump_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+# ── Highlight af ændrede filterelementer (issue #610) ────────────────────────
+
+def hug_label(label: QLabel) -> QLabel:
+    """Stop a label from filling its layout column, so a highlight (#610)
+    hugs the text instead of running on to the next widget."""
+    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+    return label
+
+
+def labeled_row(label_text: str, *widgets: QWidget) -> tuple[QLabel, QWidget]:
+    """Compact "Label:  [w] [w] …" row (#610) — replaces a QGroupBox holding a
+    single line of controls. The label is the highlight target."""
+    label = hug_label(QLabel(label_text))
+    holder = QWidget()
+    holder_layout = QHBoxLayout(holder)
+    holder_layout.setContentsMargins(0, 0, 0, 0)
+    holder_layout.setSpacing(8)
+    for w in widgets:
+        holder_layout.addWidget(w)
+    holder_layout.addStretch()
+    return label, holder
+
+
+def set_highlighted(widget: QWidget, on: bool) -> None:
+    """Paint *widget* in the "changed filter element" colour, or clear it (#610).
+
+    Group boxes get only their title highlighted — a whole yellow frame would
+    drown the tab — everything else (labels, mostly) is painted as a whole.
+    """
+    if isinstance(widget, QGroupBox):
+        widget.setStyleSheet(highlight_style("QGroupBox::title") if on else "")
+    else:
+        widget.setStyleSheet(highlight_style() if on else "")
+
+
+class HighlightTabBar(QTabBar):
+    """Tab bar that marks tabs holding a changed filter condition (#610).
+
+    Qt style sheets can't address a single tab by index, so the highlighted
+    tabs are painted by hand: the native tab shape, a coloured band behind the
+    label, then the label on top.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._highlighted: set[int] = set()
+
+    def set_tab_highlighted(self, index: int, on: bool) -> None:
+        if on == (index in self._highlighted):
+            return
+        if on:
+            self._highlighted.add(index)
+        else:
+            self._highlighted.discard(index)
+        self.update()
+
+    def is_tab_highlighted(self, index: int) -> bool:
+        return index in self._highlighted
+
+    def paintEvent(self, event) -> None:  # noqa: N802  (Qt naming)
+        painter = QStylePainter(self)
+        # Same order as QTabBar's own painter: the selected tab goes last, so
+        # its border overlaps its neighbours instead of the other way round.
+        selected = self.currentIndex()
+        for i in range(self.count()):
+            if i != selected:
+                self._paint_tab(painter, i)
+        if 0 <= selected < self.count():
+            self._paint_tab(painter, selected)
+
+    def _paint_tab(self, painter: QStylePainter, index: int) -> None:
+        option = QStyleOptionTab()
+        self.initStyleOption(option, index)
+        if index not in self._highlighted:
+            painter.drawControl(QStyle.ControlElement.CE_TabBarTab, option)
+            return
+        bg, fg = highlight_colors()
+        painter.drawControl(QStyle.ControlElement.CE_TabBarTabShape, option)
+        painter.fillRect(self.tabRect(index).adjusted(6, 5, -6, -5), QColor(bg))
+        option.palette.setColor(QPalette.ColorRole.WindowText, QColor(fg))
+        option.palette.setColor(QPalette.ColorRole.ButtonText, QColor(fg))
+        painter.drawControl(QStyle.ControlElement.CE_TabBarTabLabel, option)
 
 
 # ── D/T spin box: snaps to valid 0.5-increment values (1.0–5.0) ──────────────
@@ -223,6 +351,9 @@ _TEXT_OP_LABELS: tuple[tuple[str, str], ...] = (
 )
 
 
+_F = TypeVar("_F", bound=BaseFilter)
+
+
 class TextFilterRow(QWidget):
     """Operator dropdown + value field for one text filter (name, owner, …).
 
@@ -232,7 +363,9 @@ class TextFilterRow(QWidget):
 
     def __init__(self, label: str, placeholder: str, parent=None):
         super().__init__(parent)
-        self.label = label
+        # A real QLabel (like DateFilterRow's) rather than a bare string, so
+        # the highlighting in issue #610 has something to paint yellow.
+        self.label = hug_label(QLabel(label))
         self._placeholder = placeholder
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -257,13 +390,20 @@ class TextFilterRow(QWidget):
         self.set_op("contains")
         self.edit.clear()
 
-    def build(self, cls: type[TextMatchFilter]) -> Optional[TextMatchFilter]:
-        """Filter for the current input, or None when the row is not set."""
+    def build(self, cls: Callable[[str, str], _F]) -> Optional[_F]:
+        """Filter for the current input, or None when the row is not set.
+
+        *cls* is called as ``cls(text, op)`` — a TextMatchFilter subclass, or
+        a factory like the Text Search tab's."""
         op = self.op()
         if op in TEXT_OPS_VALUELESS:
             return cls("", op)
         text = self.edit.text().strip()
         return cls(text, op) if text else None
+
+    def is_set(self) -> bool:
+        """True when the row contributes a condition (issue #610 highlighting)."""
+        return self.op() in TEXT_OPS_VALUELESS or bool(self.edit.text().strip())
 
     def load(self, f) -> None:
         self.set_op(getattr(f, "op", "contains"))
@@ -281,6 +421,335 @@ class TextFilterRow(QWidget):
         else:
             placeholder = ""
         self.edit.setPlaceholderText(placeholder)
+
+
+# ── Hjælper widget: GSAK-lignende datofilter ──────────────────────────────────
+
+# Dropdown-rækkefølge som i GSAK. Nøglerne står som literals, så
+# test_no_unused_keys kan finde dem. "any" = intet filter.
+_DATE_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",          "filter_date_op_any"),
+    ("on_or_before", "filter_date_op_on_or_before"),
+    ("on_or_after",  "filter_date_op_on_or_after"),
+    ("equal",        "filter_date_op_equal"),
+    ("between",      "filter_date_op_between"),
+    ("during",       "filter_date_op_during"),
+    ("not_during",   "filter_date_op_not_during"),
+    ("compare",      "filter_date_op_compare"),
+)
+_DATE_UNIT_LABELS: tuple[tuple[str, str], ...] = (
+    ("days",   "filter_date_unit_days"),
+    ("weeks",  "filter_date_unit_weeks"),
+    ("months", "filter_date_unit_months"),
+    ("years",  "filter_date_unit_years"),
+)
+_DATE_COMPARE_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",          "filter_date_cmp_equal"),
+    ("older",          "filter_date_cmp_older"),
+    ("older_or_equal", "filter_date_cmp_older_or_equal"),
+    ("newer",          "filter_date_cmp_newer"),
+    ("newer_or_equal", "filter_date_cmp_newer_or_equal"),
+    ("within",         "filter_date_cmp_within"),
+    ("outside",        "filter_date_cmp_outside"),
+)
+# Datofelterne i GSAK's rækkefølge, med deres label.
+_DATE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
+    ("last_found_date", "col_last_found_date"),
+    ("hidden_date",     "filter_hidden_date_group"),
+    ("found_date",      "filter_found_date_group"),
+    ("dnf_date",        "col_dnf_date"),
+    ("creation_date",   "col_creation_date"),
+    ("last_gpx_update", "col_last_gpx_update"),
+    ("last_log_date",   "filter_log_date_group"),
+    ("changed_date",    "col_changed_date"),
+)
+_DATE_OPS_WITH_DATE1 = ("on_or_before", "on_or_after", "equal", "between")
+_DATE_OPS_RELATIVE = ("during", "not_during")
+
+
+# ── Waypoints-fanen ───────────────────────────────────────────────────────────
+
+# (felt, oversættelsesnøgle) for tekstrækkerne, i GSAK's rækkefølge.
+_WP_TEXT_LABELS: tuple[tuple[str, str], ...] = (
+    ("code",    "filter_wp_code"),
+    ("wp_type", "col_type"),
+    ("name",    "col_name"),
+    ("comment", "filter_wp_comment"),
+)
+assert tuple(f for f, _ in _WP_TEXT_LABELS) == WAYPOINT_TEXT_FIELDS
+_WP_COUNT_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",      "filter_date_op_any"),
+    ("equal",    "filter_date_op_equal"),
+    ("at_least", "filter_wp_count_at_least"),
+    ("at_most",  "filter_wp_count_at_most"),
+    ("between",  "filter_date_op_between"),
+)
+
+
+# ── Trackables-fanen ──────────────────────────────────────────────────────────
+
+# (felt, oversættelsesnøgle) for tekstrækkerne; antal bruger _WP_COUNT_LABELS.
+_TB_TEXT_LABELS: tuple[tuple[str, str], ...] = (
+    ("name",          "col_name"),
+    ("tracking_code", "filter_tb_tracking_code"),
+)
+assert tuple(f for f, _ in _TB_TEXT_LABELS) == TRACKABLE_TEXT_FIELDS
+
+
+# ── Logs-fanen ────────────────────────────────────────────────────────────────
+
+# (kategori, oversættelsesnøgle) for "Zu durchsuchende Logs", i GSAK's
+# rækkefølge. Nøglerne står som literals, så test_no_unused_keys kan finde dem.
+_LOG_CATEGORY_LABELS: tuple[tuple[str, str], ...] = (
+    ("found",     "quick_found"),
+    ("not_found", "quick_not_found"),
+    ("other",     "filter_log_cat_other"),
+)
+assert tuple(c for c, _ in _LOG_CATEGORY_LABELS) == LOG_CATEGORIES
+# GSAK's "Nötige Anzahl" — som waypoint-antallet, men med GSAK's egen tekst
+# for "any" ("Mindestens ein Log").
+_LOG_COUNT_LABELS: tuple[tuple[str, str], ...] = (
+    ("any",      "filter_log_count_any"),
+    ("at_most",  "filter_wp_count_at_most"),
+    ("at_least", "filter_wp_count_at_least"),
+    ("equal",    "filter_date_op_equal"),
+    ("between",  "filter_date_op_between"),
+)
+
+
+# ── Linje/polygon-fanen ───────────────────────────────────────────────────────
+
+# (filtertype, oversættelsesnøgle) i GSAK's rækkefølge. Nøglerne står som
+# literals, så test_no_unused_keys kan finde dem.
+_LP_MODE_LABELS: tuple[tuple[str, str], ...] = (
+    ("line",    "filter_lp_type_line"),
+    ("polygon", "filter_lp_type_polygon"),
+    ("points",  "filter_lp_type_points"),
+)
+_LP_DEFAULT_DISTANCE = 1.0  # i brugerens enhed (km / mi)
+_M_TO_FT = 3.28084  # højdefilteret gemmer meter; vises i ft når use_miles
+
+# Afstandsbetingelser — delt af afstand fra center-punkt og afstand rettede ↔
+# oprindelige koordinater. Nøglerne står som literals, så test_no_unused_keys
+# kan finde dem.
+_DISTANCE_OP_LABELS: tuple[tuple[str, str], ...] = (
+    ("equal",       "filter_date_op_equal"),
+    ("less_than",   "filter_op_less_than"),
+    ("at_most",     "filter_wp_count_at_most"),
+    ("more_than",   "filter_op_more_than"),
+    ("at_least",    "filter_wp_count_at_least"),
+    ("between",     "filter_date_op_between"),
+    ("not_between", "filter_op_not_between"),
+)
+assert tuple(op for op, _ in _DISTANCE_OP_LABELS) == DISTANCE_OPS
+_DIST_DEFAULT_KM = 50.0  # afstand fra center-punkt, i brugerens enhed
+_DIR_DEFAULT_OP, _DIR_DEFAULT_DEG = "between", (0.0, 90.0)  # pejling i grader
+_CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
+_FAV_DEFAULT_OP, _FAV_DEFAULT_PTS = "at_least", 10
+_ELEV_DEFAULT_OP, _ELEV_DEFAULT_M = "at_least", 1000.0
+
+
+def _format_lp_point(point: tuple[float, float]) -> str:
+    return f"{point[0]:.6f}, {point[1]:.6f}"
+
+
+def _qdate_to_date(qdate: QDate) -> date:
+    return date(qdate.year(), qdate.month(), qdate.day())
+
+
+def _qdatetime_to_datetime(qdt: QDateTime) -> datetime:
+    d, t = qdt.date(), qdt.time()
+    return datetime(d.year(), d.month(), d.day(), t.hour(), t.minute())
+
+
+class DateFilterRow(QWidget):
+    """Operator dropdown + inputs for one date field (GSAK's Dates tab).
+
+    Depending on the operator it shows one or two date pickers, "Last
+    [N] [days/weeks/months/years]", or a comparison with another date field
+    (plus a day count for "within"/"outside"). The label turns bold while the
+    row is active. Fields in DATETIME_FILTER_FIELDS get a "Time" checkbox that
+    adds hours:minutes to the date pickers.
+
+    *field* None means a date that is not one of the cache's date fields (a
+    waypoint's date): there is nothing to compare with, so no "compare"
+    operator, and build() is not used — read op() and range_args() instead.
+    """
+
+    def __init__(self, field: Optional[str], label: str, parent=None):
+        super().__init__(parent)
+        self.field = field
+        self.label = hug_label(QLabel(label))
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        self.op_combo = QComboBox()
+        for op, key in _DATE_OP_LABELS:
+            if field is not None or op != "compare":
+                self.op_combo.addItem(tr(key), op)
+        layout.addWidget(self.op_combo)
+
+        self.date1 = self._make_date_edit()
+        self.date2 = self._make_date_edit()
+        self._date_format = self.date1.displayFormat()
+        self._date_width: Optional[int] = None  # date-only picker width
+        layout.addWidget(self.date1)
+        layout.addWidget(self.date2)
+        self.time_check = QCheckBox(tr("filter_date_with_time"))
+        self._with_time = field in DATETIME_FILTER_FIELDS
+        layout.addWidget(self.time_check)
+
+        self._relative = QWidget()
+        rel_layout = QHBoxLayout(self._relative)
+        rel_layout.setContentsMargins(0, 0, 0, 0)
+        rel_layout.addWidget(QLabel(tr("filter_date_last")))
+        self.amount = QSpinBox()
+        self.amount.setRange(0, 9999)
+        self.amount.setValue(1)
+        rel_layout.addWidget(self.amount)
+        self.unit_combo = QComboBox()
+        for unit, key in _DATE_UNIT_LABELS:
+            self.unit_combo.addItem(tr(key), unit)
+        rel_layout.addWidget(self.unit_combo)
+        layout.addWidget(self._relative)
+
+        self._compare = QWidget()
+        cmp_layout = QHBoxLayout(self._compare)
+        cmp_layout.setContentsMargins(0, 0, 0, 0)
+        self.other_combo = QComboBox()
+        for other, key in _DATE_FIELD_LABELS:
+            if other != field:
+                self.other_combo.addItem(tr(key), other)
+        cmp_layout.addWidget(self.other_combo)
+        self.compare_combo = QComboBox()
+        for op, key in _DATE_COMPARE_LABELS:
+            self.compare_combo.addItem(tr(key), op)
+        cmp_layout.addWidget(self.compare_combo)
+        self.compare_days = QSpinBox()
+        self.compare_days.setRange(0, 99999)
+        cmp_layout.addWidget(self.compare_days)
+        self._days_label = QLabel(tr("filter_date_unit_days"))
+        cmp_layout.addWidget(self._days_label)
+        layout.addWidget(self._compare)
+        layout.addStretch()
+
+        self.op_combo.currentIndexChanged.connect(self._update_inputs)
+        self.compare_combo.currentIndexChanged.connect(self._update_inputs)
+        self.time_check.toggled.connect(self._update_time_format)
+        self._reset_times()
+        self._update_inputs()
+
+    @staticmethod
+    def _make_date_edit() -> QDateTimeEdit:
+        edit = QDateTimeEdit()
+        edit.setCalendarPopup(True)
+        edit.setDisplayFormat(QDateEdit().displayFormat())
+        edit.setDate(QDate.currentDate())
+        return edit
+
+    def _reset_times(self) -> None:
+        # "between" defaults to the whole of both days once a time is shown
+        self.date1.setTime(QTime(0, 0))
+        self.date2.setTime(QTime(23, 59))
+
+    def _update_time_format(self) -> None:
+        fmt = self._date_format
+        with_time = self.time_check.isChecked()
+        if with_time:
+            fmt += " HH:mm"
+        for edit in (self.date1, self.date2):
+            # QDateTimeEdit caches its size hint, so it would not grow for
+            # the longer format — widen it by the width of the time part.
+            if self._date_width is None:
+                self._date_width = edit.sizeHint().width()
+            extra = edit.fontMetrics().horizontalAdvance(" 00:00") if with_time else 0
+            edit.setMinimumWidth(self._date_width + extra)
+            edit.setDisplayFormat(fmt)
+
+    def op(self) -> str:
+        return self.op_combo.currentData()
+
+    @staticmethod
+    def _select(combo: QComboBox, value) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def reset(self) -> None:
+        self.op_combo.setCurrentIndex(0)
+        self.time_check.setChecked(False)
+        self.date1.setDate(QDate.currentDate())
+        self.date2.setDate(QDate.currentDate())
+        self._reset_times()
+        self.amount.setValue(1)
+        self.unit_combo.setCurrentIndex(0)
+        self.other_combo.setCurrentIndex(0)
+        self.compare_combo.setCurrentIndex(0)
+        self.compare_days.setValue(0)
+
+    def build(self) -> Optional[DateFilter]:
+        """Filter for the current input, or None when the row is "Any"."""
+        op = self.op()
+        if op == "any":
+            return None
+        assert self.field is not None
+        return DateFilter(
+            self.field, op, **self.range_args(),
+            other_field=self.other_combo.currentData(),
+            compare_op=self.compare_combo.currentData(),
+            compare_days=self.compare_days.value(),
+        )
+
+    def range_args(self) -> dict:
+        """date1/date2/amount/unit for the current operator. Only the dates
+        the operator uses — keeps saved profiles free of stale picker values."""
+        op = self.op()
+        return {
+            "date1": self._value(self.date1) if op in _DATE_OPS_WITH_DATE1 else None,
+            "date2": self._value(self.date2) if op == "between" else None,
+            "amount": self.amount.value(),
+            "unit": self.unit_combo.currentData(),
+        }
+
+    def _value(self, edit: QDateTimeEdit) -> date:
+        """The picker's date, or date and time when the time box is ticked."""
+        if self._with_time and self.time_check.isChecked():
+            return _qdatetime_to_datetime(edit.dateTime())
+        return _qdate_to_date(edit.date())
+
+    def load_range(self, op: str, date1: Optional[date], date2: Optional[date],
+                   amount: int, unit: str) -> None:
+        self._select(self.op_combo, op)
+        self.time_check.setChecked(self._with_time and any(
+            isinstance(value, datetime) for value in (date1, date2)))
+        for edit, value in ((self.date1, date1), (self.date2, date2)):
+            if value is not None:
+                edit.setDate(QDate(value.year, value.month, value.day))
+                if isinstance(value, datetime):
+                    edit.setTime(QTime(value.hour, value.minute))
+        self.amount.setValue(amount)
+        self._select(self.unit_combo, unit)
+
+    def load(self, f: DateFilter) -> None:
+        self.load_range(f.op, f.date1, f.date2, f.amount, f.unit)
+        self._select(self.other_combo, f.other_field)
+        self._select(self.compare_combo, f.compare_op)
+        self.compare_days.setValue(f.compare_days)
+
+    def _update_inputs(self) -> None:
+        op = self.op()
+        self.date1.setVisible(op in _DATE_OPS_WITH_DATE1)
+        self.date2.setVisible(op == "between")
+        self.time_check.setVisible(self._with_time and op in _DATE_OPS_WITH_DATE1)
+        self._relative.setVisible(op in _DATE_OPS_RELATIVE)
+        self._compare.setVisible(op == "compare")
+        needs_days = self.compare_combo.currentData() in ("within", "outside")
+        self.compare_days.setVisible(needs_days)
+        self._days_label.setVisible(needs_days)
+        font = self.label.font()
+        font.setBold(op != "any")
+        self.label.setFont(font)
 
 
 # ── Filter dialog ─────────────────────────────────────────────────────────────
@@ -301,10 +770,26 @@ class FilterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("filter_dialog_title"))
         self._attr_boxes: dict[int, tuple] = {}
+        # attr_id -> (table row, name item, folded search text)
+        self._attr_rows: dict[int, tuple] = {}
+        # Last painted highlight state, so a keystroke doesn't restyle the
+        # whole dialog (#610)
+        self._highlight_state: dict[int, bool] = {}
         # Cache currently selected in the main window's table, if any — lets
         # the "Afstand"-fanens center-punkt-vælger tilbyde "denne cache" som
         # centrum (issue #511). None if nothing is selected.
         self._current_cache = current_cache
+        # A direction filter from a profile saved before the bearing
+        # condition (compass sectors, from Home). Rebuilt unchanged until the
+        # direction row is edited, so loading and re-applying such a profile
+        # never changes what it matches. See _load_direction_filter().
+        self._legacy_dir_filter: Optional[DirectionFilter] = None
+        # Compass directions picked on the rose (or loaded as sectors); None
+        # while the direction is set by degree values. See _on_dir_clicked().
+        self._dir_sectors: Optional[list[str]] = None
+        # True while the degree inputs are written from _dir_sectors, so that
+        # doesn't count as the user editing them.
+        self._dir_syncing = False
         # Startsstørrelse: 70% af skærm, aldrig større end 1000x850
         from PySide6.QtWidgets import QApplication
         # Issue #580: brugte tidligere altid QApplication.primaryScreen(),
@@ -355,7 +840,11 @@ class FilterDialog(QDialog):
         profile_row.addWidget(self._profile_combo)
 
         save_btn = QPushButton(tr("filter_save_btn"))
-        save_btn.setMaximumWidth(110)
+        # #927: size to the translated label instead of a hardcoded width,
+        # so longer translations are never clipped.
+        save_btn.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
         save_btn.setAutoDefault(False)
         save_btn.clicked.connect(self._save_profile)
         profile_row.addWidget(save_btn)
@@ -372,15 +861,24 @@ class FilterDialog(QDialog):
 
         # ── Faneblade ─────────────────────────────────────────────────────────
         self._tabs = QTabWidget()
+        self._tabs.setTabBar(HighlightTabBar(self._tabs))
         self._general_tab = self._build_general_tab()
         self._dates_tab = self._build_dates_tab()
         self._misc_tab = self._build_misc_tab()
+        self._logs_tab = self._build_logs_tab()
+        self._line_polygon_tab = self._build_line_polygon_tab()
         self._attributes_tab = self._build_attributes_tab()
+        self._waypoints_tab = self._build_waypoints_tab()
+        self._trackables_tab = self._build_trackables_tab()
         self._text_search_tab = self._build_text_search_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
         self._tabs.addTab(self._misc_tab, tr("filter_tab_misc"))
+        self._tabs.addTab(self._logs_tab, tr("detail_tab_logs"))
+        self._tabs.addTab(self._line_polygon_tab, tr("filter_tab_line_polygon"))
+        self._tabs.addTab(self._waypoints_tab, tr("filter_tab_waypoints"))
+        self._tabs.addTab(self._trackables_tab, tr("filter_trackables_group"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
@@ -402,6 +900,11 @@ class FilterDialog(QDialog):
         reset_tab_btn.clicked.connect(self._reset_current_tab)
         btn_row.addWidget(reset_tab_btn)
 
+        # Global invert: show exactly the caches the filter would hide.
+        self._invert_cb = QCheckBox(tr("filter_invert"))
+        self._invert_cb.setToolTip(tr("filter_invert_tooltip"))
+        btn_row.addWidget(self._invert_cb)
+
         btn_row.addStretch()
 
         cancel_btn = QPushButton(tr("cancel"))
@@ -410,8 +913,20 @@ class FilterDialog(QDialog):
 
         layout.addLayout(btn_row)
 
+        # After the button row, so the invert checkbox is connected too.
+        self._connect_highlight_signals()
+        self._refresh_highlights()
+
     def _build_general_tab(self) -> QWidget:
-        """Generelt filter fane — indpakket i QScrollArea så indhold ikke klemmes."""
+        """Generelt filter fane.
+
+        Issue #610: fanen var én lang kolonne af QGroupBox'e og krævede altid
+        scrolling. Den er nu lagt ud i to kolonner, og de fem rene ja/nej-
+        grupper (fundet, tilgængelighed, premium, trackables, rettede
+        koordinater) er blevet til kompakte etiket-rækker i stedet for hver sin
+        ramme — det alene sparede ~300 px. QScrollArea'en er beholdt som
+        sikkerhedsnet for meget små skærme og "stor tekst"-indstillingen.
+        """
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -421,37 +936,50 @@ class FilterDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
-        layout = QFormLayout(inner)
+        layout = QVBoxLayout(inner)
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Cachenavn / GC kode / Udlagt af / Owner name — hver med operator-
-        # vælger (Indeholder, Er lig med, RegEx, …). *_filter er selve
-        # tekstfeltet, som før.
+        # ── Cachenavn / GC kode / Udlagt af / Owner name ─────────────────────
+        # To rækker à to felter i stedet for fire fulde rækker. *_filter er
+        # stadig selve tekstfeltet, som før.
         self._name_row = TextFilterRow(tr("filter_name_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._name_row.label, self._name_row)
         self._gc_row = TextFilterRow(tr("filter_gc_label"), tr("filter_gc_placeholder"))
-        layout.addRow(self._gc_row.label, self._gc_row)
         self._placed_row = TextFilterRow(tr("filter_placed_by_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._placed_row.label, self._placed_row)
         self._owner_row = TextFilterRow(tr("filter_owner_name_label"), tr("filter_contains_placeholder"))
-        layout.addRow(self._owner_row.label, self._owner_row)
+        text_grid = QGridLayout()
+        text_grid.setHorizontalSpacing(12)
+        text_grid.setVerticalSpacing(4)
+        for i, row in enumerate((self._name_row, self._gc_row,
+                                 self._placed_row, self._owner_row)):
+            r, c = divmod(i, 2)
+            text_grid.addWidget(row.label, r, c * 2)
+            text_grid.addWidget(row, r, c * 2 + 1)
+        text_grid.setColumnStretch(1, 1)
+        text_grid.setColumnStretch(3, 1)
+        layout.addLayout(text_grid)
+
         self._name_filter = self._name_row.edit
         self._gc_filter = self._gc_row.edit
         self._placed_filter = self._placed_row.edit
         self._owner_filter = self._owner_row.edit
 
-        spacer = QWidget()
-        spacer.setFixedHeight(6)
-        layout.addRow(spacer)
+        # ── Midterblok: cachetyper til venstre, beholder + D/T til højre ─────
+        middle = QHBoxLayout()
+        middle.setSpacing(10)
 
         # Cache type
-        type_group = QGroupBox(tr("filter_cache_type_group"))
-        type_outer = QVBoxLayout(type_group)
+        self._type_group = QGroupBox(tr("filter_cache_type_group"))
+        type_outer = QVBoxLayout(self._type_group)
+        type_outer.setSpacing(4)
         type_layout = QGridLayout()
+        type_layout.setHorizontalSpacing(10)
+        type_layout.setVerticalSpacing(2)
         self._type_checks: dict[str, QCheckBox] = {}
-        # Same icons and size as the cache table's type column
-        type_icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
+        # Same icons as the cache table's type column, but capped at 16 px —
+        # at "large text" the table's 26 px icons made this grid alone taller
+        # than the whole tab (#610).
+        type_icon_size = min(16, TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"])
         for i, ct in enumerate(CACHE_TYPES):
             cb = QCheckBox(ct.replace(" Cache", "").replace("Unknown", "Mystery"))
             cb.setIcon(get_cache_type_icon(ct, size=type_icon_size))
@@ -462,29 +990,38 @@ class FilterDialog(QDialog):
         type_outer.addLayout(type_layout)
         type_btn_row = QHBoxLayout()
         type_enable_all = QPushButton(tr("filter_type_enable_all"))
+        type_enable_all.setAutoDefault(False)
         type_enable_all.clicked.connect(self._enable_all_types)
         type_disable_all = QPushButton(tr("filter_type_disable_all"))
+        type_disable_all.setAutoDefault(False)
         type_disable_all.clicked.connect(self._disable_all_types)
         type_btn_row.addWidget(type_enable_all)
         type_btn_row.addWidget(type_disable_all)
         type_btn_row.addStretch()
         type_outer.addLayout(type_btn_row)
-        layout.addRow(type_group)
+        middle.addWidget(self._type_group, 3)
 
-        # Container
-        cont_group = QGroupBox(tr("filter_container_group"))
-        cont_layout = QHBoxLayout(cont_group)
+        right_col = QVBoxLayout()
+        right_col.setSpacing(8)
+
+        # Container — to rækker à tre i stedet for én bred række
+        self._cont_group = QGroupBox(tr("filter_container_group"))
+        cont_layout = QGridLayout(self._cont_group)
+        cont_layout.setHorizontalSpacing(10)
+        cont_layout.setVerticalSpacing(2)
         self._cont_checks: dict[str, QCheckBox] = {}
-        for cs in CONTAINER_SIZES:
+        for i, cs in enumerate(CONTAINER_SIZES):
             cb = QCheckBox(cs)
             cb.setChecked(True)
             self._cont_checks[cs] = cb
-            cont_layout.addWidget(cb)
-        layout.addRow(cont_group)
+            cont_layout.addWidget(cb, i // 3, i % 3)
+        right_col.addWidget(self._cont_group)
 
-        # Sværhedsgrad
+        # Sværhedsgrad / terræn
         dt_group = QGroupBox(tr("filter_dt_group"))
         dt_layout = QFormLayout(dt_group)
+        dt_layout.setContentsMargins(8, 4, 8, 4)
+        dt_layout.setVerticalSpacing(4)
 
         d_row = QHBoxLayout()
         self._diff_min = DTSpinBox()
@@ -495,7 +1032,8 @@ class FilterDialog(QDialog):
         d_row.addWidget(QLabel(tr("filter_to")))
         d_row.addWidget(self._diff_max)
         d_row.addStretch()
-        dt_layout.addRow(tr("wp_label_difficulty"), d_row)
+        self._diff_label = hug_label(QLabel(tr("wp_label_difficulty")))
+        dt_layout.addRow(self._diff_label, d_row)
 
         t_row = QHBoxLayout()
         self._terr_min = DTSpinBox()
@@ -506,178 +1044,96 @@ class FilterDialog(QDialog):
         t_row.addWidget(QLabel(tr("filter_to")))
         t_row.addWidget(self._terr_max)
         t_row.addStretch()
-        dt_layout.addRow(tr("wp_label_terrain"), t_row)
-        layout.addRow(dt_group)
+        self._terr_label = hug_label(QLabel(tr("wp_label_terrain")))
+        dt_layout.addRow(self._terr_label, t_row)
+        right_col.addWidget(dt_group)
+        right_col.addStretch()
+
+        middle.addLayout(right_col, 2)
+        layout.addLayout(middle)
+
+        # ── Ja/nej-valg: fire etiket-rækker i to kolonner ─────────────────────
+        # Tidligere fem QGroupBox'e under hinanden — hver med ~24 px indhold i
+        # en ~70 px ramme. Etiketterne er selve highlight-målet (#610).
+        status_grid = QGridLayout()
+        status_grid.setHorizontalSpacing(16)
+        status_grid.setVerticalSpacing(4)
+
+        def _status_row(label_text: str, *boxes: QCheckBox) -> tuple[QLabel, QWidget]:
+            for box in boxes:
+                box.setChecked(True)
+            return labeled_row(label_text, *boxes)
 
         # Fundet status
-        found_group = QGroupBox(tr("filter_found_group"))
-        found_layout = QHBoxLayout(found_group)
-        self._found_cb   = QCheckBox(tr("quick_found"))
-        self._found_cb.setChecked(True)
+        self._found_cb    = QCheckBox(tr("quick_found"))
         self._notfound_cb = QCheckBox(tr("quick_not_found"))
-        self._notfound_cb.setChecked(True)
-        found_layout.addWidget(self._found_cb)
-        found_layout.addWidget(self._notfound_cb)
-        found_layout.addStretch()
-        layout.addRow(found_group)
+        self._found_label, found_widget = _status_row(
+            tr("filter_found_group"), self._found_cb, self._notfound_cb)
 
         # Tilgængelighed
-        avail_group = QGroupBox(tr("filter_avail_group"))
-        avail_layout = QHBoxLayout(avail_group)
         self._avail_cb    = QCheckBox(tr("filter_available"))
-        self._avail_cb.setChecked(True)
         self._unavail_cb  = QCheckBox(tr("filter_unavailable"))
-        self._unavail_cb.setChecked(True)
-        self._archived_cb = QCheckBox(tr("quick_archived"))
         # Issue #576 (Mike): GSAK always shows archived caches unless a
         # filter is explicitly set to hide them — OpenSAK previously hid
         # them by default, which surprised users and (per Mike's report)
         # made an explicit "show archived" choice forget itself on reopen.
-        self._archived_cb.setChecked(True)
-        avail_layout.addWidget(self._avail_cb)
-        avail_layout.addWidget(self._unavail_cb)
-        avail_layout.addWidget(self._archived_cb)
-        avail_layout.addStretch()
-        layout.addRow(avail_group)
-
-        # Afstand
-        dist_group = QGroupBox(tr("filter_distance_group"))
-        dist_outer = QVBoxLayout(dist_group)
-
-        dist_row = QHBoxLayout()
-        self._dist_enabled = QCheckBox(tr("filter_enable"))
-        self._dist_enabled.toggled.connect(self._on_dist_toggled)
-        dist_row.addWidget(self._dist_enabled)
-        dist_row.addWidget(QLabel(tr("filter_min")))
-        self._dist_min = QDoubleSpinBox()
-        self._dist_min.setRange(0.0, 9999.0)
-        self._dist_min.setValue(0.0)
-        from opensak.gui.settings import get_settings as _gs
-        _unit = " mi" if _gs().use_miles else " km"
-        self._dist_min.setSuffix(_unit)
-        self._dist_min.setEnabled(False)
-        dist_row.addWidget(self._dist_min)
-        dist_row.addWidget(QLabel(tr("filter_max")))
-        self._dist_max = QDoubleSpinBox()
-        self._dist_max.setRange(0.1, 9999.0)
-        self._dist_max.setValue(50.0)
-        self._dist_max.setSuffix(_unit)
-        self._dist_max.setEnabled(False)
-        dist_row.addWidget(self._dist_max)
-        dist_row.addStretch()
-        dist_outer.addLayout(dist_row)
-
-        # Center-punkt (issue #511) — genbrugelig widget, delt med den
-        # planlagte quick "Where"-boks i toolbaren (#558).
-        center_row = QHBoxLayout()
-        center_row.addWidget(QLabel(tr("center_point_label")))
-        self._center_picker = CenterPointPicker(self)
-        self._center_picker.set_current_cache(self._current_cache)
-        self._center_picker.setEnabled(False)
-        center_row.addWidget(self._center_picker, 1)
-        dist_outer.addLayout(center_row)
-
-        layout.addRow(dist_group)
+        self._archived_cb = QCheckBox(tr("quick_archived"))
+        self._avail_label, avail_widget = _status_row(
+            tr("filter_avail_group"), self._avail_cb, self._unavail_cb, self._archived_cb)
 
         # Premium
-        prem_group = QGroupBox(tr("col_premium"))
-        prem_layout = QHBoxLayout(prem_group)
         self._prem_yes = QCheckBox(tr("filter_premium_only"))
-        self._prem_yes.setChecked(True)
         self._prem_no  = QCheckBox(tr("filter_not_premium"))
-        self._prem_no.setChecked(True)
-        prem_layout.addWidget(self._prem_yes)
-        prem_layout.addWidget(self._prem_no)
-        prem_layout.addStretch()
-        layout.addRow(prem_group)
-
-        # Trackables
-        tb_group = QGroupBox(tr("filter_trackables_group"))
-        tb_layout = QHBoxLayout(tb_group)
-        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
-        self._tb_yes.setChecked(True)
-        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
-        self._tb_no.setChecked(True)
-        tb_layout.addWidget(self._tb_yes)
-        tb_layout.addWidget(self._tb_no)
-        tb_layout.addStretch()
-        layout.addRow(tb_group)
+        self._prem_label, prem_widget = _status_row(
+            tr("col_premium"), self._prem_yes, self._prem_no)
 
         # Corrected Coordinates
-        cc_group = QGroupBox(tr("filter_corrected_group"))
-        cc_layout = QHBoxLayout(cc_group)
         self._cc_yes = QCheckBox(tr("filter_has_corrected"))
-        self._cc_yes.setChecked(True)
         self._cc_no  = QCheckBox(tr("filter_no_corrected"))
-        self._cc_no.setChecked(True)
-        cc_layout.addWidget(self._cc_yes)
-        cc_layout.addWidget(self._cc_no)
-        cc_layout.addStretch()
-        layout.addRow(cc_group)
+        self._cc_label, cc_widget = _status_row(
+            tr("filter_corrected_group"), self._cc_yes, self._cc_no)
+
+        for i, (label, widget) in enumerate((
+            (self._found_label, found_widget),
+            (self._prem_label, prem_widget),
+            (self._avail_label, avail_widget),
+            (self._cc_label, cc_widget),
+        )):
+            r, c = divmod(i, 2)
+            status_grid.addWidget(label, r, c * 2)
+            status_grid.addWidget(widget, r, c * 2 + 1)
+        status_grid.setColumnStretch(1, 1)
+        status_grid.setColumnStretch(3, 1)
+        layout.addLayout(status_grid)
+
+        layout.addStretch()
 
         scroll.setWidget(inner)
         outer_layout.addWidget(scroll)
         return outer
 
     def _build_dates_tab(self) -> QWidget:
-        """Datoer filter fane."""
+        """Datoer filter fane — én GSAK-lignende operator-række pr. datofelt."""
         widget = QWidget()
         layout = QFormLayout(widget)
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        def _make_date_group(title: str):
-            """Hjælper: lav en from/to dato-gruppe og returner (group, from_en, from_dt, to_en, to_dt)."""
-            group = QGroupBox(title)
-            grp_layout = QFormLayout(group)
-            from_en = QCheckBox(tr("filter_from"))
-            from_dt = QDateEdit()
-            from_dt.setCalendarPopup(True)
-            from_dt.setDate(QDate(2000, 1, 1))
-            from_dt.setEnabled(False)
-            from_en.toggled.connect(from_dt.setEnabled)
-            row1 = QHBoxLayout()
-            row1.addWidget(from_en)
-            row1.addWidget(from_dt)
-            row1.addStretch()
-            grp_layout.addRow(row1)
-            to_en = QCheckBox(tr("filter_to"))
-            to_dt = QDateEdit()
-            to_dt.setCalendarPopup(True)
-            to_dt.setDate(QDate.currentDate())
-            to_dt.setEnabled(False)
-            to_en.toggled.connect(to_dt.setEnabled)
-            row2 = QHBoxLayout()
-            row2.addWidget(to_en)
-            row2.addWidget(to_dt)
-            row2.addStretch()
-            grp_layout.addRow(row2)
-            return group, from_en, from_dt, to_en, to_dt
-
-        # Udlagt dato
-        g, self._hidden_from_enabled, self._hidden_from, self._hidden_to_enabled, self._hidden_to = \
-            _make_date_group(tr("filter_hidden_date_group"))
-        layout.addRow(g)
-
-        # Fundet af mig dato
-        g, self._found_from_enabled, self._found_from, self._found_to_enabled, self._found_to = \
-            _make_date_group(tr("filter_found_date_group"))
-        layout.addRow(g)
-
-        # DNF dato
-        g, self._dnf_date_from_enabled, self._dnf_date_from, self._dnf_date_to_enabled, self._dnf_date_to = \
-            _make_date_group(tr("col_dnf_date"))
-        layout.addRow(g)
-
-        # Seneste log dato
-        g, self._log_from_enabled, self._log_from, self._log_to_enabled, self._log_to = \
-            _make_date_group(tr("filter_log_date_group"))
-        layout.addRow(g)
+        self._date_rows: dict[str, DateFilterRow] = {}
+        for field, key in _DATE_FIELD_LABELS:
+            row = DateFilterRow(field, tr(key))
+            self._date_rows[field] = row
+            layout.addRow(row.label, row)
 
         return widget
 
     def _build_misc_tab(self) -> QWidget:
-        """Øvrigt filter fane — land, user flag, DNF, favorit points."""
+        """Øvrigt filter fane — land, user flag, DNF, favorit points.
+
+        Issue #610: samme komprimering som Generelt-fanen — tekstfelterne i to
+        kolonner, og de rene ja/nej-grupper er blevet til etiket-rækker i
+        stedet for hver sin QGroupBox.
+        """
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -687,116 +1143,370 @@ class FilterDialog(QDialog):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         inner = QWidget()
-        layout = QFormLayout(inner)
+        layout = QVBoxLayout(inner)
         layout.setSpacing(8)
         layout.setContentsMargins(10, 10, 10, 10)
 
-        # Land / Stat / Kommune
-        geo_group = QGroupBox(tr("filter_geo_group"))
-        geo_layout = QFormLayout(geo_group)
-
-        self._country_row = TextFilterRow(tr("filter_country_label"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._country_row.label, self._country_row)
+        # ── Land / Stat / Kommune — to kolonner ──────────────────────────────
+        self._country_row = TextFilterRow(tr("col_country"), tr("filter_contains_placeholder"))
         self._state_row = TextFilterRow(tr("filter_state_label"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._state_row.label, self._state_row)
         self._county_row = TextFilterRow(tr("filter_county_label"), tr("filter_contains_placeholder"))
-        geo_layout.addRow(self._county_row.label, self._county_row)
+        # GSAK UserData1–4 + GC.com's synced personal note (gc_note) + the
+        # local personal note (UserNote.note)
+        self._ud_rows = [
+            TextFilterRow(tr(f"col_user_data_{i}"), tr("filter_contains_placeholder"))
+            for i in range(1, 5)
+        ]
+        self._gc_note_row = TextFilterRow(tr("col_gc_note"), tr("filter_contains_placeholder"))
+        self._user_note_row = TextFilterRow(tr("filter_user_note_label"), tr("filter_contains_placeholder"))
+        geo_grid = QGridLayout()
+        geo_grid.setHorizontalSpacing(12)
+        geo_grid.setVerticalSpacing(4)
+        for i, (row, _cls) in enumerate(self._misc_text_rows()):
+            r, c = divmod(i, 2)
+            geo_grid.addWidget(row.label, r, c * 2)
+            geo_grid.addWidget(row, r, c * 2 + 1)
+        geo_grid.setColumnStretch(1, 1)
+        geo_grid.setColumnStretch(3, 1)
+        layout.addLayout(geo_grid)
         self._country_filter = self._country_row.edit
         self._state_filter = self._state_row.edit
         self._county_filter = self._county_row.edit
 
-        layout.addRow(geo_group)
+        layout.addWidget(self._build_center_block())
 
-        # User Flag
-        flag_group = QGroupBox(tr("filter_user_flag_group"))
-        flag_layout = QHBoxLayout(flag_group)
-        self._flag_yes = QCheckBox(tr("yes"))
-        self._flag_yes.setChecked(True)
-        self._flag_no  = QCheckBox(tr("no"))
-        self._flag_no.setChecked(True)
-        flag_layout.addWidget(self._flag_yes)
-        flag_layout.addWidget(self._flag_no)
-        flag_layout.addStretch()
-        layout.addRow(flag_group)
+        # ── Ja/nej-valg + favoritpoint: etiket-rækker i to kolonner ──────────
+        def _yes_no_row(label_key: str) -> tuple[QCheckBox, QCheckBox, QLabel, QWidget]:
+            yes = QCheckBox(tr("yes"))
+            no = QCheckBox(tr("no"))
+            yes.setChecked(True)
+            no.setChecked(True)
+            label, holder = labeled_row(tr(label_key), yes, no)
+            return yes, no, label, holder
 
+        self._flag_yes, self._flag_no, self._flag_label, flag_widget = \
+            _yes_no_row("filter_user_flag_group")
         # Locked (issue #202)
-        locked_group = QGroupBox(tr("filter_locked_group"))
-        locked_layout = QHBoxLayout(locked_group)
-        self._locked_yes = QCheckBox(tr("yes"))
-        self._locked_yes.setChecked(True)
-        self._locked_no  = QCheckBox(tr("no"))
-        self._locked_no.setChecked(True)
-        locked_layout.addWidget(self._locked_yes)
-        locked_layout.addWidget(self._locked_no)
-        locked_layout.addStretch()
-        layout.addRow(locked_group)
+        self._locked_yes, self._locked_no, self._locked_label, locked_widget = \
+            _yes_no_row("filter_locked_group")
+        self._dnf_yes, self._dnf_no, self._dnf_label, dnf_widget = \
+            _yes_no_row("filter_dnf_group")
+        self._ftf_yes, self._ftf_no, self._ftf_label, ftf_widget = \
+            _yes_no_row("filter_ftf_group")
 
-        # DNF
-        dnf_group = QGroupBox(tr("filter_dnf_group"))
-        dnf_layout = QHBoxLayout(dnf_group)
-        self._dnf_yes = QCheckBox(tr("yes"))
-        self._dnf_yes.setChecked(True)
-        self._dnf_no  = QCheckBox(tr("no"))
-        self._dnf_no.setChecked(True)
-        dnf_layout.addWidget(self._dnf_yes)
-        dnf_layout.addWidget(self._dnf_no)
-        dnf_layout.addStretch()
-        layout.addRow(dnf_group)
-
-        # FTF
-        ftf_group = QGroupBox(tr("filter_ftf_group"))
-        ftf_layout = QHBoxLayout(ftf_group)
-        self._ftf_yes = QCheckBox(tr("yes"))
-        self._ftf_yes.setChecked(True)
-        self._ftf_no  = QCheckBox(tr("no"))
-        self._ftf_no.setChecked(True)
-        ftf_layout.addWidget(self._ftf_yes)
-        ftf_layout.addWidget(self._ftf_no)
-        ftf_layout.addStretch()
-        layout.addRow(ftf_group)
-
-        # Favorit points
-        fav_group = QGroupBox(tr("filter_fav_points_group"))
-        fav_layout = QHBoxLayout(fav_group)
+        # Favorit points — samme betingelser som afstandsfiltrene
         self._fav_enabled = QCheckBox(tr("filter_enable"))
-        self._fav_enabled.toggled.connect(self._on_fav_toggled)
-        fav_layout.addWidget(self._fav_enabled)
-        fav_layout.addWidget(QLabel(tr("filter_from")))
-        self._fav_min = QDoubleSpinBox()
-        self._fav_min.setRange(0, 9999)
-        self._fav_min.setDecimals(0)
-        self._fav_min.setValue(0)
-        self._fav_min.setEnabled(False)
-        fav_layout.addWidget(self._fav_min)
-        fav_layout.addWidget(QLabel(tr("filter_to")))
-        self._fav_max = QDoubleSpinBox()
-        self._fav_max.setRange(0, 9999)
-        self._fav_max.setDecimals(0)
-        self._fav_max.setValue(9999)
-        self._fav_max.setEnabled(False)
-        fav_layout.addWidget(self._fav_max)
-        fav_layout.addStretch()
-        layout.addRow(fav_group)
+        self._fav_enabled.toggled.connect(self._update_fav_inputs)
+        self._fav_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._fav_op.addItem(tr(key), op)
+        self._fav_op.currentIndexChanged.connect(self._update_fav_inputs)
+        self._fav_val1 = QDoubleSpinBox()
+        self._fav_val2 = QDoubleSpinBox()
+        for spin in (self._fav_val1, self._fav_val2):
+            spin.setRange(0, 999_999)
+            spin.setDecimals(0)
+        self._fav_and = QLabel("–")
+        self._fav_label, fav_widget = labeled_row(
+            tr("filter_fav_points_group"),
+            self._fav_enabled, self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
+        )
+        self._reset_fav()
 
-        inner.setLayout(layout)
+        # Højde (m, eller ft når use_miles) — ukendt højde matcher aldrig
+        self._elev_enabled = QCheckBox(tr("filter_enable"))
+        self._elev_enabled.toggled.connect(self._update_elev_inputs)
+        self._elev_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._elev_op.addItem(tr(key), op)
+        self._elev_op.currentIndexChanged.connect(self._update_elev_inputs)
+        self._elev_val1 = QDoubleSpinBox()
+        self._elev_val2 = QDoubleSpinBox()
+        for spin in (self._elev_val1, self._elev_val2):
+            spin.setDecimals(0)
+        self._elev_and = QLabel("–")
+        self._elev_label, elev_widget = labeled_row(
+            tr("col_elevation"),
+            self._elev_enabled, self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+        self._reset_elev()
+
+        status_grid = QGridLayout()
+        status_grid.setHorizontalSpacing(16)
+        status_grid.setVerticalSpacing(4)
+        for i, (label, widget) in enumerate((
+            (self._flag_label, flag_widget),
+            (self._locked_label, locked_widget),
+            (self._dnf_label, dnf_widget),
+            (self._ftf_label, ftf_widget),
+        )):
+            r, c = divmod(i, 2)
+            status_grid.addWidget(label, r, c * 2)
+            status_grid.addWidget(widget, r, c * 2 + 1)
+        # Operator-rækkerne er for brede til to pr. række (især ved "mellem")
+        for label, widget in (
+            (self._fav_label, fav_widget),
+            (self._elev_label, elev_widget),
+        ):
+            r = status_grid.rowCount()
+            status_grid.addWidget(label, r, 0)
+            status_grid.addWidget(widget, r, 1, 1, 3)
+        status_grid.setColumnStretch(1, 1)
+        status_grid.setColumnStretch(3, 1)
+        layout.addLayout(status_grid)
+
+        layout.addStretch()
+
         scroll.setWidget(inner)
         outer_layout.addWidget(scroll)
         return outer
 
+    def _build_center_block(self) -> QGroupBox:
+        """Øvrigt-fanens blok med de positionsbaserede filtre: afstand og
+        retning fra ét fælles center-punkt, plus afstand rettede ↔ oprindelige
+        koordinater. Etiketterne er highlight-målene (#610); kompasrosen til
+        højre viser kun, hvilke retninger retningsbetingelsen dækker.
+        """
+        box = QGroupBox()
+        grid = QGridLayout(box)
+        grid.setContentsMargins(8, 6, 8, 6)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(4)
+
+        # Center-punkt (issue #511) — genbrugelig widget, delt med den
+        # planlagte quick "Where"-boks i toolbaren (#558). Ét valg for både
+        # afstand og retning.
+        self._center_picker = CenterPointPicker(self)
+        self._center_picker.set_current_cache(self._current_cache)
+        self._center_picker.setEnabled(False)
+        # Pickeren har en hint-linje under dropdownen — etiketten lægges i
+        # toppen med dropdownens højde, så den flugter med dropdownen.
+        center_label = hug_label(QLabel(tr("center_point_label")))
+        center_label.setMinimumHeight(self._center_picker.combo_height())
+        grid.addWidget(center_label, 0, 0, Qt.AlignmentFlag.AlignTop)
+        grid.addWidget(self._center_picker, 0, 1, 1, 2)
+
+        # Afstand fra center-punkt — værdierne vises i brugerens enhed
+        # (km / mi), gemmes i km.
+        self._dist_enabled = QCheckBox(tr("filter_enable"))
+        self._dist_enabled.toggled.connect(self._on_dist_toggled)
+        self._dist_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dist_op.addItem(tr(key), op)
+        self._dist_op.currentIndexChanged.connect(self._update_dist_inputs)
+        _unit = " mi" if self._use_miles() else " km"
+        self._dist1 = QDoubleSpinBox()
+        self._dist2 = QDoubleSpinBox()
+        for spin in (self._dist1, self._dist2):
+            spin.setRange(0.0, 20_100.0)  # > halvdelen af jordens omkreds
+            spin.setSuffix(_unit)
+        self._dist_and = QLabel("–")
+        self._dist_label, dist_widget = labeled_row(
+            tr("filter_distance_group"),
+            self._dist_enabled, self._dist_op,
+            self._dist1, self._dist_and, self._dist2,
+        )
+
+        # Retning fra center-punkt (GSAK "Richtung") — enten pejling i grader
+        # med samme betingelser som de øvrige talfiltre ("mellem" går med
+        # uret, så 315°–45° er sektoren gennem nord), eller retninger valgt
+        # på kompasrosen, som så overskriver gradtallene.
+        self._dir_enabled = QCheckBox(tr("filter_enable"))
+        self._dir_enabled.toggled.connect(self._update_dir_inputs)
+        self._dir_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._dir_op.addItem(tr(key), op)
+        self._dir_op.currentIndexChanged.connect(self._on_dir_edited)
+        self._dir_deg1 = QDoubleSpinBox()
+        self._dir_deg2 = QDoubleSpinBox()
+        for spin in (self._dir_deg1, self._dir_deg2):
+            spin.setRange(0.0, 360.0)
+            # One decimal, so the compass-sector edges (22.5°, 67.5°, …) of
+            # a migrated sector filter show exactly.
+            spin.setDecimals(1)
+            spin.setSuffix("°")
+            spin.valueChanged.connect(self._on_dir_edited)
+        self._dir_and = QLabel("–")
+        dir_info = QPushButton("ⓘ")
+        dir_info.setMaximumWidth(32)
+        dir_info.setFlat(True)
+        dir_info.setAutoDefault(False)
+        dir_info.setToolTip(tr("filter_direction_info"))
+        dir_info.clicked.connect(self._show_direction_info)
+        self._dir_label, dir_widget = labeled_row(
+            tr("filter_direction_group"),
+            self._dir_enabled, self._dir_op,
+            self._dir_deg1, self._dir_and, self._dir_deg2, dir_info,
+        )
+
+        # Afstand mellem rettede og oprindelige koordinater (m, eller ft når
+        # use_miles) — caches uden rettede koordinater matcher aldrig
+        self._ccd_enabled = QCheckBox(tr("filter_enable"))
+        self._ccd_enabled.toggled.connect(self._update_ccd_inputs)
+        self._ccd_op = QComboBox()
+        for op, key in _DISTANCE_OP_LABELS:
+            self._ccd_op.addItem(tr(key), op)
+        self._ccd_op.currentIndexChanged.connect(self._update_ccd_inputs)
+        self._ccd_dist1 = QDoubleSpinBox()
+        self._ccd_dist2 = QDoubleSpinBox()
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setDecimals(0)
+        self._ccd_and = QLabel("–")
+        self._ccd_label, ccd_widget = labeled_row(
+            tr("filter_cc_distance"),
+            self._ccd_enabled, self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+            QLabel("ft" if self._use_miles() else "m"),
+        )
+        self._reset_ccd()
+
+        for r, (label, widget) in enumerate((
+            (self._dist_label, dist_widget),
+            (self._dir_label, dir_widget),
+            (self._ccd_label, ccd_widget),
+        ), start=1):
+            grid.addWidget(label, r, 0)
+            grid.addWidget(widget, r, 1)
+
+        # Kompasrose — viser de retninger, som retningsbetingelsen (helt
+        # eller delvist) dækker; et klik vælger retninger og overskriver
+        # gradtallene (_on_dir_clicked).
+        rose = QGridLayout()
+        rose.setContentsMargins(0, 0, 0, 0)
+        rose.setHorizontalSpacing(8)
+        rose.setVerticalSpacing(2)
+        # (row, col) for each direction in a 3x3 compass rose, centre empty
+        dir_cells = {
+            "NW": (0, 0), "N": (0, 1), "NE": (0, 2),
+            "W":  (1, 0),              "E":  (1, 2),
+            "SW": (2, 0), "S": (2, 1), "SE": (2, 2),
+        }
+        dir_labels = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
+        self._dir_checks: dict[str, QCheckBox] = {}
+        for d in DIRECTIONS:
+            cb = QCheckBox(dir_labels.get(d, d))
+            cb.setChecked(True)
+            # clicked, not toggled: only a user's click picks directions —
+            # _update_dir_display() ticks the boxes programmatically.
+            cb.clicked.connect(lambda _checked, d=d: self._on_dir_clicked(d))
+            self._dir_checks[d] = cb
+            rose.addWidget(cb, *dir_cells[d])
+        grid.addLayout(rose, 1, 2, 3, 1, Qt.AlignmentFlag.AlignTop)
+        grid.setColumnStretch(1, 1)
+
+        # Først her — begge nulstillinger slår center-vælgeren til/fra ud
+        # fra både afstand og retning, så alle tre rækker skal findes.
+        self._reset_dist()
+        self._reset_dir()
+        return box
+
+    def _build_line_polygon_tab(self) -> QWidget:
+        """Linje/Polygon fane — GSAK's linje-/polygonfilter: caches langs en
+        rute, inden for et område eller nær en række punkter."""
+        from opensak.gui.settings import get_settings as _gs
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Venstre: punktliste, markerede caches, punkter fra fil
+        left = QVBoxLayout()
+        self._lp_points_label = hug_label(QLabel(tr("filter_lp_points_label")))
+        left.addWidget(self._lp_points_label)
+        self._lp_text = QPlainTextEdit()
+        self._lp_text.setPlaceholderText(tr("filter_lp_points_placeholder"))
+        self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        left.addWidget(self._lp_text, 1)
+
+        flagged_btn = QPushButton(tr("filter_lp_add_flagged_btn"))
+        flagged_btn.setAutoDefault(False)
+        flagged_btn.clicked.connect(self._add_flagged_points)
+        left.addWidget(flagged_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        file_group = QGroupBox(tr("filter_lp_file_group"))
+        file_layout = QVBoxLayout(file_group)
+        file_btn = QPushButton(tr("filter_lp_choose_file_btn"))
+        file_btn.setAutoDefault(False)
+        file_btn.clicked.connect(self._load_points_file)
+        file_layout.addWidget(file_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        file_mode_row = QHBoxLayout()
+        self._lp_replace = QRadioButton(tr("filter_lp_replace"))
+        self._lp_replace.setChecked(True)
+        self._lp_append = QRadioButton(tr("filter_lp_append"))
+        file_mode_row.addWidget(self._lp_replace)
+        file_mode_row.addWidget(self._lp_append)
+        file_mode_row.addStretch()
+        file_layout.addLayout(file_mode_row)
+        left.addWidget(file_group)
+        layout.addLayout(left, 1)
+
+        # Højre: forklaring, filtertype, afstand, udeluk
+        right = QVBoxLayout()
+        desc_label = QLabel(tr("filter_lp_description"))
+        desc_label.setWordWrap(True)
+        right.addWidget(desc_label)
+
+        type_group = QGroupBox(tr("filter_lp_type_group"))
+        type_layout = QHBoxLayout(type_group)
+        self._lp_mode_buttons: dict[str, QRadioButton] = {}
+        for mode, key in _LP_MODE_LABELS:
+            button = QRadioButton(tr(key))
+            type_layout.addWidget(button)
+            self._lp_mode_buttons[mode] = button
+        self._lp_mode_buttons["line"].setChecked(True)
+        right.addWidget(type_group)
+
+        dist_row = QHBoxLayout()
+        dist_row.addWidget(QLabel(tr("filter_lp_distance_label")))
+        self._lp_distance = QDoubleSpinBox()
+        self._lp_distance.setRange(0.0, 99999.0)
+        self._lp_distance.setDecimals(3)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_distance.setSuffix(" mi" if _gs().use_miles else " km")
+        dist_row.addWidget(self._lp_distance)
+        dist_row.addStretch()
+        right.addLayout(dist_row)
+
+        self._lp_exclude = QCheckBox(tr("filter_lp_exclude"))
+        right.addWidget(self._lp_exclude)
+        right.addStretch()
+        layout.addLayout(right, 1)
+        return widget
+
     def _build_attributes_tab(self) -> QWidget:
-        """Attributter filter fane med scrollbar."""
+        """Attributter filter fane med søgefelt og scrollbar."""
         outer = QWidget()
         outer_layout = QVBoxLayout(outer)
         outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Mode
+        # Mode — ALLE valgte attributter skal passe (AND) eller blot ÉN af dem (OR)
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel(tr("filter_caches_with")))
-        self._attr_mode_all = QCheckBox(tr("filter_all_selected"))
+        self._attr_mode_all = QRadioButton(tr("filter_all_selected"))
+        self._attr_mode_any = QRadioButton(tr("filter_any_selected"))
         self._attr_mode_all.setChecked(True)
         mode_row.addWidget(self._attr_mode_all)
+        mode_row.addWidget(self._attr_mode_any)
         mode_row.addStretch()
         outer_layout.addLayout(mode_row)
+
+        # Search row — live-filters the table on translated name, English name or ID
+        search_row = QHBoxLayout()
+        self._attr_search = _AttrSearchEdit()
+        self._attr_search.setPlaceholderText(tr("filter_attr_search_placeholder"))
+        self._attr_search.setClearButtonEnabled(True)
+        self._attr_search.textChanged.connect(self._apply_attr_search)
+        self._attr_search.jump_requested.connect(self._focus_first_visible_attr)
+        search_row.addWidget(self._attr_search, 1)
+        self._attr_only_selected = QCheckBox(tr("filter_attr_only_selected"))
+        self._attr_only_selected.toggled.connect(self._apply_attr_search)
+        search_row.addWidget(self._attr_only_selected)
+        self._attr_status = QLabel()
+        search_row.addWidget(self._attr_status)
+        outer_layout.addLayout(search_row)
 
         # Deduplicate keys (keep only first occurrence per attr_key)
         seen_keys: set[str] = set()
@@ -806,7 +1516,11 @@ class FilterDialog(QDialog):
                 seen_keys.add(attr_key)
                 unique_attrs.append((attr_id, attr_key))
 
+        # English names are searchable too, whatever the UI language
+        from opensak.lang.en import STRINGS as en_strings
+
         table = QTableWidget(len(unique_attrs), 4)
+        self._attr_table = table
         table.setHorizontalHeaderLabels([
             tr("filter_attr_col_name"), tr("yes"), tr("no"), tr("filter_none_short"),
         ])
@@ -857,9 +1571,456 @@ class FilterDialog(QDialog):
                 table.setCellWidget(i, col, cell)
 
             self._attr_boxes[attr_id] = (ja_cb, nej_cb, ingen_cb)
+            haystack = _fold(f"{tr(attr_key)} {en_strings.get(attr_key, '')}")
+            self._attr_rows[attr_id] = (i, name_item, haystack)
+
+            # Mark the row whenever its Yes/No state changes (also on profile load/reset)
+            ja_cb.toggled.connect(lambda _v, a=attr_id: self._on_attr_state_changed(a))
+            nej_cb.toggled.connect(lambda _v, a=attr_id: self._on_attr_state_changed(a))
 
         outer_layout.addWidget(table)
+        self._apply_attr_search()
         return outer
+
+    def _attr_is_set(self, attr_id: int) -> bool:
+        ja_cb, nej_cb, _ingen_cb = self._attr_boxes[attr_id]
+        return ja_cb.isChecked() or nej_cb.isChecked()
+
+    def _on_attr_state_changed(self, attr_id: int) -> None:
+        """Bold + highlight (#610) the name of an attribute that has Yes or No ticked."""
+        _row, name_item, _haystack = self._attr_rows[attr_id]
+        is_set = self._attr_is_set(attr_id)
+        font = name_item.font()
+        font.setBold(is_set)
+        name_item.setFont(font)
+        if is_set:
+            bg, _fg = highlight_colors()
+            name_item.setBackground(QBrush(QColor(bg)))
+        else:
+            name_item.setData(Qt.ItemDataRole.BackgroundRole, None)
+        # In "only selected" mode an un-ticked row stays visible until the view is
+        # refreshed, so a mis-click can be undone; only the counter updates here.
+        self._update_attr_status()
+
+    def _apply_attr_search(self, *_args) -> None:
+        """Hide attribute rows that don't match the search text / selection toggle.
+
+        Every whitespace-separated term must match the translated or English name
+        (case- and accent-insensitive), or equal the numeric attribute ID.
+        """
+        terms = _fold(self._attr_search.text()).split()
+        only_selected = self._attr_only_selected.isChecked()
+        for attr_id, (row, _item, haystack) in self._attr_rows.items():
+            visible = all(t in haystack or t == str(attr_id) for t in terms)
+            if only_selected and not self._attr_is_set(attr_id):
+                visible = False
+            self._attr_table.setRowHidden(row, not visible)
+        self._update_attr_status()
+
+    def _update_attr_status(self) -> None:
+        total = len(self._attr_rows)
+        shown = sum(1 for row, _i, _h in self._attr_rows.values()
+                    if not self._attr_table.isRowHidden(row))
+        selected = sum(1 for a in self._attr_boxes if self._attr_is_set(a))
+        self._attr_status.setText(
+            tr("filter_attr_status", shown=shown, total=total, selected=selected))
+
+    def _focus_first_visible_attr(self) -> None:
+        """Move keyboard focus to the Yes box of the first visible row."""
+        for attr_id, (row, name_item, _haystack) in sorted(
+                self._attr_rows.items(), key=lambda kv: kv[1][0]):
+            if not self._attr_table.isRowHidden(row):
+                self._attr_table.scrollToItem(name_item)
+                self._attr_boxes[attr_id][0].setFocus()
+                return
+
+    def _build_waypoints_tab(self) -> QWidget:
+        """Waypoints fane — caches efter deres waypoints (GSAK's
+        "Child waypoints"). Alle kriterier skal gælde for samme waypoint;
+        Antal tæller de waypoints, der opfylder dem."""
+        widget = QWidget()
+        layout = QFormLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        self._wp_text_rows: dict[str, TextFilterRow] = {}
+        for field, key in _WP_TEXT_LABELS:
+            row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
+            self._wp_text_rows[field] = row
+            layout.addRow(row.label, row)
+            if field == "wp_type":
+                # GSAK's order: Code, Type, Date, Name, Comment
+                self._wp_date_row = DateFilterRow(None, tr("filter_wp_date"))
+                layout.addRow(self._wp_date_row.label, self._wp_date_row)
+
+        by_user = QWidget()
+        by_user_layout = QHBoxLayout(by_user)
+        by_user_layout.setContentsMargins(0, 0, 0, 0)
+        self._wp_by_user_yes = QCheckBox(tr("yes"))
+        self._wp_by_user_yes.setChecked(True)
+        self._wp_by_user_no = QCheckBox(tr("no"))
+        self._wp_by_user_no.setChecked(True)
+        by_user_layout.addWidget(self._wp_by_user_yes)
+        by_user_layout.addWidget(self._wp_by_user_no)
+        by_user_layout.addStretch()
+        layout.addRow(tr("filter_wp_by_user"), by_user)
+
+        count = QWidget()
+        count_layout = QHBoxLayout(count)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self._wp_count_op = QComboBox()
+        for op, key in _WP_COUNT_LABELS:
+            self._wp_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._wp_count_op)
+        self._wp_count1 = QSpinBox()
+        self._wp_count1.setRange(0, 9999)
+        self._wp_count2 = QSpinBox()
+        self._wp_count2.setRange(0, 9999)
+        count_layout.addWidget(self._wp_count1)
+        count_layout.addWidget(self._wp_count2)
+        count_layout.addStretch()
+        layout.addRow(tr("filter_wp_count"), count)
+        self._wp_count_op.currentIndexChanged.connect(self._update_wp_count_inputs)
+        self._update_wp_count_inputs()
+
+        return widget
+
+    def _update_wp_count_inputs(self) -> None:
+        op = self._wp_count_op.currentData()
+        self._wp_count1.setVisible(op != "any")
+        self._wp_count2.setVisible(op == "between")
+
+    def _build_waypoint_filter(self) -> Optional[WaypointFilter]:
+        """WaypointFilter for the waypoints tab, or None when nothing is set."""
+        texts = {}
+        for field, row in self._wp_text_rows.items():
+            op = row.op()
+            text = row.edit.text().strip()
+            if op in TEXT_OPS_VALUELESS or text:
+                texts[field] = (text, op)
+        date_op = self._wp_date_row.op()
+        dates = self._wp_date_row.range_args()
+        yes, no = self._wp_by_user_yes.isChecked(), self._wp_by_user_no.isChecked()
+        f = WaypointFilter(
+            texts=texts,
+            date_op=None if date_op == "any" else date_op,
+            date1=dates["date1"],
+            date2=dates["date2"],
+            date_amount=dates["amount"],
+            date_unit=dates["unit"],
+            by_user=yes if yes != no else None,
+            count_op=self._wp_count_op.currentData(),
+            count1=self._wp_count1.value(),
+            count2=self._wp_count2.value(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_waypoint_filter(self, f: WaypointFilter) -> None:
+        for field, match in f.texts.items():
+            self._wp_text_rows[field].load(match)
+        if f.date_op is not None:
+            self._wp_date_row.load_range(f.date_op, f.date1, f.date2,
+                                         f.date_amount, f.date_unit)
+        if f.by_user is not None:
+            self._wp_by_user_yes.setChecked(f.by_user)
+            self._wp_by_user_no.setChecked(not f.by_user)
+        index = self._wp_count_op.findData(f.count_op)
+        self._wp_count_op.setCurrentIndex(max(index, 0))
+        self._wp_count1.setValue(f.count1)
+        self._wp_count2.setValue(f.count2)
+
+    def _build_trackables_tab(self) -> QWidget:
+        """Trackables fane — caches efter deres trackables. Tekstkriterierne
+        skal gælde for samme trackable; Antal tæller dem, der opfylder dem."""
+        widget = QWidget()
+        layout = QFormLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Har trackables ja/nej (flyttet hertil fra Generelt-fanen)
+        self._tb_yes = QCheckBox(tr("filter_has_trackables"))
+        self._tb_no  = QCheckBox(tr("filter_no_trackables"))
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
+        self._tb_label, tb_widget = labeled_row(
+            tr("filter_trackables_group"), self._tb_yes, self._tb_no)
+        layout.addRow(self._tb_label, tb_widget)
+
+        self._tb_text_rows: dict[str, TextFilterRow] = {}
+        for field, key in _TB_TEXT_LABELS:
+            row = TextFilterRow(tr(key), tr("filter_contains_placeholder"))
+            self._tb_text_rows[field] = row
+            layout.addRow(row.label, row)
+
+        count = QWidget()
+        count_layout = QHBoxLayout(count)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        self._tb_count_op = QComboBox()
+        for op, key in _WP_COUNT_LABELS:
+            self._tb_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._tb_count_op)
+        self._tb_count1 = QSpinBox()
+        self._tb_count1.setRange(0, 9999)
+        self._tb_count2 = QSpinBox()
+        self._tb_count2.setRange(0, 9999)
+        count_layout.addWidget(self._tb_count1)
+        count_layout.addWidget(self._tb_count2)
+        count_layout.addStretch()
+        layout.addRow(tr("filter_wp_count"), count)
+        self._tb_count_op.currentIndexChanged.connect(self._update_tb_count_inputs)
+        self._update_tb_count_inputs()
+
+        return widget
+
+    def _update_tb_count_inputs(self) -> None:
+        op = self._tb_count_op.currentData()
+        self._tb_count1.setVisible(op != "any")
+        self._tb_count2.setVisible(op == "between")
+
+    def _build_trackable_filter(self) -> Optional[TrackableFilter]:
+        """TrackableFilter for the trackables tab, or None when nothing is set."""
+        texts = {}
+        for field, row in self._tb_text_rows.items():
+            op = row.op()
+            text = row.edit.text().strip()
+            if op in TEXT_OPS_VALUELESS or text:
+                texts[field] = (text, op)
+        f = TrackableFilter(
+            texts=texts,
+            count_op=self._tb_count_op.currentData(),
+            count1=self._tb_count1.value(),
+            count2=self._tb_count2.value(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_trackable_filter(self, f: TrackableFilter) -> None:
+        for field, match in f.texts.items():
+            self._tb_text_rows[field].load(match)
+        index = self._tb_count_op.findData(f.count_op)
+        self._tb_count_op.setCurrentIndex(max(index, 0))
+        self._tb_count1.setValue(f.count1)
+        self._tb_count2.setValue(f.count2)
+
+    def _build_logs_tab(self) -> QWidget:
+        """Logs fane — caches efter deres logs (GSAK's "Logs"). Øverst vælges
+        hvilke logs der søges i, nederst hvad de skal opfylde."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        scope_form = QFormLayout()
+        scope_form.setSpacing(8)
+
+        self._log_date_row = DateFilterRow(None, tr("filter_log_date"))
+        scope_form.addRow(self._log_date_row.label, self._log_date_row)
+
+        scope = QWidget()
+        scope_layout = QHBoxLayout(scope)
+        scope_layout.setContentsMargins(0, 0, 0, 0)
+        self._log_scope = QComboBox()
+        for n in LOG_SCOPE_CHOICES:
+            if n == 0:
+                label = tr("filter_log_scope_all")
+            elif n == 1:
+                label = tr("filter_log_scope_last_one")
+            else:
+                label = tr("filter_log_scope_last", n=n)
+            self._log_scope.addItem(label, n)
+        scope_layout.addWidget(self._log_scope)
+        scope_layout.addSpacing(12)
+        self._log_categories: dict[str, QCheckBox] = {}
+        for category, key in _LOG_CATEGORY_LABELS:
+            cb = QCheckBox(tr(key))
+            cb.setChecked(True)
+            self._log_categories[category] = cb
+            scope_layout.addWidget(cb)
+        scope_layout.addStretch()
+        scope_form.addRow(tr("filter_log_scope"), scope)
+
+        exclude = QWidget()
+        exclude_layout = QHBoxLayout(exclude)
+        exclude_layout.setContentsMargins(0, 0, 0, 0)
+        self._log_exclude = QComboBox()
+        self._log_exclude.addItem(tr("filter_log_include_yes"), False)
+        self._log_exclude.addItem(tr("filter_lp_exclude"), True)
+        exclude_layout.addWidget(self._log_exclude)
+        exclude_layout.addWidget(QLabel(tr("filter_log_include_hint")), 1)
+        scope_form.addRow(tr("filter_log_include"), exclude)
+        layout.addLayout(scope_form)
+
+        # ── Logtyper ──────────────────────────────────────────────────────────
+        type_group = QGroupBox(tr("filter_log_types"))
+        type_outer = QVBoxLayout(type_group)
+        self._log_types_all = QCheckBox(tr("filter_log_types_all"))
+        self._log_types_all.setChecked(True)
+        type_outer.addWidget(self._log_types_all)
+
+        count_row = QWidget()
+        count_layout = QHBoxLayout(count_row)
+        count_layout.setContentsMargins(0, 0, 0, 0)
+        count_layout.addWidget(QLabel(tr("filter_log_count")))
+        self._log_count_op = QComboBox()
+        for op, key in _LOG_COUNT_LABELS:
+            self._log_count_op.addItem(tr(key), op)
+        count_layout.addWidget(self._log_count_op)
+        self._log_count1 = QSpinBox()
+        self._log_count1.setRange(0, 9999)
+        self._log_count2 = QSpinBox()
+        self._log_count2.setRange(0, 9999)
+        count_layout.addWidget(self._log_count1)
+        count_layout.addWidget(self._log_count2)
+        count_layout.addStretch()
+        type_outer.addWidget(count_row)
+
+        self._log_types_box = QWidget()
+        types_layout = QHBoxLayout(self._log_types_box)
+        types_layout.setContentsMargins(0, 0, 0, 0)
+        type_grid = QGridLayout()
+        self._log_type_checks: dict[str, QCheckBox] = {}
+        # GSAK's own list plus its "Other" catch-all, in two columns.
+        entries = list(LOG_TYPES) + [LOG_TYPE_OTHER]
+        rows = (len(entries) + 1) // 2
+        for i, log_type in enumerate(entries):
+            label = tr("filter_log_type_other") if log_type == LOG_TYPE_OTHER else log_type
+            cb = QCheckBox(label)
+            self._log_type_checks[log_type] = cb
+            type_grid.addWidget(cb, i % rows, i // rows)
+        types_layout.addLayout(type_grid, 1)
+
+        type_btn_col = QVBoxLayout()
+        type_none = QPushButton(tr("filter_type_disable_all"))
+        type_none.setAutoDefault(False)
+        type_none.clicked.connect(lambda: self._set_all_log_types(False))
+        type_all = QPushButton(tr("filter_type_enable_all"))
+        type_all.setAutoDefault(False)
+        type_all.clicked.connect(lambda: self._set_all_log_types(True))
+        type_btn_col.addWidget(type_none)
+        type_btn_col.addWidget(type_all)
+        type_btn_col.addStretch()
+        types_layout.addLayout(type_btn_col)
+        type_outer.addWidget(self._log_types_box)
+        layout.addWidget(type_group)
+
+        # ── Logget af ──────────────────────────────────────────────────────────
+        finder_form = QFormLayout()
+        finder_form.setSpacing(8)
+        self._log_finder_enabled = QCheckBox(tr("filter_log_finder_enable"))
+        finder_form.addRow(tr("filter_log_finder"), self._log_finder_enabled)
+        self._log_finder_row = TextFilterRow(tr("filter_log_finder"),
+                                             tr("filter_contains_placeholder"))
+        finder_form.addRow("", self._log_finder_row)
+        self._log_finder_by_id = QCheckBox(tr("filter_log_finder_by_id"))
+        finder_form.addRow("", self._log_finder_by_id)
+        layout.addLayout(finder_form)
+        layout.addStretch()
+
+        self._log_types_all.toggled.connect(self._update_log_type_inputs)
+        self._log_count_op.currentIndexChanged.connect(self._update_log_count_inputs)
+        self._log_finder_enabled.toggled.connect(self._update_log_finder_inputs)
+        self._update_log_type_inputs()
+        self._update_log_count_inputs()
+        self._update_log_finder_inputs()
+        return widget
+
+    def _set_all_log_types(self, checked: bool) -> None:
+        for cb in self._log_type_checks.values():
+            cb.setChecked(checked)
+
+    def _update_log_type_inputs(self) -> None:
+        # "All log types" ticked = no type criterion, so the list is inert.
+        self._log_types_box.setEnabled(not self._log_types_all.isChecked())
+
+    def _update_log_count_inputs(self) -> None:
+        op = self._log_count_op.currentData()
+        self._log_count1.setVisible(op != "any")
+        self._log_count2.setVisible(op == "between")
+
+    def _update_log_finder_inputs(self) -> None:
+        enabled = self._log_finder_enabled.isChecked()
+        self._log_finder_row.setEnabled(enabled)
+        self._log_finder_by_id.setEnabled(enabled)
+        name = get_settings().gc_username if enabled else ""
+        if name and not self._log_finder_row.edit.text().strip():
+            # "Logged by" nearly always means "by me", and an empty field
+            # would quietly match a log by anyone — so offer the user's own
+            # name. Exactly, not "contains": a caching name is an identity,
+            # so a substring match would also pull in every longer name that
+            # embeds it, and it costs a LIKE '%…%' scan to do so.
+            # _load_log_filter() overwrites both right after, and the user is
+            # free to widen the operator again.
+            self._log_finder_row.edit.setText(name)
+            self._log_finder_row.set_op("equals")
+
+    def _selected_log_types(self) -> list[str]:
+        """The ticked log types, or [] for "every type" — which is both what
+        the "All" box means and what an empty selection falls back to."""
+        if self._log_types_all.isChecked():
+            return []
+        return [t for t, cb in self._log_type_checks.items() if cb.isChecked()]
+
+    def _build_log_filter(self) -> Optional[LogFilter]:
+        """LogFilter for the logs tab, or None when nothing is set."""
+        date_op = self._log_date_row.op()
+        dates = self._log_date_row.range_args()
+        finder_op = self._log_finder_row.op()
+        finder_text = self._log_finder_row.edit.text().strip()
+        if not self._log_finder_enabled.isChecked():
+            finder_op, finder_text = "contains", ""
+        f = LogFilter(
+            date_op=None if date_op == "any" else date_op,
+            date1=dates["date1"],
+            date2=dates["date2"],
+            date_amount=dates["amount"],
+            date_unit=dates["unit"],
+            categories=[c for c, cb in self._log_categories.items() if cb.isChecked()],
+            last_n=self._log_scope.currentData(),
+            types=self._selected_log_types(),
+            finder_text=finder_text,
+            finder_op=finder_op,
+            finder_by_id=self._log_finder_by_id.isChecked(),
+            count_op=self._log_count_op.currentData(),
+            count1=self._log_count1.value(),
+            count2=self._log_count2.value(),
+            exclude=self._log_exclude.currentData(),
+        )
+        return None if f.is_noop() else f
+
+    def _load_log_filter(self, f: LogFilter) -> None:
+        if f.date_op is not None:
+            self._log_date_row.load_range(f.date_op, f.date1, f.date2,
+                                          f.date_amount, f.date_unit)
+        for category, cb in self._log_categories.items():
+            cb.setChecked(category in f.categories)
+        index = self._log_scope.findData(f.last_n)
+        self._log_scope.setCurrentIndex(max(index, 0))
+        self._log_types_all.setChecked(not f.types)
+        for log_type, cb in self._log_type_checks.items():
+            cb.setChecked(log_type in f.types)
+        if f.finder is not None:
+            self._log_finder_enabled.setChecked(True)
+            self._log_finder_row.load(f.finder)
+        self._log_finder_by_id.setChecked(f.finder_by_id)
+        index = self._log_count_op.findData(f.count_op)
+        self._log_count_op.setCurrentIndex(max(index, 0))
+        self._log_count1.setValue(f.count1)
+        self._log_count2.setValue(f.count2)
+        self._log_exclude.setCurrentIndex(1 if f.exclude else 0)
+
+    def _reset_logs(self) -> None:
+        self._log_date_row.reset()
+        self._log_scope.setCurrentIndex(0)
+        for cb in self._log_categories.values():
+            cb.setChecked(True)
+        self._log_exclude.setCurrentIndex(0)
+        self._log_types_all.setChecked(True)
+        self._set_all_log_types(False)
+        self._log_count_op.setCurrentIndex(0)
+        self._log_count1.setValue(0)
+        self._log_count2.setValue(0)
+        self._log_finder_enabled.setChecked(False)
+        self._log_finder_row.reset()
+        self._log_finder_by_id.setChecked(False)
 
     def _build_text_search_tab(self) -> QWidget:
         """Tekstsøgning fane — søg i fritekst felter."""
@@ -872,9 +2033,10 @@ class FilterDialog(QDialog):
         group_layout = QFormLayout(group)
         group_layout.setSpacing(8)
 
-        self._text_search_input = QLineEdit()
-        self._text_search_input.setPlaceholderText(tr("filter_text_search_placeholder"))
-        group_layout.addRow(tr("filter_text_search_label"), self._text_search_input)
+        # Same operators as the other text filters, regex included.
+        self._text_search_row = TextFilterRow(tr("filter_text_search_label"),
+                                              tr("filter_text_search_placeholder"))
+        group_layout.addRow(self._text_search_row.label, self._text_search_row)
 
         self._text_search_description = QCheckBox(tr("detail_tab_desc"))
         self._text_search_description.setChecked(True)
@@ -949,122 +2111,158 @@ class FilterDialog(QDialog):
 
         return widget
 
+    # ── Highlight af ændrede filterelementer (issue #610) ─────────────────────
+    #
+    # GSAK markerer hvert filterelement, der afviger fra standarden, med gul
+    # baggrund, så man kan se på et øjeblik hvad et gemt filter egentlig gør.
+    # Her gøres det samme: etiketten (eller gruppens titel) males gul, og
+    # fanebladet males gult hvis noget på det er sat.
+
+    def _highlight_specs(self) -> list[tuple[QWidget, Optional[QWidget], Callable[[], bool]]]:
+        """(fane, element der males gult eller None, "er sat?"-funktion)."""
+        general = self._general_tab
+        misc = self._misc_tab
+        specs: list[tuple[QWidget, Optional[QWidget], Callable[[], bool]]] = []
+
+        for row, _cls in self._general_text_rows():
+            specs.append((general, row.label, row.is_set))
+        specs += [
+            (general, self._type_group,
+             lambda: not all(cb.isChecked() for cb in self._type_checks.values())),
+            (general, self._cont_group,
+             lambda: not all(cb.isChecked() for cb in self._cont_checks.values())),
+            (general, self._diff_label,
+             lambda: self._diff_min.value() > 1.0 or self._diff_max.value() < 5.0),
+            (general, self._terr_label,
+             lambda: self._terr_min.value() > 1.0 or self._terr_max.value() < 5.0),
+            (general, self._found_label,
+             lambda: not (self._found_cb.isChecked() and self._notfound_cb.isChecked())),
+            (general, self._avail_label,
+             lambda: not (self._avail_cb.isChecked() and self._unavail_cb.isChecked()
+                          and self._archived_cb.isChecked())),
+            (general, self._prem_label,
+             lambda: not (self._prem_yes.isChecked() and self._prem_no.isChecked())),
+            (self._trackables_tab, self._tb_label,
+             lambda: not (self._tb_yes.isChecked() and self._tb_no.isChecked())),
+            (general, self._cc_label,
+             lambda: not (self._cc_yes.isChecked() and self._cc_no.isChecked())),
+        ]
+
+        def date_is_set(row: DateFilterRow) -> Callable[[], bool]:
+            # Bound here rather than with a default argument, so each
+            # closure keeps its own row.
+            return lambda: row.op() != "any"
+
+        for date_row in self._date_rows.values():
+            specs.append((self._dates_tab, date_row.label, date_is_set(date_row)))
+
+        for row, _cls in self._misc_text_rows():
+            specs.append((misc, row.label, row.is_set))
+        for wp_row in self._wp_text_rows.values():
+            specs.append((self._waypoints_tab, wp_row.label, wp_row.is_set))
+        for tb_row in self._tb_text_rows.values():
+            specs.append((self._trackables_tab, tb_row.label, tb_row.is_set))
+        specs += [
+            (misc, self._dist_label, self._dist_enabled.isChecked),
+            (misc, self._dir_label, self._dir_enabled.isChecked),
+            (misc, self._ccd_label, self._ccd_enabled.isChecked),
+            (misc, self._flag_label,
+             lambda: not (self._flag_yes.isChecked() and self._flag_no.isChecked())),
+            (misc, self._locked_label,
+             lambda: not (self._locked_yes.isChecked() and self._locked_no.isChecked())),
+            (misc, self._dnf_label,
+             lambda: not (self._dnf_yes.isChecked() and self._dnf_no.isChecked())),
+            (misc, self._ftf_label,
+             lambda: not (self._ftf_yes.isChecked() and self._ftf_no.isChecked())),
+            (misc, self._fav_label, self._fav_enabled.isChecked),
+            (misc, self._elev_label, self._elev_enabled.isChecked),
+            # Logs/Waypoints: the date row labels light up on their own; the
+            # tab follows the whole filter, so scope, types, count etc. count too.
+            (self._logs_tab, self._log_date_row.label,
+             date_is_set(self._log_date_row)),
+            (self._logs_tab, None, lambda: self._build_log_filter() is not None),
+            (self._line_polygon_tab, self._lp_points_label,
+             lambda: bool(self._lp_text.toPlainText().strip())),
+            (self._waypoints_tab, self._wp_date_row.label,
+             date_is_set(self._wp_date_row)),
+            (self._waypoints_tab, None,
+             lambda: self._build_waypoint_filter() is not None),
+            (self._trackables_tab, None,
+             lambda: self._build_trackable_filter() is not None),
+            # The attribute rows are cells, not widgets — painted by
+            # _on_attr_state_changed; this entry only drives the tab itself.
+            (self._attributes_tab, None, self._attributes_changed),
+            (self._text_search_tab, self._text_search_row.label,
+             self._text_search_row.is_set),
+            # Nothing on the Where tab is a label worth painting — the SQL box
+            # already shows plainly whether it holds anything.
+            (self._where_tab, None,
+             lambda: bool(self._where_sql_general.toPlainText().strip())),
+        ]
+        return specs
+
+    def _attributes_changed(self) -> bool:
+        """True when at least one attribute is set to Yes or No."""
+        return any(self._attr_is_set(attr_id) for attr_id in self._attr_boxes)
+
+    def _connect_highlight_signals(self) -> None:
+        """Re-evaluate the highlighting whenever any input in the dialog changes.
+
+        Connected generically rather than control by control, so a filter
+        element added later can't silently miss its highlight.
+        """
+        refresh = self._refresh_highlights
+        for child in self.findChildren(QWidget):
+            if isinstance(child, (QCheckBox, QRadioButton)):
+                child.toggled.connect(refresh)
+            elif isinstance(child, QComboBox):
+                child.currentIndexChanged.connect(refresh)
+            elif isinstance(child, QLineEdit):
+                child.textChanged.connect(refresh)
+            elif isinstance(child, (QSpinBox, QDoubleSpinBox)):
+                child.valueChanged.connect(refresh)
+            elif isinstance(child, QDateEdit):
+                child.dateChanged.connect(refresh)
+            elif isinstance(child, QPlainTextEdit):
+                child.textChanged.connect(refresh)
+
+    def _refresh_highlights(self) -> None:
+        """Repaint every changed filter element, and every tab holding one."""
+        changed_tabs: set[QWidget] = set()
+        for i, (tab, target, is_set) in enumerate(self._highlight_specs()):
+            on = bool(is_set())
+            if on:
+                changed_tabs.add(tab)
+            if target is None or self._highlight_state.get(i) == on:
+                continue
+            self._highlight_state[i] = on
+            set_highlighted(target, on)
+
+        tab_bar = self._tabs.tabBar()
+        if isinstance(tab_bar, HighlightTabBar):
+            for i in range(self._tabs.count()):
+                tab_bar.set_tab_highlighted(i, self._tabs.widget(i) in changed_tabs)
+
+        # The invert checkbox sits outside the tabs, so it isn't a spec.
+        set_highlighted(self._invert_cb, self._invert_cb.isChecked())
+
     def _show_where_info(self) -> None:
         """Show a dialog with the available SQL column reference."""
-        from PySide6.QtWidgets import QScrollArea as _QScrollArea
-        from PySide6.QtCore import QLocale
-        from opensak.gui.settings import get_settings
-        from opensak.utils.types import DateFormat, norm_locale_date_fmt
-
-        settings = get_settings()
-        dist_unit = "mi" if settings.use_miles else "km"
-
-        fmt = settings.date_format
-        if fmt == DateFormat.DMY:
-            date_col_eg = "15.06.2020"
-            date_where_eg = "01.01.2023"
-        elif fmt == DateFormat.MDY:
-            date_col_eg = "06/15/2020"
-            date_where_eg = "01/01/2023"
-        elif fmt == DateFormat.YMD:
-            date_col_eg = "2020-06-15"
-            date_where_eg = "2023-01-01"
-        else:  # LOCALE
-            _loc = QLocale.system()
-            _fmt = norm_locale_date_fmt(_loc.dateFormat(QLocale.FormatType.ShortFormat))
-            date_col_eg = _loc.toString(QDate(2020, 6, 15), _fmt)
-            date_where_eg = _loc.toString(QDate(2023, 1, 1), _fmt)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(tr("filter_where_info_title"))
-        dlg.resize(560, 480)
-
-        outer = QVBoxLayout(dlg)
-
-        scroll = _QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        content = QLabel()
-        content.setTextFormat(Qt.TextFormat.RichText)
-        content.setWordWrap(True)
-        content.setContentsMargins(8, 8, 8, 8)
-        content.setText(
-            f"<b>{tr('filter_where_help_heading')}</b><br><br>"
-            f"{tr('filter_where_help_intro')}<br><br>"
-            "<table cellspacing='4'>"
-            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
-            f"<th align='left'>{tr('col_type')}</th>"
-            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
-            "<tr><td><code>gc_code</code></td><td>text</td><td>e.g. <code>'GC12345'</code></td></tr>"
-            f"<tr><td><code>name</code></td><td>text</td><td>{tr('filter_where_note_name')}</td></tr>"
-            f"<tr><td><code>long_description</code></td><td>text</td><td>{tr('filter_where_note_long_desc')}</td></tr>"
-            "<tr><td><code>cache_type</code></td><td>text</td>"
-            "<td><code>'Traditional Cache'</code>, <code>'Multi-cache'</code>, "
-            "<code>'Mystery Cache'</code>, …</td></tr>"
-            "<tr><td><code>container</code></td><td>text</td>"
-            "<td><code>'Nano'</code>, <code>'Micro'</code>, <code>'Small'</code>, "
-            "<code>'Regular'</code>, <code>'Large'</code></td></tr>"
-            "<tr><td><code>difficulty</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
-            "<tr><td><code>terrain</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
-            f"<tr><td><code>placed_by</code></td><td>text</td><td>{tr('filter_where_note_placed_by')}</td></tr>"
-            "<tr><td><code>country</code></td><td>text</td><td>e.g. <code>'Denmark'</code></td></tr>"
-            f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
-            f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
-            "<tr><td><code>hidden_date</code></td><td>datetime</td>"
-            f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
-            "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
-            "<tr><td><code>premium_only</code></td><td>boolean</td><td>1 or 0</td></tr>"
-            f"<tr><td><code>favorite_points</code></td><td>integer</td><td>{tr('filter_where_note_fav')}</td></tr>"
-            f"<tr><td><code>log_count</code></td><td>integer</td><td>{tr('filter_where_note_logcount')}</td></tr>"
-            f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance', unit=dist_unit)}</td></tr>"
-            f"<tr><td><code>user_data_1</code> – <code>user_data_4</code></td>"
-            f"<td>text</td><td>{tr('filter_where_note_userdata')}</td></tr>"
-            "</table><br>"
-            f"<b>{tr('filter_where_examples_heading')}</b><br>"
-            "<code>difficulty &gt;= 4 AND terrain &gt;= 4</code><br>"
-            "<code>cache_type = 'Traditional Cache' AND country = 'Denmark'</code><br>"
-            "<code>favorite_points &gt; 100</code><br>"
-            "<code>found = 0 AND available = 1</code><br>"
-            "<code>name LIKE '%night%'</code><br>"
-            "<code>long_description LIKE '%waterfall%'</code><br>"
-            f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
-            f"<b>{tr('filter_where_subquery_heading')}</b><br>"
-            "<table cellspacing='4'>"
-            f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
-            f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
-            f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
-            f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
-            "</table><br>"
-            "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
-            "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
-        )
-
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
-
-        close_btn = QPushButton(tr("close"))
-        close_btn.clicked.connect(dlg.accept)
-        outer.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
-
-        dlg.exec()
+        show_where_info(self)
 
     def _validate_where_sql(self, sql: str) -> Optional[str]:
         """Return an error message if the SQL is invalid, or None if valid."""
         try:
             from opensak.db.database import get_session
-            from sqlalchemy import text as _sa_text
+            from opensak.filters.engine import validate_where_sql
             with get_session() as session:
-                session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
-            return None
+                return validate_where_sql(session, sql)
         except Exception as exc:
             return str(exc)
 
     def _validate_text_filters(self) -> bool:
         """Warn about, and focus, the first text filter with an invalid regex."""
-        for row, cls in self._general_text_rows() + self._geo_text_rows():
+        for row, cls in self._general_text_rows() + self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is None or text_filter.regex_error is None:
                 continue
@@ -1075,22 +2273,401 @@ class FilterDialog(QDialog):
             row.edit.setFocus()
             QMessageBox.warning(
                 self, tr("warning"),
-                tr("filter_regex_invalid", field=row.label.rstrip(":"),
+                tr("filter_regex_invalid", field=row.label.text().rstrip(":"),
                    error=text_filter.regex_error),
+            )
+            return False
+        for tab, rows in ((self._waypoints_tab, self._wp_text_rows),
+                          (self._trackables_tab, self._tb_text_rows)):
+            for row in rows.values():
+                text_filter = row.build(TextMatchFilter)
+                if text_filter is None or text_filter.regex_error is None:
+                    continue
+                self._tabs.setCurrentWidget(tab)
+                row.edit.setFocus()
+                QMessageBox.warning(
+                    self, tr("warning"),
+                    tr("filter_regex_invalid", field=row.label,
+                       error=text_filter.regex_error),
+                )
+                return False
+        text_search = self._build_text_search_filter()
+        if text_search is not None and text_search.regex_error is not None:
+            self._tabs.setCurrentWidget(self._text_search_tab)
+            self._text_search_row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid",
+                   field=self._text_search_row.label.text().rstrip(":"),
+                   error=text_search.regex_error),
+            )
+            return False
+        log_filter = self._build_log_filter()
+        if log_filter is not None and log_filter.regex_error is not None:
+            self._tabs.setCurrentWidget(self._logs_tab)
+            self._log_finder_row.edit.setFocus()
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("filter_regex_invalid", field=tr("filter_log_finder"),
+                   error=log_filter.regex_error),
             )
             return False
         return True
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
-    def _on_dist_toggled(self, checked: bool) -> None:
-        self._dist_max.setEnabled(checked)
-        self._dist_min.setEnabled(checked)
-        self._center_picker.setEnabled(checked)
+    # ── Linje/Polygon ────────────────────────────────────────────────────────
 
-    def _on_fav_toggled(self, checked: bool) -> None:
-        self._fav_min.setEnabled(checked)
-        self._fav_max.setEnabled(checked)
+    def _lp_mode(self) -> str:
+        for mode, button in self._lp_mode_buttons.items():
+            if button.isChecked():
+                return mode
+        return "line"
+
+    def _lp_distance_km(self) -> float:
+        from opensak.gui.settings import get_settings as _gs
+        value = self._lp_distance.value()
+        return value * 1.60934 if _gs().use_miles else value
+
+    @staticmethod
+    def _resolve_point_code(code: str) -> Optional[tuple[float, float]]:
+        """Coordinates for a "W,<code>" line, from the open database."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                return lookup_code_coords(session, code)
+        except Exception:
+            return None
+
+    def _lp_points(self) -> tuple[list[tuple[float, float]], list[str]]:
+        return parse_points_text(self._lp_text.toPlainText(), self._resolve_point_code)
+
+    def _build_line_polygon_filter(self) -> Optional[LinePolygonFilter]:
+        """Filter for the Line/Polygon tab, or None when the tab is unused or
+        incomplete — _validate_line_polygon() tells the user why."""
+        points, bad = self._lp_points()
+        mode = self._lp_mode()
+        distance_km = self._lp_distance_km()
+        if bad or len(points) < LP_MIN_POINTS[mode]:
+            return None
+        if mode != "polygon" and distance_km <= 0:
+            return None
+        return LinePolygonFilter(
+            points, mode, distance_km,
+            exclude=self._lp_exclude.isChecked(),
+            text=self._lp_text.toPlainText().strip(),
+        )
+
+    def _validate_line_polygon(self) -> bool:
+        """Warn about, and show, a Line/Polygon tab that is filled in but
+        can't be used: unreadable lines, too few points or no distance."""
+        points, bad = self._lp_points()
+        if not points and not bad:
+            return True  # fanen er ikke i brug
+        mode = self._lp_mode()
+        if bad:
+            message = tr("filter_lp_invalid_lines", lines="\n".join(bad[:10]))
+        elif len(points) < LP_MIN_POINTS[mode]:
+            message = tr("filter_lp_too_few_points", count=LP_MIN_POINTS[mode])
+        elif mode != "polygon" and self._lp_distance_km() <= 0:
+            message = tr("filter_lp_distance_required")
+        else:
+            return True
+        self._tabs.setCurrentWidget(self._line_polygon_tab)
+        QMessageBox.warning(self, tr("warning"), message)
+        return False
+
+    def _add_lp_lines(self, lines: list[str], replace: bool = False) -> None:
+        current = "" if replace else self._lp_text.toPlainText().rstrip()
+        added = "\n".join(lines)
+        self._lp_text.setPlainText(f"{current}\n{added}" if current else added)
+
+    def _add_flagged_points(self) -> None:
+        """Tilføj en "W,<kode>"-linje for hver cache med user flag."""
+        try:
+            from opensak.db.database import get_session
+            with get_session() as session:
+                codes = user_flagged_codes(session)
+        except Exception:
+            codes = []
+        if not codes:
+            QMessageBox.information(self, tr("filter_tab_line_polygon"), tr("filter_lp_no_flagged"))
+            return
+        self._add_lp_lines([f"W,{code}" for code in codes])
+
+    def _load_points_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("filter_lp_file_group"), "", tr("filter_lp_file_filter"),
+        )
+        if not path:
+            return
+        try:
+            points = read_points_file(Path(path), self._resolve_point_code)
+        except Exception as exc:
+            QMessageBox.warning(self, tr("error"), tr("filter_lp_file_error", error=exc))
+            return
+        if not points:
+            QMessageBox.warning(self, tr("warning"), tr("filter_lp_file_no_points"))
+            return
+        self._add_lp_lines(
+            [_format_lp_point(p) for p in points],
+            replace=self._lp_replace.isChecked(),
+        )
+
+    def _on_dist_toggled(self, checked: bool) -> None:
+        self._update_dist_inputs()
+
+    def _update_dist_inputs(self) -> None:
+        self._update_op_inputs(
+            self._dist_enabled.isChecked(), self._dist_op,
+            self._dist1, self._dist_and, self._dist2,
+        )
+        self._update_center_picker()
+
+    def _update_center_picker(self) -> None:
+        """The shared centre point matters to both distance and direction."""
+        self._center_picker.setEnabled(
+            self._dist_enabled.isChecked() or self._dir_enabled.isChecked()
+        )
+
+    def _update_dir_inputs(self) -> None:
+        enabled = self._dir_enabled.isChecked()
+        numeric = True
+        if enabled and self._dir_sectors is not None:
+            numeric = self._sync_dir_values_from_sectors()
+        # Directions that no single degree range can express (not adjacent,
+        # or none at all) grey the degree inputs out — the rose rules.
+        self._update_op_inputs(
+            enabled and numeric, self._dir_op,
+            self._dir_deg1, self._dir_and, self._dir_deg2,
+        )
+        self._update_center_picker()
+        self._update_dir_display()
+
+    def _sync_dir_values_from_sectors(self) -> bool:
+        """Write the degree inputs matching _dir_sectors. False when no
+        single degree condition expresses them."""
+        sectors = self._dir_sectors or []
+        selected = [d in sectors for d in DIRECTIONS]
+        if all(selected):
+            values = ("at_least", 0.0, 0.0)
+        else:
+            arc = self._sector_arc(selected)
+            if arc is None:
+                return False
+            values = ("between", *arc)
+        self._dir_syncing = True
+        try:
+            op, deg1, deg2 = values
+            self._dir_op.setCurrentIndex(max(self._dir_op.findData(op), 0))
+            self._dir_deg1.setValue(deg1)
+            self._dir_deg2.setValue(deg2)
+        finally:
+            self._dir_syncing = False
+        return True
+
+    def _on_dir_edited(self) -> None:
+        """Editing the degree condition replaces picked compass directions,
+        and a migrated sector filter."""
+        if self._dir_syncing:
+            return
+        self._legacy_dir_filter = None
+        self._dir_sectors = None
+        self._update_dir_inputs()
+
+    def _on_dir_clicked(self, direction: str) -> None:
+        """A click on the compass rose picks directions, overwriting the
+        degree values. With the filter still off, the click switches it on
+        with just that direction — not "everything except it"."""
+        if self._dir_enabled.isChecked():
+            picked = {d for d, cb in self._dir_checks.items() if cb.isChecked()}
+        else:
+            picked = {direction}
+        self._legacy_dir_filter = None
+        self._dir_sectors = [d for d in DIRECTIONS if d in picked]
+        self._dir_enabled.setChecked(True)
+        self._update_dir_inputs()
+
+    def _show_direction_info(self) -> None:
+        QMessageBox.information(
+            self, tr("filter_direction_group"), tr("filter_direction_info"),
+        )
+
+    def _update_dir_display(self) -> None:
+        """Tick the compass-rose sectors the direction condition reaches.
+
+        Picked (or loaded) directions are shown as they are. For a degree
+        condition a sector counts when any bearing inside it satisfies it
+        (sampled every ½°, fine enough for "equal" ±0.5°). With the
+        direction filter off, every direction is shown.
+        """
+        enabled = self._dir_enabled.isChecked()
+        if enabled and self._dir_sectors is not None:
+            for d, cb in self._dir_checks.items():
+                cb.setChecked(d in self._dir_sectors)
+            return
+        op = self._dir_op.currentData()
+        a, b = self._dir_deg1.value(), self._dir_deg2.value()
+        for i, d in enumerate(DIRECTIONS):
+            lo = i * 45.0 - 22.5
+            on = not enabled or any(
+                bearing_op_ok(op, (lo + k * 0.5) % 360.0, a, b) for k in range(90)
+            )
+            self._dir_checks[d].setChecked(on)
+
+    def _reset_dir(self) -> None:
+        self._legacy_dir_filter = None
+        self._dir_sectors = None
+        self._dir_enabled.setChecked(False)
+        self._set_dir_values(_DIR_DEFAULT_OP, *_DIR_DEFAULT_DEG)
+
+    def _set_dir_values(self, op: str, deg1: float, deg2: float) -> None:
+        self._dir_op.setCurrentIndex(max(self._dir_op.findData(op), 0))
+        self._dir_deg1.setValue(deg1)
+        self._dir_deg2.setValue(deg2)
+        self._update_dir_inputs()
+
+    def _set_dist_values(self, op: str, dist1_km: float, dist2_km: float) -> None:
+        """Show a centre-distance condition given in km, in the display unit."""
+        factor = 0.621371 if self._use_miles() else 1.0
+        self._dist_op.setCurrentIndex(max(self._dist_op.findData(op), 0))
+        self._dist1.setValue(dist1_km * factor)
+        self._dist2.setValue(dist2_km * factor)
+        self._update_dist_inputs()
+
+    def _dist_values_km(self) -> tuple[float, float]:
+        """The centre-distance values entered, converted back to km."""
+        factor = 1.60934 if self._use_miles() else 1.0
+        return self._dist1.value() * factor, self._dist2.value() * factor
+
+    def _reset_dist(self) -> None:
+        self._dist_enabled.setChecked(False)
+        self._dist_op.setCurrentIndex(self._dist_op.findData("at_most"))
+        self._dist1.setValue(_DIST_DEFAULT_KM)
+        self._dist2.setValue(_DIST_DEFAULT_KM)
+        self._update_dist_inputs()
+
+    @staticmethod
+    def _update_op_inputs(enabled: bool, op_combo: QComboBox, spin1, and_label: QLabel, spin2) -> None:
+        """Enable an operator row; show its second value only for (not) between."""
+        between = op_combo.currentData() in ("between", "not_between")
+        op_combo.setEnabled(enabled)
+        spin1.setEnabled(enabled)
+        spin2.setEnabled(enabled)
+        and_label.setVisible(between)
+        spin2.setVisible(between)
+
+    def _update_fav_inputs(self) -> None:
+        self._update_op_inputs(
+            self._fav_enabled.isChecked(), self._fav_op,
+            self._fav_val1, self._fav_and, self._fav_val2,
+        )
+
+    def _reset_fav(self) -> None:
+        self._fav_enabled.setChecked(False)
+        self._fav_op.setCurrentIndex(self._fav_op.findData(_FAV_DEFAULT_OP))
+        self._fav_val1.setValue(_FAV_DEFAULT_PTS)
+        self._fav_val2.setValue(_FAV_DEFAULT_PTS)
+        self._update_fav_inputs()
+
+    def _update_ccd_inputs(self) -> None:
+        self._update_op_inputs(
+            self._ccd_enabled.isChecked(), self._ccd_op,
+            self._ccd_dist1, self._ccd_and, self._ccd_dist2,
+        )
+
+    def _set_ccd_distances(self, dist1_m: float, dist2_m: float) -> None:
+        """Show corrected-distance bounds given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._ccd_dist1, self._ccd_dist2):
+            spin.setRange(0, 20_100_000 * factor)  # > halvdelen af jordens omkreds
+        self._ccd_dist1.setValue(dist1_m * factor)
+        self._ccd_dist2.setValue(dist2_m * factor)
+
+    def _ccd_distances_m(self) -> tuple[float, float]:
+        """The corrected-distance bounds entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._ccd_dist1.value() / factor, self._ccd_dist2.value() / factor
+
+    def _reset_ccd(self) -> None:
+        self._ccd_enabled.setChecked(False)
+        self._ccd_op.setCurrentIndex(self._ccd_op.findData("more_than"))
+        self._set_ccd_distances(_CC_DIST_DEFAULT_M, _CC_DIST_DEFAULT_M)
+        self._update_ccd_inputs()
+
+    def _update_elev_inputs(self) -> None:
+        self._update_op_inputs(
+            self._elev_enabled.isChecked(), self._elev_op,
+            self._elev_val1, self._elev_and, self._elev_val2,
+        )
+
+    def _reset_elev(self) -> None:
+        self._elev_enabled.setChecked(False)
+        self._elev_op.setCurrentIndex(self._elev_op.findData(_ELEV_DEFAULT_OP))
+        self._set_elev_values(_ELEV_DEFAULT_M, _ELEV_DEFAULT_M)
+        self._update_elev_inputs()
+
+    @staticmethod
+    def _use_miles() -> bool:
+        from opensak.gui.settings import get_settings
+        return get_settings().use_miles
+
+    def _set_elev_values(self, elev1_m: float, elev2_m: float) -> None:
+        """Show elevation bounds given in metres, in the display unit."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        for spin in (self._elev_val1, self._elev_val2):
+            spin.setRange(-2000 * factor, 9000 * factor)
+        self._elev_val1.setValue(elev1_m * factor)
+        self._elev_val2.setValue(elev2_m * factor)
+
+    def _elev_values_m(self) -> tuple[float, float]:
+        """The elevation bounds entered, converted back to metres."""
+        factor = _M_TO_FT if self._use_miles() else 1.0
+        return self._elev_val1.value() / factor, self._elev_val2.value() / factor
+
+    def _load_center_state(self, f: DirectionFilter) -> None:
+        if f.center_state:
+            self._center_picker.set_state(f.center_state)
+        elif f.lat is not None and f.lon is not None:
+            self._center_picker.set_state({
+                "kind": "custom", "text": f"{f.lat:.6f}, {f.lon:.6f}",
+            })
+
+    def _load_direction_filter(self, f: DirectionFilter) -> None:
+        if f.op is not None:
+            self._dir_enabled.setChecked(True)
+            self._set_dir_values(f.op, f.deg1, f.deg2)
+            self._load_center_state(f)
+            return
+        # Kompassektorer. Uden center er det en profil gemt før
+        # pejlingsbetingelsen (set fra Home): selve filteret genbruges
+        # uændret (se _legacy_dir_filter). Rækken viser den tilsvarende
+        # gradbue, når sektorerne hænger sammen, og kompasrosen de gemte
+        # sektorer.
+        legacy = f.lat is None or f.lon is None
+        selected = [d in f.directions for d in DIRECTIONS]
+        if legacy and (all(selected) or not any(selected)):
+            return  # the old dialog never saved these — nothing to show
+        self._dir_enabled.setChecked(True)
+        if not legacy:
+            self._load_center_state(f)
+        self._dir_sectors = list(f.directions)
+        self._legacy_dir_filter = f if legacy else None
+        self._update_dir_inputs()
+
+    @staticmethod
+    def _sector_arc(selected: list[bool]) -> Optional[tuple[float, float]]:
+        """Clockwise (from°, to°) covering the selected compass sectors when
+        they form one contiguous run, else None."""
+        n = len(selected)
+        starts = [i for i in range(n) if selected[i] and not selected[i - 1]]
+        if len(starts) != 1:
+            return None
+        first = starts[0]
+        last = first
+        while selected[(last + 1) % n]:
+            last = (last + 1) % n
+        return (first * 45.0 - 22.5) % 360.0, (last * 45.0 + 22.5) % 360.0
 
     def _enable_all_types(self) -> None:
         for cb in self._type_checks.values():
@@ -1116,30 +2693,22 @@ class FilterDialog(QDialog):
         self._avail_cb.setChecked(True)
         self._unavail_cb.setChecked(True)
         self._archived_cb.setChecked(True)  # issue #576 — GSAK-style default
-        self._dist_enabled.setChecked(False)
-        self._dist_max.setValue(50.0)
-        self._dist_min.setValue(0.0)
-        self._center_picker.set_state({"kind": "home"})
         self._prem_yes.setChecked(True)
         self._prem_no.setChecked(True)
-        self._tb_yes.setChecked(True)
-        self._tb_no.setChecked(True)
         self._cc_yes.setChecked(True)
         self._cc_no.setChecked(True)
 
     def _reset_dates(self) -> None:
-        self._hidden_from_enabled.setChecked(False)
-        self._hidden_to_enabled.setChecked(False)
-        self._found_from_enabled.setChecked(False)
-        self._found_to_enabled.setChecked(False)
-        self._dnf_date_from_enabled.setChecked(False)
-        self._dnf_date_to_enabled.setChecked(False)
-        self._log_from_enabled.setChecked(False)
-        self._log_to_enabled.setChecked(False)
+        for row in self._date_rows.values():
+            row.reset()
 
     def _reset_misc(self) -> None:
-        for row, _cls in self._geo_text_rows():
+        for row, _cls in self._misc_text_rows():
             row.reset()
+        self._reset_dist()
+        self._reset_dir()
+        self._reset_ccd()
+        self._center_picker.set_state({"kind": "home"})
         self._flag_yes.setChecked(True)
         self._flag_no.setChecked(True)
         self._locked_yes.setChecked(True)
@@ -1148,32 +2717,79 @@ class FilterDialog(QDialog):
         self._dnf_no.setChecked(True)
         self._ftf_yes.setChecked(True)
         self._ftf_no.setChecked(True)
-        self._fav_enabled.setChecked(False)
-        self._fav_min.setValue(0)
-        self._fav_max.setValue(9999)
+        self._reset_fav()
+        self._reset_elev()
 
     def _reset_attributes(self) -> None:
+        self._attr_mode_all.setChecked(True)
         for ja_cb, nej_cb, ingen_cb in self._attr_boxes.values():
             ja_cb.setChecked(False)
             nej_cb.setChecked(False)
             ingen_cb.setChecked(True)
+        self._attr_search.clear()
+        self._attr_only_selected.setChecked(False)
+        self._apply_attr_search()
+
+    def _reset_waypoints(self) -> None:
+        for row in self._wp_text_rows.values():
+            row.reset()
+        self._wp_date_row.reset()
+        self._wp_by_user_yes.setChecked(True)
+        self._wp_by_user_no.setChecked(True)
+        self._wp_count_op.setCurrentIndex(0)
+        self._wp_count1.setValue(0)
+        self._wp_count2.setValue(0)
+
+    def _reset_trackables(self) -> None:
+        self._tb_yes.setChecked(True)
+        self._tb_no.setChecked(True)
+        for row in self._tb_text_rows.values():
+            row.reset()
+        self._tb_count_op.setCurrentIndex(0)
+        self._tb_count1.setValue(0)
+        self._tb_count2.setValue(0)
+
+    def _build_text_search_filter(self) -> Optional[TextSearchFilter]:
+        """The Text Search tab's filter, or None when its row is not set."""
+        return self._text_search_row.build(
+            lambda text, op: TextSearchFilter(
+                text,
+                search_description=self._text_search_description.isChecked(),
+                search_logs=self._text_search_logs.isChecked(),
+                search_notes=self._text_search_notes.isChecked(),
+                search_hint=self._text_search_hint.isChecked(),
+                op=op,
+            ))
 
     def _reset_text_search(self) -> None:
-        self._text_search_input.clear()
+        self._text_search_row.reset()
         self._text_search_description.setChecked(True)
         self._text_search_logs.setChecked(True)
         self._text_search_notes.setChecked(True)
         self._text_search_hint.setChecked(False)
 
+    def _reset_line_polygon(self) -> None:
+        self._lp_text.clear()
+        self._lp_mode_buttons["line"].setChecked(True)
+        self._lp_distance.setValue(_LP_DEFAULT_DISTANCE)
+        self._lp_exclude.setChecked(False)
+        self._lp_replace.setChecked(True)
+
     def _reset_all(self) -> None:
         self._reset_general()
         self._reset_dates()
         self._reset_misc()
+        self._reset_logs()
+        self._reset_line_polygon()
         self._reset_attributes()
+        self._reset_waypoints()
+        self._reset_trackables()
         self._reset_text_search()
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
+        self._invert_cb.setChecked(False)
+        self._refresh_highlights()
 
     def _reset_current_tab(self) -> None:
         tab = self._tabs.currentWidget()
@@ -1186,10 +2802,19 @@ class FilterDialog(QDialog):
             self._reset_dates()
         elif tab is self._misc_tab:
             self._reset_misc()
+        elif tab is self._logs_tab:
+            self._reset_logs()
+        elif tab is self._line_polygon_tab:
+            self._reset_line_polygon()
         elif tab is self._attributes_tab:
             self._reset_attributes()
+        elif tab is self._waypoints_tab:
+            self._reset_waypoints()
+        elif tab is self._trackables_tab:
+            self._reset_trackables()
         elif tab is self._text_search_tab:
             self._reset_text_search()
+        self._refresh_highlights()
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
 
@@ -1201,15 +2826,42 @@ class FilterDialog(QDialog):
             (self._owner_row, OwnerFilter),
         ]
 
-    def _geo_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+    def _misc_text_rows(self) -> list[tuple[TextFilterRow, type[TextMatchFilter]]]:
+        ud1, ud2, ud3, ud4 = self._ud_rows
         return [
             (self._country_row, CountryFilter),
             (self._state_row, StateFilter),
             (self._county_row, CountyFilter),
+            (ud1, UserData1Filter),
+            (ud2, UserData2Filter),
+            (ud3, UserData3Filter),
+            (ud4, UserData4Filter),
+            (self._gc_note_row, GcNoteFilter),
+            (self._user_note_row, UserNoteFilter),
         ]
 
+    def _order_distance_ranges(self) -> None:
+        """Put the smaller value first in a (not) between distance range.
+
+        The filter accepts the bounds in either order, but "Between 70 – 50"
+        left on screen looks like an empty range while it filters 50–70.
+        Only called when the filter is applied or saved, never while typing.
+        """
+        for op_combo, spin1, spin2 in (
+            (self._dist_op, self._dist1, self._dist2),
+            (self._ccd_op, self._ccd_dist1, self._ccd_dist2),
+            (self._fav_op, self._fav_val1, self._fav_val2),
+            (self._elev_op, self._elev_val1, self._elev_val2),
+        ):
+            if op_combo.currentData() in ("between", "not_between") \
+                    and spin1.value() > spin2.value():
+                low, high = spin2.value(), spin1.value()
+                spin1.setValue(low)
+                spin2.setValue(high)
+
     def _build_filterset(self) -> FilterSet:
-        fs = FilterSet(mode="AND")
+        self._order_distance_ranges()
+        fs = FilterSet(mode="AND", negate=self._invert_cb.isChecked())
 
         # Navn / GC kode / Udlagt af / Owner name
         for row, cls in self._general_text_rows():
@@ -1261,23 +2913,40 @@ class FilterDialog(QDialog):
                 show_archived=archived,
             ))
 
-        # Afstand
-        if self._dist_enabled.isChecked():
-            from opensak.gui.settings import get_settings
-            s = get_settings()
+        # Afstand og retning fra det fælles center-punkt. En uændret,
+        # migreret sektor-retning (fra Home) genbruges som den er.
+        legacy_dir = self._legacy_dir_filter if self._dir_enabled.isChecked() else None
+        if legacy_dir is not None:
+            fs.add(legacy_dir)
+        if self._dist_enabled.isChecked() or (
+                self._dir_enabled.isChecked() and legacy_dir is None):
             center = self._center_picker.get_center()
             if center is None:
                 QMessageBox.warning(self, tr("warning"), tr("center_point_invalid_warning"))
             else:
                 lat, lon = center
-                dist_val = self._dist_max.value()
-                min_val = self._dist_min.value()
-                max_km = dist_val * 1.60934 if s.use_miles else dist_val
-                min_km = min_val * 1.60934 if s.use_miles else min_val
-                fs.add(DistanceFilter(
-                    lat, lon, max_km, min_km,
-                    center_state=self._center_picker.to_state(),
-                ))
+                center_state = self._center_picker.to_state()
+                if self._dist_enabled.isChecked():
+                    dist1_km, dist2_km = self._dist_values_km()
+                    fs.add(DistanceFilter(
+                        lat, lon,
+                        center_state=center_state,
+                        op=self._dist_op.currentData(),
+                        dist1_km=dist1_km, dist2_km=dist2_km,
+                    ))
+                if self._dir_enabled.isChecked() and legacy_dir is None:
+                    if self._dir_sectors is not None:
+                        # Picked on the rose — exactly those sectors.
+                        fs.add(DirectionFilter(
+                            self._dir_sectors,
+                            lat=lat, lon=lon, center_state=center_state,
+                        ))
+                    else:
+                        fs.add(DirectionFilter(
+                            op=self._dir_op.currentData(),
+                            deg1=self._dir_deg1.value(), deg2=self._dir_deg2.value(),
+                            lat=lat, lon=lon, center_state=center_state,
+                        ))
 
         # Premium
         prem_yes = self._prem_yes.isChecked()
@@ -1302,47 +2971,21 @@ class FilterDialog(QDialog):
             fs.add(NoCorrectedFilter())
         # Begge valgt (eller ingen) = vis alt = intet filter
 
-        # Datoer — hjælper til at konvertere QDate til datetime
-        # #844: hour/minute var hardkodet til 23/59 uanset end_of_day, så
-        # from_date reelt blev sat til 23:59:00 i stedet for 00:00:00 —
-        # samme dato i from/to gav dermed et 59-sekunders vindue og ingen
-        # match; en flerdagesrange "virkede" kun fordi from-grænsen i
-        # praksis rykkede en dag tilbage.
-        def _qdate_to_dt(qdate, end_of_day=False) -> datetime:
-            if end_of_day:
-                return datetime(qdate.year(), qdate.month(), qdate.day(), 23, 59, 59)
-            return datetime(qdate.year(), qdate.month(), qdate.day(), 0, 0, 0)
-
-        # Udlagt dato
-        if self._hidden_from_enabled.isChecked() or self._hidden_to_enabled.isChecked():
-            fs.add(HiddenDateFilter(
-                from_date=_qdate_to_dt(self._hidden_from.date()) if self._hidden_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._hidden_to.date(), end_of_day=True) if self._hidden_to_enabled.isChecked() else None,
+        # Afstand rettede ↔ oprindelige koordinater
+        if self._ccd_enabled.isChecked():
+            dist1_m, dist2_m = self._ccd_distances_m()
+            fs.add(CorrectedDistanceFilter(
+                op=self._ccd_op.currentData(), dist1_m=dist1_m, dist2_m=dist2_m,
             ))
 
-        # Fundet af mig dato
-        if self._found_from_enabled.isChecked() or self._found_to_enabled.isChecked():
-            fs.add(FoundByMeDateFilter(
-                from_date=_qdate_to_dt(self._found_from.date()) if self._found_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._found_to.date(), end_of_day=True) if self._found_to_enabled.isChecked() else None,
-            ))
+        # Datoer — én DateFilter pr. datofelt med en valgt operator
+        for date_row in self._date_rows.values():
+            date_filter = date_row.build()
+            if date_filter is not None:
+                fs.add(date_filter)
 
-        # DNF dato
-        if self._dnf_date_from_enabled.isChecked() or self._dnf_date_to_enabled.isChecked():
-            fs.add(DnfDateFilter(
-                from_date=_qdate_to_dt(self._dnf_date_from.date()) if self._dnf_date_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._dnf_date_to.date(), end_of_day=True) if self._dnf_date_to_enabled.isChecked() else None,
-            ))
-
-        # Seneste log dato
-        if self._log_from_enabled.isChecked() or self._log_to_enabled.isChecked():
-            fs.add(LastLogDateFilter(
-                from_date=_qdate_to_dt(self._log_from.date()) if self._log_from_enabled.isChecked() else None,
-                to_date=_qdate_to_dt(self._log_to.date(), end_of_day=True) if self._log_to_enabled.isChecked() else None,
-            ))
-
-        # Øvrigt — Land / Stat / Kommune
-        for row, cls in self._geo_text_rows():
+        # Øvrigt — Land / Stat / Kommune / UserData1–4 / GC-note / personlig note
+        for row, cls in self._misc_text_rows():
             text_filter = row.build(cls)
             if text_filter is not None:
                 fs.add(text_filter)
@@ -1382,9 +3025,22 @@ class FilterDialog(QDialog):
         # Favorit points
         if self._fav_enabled.isChecked():
             fs.add(FavoritePointsFilter(
-                min_pts=int(self._fav_min.value()),
-                max_pts=int(self._fav_max.value()),
+                op=self._fav_op.currentData(),
+                pts1=int(self._fav_val1.value()),
+                pts2=int(self._fav_val2.value()),
             ))
+
+        # Højde
+        if self._elev_enabled.isChecked():
+            elev1_m, elev2_m = self._elev_values_m()
+            fs.add(ElevationFilter(
+                op=self._elev_op.currentData(), elev1_m=elev1_m, elev2_m=elev2_m,
+            ))
+
+        # Linje/Polygon
+        lp_filter = self._build_line_polygon_filter()
+        if lp_filter is not None:
+            fs.add(lp_filter)
 
         # Attributter
         attr_mode_and = self._attr_mode_all.isChecked()
@@ -1405,16 +3061,25 @@ class FilterDialog(QDialog):
                     attr_or.add(af)
                 fs.add(attr_or)
 
+        # Logs
+        log_filter = self._build_log_filter()
+        if log_filter is not None:
+            fs.add(log_filter)
+
+        # Waypoints
+        wp_filter = self._build_waypoint_filter()
+        if wp_filter is not None:
+            fs.add(wp_filter)
+
+        # Trackables
+        tb_filter = self._build_trackable_filter()
+        if tb_filter is not None:
+            fs.add(tb_filter)
+
         # Tekstsøgning
-        ts_text = self._text_search_input.text().strip()
-        if ts_text:
-            fs.add(TextSearchFilter(
-                text=ts_text,
-                search_description=self._text_search_description.isChecked(),
-                search_logs=self._text_search_logs.isChecked(),
-                search_notes=self._text_search_notes.isChecked(),
-                search_hint=self._text_search_hint.isChecked(),
-            ))
+        text_search = self._build_text_search_filter()
+        if text_search is not None:
+            fs.add(text_search)
 
         # WHERE clause
         if self._where_tab is not None:
@@ -1461,20 +3126,58 @@ class FilterDialog(QDialog):
         )
         if not ok or not name.strip():
             return
+        name = name.strip()
+        if not self._confirm_overwrite(name):
+            return
         fs = self._build_filterset()
-        profile = FilterProfile(name.strip(), fs)
+        profile = FilterProfile(name, fs)
         profile.save()
         self._load_profiles_into_combo()
         # Vælg den nye profil i combo
         for i in range(self._profile_combo.count()):
-            if self._profile_combo.itemText(i) == name.strip():
+            if self._profile_combo.itemText(i) == name:
                 self._profile_combo.setCurrentIndex(i)
                 break
         # issue #682: rapportér straks til MainWindow at en ny profil er
         # gemt, uanset om dialogen bagefter lukkes med Apply eller bare
         # med Close/Escape — samme mønster som profile_deleted (#491).
-        self.profile_saved.emit(name.strip())
+        self.profile_saved.emit(name)
         QMessageBox.information(self, tr("filter_saved_title"), tr("filter_saved_msg", name=name))
+
+    def _confirm_overwrite(self, name: str) -> bool:
+        """Ask before a save would replace an existing profile (issue #671).
+
+        Returns True when the save may go ahead. The check is on the file
+        the profile would land in — not on the names shown in the combo —
+        so a name that only collides after sanitising ('My/Filter' vs.
+        'My_Filter') is caught too, and so is a case-only difference on the
+        case-insensitive filesystems where it really does overwrite.
+
+        Re-saving the profile that is currently selected asks as well: the
+        prefilled name (#671 item 2) makes that the easiest way to clobber
+        a filter by simply not noticing which one was loaded.
+        """
+        try:
+            path = FilterProfile.profile_path(name)
+        except Exception:
+            # Can't work out where it would go — don't block the save.
+            return True
+        if not path.exists():
+            return True
+        # Prefer the stored display name in the prompt: it is what the user
+        # sees in the combo, and it can differ from what they just typed.
+        existing = name
+        try:
+            existing = FilterProfile.load(path).name
+        except Exception:
+            pass
+        reply = QMessageBox.question(
+            self, tr("filter_overwrite_title"),
+            tr("filter_overwrite_msg", name=existing),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     def _delete_profile(self) -> None:
         path = self._profile_combo.currentData()
@@ -1505,6 +3208,7 @@ class FilterDialog(QDialog):
         """
         # Først: ryd UI så vi starter fra en kendt tilstand
         self._reset_all()
+        self._invert_cb.setChecked(fs.negate)
 
         # Saml filtre — hvis der er en nested OR-gruppe (fx attributter i OR-mode),
         # flad den ud, men husk at attributmode skal sættes.
@@ -1519,13 +3223,16 @@ class FilterDialog(QDialog):
             else:
                 flat_filters.append(f)
 
-        # OR-mode = "any selected"; the UI only has the "all selected" checkbox,
-        # so unchecking it expresses ANY (avoids a crash on the missing widget).
-        self._attr_mode_all.setChecked(not attr_mode_or_detected)
+        # OR-mode = "ONE of the selected attributes". The two mode radios are
+        # exclusive, so check the matching one (setChecked(False) is a no-op).
+        if attr_mode_or_detected:
+            self._attr_mode_any.setChecked(True)
+        else:
+            self._attr_mode_all.setChecked(True)
 
         text_rows = {
             cls.filter_type: row
-            for row, cls in self._general_text_rows() + self._geo_text_rows()
+            for row, cls in self._general_text_rows() + self._misc_text_rows()
         }
         for f in flat_filters:
             ftype = getattr(f, "filter_type", None)
@@ -1540,6 +3247,8 @@ class FilterDialog(QDialog):
                 sizes = getattr(f, "sizes", [])
                 for cs, cb in self._cont_checks.items():
                     cb.setChecked(cs in sizes)
+            elif ftype == "direction":
+                self._load_direction_filter(f)
             elif ftype == "difficulty":
                 self._diff_min.setValue(getattr(f, "min_difficulty", 1.0))
                 self._diff_max.setValue(getattr(f, "max_difficulty", 5.0))
@@ -1567,12 +3276,11 @@ class FilterDialog(QDialog):
                 self._archived_cb.setChecked(True)
             elif ftype == "distance":
                 self._dist_enabled.setChecked(True)
-                from opensak.gui.settings import get_settings as _gs
-                _use_mi = _gs().use_miles
-                saved_km = getattr(f, "max_km", 10.0)
-                self._dist_max.setValue(saved_km * 0.621371 if _use_mi else saved_km)
-                saved_min_km = getattr(f, "min_km", 0.0)
-                self._dist_min.setValue(saved_min_km * 0.621371 if _use_mi else saved_min_km)
+                self._set_dist_values(
+                    getattr(f, "op", "at_most"),
+                    getattr(f, "dist1_km", _DIST_DEFAULT_KM),
+                    getattr(f, "dist2_km", 0.0),
+                )
                 center_state = getattr(f, "center_state", None)
                 if center_state:
                     self._center_picker.set_state(center_state)
@@ -1599,6 +3307,21 @@ class FilterDialog(QDialog):
             elif ftype == "no_corrected":
                 self._cc_yes.setChecked(False)
                 self._cc_no.setChecked(True)
+            elif ftype == "corrected_distance":
+                self._ccd_enabled.setChecked(True)
+                index = self._ccd_op.findData(getattr(f, "op", "more_than"))
+                self._ccd_op.setCurrentIndex(max(index, 0))
+                self._set_ccd_distances(getattr(f, "dist1_m", 0.0), getattr(f, "dist2_m", 0.0))
+            elif ftype == "line_polygon":
+                self._lp_text.setPlainText(
+                    f.text or "\n".join(_format_lp_point(p) for p in f.points)
+                )
+                self._lp_mode_buttons[f.mode].setChecked(True)
+                from opensak.gui.settings import get_settings as _gs
+                self._lp_distance.setValue(
+                    f.distance_km * 0.621371 if _gs().use_miles else f.distance_km
+                )
+                self._lp_exclude.setChecked(f.exclude)
             elif ftype == "attribute":
                 attr_id = getattr(f, "attribute_id", None)
                 is_on   = getattr(f, "is_on", True)
@@ -1608,8 +3331,12 @@ class FilterDialog(QDialog):
                         ja_cb.setChecked(True)
                     else:
                         nej_cb.setChecked(True)
+            elif ftype == "waypoint":
+                self._load_waypoint_filter(f)
+            elif ftype == "trackable":
+                self._load_trackable_filter(f)
             elif ftype == "text_search":
-                self._text_search_input.setText(getattr(f, "text", ""))
+                self._text_search_row.load(f)
                 self._text_search_description.setChecked(getattr(f, "search_description", True))
                 self._text_search_logs.setChecked(getattr(f, "search_logs", True))
                 self._text_search_notes.setChecked(getattr(f, "search_notes", True))
@@ -1635,48 +3362,33 @@ class FilterDialog(QDialog):
                 self._ftf_no.setChecked(not has_ftf)
             elif ftype == "favorite_points":
                 self._fav_enabled.setChecked(True)
-                self._fav_min.setValue(getattr(f, "min_pts", 0))
-                self._fav_max.setValue(getattr(f, "max_pts", 9999))
-            elif ftype == "found_by_me_date":
-                if getattr(f, "from_date", None):
-                    self._found_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._found_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._found_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._found_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "dnf_date":
-                if getattr(f, "from_date", None):
-                    self._dnf_date_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._dnf_date_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._dnf_date_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._dnf_date_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "last_log_date":
-                if getattr(f, "from_date", None):
-                    self._log_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._log_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._log_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._log_to.setDate(QDate(d.year, d.month, d.day))
-            elif ftype == "hidden_date_range":
-                # #857: this branch was missing, so the Hidden date
-                # checkboxes/fields silently reset on reopen even though the
-                # filter was still active on the cache list.
-                if getattr(f, "from_date", None):
-                    self._hidden_from_enabled.setChecked(True)
-                    d = f.from_date
-                    self._hidden_from.setDate(QDate(d.year, d.month, d.day))
-                if getattr(f, "to_date", None):
-                    self._hidden_to_enabled.setChecked(True)
-                    d = f.to_date
-                    self._hidden_to.setDate(QDate(d.year, d.month, d.day))
+                index = self._fav_op.findData(getattr(f, "op", _FAV_DEFAULT_OP))
+                self._fav_op.setCurrentIndex(max(index, 0))
+                self._fav_val1.setValue(getattr(f, "pts1", 0))
+                self._fav_val2.setValue(getattr(f, "pts2", 0))
+            elif ftype == "elevation":
+                self._elev_enabled.setChecked(True)
+                index = self._elev_op.findData(getattr(f, "op", _ELEV_DEFAULT_OP))
+                self._elev_op.setCurrentIndex(max(index, 0))
+                self._set_elev_values(getattr(f, "elev1_m", 0.0), getattr(f, "elev2_m", 0.0))
+            elif ftype == "log":
+                self._load_log_filter(f)
+            elif ftype == "date":
+                row = self._date_rows.get(f.field)
+                if row is not None:
+                    row.load(f)
+            elif ftype in LEGACY_DATE_FILTER_FIELDS:
+                # Profiles saved before the GSAK-style date filter hold
+                # from/to range filters — show them as the equivalent
+                # operator (Between / On or after / On or before).
+                converted = DateFilter.from_legacy(f)
+                if converted is not None:
+                    self._date_rows[converted.field].load(converted)
             # Andre/ukendte filtre ignoreres stille
+
+        # Sætning af widgets ovenfor udløser normalt selv et refresh, men
+        # ikke hvis en værdi var identisk med standarden (#610).
+        self._refresh_highlights()
 
     # ── Apply ─────────────────────────────────────────────────────────────────
 
@@ -1698,6 +3410,8 @@ class FilterDialog(QDialog):
         # Et ugyldigt regulært udtryk ville stille matche ingenting — afvis det
         if not self._validate_text_filters():
             return
+        if not self._validate_line_polygon():
+            return
 
         fs = self._build_filterset()
         profile_name = (
@@ -1707,3 +3421,107 @@ class FilterDialog(QDialog):
         )
         self.filter_applied.emit(fs, SortSpec("name"), profile_name)
         self.accept()
+
+
+def show_where_info(parent: Optional[QWidget] = None) -> None:
+    """Show the Where-clause column reference dialog. Shared by the Set
+    Filter dialog's Where tab and the toolbar's quick Where box (#558)."""
+    from PySide6.QtWidgets import QScrollArea as _QScrollArea
+    from PySide6.QtCore import QLocale
+    from opensak.gui.settings import get_settings
+    from opensak.utils.types import DateFormat, norm_locale_date_fmt
+
+    settings = get_settings()
+    dist_unit = "mi" if settings.use_miles else "km"
+
+    fmt = settings.date_format
+    if fmt == DateFormat.DMY:
+        date_col_eg = "15.06.2020"
+        date_where_eg = "01.01.2023"
+    elif fmt == DateFormat.MDY:
+        date_col_eg = "06/15/2020"
+        date_where_eg = "01/01/2023"
+    elif fmt == DateFormat.YMD:
+        date_col_eg = "2020-06-15"
+        date_where_eg = "2023-01-01"
+    else:  # LOCALE
+        _loc = QLocale.system()
+        _fmt = norm_locale_date_fmt(_loc.dateFormat(QLocale.FormatType.ShortFormat))
+        date_col_eg = _loc.toString(QDate(2020, 6, 15), _fmt)
+        date_where_eg = _loc.toString(QDate(2023, 1, 1), _fmt)
+
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(tr("filter_where_info_title"))
+    dlg.resize(560, 480)
+
+    outer = QVBoxLayout(dlg)
+
+    scroll = _QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    content = QLabel()
+    content.setTextFormat(Qt.TextFormat.RichText)
+    content.setWordWrap(True)
+    content.setContentsMargins(8, 8, 8, 8)
+    content.setText(
+        f"<b>{tr('filter_where_help_heading')}</b><br><br>"
+        f"{tr('filter_where_help_intro')}<br><br>"
+        "<table cellspacing='4'>"
+        f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+        f"<th align='left'>{tr('col_type')}</th>"
+        f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+        "<tr><td><code>gc_code</code></td><td>text</td><td>e.g. <code>'GC12345'</code></td></tr>"
+        f"<tr><td><code>name</code></td><td>text</td><td>{tr('filter_where_note_name')}</td></tr>"
+        f"<tr><td><code>long_description</code></td><td>text</td><td>{tr('filter_where_note_long_desc')}</td></tr>"
+        "<tr><td><code>cache_type</code></td><td>text</td>"
+        "<td><code>'Traditional Cache'</code>, <code>'Multi-cache'</code>, "
+        "<code>'Mystery Cache'</code>, …</td></tr>"
+        "<tr><td><code>container</code></td><td>text</td>"
+        "<td><code>'Nano'</code>, <code>'Micro'</code>, <code>'Small'</code>, "
+        "<code>'Regular'</code>, <code>'Large'</code></td></tr>"
+        "<tr><td><code>difficulty</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
+        "<tr><td><code>terrain</code></td><td>decimal</td><td>1.0 – 5.0</td></tr>"
+        f"<tr><td><code>placed_by</code></td><td>text</td><td>{tr('filter_where_note_placed_by')}</td></tr>"
+        "<tr><td><code>country</code></td><td>text</td><td>e.g. <code>'Denmark'</code></td></tr>"
+        f"<tr><td><code>state</code></td><td>text</td><td>{tr('filter_where_note_state')}</td></tr>"
+        f"<tr><td><code>county</code></td><td>text</td><td>{tr('filter_where_note_county')}</td></tr>"
+        "<tr><td><code>hidden_date</code></td><td>datetime</td>"
+        f"<td>e.g. <code>'{date_col_eg}'</code></td></tr>"
+        "<tr><td><code>available</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        "<tr><td><code>archived</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        f"<tr><td><code>found</code></td><td>boolean</td><td>{tr('filter_where_note_found')}</td></tr>"
+        "<tr><td><code>premium_only</code></td><td>boolean</td><td>1 or 0</td></tr>"
+        f"<tr><td><code>favorite_points</code></td><td>integer</td><td>{tr('filter_where_note_fav')}</td></tr>"
+        f"<tr><td><code>log_count</code></td><td>integer</td><td>{tr('filter_where_note_logcount')}</td></tr>"
+        f"<tr><td><code>distance</code></td><td>decimal</td><td>{tr('filter_where_note_distance', unit=dist_unit)}</td></tr>"
+        f"<tr><td><code>user_data_1</code> – <code>user_data_4</code></td>"
+        f"<td>text</td><td>{tr('filter_where_note_userdata')}</td></tr>"
+        "</table><br>"
+        f"<b>{tr('filter_where_examples_heading')}</b><br>"
+        "<code>difficulty &gt;= 4 AND terrain &gt;= 4</code><br>"
+        "<code>cache_type = 'Traditional Cache' AND country = 'Denmark'</code><br>"
+        "<code>favorite_points &gt; 100</code><br>"
+        "<code>found = 0 AND available = 1</code><br>"
+        "<code>name LIKE '%night%'</code><br>"
+        "<code>long_description LIKE '%waterfall%'</code><br>"
+        f"<code>hidden_date &gt; '{date_where_eg}'</code><br><br>"
+        f"<b>{tr('filter_where_subquery_heading')}</b><br>"
+        "<table cellspacing='4'>"
+        f"<tr><th align='left'>{tr('filter_where_col_header')}</th>"
+        f"<th align='left'>{tr('filter_where_notes_header')}</th></tr>"
+        f"<tr><td><code>logs.text</code></td><td>{tr('filter_where_note_log_text')}</td></tr>"
+        f"<tr><td><code>user_notes.note</code></td><td>{tr('filter_where_note_user_note')}</td></tr>"
+        "</table><br>"
+        "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
+        "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
+    )
+
+    scroll.setWidget(content)
+    outer.addWidget(scroll)
+
+    close_btn = QPushButton(tr("close"))
+    close_btn.clicked.connect(dlg.accept)
+    outer.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+
+    dlg.exec()

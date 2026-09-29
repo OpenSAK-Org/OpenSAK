@@ -59,8 +59,8 @@ class RefreshWorker(QThread):
         # Own session, own connection — never share a Session across threads.
         # Objects returned here are safe to hand to the GUI thread afterwards:
         # apply_filters_auto()/apply_filters() already joinedload() everything
-        # the table/map need and noload() the rest (see filters/engine.py),
-        # so nothing triggers a lazy load once this session closes — the
+        # the table/map need and raiseload() the rest (see filters/engine.py,
+        # #898), so nothing triggers a lazy load once this session closes — the
         # exact same closed-session usage the previous synchronous code
         # already relied on (caches were read after `with get_session()`
         # had already exited).

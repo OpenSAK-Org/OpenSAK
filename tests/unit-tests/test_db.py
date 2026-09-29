@@ -321,8 +321,9 @@ class TestReloadCachesFull:
     def test_empty_input(self, tmp_db):
         assert reload_caches_full([]) == []
 
-    def test_reloads_deferred_blob_and_noloaded_logs(self, tmp_path):
-        from sqlalchemy.orm import defer, noload
+    def test_reloads_deferred_blob_and_unloaded_logs(self, tmp_path):
+        from sqlalchemy.exc import InvalidRequestError
+        from sqlalchemy.orm import defer, raiseload
         from sqlalchemy.orm.exc import DetachedInstanceError
 
         init_db(db_path=tmp_path / "reload.db")
@@ -334,16 +335,19 @@ class TestReloadCachesFull:
             cache.logs.append(Log(log_type="Found it", finder="T", text="Nice one"))
             s.add(cache)
 
-        # Load it the way the table does: deferred blob + noload'ed logs, detached.
+        # Load it the way the table does: deferred blob + raiseload'ed logs, detached.
         with get_session() as s:
             partial = (
                 s.query(Cache)
-                .options(defer(Cache.encoded_hints), noload(Cache.logs))
+                .options(defer(Cache.encoded_hints), raiseload(Cache.logs))
                 .filter_by(gc_code="GCRELOAD")
                 .one()
             )
         with pytest.raises(DetachedInstanceError):
             _ = partial.encoded_hints
+        # #898: an unloaded relationship fails loudly instead of reading as [].
+        with pytest.raises(InvalidRequestError):
+            _ = partial.logs
 
         [full] = reload_caches_full([partial])
         assert full.encoded_hints == "Behind the sign."
