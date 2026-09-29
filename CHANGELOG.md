@@ -4,6 +4,70 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.1] — 2026-09-29
+
+> First beta of the 1.21.0 cycle. Headlines: a first look at **macros**
+> (a small, beta-only Lua proof of concept — the start of the macro &
+> scripting work tracked in #938), **importing your saved GSAK filters**
+> as OpenSAK filter profiles, and a more helpful corrected-coordinates
+> dialog.
+
+### Added
+
+- **Macros: first proof of concept (#939, part of #938)** — A new
+  **Macros** menu with **Run macro (Lua)…**, where you can write or load a
+  small [Lua](https://www.lua.org/) script and run it against the active
+  database. This first version is about filtering:
+  `opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }`
+  applies a filter and returns the number of matching caches, and
+  `opensak.filter_profile("Name")` applies one of your saved filter
+  profiles. As with GSAK's MFILTER, a filter that matches nothing leaves
+  the list unchanged and returns 0. Macros run in a sandbox with no access
+  to files, other programs or OpenSAK's internals, and are stopped if they
+  loop endlessly or use too much memory. **Beta builds only** — the menu
+  is hidden in stable releases until the macro API has been settled (#938).
+  The commands will change as the macro system develops, so treat macros
+  written now as experiments.
+- **Import GSAK filters (#935)** — **File → Import GSAK Filters…** reads the
+  saved filters from your GSAK database (`gsak.db3`, or a GSAK backup
+  `.zip`) and turns them into OpenSAK filter profiles. Everything OpenSAK
+  can express becomes a normal filter in the Filter dialog; criteria that
+  OpenSAK stores but has no dialog control for become SQL on the Where tab;
+  and anything OpenSAK can't express yet is kept as a comment on the Where
+  tab, so you can see what GSAK filtered on and finish it by hand. The
+  dialog shows how much of each filter was migrated. The GSAK database is
+  only read, never changed, and existing profiles are only overwritten if
+  you tick **Overwrite filter profiles that already exist**.
+- **Corrected coordinates dialog: distance and bearing from the original
+  coordinates (#940)** — While you type, the dialog shows how far and in
+  which direction the new coordinates are from the posted ones. Useful for
+  catching typos, such as a wrong minute digit or the wrong hemisphere.
+- **Corrected coordinates dialog: Clear button (#940)** — When a cache
+  already has corrected coordinates, they can now be removed directly from
+  the dialog.
+
+### Changed
+
+- **Corrected coordinates are saved the same way everywhere (#940)** — The
+  details panel, the cache list's right-click menu and the map's
+  right-click menu now share one code path for saving corrected
+  coordinates, so they always behave identically.
+- **Roadmap revised** — Backup Support, Macro & Scripting Support and Full
+  GSAK Field Compatibility have moved to the top of `docs/ROADMAP.md`.
+  Macro support does not depend on Geocaching.com API access; the earlier
+  wording suggesting it did has been corrected.
+
+### Dependencies
+
+- **New: [Lupa](https://github.com/scoder/lupa) (MIT)** — embeds the Lua
+  runtime used by the macro proof of concept. Included in all builds; if
+  you run OpenSAK from source, update your environment with
+  `pip install -e .`.
+
+Thanks to nagisml for this work.
+
+---
+
 ## [1.20.0] — 2026-09-29
 
 > First stable release of the 1.20.0 cycle. Replaces the `1.20.0-beta.1`
