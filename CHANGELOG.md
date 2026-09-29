@@ -4,6 +4,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.20.0-beta.15] — 2026-09-29
+
+### Changed
+
+- **Filter dialog: favourite points and elevation use conditions (#921, part
+  of #821)** — Instead of a from/to range, pick Equal, Less than, At most,
+  More than, At least, Between or Not between, the same conditions as the
+  distance filters. Caches without favourite points count as 0; caches with
+  unknown elevation never match. Saved filter profiles with the old range
+  are converted automatically and select the same caches.
+- **Filter dialog: centre-point filters grouped on the Other tab (part of
+  #821)** — *Distance from centre point*, *Direction from centre point* and
+  *Distance corrected ↔ posted* now sit together in one block with a single
+  shared centre-point picker.
+- **Filter dialog: Direction by degrees or compass (part of #821)** — The
+  direction can now be set as a bearing in degrees with the usual conditions
+  (0° = north, clockwise). *Between* runs clockwise, so 315°–45° is the
+  sector through north. Clicking directions on the compass rose still works
+  and fills in the matching degree range. The direction is measured from the
+  chosen centre point instead of always from your home point. A new ⓘ button
+  explains both modes. Saved direction filters keep matching exactly as
+  before until you edit them.
+
+### Fixed
+
+- **Filter dialog: the centre point label was not aligned with its dropdown
+  (#926)**.
+
+Thanks to nagisml for this work.
+
+---
+
 ## [1.20.0-beta.14] — 2026-09-28
 
 ### Fixed
