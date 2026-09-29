@@ -476,8 +476,8 @@ Every condition in a GSAK filter lands in one of three places:
 
 | | What it means | Counts as migrated |
 |---|---|---|
-| **A filter** | The condition exists in the tabs above — cache types, D/T, dates, logs, child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, compass quadrants (as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
-| **SQL in the Where tab** | OpenSAK stores the data but has no filter row for it — the watch list, a bearing range in degrees, user sort | yes |
+| **A filter** | The condition exists in the tabs above — cache types, D/T, dates, logs, child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
+| **SQL in the Where tab** | OpenSAK stores the data but has no filter row for it — the watch list, user sort, a bearing in degrees next to compass quadrants (the dialog has only one *Direction* row) | yes |
 | **A comment in the Where tab** | Nothing in OpenSAK can express it | no |
 
 The third case is why the Where tab of an imported filter often opens with a block of `--` lines. They do nothing; they are there so you can see exactly what GSAK filtered on and rebuild it yourself. A typical one looks like this:

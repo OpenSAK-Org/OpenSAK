@@ -10,6 +10,7 @@ import pytest
 from opensak.filters.engine import (
     DATE_OPS,
     DATE_UNITS,
+    DirectionFilter,
     LOG_CATEGORIES,
     LOG_SCOPE_CHOICES,
     TEXT_OPS,
@@ -245,12 +246,12 @@ class TestNewNativeRows:
                       "edtElevation2": "2000"})
         assert _statuses(c) == {"Elevation": NATIVE}
         f = c.filters[0]
-        assert (f.filter_type, f.min_m, f.max_m) == ("elevation", 1000, 2000)
+        assert (f.filter_type, f.op, f.elev1_m, f.elev2_m) == ("elevation", "between", 1000, 2000)
 
     def test_elevation_at_least(self):
         c = _convert({"cbxElevation": "2", "edtElevation": "1500"})
         f = c.filters[0]
-        assert (f.min_m, f.max_m) == (1500, 9000)
+        assert (f.op, f.elev1_m) == ("at_least", 1500)
 
     @pytest.mark.parametrize("yes,no,op", [("True", "False", "not_empty"),
                                            ("False", "True", "empty")])
@@ -273,6 +274,37 @@ class TestNewNativeRows:
         c = _convert({k: "True" for k in ("cbxN", "cbxNE", "cbxE", "cbxSE",
                                           "cbxS", "cbxSW", "cbxW", "cbxNW")})
         assert c.criteria == []
+
+    @pytest.mark.parametrize("op_idx,deg,op", [
+        ("1", "90", "at_most"),
+        ("2", "270", "at_least"),
+        ("3", "45", "equal"),
+    ])
+    def test_bearing_becomes_direction_filter(self, op_idx, deg, op):
+        # GSAK stores a single degree value (edtDegrees) — no range.
+        c = _convert({"cbxDegrees": op_idx, "edtDegrees": deg})
+        assert _statuses(c) == {"Bearing": NATIVE}
+        assert c.sql_parts == []
+        f = c.filters[0]
+        assert (f.filter_type, f.op, f.deg1) == ("direction", op, int(deg))
+        # No centre: the persisted Cache.bearing from the home point, in SQL.
+        assert (f.lat, f.lon) == (None, None)
+        restored = DirectionFilter.from_dict(f.to_dict())
+        assert (restored.op, restored.deg1, restored.lat) == (op, int(deg), None)
+
+    def test_bearing_off_is_no_criterion(self):
+        c = _convert({"cbxDegrees": "0", "edtDegrees": "90"})
+        assert c.criteria == []
+
+    def test_bearing_next_to_quadrants_stays_sql(self):
+        pairs = {k: "False" for k in ("cbxN", "cbxNE", "cbxE", "cbxSE",
+                                      "cbxS", "cbxSW", "cbxW", "cbxNW")}
+        pairs.update(cbxN="True", cbxDegrees="1", edtDegrees="30")
+        c = _convert(pairs)
+        assert _statuses(c) == {"Bearing": SQL, "Compass quadrants": NATIVE}
+        assert [f.filter_type for f in c.filters] == ["direction"]
+        assert c.filters[0].directions == ["N"]
+        assert c.sql_parts == [("Bearing", "bearing <= 30")]
 
     def test_reverse_filter_negates_filterset(self):
         c = _convert({"chkFound": "False", "chkNotFound": "True", "chkReverse": "True"})

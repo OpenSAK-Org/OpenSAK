@@ -176,7 +176,8 @@ NUM_OP: dict[int, Optional[str]] = {
     3: "equals",
     4: "between",
 }
-# The same operators under the names OpenSAK's log/waypoint count rows use.
+# The same operators under the names OpenSAK's condition rows use — the
+# log/waypoint counts, favourite points, elevation and bearing.
 NUM_OP_TO_COUNT_OP: dict[str, str] = {
     "at_most": "at_most",
     "at_least": "at_least",
@@ -1603,15 +1604,7 @@ def _convert_favorites(gf: GsakFilter, c: Conversion) -> None:
     if bounds is None:
         return
     op, v1, v2 = bounds
-    if op == "at_most":
-        lo, hi = 0, v1
-    elif op == "at_least":
-        lo, hi = v1, 9999
-    elif op == "equals":
-        lo, hi = v1, v1
-    else:
-        lo, hi = v1, v2
-    c.native("Favourite points", FavoritePointsFilter(min_pts=lo, max_pts=hi))
+    c.native("Favourite points", FavoritePointsFilter(NUM_OP_TO_COUNT_OP[op], v1, v2))
 
 
 def _convert_distance(gf: GsakFilter, c: Conversion, opts: Options) -> None:
@@ -2104,9 +2097,7 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
     bounds = _num_bounds(gf, c, "Elevation", "cbxElevation", "edtElevation", "edtElevation2")
     if bounds is not None:
         op, v1, v2 = bounds
-        lo, hi = {"at_most": (-500, v1), "at_least": (v1, 9000),
-                  "equals": (v1, v1)}.get(op, (v1, v2))
-        c.native("Elevation", ElevationFilter(min_m=lo, max_m=hi))
+        c.native("Elevation", ElevationFilter(NUM_OP_TO_COUNT_OP[op], v1, v2))
 
     # Numeric criteria OpenSAK stores as a column but has no filter row for.
     for label, op_key, v1_key, v2_key, column, extra in (
@@ -2119,11 +2110,6 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
          "My found count: GSAK's FoundCount is really a 0/1 found-by-me flag, while "
          "OpenSAK's found_log_count counts your own found-type logs, so it is >= 1 for "
          "exactly the caches GSAK counted as 1"),
-        # OpenSAK persists a bearing per cache, recomputed whenever the centre
-        # point changes (db/database.py::recalculate_distances).
-        ("Bearing", "cbxDegrees", "edtDegrees", None, "bearing",
-         "Bearing: measured from the ACTIVE centre point, and only as fresh as the last "
-         "distance recalculation"),
     ):
         bounds = _num_bounds(gf, c, label, op_key, v1_key, v2_key)
         if bounds is None:
@@ -2141,6 +2127,7 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
             f"does not store"
         ))
 
+    _convert_bearing(gf, c)
     _convert_quadrants(gf, c)
 
     if gf.flag("chkReverse", False):
@@ -2149,15 +2136,48 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
         c.criteria.append(Criterion("Reverse filter", NATIVE))
 
 
+def _convert_bearing(gf: GsakFilter, c: Conversion) -> None:
+    """GSAK's "Degrees" criterion → a DirectionFilter's bearing condition.
+
+    Left without a centre, so it reads the persisted Cache.bearing — measured
+    from the active home point like GSAK's — and stays pushable to SQL.
+    """
+    bounds = _num_bounds(gf, c, "Bearing", "cbxDegrees", "edtDegrees", None)
+    if bounds is None:
+        return
+    op, v1, v2 = bounds
+    if _quadrant_selection(gf):
+        # The filter dialog holds one direction row, which the compass
+        # quadrants take; the degrees still apply as SQL next to them.
+        c.sql("Bearing", _num_sql("bearing", op, v1, v2))
+        c.note("Bearing: the compass quadrants already take the filter dialog's direction "
+               "row, so the degree condition was kept as SQL on the bearing column")
+        return
+    c.native("Bearing", DirectionFilter(op=NUM_OP_TO_COUNT_OP[op], deg1=v1, deg2=v2))
+    note = ("Bearing: measured from the ACTIVE centre point, like GSAK, and only as fresh "
+            "as the last distance recalculation")
+    if op == "equals":
+        note += ("; \"equal\" matches the whole degree (±0.5°), where GSAK compared the "
+                 "exact stored bearing")
+    c.note(note)
+
+
+def _quadrant_selection(gf: GsakFilter) -> list[str]:
+    """Direction codes of the ticked compass quadrants — empty when none
+    were recorded or all are ticked, i.e. when they restrict nothing."""
+    present = [k for k in _QUADRANTS if k in gf.kv]
+    selected = [k for k in present if gf.flag(k)]
+    if len(selected) == len(present):
+        return []
+    return [_QUADRANTS[k] for k in selected]
+
+
 def _convert_quadrants(gf: GsakFilter, c: Conversion) -> None:
     """Compass-quadrant tick boxes → a DirectionFilter."""
-    present = [k for k in _QUADRANTS if k in gf.kv]
-    if not present:
+    selected = _quadrant_selection(gf)
+    if not selected:
         return
-    selected = [k for k in present if gf.flag(k)]
-    if len(selected) == len(present) or not selected:
-        return   # all ticked (or none recorded) = no restriction
-    c.native("Compass quadrants", DirectionFilter([_QUADRANTS[k] for k in selected]))
+    c.native("Compass quadrants", DirectionFilter(selected))
     c.note("Compass quadrants: measured from the ACTIVE centre point, like GSAK")
 
 
