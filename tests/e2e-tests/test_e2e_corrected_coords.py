@@ -183,3 +183,65 @@ def test_clear_corrected_coords_removes_from_db(seeded_window, qtbot, monkeypatc
     if note is not None:
         assert note.corrected_lat is None
         assert note.corrected_lon is None
+
+
+# ── End-to-end: detail panel follows changes from other entry points ─────────
+
+
+def _table_cache(window, gc_code: str):
+    model = window._cache_table.model()
+    for row in range(model.rowCount()):
+        cache = model.cache_at(row)
+        if cache and cache.gc_code == gc_code:
+            return cache
+    pytest.fail(f"{gc_code} not found in table")
+
+
+def test_table_context_menu_refreshes_detail_panel(seeded_window, qtbot):
+    # Setting/clearing corrected coords via the table context menu must update
+    # the detail panel when it shows that cache — not only table and map.
+    window = seeded_window
+    _select_cache(window, qtbot, "GC12345")
+    panel = window._detail_panel
+    assert panel._corrected_lat is None
+
+    window._cache_table._save_corrected(_table_cache(window, "GC12345"), 56.0, 13.0)
+    qtbot.wait(100)
+
+    assert panel._current_gc_code == "GC12345"
+    assert panel._corrected_lat == pytest.approx(56.0)
+    assert panel._corrected_lon == pytest.approx(13.0)
+    assert panel._corrected_frame.isVisibleTo(panel)
+
+    window._cache_table._clear_corrected(_table_cache(window, "GC12345"))
+    qtbot.wait(100)
+
+    assert panel._corrected_lat is None
+    assert not panel._corrected_frame.isVisibleTo(panel)
+
+
+def test_map_context_menu_refreshes_detail_panel(seeded_window, qtbot):
+    # "Set corrected here" on the map must update the detail panel too.
+    window = seeded_window
+    _select_cache(window, qtbot, "GC12345")
+    panel = window._detail_panel
+
+    window._on_set_corrected_from_map("GC12345", 56.5, 13.5)
+    qtbot.wait(100)
+
+    assert panel._current_gc_code == "GC12345"
+    assert panel._corrected_lat == pytest.approx(56.5)
+    assert panel._corrected_lon == pytest.approx(13.5)
+
+
+def test_change_on_other_cache_leaves_detail_panel_alone(seeded_window, qtbot):
+    # A change to a cache that isn't shown must not switch the detail panel.
+    window = seeded_window
+    _select_cache(window, qtbot, "GC12345")
+    panel = window._detail_panel
+
+    window._on_set_corrected_from_map("GC99999", 56.5, 13.5)
+    qtbot.wait(100)
+
+    assert panel._current_gc_code == "GC12345"
+    assert panel._corrected_lat is None

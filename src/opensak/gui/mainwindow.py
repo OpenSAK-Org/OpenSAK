@@ -1641,11 +1641,15 @@ class MainWindow(QMainWindow):
         self._on_corrected_coords_changed(gc_code)
 
     def _on_corrected_coords_changed(self, gc_code: GcCode) -> None:
-        """Update the map pin and table row after corrected coordinates change."""
+        """Update the map pin, table row and detail panel (if this cache is
+        currently shown) after corrected coordinates change — whichever entry
+        point (detail panel, table context menu, map context menu) made it."""
         self._cache_table.refresh_cache_row(gc_code)
         full = self._load_full_cache(gc_code)
         if full:
             self._map_widget.update_cache(full)
+            if getattr(self._detail_panel, "_current_gc_code", None) == gc_code:
+                self._detail_panel.show_cache(full)
 
     def _on_found_status_changed(self, gc_code: GcCode) -> None:
         """Issue #649: refresh table row, map pin, detail panel (if this

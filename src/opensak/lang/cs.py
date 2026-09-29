@@ -1002,6 +1002,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Původní souřadnice:",
     "corrected_dialog_corrected":   "Opravené souřadnice:",
     "corrected_dialog_copy_tooltip": "Kopírovat do schránky",
+    "corrected_dialog_offset":      "Vzdálenost od originálu: {distance}  ·  Azimut: {bearing}",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Vzdálenost & Azimut",

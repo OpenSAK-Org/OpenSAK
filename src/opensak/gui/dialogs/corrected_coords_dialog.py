@@ -20,6 +20,10 @@ from PySide6.QtGui import QFont
 
 from opensak.lang import tr
 from opensak.coords import format_coords, parse_coords
+from opensak.filters.engine import (
+    DIRECTIONS, _bearing_deg, bearing_direction, distance_km,
+)
+from opensak.gui.dialogs.distance_bearing_dialog import _format_distance
 from opensak.gui.settings import get_settings
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode, CoordFormat
@@ -164,6 +168,13 @@ class CorrectedCoordsDialog(QDialog):
         self._corrected_panel_widget: Optional[QFrame] = None
         layout.addLayout(self._corrected_panel_container)
 
+        # ── Afstand og retning fra originale koordinater ──────────────────────
+        self._offset_lbl = QLabel("")
+        self._offset_lbl.setStyleSheet("font-weight: bold;")
+        self._offset_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._offset_lbl.setVisible(False)
+        layout.addWidget(self._offset_lbl)
+
         # ── Knapper ───────────────────────────────────────────────────────────
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok |
@@ -221,10 +232,36 @@ class CorrectedCoordsDialog(QDialog):
             self._corrected_lbl.setVisible(True)
             self._corrected_panel_widget = self._make_coords_panel(lat, lon)
             self._corrected_panel_container.addWidget(self._corrected_panel_widget)
-            self.adjustSize()
         else:
             self._corrected_lbl.setVisible(False)
-            self.adjustSize()
+        self._update_offset(lat, lon)
+        self.adjustSize()
+
+    def _update_offset(self, lat: Optional[float], lon: Optional[float]) -> None:
+        """Vis afstand og retning fra originale til korrigerede koordinater.
+
+        Skjules når originale koordinater mangler eller input er ugyldigt.
+        Fanger tastefejl (forkert minut-ciffer, forkert halvkugle) — mystery
+        final-koordinater ligger typisk inden for 2 mi / 3.2 km af de originale.
+        """
+        if (lat is None or lon is None
+                or self._orig_lat is None or self._orig_lon is None):
+            self._offset_lbl.setVisible(False)
+            return
+        metres = distance_km(self._orig_lat, self._orig_lon, lat, lon) * 1000.0
+        if metres < 0.5:
+            bearing = "—"
+        else:
+            deg = _bearing_deg(self._orig_lat, self._orig_lon, lat, lon)
+            dirs = dict(zip(DIRECTIONS, tr("bearing_dirs").split()))
+            code = bearing_direction(deg)
+            bearing = f"{deg:.0f}° {dirs.get(code, code)}"
+        self._offset_lbl.setText(tr(
+            "corrected_dialog_offset",
+            distance=_format_distance(metres, get_settings().use_miles),
+            bearing=bearing,
+        ))
+        self._offset_lbl.setVisible(True)
 
     def _on_accept(self) -> None:
         if self._lat is not None and self._lon is not None:

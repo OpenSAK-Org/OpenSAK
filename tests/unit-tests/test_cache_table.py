@@ -1493,6 +1493,8 @@ class TestView:
         db_session.commit()
         cache = _cache(gc_code="GCCC", latitude=55.0, longitude=12.0)
         view.load_caches([cache])
+        # mainwindow refreshes the row from this signal (see _on_corrected_coords_changed)
+        view.corrected_coords_changed.connect(view.refresh_cache_row)
         view._save_corrected(cache, 56.0, 13.0)
         refreshed = view._model.cache_at(0)
         assert refreshed.user_note is not None
@@ -1545,6 +1547,7 @@ class TestView:
         cache_a = _cache(gc_code="GCA", latitude=55.0, longitude=12.0)
         cache_b = _cache(gc_code="GCB", latitude=56.0, longitude=13.0)
         view.load_caches([cache_a, cache_b])
+        view.corrected_coords_changed.connect(view.refresh_cache_row)
 
         # Simulate the user having GCA selected (shown in the detail panel).
         # Use select_by_gc_code rather than assuming insertion order == row

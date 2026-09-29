@@ -1002,6 +1002,7 @@ STRINGS: dict[str, str] = {
     "corrected_dialog_original":    "Oryginalne współrzędne:",
     "corrected_dialog_corrected":   "Poprawione współrzędne:",
     "corrected_dialog_copy_tooltip": "Kopiuj do schowka",
+    "corrected_dialog_offset":      "Odległość od oryginału: {distance}  ·  Azymut: {bearing}",
 
     # ── Distance & bearing dialog ─────────────────────────────────────────────
     "dist_title":                   "Odległość i azymut",
