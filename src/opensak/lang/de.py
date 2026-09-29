@@ -86,6 +86,14 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Einstellungen…",
     "action_found_update":          "⟳  Funde aus Referenz-Datenbank aktualisieren",
+    # Lua macros (proof of concept)
+    "action_run_macro":             "Makro ausführen (Lua)…",
+    "macro_title":                  "Makro (Lua) — Proof of Concept",
+    "macro_btn_open":               "Öffnen…",
+    "macro_btn_run":                "▶  Ausführen",
+    "macro_open_title":             "Lua-Makro öffnen",
+    "macro_done":                   "Makro beendet.",
+    "macro_error":                  "Makrofehler: {msg}",
     "action_update_location":       "Standortdaten der Wegpunkte aktualisieren…",
     "action_download_boundaries":   "Grenzpolygon-Pakete herunterladen…",
     "action_check_boundaries":      "Nach Grenzpolygon-Aktualisierungen suchen…",
@@ -126,6 +134,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Tools",
+    "menu_macros":                  "&Makros",
     "action_coord_converter":       "⇄  &Koordinaten-Konverter…",
     "action_projection":            "📐  &Koordinaten-Projektion…",
     "action_checksum":              "🔢  &Koordinaten-Checksumme…",

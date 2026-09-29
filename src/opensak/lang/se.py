@@ -86,6 +86,14 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Inställningar…",
     "action_found_update":          "⟳  Uppdatera hittade från referensdatabasen…",
+    # Lua macros (proof of concept)
+    "action_run_macro":             "Kör makro (Lua)…",
+    "macro_title":                  "Makro (Lua) — konceptbevis",
+    "macro_btn_open":               "Öppna…",
+    "macro_btn_run":                "▶  Kör",
+    "macro_open_title":             "Öppna Lua-makro",
+    "macro_done":                   "Makrot är klart.",
+    "macro_error":                  "Makrofel: {msg}",
     "action_update_location":       "Update waypoint locations…",
     "action_download_boundaries":   "Ladda ner gränspaket…",
     "action_check_boundaries":      "Sök efter uppdateringar av gränsdata…",
@@ -126,6 +134,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Verktyg",
+    "menu_macros":                  "&Makron",
     "action_coord_converter":       "⇄  &Konvertera koordinater…",
     "action_projection":            "📐  &Koordinat Projection…",
     "action_checksum":              "🔢  &Checksumma av tal…",

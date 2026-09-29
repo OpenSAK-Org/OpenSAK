@@ -39,6 +39,8 @@ dependencies = [
     "shapely>=2.0,<3",
     "pywin32>=306; platform_system == 'Windows'",
     "keyring>=25.0,<26",
+    # Lua macros (proof of concept, roadmap item 2)
+    "lupa>=2.0,<3",
 ]
 
 [project.optional-dependencies]

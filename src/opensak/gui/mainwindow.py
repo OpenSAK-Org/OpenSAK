@@ -547,6 +547,15 @@ class MainWindow(QMainWindow):
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
 
+        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        macros_menu = menubar.addMenu(tr("menu_macros"))
+        # Beta-only until the macro API is settled (#938 step 4).
+        macros_menu.menuAction().setVisible(flags.lua_macros)
+
+        act_run_macro = QAction(tr("action_run_macro"), self)
+        act_run_macro.triggered.connect(self._open_macro_dialog)
+        macros_menu.addAction(act_run_macro)
+
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
 
@@ -2600,6 +2609,13 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self._show_filter_dialog(filterset, profile_name))
             return
 
+        self._show_filter_result(filterset, profile_name, caches)
+
+    def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
+        """Make *filterset* the active filter and show its (non-empty) *caches*.
+
+        Shared by the "Set filter" dialog and Lua macros (opensak.filter).
+        """
         self._current_filterset = filterset
         self._active_filter_name = profile_name
         self._save_sort_for_active_db()
@@ -3022,6 +3038,41 @@ class MainWindow(QMainWindow):
 
     def _on_trip_planner_destroyed(self) -> None:
         self._trip_planner_win = None
+
+    # ── Lua macros (proof of concept) — MacroHost for opensak.macro ─────────
+
+    def _open_macro_dialog(self) -> None:
+        from opensak.gui.dialogs.macro_dialog import MacroDialog
+        if getattr(self, "_macro_dialog", None) is None:
+            self._macro_dialog = MacroDialog(host=self, parent=self)
+        self._macro_dialog.show()
+        self._macro_dialog.raise_()
+        self._macro_dialog.activateWindow()
+
+    def apply_filter(self, filterset, label: str) -> int:
+        """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result
+        leaves the current view untouched and returns 0."""
+        with get_session() as session:
+            caches = apply_filters_auto(
+                session, filterset, self._current_sort,
+                columns=self._visible_table_columns(),
+            )
+        if caches:
+            self._show_filter_result(filterset, label, caches)
+        return len(caches)
+
+    def clear_filter(self) -> None:
+        """MacroHost: remove the active filter (the list reloads asynchronously)."""
+        self._clear_filter()
+
+    def cache_count(self) -> int:
+        """MacroHost: number of caches matching the active filter.
+
+        Asks the database rather than the table: clear_filter() (and any
+        other _refresh_cache_list()) reloads the table asynchronously, so its
+        row count would still be stale right after the call."""
+        with get_session() as session:
+            return len(apply_filters_auto(session, self._build_active_filterset()))
 
     def _open_found_updater(self) -> None:
         if self._trip_planner_active():

@@ -1,4 +1,5 @@
 {
   "reverse-geocoding": true,
-  "map-popout": true
+  "map-popout": true,
+  "lua-macros": true
 }

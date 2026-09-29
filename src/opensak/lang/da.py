@@ -86,6 +86,14 @@ STRINGS: dict[str, str] = {
     # Funktioner-menu
     "action_settings":              "&Indstillinger…",
     "action_found_update":          "⟳  Opdater fund fra reference database…",
+    # Lua macros (proof of concept)
+    "action_run_macro":             "Kør makro (Lua)…",
+    "macro_title":                  "Makro (Lua) — proof of concept",
+    "macro_btn_open":               "Åbn…",
+    "macro_btn_run":                "▶  Kør",
+    "macro_open_title":             "Åbn Lua-makro",
+    "macro_done":                   "Makro færdig.",
+    "macro_error":                  "Makrofejl: {msg}",
     "action_update_location":       "Update waypoint locations…",
     "action_download_boundaries":   "Download grænsefladedata…",
     "action_check_boundaries":      "Søg efter opdateringer til grænsefladedata…",
@@ -126,6 +134,7 @@ STRINGS: dict[str, str] = {
 
     # ── Geocaching Værktøjer-menu ─────────────────────────────────────────────
     "menu_gc_tools":                "&Værktøjer",
+    "menu_macros":                  "&Makroer",
     "action_coord_converter":       "⇄  &Koordinatkonverter…",
     "action_projection":            "📐  &Koordinatprojektion…",
     "action_checksum":              "🔢  &Tjeksum-beregner…",
