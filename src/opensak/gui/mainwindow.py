@@ -365,6 +365,10 @@ class MainWindow(QMainWindow):
         self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
         file_menu.addAction(self._act_gsak_import)
 
+        self._act_gsak_filter_import = QAction(tr("action_gsak_filter_import"), self)
+        self._act_gsak_filter_import.triggered.connect(self._open_gsak_filter_import_dialog)
+        file_menu.addAction(self._act_gsak_filter_import)
+
         self._act_pq_email_check = QAction(tr("action_pq_email_check"), self)
         self._act_pq_email_check.triggered.connect(self._open_pq_email_check_dialog)
         file_menu.addAction(self._act_pq_email_check)
@@ -1844,6 +1848,21 @@ class MainWindow(QMainWindow):
         dlg = GsakImportDialog(self)
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
+
+    def _open_gsak_filter_import_dialog(self) -> None:
+        """Import GSAK's saved filters as OpenSAK filter profiles.
+
+        Unlike the cache import next to it this touches no cache data, so the
+        cache list and map are left alone — only the toolbar's profile
+        dropdown has to pick up the new profiles.
+        """
+        from opensak.gui.dialogs.gsak_filter_import_dialog import GsakFilterImportDialog
+        dlg = GsakFilterImportDialog(self)
+        dlg.import_completed.connect(self._on_filter_profiles_imported)
+        dlg.exec()
+
+    def _on_filter_profiles_imported(self) -> None:
+        self._populate_filter_profile_combo(select_name=self._active_filter_name or None)
 
     def _open_pq_email_check_dialog(self) -> None:
         if self._trip_planner_active():

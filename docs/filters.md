@@ -464,6 +464,64 @@ Once you have set up a useful combination, save it so you can reload it in one c
 
 ---
 
+## Importing GSAK's saved filters
+
+**File → Import GSAK Filters…** turns the filters you saved in GSAK into OpenSAK filter profiles. It is the companion of *Import from GSAK Database*: that one imports caches out of a cache database (`sqlite.db3`), this one imports filters out of GSAK's settings database (`gsak.db3`, normally `%AppData%\GSAK\gsak.db3`). A GSAK backup `.zip` works too — the `gsak.db3` inside it is found automatically.
+
+Pick the file, tick the filters you want (all of them are ticked to begin with; the search box narrows the list, and **Select all / Select none** apply to what the search currently shows), and press **Start import**. Existing profiles of the same name are kept and reported as skipped unless you tick **Overwrite filter profiles that already exist**.
+
+### Where each GSAK condition ends up
+
+Every condition in a GSAK filter lands in one of three places:
+
+| | What it means | Counts as migrated |
+|---|---|---|
+| **A filter** | The condition exists in the tabs above — cache types, D/T, dates (including *compared with* another date), logs (including *exclude*), child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
+| **SQL in the Where tab** | OpenSAK stores the data but has no filter row for it — the watch list, user sort, a bearing in degrees next to compass quadrants (the dialog has only one *Direction* row) | yes |
+| **A comment in the Where tab** | Nothing in OpenSAK can express it | no |
+
+The third case is why the Where tab of an imported filter often opens with a block of `--` lines. They do nothing; they are there so you can see exactly what GSAK filtered on and rebuild it yourself. A typical one looks like this:
+
+```sql
+-- NOT MIGRATED from the GSAK filter "Ideas_CH" (2 condition(s)).
+-- Rebuild these by hand, then delete the comment.
+--   User-defined GSAK column "Niggae_Ignore": OpenSAK stores no custom columns
+--     (only user_data_1-4) … The GSAK criterion was: Niggae_Ignore;bool;…
+--   Cache types "Waymark": GSAK has these cache types but OpenSAK does not …
+-- Watch list
+(coalesce(watch, 0) = 1)
+```
+
+The comments always come first and the executable SQL last, so the clause stays valid whatever you delete. Where a whole GSAK `WHERE` clause could not be translated, the translation-so-far is included in the comment, ready to be fixed up and uncommented — it is deliberately never left live, because SQL that fails to run would silently make the filter match nothing.
+
+The things that cannot be migrated are, in practice: GSAK's user-defined columns (OpenSAK has no custom columns, and the cache import does not carry them over), the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId, the GPX symbol name).
+
+Two conditions come across with a small difference, which the import reports list:
+
+- **Last *n* logs** — GSAK counts the last *n* logs among the ticked log groups only (found / not found / notes); OpenSAK counts them over every log. With all three groups ticked the two agree.
+- **Compared with another date** — no saved filter available when this was written used it, so the order of GSAK's comparison and date lists was inferred. Open the date row after importing and check it shows the comparison you meant.
+
+### The statistics after an import
+
+The results panel ends with a migration-coverage figure:
+
+```
+Migration coverage
+  GSAK conditions                  445
+  … migrated to filters            286
+  … migrated to Where SQL           63
+  … left as SQL comments            96
+
+  Coverage                      78.4 %
+    fully migrated (100 %)          54
+    partly migrated                 61
+    nothing migrated (0 %)           7
+```
+
+Coverage is counted over **conditions, not filters** — 100 % means every condition from every imported filter runs, 0 % means all of it sits in comments — so one filter with twenty conditions weighs more than one with two. Filters that came through with something left in comments are listed underneath, lowest coverage first, so you know which ones to open and finish.
+
+---
+
 ## Clearing filters
 
 Click **View → Clear filter** or use the clear button (shown in red when active) in the toolbar to remove all active filters and show the full cache list.
