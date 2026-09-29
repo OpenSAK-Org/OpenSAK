@@ -1,6 +1,7 @@
 # OpenSAK Roadmap
 
-*Last updated: 29 September 2026 (status notes added — priority order unchanged)*
+*Last updated: 29 September 2026 (status notes added, item 13 clarified — priority
+order unchanged)*
 
 *This reflects the current priority order for planned work. It's a living
 document and will be updated as things progress — not a fixed release schedule
@@ -92,13 +93,18 @@ here so the plans are visible while we wait.
 
 *Status: waiting for Partner API approval.*
 
-### 13. GSAK Macro Support
-Explore support for running GSAK-style macros within OpenSAK. This is a deliberate,
-longer-term item: it depends on both Geocaching.com API access and OpenSAK
-maturing further first, so it's not near-term — but it's on our radar, and we
-wanted it visible here rather than left unspoken.
+### 13. Macro & Scripting Support
+Give users a way to automate OpenSAK, as a modern successor to the GSAK Macro
+Language. The current concept is an embedded scripting language (Lua) with a
+documented OpenSAK macro API, so existing GSAK macros would be ported rather than
+run unchanged. This does not depend on Geocaching.com API access: macros can work
+with everything OpenSAK already stores, and only the extra fields that come from
+the API (item 12) will be missing until that access exists. It's a larger piece of
+work, which is why it sits further down the list.
 
-*Status: design phase — community use cases collected in #808–#813.*
+*Status: design phase — community use cases collected in #808–#813. A smaller
+first step for unattended use (command-line import of GPX files and GSAK databases,
+so a refresh can be scheduled overnight) is proposed as a separate issue.*
 
 ---
 
