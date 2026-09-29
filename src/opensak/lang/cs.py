@@ -86,6 +86,14 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Nastavení…",
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
+    # Lua macros (proof of concept)
+    "action_run_macro":             "Spustit makro (Lua)…",
+    "macro_title":                  "Makro (Lua) — ověření konceptu",
+    "macro_btn_open":               "Otevřít…",
+    "macro_btn_run":                "▶  Spustit",
+    "macro_open_title":             "Otevřít makro Lua",
+    "macro_done":                   "Makro dokončeno.",
+    "macro_error":                  "Chyba makra: {msg}",
     "action_update_location":       "Update waypoint locations…",
     "action_download_boundaries":   "Download boundary packs…",
     "action_check_boundaries":      "Check for boundary data updates…",

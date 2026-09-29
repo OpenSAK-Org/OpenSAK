@@ -89,6 +89,14 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Instellingen…",
     "action_found_update":          "⟳  Vondsten bijwerken vanuit referentiedatabase…",
+    # Lua macros (proof of concept)
+    "action_run_macro":             "Macro uitvoeren (Lua)…",
+    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_btn_open":               "Openen…",
+    "macro_btn_run":                "▶  Uitvoeren",
+    "macro_open_title":             "Lua-macro openen",
+    "macro_done":                   "Macro voltooid.",
+    "macro_error":                  "Macrofout: {msg}",
     "action_update_location":       "🌍  Waypointlocaties bijwerken…",
     "action_download_boundaries":   "Grenspakketten downloaden…",
     "action_check_boundaries":      "Zoeken naar updates voor grensgegevens…",
