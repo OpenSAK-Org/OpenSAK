@@ -13,7 +13,9 @@ means the betas leading up to it.
 ## 0. Preconditions — don't start until these are true
 
 - [ ] No open release-blocking issues on the milestone for `X.Y.0`
-- [ ] Latest beta tested and confirmed on **macOS** (e.g. Mike Wood, Bob Long)
+- [ ] Latest beta tested and confirmed on **macOS** (e.g. Mike Wood, Bob Long,
+      or our own Mac Mini), including in-app update ("Download & Install")
+      from the previous beta and Settings → Advanced → Uninstall
 - [ ] Latest beta tested and confirmed on **Windows** (e.g. Hans), including
       the Microsoft Store/MSIX build if anything Windows-specific changed
 - [ ] Latest beta tested on **Linux**, including AppImage self-update
@@ -122,9 +124,11 @@ merge in §3, so they ship with the release.
 
 - [ ] On `main`: `git tag vX.Y.0 && git push origin vX.Y.0` — pushing the tag
       is what triggers `build.yml`, `screenshots.yml` and `deploy-site.yml`
-- [ ] `build.yml` attached all four artifacts to the GitHub Release:
+- [ ] `build.yml` attached all five files to the GitHub Release:
       `OpenSAK-vX.Y.0-Windows.zip`, `OpenSAK-vX.Y.0-Linux-x86_64.AppImage`,
-      `OpenSAK-vX.Y.0-macOS-arm64.dmg`, `OpenSAK-vX.Y.0-macOS-x86_64.dmg`
+      `OpenSAK-vX.Y.0-macOS-arm64.dmg`, `OpenSAK-vX.Y.0-macOS-x86_64.dmg`,
+      and `SHA256SUMS.txt` — the in-app "Download & Install" refuses to
+      install without it (#572)
 - [ ] The release is **not** marked as a pre-release (set automatically from
       the tag name — just confirm)
 - [ ] `deploy-site.yml` ran and opensak.com shows the new version, and the

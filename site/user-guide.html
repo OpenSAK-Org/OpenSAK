@@ -933,9 +933,9 @@ python run.py</code></pre>
     <h3>Filter Tabs</h3>
     <p>The filter dialog has ten tabs, modelled on GSAK's filter dialog:</p>
     <ul>
-      <li><strong>General</strong> — name, GC code, placed by, owner, type, container, difficulty, terrain, distance from a centre point, found/not found, availability, premium, corrected coords (including how far they lie from the posted ones)</li>
+      <li><strong>General</strong> — name, GC code, placed by, owner, type, container, difficulty, terrain, found/not found, availability, premium, corrected coords</li>
       <li><strong>Dates</strong> — eight date fields (see <a href="#filter-types">All Filter Types</a>), each with its own condition</li>
-      <li><strong>Other</strong> — country, state, county, user data 1–4, GC.com note, personal note, direction, user flag, DNF flag, FTF flag, favorite points range, elevation, locked</li>
+      <li><strong>Other</strong> — country, state, county, user data 1–4, GC.com note, personal note, user flag, DNF flag, FTF flag, favorite points, elevation, locked, and a block with one shared <strong>centre point</strong> for distance, direction, and how far corrected coordinates lie from the posted ones</li>
       <li><strong>Logs</strong> — filter by the logs on a cache: which logs, what type, who logged them, and how many</li>
       <li><strong>Line/Polygon</strong> — caches near a route or track, near a set of points, or inside a polygon</li>
       <li><strong>Child Waypoints</strong> — filter by a cache's child waypoints (code, type, name, comment, date, count)</li>
@@ -982,7 +982,7 @@ python run.py</code></pre>
         <tr><td>Country / State / County</td><td>Any of the 12 text operators</td></tr>
         <tr><td>User data 1–4 / GC.com note</td><td>GSAK's four User data fields and the personal cache note synced from geocaching.com — any of the 12 text operators</td></tr>
         <tr><td>Personal note</td><td>The text of your own note (Notes tab) — any of the 12 text operators. Use <em>empty</em> / <em>not empty</em> for a simple yes/no check; filters saved with the old Yes/No checkboxes are converted automatically</td></tr>
-        <tr><td>Direction</td><td>Compass directions (N, NE, E … NW) from your active home point — the same bearing as the Bearing column. All eight are ticked by default</td></tr>
+        <tr><td>Direction</td><td>Direction from the centre point, either as a bearing in degrees (0° = north, clockwise) with the same operators as Distance — <em>Between</em> runs clockwise, so 315°–45° is the sector through north — or by clicking compass directions (N, NE, E … NW), which fills in the matching degree range. Direction filters saved in earlier versions still match from your home point until edited</td></tr>
         <tr><td>Attribute</td><td>Any of ~70 Groundspeak attributes, Yes/No/Any — all must match (AND) or any may match (OR)</td></tr>
         <tr><td>Trackables</td><td>Has / has no trackables, plus trackable name and tracking code (text operators) and count (Any, Equal, At least, At most, Between). Name and code must match on the same trackable; <em>Count equal 0</em> finds caches without a matching trackable</td></tr>
         <tr><td>Premium / Non-premium</td><td>Membership requirement</td></tr>
@@ -993,8 +993,8 @@ python run.py</code></pre>
         <tr><td>DNF</td><td>Did Not Find flag set/not set</td></tr>
         <tr><td>FTF</td><td>First to Find flag set/not set</td></tr>
         <tr><td>Locked</td><td>Cache is locked against import overwrites — yes/no</td></tr>
-        <tr><td>Favorite points</td><td>Community favorites in a numeric range</td></tr>
-        <tr><td>Elevation</td><td>Elevation within a range, in metres (feet with miles selected). Caches with unknown elevation never match</td></tr>
+        <tr><td>Favorite points</td><td>Community favorites, with the same operators as Distance. Caches without favorite points count as 0</td></tr>
+        <tr><td>Elevation</td><td>Elevation in metres (feet with miles selected), with the same operators as Distance. Caches with unknown elevation never match. Filters saved with the older from/to range for favorite points or elevation are converted automatically</td></tr>
         <tr><td>Dates</td><td>Last found, Hidden date, Found by me date, DNF date, Creation date, Last GPX update, Latest log date, Changed date — each with on or before / on or after / equal / between, "during" or "not during" the last N days/weeks/months/years, or compared with another date field. Creation, Last GPX update and Changed date also accept a time</td></tr>
         <tr><td>Logs</td><td>Which logs are searched (all, or only each cache's latest / last <em>N</em>), log type or Found / Not found / Other, log date, who logged it (text operators or numeric user ID), and how many matching logs are required (at least / at most / equal / between), with Include/Exclude</td></tr>
         <tr><td>Child waypoints</td><td>Code, type, name, comment, date, created-by-user, and count — all criteria must hold for the same waypoint</td></tr>
@@ -1034,8 +1034,8 @@ python run.py</code></pre>
         <tr><td>Latest log is a DNF</td><td>Logs tab: Logs to search = Latest + Not found only</td></tr>
         <tr><td>Caches without a parking waypoint</td><td>Child Waypoints tab: Type contains "Parking" + Count equal 0</td></tr>
         <tr><td>Caches along a route</td><td>Line/Polygon tab: Line, load the route from a GPX file, distance 0.5 km</td></tr>
-        <tr><td>Solved finals outside the 2-mile rule</td><td>General tab: Distance corrected ↔ posted, More than 3219 m</td></tr>
-        <tr><td>Caches north of home</td><td>Other tab: Direction, untick everything except NW, N and NE</td></tr>
+        <tr><td>Solved finals outside the 2-mile rule</td><td>Other tab: Distance corrected ↔ posted, More than 3219 m</td></tr>
+        <tr><td>Caches north of home</td><td>Other tab: centre point = your home point, Direction <em>Between</em> 315° and 45° (or click NW, N and NE on the compass)</td></tr>
         <tr><td>Caches without a geocoin</td><td>Trackables tab: Name contains "coin" + Count equal 0</td></tr>
         <tr><td>Everything except easy traditionals</td><td>Type = Traditional + Difficulty ≤ 2, then tick <strong>Invert filter</strong></td></tr>
       </tbody>

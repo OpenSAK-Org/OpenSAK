@@ -40,9 +40,9 @@ The filter dialog is split across ten tabs:
 
 | Tab | What's on it |
 |---|---|
-| **General** | Cache type, container, D/T, found status, availability, distance, premium, trackables, corrected coordinates |
+| **General** | Cache type, container, D/T, found status, availability, premium, trackables, corrected coordinates |
 | **Dates** | Hidden date, found by me date, DNF date, last log date |
-| **Other** | Country / State / County, user data 1–4, GC.com note, personal note, direction, user flag, DNF, FTF, favourite points, elevation, locked |
+| **Other** | Country / State / County, user data 1–4, GC.com note, personal note, user flag, DNF, FTF, favourite points, elevation, locked — plus one block with a shared **centre point** for distance, direction, and distance corrected ↔ posted |
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
 | **Child Waypoints** | Caches by their child waypoints — code, type, date, name, comment, created by user, count |
@@ -151,7 +151,7 @@ All three can be toggled independently. Default: available only.
 
 ### Distance
 
-Filter on the distance from a centre point — your home point, a saved point, the selected cache or a custom coordinate. Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance. The unit (km or mi) follows your preference set in Settings. *Equal* matches within ±5 m. For *Between* / *Not between* the two values may be entered in either order; the smaller one is moved to the first box when the filter is applied.
+Filter on the distance from a centre point — your home point, a saved point, the selected cache or a custom coordinate. The centre point is chosen once, at the top of the centre-point block on the **Other** tab, and is shared with the Direction filter. Check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance. The unit (km or mi) follows your preference set in Settings. *Equal* matches within ±5 m. For *Between* / *Not between* the two values may be entered in either order; the smaller one is moved to the first box when the filter is applied.
 
 Examples: *At most 10 km* is the classic radius; *Between 5 and 20 km* skips the caches right around you; *More than 100 km* finds caches far from home.
 
@@ -293,7 +293,7 @@ Both text criteria must hold for the **same** trackable. Count is the number of 
 | Has corrected | Only caches where you have stored corrected (puzzle-solved) coordinates |
 | No corrected | Only caches without corrected coordinates |
 
-**Distance corrected ↔ posted** — check **Enable** to filter on how far a cache's corrected coordinates lie from its posted coordinates. Pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance in metres (feet when miles are selected in Settings). *Equal* compares to the whole metre. As with the centre-point distance, a reversed *Between* range is put in order when applied. Caches without corrected coordinates never match.
+**Distance corrected ↔ posted** — check **Enable** to filter on how far a cache's corrected coordinates lie from its posted coordinates. Pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the distance in metres (feet when miles are selected in Settings). *Equal* compares to the whole metre. As with the centre-point distance, a reversed *Between* range is put in order when applied. Caches without corrected coordinates never match. Available in the centre-point block on the **Other** tab.
 
 Examples: *More than 3219 m* finds solved finals outside the 2-mile rule (often a typo); *Equal 0 m* finds caches whose corrected coordinates are just the posted ones.
 
@@ -301,9 +301,14 @@ Examples: *More than 3219 m* finds solved finals outside the 2-mile rule (often 
 
 ### Direction
 
-Show only caches lying in the selected compass directions (N, NE, E, SE, S, SW, W, NW) as seen from your active home point — the same bearing shown in the **Bearing** column. Each direction covers a 45° sector centred on it (N = 337.5°–22.5°). Available on the **Other** tab.
+Show only caches lying in a given direction as seen from the centre point (see *Distance* above). Available in the centre-point block on the **Other** tab. There are two ways to set it:
 
-All eight are checked by default, so the filter has no effect until you uncheck at least one. Caches without coordinates never match.
+- **Degrees** — check **Enable**, pick an operator — *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between (inclusive)* or *Not between* — and enter the bearing: 0° = north, 90° = east, clockwise. *Between* runs clockwise, so 315° – 45° is the sector through north.
+- **Compass** — click the directions (N, NE, E, SE, S, SW, W, NW) on the compass rose. Each covers a 45° sector centred on it (N = 337.5°–22.5°), and clicking fills in the matching degree range. Directions that aren't next to each other can't be written as one range; the degree values are then greyed out. Changing the degree values again replaces the clicked directions.
+
+The ⓘ button next to the filter explains both modes. Caches without coordinates never match.
+
+Direction filters saved in earlier versions keep matching exactly as before — measured from your active home point, the same bearing as the **Bearing** column — until you edit them.
 
 ---
 

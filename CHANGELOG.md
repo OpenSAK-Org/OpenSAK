@@ -4,515 +4,140 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.20.0-beta.15] — 2026-09-29
+## [1.20.0] — 2026-09-29
 
-### Changed
-
-- **Filter dialog: favourite points and elevation use conditions (#921, part
-  of #821)** — Instead of a from/to range, pick Equal, Less than, At most,
-  More than, At least, Between or Not between, the same conditions as the
-  distance filters. Caches without favourite points count as 0; caches with
-  unknown elevation never match. Saved filter profiles with the old range
-  are converted automatically and select the same caches.
-- **Filter dialog: centre-point filters grouped on the Other tab (part of
-  #821)** — *Distance from centre point*, *Direction from centre point* and
-  *Distance corrected ↔ posted* now sit together in one block with a single
-  shared centre-point picker.
-- **Filter dialog: Direction by degrees or compass (part of #821)** — The
-  direction can now be set as a bearing in degrees with the usual conditions
-  (0° = north, clockwise). *Between* runs clockwise, so 315°–45° is the
-  sector through north. Clicking directions on the compass rose still works
-  and fills in the matching degree range. The direction is measured from the
-  chosen centre point instead of always from your home point. A new ⓘ button
-  explains both modes. Saved direction filters keep matching exactly as
-  before until you edit them.
-
-### Fixed
-
-- **Filter dialog: the centre point label was not aligned with its dropdown
-  (#926)**.
-
-Thanks to nagisml for this work.
-
----
-
-## [1.20.0-beta.14] — 2026-09-28
-
-### Fixed
-
-- **Button labels were cut off in several dialogs (#927)** — In some
-  languages, longer button texts were clipped, for example *Durchsuchen…*
-  (Browse…) in the German **New Database** dialog. Buttons now always fit
-  their translated text. This affected the Browse, Scan, Save, Copy and
-  Decode hint buttons in the New Database, Send to GPS, Filter, Columns,
-  Coordinate Converter, Projection, Midpoint and Corrected Coordinates
-  dialogs, the Welcome Wizard and the cache details panel. Thanks to the
-  Facebook group member who reported it.
-
----
-
-## [1.20.0-beta.13] — 2026-09-28
+> First stable release of the 1.20.0 cycle. Replaces the `1.20.0-beta.1`
+> … `1.20.0-beta.15` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: the Filter dialog comes close
+> to GSAK parity (Logs, Child Waypoints and Trackables tabs, Invert filter,
+> and many new fields and conditions); OpenSAK now updates itself on
+> Windows and macOS, and can be uninstalled from inside the app on macOS
+> and Linux; the Microsoft Store is the recommended way to install on
+> Windows; a much more capable Edit Cache dialog; and Swiss German as the
+> 11th UI language.
 
 ### Added
 
-- **macOS: uninstall OpenSAK from inside the app (#859, part of #824)** —
-  **Settings → Advanced → Uninstall OpenSAK** now works on macOS the same way
-  it does for the Linux AppImage: choose *Remove program only* or *Remove
-  program and all data*. OpenSAK moves itself to the Trash and closes. Data
-  removal covers every location listed under *Help → OpenSAK File
-  Locations…*, and databases opened from other places are never deleted.
-
-### Fixed
-
-- **"Remove program and all data" could leave settings behind (#859)** — On
-  Linux, closing OpenSAK right after uninstalling wrote the window layout
-  back to disk, which recreated the settings folder with the old settings
-  in it. Nothing is written anymore once your data has been deleted.
-
----
-
-## [1.20.0-beta.12] — 2026-09-27
-
-> The Filter dialog takes another big step towards GSAK parity (#821): a
-> global *Invert filter* checkbox, a new Trackables tab, filtering by compass
-> direction, full text operators on Text Search, and several new fields. Also
-> fixes a column sort that could be lost after reopening a database when a
-> saved filter was in use.
-
-### Added
-
-- **Filter dialog: Invert filter (#911, part of #821)** — A new global
-  checkbox shows exactly the caches the current filter would hide. It is
-  saved with the filter profile and cleared by **Reset all**.
-- **Filter dialog: new Trackables tab (#911, part of #821)** — Filter by
-  trackable name, tracking code and count. Name and code must match on the
-  same trackable, and *Count equal 0* finds caches without a matching
-  trackable.
-- **Filter dialog: Direction filter (#911, part of #821)** — Show only caches
-  in the selected compass directions (N, NE, E … NW) from your home point.
-- **Filter dialog: distance between corrected and posted coordinates (#911,
-  part of #821)** — Filters on how far the corrected coordinates are from the
-  posted ones, e.g. to find solved finals outside the 2-mile rule.
-- **Filter dialog: new text filters for User Data 1–4 and the GC.com note,
-  and a new Elevation filter (#911)**.
-
-### Changed
-
-- **Filter dialog: Distance from centre point uses the same conditions as the
-  other distance filters (#911)** — Equal, Less than, At most, More than, At
-  least, Between and Not between. The centre point can be your home point, a
-  saved point, the selected cache or a custom coordinate. Saved filters that
-  use the old Min/Max still select the same caches.
-- **Filter dialog: Text Search supports all text operators (#911, part of
-  #821)** — Including RegEx and negated operators such as *does not
-  contain*. Previously it only matched plain substrings.
-- **Filter dialog: personal note is now a text filter (#911, part of #821)**
-  — Replaces the old yes/no filter, so you can also search the note's
-  content. Saved filters using the yes/no filter are converted automatically.
-- **The new filter elements follow the #610 filter design** and are
-  highlighted when active. `docs/filters.md` has been updated to match.
-- **User Guide updated for the new filters** — The Filter Dialog and All
-  Filter Types sections now cover all ten tabs, the Invert filter checkbox,
-  the new filters, and a few new recipes (solved finals outside the 2-mile
-  rule, caches in a given direction, caches without a geocoin).
-
-### Fixed
-
-- **Column sort was lost after reopening a database with a saved filter
-  (#912)** — Sorting by e.g. Distance could reset to Name after restarting
-  OpenSAK or switching databases, or as soon as a saved filter was selected.
-  Filters no longer change the sort order; the column you sort by is
-  remembered per database. The sort is now also kept after you move a column
-  or switch to a database with different columns.
-- **Update dialog test failed on Windows and macOS (#914)** — A test assumed
-  the Linux-only "Open releases page" button. It now covers each platform's
-  button explicitly. No change to the app itself.
-
-> Contributed by nagisml.
-
----
-
-## [1.20.0-beta.11] — 2026-09-26
-
-> A documentation release: opensak.com and the User Guide now recommend the
-> Microsoft Store on Windows, and the User Guide has been brought up to date
-> with everything added in the 1.19 and 1.20 cycles. No changes to the app
-> itself compared to beta.10.
+- **Filter dialog: many new tabs and filters, continuing the GSAK
+  filter-parity work (#821, #557, #866, #889, #911, #921)** —
+  - **Logs tab** — filter by the logs on a cache: which logs are searched
+    (all, or only the latest *N*), log type and date, who logged it, and
+    how many such logs are required. Makes negative conditions possible,
+    e.g. "no find in the last year" or "latest log is a DNF".
+  - **Child Waypoints tab** — filter by waypoint code, type, name,
+    comment, date, created-by-user and count, e.g. caches *without* a
+    parking waypoint.
+  - **Trackables tab** — filter by trackable name, tracking code and
+    count.
+  - **Invert filter** — a global checkbox that shows exactly the caches
+    the current filter would hide. Saved with the filter profile.
+  - **Direction from centre point** — by compass direction or by bearing
+    in degrees; *Between* runs clockwise, so 315°–45° is the sector
+    through north.
+  - **Distance between corrected and posted coordinates** — e.g. to find
+    solved finals outside the 2-mile rule.
+  - **Date operators** (before / after / between / empty …), including
+    time of day on the created, changed and last GPX update dates.
+  - **Line/Point/Polygon filtering**, **OR matching for attributes**, and
+    an attribute **search box** with a "Show only selected" toggle.
+  - **New fields:** User Data 1–4, the GC.com note and Elevation.
+  - **Highlighting of what a filter restricts** — every element that
+    differs from its default, and every tab that holds one, is
+    highlighted, as in GSAK (#610).
+  - **Warning before overwriting a saved filter** (#671).
+- **Quick Where filter in the top bar (#887, implements #558)** — type a
+  raw SQL WHERE condition (e.g. `distance < 5`) and apply it without
+  opening the Filter dialog. Recent entries are remembered.
+- **Edit Cache dialog: many more editable fields (#890, addresses #873)**
+  — owner name, hidden/found/DNF dates, county, elevation, "Contains
+  HTML", and a new **Personal** tab with user flag, user data 1–4, GC
+  note, watch, personal note and corrected coordinates. Child waypoints
+  can now be added, edited and deleted.
+- **Windows and macOS: updates download and install from inside the app
+  (#572, #893)** — **Download & Install** fetches the right file for your
+  system and verifies its checksum against the new `SHA256SUMS.txt`
+  published with every release. On macOS, OpenSAK then replaces the
+  installed app safely (the old version is only removed once the new one
+  is in place), cleans up after itself and closes — open it again to
+  start the new version. On Windows, the verified download is shown in
+  Explorer.
+- **macOS: uninstall OpenSAK from inside the app (#859)** — **Settings →
+  Advanced → Uninstall OpenSAK**, as on Linux: choose *Remove program
+  only* or *Remove program and all data*. OpenSAK moves itself to the
+  Trash and closes.
+- **Help → OpenSAK File Locations… (#907)** — shows every place OpenSAK
+  keeps files, with size and an **Open folder** button for each. Handy for
+  backups and for moving to a new computer. It never deletes anything.
+- **Swiss German (de_CH) UI language (#886)** — 11 UI languages in total.
 
 ### Changed
 
-- **opensak.com and the User Guide recommend the Microsoft Store on Windows
-  (#904)** — The Store version is free, signed by Microsoft, never blocked by
-  Windows' Smart App Control, and updates itself automatically, so it is now
-  listed first on the download page and in the User Guide. The direct
-  download from GitHub is still available as an alternative, with a short
-  note that Smart App Control may block it. The download page also no longer
-  describes the Windows download as an installer — it is a ZIP file.
-- **User Guide brought up to date** — New and updated sections for:
-  uninstalling on each platform (your data is never removed unless you choose
-  to), adding the Linux AppImage to your application menu, importing Pocket
-  Queries by e-mail, the **Where** field in the search toolbar, all nine tabs
-  of the Filter dialog (text and date operators, Logs, Child Waypoints,
-  Line/Polygon, highlighting of what a filter restricts, and the warning
-  before overwriting a saved filter), the extra fields and child-waypoint
-  editing in **Edit cache**, how updates work for each way of installing,
-  **Help → OpenSAK File Locations…**, and all 11 UI languages. The location
-  of saved filter profiles is also corrected.
-- **opensak.com feature list updated** — Filter engine, MTP support for
-  newer Garmin devices, Pocket Queries by e-mail, and 11 languages.
-
----
-
-## [1.20.0-beta.10] — 2026-09-26
-
-> A new overview of every place OpenSAK stores files, a more thorough clean-up
-> when uninstalling the Linux AppImage with data removal, and a fix for
-> databases that could disappear after changing the installation folder in the
-> Welcome Wizard.
-
-### Added
-
-- **Help → OpenSAK File Locations… (#907)** — Shows every place OpenSAK keeps
-  files on your computer: settings and application data, the startup
-  configuration, your database folder, databases opened from other locations,
-  older settings (keyboard shortcuts), the saved PQ Email password and, on
-  Linux, the application menu files. Each row shows whether the location
-  exists and how much space it uses, with an **Open folder** button. Handy for
-  backups, for moving to a new computer, or for tidying up after uninstalling.
-  **Copy all to clipboard** gives you a text summary to paste into a bug
-  report. The window only shows information — it never deletes anything.
+- **Microsoft Store is the recommended way to install on Windows (#904)**
+  — it is signed by Microsoft, never blocked by Windows' Smart App
+  Control, and updates itself automatically. opensak.com and the User
+  Guide list it first; the direct download from GitHub is still
+  available.
+- **Microsoft Store installs no longer show an update popup (#874)** — the
+  Store already updates OpenSAK in the background, so the "download this
+  yourself" notification was misleading. A manual **Check for updates**
+  still works.
+- **Filter dialog: distance, favourite points and elevation use the same
+  conditions** — Equal, Less than, At most, More than, At least, Between
+  and Not between, instead of a from/to range. The centre-point filters
+  (distance, direction, corrected ↔ posted) are grouped on the Other tab
+  with one shared centre-point picker, which can be your home point, a
+  saved point, the selected cache or a custom coordinate.
+- **Filter dialog: Text Search supports all text operators, including
+  RegEx**, and the personal note is now a text filter instead of yes/no.
+- **Filter dialog: General and Other tabs redesigned** to fit without
+  scrolling.
+- **Saved filter profiles are converted automatically** to the new
+  filters and keep selecting the same caches.
+- **Edit Cache: found/DNF dates follow their checkboxes**, and the detail
+  panel and map refresh immediately after editing.
+- **User Guide and opensak.com brought up to date** for everything added
+  in the 1.19 and 1.20 cycles.
+- **Dependency versions are now bounded (#897)**, so an upstream release
+  can't silently change what ships inside OpenSAK.
 
 ### Fixed
 
-- **Linux: uninstalling with "also remove my data" left files behind (#906)**
-  — The in-app uninstall of the AppImage now also removes the startup
-  configuration in `~/.config/opensak/`, the older settings file in
-  `~/.config/OpenSAK Project/`, and the saved PQ Email password in your
-  system's keyring. Previously a leftover settings file could also bring back
-  your old database list the next time OpenSAK was installed. Databases you
-  opened from other locations (e.g. a USB drive) are still never removed
-  automatically.
-- **Welcome Wizard: databases could disappear after changing only the
-  installation folder (#908)** — When the Welcome Wizard was run again from
-  **Settings → Advanced** and only the installation folder was changed, your
-  database files were moved along with it, but OpenSAK kept looking for them
-  in the old place. Databases now stay where your database folder setting
-  says they are, and if you change both folders you are asked whether to move
-  your databases, as intended. Your data was never deleted — if this happened
-  to you, your databases are in the new installation folder and can be added
-  back with **Open existing…** in **File → Manage databases…**.
-
----
-
-## [1.20.0-beta.9] — 2026-09-25
-
-> Fixes a startup failure in the direct Windows download on PCs where
-> Windows' Smart App Control is switched on. The Microsoft Store version was
-> never affected, and remains the recommended way to install OpenSAK on
-> Windows.
-
-### Fixed
-
-- **Windows: the direct download could fail to start with Smart App Control
-  on (#904)** — beta.6 to beta.8 passed the welcome wizard, then stopped with
-  *"OpenSAK could not open your database and cannot start"* and *"DLL load
-  failed … An Application Control policy has blocked this file"*. Your
-  database was fine: Windows' Smart App Control blocked a new, unsigned
-  component of the database library that Microsoft hadn't seen before. The
-  direct download no longer includes that component (the library's own
-  equivalent is used instead, with no noticeable difference).
-
-  Smart App Control is on by default on many newer Windows 11 PCs and can
-  switch itself on, so you may have it without knowing. If it ever blocks
-  another part of OpenSAK, you now get a clear explanation instead of a
-  database error.
-
-### Changed
-
-- **Microsoft Store is the recommended Windows installation** — it is signed
-  by Microsoft, is never blocked by Smart App Control, and updates itself
-  automatically. The direct download from GitHub remains available.
-
----
-
-## [1.20.0-beta.8] — 2026-09-25
-
-> Two security-related network fixes. Boundary Data Updates works again on
-> macOS, and the PQ email connection now checks that it's really talking to
-> your mail server before sending your password.
-
-### Fixed
-
-- **Boundary Data Updates always failed on macOS with "no network
-  connection" (#901)** — The network was fine; the macOS app couldn't find
-  the certificates it needs to verify HTTPS connections, and the error was
-  reported as a missing connection. All HTTPS requests now share one
-  verifying setup that uses both the system's certificates and a bundled
-  certificate set, so this also works on fresh Windows installs, on Linux
-  distributions outside the Debian/Ubuntu family, and behind company
-  networks that inspect encrypted traffic. The real cause of a failed
-  boundary data check is now written to `opensak.log`.
+- **Windows: the direct download could fail to start with Smart App
+  Control switched on (#904)** — it stopped after the Welcome Wizard with
+  a misleading database error. If Smart App Control ever blocks a part of
+  OpenSAK again, you now get a clear explanation instead.
 - **PQ email: the mail server's certificate was never checked (#902)** —
-  The connection was encrypted, but OpenSAK accepted any server
-  certificate, so on an untrusted network (e.g. public Wi-Fi) your mail
-  password could have been intercepted. OpenSAK now verifies the server's
-  certificate and name before logging in. If verification fails, the
-  password is not sent, and **Test connection** / **Check for PQ Email**
-  explain why and what to check.
+  on an untrusted network, your mail password could have been
+  intercepted. OpenSAK now verifies the server before logging in. **Note:**
+  mail servers with a self-signed certificate, or a server name that
+  doesn't match its certificate, are now refused.
+- **macOS: Boundary Data Updates always failed with "no network
+  connection" (#901)** — HTTPS certificate verification now works on
+  macOS, fresh Windows installs, more Linux distributions and company
+  networks that inspect encrypted traffic.
+- **Uninstalling with "Remove program and all data" left data behind
+  (#906, #859)** — the Linux AppImage uninstall now also removes the
+  startup configuration, older settings files and the saved PQ Email
+  password, and closing OpenSAK afterwards no longer recreates the
+  settings folder.
+- **Welcome Wizard: databases could disappear after changing only the
+  installation folder (#908)** — databases now stay where your database
+  folder setting says. No data was ever deleted.
+- **macOS: a fresh install could skip the Welcome Wizard (#882)**.
+- **Column sort was lost after reopening a database with a saved filter
+  (#912)** — the sort column is now remembered per database.
+- **Deleting a database could fail with "file in use" on Windows** — also
+  affected database paths with non-ASCII characters (e.g. æ/ø/å) on all
+  platforms.
+- **Button labels were cut off in several dialogs in some languages
+  (#927)**.
+- **Update dialog showed instructions that didn't match its button**, and
+  **"Home" appeared twice in the centre-point list**.
 
-  **Please note:** mail servers with a self-signed certificate (e.g. a
-  private server on a NAS), or a server name that doesn't match the
-  server's certificate, will now be refused. Use the server name your mail
-  provider gives, exactly as written.
-
----
-
-## [1.20.0-beta.7] — 2026-09-25
-
-> A test release for the new macOS self-update flow from beta.6 (#893): that
-> flow can only be exercised when updating *from* a version that contains it,
-> so this release exists to give beta.6 users something to update to. No new
-> features or fixes compared to beta.6.
-
-### Changed
-
-- **Screenshots on opensak.com and in the User Guide refreshed** for the
-  redesigned Filter dialog (#899).
-
----
-
-## [1.20.0-beta.6] — 2026-09-25
-
-> The Filter dialog now shows at a glance what a filter actually restricts,
-> and warns before a save would overwrite an existing filter. On macOS,
-> "Download & Install" now finishes the job itself. This release is also the
-> first half of a two-release test of that new macOS update flow — it can only
-> be exercised when updating *from* this version, so beta.7 follows shortly.
-
-### Added
-
-- **Filter dialog: highlight what a filter sets (#610, #895)** — Every filter
-  element that differs from its default is highlighted, and so is any tab
-  that holds one, as in GSAK. Open a saved filter and you can see immediately
-  what it restricts; **Reset all** / **Reset tab** clear the highlighting with
-  the values. The highlight colour follows the light/dark theme.
-- **Filter dialog: warning before overwriting a saved filter (#671, #896)** —
-  Saving under a name that already exists now asks before replacing it
-  (default: No). The check is made against the actual file on disk, so names
-  that only differ in characters that get replaced when saving, or only in
-  upper/lower case on Windows and macOS, are caught too.
-
-### Changed
-
-- **macOS: "Download & Install" now installs the update itself (#893)** —
-  Reported by Mike Wood (GSAK forum): the update was downloaded and the DMG
-  opened, but the app still had to be copied by hand, the disk image stayed
-  mounted, and the downloaded file ended up hidden in `/private/var/folders`.
-  OpenSAK now mounts the verified DMG invisibly, replaces the installed app
-  safely (the old version is only removed once the new one is in place),
-  unmounts it again and deletes the download. It then tells you the update is
-  installed and closes — open OpenSAK again to start the new version. If the
-  automatic install isn't possible (e.g. a read-only Applications folder on a
-  managed Mac), it falls back to opening the DMG as before, now saved in your
-  Downloads folder with the exact location shown. Windows is unchanged.
-- **Filter dialog: General and Other tabs redesigned (#895)** — Laid out in
-  two columns so the General tab fits without scrolling.
-- **Dependency versions are now bounded (#897)** — CI and the release builds
-  no longer pick up whatever is newest on PyPI at build time, so an upstream
-  release can't silently change what ships inside OpenSAK. PyInstaller is
-  pinned for the release builds as well.
-- **Internal: replaced SQLAlchemy's deprecated `noload()` (#898)** — No
-  visible change; removes ~3,000 deprecation warnings per test run and makes
-  code that reads data not loaded for the cache list fail loudly in testing
-  instead of silently seeing an empty list.
-
-### Fixed
-
-- **Deleting or removing a database could leave its file locked** — With
-  SQLAlchemy 2.1, OpenSAK no longer recognised which database connection to
-  close before deleting a database on Windows, which could fail with a
-  "file in use" error (WinError 32). Database paths containing non-ASCII
-  characters (e.g. æ/ø/å) were affected on all platforms.
-- **Filter dialog: "Home" shown twice in the centre point list (#895)** —
-  The list now matches the home-point dropdown in the toolbar.
-- **Danish: self-update text named the wrong button** — It referred to
-  "Download & Install" instead of the Danish button label.
-
-> Filter highlighting, redesign and overwrite warning contributed by nagisml.
-> #671's other two items — the profile name pre-filled when saving over a
-> selected filter, and the Archived box keeping its state after saving — were
-> already fixed earlier; #896 adds regression tests for both.
-
----
-
-## [1.20.0-beta.5] — 2026-09-23
-
-### Fixed
-
-- **Update dialog showed the wrong instructions next to a working button**
-  — reported by Mike Wood (GSAK forum) testing beta.1 → beta.3 self-download
-  on macOS: the "Download & Install" button correctly downloaded and
-  verified the update, but the text beside it still said "Click 'Download'
-  to open the GitHub releases page", left over from before #572. The same
-  stale text was shown for AppImage's "Upgrade now" button too, since #836 —
-  just never reported. Each path (AppImage self-update, Windows/macOS
-  self-download, and the plain manual-download fallback) now shows text that
-  actually matches its own button.
-
----
-
-## [1.20.0-beta.4] — 2026-09-22
-
-> Two larger additions from the community: the Filter dialog gains GSAK-style
-> Logs and Child Waypoints tabs (continuing the filter-parity work in #821),
-> and the Edit Cache dialog can now edit most of the fields and related data
-> it previously only displayed or ignored.
-
-### Added
-
-- **Filter dialog: new Logs tab (#889, part of #821)** — Filter caches by the
-  logs on them, mirroring GSAK's Logs tab: choose which logs are searched
-  (all logs, or only each cache's latest / last *N*), which kind of log counts
-  (Found / Not found / Other, log date, individual log types), who logged it
-  (same text operators as Name, or match on the numeric user ID), and how many
-  such logs are required (at least / at most / equal / between). Combined with
-  Include/Exclude this makes negative conditions expressible, e.g. "caches
-  with no find in the last year" or "caches whose most recent log is a DNF".
-- **Filter dialog: new Child Waypoints tab (#889, part of #821)** — Filter
-  caches by properties of their child waypoints: code, type, date, name,
-  comment, created-by-user, and count. All criteria must hold for the same
-  waypoint; e.g. *Type contains "Parking"* with *Count equal 0* finds caches
-  without a parking waypoint.
-- **Filter dialog: time-of-day filtering on created, changed and last GPX
-  update dates (#889, part of #821)** — These three date fields now accept a
-  time as well as a date.
-- **Filter dialog: search attributes by name or ID (#889)** — The Attributes
-  tab gets a search box, a "Show only selected" toggle, and a status line
-  showing how many attributes are shown and selected.
-- **Edit Cache dialog: many more editable fields (#890, addresses #873)** —
-  Owner name, hidden / found / DNF dates, county, elevation (validated as a
-  number in metres), "Contains HTML" for the short and long description, and
-  a new **Personal** tab with user flag, user data 1–4, GC note, watch, the
-  personal note and corrected coordinates.
-- **Edit Cache dialog: add, edit and delete child waypoints (#890, addresses
-  #873)** — Including prefix, code, date, comment and flag. A prefix is
-  required, and a waypoint code already used by another waypoint of the same
-  cache is rejected.
-
-### Changed
-
-- **Edit Cache dialog: found/DNF dates follow their checkboxes (#890)** —
-  Unticking Found or DNF now clears the matching date instead of leaving a
-  stale date behind.
-- **Detail panel and map refresh immediately after Edit Cache (#890)** —
-  Changed waypoints, notes and corrected coordinates are shown right away,
-  without having to re-select the cache.
-- **`docs/filters.md` documents the new Logs and Child Waypoints tabs
-  (#889)**, including a table of common negative-condition recipes.
-
-> Contributed by nagisml.
-
----
-
-## [1.20.0-beta.3] — 2026-09-22
-
-> New UI language: Swiss German, plus a quick way to run a raw SQL WHERE
-> filter directly from the top bar.
-
-### Added
-
-- **Quick Where filter in the top bar (#887, implements #558)** — Adds a
-  "Where:" combo box directly in the top toolbar (next to the existing GC
-  code / Name quick-filter fields), letting you type a raw SQL WHERE-style
-  condition (e.g. `distance < 5`) and apply it without first opening the
-  full Filter dialog's Where tab. The dropdown keeps recent entries for
-  quick reuse; an inline info icon links to WHERE-syntax help.
-- **Swiss German (de_CH) UI language (#886)** — New `src/opensak/lang/de_CH.py`,
-  derived from `de.py` with Swiss orthography ("ss" instead of "ß") and Swiss
-  terminology (Kanton, Bezirk). Registered as `de_CH` → "Deutsch (Schweiz)" in
-  `AVAILABLE_LANGUAGES`. Qt's own bundled dialog translations (Close/OK/Cancel
-  etc.) map to the existing `qtbase_de.qm`, since no Swiss-specific
-  `qtbase_de_CH.qm` exists. Now 11 UI languages in total.
-
-### Changed
-
-- **Filter dialog: dropped the redundant `filter_country_label` translation
-  key (#886)** — the country filter label now reuses the existing
-  `col_country` key instead of a duplicate key carrying the same text, across
-  all language files.
-
-> Contributed by nagisml.
-
----
-
-## [1.20.0-beta.2] — 2026-09-22
-
-> Next installment of the ongoing GSAK filter-parity work tracked in #557
-> (part of the wider filter-parity epic, #821) — continuing on from the 12
-> text-field operators shipped in v1.19.0-beta.7 (#850).
-
-### Added
-
-- **Date filter operators (#557)** — Date-based filter fields now support the
-  same kind of condition set already available for text fields (equals /
-  before / after / between / empty / not empty, etc.), instead of a single
-  fixed comparison per field.
-- **Line/Point/Polygon filtering (#557)** — Adds geometry-based filtering
-  (lines, points and polygons) as a new filter criterion.
-- **OR condition for attribute filtering (#557)** — Attribute filtering gains
-  an OR-based combination option alongside the existing AND matching.
-
-> Contributed by nagisml (#866). This is a partial delivery — #557 remains
-> open for further filter-enhancement work.
-
----
-
-## [1.20.0-beta.1] — 2026-09-21
-
-> First beta of the 1.20.0 cycle — opens with the follow-up fix for
-> v1.19.6's known macOS issue, plus two independent update-flow
-> improvements for Windows and macOS.
-
-### Fixed
-
-- **macOS: a genuinely fresh install could incorrectly skip the welcome
-  wizard (fixes #882)** — `migrate_from_qsettings()`'s "does old OpenSAK
-  data exist" check treated `QSettings.allKeys()` being non-empty as
-  proof of a legacy installation to migrate. On macOS, `QSettings`
-  transparently falls back to the OS's own global preference domain
-  (keyboard, locale, trackpad, spelling, etc.) whenever the app's own
-  domain has no keys of its own — so a brand new install could still see
-  40-50 keys back here, none of them ever written by OpenSAK. The check
-  now looks at whether any *actual* OpenSAK data was found (the same
-  `updates` dict the migration itself builds), not at whether the
-  QSettings domain answered at all. No data-loss risk either way (see
-  v1.19.6's own note on this) — this only fixes which users correctly see
-  the first-run wizard.
-- **Windows: Microsoft Store/MSIX installs were shown a misleading
-  "download and run this .exe yourself" update popup (fixes #874)** — the
-  built-in update checker didn't distinguish installation sources on
-  Windows, so a Store user got the exact same notification as a
-  portable/.exe user, even though the Store already updates the app
-  automatically in the background. The background check is now skipped
-  entirely for MSIX builds; a manual "Check for updates" click still
-  checks, but shows a plain informational message instead of an actionable
-  download prompt.
-
-### Added
-
-- **Windows/macOS: checksum-verified self-download for updates (#572)** —
-  Linux (AppImage) has had a fully automatic self-update since #836; this
-  brings the equivalent convenience to Windows and macOS within what those
-  platforms actually allow. Clicking "Download & Install" on an update
-  notification now downloads the correct OS/architecture-matched asset
-  in-app with a real progress bar, verifies its SHA256 checksum against a
-  new `SHA256SUMS.txt` published with every release, and then opens it
-  (reveals in Explorer on Windows, mounts and opens in Finder on macOS) —
-  the same last step as a manual download, minus having to find and pick
-  the right file yourself. Replacing the running `.exe`/`.app` itself is
-  intentionally out of scope (Windows locks a running executable; macOS
-  installation is drag-to-Applications, not a single-file swap) — see
-  `SelfUpdateWorker` in `updater.py` for the reasoning.
+Thanks to **nagisml** for the large majority of the filter and Edit Cache
+work, to **Mike Wood** for testing and reporting the macOS update flow, and
+to everyone in the Facebook group who tested the 1.20 betas and reported
+bugs.
 
 ---
 

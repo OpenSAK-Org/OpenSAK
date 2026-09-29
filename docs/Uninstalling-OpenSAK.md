@@ -1,15 +1,26 @@
-# Removing Old OpenSAK Versions (Windows / Linux / macOS)
+# Uninstalling OpenSAK (Windows / Linux / macOS)
 
-OpenSAK does **not** come with an installer or uninstaller — it's distributed as a
-portable `.exe` (Windows), an AppImage (Linux), or a `.dmg` (macOS). That means
-"installing" a new version is just running a new file, and the old one doesn't
-get removed automatically. This guide explains what OpenSAK actually creates on
-your computer and how to clean it up safely, if you want to.
+Uninstalling OpenSAK removes the program only. Your databases and settings are
+**never** deleted unless you explicitly choose to remove them.
 
-> **You usually don't need to do this.** Downloading a newer release and running
-> it will not conflict with an older copy — they're just separate files. This
-> guide is for people who specifically want to free up space, do a clean
-> reinstall, or fully remove OpenSAK from their machine.
+| Installed from | The easy way |
+|---|---|
+| **Microsoft Store** | Windows **Settings → Apps → Installed apps**, find OpenSAK, choose **Uninstall** |
+| **Linux AppImage** | In OpenSAK: **Settings → Settings… → Advanced → AppImage → Uninstall OpenSAK** |
+| **macOS** | In OpenSAK: **Settings → Settings… → Advanced → Uninstall → Uninstall OpenSAK** |
+| **Windows direct download** | Delete the folder you unzipped OpenSAK into |
+
+On Linux and macOS you choose between *Remove program only* and *Remove program
+and all data*; the second asks you to confirm again, and databases you opened
+from other places (e.g. a USB drive) are never deleted.
+
+The rest of this guide explains what OpenSAK actually creates on your computer
+and how to clean it up by hand — for Windows data, for older versions, or if
+you've already deleted the program.
+
+> **Tip:** **Help → OpenSAK File Locations…** (1.20.0 and later) lists every
+> place OpenSAK keeps files, with an **Open folder** button for each. Use it
+> before uninstalling if you want to back up or remove your data.
 
 ---
 
@@ -61,9 +72,11 @@ clutter and are safe to delete if you want a clean system.
 
 ### 1. Remove the program
 
-OpenSAK on Windows is a single portable `.exe`. Just delete the file (and any
-shortcut you may have pinned to the Start Menu, Taskbar, or Desktop — OpenSAK
-doesn't create these automatically, so only remove ones you made yourself).
+- **Microsoft Store:** Windows **Settings → Apps → Installed apps**, find
+  OpenSAK, and choose **Uninstall**. Windows removes the program. To find
+  your data before uninstalling, use **Help → OpenSAK File Locations…**.
+- **Direct download:** delete the folder you unzipped OpenSAK into (and any
+  shortcut you pinned yourself — OpenSAK doesn't create these).
 
 ### 2. Find your data
 
@@ -104,7 +117,16 @@ above, if present) to remove all traces of OpenSAK.
 
 ## Linux
 
-### 1. Remove the program
+### The easy way: uninstall from inside OpenSAK
+
+If you added the AppImage to your application menu (OpenSAK offers this on first
+launch), open **Settings → Settings… → Advanced → AppImage** and click
+**Uninstall OpenSAK**. Choose *Remove program only* or *Remove program and all
+data* — the second also removes the settings, database folder, older settings
+files and the saved PQ Email password from your keyring, after a second
+confirmation.
+
+### 1. Remove the program manually
 
 Just delete the AppImage file you downloaded (wherever you saved it — often
 `~/Applications`, `~/Downloads`, or `~/.local/bin`).

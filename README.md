@@ -50,6 +50,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
   - 12 text operators on every text field (contains, equals, starts/ends with, in list, empty, regex — and their negations)
   - Date conditions, distance from any centre point, compass direction, caches along a route or inside a polygon
   - AND/OR logic, a global **Invert filter**, and saved filter profiles in the toolbar
+  - **Quick Where** box in the toolbar for a raw SQL condition without opening the dialog
 - 📊 **Configurable columns** — 17+ columns, toggle on/off
 - 🎨 **Color-coded status** — found (yellow) and your own caches (green) in the GC Code column and info bar, archived/disabled caches in red; clickable info-bar counts filter the list instantly
 - 🔗 **Click GC code** → opens cache page on geocaching.com
@@ -65,7 +66,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 🧩 **Child waypoints** — parking spots, trail heads, and stages imported from GPX, shown on the map and in a dedicated tab; caches with waypoints show in **bold** in the list
 - 🔒 **Lock caches** — freeze a cache's core fields (name, type, coordinates, D/T, owner, status, descriptions, hint…) against being overwritten by a later re-import
 - 📍 **Corrected coordinates** — store solved puzzle coordinates per cache; used in GPS export and shown on map
-- ✏️ **Add / edit / delete** caches manually
+- ✏️ **Add / edit / delete** caches manually — including owner, dates, elevation, user data 1–4, personal note and child waypoints
 
 ### Right-click Menu
 - 🌐 Open on geocaching.com
@@ -92,9 +93,10 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 
 ### Installation & Updates
 - 🪟 **Windows** — available from the [Microsoft Store](https://apps.microsoft.com/detail/9p4nbmm84h2d) (free, signed, updates itself automatically), or as a direct download from GitHub
-- 🍎 **macOS** — signed and notarized `.dmg` for Apple Silicon and Intel
-- 🐧 **Linux** — AppImage that adds itself to your application menu, can update itself in place, and can uninstall itself from within the app
-- 🔔 **Update check** — OpenSAK tells you when a new version is available, optionally including betas
+- 🍎 **macOS** — signed and notarized `.dmg` for Apple Silicon and Intel; updates and uninstalls itself from within the app
+- 🐧 **Linux** — AppImage that adds itself to your application menu, updates itself in place, and uninstalls itself from within the app
+- 🔔 **Updates** — OpenSAK tells you when a new version is available (optionally including betas) and can download, verify and install it for you
+- 📂 **Help → OpenSAK File Locations…** — see every place OpenSAK keeps files, handy for backups
 - 🛡️ **Your data is never removed** by an update or uninstall unless you explicitly choose to
 
 ### Language Support
@@ -182,8 +184,8 @@ tailored to that workflow.
 
 OpenSAK is free and open source, developed in spare time. If it's useful to you,
 consider supporting ongoing development — contributions help cover costs like
-Windows code signing and macOS notarization so releases can be trusted and
-installed without security warnings.
+Apple notarization and the test hardware we use, so releases can be trusted
+and installed without security warnings.
 
 👉 [Support OpenSAK on Open Collective](https://opencollective.com/opensak)
 

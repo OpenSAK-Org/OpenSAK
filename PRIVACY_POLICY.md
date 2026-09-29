@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: April 3, 2025*
+*Effective date: September 29, 2026*
 
 ---
 
@@ -63,6 +63,12 @@ The token file is located at:
 | Windows  | `%APPDATA%\opensak\gc_token.json` |
 | macOS    | `~/Library/Application Support/opensak/gc_token.json` |
 
+### 2.4 Pocket Query e-mail settings (optional)
+
+If you set up **Pocket Queries by e-mail**, OpenSAK stores your mail server name, port, security setting and username in its settings file. The **password** is stored in your operating system's own secure credential store (the macOS Keychain, Windows Credential Manager, or the Secret Service keyring on Linux) — never in plain text.
+
+When you check for PQ e-mails, OpenSAK connects **only to the mail server you entered**, over an encrypted connection, and verifies the server's certificate before sending your password. It reads messages to find Pocket Query attachments and, if you chose so, deletes the e-mail after a successful import. Nothing from your mailbox is sent anywhere else.
+
 ---
 
 ## 3. Data We Do Not Collect
@@ -103,9 +109,22 @@ https://wiki.osmfoundation.org/wiki/Privacy_Policy
 
 You can optionally configure OpenSAK to open cache locations in Google Maps or OpenStreetMap in your browser. This is triggered only by your explicit action and is subject to those services' own privacy policies.
 
+The map component itself (Leaflet and its marker-clustering plugin) is loaded from the unpkg.com content delivery network when the map is shown — again a standard web request.
+
 ### 5.2 Garmin GPS devices
 
-When you export caches to a connected Garmin device, OpenSAK writes a GPX file directly to the device via USB. No data is transmitted over the internet during this operation.
+When you export caches to a connected Garmin device, OpenSAK writes a GPX file directly to the device via USB or MTP. No data is transmitted over the internet during this operation.
+
+### 5.3 Update check and in-app updates (GitHub)
+
+Unless you turn it off (**Settings → Advanced → Check for updates automatically**), OpenSAK asks GitHub's public API at startup which OpenSAK release is the newest. The request contains no personal data beyond what any web request includes, such as your IP address. The Microsoft Store version skips this check, because the Store updates OpenSAK itself.
+
+When you click **Download & Install** or **Upgrade now**, the new version and its checksum file are downloaded from OpenSAK's release page on GitHub. GitHub's privacy statement applies:
+https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement
+
+### 5.4 Boundary data (OpenSAK-Data)
+
+Country, state and county lookup works offline. Only when you choose to download boundary packs or check for boundary data updates does OpenSAK fetch files from the OpenSAK-Data release page on GitHub.
 
 ---
 
@@ -115,7 +134,8 @@ Because all data is stored locally on your own device, you have full control at 
 
 - You can delete your cache database at any time from the application (Database menu)
 - You can log out of Geocaching.com at any time from the Settings dialog, which deletes the stored token
-- You can uninstall OpenSAK and delete all associated files from your application data directory
+- **Help → OpenSAK File Locations…** shows every place OpenSAK keeps files on your device, including the saved PQ e-mail password
+- You can uninstall OpenSAK and delete all associated files — on Linux (AppImage) and macOS, **Settings → Advanced → Uninstall OpenSAK → Remove program and all data** does this for you
 
 There is no account to delete, no server-side data to request, and no data retention period — your data exists only on your device for as long as you keep it there.
 
