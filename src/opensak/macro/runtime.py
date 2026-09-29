@@ -63,6 +63,8 @@ from opensak.utils.constants import CACHE_TYPES
 # A runaway `while true do end` would freeze the GUI thread, so the script is
 # aborted after this many Lua VM instructions.
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
+# Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
+DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 
 _TEXT_FILTERS = {
     "name": NameFilter,
@@ -77,11 +79,63 @@ FILTER_KEYS = sorted(
     | set(_TEXT_FILTERS)
 )
 
-# Globals removed from the sandbox: file/process access, loading other code,
-# and the lupa bridge back into Python.
+# Instruction budget + removal of globals that give file/process access, load
+# other code, or bridge back into Python.
+#
+# The instruction limit is enforced by a count hook, which needs care:
+#   * The abort is an ordinary Lua error, so pcall/xpcall could catch it.
+#     Once the budget is spent the hook therefore becomes "sticky" (fires on
+#     every instruction), so the script cannot execute anything after it.
+#   * Hooks are per thread (coroutine) in Lua, so coroutine.create/wrap are
+#     replaced to install the hook in every new coroutine as well.
+#   * The budget is shared by all threads, so spreading the work over many
+#     coroutines does not multiply it.
 _SANDBOX_SETUP = """
 local limit = ...
-debug.sethook(function() error("macro aborted: instruction limit reached", 2) end, "", limit)
+local sethook, co_create, co_resume = debug.sethook, coroutine.create, coroutine.resume
+local pack, unpack = table.pack, table.unpack
+local main = coroutine.running()
+local step = math.min(limit, 1000)
+local used, tripped = 0, false
+local function hook()
+  if not tripped then
+    used = used + step
+    if used < limit then return end
+    tripped = true
+  end
+  sethook(hook, "", 1)
+  sethook(main, hook, "", 1)
+  error("macro aborted: instruction limit reached", 2)
+end
+sethook(hook, "", step)
+coroutine.create = function(f)
+  local co = co_create(f)
+  sethook(co, hook, "", tripped and 1 or step)
+  return co
+end
+coroutine.wrap = function(f)
+  local co = coroutine.create(f)
+  return function(...)
+    local r = pack(co_resume(co, ...))
+    if not r[1] then error(r[2], 0) end
+    return unpack(r, 2, r.n)
+  end
+end
+-- Lua runs xpcall message handlers and __gc finalizers with hooks disabled,
+-- so an endless loop there could not be stopped. The handler is therefore
+-- called after the stack has unwound, and finalizers are not allowed.
+local pcall, raw_setmetatable, rawget = pcall, setmetatable, rawget
+xpcall = function(f, handler, ...)
+  local r = pack(pcall(f, ...))
+  if r[1] then return unpack(r, 1, r.n) end
+  return false, handler(r[2])
+end
+setmetatable = function(t, mt)
+  if type(mt) == "table" and rawget(mt, "__gc") ~= nil then
+    error("__gc metamethods are not allowed in macros", 2)
+  end
+  return raw_setmetatable(t, mt)
+end
 local os_time, os_date, os_clock = os.time, os.date, os.clock
 os = { time = os_time, date = os_date, clock = os_clock }
 io, debug, package, require, dofile, loadfile, load, collectgarbage, python = nil
@@ -191,11 +245,13 @@ class MacroRuntime:
         output: Optional[Callable[[str], None]] = None,
         profiles_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
+        memory_limit: int = DEFAULT_MEMORY_LIMIT,
     ):
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
         self._instruction_limit = instruction_limit
+        self._memory_limit = memory_limit
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -235,7 +291,7 @@ class MacroRuntime:
     def run(self, source: str, chunk_name: str = "macro") -> None:
         """Execute *source*. Raises MacroError on any failure."""
         try:
-            from lupa.lua54 import LuaError, LuaRuntime
+            from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
             raise MacroError(
                 "Lua support is not installed — run: pip install \"lupa>=2.0,<3\""
@@ -245,6 +301,7 @@ class MacroRuntime:
             register_eval=False,
             register_builtins=False,
             unpack_returned_tuples=True,
+            max_memory=self._memory_limit,
             # No attribute access on Python objects from Lua at all: the
             # script only gets the plain functions in the opensak table.
             attribute_filter=self._deny_attribute,
@@ -266,6 +323,10 @@ class MacroRuntime:
             fn()
         except MacroError:
             raise
+        except LuaMemoryError as exc:
+            raise MacroError(
+                f"macro aborted: memory limit reached ({self._memory_limit // (1024 * 1024)} MB)"
+            ) from exc
         except LuaError as exc:
             raise MacroError(str(exc)) from exc
         except Exception as exc:

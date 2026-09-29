@@ -126,6 +126,51 @@ def test_endless_loop_is_aborted():
         _run("while true do end", instruction_limit=100_000)
 
 
+@pytest.mark.parametrize("source", [
+    # pcall/xpcall must not be able to swallow the abort
+    "while true do pcall(function() while true do end end) end",
+    "while true do xpcall(function() while true do end end, function() while true do end end) end",
+    "xpcall(function() error('x') end, function() while true do end end)",
+    # hooks are per thread, so coroutines need their own
+    "coroutine.wrap(function() while true do end end)()",
+    "coroutine.resume(coroutine.create(function() while true do end end))",
+    "while true do pcall(coroutine.wrap(function() while true do end end)) end",
+    # the budget is shared, so many short coroutines don't multiply it
+    "for i = 1, 1e9 do coroutine.wrap(function() for j = 1, 50000 do end end)() end",
+])
+def test_instruction_limit_cannot_be_bypassed(source):
+    with pytest.raises(MacroError, match="instruction limit"):
+        _run(source, instruction_limit=100_000)
+
+
+def test_coroutines_still_work():
+    _, out = _run("""
+        local gen = coroutine.wrap(function(a) local b = coroutine.yield(a + 1) coroutine.yield(b * 2) end)
+        local co = coroutine.create(function() coroutine.yield("y") return "r" end)
+        print(gen(1), gen(5), select(2, coroutine.resume(co)), select(2, coroutine.resume(co)))
+        print(pcall(error, "caught"))
+        print(xpcall(error, function(e) return "handled " .. e end, "x", 0))
+        print(xpcall(function(a, b) return a + b end, print, 1, 2))
+    """)
+    assert out == ["2\t10\ty\tr", "false\tcaught", "false\thandled x", "true\t3"]
+
+
+def test_gc_metamethods_are_rejected():
+    # finalizers run with hooks disabled, so a loop in one could not be stopped
+    with pytest.raises(MacroError, match="__gc"):
+        _run("setmetatable({}, { __gc = true })", instruction_limit=100_000)
+    _, out = _run('print(getmetatable(setmetatable({}, { __index = {a = 1} })).__index.a)')
+    assert out == ["1"]
+
+
+def test_memory_limit():
+    with pytest.raises(MacroError, match="memory limit"):
+        _run('local s = string.rep("x", 1e9)', memory_limit=32 * 1024 * 1024)
+    # caught inside Lua: the allocation simply fails, nothing is exhausted
+    _, out = _run('print(pcall(string.rep, "x", 1e9))', memory_limit=32 * 1024 * 1024)
+    assert out == ["false\tnot enough memory"]
+
+
 def test_syntax_error_is_reported():
     with pytest.raises(MacroError, match="macro:1"):
         _run("this is not lua")
