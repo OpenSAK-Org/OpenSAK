@@ -1849,22 +1849,11 @@ class CacheTableView(QTableView):
 
     def _save_corrected(self, cache: Cache, lat, lon) -> None:
         from opensak.db.database import get_session
-        from opensak.db.models import UserNote, Cache as CacheModel
+        from opensak.db.models import Cache as CacheModel
+        from opensak.db.corrected_coords import set_corrected_coords
         from sqlalchemy.orm import joinedload, selectinload
-        with get_session() as session:
-            cache_row = session.query(CacheModel).options(
-                joinedload(CacheModel.user_note)
-            ).filter_by(gc_code=cache.gc_code).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-                session.flush()
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
+        if not set_corrected_coords(cache.gc_code, lat, lon):
+            return
 
         # Reload det fulde cache-objekt fra DB med user_note eager-loaded,
         # og erstat det detachede objekt i modellen direkte.

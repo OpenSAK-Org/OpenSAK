@@ -462,21 +462,9 @@ class CacheDetailPanel(QWidget):
         self._save_corrected_coords(None, None)
 
     def _save_corrected_coords(self, lat, lon) -> None:
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache as CacheModel, UserNote
-        with get_session() as session:
-            cache_row = session.query(CacheModel).filter_by(
-                gc_code=self._current_gc_code
-            ).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(self._current_gc_code, lat, lon):
+            return
 
         self._corrected_lat = lat
         self._corrected_lon = lon

@@ -1627,26 +1627,12 @@ class MainWindow(QMainWindow):
 
     def _on_set_corrected_from_map(self, gc_code: GcCode, lat: float, lon: float) -> None:
         """Sæt korrigerede koordinater på en cache via højreklik på kortet."""
-        from opensak.db.database import get_session
-        from opensak.db.models import UserNote
+        from opensak.db.corrected_coords import set_corrected_coords
         from opensak.coords import format_coords
         from opensak.gui.settings import get_settings
-        from sqlalchemy.orm import joinedload
 
-        with get_session() as session:
-            cache = session.query(Cache).options(
-                joinedload(Cache.user_note)
-            ).filter_by(gc_code=gc_code).first()
-            if not cache:
-                return
-            note = cache.user_note
-            if note is None:
-                note = UserNote(cache_id=cache.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = True
-            session.commit()
+        if not set_corrected_coords(gc_code, lat, lon):
+            return
 
         coords = format_coords(lat, lon, get_settings().coord_format)
         self._statusbar.showMessage(
