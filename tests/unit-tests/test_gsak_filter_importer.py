@@ -196,6 +196,36 @@ class TestNativeConversions:
         assert f.categories == ["found", "not_found"]
         assert (f.last_n, f.count_op, f.count1) == (2, "at_least", 2)
 
+    def test_log_tab_last_n_within_groups_is_noted(self):
+        c = _convert({
+            "chkLogFound": "False", "chkLogSearchFound": "True",
+            "chkLogSearchNotFound": "True", "chkLogSearchNote": "False",
+            "cbxLogsToSearch": "2", "cbxLogDate": "6", "LtDidn't find it": "True",
+        })
+        assert c.filters[0].last_n == 2
+        assert any("among the ticked groups only" in n for n in c.notes)
+
+    def test_log_tab_last_n_over_all_groups_needs_no_note(self):
+        c = _convert({
+            "chkLogFound": "False", "chkLogSearchFound": "True",
+            "chkLogSearchNotFound": "True", "chkLogSearchNote": "True",
+            "cbxLogsToSearch": "2", "cbxLogDate": "6", "LtDidn't find it": "True",
+        })
+        assert not any("among the ticked groups only" in n for n in c.notes)
+
+    @pytest.mark.parametrize("index,exclude", [("0", False), ("1", True)])
+    def test_log_tab_include_exclude(self, index, exclude):
+        c = _convert({"chkLogFound": "False", "cbxLogDate": "6",
+                      "LtNeeds Maintenance": "True", "cbxLogInclude": index})
+        assert list(_statuses(c).values()) == [NATIVE]
+        assert c.filters[0].exclude is exclude
+
+    def test_log_tab_unknown_include_index_is_commented(self):
+        c = _convert({"chkLogFound": "False", "cbxLogDate": "6",
+                      "LtNeeds Maintenance": "True", "cbxLogInclude": "2"})
+        assert _statuses(c)["Logs: include/exclude"] == COMMENT
+        assert c.filters[0].exclude is False
+
     def test_waypoint_tab_becomes_waypoint_filter(self):
         c = _convert({"cbxcCount": "0", "cbxCtype2": "1", "cbxctype": "0",
                       "edtctype": "", "cbxcDate": "6"})
@@ -305,6 +335,47 @@ class TestNewNativeRows:
         assert [f.filter_type for f in c.filters] == ["direction"]
         assert c.filters[0].directions == ["N"]
         assert c.sql_parts == [("Bearing", "bearing <= 30")]
+
+    def test_date_compared_within_days(self):
+        # Hidden date within 7 days of the last found date.
+        c = _convert({"cbxPlaced": "6", "cbxPlacedComp": "5", "cbxPlacedComp2": "0",
+                      "edtPlacedDuring": "7", "cbxPlacedDuring": "0"})
+        assert _statuses(c) == {"Hidden date": NATIVE}
+        f = c.filters[0]
+        assert (f.field, f.op, f.other_field, f.compare_op, f.compare_days) == (
+            "hidden_date", "compare", "last_found_date", "within", 7)
+        assert any("assumed order" in n for n in c.notes)
+
+    def test_date_compared_older_needs_no_days(self):
+        # Last changed date (note GSAK's capital "CbxChangeComp") older than
+        # the DNF date.
+        c = _convert({"cbxChange": "6", "CbxChangeComp": "1", "cbxChangeComp2": "2"})
+        f = c.filters[0]
+        assert (f.field, f.other_field, f.compare_op) == (
+            "changed_date", "dnf_date", "older")
+
+    def test_date_compared_weeks_become_days(self):
+        c = _convert({"cbxFound": "6", "cbxFoundComp": "6", "cbxFoundComp2": "1",
+                      "edtFoundDuring": "2", "cbxFoundDuring": "1"})
+        f = c.filters[0]
+        assert (f.compare_op, f.compare_days) == ("outside", 14)
+
+    def test_date_compared_without_day_count_is_commented(self):
+        c = _convert({"cbxFound": "6", "cbxFoundComp": "5", "cbxFoundComp2": "1"})
+        assert _statuses(c) == {"Last found date": COMMENT}
+
+    def test_date_compared_with_last_user_update_is_commented(self):
+        c = _convert({"cbxPlaced": "6", "cbxPlacedComp": "0", "cbxPlacedComp2": "6"})
+        assert _statuses(c) == {"Hidden date": COMMENT}
+
+    def test_last_user_update_compared_is_commented(self):
+        c = _convert({"cbxLastUser": "6", "cbxLastUserComp": "0",
+                      "cbxLastUserComp2": "1"})
+        assert _statuses(c) == {"Last user update": COMMENT}
+
+    def test_date_compared_unknown_index_is_commented(self):
+        c = _convert({"cbxPlaced": "6", "cbxPlacedComp": "9", "cbxPlacedComp2": "0"})
+        assert _statuses(c) == {"Hidden date": COMMENT}
 
     def test_reverse_filter_negates_filterset(self):
         c = _convert({"chkFound": "False", "chkNotFound": "True", "chkReverse": "True"})

@@ -476,7 +476,7 @@ Every condition in a GSAK filter lands in one of three places:
 
 | | What it means | Counts as migrated |
 |---|---|---|
-| **A filter** | The condition exists in the tabs above — cache types, D/T, dates, logs, child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
+| **A filter** | The condition exists in the tabs above — cache types, D/T, dates (including *compared with* another date), logs (including *exclude*), child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
 | **SQL in the Where tab** | OpenSAK stores the data but has no filter row for it — the watch list, user sort, a bearing in degrees next to compass quadrants (the dialog has only one *Direction* row) | yes |
 | **A comment in the Where tab** | Nothing in OpenSAK can express it | no |
 
@@ -495,6 +495,11 @@ The third case is why the Where tab of an imported filter often opens with a blo
 The comments always come first and the executable SQL last, so the clause stays valid whatever you delete. Where a whole GSAK `WHERE` clause could not be translated, the translation-so-far is included in the comment, ready to be fixed up and uncommented — it is deliberately never left live, because SQL that fails to run would silently make the filter match nothing.
 
 The things that cannot be migrated are, in practice: GSAK's user-defined columns (OpenSAK has no custom columns, and the cache import does not carry them over), the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId, the GPX symbol name).
+
+Two conditions come across with a small difference, which the import reports list:
+
+- **Last *n* logs** — GSAK counts the last *n* logs among the ticked log groups only (found / not found / notes); OpenSAK counts them over every log. With all three groups ticked the two agree.
+- **Compared with another date** — no saved filter available when this was written used it, so the order of GSAK's comparison and date lists was inferred. Open the date row after importing and check it shows the comparison you meant.
 
 ### The statistics after an import
 

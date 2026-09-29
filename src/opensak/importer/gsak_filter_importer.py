@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from opensak.filters.engine import (
+    DATE_COMPARE_OPS,
     DATE_UNITS,
     LOG_SCOPE_CHOICES,
     AttributeFilter,
@@ -242,6 +243,46 @@ DATE_OP_MY_FOUND: dict[int, Optional[str]] = {0: None}
 # the row empty): that combo lists days / weeks / months / years — OpenSAK's
 # DATE_UNITS, in the same order.
 DURING_UNITS: tuple[str, ...] = DATE_UNITS
+
+# "Verglichen mit" (compare this date against another date of the same cache)
+# is stored in two extra combos per date field, cbx<Field>Comp and
+# cbx<Field>Comp2. ASSUMED (no real filter uses the operator; both combos are
+# 0 everywhere): Comp is the comparison, in the order of OpenSAK's
+# DATE_COMPARE_OPS — equal, older, older or equal, newer, newer or equal,
+# within, outside, which was modelled on GSAK's list — and Comp2 picks the
+# other date, in the order GSAK writes the date fields to the saved filter.
+# "Within"/"outside" take their day count from the field's rolling-window box.
+DATE_COMPARE_OP_BY_INDEX: tuple[str, ...] = DATE_COMPARE_OPS
+# GSAK date field in Comp2 order → OpenSAK DateFilter field (None = OpenSAK
+# has no date row for it).
+DATE_COMPARE_FIELD_BY_INDEX: tuple[tuple[str, Optional[str]], ...] = (
+    ("Last found date", "last_found_date"),
+    ("Hidden date", "hidden_date"),
+    ("DNF date", "dnf_date"),
+    ("My found date", "found_date"),
+    ("Record created date", "creation_date"),
+    ("Last GPX update", "last_gpx_update"),
+    ("Last user update", None),
+    ("Last log date", "last_log_date"),
+    ("Last changed date", "changed_date"),
+)
+# Date operator combo → its (comparison, other date) combos.
+DATE_COMPARE_KEYS: dict[str, tuple[str, str]] = {
+    "cbxFound":      ("cbxFoundComp", "cbxFoundComp2"),
+    "cbxPlaced":     ("cbxPlacedComp", "cbxPlacedComp2"),
+    "cbxDNFDate":    ("cbxDNFComp", "cbxDNFComp2"),
+    "cbxUserFound":  ("cbxFBMComp", "cbxFBMComp2"),
+    "cbxCreate":     ("cbxCreateComp", "cbxCreateComp2"),
+    "cbxLastUpdate": ("cbxLastUpdateComp", "cbxLastUpdateComp2"),
+    "cbxLastUser":   ("cbxLastUserComp", "cbxLastUserComp2"),
+    "cbxLastLog":    ("cbxLastLogComp", "cbxLastLogComp2"),
+    "cbxChange":     ("CbxChangeComp", "cbxChangeComp2"),
+}
+
+# GSAK's "Logs to include" combo (cbxLogInclude): whether a cache whose log
+# count passes is kept or removed — the last step of GSAK's log selection
+# process, which OpenSAK's LogFilter models as *exclude*.
+LOG_INCLUDE_EXCLUDE: dict[int, bool] = {0: False, 1: True}
 
 # GSAK's child-waypoint type dropdown (cbxCtype2) stores an index, not a name.
 # ASSUMED from real filters: the list holds the six GPX waypoint types in
@@ -1268,6 +1309,10 @@ class DateSpec:
     date2: Optional[datetime] = None
     amount: int = 1
     unit: str = "days"
+    # op == "compare": the other DateFilter field, DATE_COMPARE_OPS name, days.
+    other_field: str = "hidden_date"
+    compare_op: str = "equal"
+    compare_days: int = 0
 
     def ordered(self) -> "DateSpec":
         """"Between" with the dates the wrong way round still means a range."""
@@ -1311,13 +1356,7 @@ def _read_date(gf: GsakFilter, c: Conversion, label: str, op_key: str,
     if op is None:
         return None                      # "Beliebig" — criterion off
     if op == "compare":
-        c.comment(label, (
-            "GSAK compared this date against another date column "
-            "(\"Verglichen mit\") and the saved filter does not record which one, "
-            "so there is nothing to translate. OpenSAK's date row has the same "
-            "\"Compared with\" operator — pick the other field there by hand"
-        ))
-        return None
+        return _read_date_compare(gf, c, label, op_key, during_edt, during_cbx)
     if op in ("during", "not_during"):
         during = _read_during(gf, during_edt, during_cbx)
         if during is None:
@@ -1339,6 +1378,50 @@ def _read_date(gf: GsakFilter, c: Conversion, label: str, op_key: str,
     if start is None:
         return None
     return DateSpec(op, start)
+
+
+# Days per rolling-window unit that a compare's "within N" can use exactly.
+_COMPARE_DAYS_PER_UNIT = {"days": 1, "weeks": 7}
+
+
+def _read_date_compare(gf: GsakFilter, c: Conversion, label: str, op_key: str,
+                       during_edt: str, during_cbx: str) -> Optional[DateSpec]:
+    """GSAK's "Verglichen mit" → a compare DateSpec (see DATE_COMPARE_KEYS)."""
+    keys = DATE_COMPARE_KEYS.get(op_key)
+    if keys is None:
+        c.comment(label, "GSAK compared this date against another date, which this "
+                         "field cannot do in OpenSAK")
+        return None
+    op_index, field_index = gf.num(keys[0]) or 0, gf.num(keys[1]) or 0
+    if not (0 <= op_index < len(DATE_COMPARE_OP_BY_INDEX)
+            and 0 <= field_index < len(DATE_COMPARE_FIELD_BY_INDEX)):
+        c.comment(label, (
+            f"GSAK compared this date against another date (comparison index {op_index}, "
+            f"date index {field_index}), which is outside the lists OpenSAK knows — "
+            f"rebuild it with the date row's \"Compared with\" operator"
+        ))
+        return None
+    compare_op = DATE_COMPARE_OP_BY_INDEX[op_index]
+    other_label, other_field = DATE_COMPARE_FIELD_BY_INDEX[field_index]
+    if other_field is None:
+        c.comment(label, f"GSAK compared this date against the {other_label}, which "
+                         f"OpenSAK's date row cannot compare against")
+        return None
+    days = 0
+    if compare_op in ("within", "outside"):
+        during = _read_during(gf, during_edt, during_cbx)
+        if during is None or during[1] not in _COMPARE_DAYS_PER_UNIT:
+            c.comment(label, (
+                f"GSAK compared this date against the {other_label} ({compare_op} a number "
+                f"of days), but no day count could be read"
+            ))
+            return None
+        days = during[0] * _COMPARE_DAYS_PER_UNIT[during[1]]
+    c.note(f"{label}: GSAK's \"compared with\" combos were read as comparison "
+           f"{op_index} = {compare_op.replace('_', ' ')} and date {field_index} = "
+           f"{other_label} (assumed order) — check the date row")
+    return DateSpec("compare", other_field=other_field, compare_op=compare_op,
+                    compare_days=days)
 
 
 def _date_sql(column: str, spec: DateSpec) -> str:
@@ -1780,7 +1863,16 @@ def _convert_dates(gf: GsakFilter, c: Conversion) -> None:
             continue
         if extra:
             c.note(extra)
-        if osak_field is not None:
+        if spec.op == "compare":
+            if osak_field is None:
+                c.comment(label, "GSAK compared this date against another date, but "
+                                 "OpenSAK has no date row for it to compare from")
+                continue
+            c.native(label, DateFilter(
+                field=osak_field, op="compare", other_field=spec.other_field,
+                compare_op=spec.compare_op, compare_days=spec.compare_days,
+            ))
+        elif osak_field is not None:
             c.native(label, DateFilter(
                 field=osak_field, op=spec.op,
                 date1=spec.date1, date2=spec.date2,
@@ -1929,6 +2021,11 @@ def _convert_log_tab(gf: GsakFilter, c: Conversion) -> None:
             described.append(f"in the last {last_n} log(s)")
             c.note("Logs: GSAK's \"logs to search\" dropdown was read through OpenSAK's own "
                    "list of the same choices (0/all, 1, 2, …, 10, 15, 20, 30, 40, 50, 100)")
+            if categories is not None:
+                c.note(f"Logs: GSAK counts the last {last_n} log(s) among the ticked "
+                       f"groups only ({'/'.join(categories)}); OpenSAK counts them over "
+                       f"every log, so a cache whose last {last_n} log(s) include other "
+                       f"groups may match differently")
         else:
             c.comment("Logs: number of logs to search",
                       f"GSAK's dropdown index {scope_index} is outside the list of choices "
@@ -1971,10 +2068,15 @@ def _convert_log_tab(gf: GsakFilter, c: Conversion) -> None:
         described.insert(0, f"count {count_op.replace('_', ' ')} "
                             f"{v1}{f'..{v2}' if count_op == 'between' else ''}")
 
-    if gf.num("cbxLogInclude"):
-        c.comment("Logs: \"logs to include\" selector",
-                  f"GSAK stores index {gf.num('cbxLogInclude')} here and its meaning could "
-                  f"not be established, so it was left out of the log filter")
+    include_index = gf.num("cbxLogInclude") or 0
+    exclude = LOG_INCLUDE_EXCLUDE.get(include_index)
+    if exclude is None:
+        exclude = False
+        c.comment("Logs: include/exclude",
+                  f"GSAK's include/exclude combo holds index {include_index}, which is "
+                  f"neither include (0) nor exclude (1), so the caches were included")
+    elif exclude:
+        described.insert(0, "exclude")
 
     log_filter = LogFilter(
         date_op=spec.op if spec else None,
@@ -1991,6 +2093,7 @@ def _convert_log_tab(gf: GsakFilter, c: Conversion) -> None:
         count_op=count_op,
         count1=count1,
         count2=count2,
+        exclude=exclude,
     )
     if log_filter.is_noop():
         return
