@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "action_about":                 "Sobre o &OpenSAK…",
     "action_check_update":          "Verificar atualizações…",
     "action_user_guide":            "Guia do utilizador",
+    "action_changelog":             "Novidades (registo de alterações)",
     "action_shortcuts":             "⌨️  &Atalhos de teclado…",
 
     "action_open_log_file": "Abrir ficheiro de registo",

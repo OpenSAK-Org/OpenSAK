@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "action_about":                 "O &OpenSAK…",
     "action_check_update":          "Zkontrolovat aktualizace…",
     "action_user_guide":            "Uživatelská příručka",
+    "action_changelog":             "Co je nového (protokol změn)",
     "action_shortcuts":             "⌨️  &Klávesové zkratky…",
 
     "action_open_log_file": "Otevřít soubor protokolu",

@@ -571,6 +571,13 @@ class MainWindow(QMainWindow):
         act_user_guide.triggered.connect(self._open_user_guide)
         help_menu.addAction(act_user_guide)
 
+        # Issue #944: lets users see what changed without relying on the
+        # Facebook announcement or on catching the update popup's link
+        # (Store/MSIX installs never get that popup — see #874).
+        act_changelog = QAction(tr("action_changelog"), self)
+        act_changelog.triggered.connect(self._open_changelog)
+        help_menu.addAction(act_changelog)
+
         act_check_update = QAction(tr("action_check_update"), self)
         act_check_update.triggered.connect(self._check_update_manual)
         help_menu.addAction(act_check_update)
@@ -3187,6 +3194,14 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://opensak.com/user-guide.html"))
+
+    def _open_changelog(self) -> None:
+        """Open CHANGELOG.md on GitHub for the installed channel (issue #944)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from opensak import __version__
+        from opensak.updater import changelog_url_for_version
+        QDesktopServices.openUrl(QUrl(changelog_url_for_version(__version__)))
 
     def _open_support_page(self) -> None:
         """Open the Open Collective support/sponsor page in the default browser."""
