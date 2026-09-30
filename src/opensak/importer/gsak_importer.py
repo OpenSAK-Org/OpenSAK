@@ -386,16 +386,164 @@ def find_gsak_db3_in_zip(path: Path) -> Path:
         return path
 
     import tempfile
+
+    entries = list_gsak_backup(path).databases
+    if not entries:
+        raise ValueError(f"No sqlite.db3 file found inside {path.name}")
+    # Only the one database is unpacked — a full GSAK backup easily holds
+    # 20+ databases and several GB, which extractall() used to copy to %TEMP%.
+    member = entries[0].member
+    assert member is not None   # entries listed from a zip always have one
+    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_extract_"))
+    return extract_gsak_member(path, member, extract_dir)
+
+
+# ── Multi-database GSAK backups ──────────────────────────────────────────────
+#
+# A GSAK backup .zip ("File → Backup") holds one folder per GSAK database,
+# each with its own ``sqlite.db3`` (e.g. ``AllCH/sqlite.db3``), plus GSAK's
+# settings database ``gsak.db3`` (saved filters etc.) at the root. The folder
+# name *is* the GSAK database name, so it doubles as the OpenSAK database
+# name the import dialog proposes.
+
+GSAK_CACHE_DB_NAME = "sqlite.db3"
+GSAK_SETTINGS_DB_NAME = "gsak.db3"
+
+
+class GsakBackupDatabase:
+    """One GSAK cache database found in a backup (or a single .db3 file)."""
+
+    def __init__(self, name: str, size: int, member: Optional[str] = None,
+                 path: Optional[Path] = None):
+        self.name = name        # GSAK database name (= folder name)
+        self.size = size        # uncompressed size in bytes
+        self.member = member    # zip member name, when inside a .zip
+        self.path = path        # file on disk, when not inside a .zip
+
+    def __repr__(self) -> str:
+        return f"GsakBackupDatabase({self.name!r}, member={self.member!r}, path={self.path!r})"
+
+
+class GsakBackupContents:
+    """What a GSAK backup .zip or a single .db3 file offers for import."""
+
+    def __init__(self, source: Path):
+        self.source = source
+        self.databases: list[GsakBackupDatabase] = []
+        self.settings_member: Optional[str] = None   # gsak.db3 inside the zip
+        self.settings_path: Optional[Path] = None    # gsak.db3 on disk
+
+    @property
+    def is_zip(self) -> bool:
+        return self.source.suffix.lower() == ".zip"
+
+    @property
+    def has_settings_db(self) -> bool:
+        return self.settings_member is not None or self.settings_path is not None
+
+
+def _gsak_db_name_for_file(db3_path: Path) -> str:
+    """GSAK stores every database as ``<name>/sqlite.db3``: use the folder
+    name. Any other file name (a renamed copy) is used as-is, minus suffix."""
+    if db3_path.name.lower() == GSAK_CACHE_DB_NAME and db3_path.parent.name:
+        return db3_path.parent.name
+    return db3_path.stem
+
+
+def list_gsak_backup(path: Path) -> GsakBackupContents:
+    """List the GSAK cache databases (and gsak.db3) in *path* without
+    unpacking anything.
+
+    *path* is either a GSAK backup .zip — every ``<folder>/sqlite.db3`` in it
+    becomes one entry, named after its folder (a ``sqlite.db3`` at the zip
+    root is named after the zip itself) — or a single database file, which
+    becomes the only entry. For a single file, a ``gsak.db3`` in the GSAK
+    install it belongs to (``<gsak>/data/<name>/sqlite.db3``) is picked up
+    too, so its filters can be offered alongside.
+    """
+    path = Path(path)
+    contents = GsakBackupContents(path)
+
+    if not contents.is_zip:
+        size = path.stat().st_size if path.exists() else 0
+        contents.databases.append(
+            GsakBackupDatabase(_gsak_db_name_for_file(path), size, path=path)
+        )
+        for candidate in (path.parent.parent / GSAK_SETTINGS_DB_NAME,
+                          path.parent.parent.parent / GSAK_SETTINGS_DB_NAME):
+            if candidate != path and candidate.is_file():
+                contents.settings_path = candidate
+                break
+        return contents
+
     import zipfile
 
-    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_extract_"))
     with zipfile.ZipFile(path) as zf:
-        zf.extractall(extract_dir)
+        infos = zf.infolist()
 
-    matches = list(extract_dir.rglob("sqlite.db3"))
-    if not matches:
-        raise ValueError(f"No sqlite.db3 file found inside {path.name}")
-    return matches[0]
+    settings_depth: Optional[int] = None
+    for info in infos:
+        if info.is_dir():
+            continue
+        parts = [p for p in info.filename.replace("\\", "/").split("/") if p]
+        if not parts:
+            continue
+        leaf = parts[-1].lower()
+        if leaf == GSAK_CACHE_DB_NAME:
+            name = parts[-2] if len(parts) > 1 else path.stem
+            contents.databases.append(
+                GsakBackupDatabase(name, info.file_size, member=info.filename)
+            )
+        elif leaf == GSAK_SETTINGS_DB_NAME:
+            # Prefer the shallowest gsak.db3 — macros never ship one, but a
+            # nested copy should never win over the real root one.
+            if settings_depth is None or len(parts) < settings_depth:
+                contents.settings_member = info.filename
+                settings_depth = len(parts)
+
+    contents.databases.sort(key=lambda db: db.name.lower())
+    return contents
+
+
+def extract_gsak_member(zip_path: Path, member: str, dest_dir: Path,
+                        progress_cb=None) -> Path:
+    """Unpack the single zip *member* into *dest_dir* and return its path.
+
+    The file keeps its own base name (``sqlite.db3`` / ``gsak.db3``) and is
+    written straight into *dest_dir* — never to a path taken from the zip —
+    so a crafted member name can't escape the directory. ``progress_cb`` is
+    called with the number of bytes written so far after every chunk.
+    """
+    import zipfile
+
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    target = dest_dir / Path(member.replace("\\", "/")).name
+    written = 0
+    with zipfile.ZipFile(zip_path) as zf, zf.open(member) as src, open(target, "wb") as dst:
+        while chunk := src.read(1024 * 1024):
+            dst.write(chunk)
+            written += len(chunk)
+            if progress_cb is not None:
+                progress_cb(written)
+    return target
+
+
+def clear_opensak_cache_data(session: Session) -> int:
+    """Delete every cache (and everything hanging off it) from *session*'s
+    database — used when the user chose to *overwrite* an existing OpenSAK
+    database with a GSAK import rather than merge into it.
+
+    Returns the number of caches removed. Children go first: the foreign
+    keys don't cascade on delete.
+    """
+    from sqlalchemy import delete, func, select
+
+    removed = session.execute(select(func.count()).select_from(Cache)).scalar_one()
+    for model in (UserNote, Trackable, Attribute, Log, Waypoint, Cache):
+        session.execute(delete(model))
+    session.commit()
+    return int(removed)
 
 
 def _open_readonly(

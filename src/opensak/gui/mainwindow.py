@@ -1854,6 +1854,8 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.gsak_import_dialog import GsakImportDialog
         dlg = GsakImportDialog(self)
         dlg.import_completed.connect(self._refresh_after_import)
+        dlg.databases_changed.connect(self._reload_db_combo)
+        dlg.filters_imported.connect(self._on_filter_profiles_imported)
         dlg.exec()
 
     def _open_gsak_filter_import_dialog(self) -> None:
