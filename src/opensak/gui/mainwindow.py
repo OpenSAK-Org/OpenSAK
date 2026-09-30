@@ -1001,6 +1001,17 @@ class MainWindow(QMainWindow):
         self._detail_panel.clear()
         self._load_sort_for_active_db()
         self._reload_home_combo()
+        # Den nye database kan have manglende/forældede distancer — fx en
+        # database som GSAK-backup-importen har udfyldt i baggrunden (kun
+        # den aktive database genberegnes i _refresh_after_import()), eller
+        # et andet hjemmepunkt gemt per database. Samme billige tjek som
+        # ved opstart (issue #579), så et skift normalt ikke koster en fuld
+        # genberegning.
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not distances_up_to_date(s.home_lat, s.home_lon):
+                recalculate_distances(s.home_lat, s.home_lon)
         # Genindlæs kolonner for den nye database (issue #199)
         self._cache_table.reload_columns()
         # Issue #607 (opfølgning): genindlæs comboen for den nye database —
