@@ -5,8 +5,11 @@ DB-backed host applies the FilterSet the macro built against a real test
 database, so "a Lua script selects caches" is covered end to end.
 """
 
+from pathlib import Path
+
 import pytest
 
+from opensak.db.corrected_coords import set_corrected_coords
 from opensak.db.database import get_session
 from opensak.db.models import Cache
 from opensak.filters.engine import (
@@ -32,6 +35,11 @@ class FakeHost:
     def cache_count(self):
         return 99
 
+    def set_corrected_coords(self, gc_code, lat, lon):
+        self.corrected = getattr(self, "corrected", [])
+        self.corrected.append((gc_code, lat, lon))
+        return gc_code != "GCNONE"
+
 
 class DbHost(FakeHost):
     """Applies the filter against the test DB and remembers the selection."""
@@ -46,6 +54,9 @@ class DbHost(FakeHost):
         if codes:
             self.selected = codes
         return len(codes)
+
+    def set_corrected_coords(self, gc_code, lat, lon):
+        return set_corrected_coords(gc_code, lat, lon)
 
 
 def _run(source, host=None, **kwargs):
@@ -207,3 +218,85 @@ def test_empty_result_keeps_previous_selection():
         assert(opensak.filter{ name = "does-not-exist" } == 0)
     """, host=host)
     assert host.selected == {"GCMAC3"}
+
+
+# ── Corrected coordinates / CSV ──────────────────────────────────────────────
+
+EXAMPLES = Path(__file__).resolve().parents[2] / "macros" / "examples"
+
+
+def test_set_corrected_accepts_numbers_strings_and_coord_text():
+    host, out = _run("""
+        print(opensak.set_corrected("gc123", 47.5, 8.25))
+        print(opensak.set_corrected("GC124", "47.5", "8.25"))
+        print(opensak.set_corrected("GC125", "N47 30.000 E008 15.000"))
+        print(opensak.clear_corrected("GC126"))
+        print(opensak.set_corrected("GCNONE", 1, 2))
+    """)
+    assert out == ["true", "true", "true", "true", "false"]
+    assert host.corrected[:3] == [("GC123", 47.5, 8.25)] + [("GC124", 47.5, 8.25)] + [
+        ("GC125", pytest.approx(47.5), pytest.approx(8.25))]
+    assert host.corrected[3] == ("GC126", None, None)
+
+
+@pytest.mark.parametrize("call,msg", [
+    ('opensak.set_corrected("GC1", 91, 0)', "out of range"),
+    ('opensak.set_corrected("GC1", "somewhere")', "cannot parse coordinates"),
+    ('opensak.set_corrected("GC1", "x", 8)', "must be numbers"),
+    ('opensak.set_corrected(nil, 1, 2)', "expects a GC code"),
+    ('opensak.set_corrected("GC1", 47)', "coordinate string"),
+])
+def test_set_corrected_rejects_bad_input(call, msg):
+    host = FakeHost()
+    with pytest.raises(MacroError, match=msg):
+        _run(call, host=host)
+    assert not getattr(host, "corrected", [])
+
+
+def test_read_csv_sniffs_separator_and_resolves_relative_path(tmp_path):
+    (tmp_path / "a.csv").write_text(
+        "﻿code ; lat;lon\nGC1;47.1;8.2\n\nGC2;46;7\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("code|x\nGC3|y\n", encoding="utf-8")
+    out: list[str] = []
+    MacroRuntime(FakeHost(), output=out.append).run("""
+        local rows = opensak.read_csv("a.csv")
+        print(#rows, rows[1].code, rows[1].lat, rows[2].lon)
+        print(opensak.read_csv("b.csv", "|")[1].x)
+    """, base_dir=tmp_path)
+    assert out == ["2\tGC1\t47.1\t7", "y"]
+
+
+def test_read_csv_missing_file(tmp_path):
+    with pytest.raises(MacroError, match="file not found"):
+        MacroRuntime(FakeHost(), output=lambda _: None).run(
+            'opensak.read_csv("nope.csv")', base_dir=tmp_path)
+
+
+def test_example_macro_sets_corrected_coords_from_csv():
+    codes = ["GC1", "GC2", "GC3", "GC4", "GC5", "GC6"]
+    with get_session() as s:
+        for code in codes:
+            s.add(Cache(gc_code=code, name=code, cache_type="Unknown Cache",
+                        latitude=47.0, longitude=8.0))
+    set_corrected_coords("GC4", 1.0, 1.0)   # overwritten by the CSV
+
+    host, out = DbHost(), []
+    MacroRuntime(host, output=out.append).run(
+        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
+        base_dir=EXAMPLES,
+    )
+
+    assert out[0] == "Read 6 row(s) from corrected_coords.csv"
+    assert out[-1] == "Done: 6 set, 0 cleared, 0 not found, 0 failed"
+    assert host.selected == set(codes)
+    with get_session() as s:
+        got = {c.gc_code: (c.user_note.corrected_lat, c.user_note.corrected_lon,
+                           c.user_note.is_corrected)
+               for c in s.query(Cache).filter(Cache.gc_code.in_(codes))}
+    assert got["GC1"] == (pytest.approx(47 + 21.689 / 60), pytest.approx(6 + 18.718 / 60), True)
+    assert got["GC2"][:2] == (pytest.approx(47 + 8.905 / 60), pytest.approx(9 + 42.534 / 60))
+    assert got["GC3"] == (pytest.approx(47.514093), pytest.approx(7.470118), True)
+    assert got["GC4"][:2] == (pytest.approx(46 + 40.099 / 60), pytest.approx(6 + 33.842 / 60))
+    assert got["GC5"][:2] == (pytest.approx(47 + 25 / 60 + 0.37 / 3600),
+                              pytest.approx(8 + 5 / 60 + 31.97 / 3600))
+    assert got["GC6"][:2] == (pytest.approx(46.66695), pytest.approx(8.32197))

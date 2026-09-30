@@ -3090,6 +3090,16 @@ class MainWindow(QMainWindow):
         with get_session() as session:
             return len(apply_filters_auto(session, self._build_active_filterset()))
 
+    def set_corrected_coords(self, gc_code, lat, lon) -> bool:
+        """MacroHost: set (or clear, with lat/lon = None) corrected coordinates
+        and refresh the table row, map pin and detail panel like the other
+        entry points do."""
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(gc_code, lat, lon):
+            return False
+        self._on_corrected_coords_changed(gc_code)
+        return True
+
     def _open_found_updater(self) -> None:
         if self._trip_planner_active():
             self._warn_trip_planner_active()
