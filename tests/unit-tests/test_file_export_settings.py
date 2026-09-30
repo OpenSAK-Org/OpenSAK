@@ -16,7 +16,8 @@ from opensak.export.file_export_settings import (
 
 class TestFileExportSettings:
     def test_roundtrip(self):
-        s = FileExportSettings(fmt="ggz", output_path="/x/y.ggz")
+        s = FileExportSettings(fmt="ggz", output_path="/x/y.ggz",
+                               use_corrected_coords=False, max_records=250)
         assert FileExportSettings.from_dict(s.to_dict()) == s
 
     def test_missing_keys_fall_back_to_defaults(self):
@@ -25,6 +26,15 @@ class TestFileExportSettings:
     def test_invalid_values_fall_back_to_defaults(self):
         s = FileExportSettings.from_dict({"fmt": "kml", "output_path": 42})
         assert s == FileExportSettings()
+
+    @pytest.mark.parametrize("value", ["yes", 1, None])
+    def test_invalid_use_corrected_falls_back(self, value):
+        s = FileExportSettings.from_dict({"use_corrected_coords": value})
+        assert s.use_corrected_coords is True
+
+    @pytest.mark.parametrize("value", [-1, "10", 2.5, True, None])
+    def test_invalid_max_records_falls_back(self, value):
+        assert FileExportSettings.from_dict({"max_records": value}).max_records == 0
 
     def test_unknown_keys_are_ignored(self):
         s = FileExportSettings.from_dict({"fmt": "loc", "from_the_future": True})
@@ -67,7 +77,10 @@ class TestFileExportProfile:
         path = FileExportProfile("A/B", FileExportSettings(fmt="loc")).save(tmp_path)
         assert path.name == "A_B.json"
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data == {"name": "A/B", "settings": {"fmt": "loc", "output_path": ""}}
+        assert data == {"name": "A/B", "settings": {
+            "fmt": "loc", "output_path": "",
+            "use_corrected_coords": True, "max_records": 0,
+        }}
 
 
 # ── Dialog integration ────────────────────────────────────────────────────────
@@ -125,6 +138,43 @@ class TestFileExportDialogSettings:
         dlg._save_profile()
         path = FileExportProfile.profile_path("P")
         assert FileExportProfile.load(path).settings.fmt == "ggz"
+
+    def test_new_options_saved_and_applied(self, qtbot, fed, monkeypatch):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        dlg._chk_corrected.setChecked(False)
+        dlg._spin_max.setValue(42)
+        monkeypatch.setattr(fed.QInputDialog, "getText", lambda *a, **k: ("Opt", True))
+        dlg._save_profile()
+        saved = FileExportProfile.load(FileExportProfile.profile_path("Opt")).settings
+        assert saved.use_corrected_coords is False
+        assert saved.max_records == 42
+
+        dlg._settings_combo.setCurrentIndex(0)   # "last used" (defaults)
+        assert dlg._chk_corrected.isChecked() is True
+        assert dlg._spin_max.value() == 0
+        dlg._settings_combo.setCurrentIndex(1)
+        assert dlg._chk_corrected.isChecked() is False
+        assert dlg._spin_max.value() == 42
+
+    def test_export_applies_max_records_and_coord_choice(self, qtbot, fed, monkeypatch, tmp_path):
+        caches = [_cache() for _ in range(5)]
+        caches.insert(0, SimpleNamespace(latitude=None, longitude=None))
+        dlg = fed.FileExportDialog(caches)
+        qtbot.addWidget(dlg)
+        dlg._chk_corrected.setChecked(False)
+        dlg._spin_max.setValue(3)
+        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName",
+                            lambda *a: (str(tmp_path / "x.gpx"), ""))
+        calls = []
+        monkeypatch.setattr(fed, "_ExportWorker",
+                            lambda *a, **k: calls.append((a, k)) or MagicMock())
+        dlg._do_export()
+        (args, kwargs), = calls
+        assert args[0] == caches[1:4]
+        assert kwargs["use_corrected"] is False
+        last = FileExportProfile.load_last_used()
+        assert (last.use_corrected_coords, last.max_records) == (False, 3)
 
     def test_delete_profile(self, qtbot, fed, monkeypatch):
         FileExportProfile("P", FileExportSettings(fmt="ggz")).save()

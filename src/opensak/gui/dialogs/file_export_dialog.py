@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QRadioButton,
     QButtonGroup, QGroupBox, QProgressBar,
     QTextEdit, QComboBox, QInputDialog, QSizePolicy,
+    QCheckBox, QSpinBox, QFormLayout,
 )
 
 from opensak.lang import tr
@@ -36,11 +37,13 @@ class _ExportWorker(QThread):
     error    = Signal(str)        # error message
     progress = Signal(int, int)   # (done, total)
 
-    def __init__(self, caches: list, output_path: Path, fmt: str):
+    def __init__(self, caches: list, output_path: Path, fmt: str,
+                 use_corrected: bool = True):
         super().__init__()
-        self._caches      = caches
-        self._output_path = output_path
-        self._fmt         = fmt          # "gpx" | "loc" | "ggz"
+        self._caches        = caches
+        self._output_path   = output_path
+        self._fmt           = fmt          # "gpx" | "loc" | "ggz"
+        self._use_corrected = use_corrected
 
     def run(self) -> None:
         try:
@@ -52,13 +55,16 @@ class _ExportWorker(QThread):
             cb = make_progress_cb(self.progress.emit)
 
             if self._fmt == "gpx":
-                content = generate_gpx(caches, self._output_path.stem, progress_cb=cb)
+                content = generate_gpx(caches, self._output_path.stem, progress_cb=cb,
+                                       use_corrected=self._use_corrected)
                 self._output_path.write_text(content, encoding="utf-8")
             elif self._fmt == "loc":
-                content = generate_loc(caches, progress_cb=cb)
+                content = generate_loc(caches, progress_cb=cb,
+                                       use_corrected=self._use_corrected)
                 self._output_path.write_text(content, encoding="utf-8")
             elif self._fmt == "ggz":
-                data = generate_ggz(caches, self._output_path.stem, progress_cb=cb)
+                data = generate_ggz(caches, self._output_path.stem, progress_cb=cb,
+                                    use_corrected=self._use_corrected)
                 self._output_path.write_bytes(data)
 
             count = len([c for c in caches if c.latitude is not None])
@@ -118,6 +124,19 @@ class FileExportDialog(QDialog):
         fmt_layout.addWidget(self._btn_ggz)
         layout.addWidget(fmt_group)
 
+        # Export options
+        opt_group = QGroupBox(tr("gps_opt_group"))
+        opt_layout = QFormLayout(opt_group)
+        self._chk_corrected = QCheckBox(tr("file_export_use_corrected"))
+        self._chk_corrected.setChecked(True)
+        opt_layout.addRow(self._chk_corrected)
+        self._spin_max = QSpinBox()
+        self._spin_max.setRange(0, 1_000_000)
+        self._spin_max.setSpecialValueText(tr("file_export_max_records_all"))
+        self._spin_max.setToolTip(tr("file_export_max_records_tip"))
+        opt_layout.addRow(tr("file_export_max_records"), self._spin_max)
+        layout.addWidget(opt_group)
+
         # Saved settings
         settings_group = QGroupBox(tr("file_export_settings_label"))
         settings_row = QHBoxLayout(settings_group)
@@ -175,6 +194,8 @@ class FileExportDialog(QDialog):
         return FileExportSettings(
             fmt=self._current_fmt(),
             output_path=self._output_path,
+            use_corrected_coords=self._chk_corrected.isChecked(),
+            max_records=self._spin_max.value(),
         )
 
     def _apply_settings(self, settings: FileExportSettings) -> None:
@@ -184,6 +205,8 @@ class FileExportDialog(QDialog):
             "ggz": self._btn_ggz,
         }.get(settings.fmt, self._btn_gpx).setChecked(True)
         self._output_path = settings.output_path
+        self._chk_corrected.setChecked(settings.use_corrected_coords)
+        self._spin_max.setValue(settings.max_records)
 
     def _load_profiles_into_combo(self) -> None:
         self._settings_combo.clear()
@@ -314,7 +337,16 @@ class FileExportDialog(QDialog):
         self._progress.setVisible(True)
         self._btn_export.setEnabled(False)
 
-        self._worker = _ExportWorker(self._caches, output_path, fmt)
+        # Only caches with coordinates are exported, so the limit counts those.
+        caches = [c for c in self._caches if c.latitude is not None]
+        max_records = self._spin_max.value()
+        if max_records:
+            caches = caches[:max_records]
+
+        self._worker = _ExportWorker(
+            caches, output_path, fmt,
+            use_corrected=self._chk_corrected.isChecked(),
+        )
         self._worker.finished.connect(self._on_success)
         self._worker.error.connect(self._on_error)
         self._worker.progress.connect(self._on_progress)

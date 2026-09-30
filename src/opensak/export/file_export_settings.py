@@ -35,11 +35,15 @@ class FileExportSettings:
 
     fmt: str = "gpx"          # "gpx" | "loc" | "ggz"
     output_path: str = ""     # last chosen output file ("" = not set)
+    use_corrected_coords: bool = True   # False = always export original coords
+    max_records: int = 0      # max caches to export (0 = all)
 
     def to_dict(self) -> dict:
         return {
             "fmt": self.fmt,
             "output_path": self.output_path,
+            "use_corrected_coords": self.use_corrected_coords,
+            "max_records": self.max_records,
         }
 
     @classmethod
@@ -51,7 +55,20 @@ class FileExportSettings:
         output_path = data.get("output_path", defaults.output_path)
         if not isinstance(output_path, str):
             output_path = defaults.output_path
-        return cls(fmt=fmt, output_path=output_path)
+        use_corrected = data.get("use_corrected_coords", defaults.use_corrected_coords)
+        if not isinstance(use_corrected, bool):
+            use_corrected = defaults.use_corrected_coords
+        max_records = data.get("max_records", defaults.max_records)
+        # bool is an int subclass — reject it explicitly.
+        if (not isinstance(max_records, int) or isinstance(max_records, bool)
+                or max_records < 0):
+            max_records = defaults.max_records
+        return cls(
+            fmt=fmt,
+            output_path=output_path,
+            use_corrected_coords=use_corrected,
+            max_records=max_records,
+        )
 
 
 class FileExportProfile:
