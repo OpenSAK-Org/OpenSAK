@@ -40,6 +40,9 @@ class FakeHost:
         self.corrected.append((gc_code, lat, lon))
         return gc_code != "GCNONE"
 
+    def end_macro(self):
+        self.ended = getattr(self, "ended", 0) + 1
+
 
 class DbHost(FakeHost):
     """Applies the filter against the test DB and remembers the selection."""
@@ -270,6 +273,37 @@ def test_read_csv_missing_file(tmp_path):
     with pytest.raises(MacroError, match="file not found"):
         MacroRuntime(FakeHost(), output=lambda _: None).run(
             'opensak.read_csv("nope.csv")', base_dir=tmp_path)
+
+
+def test_end_macro_called_once_after_run_even_on_error():
+    host, _ = _run('opensak.set_corrected("GC1", 47, 8) opensak.clear_corrected("GC2")')
+    assert host.ended == 1
+    host = FakeHost()
+    with pytest.raises(MacroError):
+        MacroRuntime(host, output=lambda _: None).run('opensak.set_corrected("GC1", 47, 8) error("boom")')
+    assert host.ended == 1
+
+
+@pytest.mark.parametrize("n, row_refreshes, full_reloads", [(3, 3, 0), (51, 0, 1)])
+def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
+    from types import SimpleNamespace
+    from opensak.gui import mainwindow as mw
+
+    calls = {"row": [], "full": 0, "detail": []}
+    win = SimpleNamespace(
+        _macro_changed_codes={f"GC{i}" for i in range(n)},
+        _on_corrected_coords_changed=calls["row"].append,
+        _refresh_cache_list=lambda: calls.__setitem__("full", calls["full"] + 1),
+        _detail_panel=SimpleNamespace(_current_gc_code="GC1",
+                                      show_cache=calls["detail"].append),
+        _load_full_cache=lambda code: code,
+    )
+    mw.MainWindow.end_macro(win)
+
+    assert len(calls["row"]) == row_refreshes
+    assert calls["full"] == full_reloads
+    assert calls["detail"] == (["GC1"] if full_reloads else [])
+    assert win._macro_changed_codes == set()
 
 
 def test_example_macro_sets_corrected_coords_from_csv():
