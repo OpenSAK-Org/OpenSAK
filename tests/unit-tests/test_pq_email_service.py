@@ -88,7 +88,7 @@ class TestScanAndImport:
         manager.active_path = manager.active.path
         monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
         monkeypatch.setattr("opensak.db.database.get_session", _fake_get_session)
-        monkeypatch.setattr("opensak.db.database.init_db", lambda db_path=None: None)
+        monkeypatch.setattr("opensak.db.database.session_for", lambda db_path: _fake_get_session())
         monkeypatch.setattr(
             "opensak.importer.import_zip",
             lambda *a, **kw: import_result if import_result is not None else FakeImportResult(created=1),
@@ -244,7 +244,7 @@ class TestOnlyUnseen:
         manager.active_path = north.path
         monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
         monkeypatch.setattr("opensak.db.database.get_session", _fake_get_session)
-        monkeypatch.setattr("opensak.db.database.init_db", lambda db_path=None: None)
+        monkeypatch.setattr("opensak.db.database.session_for", lambda db_path: _fake_get_session())
         monkeypatch.setattr(
             "opensak.importer.import_zip",
             lambda *a, **kw: import_result or FakeImportResult(created=1),

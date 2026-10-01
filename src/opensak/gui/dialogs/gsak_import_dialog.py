@@ -96,23 +96,22 @@ class GsakImportWorker(QThread):
         self.replace = replace                # empty the target DB first
 
     def run(self) -> None:
-        from opensak.db.database import get_session, init_db
+        from opensak.db.database import get_session, session_for
         from opensak.db.manager import get_db_manager
         from opensak.importer.gsak_importer import (
             clear_opensak_cache_data, import_gsak_db,
         )
 
-        manager = get_db_manager()
-        original_path = manager.active_path
-        switched = (
+        # Another database than the active one gets a private session —
+        # never swap the app-wide engine from this thread (see session_for).
+        active_path = get_db_manager().active_path
+        other_db = (
             self.target_db_path is not None
-            and self.target_db_path != original_path
+            and self.target_db_path != active_path
         )
-        if switched:
-            init_db(db_path=self.target_db_path)
 
         try:
-            with get_session() as session:
+            with (session_for(self.target_db_path) if other_db else get_session()) as session:
                 if self.replace:
                     self.cleared.emit(clear_opensak_cache_data(session))
                 result = import_gsak_db(
@@ -124,9 +123,6 @@ class GsakImportWorker(QThread):
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
-        finally:
-            if switched and original_path is not None:
-                init_db(db_path=original_path)
 
     @staticmethod
     def _update_distances(db_path: Path | None) -> None:

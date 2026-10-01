@@ -75,32 +75,24 @@ def _match_database(pq_name: str) -> "DatabaseInfo | None":
 def _import_zip_bytes(zip_bytes: bytes, target_db_path: Path | None) -> "ImportResult":
     """
     Importér `zip_bytes` i den angivne database (eller den aktuelt
-    aktive, hvis `target_db_path` er None), og gendan bagefter altid
-    den oprindelige aktive database.
+    aktive, hvis `target_db_path` er None).
 
-    Samme mønster som ImportWorker i import_dialog.py — se dens
-    docstring for hvorfor: init_db() skifter en global session-factory,
-    så den skal altid gendannes i en `finally`-blok, uanset resultatet.
+    En anden database end den aktive får sin egen session via
+    session_for() — den globale engine (init_db()) røres ikke, så
+    GUI-tråden kan ikke ramme den forkerte database imens.
     """
-    from opensak.db.database import get_session, init_db
+    from opensak.db.database import get_session, session_for
     from opensak.db.manager import get_db_manager
     from opensak.importer import import_zip
 
-    manager = get_db_manager()
-    original_path = manager.active_path
-    switched = target_db_path is not None and target_db_path != original_path
-    if switched:
-        init_db(db_path=target_db_path)
+    active_path = get_db_manager().active_path
+    other_db = target_db_path is not None and target_db_path != active_path
 
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            zip_path = Path(tmpdir) / "pq_email.zip"
-            zip_path.write_bytes(zip_bytes)
-            with get_session() as session:
-                return import_zip(zip_path, session)
-    finally:
-        if switched and original_path is not None:
-            init_db(db_path=original_path)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = Path(tmpdir) / "pq_email.zip"
+        zip_path.write_bytes(zip_bytes)
+        with (session_for(target_db_path) if other_db else get_session()) as session:
+            return import_zip(zip_path, session)
 
 
 def scan_and_import(

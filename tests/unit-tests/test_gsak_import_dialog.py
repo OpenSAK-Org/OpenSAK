@@ -84,22 +84,31 @@ class TestGsakImportWorker:
         w.run()
         assert errs and "boom" in errs[0]
 
-    def test_run_switches_and_restores_db(self, monkeypatch):
+    def test_run_other_db_uses_private_session(self, monkeypatch):
+        # Another target DB gets its own session; the active (global) engine
+        # is never swapped from the worker thread.
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
                             lambda path, session, progress_cb=None: _result())
-        inits = []
+        inits, opened = [], []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
+        monkeypatch.setattr("opensak.db.database.get_session",
+                            lambda: pytest.fail("active DB session used for another DB"))
+        monkeypatch.setattr("opensak.db.database.session_for",
+                            lambda p: opened.append(p) or _fake_session())
         w = GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db"))
         w.run()
-        assert inits == [Path("/other.db"), Path("/active.db")]
+        assert opened == [Path("/other.db")]
+        assert inits == []
 
-    def test_run_no_switch_when_target_is_active(self, monkeypatch):
+    def test_run_active_target_uses_active_session(self, monkeypatch):
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
                             lambda path, session, progress_cb=None: _result())
         inits = []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
+        monkeypatch.setattr("opensak.db.database.session_for",
+                            lambda p: pytest.fail("private session opened for the active DB"))
         w = GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/active.db"))
         w.run()
         assert inits == []
