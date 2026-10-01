@@ -21,9 +21,9 @@ def test_quick_filter_found_returns_zero(seeded_window, qtbot):
     assert window._cache_table.row_count() == TOTAL
 
     window._quick_filter.setCurrentIndex(2)  # index 2 = Found
-    qtbot.wait(50)
-
-    assert window._cache_table.row_count() == 0
+    # issue #740: the refresh runs on a background worker, so poll instead of
+    # a fixed wait — a slow CI runner can take longer than 50 ms.
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 0, timeout=1_000)
 
 
 def test_quick_filter_not_found_returns_all(seeded_window, qtbot):
@@ -31,13 +31,10 @@ def test_quick_filter_not_found_returns_all(seeded_window, qtbot):
     window = seeded_window
 
     window._quick_filter.setCurrentIndex(2)  # Found → 0 rows
-    qtbot.wait(50)
-    assert window._cache_table.row_count() == 0
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 0, timeout=1_000)
 
     window._quick_filter.setCurrentIndex(1)  # Not Found → all rows
-    qtbot.wait(50)
-
-    assert window._cache_table.row_count() == TOTAL
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == TOTAL, timeout=1_000)
 
 
 def test_quick_filter_reset_to_all_restores_count(seeded_window, qtbot):
@@ -45,11 +42,9 @@ def test_quick_filter_reset_to_all_restores_count(seeded_window, qtbot):
     window = seeded_window
 
     window._quick_filter.setCurrentIndex(2)  # Found → 0
-    qtbot.wait(50)
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == 0, timeout=1_000)
     window._quick_filter.setCurrentIndex(0)  # All
-    qtbot.wait(50)
-
-    assert window._cache_table.row_count() == TOTAL
+    qtbot.waitUntil(lambda: window._cache_table.row_count() == TOTAL, timeout=1_000)
 
 
 # ── Name search ────────────────────────────────────────────────────────────────
