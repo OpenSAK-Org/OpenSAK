@@ -1,0 +1,7 @@
+code;coords;note
+GCF1;N47 21.689 E006 18.718;DMM
+GCF2;N 47° 08.905' E 009° 42.534';DMM with symbols
+GCF3;47.514093, 7.470118;Decimal degrees
+GCF4;N46 40.099 E006 33.842;Overwrites existing
+GCF5;N47° 25' 00.37" E008° 05' 31.97";DMS
+GCF6;N 46.66695 E 8.32197;Decimal with hemisphere letters

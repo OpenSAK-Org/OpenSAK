@@ -233,6 +233,23 @@ def test_empty_result_keeps_previous_selection():
 # ── Corrected coordinates / CSV ──────────────────────────────────────────────
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "macros" / "examples"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "macros"
+
+
+def _run_csv_import(csv_fixture, tmp_path, host=None):
+    """Run the csv_import.lua fixture against a copy of *csv_fixture*."""
+    (tmp_path / "corrected_coords.csv").write_bytes((FIXTURES / csv_fixture).read_bytes())
+    host, out = host or DbHost(), []
+    MacroRuntime(host, output=out.append).run(
+        (FIXTURES / "csv_import.lua").read_text(encoding="utf-8"), base_dir=tmp_path)
+    return host, out
+
+
+def _add_caches(codes):
+    with get_session() as s:
+        for code in codes:
+            s.add(Cache(gc_code=code, name=code, cache_type="Unknown Cache",
+                        latitude=47.0, longitude=8.0))
 
 
 def test_set_corrected_accepts_numbers_strings_and_coord_text():
@@ -324,48 +341,44 @@ def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
     assert win._macro_changed_codes == set()
 
 
-def test_example_macro_sets_corrected_coords_from_csv():
-    codes = ["GC1", "GC2", "GC3", "GC4", "GC5", "GC6"]
-    with get_session() as s:
-        for code in codes:
-            s.add(Cache(gc_code=code, name=code, cache_type="Unknown Cache",
-                        latitude=47.0, longitude=8.0))
-    set_corrected_coords("GC4", 1.0, 1.0)   # overwritten by the CSV
+@pytest.mark.parametrize("script", sorted(EXAMPLES.glob("*.lua")), ids=lambda p: p.name)
+def test_example_macros_compile(script):
+    """Compile only: catches syntax errors in the shipped examples. Calls to
+    a renamed or removed opensak.* function are only found when run."""
+    from lupa.lua54 import LuaRuntime
+    LuaRuntime().compile(script.read_text(encoding="utf-8"))
 
-    host, out = DbHost(), []
-    MacroRuntime(host, output=out.append).run(
-        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
-        base_dir=EXAMPLES,
-    )
+
+def test_csv_import_sets_corrected_coords_in_every_format(tmp_path):
+    codes = ["GCF1", "GCF2", "GCF3", "GCF4", "GCF5", "GCF6"]
+    _add_caches(codes)
+    set_corrected_coords("GCF4", 1.0, 1.0)   # overwritten by the CSV
+
+    host, out = _run_csv_import("formats.csv", tmp_path)
 
     assert out[0] == "Read 6 row(s) from corrected_coords.csv"
+    assert host.asked == ["6 will be set, 0 cleared (0 skipped, 0 invalid).\nContinue?"]
     assert out[-1] == "Done: 6 set, 0 cleared, 0 skipped, 0 not found, 0 failed"
     assert host.selected == set(codes)
     with get_session() as s:
         got = {c.gc_code: (c.user_note.corrected_lat, c.user_note.corrected_lon,
                            c.user_note.is_corrected)
                for c in s.query(Cache).filter(Cache.gc_code.in_(codes))}
-    assert got["GC1"] == (pytest.approx(47 + 21.689 / 60), pytest.approx(6 + 18.718 / 60), True)
-    assert got["GC2"][:2] == (pytest.approx(47 + 8.905 / 60), pytest.approx(9 + 42.534 / 60))
-    assert got["GC3"] == (pytest.approx(47.514093), pytest.approx(7.470118), True)
-    assert got["GC4"][:2] == (pytest.approx(46 + 40.099 / 60), pytest.approx(6 + 33.842 / 60))
-    assert got["GC5"][:2] == (pytest.approx(47 + 25 / 60 + 0.37 / 3600),
-                              pytest.approx(8 + 5 / 60 + 31.97 / 3600))
-    assert got["GC6"][:2] == (pytest.approx(46.66695), pytest.approx(8.32197))
+    assert got["GCF1"] == (pytest.approx(47 + 21.689 / 60), pytest.approx(6 + 18.718 / 60), True)
+    assert got["GCF2"][:2] == (pytest.approx(47 + 8.905 / 60), pytest.approx(9 + 42.534 / 60))
+    assert got["GCF3"] == (pytest.approx(47.514093), pytest.approx(7.470118), True)
+    assert got["GCF4"][:2] == (pytest.approx(46 + 40.099 / 60), pytest.approx(6 + 33.842 / 60))
+    assert got["GCF5"][:2] == (pytest.approx(47 + 25 / 60 + 0.37 / 3600),
+                               pytest.approx(8 + 5 / 60 + 31.97 / 3600))
+    assert got["GCF6"][:2] == (pytest.approx(46.66695), pytest.approx(8.32197))
 
 
-def test_example_macro_writes_nothing_when_summary_is_declined(tmp_path):
-    with get_session() as s:
-        s.add(Cache(gc_code="GCD1", name="GCD1", cache_type="Unknown Cache",
-                    latitude=47.0, longitude=8.0))
-    (tmp_path / "corrected_coords.csv").write_text(
-        "code;coords\nGCD1;47.5, 8.5\nGCD2;clear\nGCD3;\n", encoding="utf-8")
-    host, out = DbHost(), []
+def test_csv_import_writes_nothing_when_summary_is_declined(tmp_path):
+    _add_caches(["GCD1"])
+    host = DbHost()
     host.answer = False
-    MacroRuntime(host, output=out.append).run(
-        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
-        base_dir=tmp_path,
-    )
+
+    host, out = _run_csv_import("declined.csv", tmp_path, host)
 
     assert host.asked == ["1 will be set, 1 cleared (1 skipped, 0 invalid).\nContinue?"]
     assert out[-1] == "Cancelled — nothing changed"
@@ -374,29 +387,15 @@ def test_example_macro_writes_nothing_when_summary_is_declined(tmp_path):
         assert cache.user_note is None or not cache.user_note.is_corrected
 
 
-def test_example_macro_never_clears_on_empty_or_half_filled_rows(tmp_path):
+def test_csv_import_never_clears_on_empty_or_half_filled_rows(tmp_path):
     codes = ["GCE1", "GCE2", "GCE3", "GCE4", "GCE5"]
-    with get_session() as s:
-        for code in codes:
-            s.add(Cache(gc_code=code, name=code, cache_type="Unknown Cache",
-                        latitude=47.0, longitude=8.0))
+    _add_caches(codes)
     for code in codes:
         set_corrected_coords(code, 1.0, 2.0)   # already solved
 
-    (tmp_path / "corrected_coords.csv").write_text(
-        "code;coords;lat;lon\n"
-        "GCE1;;;\n"              # nothing → skipped
-        "GCE2;;47.5;\n"          # lon missing → error
-        "GCE3;;;8.5\n"           # lat missing → error
-        "GCE4;Clear;;\n"         # explicit clear
-        "GCE5;;47.5;8.5\n",      # set
-        encoding="utf-8",
-    )
-    out = []
-    MacroRuntime(DbHost(), output=out.append).run(
-        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
-        base_dir=tmp_path,
-    )
+    # partial_rows.csv: GCE1 nothing, GCE2 lat only, GCE3 lon only,
+    # GCE4 "Clear", GCE5 lat + lon
+    _, out = _run_csv_import("partial_rows.csv", tmp_path)
 
     assert "GCE1: no coordinates — skipped" in out
     assert "GCE2: lon missing" in out
