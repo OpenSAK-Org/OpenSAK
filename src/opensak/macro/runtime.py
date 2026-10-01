@@ -219,8 +219,14 @@ class MacroHost(Protocol):
         """Set (or clear, with lat/lon = None) corrected coordinates.
 
         Returns False if the cache is not in the database. The host should
-        refresh whatever shows the cache (table row, map pin, detail panel).
+        refresh whatever shows the cache (table row, map pin, detail panel),
+        but may defer that to end_macro() so a macro changing thousands of
+        caches does not refresh the view thousands of times.
         """
+
+    def end_macro(self) -> None:
+        """Called once after every run, also when the macro failed — apply
+        any refreshes deferred while it was running."""
 
 
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
@@ -517,6 +523,8 @@ class MacroRuntime:
             # A Python exception raised inside a callback (e.g. the
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            self._host.end_macro()
 
     @staticmethod
     def _deny_attribute(obj, attr_name, is_setting):
