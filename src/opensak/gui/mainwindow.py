@@ -2522,33 +2522,45 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
 
     def _save_sort_for_active_db(self) -> None:
-        """Gem aktuel sortering og aktivt filter-profil per database i opensak.json."""
+        """Gem aktuel sortering og aktivt filter-profil for den aktive database.
+
+        Since #659 stored inside the database file (db_settings), so it
+        travels with the database when it's copied, moved or restored.
+        """
+        from opensak.db import db_settings
         from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG save: ingen aktiv database")
             return
-        key = f"sort.{str(manager.active.path)}"
-        get_store().set_many({
-            f"{key}.field":          self._current_sort.field,
-            f"{key}.ascending":      self._current_sort.ascending,
-            f"{key}.filter_profile": self._active_filter_name,
-        })
+        path = manager.active.path
+        for suffix, value in (
+            ("field",          self._current_sort.field),
+            ("ascending",      self._current_sort.ascending),
+            ("filter_profile", self._active_filter_name),
+        ):
+            db_settings.set_value(
+                f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), value
+            )
 
     def _load_sort_for_active_db(self) -> None:
-        """Indlaes gemt sortering og filter-profil for den aktive database fra opensak.json."""
+        """Indlaes gemt sortering og filter-profil for den aktive database (#659: fra databasefilen)."""
+        from opensak.db import db_settings
         from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
         from opensak.filters.engine import FilterProfile
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG load: ingen aktiv database")
             return
-        s = get_store()
-        key = f"sort.{str(manager.active.path)}"
-        field = str(s.get(f"{key}.field", "name"))
-        asc_raw = s.get(f"{key}.ascending", True)
+        path = manager.active.path
+
+        def _get(suffix: str, default: object) -> object:
+            return db_settings.get_value(
+                f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), default
+            )
+
+        field = str(_get("field", "name"))
+        asc_raw = _get("ascending", True)
         ascending = asc_raw if isinstance(asc_raw, bool) else str(asc_raw).lower() in ("true", "1", "yes")
         try:
             self._current_sort = SortSpec(field, ascending=ascending)
@@ -2561,12 +2573,14 @@ class MainWindow(QMainWindow):
             print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
             field = "name"
             self._current_sort = SortSpec(field, ascending=ascending)
-            get_store().set(f"{key}.field", field)
+            db_settings.set_value(
+                "sort.field", db_settings.legacy_sort_key(path, "field"), field
+            )
         # Genanvend sort-indikatoren i tabellen hvis den allerede er loaded
         if hasattr(self, "_cache_table"):
             self._cache_table.apply_sort(field, ascending)
         # Genindlæs gemt filter-profil for denne database
-        profile_name = str(s.get(f"{key}.filter_profile", ""))
+        profile_name = str(_get("filter_profile", ""))
         if profile_name:
             paths = FilterProfile.list_profiles()
             for path in paths:

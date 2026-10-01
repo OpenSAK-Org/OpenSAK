@@ -9,6 +9,7 @@ i stedet for QSettings. API'et er identisk med det gamle for at undgå
 from __future__ import annotations
 import json
 import base64
+from typing import Any
 from opensak.utils.types import CoordFormat, DateFormat, TextSize
 from opensak.settings_store import get_store
 
@@ -44,27 +45,37 @@ class AppSettings:
 
     # ── Per-database nøgle-prefix ─────────────────────────────────────────────
 
-    def _db_prefix(self) -> str:
-        """Returner en unik prefix per aktiv database til per-db settings."""
+    def _db_key(self, key: str) -> str:
+        """
+        The pre-#659 opensak.json key for a per-database setting. Still used
+        as the fallback when no database is bound (see db_settings), and to
+        import the old value into the database the first time it's opened.
+        """
         try:
             from opensak.db.manager import get_db_manager
             manager = get_db_manager()
             if manager.active:
-                safe = str(manager.active.path).replace("/", "_").replace("\\", "_")
-                return f"db.{safe}"
+                from opensak.db.db_settings import legacy_db_key
+                return legacy_db_key(manager.active.path, key)
         except Exception:
             pass
-        return "db.default"
+        return f"db.default.{key}"
 
-    def _db_key(self, key: str) -> str:
-        return f"{self._db_prefix()}.{key}"
+    def _db_get(self, key: str) -> Any:
+        """Per-database setting — stored inside the database file (#659)."""
+        from opensak.db import db_settings
+        return db_settings.get_value(key, self._db_key(key))
+
+    def _db_set(self, key: str, value: Any) -> None:
+        from opensak.db import db_settings
+        db_settings.set_value(key, self._db_key(key), value)
 
     # ── Home location (per database) ──────────────────────────────────────────
 
     @property
     def home_lat(self) -> float:
         s = get_store()
-        val = s.get(self._db_key("home_lat"))
+        val = self._db_get("home_lat")
         if val is not None and val != "":
             try:
                 return float(val)
@@ -77,16 +88,13 @@ class AppSettings:
 
     @home_lat.setter
     def home_lat(self, value: float) -> None:
-        s = get_store()
-        s.set_many({
-            self._db_key("home_lat"): value,
-            "location.home_lat":      value,
-        })
+        self._db_set("home_lat", value)
+        get_store().set("location.home_lat", value)  # default for new databases
 
     @property
     def home_lon(self) -> float:
         s = get_store()
-        val = s.get(self._db_key("home_lon"))
+        val = self._db_get("home_lon")
         if val is not None and val != "":
             try:
                 return float(val)
@@ -99,11 +107,8 @@ class AppSettings:
 
     @home_lon.setter
     def home_lon(self, value: float) -> None:
-        s = get_store()
-        s.set_many({
-            self._db_key("home_lon"): value,
-            "location.home_lon":      value,
-        })
+        self._db_set("home_lon", value)
+        get_store().set("location.home_lon", value)  # default for new databases
 
     # ── Globale hjemmepunkter (liste) ─────────────────────────────────────────
 
@@ -131,18 +136,15 @@ class AppSettings:
     def active_home_name(self) -> str:
         """Navn på det aktive hjemmepunkt (per database, med global fallback)."""
         s = get_store()
-        per_db = s.get(self._db_key("active_home_name"))
+        per_db = self._db_get("active_home_name")
         if per_db is not None:
             return str(per_db)
         return str(s.get("homepoints.active_name", ""))
 
     @active_home_name.setter
     def active_home_name(self, value: str) -> None:
-        s = get_store()
-        s.set_many({
-            self._db_key("active_home_name"): value,
-            "homepoints.active_name":         value,
-        })
+        self._db_set("active_home_name", value)
+        get_store().set("homepoints.active_name", value)
 
     def set_active_home(self, point: HomePoint) -> None:
         """Sæt aktivt hjemmepunkt."""
@@ -303,7 +305,7 @@ class AppSettings:
 
     @property
     def dist_calc_lat(self) -> float | None:
-        val = get_store().get(self._db_key("dist_calc_lat"))
+        val = self._db_get("dist_calc_lat")
         if val is None or val == "":
             return None
         try:
@@ -313,11 +315,11 @@ class AppSettings:
 
     @dist_calc_lat.setter
     def dist_calc_lat(self, value: float) -> None:
-        get_store().set(self._db_key("dist_calc_lat"), value)
+        self._db_set("dist_calc_lat", value)
 
     @property
     def dist_calc_lon(self) -> float | None:
-        val = get_store().get(self._db_key("dist_calc_lon"))
+        val = self._db_get("dist_calc_lon")
         if val is None or val == "":
             return None
         try:
@@ -327,16 +329,16 @@ class AppSettings:
 
     @dist_calc_lon.setter
     def dist_calc_lon(self, value: float) -> None:
-        get_store().set(self._db_key("dist_calc_lon"), value)
+        self._db_set("dist_calc_lon", value)
 
     @property
     def dist_calc_method(self) -> str | None:
-        val = get_store().get(self._db_key("dist_calc_method"))
+        val = self._db_get("dist_calc_method")
         return val if val in ("haversine", "vincenty") else None
 
     @dist_calc_method.setter
     def dist_calc_method(self, value: str) -> None:
-        get_store().set(self._db_key("dist_calc_method"), value)
+        self._db_set("dist_calc_method", value)
 
     @property
     def use_miles(self) -> bool:
@@ -403,7 +405,7 @@ class AppSettings:
         Uafhængig af map_max_caches ovenfor, som styrer oversigtskortet.
         Default 2.0 km — Mikes forslag på #718."""
         s = get_store()
-        val = s.get(self._db_key("map_nearby_radius_km"))
+        val = self._db_get("map_nearby_radius_km")
         if val is not None and val != "":
             try:
                 return max(0.0, float(val))
@@ -417,10 +419,8 @@ class AppSettings:
     @map_nearby_radius_km.setter
     def map_nearby_radius_km(self, value: float) -> None:
         v = max(0.0, float(value))
-        get_store().set_many({
-            self._db_key("map_nearby_radius_km"): v,
-            "display.map_nearby_radius_km":       v,
-        })
+        self._db_set("map_nearby_radius_km", v)
+        get_store().set("display.map_nearby_radius_km", v)
 
     @property
     def map_nearby_max_caches(self) -> int:
@@ -429,7 +429,7 @@ class AppSettings:
         normalt ikke (radius er den primære, brugervendte kontrol), men
         beskytter mod meget tætte områder. Default 500."""
         s = get_store()
-        val = s.get(self._db_key("map_nearby_max_caches"))
+        val = self._db_get("map_nearby_max_caches")
         if val is not None and val != "":
             try:
                 return max(1, int(val))
@@ -443,10 +443,8 @@ class AppSettings:
     @map_nearby_max_caches.setter
     def map_nearby_max_caches(self, value: int) -> None:
         v = max(1, int(value))
-        get_store().set_many({
-            self._db_key("map_nearby_max_caches"): v,
-            "display.map_nearby_max_caches":       v,
-        })
+        self._db_set("map_nearby_max_caches", v)
+        get_store().set("display.map_nearby_max_caches", v)
 
     # ── Koordinatformat ───────────────────────────────────────────────────────
 

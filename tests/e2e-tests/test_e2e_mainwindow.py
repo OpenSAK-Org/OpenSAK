@@ -1069,6 +1069,21 @@ class TestBulkAndFlags:
 
 # ── sort save/load ────────────────────────────────────────────────────────────
 
+def _sort_set(suffix, value):
+    """Store a per-database sort setting the way the app does (#659: in the db file)."""
+    from opensak.db import db_settings
+    from opensak.db.manager import get_db_manager
+    path = get_db_manager().active.path
+    db_settings.set_value(f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), value)
+
+
+def _sort_get(suffix):
+    from opensak.db import db_settings
+    from opensak.db.manager import get_db_manager
+    path = get_db_manager().active.path
+    return db_settings.get_value(f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix))
+
+
 class TestSort:
     def test_on_sort_changed(self, seeded_window):
         seeded_window._on_sort_changed("name", False)
@@ -1085,11 +1100,8 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
 
     def test_load_sort_with_saved_profile(self, seeded_window, monkeypatch, iso_settings):
-        from opensak.db.manager import get_db_manager
         from opensak.filters.engine import FilterSet, SortSpec
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.filter_profile", "MyProfile")
+        _sort_set("filter_profile", "MyProfile")
         prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
                                sort=SortSpec("name"))
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
@@ -1104,13 +1116,10 @@ class TestSort:
         # Regression: the profile's embedded sort (always "name") used to
         # replace the per-DB column sort on reopen and was then saved back,
         # so e.g. a Distance sort was lost after restarting.
-        from opensak.db.manager import get_db_manager
         from opensak.filters.engine import FilterSet, SortSpec
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set_many({f"{key}.field": "distance",
-                              f"{key}.ascending": True,
-                              f"{key}.filter_profile": "MyProfile"})
+        _sort_set("field", "distance")
+        _sort_set("ascending", True)
+        _sort_set("filter_profile", "MyProfile")
         prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
                                sort=SortSpec("name"))
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
@@ -1120,26 +1129,20 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
         assert seeded_window._current_sort.field == "distance"
         seeded_window._on_filter_applied(FilterSet(), SortSpec("name"), "MyProfile")
-        assert get_store().get(f"{key}.field") == "distance"
+        assert _sort_get("field") == "distance"
 
     def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
         # Regression for #498: opensak.json deles på tværs af alle installerede
         # versioner. Hvis en nyere version har gemt et sort-felt denne version
         # ikke kender (fx "some_future_field"), må opstart IKKE crashe — den skal
         # falde tilbage til "name" og rette den gemte værdi.
-        from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.field", "some_future_field")
+        _sort_set("field", "some_future_field")
         seeded_window._load_sort_for_active_db()
         assert seeded_window._current_sort.field == "name"
-        assert get_store().get(f"{key}.field") == "name"
+        assert _sort_get("field") == "name"
 
     def test_load_sort_profile_load_error(self, seeded_window, monkeypatch, iso_settings):
-        from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.filter_profile", "Ghost")
+        _sort_set("filter_profile", "Ghost")
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
                             staticmethod(lambda: [Path("/x/p.json")]))
         monkeypatch.setattr(

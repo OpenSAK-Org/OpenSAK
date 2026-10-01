@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -106,10 +106,26 @@ def _safe_db_key(name: str) -> str:
     return name.replace(".", "_").replace(" ", "_")
 
 
+def _get_db_columns(suffix: str) -> Any:
+    """Per-database column setting — stored inside the database file (#659)."""
+    from opensak.db import db_settings
+    return db_settings.get_value(f"columns.{suffix}", _col_key(suffix))
+
+
+def _set_db_columns(suffix: str, value: Any) -> None:
+    from opensak.db import db_settings
+    db_settings.set_value(f"columns.{suffix}", _col_key(suffix), value)
+
+
 def migrate_column_settings_for_rename(old_name: str, new_name: str) -> None:
     """
     Flyt gemte kolonneindstillinger (#199) fra den gamle til den nye
     database-navne-nøgle, når en database omdøbes (#539).
+
+    Since #659 the column layout lives inside the database file, so this
+    only matters for the legacy opensak.json keys of a database that hasn't
+    been opened since the upgrade (its settings are imported on first open,
+    by its then-current name).
 
     Uden dette ville et rename få kolonneopsætningen til at "nulstille"
     (fordi den nu peger på en tom nøgle for det nye navn), mens de gamle
@@ -139,14 +155,17 @@ def _col_key(suffix: str) -> str:
     Format: "columns.<db_name>.<suffix>"
     Falder tilbage til "columns.default.<suffix>" hvis ingen aktiv database.
     Issue #199: column views gemmes per database-navn.
+
+    Since #659 this is only the legacy opensak.json key: the fallback when
+    no database is bound, and where the value is imported from on first open.
     """
     try:
         from opensak.db.manager import get_db_manager
         manager = get_db_manager()
         if manager.active:
             # Brug database-navn (ikke sti) — mere læsbart og portabelt
-            safe = manager.active.name.replace(".", "_").replace(" ", "_")
-            return f"columns.{safe}.{suffix}"
+            from opensak.db.db_settings import legacy_columns_key
+            return legacy_columns_key(manager.active.name, suffix)
     except Exception:
         pass
     return f"columns.default.{suffix}"
@@ -277,7 +296,7 @@ def get_default_view() -> Optional[ColumnView]:
 
 def get_visible_columns() -> list[str]:
     """Returner liste over synlige kolonne-id'er for den aktive database."""
-    saved = get_store().get(_col_key("visible"))
+    saved = _get_db_columns("visible")
     if saved:
         return list(saved)
     # Issue #607: ingen egen opsætning for denne database — brug det
@@ -291,12 +310,12 @@ def get_visible_columns() -> list[str]:
 
 def set_visible_columns(col_ids: list[str]) -> None:
     """Gem liste over synlige kolonne-id'er for den aktive database."""
-    get_store().set(_col_key("visible"), col_ids)
+    _set_db_columns("visible", col_ids)
 
 
 def get_column_widths() -> dict[str, int]:
     """Return saved column widths (col_id -> px) for the active database."""
-    raw = get_store().get(_col_key("widths"))
+    raw = _get_db_columns("widths")
     if not raw:
         # Issue #607: samme fallback til standard-viewet som ovenfor.
         default_view = get_default_view()
@@ -315,7 +334,7 @@ def get_column_widths() -> dict[str, int]:
 
 def set_column_widths(widths: dict[str, int]) -> None:
     """Persist column widths (col_id -> px) for the active database."""
-    get_store().set(_col_key("widths"), widths)
+    _set_db_columns("widths", widths)
 
 
 _CONTAINER_DISPLAY_KEY = "columns.container_display"

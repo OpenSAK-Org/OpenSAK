@@ -405,6 +405,11 @@ class DatabaseManager:
         old_name = db_info.name
         old_path = db_info.path
 
+        # Issue #659: the path- and name-keyed legacy settings in
+        # opensak.json no longer match once the file is renamed — import
+        # them into the database file first, so they travel with it.
+        self._seed_db_settings(db_info)
+
         safe_name = "".join(
             c if c.isalnum() or c in "-_ " else "_" for c in new_name
         ).strip()
@@ -459,6 +464,21 @@ class DatabaseManager:
         db_info.name = new_name
         self._save_to_settings()
 
+    @staticmethod
+    def _seed_db_settings(db_info: "DatabaseInfo") -> None:
+        """Import a database's legacy opensak.json settings into it (#659).
+
+        Best-effort: a failure here must never block a rename or copy.
+        """
+        try:
+            from opensak.db.db_settings import ensure_seeded
+            ensure_seeded(db_info.path, db_info.name)
+        except Exception:
+            logger.warning(
+                "Could not import the settings of %r into the database file",
+                db_info.name, exc_info=True,
+            )
+
     def copy_database(self, db_info: "DatabaseInfo", new_name: str,
                       new_path: Optional[Path] = None) -> "DatabaseInfo":
         """Lav en kopi af en database."""
@@ -472,6 +492,11 @@ class DatabaseManager:
             ).strip()
             new_path = get_db_dir() / f"{safe_name}.db"
 
+        # Issue #659: make sure the source's settings are inside the file
+        # (imported from opensak.json if it hasn't been opened since), so
+        # the copy gets them too.
+        self._seed_db_settings(db_info)
+
         # Issue #943: a WAL-safe snapshot instead of shutil.copy2(). Copying
         # only the main .db file could miss committed changes that still
         # live in the -wal sidecar — notably when copying the active,
@@ -483,6 +508,17 @@ class DatabaseManager:
             raise SnapshotError(
                 tr("db_err_copy_failed", name=db_info.name, error=str(exc))
             ) from exc
+
+        # Issue #659: a copy is a database of its own from now on, so it
+        # gets its own identity. Best-effort — the copy itself succeeded.
+        try:
+            from opensak.db.db_settings import assign_new_uuid
+            assign_new_uuid(new_path)
+        except Exception:
+            logger.warning(
+                "Could not give the copy %s a new database id", new_path,
+                exc_info=True,
+            )
         info = DatabaseInfo(new_name, new_path)
         self._databases.append(info)
         self._save_to_settings()

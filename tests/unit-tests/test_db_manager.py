@@ -238,7 +238,13 @@ class TestRename:
         shm.write_text("shm")
         wal.write_text("wal")
 
-        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+        # The sidecars here are fake text files. Opening the database (as the
+        # #659 settings import in rename() does) makes SQLite discard invalid
+        # sidecars — so keep that out of this test, which is only about the
+        # files being moved along.
+        with patch("opensak.db.database.dispose_engine"), \
+                patch("opensak.db.database.init_db"), \
+                patch.object(DatabaseManager, "_seed_db_settings"):
             manager.rename(db, "WithSidecars")
 
         new_shm = Path(str(db.path) + "-shm")
