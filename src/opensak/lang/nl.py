@@ -625,6 +625,8 @@ STRINGS: dict[str, str] = {
     "db_err_move_failed": "Kan '{name}' niet verplaatsen: {error}",
     "db_err_corrupt_source":      "Kan '{name}' niet verplaatsen: het bronbestand is geen geldige SQLite-database.",
     "db_err_copy_failed": "Kan '{name}' niet kopiëren: {error}",
+    "premigration_backup_title": "Back-up van database gemaakt",
+    "premigration_backup_msg": "Voordat het databasebestand '{file}' werd bijgewerkt voor deze versie van OpenSAK, is er hier een kopie van opgeslagen:\n\n{path}\n\nU hebt deze kopie alleen nodig als er iets is misgegaan. Anders kunt u hem verwijderen.",
     "db_err_target_path_exists": "Er bestaat al een bestand voor '{name}' op {path}.",
     "db_err_rename_failed": "Kan '{name}' niet hernoemen: {error}",
     "db_err_mkdir_failed":          "Kan map niet aanmaken:\n{path}",

@@ -1027,6 +1027,26 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(
             tr("status_db_name", db_name=db_info.name), 4000
         )
+        # Issue #549: opening the database may just have migrated it.
+        self.show_premigration_backup_notices()
+
+    def show_premigration_backup_notices(self) -> None:
+        """
+        Tell the user about databases that were backed up before a schema
+        migration (issue #549), so the backup isn't a silent background
+        action they never find out about. Called after startup and after
+        switching databases; a no-op when no backup was made.
+        """
+        from opensak.backup.premigration import take_notices
+        notices = take_notices()
+        if not notices:
+            return
+        text = "\n\n".join(
+            tr("premigration_backup_msg",
+               file=n.db_path.name, path=str(n.backup_path))
+            for n in notices
+        )
+        QMessageBox.information(self, tr("premigration_backup_title"), text)
 
     def _reload_db_combo(self) -> None:
         """Genindlæs database-dropdown fra manager."""

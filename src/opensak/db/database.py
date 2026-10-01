@@ -23,6 +23,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from opensak.backup.premigration import backup_before_migration
 from opensak.db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,13 @@ def init_db(db_path: Path | None = None) -> Engine:
         autocommit=False,
         expire_on_commit=False,  # keep objects usable after session closes
     )
+
+    # Issue #549: if opening this database is about to migrate its schema,
+    # save a one-time copy of it first. This must happen before create_all(),
+    # which already adds any new tables to an old database. Best-effort:
+    # backup_before_migration() never raises and never blocks the migration.
+    if db_path not in _migrated_paths:
+        backup_before_migration(db_path, SCHEMA_VERSION)
 
     # Create all tables that don't exist yet (safe to call multiple times).
     # Do this before touching the globals — if the file is not a valid SQLite

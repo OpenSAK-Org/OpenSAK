@@ -371,10 +371,16 @@ def main() -> None:
         from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
         from opensak.config import get_log_path
         from opensak.lang import tr
-        QMessageBox.critical(
-            None, tr("startup_db_error_title"),
-            tr("startup_db_error_msg", error=str(e), path=str(get_log_path())),
-        )
+        message = tr("startup_db_error_msg", error=str(e), path=str(get_log_path()))
+        # Issue #549: if the database was backed up before a migration that
+        # then failed, this is exactly when the user needs to know where.
+        from opensak.backup.premigration import take_notices
+        for notice in take_notices():
+            message += "\n\n" + tr(
+                "premigration_backup_msg",
+                file=notice.db_path.name, path=str(notice.backup_path),
+            )
+        QMessageBox.critical(None, tr("startup_db_error_title"), message)
         sys.exit(1)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
 
@@ -401,6 +407,9 @@ def main() -> None:
 
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, _close_splash)
+    # Issue #549: after the splash has gone, tell the user if the active
+    # database was backed up before being migrated during startup.
+    QTimer.singleShot(500, window.show_premigration_backup_notices)
 
     window.show()
     sys.exit(app.exec())

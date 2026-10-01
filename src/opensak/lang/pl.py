@@ -623,6 +623,8 @@ STRINGS: dict[str, str] = {
     "db_err_move_failed": "Nie udało się przenieść „{name}”: {error}",
     "db_err_corrupt_source":      "Nie można przenieść „{name}”: plik źródłowy nie jest prawidłową bazą danych SQLite.",
     "db_err_copy_failed": "Nie udało się skopiować „{name}”: {error}",
+    "premigration_backup_title": "Utworzono kopię zapasową bazy danych",
+    "premigration_backup_msg": "Przed aktualizacją pliku bazy danych „{file}” do tej wersji OpenSAK zapisano jego kopię tutaj:\n\n{path}\n\nTa kopia jest potrzebna tylko wtedy, gdy coś poszło nie tak. W przeciwnym razie możesz ją usunąć.",
     "db_err_target_path_exists": "Plik dla „{name}” już istnieje w {path}.",
     "db_err_rename_failed": "Nie udało się zmienić nazwy „{name}”: {error}",
     "db_err_mkdir_failed":          "Nie można utworzyć folderu:\n{path}",

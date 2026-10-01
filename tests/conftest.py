@@ -16,6 +16,20 @@ from opensak.db.models import Cache
 
 
 @pytest.fixture(autouse=True)
+def _clear_premigration_notices():
+    """
+    Issue #549: tests that rewind a database's user_version make init_db()
+    queue a "database backed up" notice. Clear the queue around every test,
+    so a notice can never leak into a later GUI test and pop up a modal
+    dialog there.
+    """
+    from opensak.backup.premigration import clear_notices
+    clear_notices()
+    yield
+    clear_notices()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_app_paths(tmp_path, monkeypatch):
     """
     Isolate the process-global singletons in settings_store, logger og

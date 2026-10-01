@@ -622,6 +622,8 @@ STRINGS: dict[str, str] = {
     "db_err_move_failed": "Nelze přesunout '{name}': {error}",
     "db_err_corrupt_source":      "Nelze přesunout '{name}': zdrojový soubor není platná databáze SQLite.",
     "db_err_copy_failed": "Nelze zkopírovat '{name}': {error}",
+    "premigration_backup_title": "Záloha databáze vytvořena",
+    "premigration_backup_msg": "Před aktualizací databázového souboru '{file}' pro tuto verzi OpenSAK byla jeho kopie uložena sem:\n\n{path}\n\nTuto kopii potřebujete jen v případě, že se něco pokazilo. Jinak ji můžete smazat.",
     "db_err_target_path_exists": "Soubor pro '{name}' už existuje na {path}.",
     "db_err_rename_failed": "Nelze přejmenovat '{name}': {error}",
     "db_err_mkdir_failed":          "Nelze vytvořit složku:\n{path}",

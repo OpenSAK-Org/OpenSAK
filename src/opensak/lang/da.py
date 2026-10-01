@@ -622,6 +622,8 @@ STRINGS: dict[str, str] = {
     "db_err_move_failed": "Kunne ikke flytte '{name}': {error}",
     "db_err_corrupt_source":      "Kan ikke flytte '{name}': kilde-filen er ikke en gyldig SQLite-database.",
     "db_err_copy_failed": "Kunne ikke kopiere '{name}': {error}",
+    "premigration_backup_title": "Backup af database",
+    "premigration_backup_msg": "Før databasefilen '{file}' blev opdateret til denne version af OpenSAK, blev der gemt en kopi af den her:\n\n{path}\n\nDu får kun brug for kopien, hvis noget gik galt. Ellers kan du slette den.",
     "db_err_target_path_exists": "Der findes allerede en fil for '{name}' på {path}.",
     "db_err_rename_failed": "Kunne ikke omdøbe '{name}': {error}",
     "db_err_mkdir_failed":          "Kan ikke oprette mappen:\n{path}",
