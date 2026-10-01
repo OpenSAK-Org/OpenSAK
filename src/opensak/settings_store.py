@@ -221,6 +221,10 @@ class SettingsStore:
             self._path = get_install_dir() / "opensak.json"
         return self._path
 
+    def settings_path(self) -> Path:
+        """The opensak.json file this store reads and writes (e.g. for backups, #952)."""
+        return self._settings_path()
+
     def _load(self) -> None:
         """Indlæs opensak.json — kaldes automatisk ved første tilgang."""
         if self._data is not None:
