@@ -267,19 +267,26 @@ class DatabaseManager:
             from opensak.db.database import init_db
             init_db(db_path=self._active.path)
 
+    @staticmethod
+    def default_path_for(name: str) -> Path:
+        """Stien new_database() giver en database med dette navn."""
+        from opensak.settings_store import get_db_dir
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_ " else "_" for c in name
+        ).strip()
+        return get_db_dir() / f"{safe_name}.db"
+
+    @staticmethod
+    def is_valid_database_file(path: Path) -> bool:
+        """True hvis *path* er en SQLite-fil (magic-header, se _is_valid_sqlite_file)."""
+        return _is_valid_sqlite_file(Path(path))
+
     def new_database(self, name: str, path: Optional[Path] = None) -> "DatabaseInfo":
         """Opret en ny tom database."""
         if self._find_by_name(name):
             raise ValueError(tr("db_err_name_exists", name=name))
 
-        if path is None:
-            from opensak.settings_store import get_db_dir
-            safe_name = "".join(
-                c if c.isalnum() or c in "-_ " else "_" for c in name
-            ).strip()
-            path = get_db_dir() / f"{safe_name}.db"
-
-        path = Path(path)
+        path = Path(path) if path is not None else self.default_path_for(name)
 
         # Issue #539 (opfølgning): stien udledes deterministisk af navnet, så
         # uden dette tjek kunne "New database" stille genbruge en efterladt/

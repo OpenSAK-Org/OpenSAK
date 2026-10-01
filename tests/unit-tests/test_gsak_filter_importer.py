@@ -613,8 +613,10 @@ class TestSource:
         with pytest.raises(GsakFilterSourceError):
             load_gsak_filters(path)
 
-    def test_zip_backup_is_unpacked(self, tmp_path):
+    def test_zip_backup_is_unpacked(self, tmp_path, monkeypatch):
+        import tempfile
         import zipfile
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))  # not the real %TEMP%
         db = _make_gsak_db(tmp_path / "gsak.db3", {"A": _blob({})})
         archive = tmp_path / "backup.zip"
         with zipfile.ZipFile(archive, "w") as zf:

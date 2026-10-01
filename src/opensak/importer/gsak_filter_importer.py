@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2357,22 +2358,24 @@ def find_gsak_filter_db(path: Path) -> Path:
         return path
 
     import tempfile
-    import zipfile
 
-    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_filters_"))
-    with zipfile.ZipFile(path) as zf:
-        zf.extractall(extract_dir)
-    matches = list(extract_dir.rglob("gsak.db3"))
-    if not matches:
+    from opensak.importer.gsak_importer import extract_gsak_member, list_gsak_backup
+
+    member = list_gsak_backup(path).settings_member
+    if member is None:
         raise GsakFilterSourceError(f"No gsak.db3 file found inside {path.name}")
-    return matches[0]
+    # Unpack only gsak.db3 — not the (possibly multi-GB) cache databases.
+    extract_dir = Path(tempfile.mkdtemp(prefix="gsak_filters_"))
+    return extract_gsak_member(path, member, extract_dir)
 
 
 def load_gsak_filters(db_path: Path) -> list[tuple[str, str]]:
     """Return [(name, data)] for every saved filter in gsak.db3 (read-only)."""
     uri = f"file:{Path(db_path).as_posix()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True) as conn:
+        # closing(): sqlite3's own context manager only commits, it leaves the
+        # file open — which on Windows blocks removing an unpacked gsak.db3.
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
             conn.text_factory = lambda b: b.decode("utf-8", errors="replace")
             rows = conn.execute(
                 "SELECT Description, Data FROM TranslateFilters WHERE Type = 'FI'"
