@@ -548,15 +548,16 @@ def debug_scan() -> str:
 
 # ── GPX generator ─────────────────────────────────────────────────────────────
 
-def _effective_coords(cache) -> tuple[float, float]:
+def _effective_coords(cache, use_corrected: bool = True) -> tuple[float, float]:
     """
     Returner de koordinater der skal bruges til GPX export.
 
     Hvis cachen har korrigerede koordinater (user_note.is_corrected),
     bruges disse. Ellers bruges de originale koordinater.
+    use_corrected=False returnerer altid de originale koordinater.
     """
     note = getattr(cache, "user_note", None)
-    if note and getattr(note, "is_corrected", False):
+    if use_corrected and note and getattr(note, "is_corrected", False):
         lat = note.corrected_lat
         lon = note.corrected_lon
         if lat is not None and lon is not None:
@@ -564,7 +565,10 @@ def _effective_coords(cache) -> tuple[float, float]:
     return cache.latitude, cache.longitude
 
 
-def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=None) -> str:
+def generate_gpx(
+    caches: list, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+) -> str:
     """
     Generer GPX indhold fra en liste af Cache objekter.
     Returnerer GPX som en streng klar til at skrive til fil.
@@ -583,6 +587,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
     i en cmt (comment) feltom muligt.
 
     progress_cb(done, total): valgfrit kald per cache, så GUI kan vise fremgang.
+    use_corrected=False eksporterer altid de originale koordinater.
     """
     from xml.etree.ElementTree import Element, SubElement
     import xml.etree.ElementTree as ET
@@ -614,7 +619,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
             continue
 
         # Brug korrigerede koordinater hvis de findes
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
         has_corrected = (export_lat != cache.latitude or export_lon != cache.longitude)
 
         wpt = SubElement(gpx, "wpt")
@@ -939,14 +944,14 @@ def _indent(elem, level: int = 0) -> None:
 
 # ── LOC generator ─────────────────────────────────────────────────────────────
 
-def generate_loc(caches: list, progress_cb=None) -> str:
+def generate_loc(caches: list, progress_cb=None, use_corrected: bool = True) -> str:
     """
     Generate LOC 1.0 XML content from a list of Cache objects.
     Returns the LOC content as a string ready to write to file.
 
     LOC is a simple waypoint format supported by many GPS apps and devices.
     It includes GC code, name, coordinates, difficulty, terrain and container.
-    Corrected coordinates are used when available.
+    Corrected coordinates are used when available, unless use_corrected=False.
 
     progress_cb(done, total): optional per-cache callback for GUI progress.
     """
@@ -964,7 +969,7 @@ def generate_loc(caches: list, progress_cb=None) -> str:
         if cache.latitude is None or cache.longitude is None:
             continue
 
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
 
         wp = SubElement(root, "waypoint")
 
@@ -1025,7 +1030,10 @@ def generate_loc(caches: list, progress_cb=None) -> str:
 
 # ── GGZ generator ─────────────────────────────────────────────────────────────
 
-def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=None) -> bytes:
+def generate_ggz(
+    caches: list, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+) -> bytes:
     """
     Generate a GGZ file (ZIP archive) from a list of Cache objects.
     Returns the GGZ content as bytes ready to write to file.
@@ -1036,7 +1044,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
 
     The format allows Garmin devices to load more than the usual 10,000
     cache limit by using the GGZ container instead of plain GPX files.
-    Corrected coordinates are used when available.
+    Corrected coordinates are used when available, unless use_corrected=False.
 
     progress_cb(done, total): optional per-cache callback for GUI progress;
     reported over the index-building pass (the slow part of GGZ).
@@ -1048,7 +1056,9 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
     from datetime import datetime, timezone
 
     gpx_filename = f"{filename}.gpx"
-    gpx_content  = generate_gpx(caches, filename).encode("utf-8")
+    gpx_content  = generate_gpx(
+        caches, filename, use_corrected=use_corrected
+    ).encode("utf-8")
 
     # ── CRC32 of the GPX content (hex, uppercase, 8 chars) ────────────────────
     import binascii
@@ -1112,7 +1122,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
         if cache.latitude is None or cache.longitude is None:
             continue
 
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
         gc_code = cache.gc_code or ""
 
         file_pos, file_len = offsets_by_gc_code.get(gc_code, (0, 0))
