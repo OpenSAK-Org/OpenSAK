@@ -281,6 +281,11 @@ class TestEffectiveCoords:
         c = _cache(latitude=55.0, longitude=12.0, user_note=note)
         assert _effective_coords(c) == (55.0, 12.0)
 
+    def test_use_corrected_false_returns_original(self):
+        note = _note(is_corrected=True, corrected_lat=56.0, corrected_lon=13.0)
+        c = _cache(latitude=55.0, longitude=12.0, user_note=note)
+        assert _effective_coords(c, use_corrected=False) == (55.0, 12.0)
+
 
 # ── generate_gpx ──────────────────────────────────────────────────────────────
 
@@ -636,6 +641,15 @@ class TestGenerateGpx:
         result = generate_gpx([c])
         assert "Original" in result
         assert "55.000000" in result
+
+    def test_use_corrected_false_exports_original_coords(self):
+        note = _note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0)
+        c = _cache(latitude=55.0, longitude=12.0, user_note=note)
+        result = generate_gpx([c], use_corrected=False)
+        assert 'lat="55.000000"' in result
+        assert 'lon="12.000000"' in result
+        assert "60.000000" not in result
+        assert "Corrected coordinates used" not in result
 
     def test_user_note_emitted_as_gsak_element(self):
         n = _note(is_corrected=False, note="My personal note")
@@ -1098,6 +1112,13 @@ class TestGenerateLoc:
         assert 'lat="60.000000"' in out
         assert 'lon="20.000000"' in out
 
+    def test_use_corrected_false_exports_original_coords(self):
+        c = _cache(latitude=55.0, longitude=12.0,
+                   user_note=_note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0))
+        out = generate_loc([c], use_corrected=False)
+        assert 'lat="55.000000"' in out
+        assert "60.000000" not in out
+
     def test_skips_cache_without_coords(self):
         c = _cache(gc_code="GCNULL")
         c.latitude = None
@@ -1144,6 +1165,14 @@ class TestGenerateGgz:
         index = _ggz_entries(generate_ggz([_cache(container=None)]))[
             "index/com/garmin/geocaches/v0/index.xml"].decode("utf-8")
         assert "<size>" not in index
+
+    def test_use_corrected_false_exports_original_coords(self):
+        c = _cache(latitude=55.0, longitude=12.0,
+                   user_note=_note(is_corrected=True, corrected_lat=60.0, corrected_lon=20.0))
+        entries = _ggz_entries(generate_ggz([c], use_corrected=False))
+        for name, blob in entries.items():
+            if name.endswith((".gpx", ".xml")):
+                assert "60.000000" not in blob.decode("utf-8"), name
 
     def test_found_flag_in_index(self):
         c = _cache(gc_code="GCFOUND")
