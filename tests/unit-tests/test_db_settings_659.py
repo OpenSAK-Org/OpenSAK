@@ -327,3 +327,51 @@ class TestBinding:
         set_value("home_lat", "legacy.key", 6.5)
         assert get_value("home_lat", "legacy.key") == 6.5
         assert get_store().get("legacy.key") == 6.5
+
+
+# ── Files that aren't (or may not be) the active database ───────────────────
+
+class TestFileAccess:
+    """peek_value()/write_file(): used by GsakImportWorker for the database
+    the engine was switched to, which db_settings doesn't bind."""
+
+    def test_write_file_goes_to_that_file_only(self, manager, tmp_path):
+        other = _new_db(manager, "Other", tmp_path)
+        db_settings.write_file(other.path, {"dist_calc_lat": 47.1})
+        assert read_file(other.path)["dist_calc_lat"] == 47.1
+        assert get_value("dist_calc_lat", None) is None  # active untouched
+
+    def test_write_file_to_active_drops_the_cache(self, manager):
+        assert get_value("dist_calc_lat", None) is None  # loads the cache
+        db_settings.write_file(manager.active.path, {"dist_calc_lat": 47.1})
+        assert get_value("dist_calc_lat", None) == 47.1
+
+    def test_write_file_survives_seeding(self, manager, tmp_path):
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        get_store().set(legacy_db_key(path, "dist_calc_lat"), 60.5)
+        db_settings.write_file(path, {"dist_calc_lat": 47.1})
+        ensure_seeded(path, "Old Trip")
+        assert read_file(path)["dist_calc_lat"] == 47.1
+
+    def test_missing_file_is_never_created(self, manager, tmp_path):
+        path = tmp_path / "nope.db"
+        db_settings.write_file(path, {"home_lat": 1.0})
+        assert db_settings.peek_value(path, "home_lat", "dflt") == "dflt"
+        assert not path.exists()
+
+    def test_peek_value_reads_the_file(self, manager, tmp_path):
+        other = _new_db(manager, "Other", tmp_path)
+        db_settings.write_file(other.path, {"home_lat": 47.1})
+        assert db_settings.peek_value(other.path, "home_lat") == 47.1
+
+    def test_peek_value_sees_legacy_value_before_seeding(self, manager, tmp_path):
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        get_store().set(legacy_db_key(path, "home_lat"), 60.5)
+        assert db_settings.peek_value(path, "home_lat") == 60.5
+        assert "db_settings" not in _tables(path)  # peeking never seeds
+
+    def test_peek_value_ignores_legacy_value_after_seeding(self, manager, tmp_path):
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        ensure_seeded(path, "Old Trip")
+        get_store().set(legacy_db_key(path, "home_lat"), 60.5)  # set too late
+        assert db_settings.peek_value(path, "home_lat", "dflt") == "dflt"

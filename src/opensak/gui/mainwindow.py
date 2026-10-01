@@ -1011,12 +1011,12 @@ class MainWindow(QMainWindow):
         self._detail_panel.clear()
         self._load_sort_for_active_db()
         self._reload_home_combo()
-        # Den nye database kan have manglende/forældede distancer — fx en
-        # database som GSAK-backup-importen har udfyldt i baggrunden (kun
-        # den aktive database genberegnes i _refresh_after_import()), eller
-        # et andet hjemmepunkt gemt per database. Samme billige tjek som
-        # ved opstart (issue #579), så et skift normalt ikke koster en fuld
-        # genberegning.
+        # Den nye database kan have manglende/forældede distancer — fx et
+        # andet hjemmepunkt gemt per database, eller en database som
+        # GSAK-backup-importen fyldte, hvis GsakImportWorker ikke nåede at
+        # genberegne den i baggrunden (det gør den normalt — dette er kun
+        # et sikkerhedsnet). Samme billige tjek som ved opstart (issue
+        # #579), så et skift normalt ikke koster en fuld genberegning.
         s = get_settings()
         if s.home_lat and s.home_lon:
             from opensak.db.database import recalculate_distances, distances_up_to_date
@@ -1894,7 +1894,11 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.gsak_import_dialog import GsakImportDialog
         dlg = GsakImportDialog(self)
-        dlg.import_completed.connect(self._refresh_after_import)
+        # GsakImportWorker already brought the distances up to date in the
+        # background — only recalculate here if that didn't happen.
+        dlg.import_completed.connect(
+            lambda: self._refresh_after_import(distances_precomputed=True)
+        )
         dlg.databases_changed.connect(self._reload_db_combo)
         dlg.filters_imported.connect(self._on_filter_profiles_imported)
         dlg.exec()
@@ -1923,13 +1927,21 @@ class MainWindow(QMainWindow):
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
-    def _refresh_after_import(self) -> None:
-        """Reload both cache table and map after a successful import."""
+    def _refresh_after_import(self, distances_precomputed: bool = False) -> None:
+        """Reload both cache table and map after a successful import.
+
+        *distances_precomputed*: the import already recalculated distances
+        (GsakImportWorker), so only do it if distances_up_to_date() can't
+        confirm them. Other imports always recalculate — the cheap check
+        can't see changed coordinates of existing caches.
+        """
         from opensak.gui.settings import get_settings
         s = get_settings()
         if s.home_lat and s.home_lon:
-            from opensak.db.database import recalculate_distances
-            recalculate_distances(s.home_lat, s.home_lon)
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not (distances_precomputed
+                    and distances_up_to_date(s.home_lat, s.home_lon)):
+                recalculate_distances(s.home_lat, s.home_lon)
         self._refresh_cache_list()
         count = self._cache_table.row_count()
         self._statusbar.showMessage(

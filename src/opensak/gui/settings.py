@@ -72,19 +72,22 @@ class AppSettings:
 
     # ── Home location (per database) ──────────────────────────────────────────
 
-    @property
-    def home_lat(self) -> float:
-        s = get_store()
-        val = self._db_get("home_lat")
-        if val is not None and val != "":
+    @staticmethod
+    def _home_coord(per_db: Any, global_key: str, default: float) -> float:
+        """Per-database home coordinate, else the global one, else *default*."""
+        if per_db is not None and per_db != "":
             try:
-                return float(val)
+                return float(per_db)
             except (TypeError, ValueError):
                 pass
         try:
-            return float(s.get("location.home_lat", 55.6761))
+            return float(get_store().get(global_key, default))
         except (TypeError, ValueError):
-            return 55.6761
+            return default
+
+    @property
+    def home_lat(self) -> float:
+        return self._home_coord(self._db_get("home_lat"), "location.home_lat", 55.6761)
 
     @home_lat.setter
     def home_lat(self, value: float) -> None:
@@ -93,22 +96,26 @@ class AppSettings:
 
     @property
     def home_lon(self) -> float:
-        s = get_store()
-        val = self._db_get("home_lon")
-        if val is not None and val != "":
-            try:
-                return float(val)
-            except (TypeError, ValueError):
-                pass
-        try:
-            return float(s.get("location.home_lon", 12.5683))
-        except (TypeError, ValueError):
-            return 12.5683
+        return self._home_coord(self._db_get("home_lon"), "location.home_lon", 12.5683)
 
     @home_lon.setter
     def home_lon(self, value: float) -> None:
         self._db_set("home_lon", value)
         get_store().set("location.home_lon", value)  # default for new databases
+
+    def home_for_db_file(self, path) -> tuple[float, float]:
+        """
+        (home_lat, home_lon) of the database file at *path* — what the two
+        properties above return once that database is the active one. For
+        work on a database that isn't active (yet), e.g. GsakImportWorker.
+        """
+        from opensak.db import db_settings
+        return (
+            self._home_coord(db_settings.peek_value(path, "home_lat"),
+                             "location.home_lat", 55.6761),
+            self._home_coord(db_settings.peek_value(path, "home_lon"),
+                             "location.home_lon", 12.5683),
+        )
 
     # ── Globale hjemmepunkter (liste) ─────────────────────────────────────────
 

@@ -23,6 +23,7 @@ removed once the import (and the optional filter migration) is done.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import tempfile
 from pathlib import Path
@@ -40,6 +41,8 @@ from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
+
+logger = logging.getLogger(__name__)
 
 # Table columns
 COL_GSAK, COL_SIZE, COL_TARGET, COL_STATUS = range(4)
@@ -117,12 +120,35 @@ class GsakImportWorker(QThread):
                     progress_cb=lambda done, total: self.progress.emit(done, total),
                 )
             self.result_ready.emit(result)
+            self._update_distances(self.target_db_path or original_path)
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
         finally:
             if switched and original_path is not None:
                 init_db(db_path=original_path)
+
+    @staticmethod
+    def _update_distances(db_path: Path | None) -> None:
+        """Bring the imported database's distances up to date while still in
+        the background, so neither the refresh after the import nor a later
+        switch to that database has to recalculate them on the GUI thread
+        (both still check, as a safety net). Runs while the engine points at
+        *db_path*, so its home point and the centre used are read from and
+        stored in that file, not in the active database's settings. A failure
+        here only means that check recalculates later — the import itself
+        succeeded.
+        """
+        if db_path is None:
+            return
+        try:
+            from opensak.db.database import distances_up_to_date, recalculate_distances
+            lat, lon = get_settings().home_for_db_file(db_path)
+            if lat and lon and not distances_up_to_date(lat, lon, db_path=db_path):
+                recalculate_distances(lat, lon, db_path=db_path)
+        except Exception:
+            logger.warning("GSAK import: could not update distances for %s",
+                           db_path, exc_info=True)
 
 
 class GsakExtractWorker(QThread):
