@@ -158,6 +158,26 @@ class TestDbCombo:
             fake_dialog(signals=("database_switched", "database_renamed")))
         seeded_window._open_db_manager()
 
+    def test_backup_now_is_in_the_file_menu_after_db_manager(self, seeded_window):
+        # Issue #953: File → Back up now…, right under Manage databases.
+        # Ask the action which menu it sits in, rather than walking every
+        # menu in the menu bar: an earlier test may have rebuilt one of
+        # them, leaving a stale wrapper that raises "already deleted".
+        from PySide6.QtWidgets import QMenu
+        file_menu = next(o for o in seeded_window._act_db_manager.associatedObjects()
+                         if isinstance(o, QMenu))
+        actions = [a for a in file_menu.actions() if not a.isSeparator()]
+        i = actions.index(seeded_window._act_db_manager)
+        assert actions[i + 1] is seeded_window._act_backup_now
+
+    def test_backup_now_opens_the_backup_dialog(self, seeded_window, monkeypatch):
+        opened = []
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.backup_dialog.BackupDialog",
+            lambda parent: SimpleNamespace(exec=lambda: opened.append(parent)))
+        seeded_window._act_backup_now.trigger()
+        assert opened == [seeded_window]
+
     def test_open_db_manager_blocked_by_trip(self, seeded_window, monkeypatch):
         seeded_window._trip_planner_win = SimpleNamespace(
             isVisible=lambda: True, raise_=lambda: None, activateWindow=lambda: None)

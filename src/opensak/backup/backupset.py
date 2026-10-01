@@ -78,6 +78,10 @@ class BackupError(Exception):
     """A backup could not be made or read. Nothing half-written is left."""
 
 
+class NotEnoughSpaceError(BackupError):
+    """The backup folder's disk doesn't have room for the backup (#953)."""
+
+
 class _DatabaseLike(Protocol):
     """What write_backup_set() needs from an entry in the database list."""
 
@@ -225,7 +229,7 @@ def write_backup_set(
     total = sum(size for _db, size in present)
     free = shutil.disk_usage(folder).free
     if free < total * _FREE_SPACE_FACTOR:
-        raise BackupError(
+        raise NotEnoughSpaceError(
             f"Not enough free space in {folder}: about "
             f"{_mb(total * _FREE_SPACE_FACTOR)} MB needed, {_mb(free)} MB free"
         )

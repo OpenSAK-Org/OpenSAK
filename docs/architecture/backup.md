@@ -2,6 +2,8 @@
 
 *Agreed 1 October 2026. Update this file in the same commit when a sub-issue changes the design.*
 
+*1 October 2026 (#953): OpenSAK has no Database menu — database actions live in the File menu, so backup and restore are File → Back up now… and File → Restore from backup….*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.
@@ -111,7 +113,7 @@ Databases are written with `snapshot_database()` (#943), so a backup is consiste
 
 There are two ways to start a backup; both write the same kind of set and differ only in `kind` and rotation.
 
-**Manual: Database → Back up now…**
+**Manual: File → Back up now…**
 
 A small dialog: the backup folder (with Browse), all databases checked by default with the option to untick some, and a Back up button. Settings are always included. The result is a `manual` set, never rotated away.
 
@@ -147,7 +149,7 @@ Sorting a column or changing the home location now writes to the database (#659)
 
 Restore adds; it never replaces. A restored database is always a new entry in the database list, and settings are only restored when the user asks for it.
 
-**Database → Restore from backup…**
+**File → Restore from backup…**
 
 1. The dialog lists the sets in the backup folder, newest first: date, auto or manual, OpenSAK version, databases. Browse opens a set anywhere else.
 2. The user picks a set, ticks the databases to restore, and optionally ticks "Also restore settings".
@@ -184,8 +186,8 @@ Restore adds; it never replaces. A restored database is always a new entry in th
 Seven sub-issues under #942, each its own commit and test run, in this order. 1–4 are the 1.21.0 target; 5–7 can follow in 1.21 if time allows, or in 1.22.
 
 1. **Backup core** — `opensak/backup/backupset.py`: write a set (folder layout, `.partial`, settings copy, manifest last), list and read sets, rotation; `backup.dir` setting with the Documents default. No UI. Builds on #943 and #659.
-2. **Manual backup** — Database → Back up now…: folder, database selection, worker thread with progress and Cancel. Depends on 1.
-3. **Restore databases** — Database → Restore from backup…: list sets, validate, restore as new with the same `db_uuid`, add missing filter profiles, offer to switch. Depends on 1.
+2. **Manual backup** — File → Back up now…: folder, database selection, worker thread with progress and Cancel. Depends on 1.
+3. **Restore databases** — File → Restore from backup…: list sets, validate, restore as new with the same `db_uuid`, add missing filter profiles, offer to switch. Depends on 1.
 4. **On-exit prompt** — `backup.on_exit` (Ask / Always / Never), "Don't ask again", change detection, folder choice on first use, closeEvent integration. Depends on 1 and the worker from 2.
 5. **Backup folder in setup** — Welcome Wizard page and Settings → Advanced row, with the other-disk advice. Depends on 1; touches Roadmap #4 (Welcome Wizard).
 6. **Restore settings** — the opt-in part of restore: safety set, replace folders, merge opensak.json, restart. Depends on 3.

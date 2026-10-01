@@ -237,6 +237,9 @@ Each database has its own:
 - Centre point for distance calculations
 - Filter profiles
 
+### Backing Up
+Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into *Documents/OpenSAK Backups* unless you choose another folder; a folder on another disk or an external drive is safest. Backups you make this way are never deleted by OpenSAK.
+
 ---
 
 ## 12. Changing the Language

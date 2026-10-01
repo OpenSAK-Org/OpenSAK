@@ -354,6 +354,11 @@ class MainWindow(QMainWindow):
         self._act_db_manager.triggered.connect(self._open_db_manager)
         file_menu.addAction(self._act_db_manager)
 
+        # Issue #953: back up all (or some) databases plus the settings.
+        self._act_backup_now = QAction(tr("action_backup_now"), self)
+        self._act_backup_now.triggered.connect(self._open_backup_dialog)
+        file_menu.addAction(self._act_backup_now)
+
         file_menu.addSeparator()
 
         self._act_import = QAction(tr("action_import"), self)
@@ -981,6 +986,11 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+
+    def _open_backup_dialog(self) -> None:
+        """File → Back up now… (issue #953)."""
+        from opensak.gui.dialogs.backup_dialog import BackupDialog
+        BackupDialog(self).exec()
 
     def _on_database_renamed(self, db_info) -> None:
         """

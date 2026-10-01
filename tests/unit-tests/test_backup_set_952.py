@@ -250,7 +250,7 @@ class TestNothingLeftBehind:
     def test_not_enough_free_space(self, backups, dbs, install):
         with patch.object(backupset.shutil, "disk_usage",
                           return_value=MagicMock(free=10)):
-            with pytest.raises(BackupError, match="Not enough free space"):
+            with pytest.raises(backupset.NotEnoughSpaceError, match="Not enough free space"):
                 write_backup_set(dbs, KIND_AUTO, folder=backups, now=NOW)
         assert _names(backups) == []
 
