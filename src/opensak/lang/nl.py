@@ -624,6 +624,7 @@ STRINGS: dict[str, str] = {
     "db_err_move_target_exists": "Kan '{name}' niet verplaatsen: er bestaat al een bestand op {path}.",
     "db_err_move_failed": "Kan '{name}' niet verplaatsen: {error}",
     "db_err_corrupt_source":      "Kan '{name}' niet verplaatsen: het bronbestand is geen geldige SQLite-database.",
+    "db_err_copy_failed": "Kan '{name}' niet kopiëren: {error}",
     "db_err_target_path_exists": "Er bestaat al een bestand voor '{name}' op {path}.",
     "db_err_rename_failed": "Kan '{name}' niet hernoemen: {error}",
     "db_err_mkdir_failed":          "Kan map niet aanmaken:\n{path}",

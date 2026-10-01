@@ -621,6 +621,7 @@ STRINGS: dict[str, str] = {
     "db_err_move_target_exists": "Kan inte flytta '{name}': en fil finns redan på {path}.",
     "db_err_move_failed": "Kunde inte flytta '{name}': {error}",
     "db_err_corrupt_source":      "Kan inte flytta '{name}': källfilen är inte en giltig SQLite-databas.",
+    "db_err_copy_failed": "Kunde inte kopiera '{name}': {error}",
     "db_err_target_path_exists": "Det finns redan en fil för '{name}' på {path}.",
     "db_err_rename_failed": "Kunde inte byta namn på '{name}': {error}",
     "db_err_mkdir_failed":          "Kunde inte skapa mappen:\n{path}",

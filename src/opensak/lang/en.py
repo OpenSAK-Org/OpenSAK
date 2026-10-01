@@ -620,6 +620,7 @@ STRINGS: dict[str, str] = {
     "db_err_move_target_exists": "Cannot move '{name}': a file already exists at {path}.",
     "db_err_move_failed": "Could not move '{name}': {error}",
     "db_err_corrupt_source":      "Cannot move '{name}': source file is not a valid SQLite database.",
+    "db_err_copy_failed": "Could not copy '{name}': {error}",
     "db_err_target_path_exists": "A file for '{name}' already exists at {path}.",
     "db_err_rename_failed": "Could not rename '{name}': {error}",
     "db_err_mkdir_failed":          "Cannot create folder:\n{path}",

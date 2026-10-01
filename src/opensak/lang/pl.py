@@ -622,6 +622,7 @@ STRINGS: dict[str, str] = {
     "db_err_move_target_exists": "Nie można przenieść „{name}”: plik już istnieje w {path}.",
     "db_err_move_failed": "Nie udało się przenieść „{name}”: {error}",
     "db_err_corrupt_source":      "Nie można przenieść „{name}”: plik źródłowy nie jest prawidłową bazą danych SQLite.",
+    "db_err_copy_failed": "Nie udało się skopiować „{name}”: {error}",
     "db_err_target_path_exists": "Plik dla „{name}” już istnieje w {path}.",
     "db_err_rename_failed": "Nie udało się zmienić nazwy „{name}”: {error}",
     "db_err_mkdir_failed":          "Nie można utworzyć folderu:\n{path}",

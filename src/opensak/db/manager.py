@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from opensak.backup.snapshot import SnapshotError, snapshot_database
 from opensak.lang import tr
 from opensak.settings_store import get_store
 
@@ -471,7 +472,17 @@ class DatabaseManager:
             ).strip()
             new_path = get_db_dir() / f"{safe_name}.db"
 
-        shutil.copy2(db_info.path, new_path)
+        # Issue #943: a WAL-safe snapshot instead of shutil.copy2(). Copying
+        # only the main .db file could miss committed changes that still
+        # live in the -wal sidecar — notably when copying the active,
+        # open database — and could produce an inconsistent copy if a
+        # write happened mid-copy.
+        try:
+            snapshot_database(db_info.path, new_path)
+        except SnapshotError as exc:
+            raise SnapshotError(
+                tr("db_err_copy_failed", name=db_info.name, error=str(exc))
+            ) from exc
         info = DatabaseInfo(new_name, new_path)
         self._databases.append(info)
         self._save_to_settings()
