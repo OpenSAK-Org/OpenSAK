@@ -236,7 +236,7 @@ class TestFileExportDialog:
         captured = {}
 
         class FakeWorker:
-            def __init__(self, caches, output_path, fmt):
+            def __init__(self, caches, output_path, fmt, use_corrected=True):
                 captured["path"] = output_path
                 self.finished = MagicMock()
                 self.error = MagicMock()
