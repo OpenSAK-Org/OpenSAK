@@ -3213,6 +3213,18 @@ class MainWindow(QMainWindow):
         self._macro_changed_codes.add(gc_code)
         return True
 
+    def confirm(self, message: str) -> bool:
+        """MacroHost: Yes/No question, on top of the macro dialog."""
+        parent = getattr(self, "_macro_dialog", None) or self
+        reply = QMessageBox.question(
+            parent,
+            tr("macro_title"),
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's corrected-coordinate changes
         affect. A handful of caches get the same per-cache refresh as the
