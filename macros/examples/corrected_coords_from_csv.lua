@@ -10,8 +10,14 @@
 --
 -- "coords" accepts every format OpenSAK understands (DMM, DMS, decimal
 -- degrees). Instead of one "coords" column the file may also have separate
--- "lat" and "lon" columns in decimal degrees. A row with no coordinates
--- removes the corrected coordinates of that cache.
+-- "lat" and "lon" columns in decimal degrees.
+--
+-- Empty never deletes anything — a blank cell is far more often a typo or a
+-- cache not solved yet than a wish to throw away a solution:
+--
+--   * no coordinates in the row   → skipped (listed in the output)
+--   * only lat or only lon        → error for that row; the rest carries on
+--   * coords cell reads "clear"   → corrected coordinates are removed
 --
 -- Open this file via Macros → Run macro… → Open… so the relative CSV path
 -- is resolved against this folder.
@@ -20,22 +26,29 @@ local CSV_FILE = "corrected_coords.csv"
 
 local function has(v) return v ~= nil and v ~= "" end
 
--- Returns (found, action) or raises an error for bad coordinates.
+-- Returns (found, action) or raises an error for bad or half-filled
+-- coordinates. found is nil for a skipped row.
 local function apply(row)
     if has(row.coords) then
+        if row.coords:lower() == "clear" then
+            return opensak.clear_corrected(row.code), "cleared"
+        end
         return opensak.set_corrected(row.code, row.coords), "set"
     elseif has(row.lat) and has(row.lon) then
         return opensak.set_corrected(row.code, row.lat, row.lon), "set"
-    else
-        return opensak.clear_corrected(row.code), "cleared"
+    elseif has(row.lat) then
+        error("lon missing", 0)
+    elseif has(row.lon) then
+        error("lat missing", 0)
     end
+    return nil, "skipped"
 end
 
 local rows = opensak.read_csv(CSV_FILE)
 print(("Read %d row(s) from %s"):format(#rows, CSV_FILE))
 
 local changed = {}          -- GC codes that were updated, for the filter below
-local set, cleared, missing, failed = 0, 0, 0, 0
+local set, cleared, skipped, missing, failed = 0, 0, 0, 0, 0
 
 for i, row in ipairs(rows) do
     if not has(row.code) then
@@ -47,6 +60,9 @@ for i, row in ipairs(rows) do
         if not ok then
             print(("%s: %s"):format(row.code, found))   -- found = error message
             failed = failed + 1
+        elseif action == "skipped" then
+            print(("%s: no coordinates — skipped"):format(row.code))
+            skipped = skipped + 1
         elseif not found then
             print(("%s: not in the database — skipped"):format(row.code))
             missing = missing + 1
@@ -62,8 +78,8 @@ for i, row in ipairs(rows) do
     end
 end
 
-print(("Done: %d set, %d cleared, %d not found, %d failed"):format(
-    set, cleared, missing, failed))
+print(("Done: %d set, %d cleared, %d skipped, %d not found, %d failed"):format(
+    set, cleared, skipped, missing, failed))
 
 -- Show the caches that just got corrected coordinates
 if #changed > 0 then

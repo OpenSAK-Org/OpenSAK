@@ -287,7 +287,7 @@ def test_example_macro_sets_corrected_coords_from_csv():
     )
 
     assert out[0] == "Read 6 row(s) from corrected_coords.csv"
-    assert out[-1] == "Done: 6 set, 0 cleared, 0 not found, 0 failed"
+    assert out[-1] == "Done: 6 set, 0 cleared, 0 skipped, 0 not found, 0 failed"
     assert host.selected == set(codes)
     with get_session() as s:
         got = {c.gc_code: (c.user_note.corrected_lat, c.user_note.corrected_lon,
@@ -300,3 +300,42 @@ def test_example_macro_sets_corrected_coords_from_csv():
     assert got["GC5"][:2] == (pytest.approx(47 + 25 / 60 + 0.37 / 3600),
                               pytest.approx(8 + 5 / 60 + 31.97 / 3600))
     assert got["GC6"][:2] == (pytest.approx(46.66695), pytest.approx(8.32197))
+
+
+def test_example_macro_never_clears_on_empty_or_half_filled_rows(tmp_path):
+    codes = ["GCE1", "GCE2", "GCE3", "GCE4", "GCE5"]
+    with get_session() as s:
+        for code in codes:
+            s.add(Cache(gc_code=code, name=code, cache_type="Unknown Cache",
+                        latitude=47.0, longitude=8.0))
+    for code in codes:
+        set_corrected_coords(code, 1.0, 2.0)   # already solved
+
+    (tmp_path / "corrected_coords.csv").write_text(
+        "code;coords;lat;lon\n"
+        "GCE1;;;\n"              # nothing → skipped
+        "GCE2;;47.5;\n"          # lon missing → error
+        "GCE3;;;8.5\n"           # lat missing → error
+        "GCE4;Clear;;\n"         # explicit clear
+        "GCE5;;47.5;8.5\n",      # set
+        encoding="utf-8",
+    )
+    out = []
+    MacroRuntime(DbHost(), output=out.append).run(
+        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
+        base_dir=tmp_path,
+    )
+
+    assert "GCE1: no coordinates — skipped" in out
+    assert "GCE2: lon missing" in out
+    assert "GCE3: lat missing" in out
+    assert "GCE4: corrected coordinates removed" in out
+    assert out[-1] == "Done: 1 set, 1 cleared, 1 skipped, 0 not found, 2 failed"
+    with get_session() as s:
+        got = {c.gc_code: (c.user_note.corrected_lat, c.user_note.corrected_lon)
+               for c in s.query(Cache).filter(Cache.gc_code.in_(codes))}
+    assert got["GCE1"] == (1.0, 2.0)
+    assert got["GCE2"] == (1.0, 2.0)
+    assert got["GCE3"] == (1.0, 2.0)
+    assert got["GCE4"] == (None, None)
+    assert got["GCE5"] == (pytest.approx(47.5), pytest.approx(8.5))
