@@ -1268,6 +1268,9 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
         return True
 
     s = get_settings()
+    calc_lat: float | None
+    calc_lon: float | None
+    calc_method: str | None
     if db_path is not None:
         from opensak.db import db_settings
         values = {
