@@ -40,6 +40,13 @@ class FakeHost:
         self.corrected.append((gc_code, lat, lon))
         return gc_code != "GCNONE"
 
+    answer = True
+
+    def confirm(self, message):
+        self.asked = getattr(self, "asked", [])
+        self.asked.append(message)
+        return self.answer
+
     def end_macro(self):
         self.ended = getattr(self, "ended", 0) + 1
 
@@ -275,6 +282,17 @@ def test_read_csv_missing_file(tmp_path):
             'opensak.read_csv("nope.csv")', base_dir=tmp_path)
 
 
+def test_confirm_returns_host_answer():
+    host, out = _run('print(opensak.confirm("Go?"))')
+    assert host.asked == ["Go?"] and out == ["true"]
+    host = FakeHost()
+    host.answer = False
+    _, out = _run('print(opensak.confirm("Go?"))', host=host)
+    assert out == ["false"]
+    with pytest.raises(MacroError, match="expects a message"):
+        _run("opensak.confirm()")
+
+
 def test_end_macro_called_once_after_run_even_on_error():
     host, _ = _run('opensak.set_corrected("GC1", 47, 8) opensak.clear_corrected("GC2")')
     assert host.ended == 1
@@ -334,6 +352,26 @@ def test_example_macro_sets_corrected_coords_from_csv():
     assert got["GC5"][:2] == (pytest.approx(47 + 25 / 60 + 0.37 / 3600),
                               pytest.approx(8 + 5 / 60 + 31.97 / 3600))
     assert got["GC6"][:2] == (pytest.approx(46.66695), pytest.approx(8.32197))
+
+
+def test_example_macro_writes_nothing_when_summary_is_declined(tmp_path):
+    with get_session() as s:
+        s.add(Cache(gc_code="GCD1", name="GCD1", cache_type="Unknown Cache",
+                    latitude=47.0, longitude=8.0))
+    (tmp_path / "corrected_coords.csv").write_text(
+        "code;coords\nGCD1;47.5, 8.5\nGCD2;clear\nGCD3;\n", encoding="utf-8")
+    host, out = DbHost(), []
+    host.answer = False
+    MacroRuntime(host, output=out.append).run(
+        (EXAMPLES / "corrected_coords_from_csv.lua").read_text(encoding="utf-8"),
+        base_dir=tmp_path,
+    )
+
+    assert host.asked == ["1 will be set, 1 cleared (1 skipped, 0 invalid).\nContinue?"]
+    assert out[-1] == "Cancelled — nothing changed"
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GCD1").one()
+        assert cache.user_note is None or not cache.user_note.is_corrected
 
 
 def test_example_macro_never_clears_on_empty_or_half_filled_rows(tmp_path):

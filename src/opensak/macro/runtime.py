@@ -29,6 +29,7 @@ Lua API (POC):
                                      -- separator (, ; or tab) is detected
                                      -- unless given. A relative path is
                                      -- resolved against the macro file's folder
+    opensak.confirm(message)         -- ask the user Yes/No; returns true on Yes
     print(...)                       -- write to the macro output pane
 
 Keys understood by opensak.filter{} (all combined with AND):
@@ -223,6 +224,9 @@ class MacroHost(Protocol):
         but may defer that to end_macro() so a macro changing thousands of
         caches does not refresh the view thousands of times.
         """
+
+    def confirm(self, message: str) -> bool:
+        """Ask the user a Yes/No question; True on Yes."""
 
     def end_macro(self) -> None:
         """Called once after every run, also when the macro failed — apply
@@ -452,6 +456,11 @@ class MacroRuntime:
         gc_code = _gc_code(code, "opensak.clear_corrected")
         return bool(self._host.set_corrected_coords(gc_code, None, None))
 
+    def _confirm(self, message=None) -> bool:
+        if not isinstance(message, str) or not message.strip():
+            raise MacroError("opensak.confirm expects a message")
+        return bool(self._host.confirm(message))
+
     def _read_csv(self, lua, path=None, sep=None):
         if not isinstance(path, str) or not path.strip():
             raise MacroError("opensak.read_csv expects a file path")
@@ -505,6 +514,7 @@ class MacroRuntime:
                 "set_corrected": self._wrap(self._set_corrected),
                 "clear_corrected": self._wrap(self._clear_corrected),
                 "read_csv": self._wrap(lambda *a: self._read_csv(lua, *a)),
+                "confirm": self._wrap(self._confirm),
             }
         )
 

@@ -26,7 +26,8 @@ EXAMPLE_MACRO = """\
 -- opensak.filter{...}, opensak.filter_profile(name), opensak.clear_filter(),
 -- opensak.count(), opensak.profiles(), print(...)
 -- opensak.set_corrected(code, lat, lon | "N47 22.123 E008 32.456"),
--- opensak.clear_corrected(code), opensak.read_csv(path [, sep])
+-- opensak.clear_corrected(code), opensak.read_csv(path [, sep]),
+-- opensak.confirm(message)
 
 local n = opensak.filter{
     type       = {"Traditional", "Multi-cache"},
