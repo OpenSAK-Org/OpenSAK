@@ -70,7 +70,8 @@ class TestGsakImportWorker:
         seen = []
         w.progress.connect(lambda done, total: seen.append((done, total)))
         w.run()
-        assert seen == [(5, 10)]
+        # (0, 0): busy mode while the distances are recalculated
+        assert seen == [(5, 10), (0, 0)]
 
     def test_run_exception_emits_error(self, monkeypatch):
         self._patch_common(monkeypatch)
@@ -126,6 +127,22 @@ class TestGsakImportWorker:
         GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db")).run()
         GsakImportWorker(Path("/gsak.db3")).run()  # no target → the active DB
         assert updated == [Path("/other.db"), Path("/active.db")]
+
+    def test_run_without_update_distances_invalidates_them(self, monkeypatch):
+        updated = self._patch_common(monkeypatch)
+        invalidated = []
+        monkeypatch.setattr(GsakImportWorker, "_invalidate_distances",
+                            staticmethod(invalidated.append))
+        monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
+                            lambda path, session, progress_cb=None: _result())
+        monkeypatch.setattr("opensak.db.database.init_db", lambda **k: None)
+        w = GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db"),
+                             update_distances=False)
+        seen = []
+        w.progress.connect(lambda done, total: seen.append((done, total)))
+        w.run()
+        assert updated == [] and invalidated == [Path("/other.db")]
+        assert seen == []
 
     def test_run_failed_import_does_not_update_distances(self, monkeypatch):
         updated = self._patch_common(monkeypatch)
@@ -449,6 +466,48 @@ class TestGsakImportDialogRun:
             assert distances_up_to_date(lat, lon, db_path=path)
         finally:
             manager.ensure_active_initialised()
+
+    def test_distances_are_calculated_once_per_target(
+            self, dlg, manager, tmp_path, qtbot, monkeypatch):
+        """Several GSAK databases into one target: only its last job
+        recalculates; the earlier ones mark the distances stale instead."""
+        from opensak.db import db_settings
+        flags = []
+        real_init = GsakImportWorker.__init__
+
+        def spy(self, *a, **k):
+            real_init(self, *a, **k)
+            flags.append(self.update_distances)
+
+        monkeypatch.setattr(GsakImportWorker, "__init__", spy)
+        dlg.set_path(_backup(tmp_path, {"A": "GC1AAA", "B": "GC2BBB", "C": "GC3CCC"},
+                             with_settings=False))
+        _target(dlg, 1).setCurrentText("A")
+        _run(dlg, qtbot)
+
+        assert flags == [False, True, True]
+        path = _db_by_name(manager, "A").path
+        assert _codes(path) == ["GC1AAA", "GC2BBB"]
+        conn = sqlite3.connect(path)
+        try:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM caches WHERE distance IS NULL").fetchone()[0] == 0
+        finally:
+            conn.close()
+        assert db_settings.read_file(path)["dist_calc_lat"] is not None
+
+    def test_invalidated_distances_are_reported_stale(self, manager, tmp_path):
+        """What a target's earlier jobs leave behind if its last job never
+        runs: the check after the import / on switching recalculates."""
+        from opensak.db import db_settings
+        from opensak.db.database import distances_up_to_date
+        path = manager.new_database("Stale").path
+        db_settings.write_file(path, {"dist_calc_lat": 55.0, "dist_calc_lon": 12.0,
+                                      "dist_calc_method": "haversine"})
+        GsakImportWorker._invalidate_distances(path)
+        stored = db_settings.read_file(path)
+        assert stored["dist_calc_lat"] is None and stored["dist_calc_method"] is None
+        assert db_settings.peek_value(path, "dist_calc_lat") is None
 
     def test_only_ticked_databases_are_imported(self, dlg, manager, tmp_path, qtbot):
         dlg.set_path(_backup(tmp_path, {"A": "GC1AAA", "B": "GC2BBB"}, with_settings=False))

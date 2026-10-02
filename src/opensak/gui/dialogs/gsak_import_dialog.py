@@ -89,11 +89,14 @@ class GsakImportWorker(QThread):
     # from inside run() itself).
 
     def __init__(self, db3_path: Path, target_db_path: Path | None = None,
-                 replace: bool = False):
+                 replace: bool = False, update_distances: bool = True):
         super().__init__()
         self.db3_path = db3_path
         self.target_db_path = target_db_path  # None → use currently active DB
         self.replace = replace                # empty the target DB first
+        # False when a later job of the same run imports into the same
+        # target: that one recalculates, once for all of them.
+        self.update_distances = update_distances
 
     def run(self) -> None:
         from opensak.db.database import get_session, init_db
@@ -120,7 +123,13 @@ class GsakImportWorker(QThread):
                     progress_cb=lambda done, total: self.progress.emit(done, total),
                 )
             self.result_ready.emit(result)
-            self._update_distances(self.target_db_path or original_path)
+            db_path = self.target_db_path or original_path
+            if self.update_distances:
+                # Busy mode — the import's own progress sits at 100% meanwhile.
+                self.progress.emit(0, 0)
+                self._update_distances(db_path)
+            else:
+                self._invalidate_distances(db_path)
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -148,6 +157,26 @@ class GsakImportWorker(QThread):
                 recalculate_distances(lat, lon, db_path=db_path)
         except Exception:
             logger.warning("GSAK import: could not update distances for %s",
+                           db_path, exc_info=True)
+
+    @staticmethod
+    def _invalidate_distances(db_path: Path | None) -> None:
+        """Forget the centre *db_path*'s distances were calculated for, so
+        distances_up_to_date() reports them stale. The target's last job
+        then recalculates; should it never run (skipped, failed, cancelled),
+        the check after the import or on switching to that database does.
+        """
+        if db_path is None:
+            return
+        try:
+            from opensak.db import db_settings
+            db_settings.write_file(db_path, {
+                "dist_calc_lat": None,
+                "dist_calc_lon": None,
+                "dist_calc_method": None,
+            })
+        except Exception:
+            logger.warning("GSAK import: could not invalidate distances for %s",
                            db_path, exc_info=True)
 
 
@@ -727,8 +756,11 @@ class GsakImportDialog(QDialog):
         self._progress.setRange(0, 0)
         self._append_log(tr("gsak_import_running",
                             name=f"{job.gsak_name} → {job.target_name}"))
-        worker = GsakImportWorker(job.db3_path, target_db_path=job.target_path,
-                                  replace=job.replace)
+        later = self._jobs[self._job_index + 1:]
+        worker = GsakImportWorker(
+            job.db3_path, target_db_path=job.target_path, replace=job.replace,
+            update_distances=all(j.target_name != job.target_name for j in later),
+        )
         worker.progress.connect(self._on_progress)
         worker.cleared.connect(
             lambda count, name=job.target_name:
