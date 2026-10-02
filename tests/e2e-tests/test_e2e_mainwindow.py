@@ -1462,6 +1462,60 @@ class TestHomeAndCwExtra:
         assert s.home_lat == pytest.approx(43.5, abs=0.01)
         assert s.home_lon == pytest.approx(-116.2, abs=0.01)
 
+    def test_reload_home_combo_activates_shown_point_when_none_active(
+        self, seeded_window
+    ):
+        # Issue #962: with no active home point the drop-down showed
+        # "★ Home" as selected while distances used the Copenhagen default.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_home_location = "N43 30.000 W116 12.000"
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert seeded_window._home_combo.currentData() == "★ Home"
+        assert s.active_home_name == "★ Home"
+        assert s.home_lat == pytest.approx(43.5, abs=0.01)
+        assert s.home_lon == pytest.approx(-116.2, abs=0.01)
+
+    def test_reload_home_combo_activates_user_point_when_none_active(
+        self, seeded_window
+    ):
+        # Issue #962: same, without a ★ Home — the first user point is shown,
+        # so it must also be the one in use.
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = ""
+        s.home_points = [HomePoint("Work", 56.0, 10.0)]
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert seeded_window._home_combo.currentData() == "Work"
+        assert s.active_home_name == "Work"
+        assert s.home_lat == pytest.approx(56.0)
+        assert s.home_lon == pytest.approx(10.0)
+
+    def test_reload_home_combo_without_points_changes_nothing(self, seeded_window):
+        # Issue #962: the placeholder item has no data — never activate it.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_home_location = ""
+        s.home_points = []
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert s.active_home_name == ""
+
+    def test_reload_home_combo_keeps_cache_center(self, seeded_window):
+        # Issue #962 must not touch a temporary cache center (#511): its name
+        # isn't a saved home point, but it IS the active one.
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = "N43 30.000 W116 12.000"
+        s.set_active_home(HomePoint("📍 GC12345 — Test", 50.0, 8.0))
+        seeded_window._reload_home_combo()
+        assert s.active_home_name == "📍 GC12345 — Test"
+        assert seeded_window._home_combo.currentData() == "📍 GC12345 — Test"
+        assert s.home_lat == pytest.approx(50.0)
+        assert s.home_lon == pytest.approx(8.0)
+
     def test_on_home_changed_user_and_gc_home(self, seeded_window, iso_settings):
         from opensak.gui.settings import HomePoint, get_settings
         s = get_settings()
