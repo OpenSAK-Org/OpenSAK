@@ -15,13 +15,16 @@ import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from lxml import etree
 from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection, Engine
 
 
 # ── XML namespace map used by Groundspeak Pocket Queries ─────────────────────
@@ -978,7 +981,7 @@ def _parse_loc_waypoint(wpt_el) -> Optional[dict]:
 
 # ── DB upsert ─────────────────────────────────────────────────────────────────
 
-def _bind_of(session) -> "Engine | None":
+def _bind_of(session) -> "Engine | Connection | None":
     """Engine of *session* so an internal session opens on the same database;
     None (= the active database) when no real Session was passed."""
     return session.get_bind() if isinstance(session, Session) else None

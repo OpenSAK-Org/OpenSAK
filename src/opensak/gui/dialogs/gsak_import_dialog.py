@@ -105,13 +105,16 @@ class GsakImportWorker(QThread):
         # Another database than the active one gets a private session —
         # never swap the app-wide engine from this thread (see session_for).
         active_path = get_db_manager().active_path
+        target_path = self.target_db_path or active_path
         other_db = (
             self.target_db_path is not None
             and self.target_db_path != active_path
         )
 
         try:
-            with (session_for(self.target_db_path) if other_db else get_session()) as session:
+            with (session_for(self.target_db_path)
+                  if other_db and self.target_db_path is not None
+                  else get_session()) as session:
                 if self.replace:
                     self.cleared.emit(clear_opensak_cache_data(session))
                 result = import_gsak_db(
@@ -119,7 +122,7 @@ class GsakImportWorker(QThread):
                     progress_cb=lambda done, total: self.progress.emit(done, total),
                 )
             self.result_ready.emit(result)
-            self._update_distances(self.target_db_path or original_path)
+            self._update_distances(target_path)
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -129,9 +132,10 @@ class GsakImportWorker(QThread):
         """Bring the imported database's distances up to date while still in
         the background, so neither the refresh after the import nor a later
         switch to that database has to recalculate them on the GUI thread
-        (both still check, as a safety net). Runs while the engine points at
-        *db_path*, so its home point and the centre used are read from and
-        stored in that file, not in the active database's settings. A failure
+        (both still check, as a safety net). Works on *db_path* through its own
+        session when that isn't the active database, and its home point and
+        the centre used are read from and stored in that file, not in the
+        active database's settings. A failure
         here only means that check recalculates later — the import itself
         succeeded.
         """

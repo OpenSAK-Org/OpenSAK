@@ -131,7 +131,7 @@ class TestGsakImportWorker:
         updated = self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
                             lambda path, session, progress_cb=None: _result())
-        monkeypatch.setattr("opensak.db.database.init_db", lambda **k: None)
+        monkeypatch.setattr("opensak.db.database.session_for", lambda p: _fake_session())
         GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db")).run()
         GsakImportWorker(Path("/gsak.db3")).run()  # no target → the active DB
         assert updated == [Path("/other.db"), Path("/active.db")]

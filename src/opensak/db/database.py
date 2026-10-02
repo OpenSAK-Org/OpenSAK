@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Generator
 
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration
@@ -122,7 +122,7 @@ def init_db(db_path: Path | None = None) -> Engine:
     return _engine
 
 
-def _session_factory(engine: Engine) -> sessionmaker:
+def _session_factory(engine: Engine | Connection) -> sessionmaker:
     """Session factory with the settings every OpenSAK session uses."""
     return sessionmaker(
         bind=engine,
@@ -1124,7 +1124,19 @@ def session_for(db_path: Path) -> Generator[Session, None, None]:
         engine.dispose()
 
 
-def make_session(engine: Engine | None = None):
+def _session_on(db_path: Path | None):
+    """get_session() when *db_path* is None or the database the active
+    engine already points at, otherwise session_for(db_path) — so a helper
+    given another database's path never reads or writes the active one."""
+    if db_path is None or (
+        _engine is not None and _engine.url.database
+        and Path(_engine.url.database).resolve() == Path(db_path).resolve()
+    ):
+        return get_session()
+    return session_for(db_path)
+
+
+def make_session(engine: Engine | Connection | None = None):
     """
     Return a bare Session — caller handles commit/rollback/close.
 
@@ -1197,12 +1209,12 @@ def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -
     refresh). Uses distance_km_batch() which dispatches to Haversine or
     Vincenty depending on the user's distance_method setting.
 
-    *db_path* is the database the open engine points at, when that may not
-    be the active one — e.g. GsakImportWorker, which switches the engine to
-    each target database in turn. The centre used is then stored in that
-    file's own settings (see distances_up_to_date()); without it it goes to
-    the active database's settings, which while the engine is switched
-    would be the wrong database.
+    *db_path* is the database to work on when that may not be the active
+    one — e.g. GsakImportWorker, which imports into each target database in
+    turn. Its caches are then read and written through a private session
+    (see session_for()) and the centre used is stored in that file's own
+    settings (see distances_up_to_date()); without it both go to the active
+    database.
 
     Returns the number of caches updated.
     """
@@ -1234,7 +1246,7 @@ def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -
                 return (math.degrees(math.atan2(x2, y2)) + 360) % 360
             return [_scalar(la, lo) for la, lo in zip(lats, lons)]
 
-    with get_session() as session:
+    with _session_on(db_path) as session:
         rows = session.execute(
             text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
         ).fetchall()
@@ -1326,7 +1338,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     # whether it currently has a persisted distance. Checked first (and
     # unconditionally) so an empty/coordinate-less database is always
     # considered up to date — there is nothing to recalculate either way.
-    with get_session() as session:
+    with _session_on(db_path) as session:
         row = session.execute(
             text(
                 "SELECT latitude, longitude, distance FROM caches "
@@ -1375,7 +1387,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
 
     # Stops at the first hit; only a database that is up to date pays for
     # the full scan.
-    with get_session() as session:
+    with _session_on(db_path) as session:
         missing = session.execute(
             text(
                 "SELECT 1 FROM caches WHERE distance IS NULL "
