@@ -4,6 +4,88 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.2] — 2026-10-02
+
+> Headline: **backup and restore** — the first big part of Backup Support
+> (Roadmap #1, #942). Back up your databases and settings with one click,
+> bring a database back exactly as it was, and get an automatic backup
+> before a new version changes a database. Also in this beta: importing
+> **every database in a GSAK backup**, and saved **GPX export settings**.
+>
+> The new backup and restore texts are machine-translated in all languages
+> except Danish and English — corrections from native speakers are very
+> welcome.
+
+### Added
+
+- **Back up your databases (#953)** — New **File → Back up now…** backs
+  up your databases together with your settings, filter profiles, column
+  views and custom icons. Backups go into *Documents/OpenSAK Backups*
+  unless you choose another folder, ideally on another disk or an
+  external drive. Each backup is its own dated folder, and backups you
+  make this way are never deleted by OpenSAK.
+- **Restore from a backup (#954)** — New **File → Restore from backup…**
+  brings a database back from one of your backups. A restored database is
+  always added as a new database, so nothing you have now is overwritten,
+  and it opens exactly as it was when the backup was taken. Filter
+  profiles you have deleted since are added back.
+- **Automatic backup before a database is upgraded (#549)** — When a new
+  version of OpenSAK needs to update the structure of one of your
+  databases, it first saves a copy of the database as it was, in a
+  `backups` folder next to it. A short message tells you where. If
+  something goes wrong, or you want to go back to an older version of
+  OpenSAK, you can restore that copy. The backup is only made once per
+  upgrade, never on a normal start.
+- **GSAK import: every database in a GSAK backup (#947, fixes #946)** —
+  **File → Import from GSAK Database** now lists every database in a GSAK
+  backup `.zip`, not just the first, and you pick which ones to import.
+  Each becomes an OpenSAK database named after its GSAK folder (you can
+  change the name). Existing OpenSAK databases are only touched after you
+  choose Overwrite, Merge or Skip, and name clashes are caught before the
+  import starts. Databases are unpacked and imported one at a time, and
+  the temporary copies are removed afterwards. If the backup contains
+  your saved GSAK filters, OpenSAK offers to import them too.
+- **Saved GPX export settings (#948)** — The export dialog can save its
+  settings under a name and load them again, and remembers the settings
+  you used last.
+- **GPX export: corrected or original coordinates (#948, #596)** — Choose
+  whether caches with corrected coordinates are exported with those or
+  with their original coordinates.
+- **GPX export: limit the number of caches (#948, #774)** — Export only the
+  first N caches of the current list.
+- **Help → What's New (#944)** — Opens the changelog for the version you're
+  running (stable or beta), so you can see what has changed without
+  relying on the announcements.
+
+### Changed
+
+- **Database settings now travel with the database (#659)** — Each
+  database's home location, column layout, sort order, last-used filter
+  profile and nearby-map settings are now stored inside the database file
+  itself, instead of in OpenSAK's settings file. Copying, moving,
+  renaming or restoring a database no longer loses them. Your existing
+  settings are moved over automatically the first time you open each
+  database.
+- **GSAK backup import recalculates distances in the background (#956,
+  fixes #955)** — After importing a GSAK backup, distances are no longer
+  recalculated on the main window, which could freeze OpenSAK for a while
+  on large databases.
+
+### Fixed
+
+- **Copying the active database could miss recent changes (#943)** —
+  Database → Copy now takes a consistent snapshot through SQLite itself,
+  so the copy always contains every saved change, also when the database
+  is open. The copy is checked for integrity before it is created, and a
+  failed copy never leaves a half-written file behind.
+- **Missing distances after an import** — Switching to a database that
+  was filled by an import in the background no longer shows caches
+  without a distance; it is recalculated when needed.
+
+Thanks to nagisml for the GSAK backup import and the GPX export work.
+
+---
+
 ## [1.21.0-beta.1] — 2026-09-29
 
 > First beta of the 1.21.0 cycle. Headlines: a first look at **macros**
