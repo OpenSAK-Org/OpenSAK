@@ -208,6 +208,52 @@ def read_file(path: Path) -> dict[str, Any]:
         conn.close()
 
 
+def peek_value(path: Path, key: str, default: Any = None) -> Any:
+    """
+    Value of path-keyed setting *key* for the database file at *path*, as
+    get_value() would return it once that database is bound: its own table,
+    or — while its legacy settings haven't been imported yet — the legacy
+    opensak.json key that ensure_seeded() would import. Never seeds.
+
+    For code that works on a database that may not be the active one, e.g.
+    an import running on a temporarily switched engine.
+    """
+    values = read_file(path) if Path(path).is_file() else {}
+    if key in values:
+        return values[key]
+    if not values.get(_IMPORTED_KEY):
+        value = get_store().get(legacy_db_key(path, key))
+        if value is not None and value != "":
+            return value
+    return default
+
+
+def write_file(path: Path, values: dict[str, Any]) -> None:
+    """
+    Store *values* in the database file at *path* (open or not). Safe to call
+    from a worker thread: the cached values of the bound database are
+    dropped, so the next read sees the new ones.
+
+    Existing keys are replaced. A later ensure_seeded() never overwrites
+    them (it only inserts missing keys). Does nothing if the file doesn't
+    exist (it is never created here).
+    """
+    if not Path(path).is_file():
+        return
+    with _lock:
+        conn = sqlite3.connect(str(path), timeout=30)
+        try:
+            conn.execute(_DDL)
+            conn.executemany(
+                f"INSERT OR REPLACE INTO {TABLE} (key, value) VALUES (?, ?)",
+                [(k, json.dumps(v)) for k, v in values.items()],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        _reset_cache()
+
+
 def _reset_cache() -> None:
     """Forget cached values; the next access reloads them (also for tests)."""
     global _cache_engine, _cache

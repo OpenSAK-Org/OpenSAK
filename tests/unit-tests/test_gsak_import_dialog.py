@@ -41,6 +41,10 @@ class TestGsakImportWorker:
         monkeypatch.setattr("opensak.db.manager.get_db_manager",
                             lambda: SimpleNamespace(active_path=active_path))
         monkeypatch.setattr("opensak.db.database.get_session", _fake_session)
+        updated = []
+        monkeypatch.setattr(GsakImportWorker, "_update_distances",
+                            staticmethod(updated.append))
+        return updated
 
     def test_run_success_emits_result(self, monkeypatch):
         self._patch_common(monkeypatch)
@@ -113,6 +117,31 @@ class TestGsakImportWorker:
         w.run()
         assert calls == ["clear", "import"]
         assert cleared == [7]
+
+    def test_run_updates_distances_of_target(self, monkeypatch):
+        updated = self._patch_common(monkeypatch, active_path=Path("/active.db"))
+        monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
+                            lambda path, session, progress_cb=None: _result())
+        monkeypatch.setattr("opensak.db.database.init_db", lambda **k: None)
+        GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db")).run()
+        GsakImportWorker(Path("/gsak.db3")).run()  # no target → the active DB
+        assert updated == [Path("/other.db"), Path("/active.db")]
+
+    def test_run_failed_import_does_not_update_distances(self, monkeypatch):
+        updated = self._patch_common(monkeypatch)
+        monkeypatch.setattr(
+            "opensak.importer.gsak_importer.import_gsak_db",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        GsakImportWorker(Path("/gsak.db3")).run()
+        assert updated == []
+
+    def test_update_distances_failure_is_only_logged(self, monkeypatch, caplog):
+        def boom(*a, **k):
+            raise RuntimeError("no distances")
+        monkeypatch.setattr("opensak.db.database.distances_up_to_date", boom)
+        GsakImportWorker._update_distances(Path("/other.db"))  # must not raise
+        assert "could not update distances" in caplog.text
 
     def test_run_without_replace_does_not_clear(self, monkeypatch):
         self._patch_common(monkeypatch)
@@ -391,6 +420,35 @@ class TestGsakImportDialogRun:
         assert dlg._temp_dir is None
         assert not path.exists() and not path.parent.parent.exists()
         assert "'AllCH → AllCH'" in dlg._log.toPlainText()
+
+    def test_distances_are_calculated_for_each_target_database(
+            self, dlg, manager, tmp_path, qtbot):
+        """GsakImportWorker brings each target's distances up to date in the
+        background, with the centre stored in that database's own settings —
+        so switching to it later doesn't recalculate on the GUI thread."""
+        from opensak.db import db_settings
+        from opensak.db.database import distances_up_to_date, init_db
+        from opensak.gui.settings import get_settings
+        active_before = db_settings.read_file(manager.active_path)
+
+        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA"}, with_settings=False))
+        _run(dlg, qtbot)
+
+        path = _db_by_name(manager, "AllCH").path
+        lat, lon = get_settings().home_for_db_file(path)
+        conn = sqlite3.connect(path)
+        try:
+            distances = [r[0] for r in conn.execute("SELECT distance FROM caches")]
+        finally:
+            conn.close()
+        assert distances and None not in distances
+        assert db_settings.read_file(path)["dist_calc_lat"] == lat
+        assert db_settings.read_file(manager.active_path) == active_before
+        init_db(db_path=path)
+        try:
+            assert distances_up_to_date(lat, lon, db_path=path)
+        finally:
+            manager.ensure_active_initialised()
 
     def test_only_ticked_databases_are_imported(self, dlg, manager, tmp_path, qtbot):
         dlg.set_path(_backup(tmp_path, {"A": "GC1AAA", "B": "GC2BBB"}, with_settings=False))

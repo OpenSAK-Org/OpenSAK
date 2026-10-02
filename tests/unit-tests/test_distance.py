@@ -388,3 +388,38 @@ def test_distances_up_to_date_true_on_empty_db(tmp_path):
     db_path = tmp_path / "empty.db"
     init_db(db_path=db_path)
     assert distances_up_to_date(55.0, 12.0) is True
+
+
+def test_distances_up_to_date_false_when_a_distance_is_missing(two_cache_db):
+    """A cache added after the last recalc (e.g. by a merge import) has no
+    distance yet. The spot-check row can't see it, so it's checked
+    separately."""
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    home_lat, home_lon = 55.6761, 12.5683
+    recalculate_distances(home_lat, home_lon)
+    with get_session() as s:
+        s.add(Cache(gc_code="GCAAA3", name="Gamma", cache_type="Traditional Cache",
+                    latitude=55.0, longitude=12.0))
+    assert distances_up_to_date(home_lat, home_lon) is False
+
+
+# ── db_path: a database the open engine points at, not the active one ────────
+
+def test_recalculate_distances_with_db_path_stores_centre_in_that_file(two_cache_db):
+    """GsakImportWorker recalculates a database the engine was switched to.
+    The centre must land in that file's settings, not the active database's."""
+    from opensak.db import db_settings
+    from opensak.db.database import recalculate_distances, distances_up_to_date
+    from opensak.gui.settings import get_settings
+    home_lat, home_lon = 55.6761, 12.5683
+
+    assert distances_up_to_date(home_lat, home_lon, db_path=two_cache_db) is False
+    assert recalculate_distances(home_lat, home_lon, db_path=two_cache_db) == 2
+
+    stored = db_settings.read_file(two_cache_db)
+    assert stored["dist_calc_lat"] == home_lat
+    assert stored["dist_calc_lon"] == home_lon
+    assert stored["dist_calc_method"] == "haversine"
+    assert get_settings().dist_calc_lat is None  # active settings untouched
+    assert distances_up_to_date(home_lat, home_lon, db_path=two_cache_db) is True
+    assert distances_up_to_date(52.5200, 13.4050, db_path=two_cache_db) is False

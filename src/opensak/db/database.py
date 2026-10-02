@@ -1119,12 +1119,19 @@ def reload_caches_full(caches: list) -> list:
 
 # ── Distance recalculation ────────────────────────────────────────────────────
 
-def recalculate_distances(lat: float, lon: float) -> int:
+def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -> int:
     """Recompute distance and bearing for every cache and persist to the DB.
 
     Called once whenever the active centre point changes (not on every table
     refresh). Uses distance_km_batch() which dispatches to Haversine or
     Vincenty depending on the user's distance_method setting.
+
+    *db_path* is the database the open engine points at, when that may not
+    be the active one — e.g. GsakImportWorker, which switches the engine to
+    each target database in turn. The centre used is then stored in that
+    file's own settings (see distances_up_to_date()); without it it goes to
+    the active database's settings, which while the engine is switched
+    would be the wrong database.
 
     Returns the number of caches updated.
     """
@@ -1194,9 +1201,17 @@ def recalculate_distances(lat: float, lon: float) -> int:
     # startup if nothing has changed (issue #579).
     from opensak.gui.settings import get_settings
     s = get_settings()
-    s.dist_calc_lat = lat
-    s.dist_calc_lon = lon
-    s.dist_calc_method = s.distance_method
+    if db_path is not None:
+        from opensak.db import db_settings
+        db_settings.write_file(db_path, {
+            "dist_calc_lat": lat,
+            "dist_calc_lon": lon,
+            "dist_calc_method": s.distance_method,
+        })
+    else:
+        s.dist_calc_lat = lat
+        s.dist_calc_lon = lon
+        s.dist_calc_method = s.distance_method
 
     logger.info(
         "recalculate_distances: done, %s caches updated (+%.2fs total)",
@@ -1212,7 +1227,7 @@ _COORD_EPSILON = 1e-9
 _DISTANCE_EPSILON_KM = 0.01  # 10 m — generous enough to absorb float rounding
 
 
-def distances_up_to_date(lat: float, lon: float) -> bool:
+def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) -> bool:
     """Check whether the persisted Cache.distance/bearing values are still
     valid for the given centre point, so a full recalculate_distances() call
     can be skipped on startup (issue #579).
@@ -1225,6 +1240,11 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
        modified outside this OpenSAK install (e.g. synced from another
        machine with a different home point, or edited by another tool)
        without a matching recalculation ever having run here.
+    3. No cache with coordinates is missing its distance — e.g. caches a
+       merge import added after the last recalculation, which the single
+       spot-check row can't see.
+
+    *db_path*: as for recalculate_distances().
 
     Returns True if it's safe to skip the full recalculation.
     """
@@ -1248,9 +1268,25 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
         return True
 
     s = get_settings()
-    calc_lat = s.dist_calc_lat
-    calc_lon = s.dist_calc_lon
-    calc_method = s.dist_calc_method
+    calc_lat: float | None
+    calc_lon: float | None
+    calc_method: str | None
+    if db_path is not None:
+        from opensak.db import db_settings
+        values = {
+            k: db_settings.peek_value(db_path, k)
+            for k in ("dist_calc_lat", "dist_calc_lon", "dist_calc_method")
+        }
+        try:
+            calc_lat = float(values["dist_calc_lat"])
+            calc_lon = float(values["dist_calc_lon"])
+        except (TypeError, ValueError):
+            calc_lat = calc_lon = None
+        calc_method = values["dist_calc_method"]
+    else:
+        calc_lat = s.dist_calc_lat
+        calc_lon = s.dist_calc_lon
+        calc_method = s.dist_calc_method
 
     if calc_lat is None or calc_lon is None or calc_method is None:
         return False
@@ -1263,7 +1299,19 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
     if stored_distance is None:
         return False
     fresh_distance = distance_km(lat, lon, row_lat, row_lon)
-    return abs(fresh_distance - stored_distance) <= _DISTANCE_EPSILON_KM
+    if abs(fresh_distance - stored_distance) > _DISTANCE_EPSILON_KM:
+        return False
+
+    # Stops at the first hit; only a database that is up to date pays for
+    # the full scan.
+    with get_session() as session:
+        missing = session.execute(
+            text(
+                "SELECT 1 FROM caches WHERE distance IS NULL "
+                "AND latitude IS NOT NULL AND longitude IS NOT NULL LIMIT 1"
+            )
+        ).fetchone()
+    return missing is None
 
 
 # ── Health-check helper ───────────────────────────────────────────────────────
