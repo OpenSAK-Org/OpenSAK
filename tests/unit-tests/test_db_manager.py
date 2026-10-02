@@ -608,7 +608,14 @@ class TestMoveDatabasesTo:
         wal.write_text("wal")
         shm.write_text("shm")
 
-        with patch("opensak.db.database.dispose_engine"):
+        # Issue #961: move_databases_to() imports the legacy settings into
+        # the database first, which opens it with sqlite3 — and SQLite
+        # discards these fake (non-WAL) sidecar files when it does. This
+        # test is only about copying the sidecars, so leave seeding out.
+        with (
+            patch("opensak.db.database.dispose_engine"),
+            patch.object(DatabaseManager, "_seed_db_settings"),
+        ):
             errors = manager.move_databases_to(new_dir, delete_originals=True)
 
         assert errors == []

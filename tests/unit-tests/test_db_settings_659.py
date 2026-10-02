@@ -289,6 +289,48 @@ class TestLegacyImport:
         assert read_file(info.path)["home_lat"] == 60.5
         assert read_file(info.path)["columns.visible"] == ["gc_code", "name", "state"]
 
+    def test_move_before_first_open_keeps_legacy_settings(self, manager, tmp_path):
+        # Issue #961: the legacy keys are based on the old path —
+        # move_databases_to() must import them before the file is moved,
+        # or the database arrives in the new folder without them.
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        self._legacy(path, "Old Trip")
+        info = manager.open_database(path)
+        new_dir = tmp_path / "new_location"
+
+        errors = manager.move_databases_to(new_dir, delete_originals=True)
+
+        assert errors == []
+        assert info.path == new_dir / "Old Trip.db"
+        moved = read_file(info.path)
+        assert moved["home_lat"] == 60.5
+        assert moved["active_home_name"] == "Cabin"
+        assert moved["sort.field"] == "distance"
+        assert moved["sort.filter_profile"] == "Unfound"
+
+    def test_move_then_open_shows_the_legacy_settings(self, manager, tmp_path):
+        # Issue #961, end to end: after the move, opening the database at
+        # its new path must not seed it with empty values.
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        self._legacy(path, "Old Trip")
+        info = manager.open_database(path)
+
+        manager.move_databases_to(tmp_path / "new_location", delete_originals=True)
+        manager.switch_to(info)
+
+        assert get_value("home_lat", None) == 60.5
+        assert get_value("sort.filter_profile", None) == "Unfound"
+
+    def test_move_with_keep_originals_also_seeds_the_copy(self, manager, tmp_path):
+        path = _unopened_db(manager, tmp_path / "Old Trip.db")
+        self._legacy(path, "Old Trip")
+        info = manager.open_database(path)
+
+        manager.move_databases_to(tmp_path / "new_location", delete_originals=False)
+
+        assert read_file(info.path)["home_lat"] == 60.5
+        assert path.exists()
+
     def test_never_creates_a_missing_file(self, manager, tmp_path):
         ensure_seeded(tmp_path / "missing.db", "Missing")
         assert not (tmp_path / "missing.db").exists()

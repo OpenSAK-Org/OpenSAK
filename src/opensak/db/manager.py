@@ -610,6 +610,13 @@ class DatabaseManager:
                 )
                 continue
 
+            # Issue #961: the path-keyed legacy settings in opensak.json
+            # (#659) no longer match once the file has a new path — import
+            # them into the database file before it is copied, so home
+            # location, sort order and filter profile travel with it. Same
+            # pattern as rename() and copy_database().
+            self._seed_db_settings(db_info)
+
             # Luk engine FØR filoperationer — undgår låste filer på Windows
             if db_info == self._active:
                 active_engine_disposed = True
