@@ -359,6 +359,11 @@ class MainWindow(QMainWindow):
         self._act_backup_now.triggered.connect(self._open_backup_dialog)
         file_menu.addAction(self._act_backup_now)
 
+        # Issue #954: restore databases from a backup (always as new ones).
+        self._act_restore_backup = QAction(tr("action_restore_backup"), self)
+        self._act_restore_backup.triggered.connect(self._open_restore_dialog)
+        file_menu.addAction(self._act_restore_backup)
+
         file_menu.addSeparator()
 
         self._act_import = QAction(tr("action_import"), self)
@@ -991,6 +996,19 @@ class MainWindow(QMainWindow):
         """File → Back up now… (issue #953)."""
         from opensak.gui.dialogs.backup_dialog import BackupDialog
         BackupDialog(self).exec()
+
+    def _open_restore_dialog(self) -> None:
+        """File → Restore from backup… (issue #954)."""
+        # Restoring may switch the active database, so it's blocked while the
+        # trip planner is active, exactly like the database manager.
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.gui.dialogs.restore_dialog import RestoreDialog
+        dlg = RestoreDialog(self)
+        dlg.database_switched.connect(self._on_database_switched)
+        dlg.databases_added.connect(self._reload_db_combo)
+        dlg.exec()
 
     def _on_database_renamed(self, db_info) -> None:
         """

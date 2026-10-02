@@ -361,6 +361,24 @@ class DatabaseManager:
         self._save_to_settings()
         return info
 
+    def add_existing(self, path: Path, name: str) -> "DatabaseInfo":
+        """
+        Add the existing database file *path* to the list under the display
+        name *name* (#954: a restored database). Unlike open_database(), the
+        name is given rather than taken from the file name.
+
+        Raises ValueError if the name or the path is already in the list.
+        """
+        path = Path(path)
+        if self._find_by_name(name):
+            raise ValueError(tr("db_err_name_exists", name=name))
+        if self._find_by_path(path):
+            raise ValueError(tr("db_err_target_path_exists", name=name, path=str(path)))
+        info = DatabaseInfo(name, path)
+        self._databases.append(info)
+        self._save_to_settings()
+        return info
+
     def switch_to(self, db_info: "DatabaseInfo") -> None:
         """Skift aktiv database og initialiser den."""
         from opensak.db.database import init_db

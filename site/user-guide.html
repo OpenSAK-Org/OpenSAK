@@ -1086,6 +1086,11 @@ python run.py</code></pre>
     <p>Backups go into a backup folder, by default <em>Documents/OpenSAK Backups</em>. You can choose another folder in the same dialog. A folder on another disk, an external drive or a synced folder is the safest choice, because it also protects your data if your computer's disk fails. OpenSAK won't store backups inside its own data or database folder.</p>
     <p>Each backup is a separate, dated folder, so you can keep as many as you like. Backups you make this way are never deleted by OpenSAK.</p>
 
+    <h3>Restoring a Backup</h3>
+    <p>Use <strong>File → Restore from backup…</strong> to bring a database back. Pick a backup from the list (newest first), tick the databases you want, and click <strong>Restore</strong>. Use <strong>Browse</strong> to open backups stored in another folder.</p>
+    <p>A restored database is always added as a <em>new</em> database, named for example <em>Denmark (restored 2026-10-01)</em> — nothing you have now is ever overwritten. It opens exactly as it was when the backup was taken, with its own home location, columns and sort order. Filter profiles from the backup that you have since deleted are added back; profiles you still have are left as they are.</p>
+    <p>A backup made with a newer version of OpenSAK can only be restored after updating OpenSAK.</p>
+
     <h3>Useful Multi-Database Patterns</h3>
     <table>
       <thead><tr><th>Pattern</th><th>Example</th></tr></thead>

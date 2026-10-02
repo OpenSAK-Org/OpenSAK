@@ -178,6 +178,42 @@ class TestDbCombo:
         seeded_window._act_backup_now.trigger()
         assert opened == [seeded_window]
 
+    def test_restore_is_in_the_file_menu_after_backup(self, seeded_window):
+        # Issue #954: File → Restore from backup…, right under Back up now…
+        from PySide6.QtWidgets import QMenu
+        file_menu = next(o for o in seeded_window._act_db_manager.associatedObjects()
+                         if isinstance(o, QMenu))
+        actions = [a for a in file_menu.actions() if not a.isSeparator()]
+        i = actions.index(seeded_window._act_backup_now)
+        assert actions[i + 1] is seeded_window._act_restore_backup
+
+    def test_restore_opens_the_dialog_and_wires_switching(self, seeded_window, monkeypatch):
+        made = []
+
+        class _FakeDialog:
+            def __init__(self, parent):
+                self.database_switched = SimpleNamespace(connect=lambda f: made.append(("switched", f)))
+                self.databases_added = SimpleNamespace(connect=lambda f: made.append(("added", f)))
+
+            def exec(self):
+                made.append(("exec", None))
+
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog", _FakeDialog)
+        seeded_window._act_restore_backup.trigger()
+        assert ("switched", seeded_window._on_database_switched) in made
+        assert ("added", seeded_window._reload_db_combo) in made
+        assert made[-1] == ("exec", None)
+
+    def test_restore_blocked_by_trip(self, seeded_window, monkeypatch):
+        monkeypatch.setattr(seeded_window, "_trip_planner_active", lambda: True)
+        warned = []
+        monkeypatch.setattr(seeded_window, "_warn_trip_planner_active",
+                            lambda: warned.append(True))
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog",
+                            lambda parent: pytest.fail("dialog must not open"))
+        seeded_window._open_restore_dialog()
+        assert warned == [True]
+
     def test_open_db_manager_blocked_by_trip(self, seeded_window, monkeypatch):
         seeded_window._trip_planner_win = SimpleNamespace(
             isVisible=lambda: True, raise_=lambda: None, activateWindow=lambda: None)
