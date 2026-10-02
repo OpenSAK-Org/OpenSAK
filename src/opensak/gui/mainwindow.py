@@ -2154,6 +2154,20 @@ class MainWindow(QMainWindow):
         # active home point before _update_distances reads them.
         s = get_settings()
         name = s.active_home_name
+        if not name:
+            # Issue #962: with no active home point (e.g. after the settings
+            # were reset, or a database whose per-database settings were
+            # lost), nothing matched in _reload_home_combo(), so Qt simply
+            # showed the first point, usually "★ Home", as if it were
+            # selected. home_lat/home_lon then fell back to the built-in
+            # default and distances were calculated from there, while
+            # re-selecting the shown point fired no signal. Make the point
+            # the drop-down shows the active one, so what the user sees is
+            # what OpenSAK uses. Every caller recalculates distances
+            # afterwards (startup, database switch, Settings closed).
+            name = self._home_combo.currentData() or ""
+            if not name:
+                return  # no points at all — nothing to activate
         for p in s.home_points:
             if p.name == name:
                 if p.name == "★ Home":
