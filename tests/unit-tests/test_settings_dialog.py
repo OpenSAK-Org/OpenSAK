@@ -150,8 +150,10 @@ class TestWorkers:
 
 class TestConstruction:
     def test_builds_five_tabs(self, dlg):
-        # General, Map (#638), Geocaching.com, PQ Email (#443), Advanced.
-        assert dlg._tabs.count() == 5
+        # General, Map (#638), Geocaching.com, PQ Email (#443), Advanced,
+        # plus Folder permissions while Lua macros are enabled.
+        from opensak.utils import flags
+        assert dlg._tabs.count() == 5 + flags.lua_macros
 
     def test_load_reflects_settings(self, qtbot, settings):
         settings.gc_username = "preset"

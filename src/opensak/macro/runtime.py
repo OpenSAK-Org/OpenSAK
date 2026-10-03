@@ -15,6 +15,23 @@ Lua API (POC):
     opensak.clear_filter()           -- show all caches again
     opensak.count()                  -- caches matching the active filter
     opensak.profiles()               -- list of saved filter profile names
+    opensak.set_corrected(code, lat, lon)
+                                     -- set corrected coordinates (decimal
+                                     -- degrees); returns false if the cache
+                                     -- is not in the database
+    opensak.set_corrected(code, "N47 22.123 E008 32.456")
+                                     -- same, from a coordinate string in any
+                                     -- format OpenSAK understands
+    opensak.clear_corrected(code)    -- remove corrected coordinates; returns
+                                     -- false if the cache is not in the database
+    opensak.read_csv(path [, sep])   -- read a CSV file (UTF-8) into an array of
+                                     -- rows keyed by the header line; the
+                                     -- separator (, ; or tab) is detected
+                                     -- unless given. A relative path is
+                                     -- resolved against the macro file's folder.
+                                     -- The file must lie in a folder with read
+                                     -- permission (Settings → Folder permissions)
+    opensak.confirm(message)         -- ask the user Yes/No; returns true on Yes
     print(...)                       -- write to the macro output pane
 
 Keys understood by opensak.filter{} (all combined with AND):
@@ -34,6 +51,10 @@ Example:
     local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
     print("Easy unfound traditionals: " .. n)
 
+    for _, row in ipairs(opensak.read_csv("solved.csv")) do
+        opensak.set_corrected(row.code, row.coords)
+    end
+
 
 Known limitation (#938 step 4): the instruction limit only counts Lua VM
 instructions, not work inside C functions. Lua pattern matching backtracks
@@ -50,6 +71,8 @@ limit does not help either (matching allocates nothing). Consequences:
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
@@ -71,6 +94,8 @@ from opensak.filters.engine import (
     TerrainFilter,
     WhereClauseFilter,
 )
+from opensak.coords import parse_coords
+from opensak.macro.permissions import FolderAccessDenied, FolderPermission, check_access
 from opensak.utils.constants import CACHE_TYPES
 
 # A runaway `while true do end` would freeze the GUI thread, so the script is
@@ -78,6 +103,9 @@ from opensak.utils.constants import CACHE_TYPES
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
 # Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
+# opensak.read_csv() refuses larger files — it is meant for small lists
+# (solved puzzles, corrections), not for bulk imports.
+MAX_CSV_BYTES = 10 * 1024 * 1024
 
 _TEXT_FILTERS = {
     "name": NameFilter,
@@ -189,6 +217,24 @@ class MacroHost(Protocol):
         not the UI.
         """
 
+    def set_corrected_coords(
+        self, gc_code: str, lat: Optional[float], lon: Optional[float]
+    ) -> bool:
+        """Set (or clear, with lat/lon = None) corrected coordinates.
+
+        Returns False if the cache is not in the database. The host should
+        refresh whatever shows the cache (table row, map pin, detail panel),
+        but may defer that to end_macro() so a macro changing thousands of
+        caches does not refresh the view thousands of times.
+        """
+
+    def confirm(self, message: str) -> bool:
+        """Ask the user a Yes/No question; True on Yes."""
+
+    def end_macro(self) -> None:
+        """Called once after every run, also when the macro failed — apply
+        any refreshes deferred while it was running."""
+
 
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
 
@@ -260,6 +306,90 @@ def build_filterset(spec: dict) -> tuple[FilterSet, str]:
     return fs, str(spec.get("label") or "Macro")
 
 
+# ── Corrected coordinates / CSV ──────────────────────────────────────────────
+
+
+def _gc_code(code: Any, func: str) -> str:
+    if not isinstance(code, str) or not code.strip():
+        raise MacroError(f"{func} expects a GC code as first argument, got {code!r}")
+    return code.strip().upper()
+
+
+def _number(value: Any) -> Optional[float]:
+    """A Lua number, or a string holding one (CSV cells are strings)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def resolve_coords(lat: Any, lon: Any = None) -> tuple[float, float]:
+    """(lat, lon) from two numbers or from one coordinate string.
+
+    Raises MacroError if the values cannot be parsed or are out of range.
+    """
+    if lon is None:
+        if not isinstance(lat, str):
+            raise MacroError(
+                'expected lat, lon or a coordinate string such as "N47 22.123 E008 32.456"'
+            )
+        parsed = parse_coords(lat)
+        if parsed is None:
+            raise MacroError(f"cannot parse coordinates {lat!r}")
+        return parsed
+    la, lo = _number(lat), _number(lon)
+    if la is None or lo is None:
+        raise MacroError(f"lat/lon must be numbers, got {lat!r}, {lon!r}")
+    if not (-90.0 <= la <= 90.0 and -180.0 <= lo <= 180.0):
+        raise MacroError(f"coordinates out of range: {la}, {lo}")
+    return la, lo
+
+
+def read_csv_rows(path: Path, sep: Optional[str] = None) -> list[dict[str, str]]:
+    """Parse a UTF-8 CSV file (BOM allowed) into a list of header-keyed dicts.
+
+    Header names and cells are stripped; blank lines are skipped. Without
+    *sep* the separator is sniffed among "," ";" and tab.
+    """
+    try:
+        if path.stat().st_size > MAX_CSV_BYTES:
+            raise MacroError(
+                f"{path.name} is larger than {MAX_CSV_BYTES // (1024 * 1024)} MB"
+            )
+        text = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        raise MacroError(f"file not found: {path}") from None
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MacroError(f"cannot read {path}: {exc}") from None
+
+    if sep is None:
+        try:
+            first_line = text.split("\n", 1)[0]
+            sep = csv.Sniffer().sniff(first_line, delimiters=",;\t").delimiter
+        except csv.Error:
+            sep = ","
+    elif len(sep) != 1:
+        raise MacroError(f"separator must be a single character, got {sep!r}")
+
+    reader = csv.reader(io.StringIO(text), delimiter=sep)
+    header = [h.strip() for h in next(reader, [])]
+    rows = []
+    for cells in reader:
+        if not any(c.strip() for c in cells):
+            continue
+        rows.append({
+            h: (cells[i].strip() if i < len(cells) else "")
+            for i, h in enumerate(header) if h
+        })
+    return rows
+
+
 # ── Runtime ──────────────────────────────────────────────────────────────────
 
 
@@ -277,12 +407,18 @@ class MacroRuntime:
         profiles_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
+        folder_permissions: Optional[list[FolderPermission]] = None,
     ):
+        """*folder_permissions* limits which folders file functions may
+        touch; None means the list saved in Settings, read at every run so
+        changes apply without reopening the macro window."""
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
+        self._folder_permissions = folder_permissions
+        self._base_dir: Optional[Path] = None
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -319,10 +455,47 @@ class MacroRuntime:
                 continue
         return names
 
+    def _set_corrected(self, code=None, lat=None, lon=None) -> bool:
+        gc_code = _gc_code(code, "opensak.set_corrected")
+        la, lo = resolve_coords(lat, lon)
+        return bool(self._host.set_corrected_coords(gc_code, la, lo))
+
+    def _clear_corrected(self, code=None) -> bool:
+        gc_code = _gc_code(code, "opensak.clear_corrected")
+        return bool(self._host.set_corrected_coords(gc_code, None, None))
+
+    def _confirm(self, message=None) -> bool:
+        if not isinstance(message, str) or not message.strip():
+            raise MacroError("opensak.confirm expects a message")
+        return bool(self._host.confirm(message))
+
+    def _read_csv(self, lua, path=None, sep=None):
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError("opensak.read_csv expects a file path")
+        if sep is not None and not isinstance(sep, str):
+            raise MacroError("opensak.read_csv: separator must be a string")
+        file = Path(path).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or Path.cwd()) / file
+        try:
+            file = check_access(file, write=False, permissions=self._folder_permissions)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
+        rows = read_csv_rows(file, sep)
+        return lua.table_from([lua.table_from(r) for r in rows])
+
     # -- Running ---------------------------------------------------------------
 
-    def run(self, source: str, chunk_name: str = "macro") -> None:
-        """Execute *source*. Raises MacroError on any failure."""
+    def run(
+        self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None
+    ) -> None:
+        """Execute *source*. Raises MacroError on any failure.
+
+        *base_dir* (usually the macro file's folder) is where relative paths
+        given to opensak.read_csv() are looked up; the working directory
+        otherwise.
+        """
+        self._base_dir = base_dir
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
@@ -350,6 +523,10 @@ class MacroRuntime:
                 "clear_filter": self._wrap(self._host.clear_filter),
                 "count": self._wrap(self._host.cache_count),
                 "profiles": self._wrap(lambda: lua.table_from(self._profile_names())),
+                "set_corrected": self._wrap(self._set_corrected),
+                "clear_corrected": self._wrap(self._clear_corrected),
+                "read_csv": self._wrap(lambda *a: self._read_csv(lua, *a)),
+                "confirm": self._wrap(self._confirm),
             }
         )
 
@@ -368,6 +545,8 @@ class MacroRuntime:
             # A Python exception raised inside a callback (e.g. the
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
+        finally:
+            self._host.end_macro()
 
     @staticmethod
     def _deny_attribute(obj, attr_name, is_setting):
