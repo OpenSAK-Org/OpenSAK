@@ -28,7 +28,9 @@ Lua API (POC):
                                      -- rows keyed by the header line; the
                                      -- separator (, ; or tab) is detected
                                      -- unless given. A relative path is
-                                     -- resolved against the macro file's folder
+                                     -- resolved against the macro file's folder.
+                                     -- The file must lie in a folder with read
+                                     -- permission (Settings → Folder permissions)
     opensak.confirm(message)         -- ask the user Yes/No; returns true on Yes
     print(...)                       -- write to the macro output pane
 
@@ -93,6 +95,7 @@ from opensak.filters.engine import (
     WhereClauseFilter,
 )
 from opensak.coords import parse_coords
+from opensak.macro.permissions import FolderAccessDenied, FolderPermission, check_access
 from opensak.utils.constants import CACHE_TYPES
 
 # A runaway `while true do end` would freeze the GUI thread, so the script is
@@ -404,12 +407,17 @@ class MacroRuntime:
         profiles_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
+        folder_permissions: Optional[list[FolderPermission]] = None,
     ):
+        """*folder_permissions* limits which folders file functions may
+        touch; None means the list saved in Settings, read at every run so
+        changes apply without reopening the macro window."""
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
+        self._folder_permissions = folder_permissions
         self._base_dir: Optional[Path] = None
 
     # -- API functions exposed to Lua -----------------------------------------
@@ -469,6 +477,10 @@ class MacroRuntime:
         file = Path(path).expanduser()
         if not file.is_absolute():
             file = (self._base_dir or Path.cwd()) / file
+        try:
+            file = check_access(file, write=False, permissions=self._folder_permissions)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
         rows = read_csv_rows(file, sep)
         return lua.table_from([lua.table_from(r) for r in rows])
 
