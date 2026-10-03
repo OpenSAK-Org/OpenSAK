@@ -68,6 +68,18 @@ def get_icons_dir() -> Path:
     return d
 
 
+def get_macros_dir() -> Path:
+    """
+    Return (and create if needed) the user's Lua macros directory.
+
+    Lives under <install_dir>/macros so macros survive app updates. Macros
+    may read files here by default (see opensak.macro.permissions).
+    """
+    d = get_app_data_dir() / "macros"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def get_log_path() -> Path:
     """Return the path to the application log file."""
     return get_app_data_dir() / "opensak.log"

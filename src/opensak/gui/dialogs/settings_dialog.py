@@ -121,6 +121,13 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
+        # Lua macros are beta-only (same flag as the Macros menu), and so is
+        # the list of folders they may access.
+        from opensak.utils import flags
+        self._perm_table: QTableWidget | None = None
+        if flags.lua_macros:
+            self._tabs.addTab(self._build_folder_permissions_tab(),
+                              tr("settings_tab_folder_permissions"))
 
         layout.addWidget(self._tabs)
 
@@ -826,6 +833,161 @@ class SettingsDialog(QDialog):
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
 
+    # ── Fane: Mappe-rettigheder (Lua-makroer) ────────────────────────────────
+
+    _PERM_COL_FOLDER, _PERM_COL_READ, _PERM_COL_WRITE = range(3)
+
+    def _build_folder_permissions_tab(self) -> QWidget:
+        from opensak.macro.permissions import load_permissions
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        intro = QLabel(tr("settings_folder_perm_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        table = QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels([
+            tr("settings_folder_perm_col_folder"),
+            tr("settings_folder_perm_col_read"),
+            tr("settings_folder_perm_col_write"),
+        ])
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(self._PERM_COL_FOLDER, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self._PERM_COL_READ, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self._PERM_COL_WRITE, QHeaderView.ResizeMode.ResizeToContents)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setDefaultSectionSize(24)
+        self._perm_table = table
+
+        for perm in load_permissions():
+            self._append_perm_row(perm.path, perm.read, perm.write)
+        table.itemChanged.connect(self._on_perm_item_changed)
+        table.itemSelectionChanged.connect(self._update_perm_buttons)
+        layout.addWidget(table)
+
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton(tr("settings_folder_perm_add"))
+        btn_add.clicked.connect(self._on_add_perm_folder)
+        btn_row.addWidget(btn_add)
+        self._btn_perm_remove = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_perm_remove.setEnabled(False)
+        self._btn_perm_remove.clicked.connect(self._on_remove_perm_folder)
+        btn_row.addWidget(self._btn_perm_remove)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        scroll = QScrollArea()
+        scroll.setWidget(tab)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        return scroll
+
+    def _append_perm_row(self, path: str, read: bool, write: bool) -> int:
+        table = self._perm_table
+        assert table is not None
+        row = table.rowCount()
+        table.blockSignals(True)
+        table.insertRow(row)
+        folder_item = QTableWidgetItem(path)
+        folder_item.setToolTip(path)
+        table.setItem(row, self._PERM_COL_FOLDER, folder_item)
+        for col, checked in ((self._PERM_COL_READ, read), (self._PERM_COL_WRITE, write)):
+            item = QTableWidgetItem()
+            item.setFlags(
+                Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            table.setItem(row, col, item)
+        table.blockSignals(False)
+        return row
+
+    def _perm_row_checked(self, row: int, col: int) -> bool:
+        item = self._perm_table.item(row, col)
+        return item is not None and item.checkState() == Qt.CheckState.Checked
+
+    def _collect_permissions(self) -> list:
+        from opensak.macro.permissions import FolderPermission
+
+        table = self._perm_table
+        return [
+            FolderPermission(
+                path=table.item(row, self._PERM_COL_FOLDER).text(),
+                read=self._perm_row_checked(row, self._PERM_COL_READ),
+                write=self._perm_row_checked(row, self._PERM_COL_WRITE),
+            )
+            for row in range(table.rowCount())
+        ]
+
+    def _update_perm_buttons(self) -> None:
+        self._btn_perm_remove.setEnabled(bool(self._perm_table.selectedItems()))
+
+    def _on_perm_item_changed(self, item: QTableWidgetItem) -> None:
+        """Both boxes cleared → offer to drop the folder from the list.
+
+        Answering No keeps it without rights, which blocks the folder even
+        when a parent folder in the list is permitted.
+        """
+        if item.column() not in (self._PERM_COL_READ, self._PERM_COL_WRITE):
+            return
+        row = item.row()
+        if self._perm_row_checked(row, self._PERM_COL_READ) or \
+                self._perm_row_checked(row, self._PERM_COL_WRITE):
+            return
+        path = self._perm_table.item(row, self._PERM_COL_FOLDER).text()
+        answer = QMessageBox.question(
+            self,
+            tr("settings_folder_perm_no_rights_title"),
+            tr("settings_folder_perm_no_rights_msg", path=path),
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._perm_table.removeRow(row)
+
+    def _on_add_perm_folder(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        from opensak.config import get_macros_dir
+
+        chosen = QFileDialog.getExistingDirectory(
+            self, tr("settings_folder_perm_add_title"), str(get_macros_dir()),
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if chosen:
+            self._add_perm_folder(chosen)
+
+    def _add_perm_folder(self, chosen: str) -> None:
+        """Add *chosen* with read permission. It is stored resolved, so the
+        list shows the folder the access check really compares against."""
+        from opensak.macro.permissions import resolve_path
+
+        folder = resolve_path(chosen)
+        table = self._perm_table
+        for row in range(table.rowCount()):
+            if resolve_path(table.item(row, self._PERM_COL_FOLDER).text()) == folder:
+                table.selectRow(row)
+                QMessageBox.information(
+                    self,
+                    tr("settings_tab_folder_permissions"),
+                    tr("settings_folder_perm_duplicate"),
+                )
+                return
+        table.selectRow(self._append_perm_row(str(folder), read=True, write=False))
+
+    def _on_remove_perm_folder(self) -> None:
+        rows = {index.row() for index in self._perm_table.selectedIndexes()}
+        for row in sorted(rows, reverse=True):
+            self._perm_table.removeRow(row)
+
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
     def _build_gc_tab(self) -> QWidget:
@@ -1499,6 +1661,10 @@ class SettingsDialog(QDialog):
             credentials.set_password(s.pq_email_username, new_pq_password)
 
         s.sync()
+
+        if self._perm_table is not None:
+            from opensak.macro.permissions import save_permissions
+            save_permissions(self._collect_permissions())
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store

@@ -100,8 +100,10 @@ class MacroDialog(QDialog):
         layout.addLayout(buttons)
 
     def _open_file(self) -> None:
+        from opensak.config import get_macros_dir
+
         path, _ = QFileDialog.getOpenFileName(
-            self, tr("macro_open_title"), "", "Lua (*.lua);;* (*)"
+            self, tr("macro_open_title"), str(get_macros_dir()), "Lua (*.lua);;* (*)"
         )
         if not path:
             return
