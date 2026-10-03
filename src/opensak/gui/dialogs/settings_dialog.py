@@ -892,9 +892,17 @@ class SettingsDialog(QDialog):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         return scroll
 
+    def _perms(self) -> QTableWidget:
+        """The folder table; only called once the tab has been built."""
+        assert self._perm_table is not None
+        return self._perm_table
+
+    def _perm_path(self, row: int) -> str:
+        item = self._perms().item(row, self._PERM_COL_FOLDER)
+        return item.text() if item is not None else ""
+
     def _append_perm_row(self, path: str, read: bool, write: bool) -> int:
-        table = self._perm_table
-        assert table is not None
+        table = self._perms()
         row = table.rowCount()
         table.blockSignals(True)
         table.insertRow(row)
@@ -914,24 +922,23 @@ class SettingsDialog(QDialog):
         return row
 
     def _perm_row_checked(self, row: int, col: int) -> bool:
-        item = self._perm_table.item(row, col)
+        item = self._perms().item(row, col)
         return item is not None and item.checkState() == Qt.CheckState.Checked
 
     def _collect_permissions(self) -> list:
         from opensak.macro.permissions import FolderPermission
 
-        table = self._perm_table
         return [
             FolderPermission(
-                path=table.item(row, self._PERM_COL_FOLDER).text(),
+                path=self._perm_path(row),
                 read=self._perm_row_checked(row, self._PERM_COL_READ),
                 write=self._perm_row_checked(row, self._PERM_COL_WRITE),
             )
-            for row in range(table.rowCount())
+            for row in range(self._perms().rowCount())
         ]
 
     def _update_perm_buttons(self) -> None:
-        self._btn_perm_remove.setEnabled(bool(self._perm_table.selectedItems()))
+        self._btn_perm_remove.setEnabled(bool(self._perms().selectedItems()))
 
     def _on_perm_item_changed(self, item: QTableWidgetItem) -> None:
         """Both boxes cleared → offer to drop the folder from the list.
@@ -945,14 +952,14 @@ class SettingsDialog(QDialog):
         if self._perm_row_checked(row, self._PERM_COL_READ) or \
                 self._perm_row_checked(row, self._PERM_COL_WRITE):
             return
-        path = self._perm_table.item(row, self._PERM_COL_FOLDER).text()
+        path = self._perm_path(row)
         answer = QMessageBox.question(
             self,
             tr("settings_folder_perm_no_rights_title"),
             tr("settings_folder_perm_no_rights_msg", path=path),
         )
         if answer == QMessageBox.StandardButton.Yes:
-            self._perm_table.removeRow(row)
+            self._perms().removeRow(row)
 
     def _on_add_perm_folder(self) -> None:
         from PySide6.QtWidgets import QFileDialog
@@ -971,9 +978,9 @@ class SettingsDialog(QDialog):
         from opensak.macro.permissions import resolve_path
 
         folder = resolve_path(chosen)
-        table = self._perm_table
+        table = self._perms()
         for row in range(table.rowCount()):
-            if resolve_path(table.item(row, self._PERM_COL_FOLDER).text()) == folder:
+            if resolve_path(self._perm_path(row)) == folder:
                 table.selectRow(row)
                 QMessageBox.information(
                     self,
@@ -984,9 +991,10 @@ class SettingsDialog(QDialog):
         table.selectRow(self._append_perm_row(str(folder), read=True, write=False))
 
     def _on_remove_perm_folder(self) -> None:
-        rows = {index.row() for index in self._perm_table.selectedIndexes()}
+        table = self._perms()
+        rows = {index.row() for index in table.selectedIndexes()}
         for row in sorted(rows, reverse=True):
-            self._perm_table.removeRow(row)
+            table.removeRow(row)
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
