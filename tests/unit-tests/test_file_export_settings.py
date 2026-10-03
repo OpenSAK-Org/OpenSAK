@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from datetime import datetime
+
 from opensak.export.file_export_settings import (
-    FileExportProfile, FileExportSettings,
+    FileExportProfile, FileExportSettings, expand_file_name,
 )
 
 
@@ -17,7 +19,9 @@ from opensak.export.file_export_settings import (
 class TestFileExportSettings:
     def test_roundtrip(self):
         s = FileExportSettings(fmt="ggz", output_path="/x/y.ggz",
-                               use_corrected_coords=False, max_records=250)
+                               use_corrected_coords=False, max_records=250,
+                               file_name="{database}_{date}", folder="/x",
+                               if_exists="skip")
         assert FileExportSettings.from_dict(s.to_dict()) == s
 
     def test_missing_keys_fall_back_to_defaults(self):
@@ -35,6 +39,23 @@ class TestFileExportSettings:
     @pytest.mark.parametrize("value", [-1, "10", 2.5, True, None])
     def test_invalid_max_records_falls_back(self, value):
         assert FileExportSettings.from_dict({"max_records": value}).max_records == 0
+
+    @pytest.mark.parametrize("value", [None, 5, ["x"]])
+    def test_invalid_file_name_falls_back(self, value):
+        assert FileExportSettings.from_dict({"file_name": value}).file_name == ""
+
+    def test_folder_migrated_from_output_path(self, tmp_path):
+        old = {"output_path": str(tmp_path / "sub" / "a.gpx")}
+        assert FileExportSettings.from_dict(old).folder == str(tmp_path / "sub")
+        assert FileExportSettings.from_dict({}).folder == ""
+
+    def test_saved_folder_wins_over_output_path(self):
+        s = FileExportSettings.from_dict({"output_path": "/a/b.gpx", "folder": ""})
+        assert s.folder == ""
+
+    @pytest.mark.parametrize("value", ["replace", None, 1])
+    def test_invalid_if_exists_falls_back(self, value):
+        assert FileExportSettings.from_dict({"if_exists": value}).if_exists == "ask"
 
     def test_unknown_keys_are_ignored(self):
         s = FileExportSettings.from_dict({"fmt": "loc", "from_the_future": True})
@@ -79,8 +100,58 @@ class TestFileExportProfile:
         data = json.loads(path.read_text(encoding="utf-8"))
         assert data == {"name": "A/B", "settings": {
             "fmt": "loc", "output_path": "",
-            "use_corrected_coords": True, "max_records": 0,
+            "use_corrected_coords": True, "max_records": 0, "file_name": "",
+            "folder": "", "if_exists": "ask",
         }}
+
+
+class TestExpandFileName:
+    NOW = datetime(2026, 10, 3, 7, 8, 9)
+
+    def _expand(self, template, **kw):
+        kw.setdefault("now", self.NOW)
+        return expand_file_name(template, **kw)
+
+    def test_fixed_name_is_kept(self):
+        assert self._expand("My caches") == "My caches"
+
+    def test_date_time_variables(self):
+        assert self._expand("{date}_{time}") == "2026-10-03_07-08-09"
+        assert self._expand("{datetime}") == "2026-10-03_07-08-09"
+        assert self._expand("{year}{month}{day}-{hour}{minute}{second}") == "20261003-070809"
+
+    def test_database_format_count(self):
+        name = self._expand("{database}-{format}-{count}", database="Zurich",
+                            fmt="ggz", count=12)
+        assert name == "Zurich-ggz-12"
+
+    def test_filter_variable(self):
+        assert self._expand("{database}_{filter}", database="DB",
+                            filter_name="Tradis") == "DB_Tradis"
+        assert self._expand("{filter}") == "opensak_export"   # no saved filter
+
+    def test_variables_are_case_insensitive(self):
+        assert self._expand("{Database}_{DATE}", database="DB") == "DB_2026-10-03"
+
+    def test_unknown_variable_is_kept(self):
+        assert self._expand("x_{nope}") == "x_{nope}"
+
+    def test_invalid_characters_are_replaced(self):
+        assert self._expand("a/b:c", database="") == "a_b_c"
+        assert self._expand("{database}", database='x<y>|"z') == "x_y___z"
+
+    def test_extension_is_dropped(self):
+        assert self._expand("export.gpx", fmt="gpx") == "export"
+        assert self._expand("export.GPX", fmt="gpx") == "export"
+        assert self._expand("export.loc", fmt="gpx") == "export.loc"
+
+    def test_empty_falls_back_to_default(self):
+        assert self._expand("") == "opensak_export"
+        assert self._expand("{database}", database="") == "opensak_export"
+        assert self._expand(" .. ") == "opensak_export"
+
+    def test_uses_current_time_by_default(self):
+        assert expand_file_name("{year}") == datetime.now().strftime("%Y")
 
 
 # ── Dialog integration ────────────────────────────────────────────────────────
@@ -164,8 +235,7 @@ class TestFileExportDialogSettings:
         qtbot.addWidget(dlg)
         dlg._chk_corrected.setChecked(False)
         dlg._spin_max.setValue(3)
-        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName",
-                            lambda *a: (str(tmp_path / "x.gpx"), ""))
+        dlg._edit_folder.setText(str(tmp_path))
         calls = []
         monkeypatch.setattr(fed, "_ExportWorker",
                             lambda *a, **k: calls.append((a, k)) or MagicMock())
@@ -175,6 +245,164 @@ class TestFileExportDialogSettings:
         assert kwargs["use_corrected"] is False
         last = FileExportProfile.load_last_used()
         assert (last.use_corrected_coords, last.max_records) == (False, 3)
+
+    def test_file_name_and_folder_saved_and_applied(self, qtbot, fed, monkeypatch, tmp_path):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        dlg._edit_file_name.setText("{database}_{date}")
+        dlg._edit_folder.setText(str(tmp_path))
+        monkeypatch.setattr(fed.QInputDialog, "getText", lambda *a, **k: ("Named", True))
+        dlg._save_profile()
+        saved = FileExportProfile.load(FileExportProfile.profile_path("Named")).settings
+        assert saved.file_name == "{database}_{date}"
+        assert saved.folder == str(tmp_path)
+
+        dlg._settings_combo.setCurrentIndex(0)   # "last used" (defaults)
+        assert dlg._edit_file_name.text() == ""
+        assert dlg._edit_folder.text() == ""
+        dlg._settings_combo.setCurrentIndex(1)
+        assert dlg._edit_file_name.text() == "{database}_{date}"
+        assert dlg._edit_folder.text() == str(tmp_path)
+
+    def test_preview_shows_target_path(self, qtbot, fed, tmp_path):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        assert dlg._output_preview() == "opensak_export.gpx"
+        dlg._edit_folder.setText(str(tmp_path))
+        dlg._edit_file_name.setText("mine")
+        assert dlg._output_preview() == str(tmp_path / "mine.gpx")
+
+    def test_long_preview_does_not_widen_dialog(self, qtbot, fed):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        width = dlg.sizeHint().width()
+        dlg._edit_folder.setText("C:\\" + "very_long_folder_name\\" * 20)
+        assert dlg.sizeHint().width() == width
+        label = dlg._lbl_file_name_preview
+        long_path = dlg._output_preview()
+        assert long_path.endswith("opensak_export.gpx")
+        label.set_full_text(long_path)
+        label.resize(200, label.height())
+        assert "…" in label.text()
+        assert label.toolTip() == long_path
+
+    def test_file_name_help_button(self, qtbot, fed, monkeypatch):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        shown = []
+        monkeypatch.setattr(fed.QMessageBox, "information",
+                            lambda *a, **k: shown.append(a))
+        dlg._btn_name_help.click()
+        assert len(shown) == 1
+
+    def test_help_text_lists_every_variable(self):
+        from opensak.export.file_export_settings import FILE_NAME_VARIABLES
+        from opensak.lang.en import STRINGS
+        help_text = STRINGS["file_export_file_name_help"]
+        for var in FILE_NAME_VARIABLES:
+            assert f"{{{var}}}" in help_text
+
+    def test_browse_folder(self, qtbot, fed, monkeypatch, tmp_path):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory",
+                            lambda *a, **k: str(tmp_path))
+        assert dlg._browse_folder() is True
+        assert dlg._edit_folder.text() == str(tmp_path)
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory", lambda *a, **k: "")
+        assert dlg._browse_folder() is False
+        assert dlg._edit_folder.text() == str(tmp_path)   # cancel keeps it
+
+    def test_preview_follows_template_and_format(self, qtbot, fed, monkeypatch):
+        monkeypatch.setattr(fed.FileExportDialog, "_database_name",
+                            staticmethod(lambda: "Home"))
+        dlg = fed.FileExportDialog([_cache(), _cache()], filter_name="Tradis")
+        qtbot.addWidget(dlg)
+        dlg._edit_file_name.setText("{database}-{filter}")
+        assert dlg._expanded_file_name() == "Home-Tradis.gpx"
+        dlg._edit_file_name.setText("{database}-{count}")
+        assert dlg._expanded_file_name() == "Home-2.gpx"
+        dlg._btn_ggz.setChecked(True)
+        assert dlg._expanded_file_name() == "Home-2.ggz"
+        dlg._spin_max.setValue(1)
+        assert dlg._expanded_file_name() == "Home-1.ggz"
+
+    def test_export_writes_to_folder_without_asking(
+            self, qtbot, fed, monkeypatch, tmp_path):
+        FileExportProfile.save_last_used(FileExportSettings(
+            folder=str(tmp_path), file_name="{database}_fixed",
+        ))
+        monkeypatch.setattr(fed.FileExportDialog, "_database_name",
+                            staticmethod(lambda: "Home"))
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+
+        def no_dialog(*a, **k):
+            raise AssertionError("no file dialog expected")
+
+        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName", no_dialog)
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory", no_dialog)
+        paths = []
+        monkeypatch.setattr(fed, "_ExportWorker",
+                            lambda *a, **k: paths.append(a[1]) or MagicMock())
+        dlg._do_export()
+        assert paths == [tmp_path / "Home_fixed.gpx"]
+        last = FileExportProfile.load_last_used()
+        assert last.file_name == "{database}_fixed"
+        assert last.output_path == str(tmp_path / "Home_fixed.gpx")
+
+    def test_if_exists_saved_and_applied(self, qtbot, fed, monkeypatch):
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        assert dlg._combo_if_exists.currentData() == "ask"
+        dlg._combo_if_exists.setCurrentIndex(dlg._combo_if_exists.findData("skip"))
+        monkeypatch.setattr(fed.QInputDialog, "getText", lambda *a, **k: ("S", True))
+        dlg._save_profile()
+        saved = FileExportProfile.load(FileExportProfile.profile_path("S")).settings
+        assert saved.if_exists == "skip"
+        dlg._settings_combo.setCurrentIndex(0)   # "last used" (defaults)
+        assert dlg._combo_if_exists.currentData() == "ask"
+        dlg._settings_combo.setCurrentIndex(1)
+        assert dlg._combo_if_exists.currentData() == "skip"
+
+    @pytest.mark.parametrize("if_exists,answer,exported", [
+        ("overwrite", None, True),
+        ("skip", None, False),
+        ("ask", "Yes", True),
+        ("ask", "No", False),
+    ])
+    def test_existing_file(self, qtbot, fed, monkeypatch, tmp_path,
+                           if_exists, answer, exported):
+        (tmp_path / "same.gpx").write_text("old", encoding="utf-8")
+        dlg = fed.FileExportDialog([_cache()])
+        qtbot.addWidget(dlg)
+        dlg._edit_folder.setText(str(tmp_path))
+        dlg._edit_file_name.setText("same")
+        dlg._combo_if_exists.setCurrentIndex(dlg._combo_if_exists.findData(if_exists))
+        asked = []
+
+        def fake_question(*a, **k):
+            asked.append(a)
+            return getattr(fed.QMessageBox.StandardButton, answer)
+
+        monkeypatch.setattr(fed.QMessageBox, "question", fake_question)
+        paths = []
+        monkeypatch.setattr(fed, "_ExportWorker",
+                            lambda *a, **k: paths.append(a[1]) or MagicMock())
+        dlg._do_export()
+        assert bool(paths) is exported
+        assert bool(asked) is (if_exists == "ask")
+        if if_exists == "skip":
+            assert not dlg._log.isHidden()   # tells the user it was skipped
+
+    def test_database_name_from_active_db(self, fed, monkeypatch):
+        from opensak.db import manager
+        fake = SimpleNamespace(active=SimpleNamespace(name="Active DB"))
+        monkeypatch.setattr(manager, "get_db_manager", lambda: fake)
+        assert fed.FileExportDialog._database_name() == "Active DB"
+        monkeypatch.setattr(manager, "get_db_manager",
+                            lambda: SimpleNamespace(active=None))
+        assert fed.FileExportDialog._database_name() == ""
 
     def test_delete_profile(self, qtbot, fed, monkeypatch):
         FileExportProfile("P", FileExportSettings(fmt="ggz")).save()
@@ -188,28 +416,27 @@ class TestFileExportDialogSettings:
         assert not FileExportProfile.profile_path("P").exists()
         assert dlg._current_fmt() == "ggz"   # what is shown stays
 
-    def test_export_records_last_used_and_prefills_path(self, qtbot, fed, monkeypatch, tmp_path):
+    def test_first_export_asks_for_folder_once(self, qtbot, fed, monkeypatch, tmp_path):
         dlg = fed.FileExportDialog([_cache()])
         qtbot.addWidget(dlg)
         dlg._btn_loc.setChecked(True)
-        target = tmp_path / "out" / "mine"
-        seen_defaults = []
-
-        def fake_save(parent, title, default, flt):
-            seen_defaults.append(default)
-            return str(target), flt
-
-        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName", fake_save)
-        worker = MagicMock()
-        monkeypatch.setattr(fed, "_ExportWorker", lambda *a, **k: worker)
+        target = tmp_path / "out"
+        asked = []
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory",
+                            lambda *a, **k: asked.append(a) or str(target))
+        paths = []
+        monkeypatch.setattr(fed, "_ExportWorker",
+                            lambda *a, **k: paths.append(a[1]) or MagicMock())
         dlg._do_export()
 
         last = FileExportProfile.load_last_used()
         assert last.fmt == "loc"
-        assert last.output_path == str(target.with_suffix(".loc"))
+        assert last.folder == str(target)
+        assert last.output_path == str(target / "opensak_export.loc")
 
         dlg2 = fed.FileExportDialog([_cache()])
         qtbot.addWidget(dlg2)
         dlg2._btn_gpx.setChecked(True)
         dlg2._do_export()
-        assert seen_defaults[-1] == str(target.with_suffix(".gpx"))
+        assert len(asked) == 1
+        assert paths == [target / "opensak_export.loc", target / "opensak_export.gpx"]
