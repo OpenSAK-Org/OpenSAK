@@ -36,9 +36,9 @@ _FOUND = _blob({"chkFound": "True", "chkNotFound": "False"})
 def gsak_db(tmp_path) -> Path:
     path = tmp_path / "gsak.db3"
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE TranslateFilters (Type TEXT, Description TEXT, Data TEXT)")
+    conn.execute("CREATE TABLE Settings (Type collate nocase, Description, Data)")
     conn.executemany(
-        "INSERT INTO TranslateFilters VALUES ('FI', ?, ?)",
+        "INSERT INTO Settings VALUES ('FI', ?, ?)",
         [("Alpha", _FOUND), ("Beta", _FOUND), ("Gamma export", _FOUND)],
     )
     conn.commit()
@@ -128,7 +128,7 @@ class TestDialog:
                                                                  monkeypatch):
         path = tmp_path / "gsak.db3"
         conn = sqlite3.connect(path)
-        conn.execute("CREATE TABLE TranslateFilters (Type TEXT, Description TEXT, Data TEXT)")
+        conn.execute("CREATE TABLE Settings (Type collate nocase, Description, Data)")
         conn.commit()
         conn.close()
         shown = []

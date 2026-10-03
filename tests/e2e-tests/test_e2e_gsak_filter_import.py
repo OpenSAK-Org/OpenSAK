@@ -21,8 +21,8 @@ def gsak_db(tmp_path) -> Path:
     leaves a condition behind in the Where tab."""
     path = tmp_path / "gsak.db3"
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE TranslateFilters (Type TEXT, Description TEXT, Data TEXT)")
-    conn.executemany("INSERT INTO TranslateFilters VALUES ('FI', ?, ?)", [
+    conn.execute("CREATE TABLE Settings (Type collate nocase, Description, Data)")
+    conn.executemany("INSERT INTO Settings VALUES ('FI', ?, ?)", [
         ("Not found", _blob({"chkFound": "False", "chkNotFound": "True"})),
         ("Watched", _blob({"chkFound": "False", "chkNotFound": "True",
                            "chkWatchYes": "True", "chkWatchNo": "False",

@@ -36,7 +36,7 @@ from opensak.importer.gsak_filter_importer import (
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _blob(pairs: dict, where: str = "", custom: list | None = None) -> str:
-    """Serialise a GSAK filter blob the way TranslateFilters.Data stores one."""
+    """Serialise a GSAK filter blob the way Settings.Data stores one."""
     lines = [f"{k}={v}" for k, v in pairs.items()]
     if custom:
         lines.append("*custom*")
@@ -59,8 +59,8 @@ def _statuses(c: Conversion) -> dict:
 
 def _make_gsak_db(path: Path, filters: dict[str, str]) -> Path:
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE TranslateFilters (Type TEXT, Description TEXT, Data TEXT)")
-    conn.executemany("INSERT INTO TranslateFilters VALUES ('FI', ?, ?)",
+    conn.execute("CREATE TABLE Settings (Type collate nocase, Description, Data)")
+    conn.executemany("INSERT INTO Settings VALUES ('FI', ?, ?)",
                      list(filters.items()))
     conn.commit()
     conn.close()
@@ -630,6 +630,24 @@ class TestSource:
             zf.writestr("readme.txt", "nothing here")
         with pytest.raises(GsakFilterSourceError):
             find_gsak_filter_db(archive)
+
+    def test_settings_table_wins_over_a_translatefilters_copy(self, tmp_path):
+        db = _make_gsak_db(tmp_path / "gsak.db3", {"Live": _blob({})})
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE TranslateFilters (Type, Description, Data)")
+        conn.execute("INSERT INTO TranslateFilters VALUES ('FI', 'Stale', '')")
+        conn.commit()
+        conn.close()
+        assert [name for name, _ in load_gsak_filters(db)] == ["Live"]
+
+    def test_translatefilters_is_read_when_settings_is_missing(self, tmp_path):
+        db = tmp_path / "gsak.db3"
+        conn = sqlite3.connect(db)
+        conn.execute("CREATE TABLE TranslateFilters (Type, Description, Data)")
+        conn.execute("INSERT INTO TranslateFilters VALUES ('FI', 'Copy', '')")
+        conn.commit()
+        conn.close()
+        assert [name for name, _ in load_gsak_filters(db)] == ["Copy"]
 
     def test_filters_are_listed_alphabetically(self, tmp_path):
         db = _make_gsak_db(tmp_path / "gsak.db3",

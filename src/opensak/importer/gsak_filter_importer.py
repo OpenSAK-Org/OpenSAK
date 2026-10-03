@@ -4,10 +4,14 @@ OpenSAK filter profiles.
 
 GSAK stores every saved filter as one row in ``gsak.db3``::
 
-    TranslateFilters(Type, Description, Data)
+    Settings(Type, Description, Data)
         Type        'FI' for a filter
         Description the filter's name as shown in GSAK
         Data        the whole filter dialog, serialised (see _parse_blob)
+
+Some installations also carry a ``TranslateFilters`` table with the same
+layout — a copy made outside GSAK, not something GSAK itself maintains — so
+it is only read when ``Settings`` is missing.
 
 OpenSAK stores one JSON file per filter profile (see
 ``opensak.filters.engine.FilterProfile``). This module converts the former
@@ -1040,7 +1044,7 @@ class GsakFilter:
 
 
 def parse_filter_blob(name: str, data: str) -> GsakFilter:
-    """Parse a TranslateFilters.Data blob.
+    """Parse a saved filter's Data blob (Settings.Data, Type 'FI').
 
     Layout (CRLF separated):
         key=value lines, one per dialog control
@@ -2369,6 +2373,11 @@ def find_gsak_filter_db(path: Path) -> Path:
     return extract_gsak_member(path, member, extract_dir)
 
 
+# Where saved filters live: GSAK's own Settings table first; TranslateFilters
+# is a copy some installations carry and is only a fallback.
+_FILTER_TABLES = ("Settings", "TranslateFilters")
+
+
 def load_gsak_filters(db_path: Path) -> list[tuple[str, str]]:
     """Return [(name, data)] for every saved filter in gsak.db3 (read-only)."""
     uri = f"file:{Path(db_path).as_posix()}?mode=ro"
@@ -2377,8 +2386,13 @@ def load_gsak_filters(db_path: Path) -> list[tuple[str, str]]:
         # file open — which on Windows blocks removing an unpacked gsak.db3.
         with closing(sqlite3.connect(uri, uri=True)) as conn:
             conn.text_factory = lambda b: b.decode("utf-8", errors="replace")
+            tables = {name.lower() for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            table = next((t for t in _FILTER_TABLES if t.lower() in tables), None)
+            if table is None:
+                raise GsakFilterSourceError("no such table: Settings")
             rows = conn.execute(
-                "SELECT Description, Data FROM TranslateFilters WHERE Type = 'FI'"
+                f"SELECT Description, Data FROM {table} WHERE Type = 'FI'"
             ).fetchall()
     except sqlite3.Error as exc:
         raise GsakFilterSourceError(str(exc)) from exc
