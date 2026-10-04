@@ -299,6 +299,29 @@ def test_read_csv_missing_file(tmp_path):
             'opensak.read_csv("nope.csv")', base_dir=tmp_path)
 
 
+def test_temp_and_macros_dir():
+    from opensak.macro.permissions import macros_dir, temp_dir
+
+    _, out = _run("print(opensak.temp_dir()); print(opensak.macros_dir())")
+    assert out == [str(temp_dir()), str(macros_dir())]
+
+
+def test_read_csv_from_temp_dir():
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".csv", delete=False, encoding="utf-8"
+    ) as f:
+        f.write("code\nGC1\n")
+    try:
+        _, out = _run(
+            f'print(opensak.read_csv(opensak.temp_dir() .. "/{Path(f.name).name}")[1].code)'
+        )
+        assert out == ["GC1"]
+    finally:
+        Path(f.name).unlink()
+
+
 def test_confirm_returns_host_answer():
     host, out = _run('print(opensak.confirm("Go?"))')
     assert host.asked == ["Go?"] and out == ["true"]

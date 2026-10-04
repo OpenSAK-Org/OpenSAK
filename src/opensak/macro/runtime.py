@@ -32,6 +32,9 @@ Lua API (POC):
                                      -- The file must lie in a folder with read
                                      -- permission (Settings → Folder permissions)
     opensak.confirm(message)         -- ask the user Yes/No; returns true on Yes
+    opensak.temp_dir()               -- the system temp folder (read/write by
+                                     -- default), e.g. opensak.temp_dir() .. "/x.csv"
+    opensak.macros_dir()             -- OpenSAK's macros folder (read by default)
     print(...)                       -- write to the macro output pane
 
 Keys understood by opensak.filter{} (all combined with AND):
@@ -95,7 +98,13 @@ from opensak.filters.engine import (
     WhereClauseFilter,
 )
 from opensak.coords import parse_coords
-from opensak.macro.permissions import FolderAccessDenied, FolderPermission, check_access
+from opensak.macro.permissions import (
+    FolderAccessDenied,
+    FolderPermission,
+    check_access,
+    macros_dir,
+    temp_dir,
+)
 from opensak.utils.constants import CACHE_TYPES
 
 # A runaway `while true do end` would freeze the GUI thread, so the script is
@@ -527,6 +536,8 @@ class MacroRuntime:
                 "clear_corrected": self._wrap(self._clear_corrected),
                 "read_csv": self._wrap(lambda *a: self._read_csv(lua, *a)),
                 "confirm": self._wrap(self._confirm),
+                "temp_dir": self._wrap(lambda: str(temp_dir())),
+                "macros_dir": self._wrap(lambda: str(macros_dir())),
             }
         )
 

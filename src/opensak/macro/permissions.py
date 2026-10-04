@@ -54,12 +54,22 @@ def resolve_path(path: str | Path) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
 
 
-def default_permissions() -> list[FolderPermission]:
+def temp_dir() -> Path:
+    """The system temp folder, resolved (on macOS e.g. /private/var/folders/…/T)."""
+    return resolve_path(tempfile.gettempdir())
+
+
+def macros_dir() -> Path:
+    """OpenSAK's macros folder, resolved."""
     from opensak.config import get_macros_dir
 
+    return resolve_path(get_macros_dir())
+
+
+def default_permissions() -> list[FolderPermission]:
     return [
-        FolderPermission(str(resolve_path(tempfile.gettempdir())), read=True, write=True),
-        FolderPermission(str(resolve_path(get_macros_dir())), read=True, write=False),
+        FolderPermission(str(temp_dir()), read=True, write=True),
+        FolderPermission(str(macros_dir()), read=True, write=False),
     ]
 
 
