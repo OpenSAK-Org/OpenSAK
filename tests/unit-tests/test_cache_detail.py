@@ -591,6 +591,17 @@ def test_trackables_tab_renders_without_ref(monkeypatch, qapp):
     assert "coord.info" not in html
 
 
+def test_trackables_tab_escapes_html_in_name(monkeypatch, qapp):
+    # Trackable names are user-written — raw HTML must not become a link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    name = '<a href="file:///C:/evil.exe">Bug</a>'
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable(name, ref="TB1")]))
+    assert 'href="file:' not in panel._tb_browser.toHtml()
+    assert name in panel._tb_browser.toPlainText()
+    assert panel._tb_browser.openLinks() is False
+
+
 def test_trackables_tab_cleared_on_clear(monkeypatch, qapp):
     # clear() resets the trackables browser and tab title.
     monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
