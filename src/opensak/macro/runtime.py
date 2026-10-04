@@ -6,58 +6,10 @@ Runs a user's Lua script in a sandboxed interpreter and exposes a small
 touches the main window goes through a MacroHost, so the runtime can be
 unit-tested with a fake host.
 
-Lua API (POC):
-
-    opensak.filter{ ... }            -- build a filter and apply it; returns
-                                     -- the number of matching caches
-                                     -- (0 = nothing matched, view unchanged)
-    opensak.filter_profile("Name")   -- apply a saved filter profile; returns count
-    opensak.clear_filter()           -- show all caches again
-    opensak.count()                  -- caches matching the active filter
-    opensak.profiles()               -- list of saved filter profile names
-    opensak.set_corrected(code, lat, lon)
-                                     -- set corrected coordinates (decimal
-                                     -- degrees); returns false if the cache
-                                     -- is not in the database
-    opensak.set_corrected(code, "N47 22.123 E008 32.456")
-                                     -- same, from a coordinate string in any
-                                     -- format OpenSAK understands
-    opensak.clear_corrected(code)    -- remove corrected coordinates; returns
-                                     -- false if the cache is not in the database
-    opensak.read_csv(path [, sep])   -- read a CSV file (UTF-8) into an array of
-                                     -- rows keyed by the header line; the
-                                     -- separator (, ; or tab) is detected
-                                     -- unless given. A relative path is
-                                     -- resolved against the macro file's folder.
-                                     -- The file must lie in a folder with read
-                                     -- permission (Settings → Folder permissions)
-    opensak.confirm(message)         -- ask the user Yes/No; returns true on Yes
-    opensak.temp_dir()               -- the system temp folder (read/write by
-                                     -- default), e.g. opensak.temp_dir() .. "/x.csv"
-    opensak.macros_dir()             -- OpenSAK's macros folder (read by default)
-    print(...)                       -- write to the macro output pane
-
-Keys understood by opensak.filter{} (all combined with AND):
-
-    type       = "Traditional" | {"Traditional", "Multi-cache", ...}
-    container  = "Small" | {"Micro", "Small", ...}
-    difficulty = 2 | {1, 2.5}         -- exact value or {min, max}
-    terrain    = 2 | {1, 2.5}
-    found      = true | false
-    available  = true                 -- only available (not disabled/archived)
-    name, code, owner, country, state, county = "text"   -- "contains" match
-    where      = "SQL WHERE clause"   -- raw clause against the caches table
-    label      = "Shown in the toolbar" (optional)
-
-Example:
-
-    local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
-    print("Easy unfound traditionals: " .. n)
-
-    for _, row in ipairs(opensak.read_csv("solved.csv")) do
-        opensak.set_corrected(row.code, row.coords)
-    end
-
+The Lua API is defined once, in API and FILTER_KEY_DOCS below: run() builds
+the `opensak` table from API, and docs/macros/api.md is generated from both
+(python scripts/generate_macro_api_docs.py). test_macro_api_docs fails when
+a function is exposed without documentation or the generated file is stale.
 
 Known limitation (#938 step 4): the instruction limit only counts Lua VM
 instructions, not work inside C functions. Lua pattern matching backtracks
@@ -76,6 +28,7 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
@@ -136,6 +89,34 @@ FILTER_KEYS = sorted(
         "label",
     }
     | set(_TEXT_FILTERS)
+)
+
+
+@dataclass(frozen=True)
+class FilterKeyDoc:
+    """Documentation of one or more opensak.filter{} keys."""
+
+    keys: tuple[str, ...]
+    value: str
+    description: str
+
+
+# Every key in FILTER_KEYS must be documented here (checked by a test).
+FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
+    FilterKeyDoc(("type",), '"Traditional" | {"Traditional", "Multi-cache", ...}',
+                 'Cache type(s); the " Cache" suffix may be left out.'),
+    FilterKeyDoc(("container",), '"Small" | {"Micro", "Small", ...}',
+                 "Container size(s)."),
+    FilterKeyDoc(("difficulty",), "2 | {1, 2.5}", "Exact value or {min, max}."),
+    FilterKeyDoc(("terrain",), "2 | {1, 2.5}", "Exact value or {min, max}."),
+    FilterKeyDoc(("found",), "true | false", "Only found or only unfound caches."),
+    FilterKeyDoc(("available",), "true",
+                 "Only available caches (not disabled or archived)."),
+    FilterKeyDoc(tuple(_TEXT_FILTERS), '"text"', '"Contains" match on that field.'),
+    FilterKeyDoc(("where",), '"SQL WHERE clause"',
+                 "Raw clause against the caches table."),
+    FilterKeyDoc(("label",), '"text"',
+                 'Shown in the toolbar (optional, default "Macro").'),
 )
 
 # Instruction budget + removal of globals that give file/process access, load
@@ -526,19 +507,7 @@ class MacroRuntime:
         g = lua.globals()
         g.print = self._lua_print
         g.opensak = lua.table_from(
-            {
-                "filter": self._wrap(self._filter),
-                "filter_profile": self._wrap(self._filter_profile),
-                "clear_filter": self._wrap(self._host.clear_filter),
-                "count": self._wrap(self._host.cache_count),
-                "profiles": self._wrap(lambda: lua.table_from(self._profile_names())),
-                "set_corrected": self._wrap(self._set_corrected),
-                "clear_corrected": self._wrap(self._clear_corrected),
-                "read_csv": self._wrap(lambda *a: self._read_csv(lua, *a)),
-                "confirm": self._wrap(self._confirm),
-                "temp_dir": self._wrap(lambda: str(temp_dir())),
-                "macros_dir": self._wrap(lambda: str(macros_dir())),
-            }
+            {func.name: self._wrap(func.bind(self, lua)) for func in API}
         )
 
         try:
@@ -578,6 +547,156 @@ class MacroRuntime:
 
     def _lua_print(self, *args) -> None:
         self._output("\t".join(_lua_tostring(a) for a in args))
+
+
+# ── Lua API registry ─────────────────────────────────────────────────────────
+#
+# Single source of truth for the `opensak` table. To add a function: add an
+# ApiFunction here (bump API_VERSION and use it as `since` if the release
+# already shipped the current version), then regenerate the docs with
+#   python scripts/generate_macro_api_docs.py
+
+# Raised whenever functions are added or changed in a released build, so
+# macros can check opensak.api_version() before using newer functions.
+API_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ApiFunction:
+    """One function of the `opensak` table, with its documentation."""
+
+    name: str
+    signatures: tuple[str, ...]
+    description: str
+    example: str
+    since: int
+    # (runtime, lua) → the Python callable exposed to Lua
+    bind: Callable[[MacroRuntime, Any], Callable]
+
+
+API: tuple[ApiFunction, ...] = (
+    ApiFunction(
+        name="api_version",
+        signatures=("opensak.api_version()",),
+        description="The API version of this OpenSAK build. Each function below "
+                    "lists the version it was added in.",
+        example='if opensak.api_version() < 1 then\n'
+                '    error("this macro needs a newer OpenSAK")\nend',
+        since=1,
+        bind=lambda rt, lua: lambda: API_VERSION,
+    ),
+    ApiFunction(
+        name="filter",
+        signatures=("opensak.filter{ key = value, ... }",),
+        description="Build a filter from the given keys (see Filter keys; all "
+                    "combined with AND) and apply it. Returns the number of "
+                    "matching caches. When nothing matches, 0 is returned and "
+                    "the view is left unchanged.",
+        example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
+                'print("Easy unfound traditionals: " .. n)',
+        since=1,
+        bind=lambda rt, lua: rt._filter,
+    ),
+    ApiFunction(
+        name="filter_profile",
+        signatures=('opensak.filter_profile("Name")',),
+        description="Apply a saved filter profile. Returns the number of "
+                    "matching caches.",
+        example='local n = opensak.filter_profile("Unfound nearby")',
+        since=1,
+        bind=lambda rt, lua: rt._filter_profile,
+    ),
+    ApiFunction(
+        name="clear_filter",
+        signatures=("opensak.clear_filter()",),
+        description="Remove the active filter, so all caches are shown again.",
+        example="opensak.clear_filter()",
+        since=1,
+        bind=lambda rt, lua: rt._host.clear_filter,
+    ),
+    ApiFunction(
+        name="count",
+        signatures=("opensak.count()",),
+        description="The number of caches matching the active filter.",
+        example='print(opensak.count() .. " caches shown")',
+        since=1,
+        bind=lambda rt, lua: rt._host.cache_count,
+    ),
+    ApiFunction(
+        name="profiles",
+        signatures=("opensak.profiles()",),
+        description="An array with the names of all saved filter profiles.",
+        example="for _, name in ipairs(opensak.profiles()) do\n"
+                "    print(name)\nend",
+        since=1,
+        bind=lambda rt, lua: lambda: lua.table_from(rt._profile_names()),
+    ),
+    ApiFunction(
+        name="set_corrected",
+        signatures=(
+            "opensak.set_corrected(code, lat, lon)",
+            'opensak.set_corrected(code, "N47 22.123 E008 32.456")',
+        ),
+        description="Set corrected coordinates, either as decimal degrees or "
+                    "as one coordinate string in any format OpenSAK "
+                    "understands. Returns false if the cache is not in the "
+                    "database.",
+        example='opensak.set_corrected("GC12345", 47.36872, 8.54093)\n'
+                'opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")',
+        since=1,
+        bind=lambda rt, lua: rt._set_corrected,
+    ),
+    ApiFunction(
+        name="clear_corrected",
+        signatures=("opensak.clear_corrected(code)",),
+        description="Remove the corrected coordinates of a cache. Returns "
+                    "false if the cache is not in the database.",
+        example='opensak.clear_corrected("GC12345")',
+        since=1,
+        bind=lambda rt, lua: rt._clear_corrected,
+    ),
+    ApiFunction(
+        name="read_csv",
+        signatures=("opensak.read_csv(path [, sep])",),
+        description="Read a CSV file (UTF-8) into an array of rows keyed by the "
+                    "header line. The separator (, ; or tab) is detected "
+                    "unless given. A relative path is resolved against the "
+                    "macro file's folder. The file must lie in a folder with "
+                    "read permission (Settings → Folder permissions) and may "
+                    f"be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
+        example='for _, row in ipairs(opensak.read_csv("solved.csv")) do\n'
+                "    opensak.set_corrected(row.code, row.coords)\nend",
+        since=1,
+        bind=lambda rt, lua: lambda *a: rt._read_csv(lua, *a),
+    ),
+    ApiFunction(
+        name="confirm",
+        signatures=("opensak.confirm(message)",),
+        description="Ask the user a Yes/No question. Returns true on Yes.",
+        example='if not opensak.confirm("Update 12 caches?") then return end',
+        since=1,
+        bind=lambda rt, lua: rt._confirm,
+    ),
+    ApiFunction(
+        name="temp_dir",
+        signatures=("opensak.temp_dir()",),
+        description="The system temp folder (read and write permission by "
+                    "default), without a trailing separator. \"/\" works as "
+                    "separator on every platform.",
+        example='local rows = opensak.read_csv(opensak.temp_dir() .. "/solved.csv")',
+        since=1,
+        bind=lambda rt, lua: lambda: str(temp_dir()),
+    ),
+    ApiFunction(
+        name="macros_dir",
+        signatures=("opensak.macros_dir()",),
+        description="OpenSAK's macros folder (read permission by default), "
+                    "without a trailing separator.",
+        example='local rows = opensak.read_csv(opensak.macros_dir() .. "/data/solved.csv")',
+        since=1,
+        bind=lambda rt, lua: lambda: str(macros_dir()),
+    ),
+)
 
 
 def _lua_tostring(value: Any) -> str:
