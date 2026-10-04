@@ -1,10 +1,16 @@
-"""The Lua API registry, the `opensak` table and docs/macros/api.md must agree."""
+"""The Lua API registry, the `opensak` table and the generated files
+(docs/macros/api.md, macros/types/opensak.lua) must agree."""
 
 from pathlib import Path
 
 import pytest
 
-from opensak.macro.api_docs import DOC_PATH, render_api_markdown
+from opensak.macro.api_docs import (
+    DOC_PATH,
+    STUB_PATH,
+    render_api_markdown,
+    render_lua_stub,
+)
 from opensak.macro.runtime import (
     API,
     API_VERSION,
@@ -46,6 +52,10 @@ def test_api_entry_is_complete(func):
     assert func.signatures and all(s.startswith(f"opensak.{func.name}") for s in func.signatures)
     assert func.description.strip() and func.example.strip()
     assert 1 <= func.since <= API_VERSION
+    for p in (*func.params, *(q for form in func.overloads for q in form)):
+        assert p.name and p.type and p.description.strip(), p
+    if func.returns:
+        assert all(part.strip() for part in func.returns)
 
 
 @pytest.mark.parametrize("func", API, ids=[f.name for f in API])
@@ -60,8 +70,18 @@ def test_every_filter_key_is_documented():
     assert sorted(documented) == sorted(FILTER_KEYS)
 
 
-def test_generated_doc_is_up_to_date():
-    path = Path(DOC_PATH)
-    assert path.exists(), f"{DOC_PATH} is missing — {REGENERATE}"
-    assert path.read_text(encoding="utf-8") == render_api_markdown(), \
-        f"{DOC_PATH} is out of date — {REGENERATE}"
+@pytest.mark.parametrize(
+    "path, render",
+    [(DOC_PATH, render_api_markdown), (STUB_PATH, render_lua_stub)],
+    ids=["api.md", "lua-stub"],
+)
+def test_generated_file_is_up_to_date(path, render):
+    assert Path(path).exists(), f"{path} is missing — {REGENERATE}"
+    assert Path(path).read_text(encoding="utf-8") == render(), \
+        f"{path} is out of date — {REGENERATE}"
+
+
+def test_lua_stub_compiles():
+    from lupa.lua54 import LuaRuntime
+
+    LuaRuntime().compile(render_lua_stub())

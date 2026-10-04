@@ -7,9 +7,10 @@ touches the main window goes through a MacroHost, so the runtime can be
 unit-tested with a fake host.
 
 The Lua API is defined once, in API and FILTER_KEY_DOCS below: run() builds
-the `opensak` table from API, and docs/macros/api.md is generated from both
+the `opensak` table from API, and docs/macros/api.md plus the Lua Language
+Server stub macros/types/opensak.lua are generated from both
 (python scripts/generate_macro_api_docs.py). test_macro_api_docs fails when
-a function is exposed without documentation or the generated file is stale.
+a function is exposed without documentation or a generated file is stale.
 
 Known limitation (#938 step 4): the instruction limit only counts Lua VM
 instructions, not work inside C functions. Lua pattern matching backtracks
@@ -97,25 +98,32 @@ class FilterKeyDoc:
     """Documentation of one or more opensak.filter{} keys."""
 
     keys: tuple[str, ...]
+    # Lua Language Server type of the value
+    type: str
     value: str
     description: str
 
 
 # Every key in FILTER_KEYS must be documented here (checked by a test).
 FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
-    FilterKeyDoc(("type",), '"Traditional" | {"Traditional", "Multi-cache", ...}',
+    FilterKeyDoc(("type",), "string|string[]",
+                 '"Traditional" | {"Traditional", "Multi-cache", ...}',
                  'Cache type(s); the " Cache" suffix may be left out.'),
-    FilterKeyDoc(("container",), '"Small" | {"Micro", "Small", ...}',
-                 "Container size(s)."),
-    FilterKeyDoc(("difficulty",), "2 | {1, 2.5}", "Exact value or {min, max}."),
-    FilterKeyDoc(("terrain",), "2 | {1, 2.5}", "Exact value or {min, max}."),
-    FilterKeyDoc(("found",), "true | false", "Only found or only unfound caches."),
-    FilterKeyDoc(("available",), "true",
+    FilterKeyDoc(("container",), "string|string[]",
+                 '"Small" | {"Micro", "Small", ...}', "Container size(s)."),
+    FilterKeyDoc(("difficulty",), "number|number[]", "2 | {1, 2.5}",
+                 "Exact value or {min, max}."),
+    FilterKeyDoc(("terrain",), "number|number[]", "2 | {1, 2.5}",
+                 "Exact value or {min, max}."),
+    FilterKeyDoc(("found",), "boolean", "true | false",
+                 "Only found or only unfound caches."),
+    FilterKeyDoc(("available",), "boolean", "true",
                  "Only available caches (not disabled or archived)."),
-    FilterKeyDoc(tuple(_TEXT_FILTERS), '"text"', '"Contains" match on that field.'),
-    FilterKeyDoc(("where",), '"SQL WHERE clause"',
+    FilterKeyDoc(tuple(_TEXT_FILTERS), "string", '"text"',
+                 '"Contains" match on that field.'),
+    FilterKeyDoc(("where",), "string", '"SQL WHERE clause"',
                  "Raw clause against the caches table."),
-    FilterKeyDoc(("label",), '"text"',
+    FilterKeyDoc(("label",), "string", '"text"',
                  'Shown in the toolbar (optional, default "Macro").'),
 )
 
@@ -553,7 +561,8 @@ class MacroRuntime:
 #
 # Single source of truth for the `opensak` table. To add a function: add an
 # ApiFunction here (bump API_VERSION and use it as `since` if the release
-# already shipped the current version), then regenerate the docs with
+# already shipped the current version), then regenerate the docs and the
+# Lua Language Server stub with
 #   python scripts/generate_macro_api_docs.py
 
 # Raised whenever functions are added or changed in a released build, so
@@ -562,53 +571,86 @@ API_VERSION = 1
 
 
 @dataclass(frozen=True)
-class ApiFunction:
-    """One function of the `opensak` table, with its documentation."""
+class Param:
+    """One parameter of an API function."""
 
     name: str
-    signatures: tuple[str, ...]
+    # Lua Language Server type, e.g. "string", "number|string", "string[]"
+    type: str
+    description: str
+    optional: bool = False
+
+
+@dataclass(frozen=True)
+class ApiFunction:
+    """One function of the `opensak` table, with its documentation.
+
+    The signatures in docs/macros/api.md and the Lua Language Server stub
+    are generated from *params*, *returns* and *overloads*.
+    """
+
+    name: str
     description: str
     example: str
     since: int
     # (runtime, lua) → the Python callable exposed to Lua
     bind: Callable[[MacroRuntime, Any], Callable]
+    params: tuple[Param, ...] = ()
+    # (Lua Language Server type, description), or None if nothing is returned
+    returns: Optional[tuple[str, str]] = None
+    # Further accepted parameter lists (same return value)
+    overloads: tuple[tuple[Param, ...], ...] = ()
 
+    @property
+    def signatures(self) -> list[str]:
+        """E.g. ["opensak.read_csv(path [, sep])"]."""
+        result = []
+        for params in (self.params, *self.overloads):
+            text = ""
+            for i, p in enumerate(params):
+                sep = ", " if i else ""
+                text += f" [{sep}{p.name}]" if p.optional else f"{sep}{p.name}"
+            result.append(f"opensak.{self.name}({text.strip()})")
+        return result
+
+
+_CODE = Param("code", "string", 'GC code, e.g. "GC12345".')
 
 API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="api_version",
-        signatures=("opensak.api_version()",),
-        description="The API version of this OpenSAK build. Each function below "
+        description="The API version of this OpenSAK build. Each function "
                     "lists the version it was added in.",
         example='if opensak.api_version() < 1 then\n'
                 '    error("this macro needs a newer OpenSAK")\nend',
         since=1,
         bind=lambda rt, lua: lambda: API_VERSION,
+        returns=("integer", "The API version."),
     ),
     ApiFunction(
         name="filter",
-        signatures=("opensak.filter{ key = value, ... }",),
         description="Build a filter from the given keys (see Filter keys; all "
-                    "combined with AND) and apply it. Returns the number of "
-                    "matching caches. When nothing matches, 0 is returned and "
-                    "the view is left unchanged.",
+                    "combined with AND) and apply it. Usually called with "
+                    "table syntax: `opensak.filter{ ... }`. When nothing "
+                    "matches, the view is left unchanged.",
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
                 'print("Easy unfound traditionals: " .. n)',
         since=1,
         bind=lambda rt, lua: rt._filter,
+        params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
+        returns=("integer", "Number of matching caches (0 = view unchanged)."),
     ),
     ApiFunction(
         name="filter_profile",
-        signatures=('opensak.filter_profile("Name")',),
-        description="Apply a saved filter profile. Returns the number of "
-                    "matching caches.",
+        description="Apply a saved filter profile.",
         example='local n = opensak.filter_profile("Unfound nearby")',
         since=1,
         bind=lambda rt, lua: rt._filter_profile,
+        params=(Param("name", "string", "Name of the saved profile."),),
+        returns=("integer", "Number of matching caches."),
     ),
     ApiFunction(
         name="clear_filter",
-        signatures=("opensak.clear_filter()",),
         description="Remove the active filter, so all caches are shown again.",
         example="opensak.clear_filter()",
         since=1,
@@ -616,51 +658,54 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="count",
-        signatures=("opensak.count()",),
         description="The number of caches matching the active filter.",
         example='print(opensak.count() .. " caches shown")',
         since=1,
         bind=lambda rt, lua: rt._host.cache_count,
+        returns=("integer", "Number of caches shown."),
     ),
     ApiFunction(
         name="profiles",
-        signatures=("opensak.profiles()",),
-        description="An array with the names of all saved filter profiles.",
+        description="The names of all saved filter profiles.",
         example="for _, name in ipairs(opensak.profiles()) do\n"
                 "    print(name)\nend",
         since=1,
         bind=lambda rt, lua: lambda: lua.table_from(rt._profile_names()),
+        returns=("string[]", "Profile names."),
     ),
     ApiFunction(
         name="set_corrected",
-        signatures=(
-            "opensak.set_corrected(code, lat, lon)",
-            'opensak.set_corrected(code, "N47 22.123 E008 32.456")',
-        ),
         description="Set corrected coordinates, either as decimal degrees or "
                     "as one coordinate string in any format OpenSAK "
-                    "understands. Returns false if the cache is not in the "
-                    "database.",
+                    "understands (DMM, DMS, decimal degrees).",
         example='opensak.set_corrected("GC12345", 47.36872, 8.54093)\n'
                 'opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")',
         since=1,
         bind=lambda rt, lua: rt._set_corrected,
+        params=(
+            _CODE,
+            Param("lat", "number|string", "Latitude in decimal degrees."),
+            Param("lon", "number|string", "Longitude in decimal degrees."),
+        ),
+        overloads=((
+            _CODE,
+            Param("coords", "string", 'Coordinates, e.g. "N47 22.123 E008 32.456".'),
+        ),),
+        returns=("boolean", "false if the cache is not in the database."),
     ),
     ApiFunction(
         name="clear_corrected",
-        signatures=("opensak.clear_corrected(code)",),
-        description="Remove the corrected coordinates of a cache. Returns "
-                    "false if the cache is not in the database.",
+        description="Remove the corrected coordinates of a cache.",
         example='opensak.clear_corrected("GC12345")',
         since=1,
         bind=lambda rt, lua: rt._clear_corrected,
+        params=(_CODE,),
+        returns=("boolean", "false if the cache is not in the database."),
     ),
     ApiFunction(
         name="read_csv",
-        signatures=("opensak.read_csv(path [, sep])",),
         description="Read a CSV file (UTF-8) into an array of rows keyed by the "
-                    "header line. The separator (, ; or tab) is detected "
-                    "unless given. A relative path is resolved against the "
+                    "header line. A relative path is resolved against the "
                     "macro file's folder. The file must lie in a folder with "
                     "read permission (Settings → Folder permissions) and may "
                     f"be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
@@ -668,33 +713,41 @@ API: tuple[ApiFunction, ...] = (
                 "    opensak.set_corrected(row.code, row.coords)\nend",
         since=1,
         bind=lambda rt, lua: lambda *a: rt._read_csv(lua, *a),
+        params=(
+            Param("path", "string", "The CSV file."),
+            Param("sep", "string",
+                  "Separator character; detected among , ; and tab if omitted.",
+                  optional=True),
+        ),
+        returns=("table<string, string>[]", "One table per data row, keyed by header."),
     ),
     ApiFunction(
         name="confirm",
-        signatures=("opensak.confirm(message)",),
-        description="Ask the user a Yes/No question. Returns true on Yes.",
+        description="Ask the user a Yes/No question.",
         example='if not opensak.confirm("Update 12 caches?") then return end',
         since=1,
         bind=lambda rt, lua: rt._confirm,
+        params=(Param("message", "string", "The question."),),
+        returns=("boolean", "true on Yes."),
     ),
     ApiFunction(
         name="temp_dir",
-        signatures=("opensak.temp_dir()",),
         description="The system temp folder (read and write permission by "
                     "default), without a trailing separator. \"/\" works as "
                     "separator on every platform.",
         example='local rows = opensak.read_csv(opensak.temp_dir() .. "/solved.csv")',
         since=1,
         bind=lambda rt, lua: lambda: str(temp_dir()),
+        returns=("string", "Folder path."),
     ),
     ApiFunction(
         name="macros_dir",
-        signatures=("opensak.macros_dir()",),
         description="OpenSAK's macros folder (read permission by default), "
                     "without a trailing separator.",
         example='local rows = opensak.read_csv(opensak.macros_dir() .. "/data/solved.csv")',
         since=1,
         bind=lambda rt, lua: lambda: str(macros_dir()),
+        returns=("string", "Folder path."),
     ),
 )
 

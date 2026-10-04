@@ -6,7 +6,7 @@ API version: **1** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions.
 
-See [Example macros](#example-macros) for complete scripts.
+See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support-vs-code) for autocompletion in VS Code.
 
 ## Functions
 
@@ -31,7 +31,9 @@ See [Example macros](#example-macros) for complete scripts.
 opensak.api_version()
 ```
 
-The API version of this OpenSAK build. Each function below lists the version it was added in.
+The API version of this OpenSAK build. Each function lists the version it was added in.
+
+Returns `integer` — The API version.
 
 Since API version 1.
 
@@ -46,10 +48,16 @@ end
 ### opensak.filter
 
 ```lua
-opensak.filter{ key = value, ... }
+opensak.filter(spec)
 ```
 
-Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Returns the number of matching caches. When nothing matches, 0 is returned and the view is left unchanged.
+Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
+
+Parameters:
+
+- `spec` (`opensak.FilterSpec`) — The filter keys.
+
+Returns `integer` — Number of matching caches (0 = view unchanged).
 
 Since API version 1.
 
@@ -63,10 +71,16 @@ print("Easy unfound traditionals: " .. n)
 ### opensak.filter_profile
 
 ```lua
-opensak.filter_profile("Name")
+opensak.filter_profile(name)
 ```
 
-Apply a saved filter profile. Returns the number of matching caches.
+Apply a saved filter profile.
+
+Parameters:
+
+- `name` (`string`) — Name of the saved profile.
+
+Returns `integer` — Number of matching caches.
 
 Since API version 1.
 
@@ -100,6 +114,8 @@ opensak.count()
 
 The number of caches matching the active filter.
 
+Returns `integer` — Number of caches shown.
+
 Since API version 1.
 
 Example:
@@ -114,7 +130,9 @@ print(opensak.count() .. " caches shown")
 opensak.profiles()
 ```
 
-An array with the names of all saved filter profiles.
+The names of all saved filter profiles.
+
+Returns `string[]` — Profile names.
 
 Since API version 1.
 
@@ -130,10 +148,19 @@ end
 
 ```lua
 opensak.set_corrected(code, lat, lon)
-opensak.set_corrected(code, "N47 22.123 E008 32.456")
+opensak.set_corrected(code, coords)
 ```
 
-Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands. Returns false if the cache is not in the database.
+Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+
+Parameters:
+
+- `code` (`string`) — GC code, e.g. "GC12345".
+- `lat` (`number|string`) — Latitude in decimal degrees.
+- `lon` (`number|string`) — Longitude in decimal degrees.
+- `coords` (`string`) — Coordinates, e.g. "N47 22.123 E008 32.456".
+
+Returns `boolean` — false if the cache is not in the database.
 
 Since API version 1.
 
@@ -150,7 +177,13 @@ opensak.set_corrected("GC12345", "N47 22.123 E008 32.456")
 opensak.clear_corrected(code)
 ```
 
-Remove the corrected coordinates of a cache. Returns false if the cache is not in the database.
+Remove the corrected coordinates of a cache.
+
+Parameters:
+
+- `code` (`string`) — GC code, e.g. "GC12345".
+
+Returns `boolean` — false if the cache is not in the database.
 
 Since API version 1.
 
@@ -166,7 +199,14 @@ opensak.clear_corrected("GC12345")
 opensak.read_csv(path [, sep])
 ```
 
-Read a CSV file (UTF-8) into an array of rows keyed by the header line. The separator (, ; or tab) is detected unless given. A relative path is resolved against the macro file's folder. The file must lie in a folder with read permission (Settings → Folder permissions) and may be at most 10 MB.
+Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. The file must lie in a folder with read permission (Settings → Folder permissions) and may be at most 10 MB.
+
+Parameters:
+
+- `path` (`string`) — The CSV file.
+- `sep` (`string`, optional) — Separator character; detected among , ; and tab if omitted.
+
+Returns `table<string, string>[]` — One table per data row, keyed by header.
 
 Since API version 1.
 
@@ -184,7 +224,13 @@ end
 opensak.confirm(message)
 ```
 
-Ask the user a Yes/No question. Returns true on Yes.
+Ask the user a Yes/No question.
+
+Parameters:
+
+- `message` (`string`) — The question.
+
+Returns `boolean` — true on Yes.
 
 Since API version 1.
 
@@ -202,6 +248,8 @@ opensak.temp_dir()
 
 The system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
 
+Returns `string` — Folder path.
+
 Since API version 1.
 
 Example:
@@ -217,6 +265,8 @@ opensak.macros_dir()
 ```
 
 OpenSAK's macros folder (read permission by default), without a trailing separator.
+
+Returns `string` — Folder path.
 
 Since API version 1.
 
@@ -247,6 +297,17 @@ Keys understood by `opensak.filter{}`, all combined with AND.
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
 
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
+
+## Editor support (VS Code)
+
+[`macros/types/opensak.lua`](../../macros/types/opensak.lua) describes this API for the [Lua Language Server](https://luals.github.io/) (VS Code extension "Lua" by sumneko): autocompletion, parameter hints and these docs while you type. Macros inside the OpenSAK repository pick it up automatically. For macros in another folder, put a `.luarc.json` next to them that points at the folder holding the stub:
+
+```json
+{
+  "runtime.version": "Lua 5.4",
+  "workspace.library": ["C:/path/to/OpenSAK/macros/types"]
+}
+```
 
 ## Globals
 
