@@ -44,17 +44,19 @@ class _MoveWorker(QThread):
         self.copy_only = copy_only
 
     def run(self) -> None:
-        from opensak.db.database import init_db, get_session
+        from opensak.db.database import session_for
         from opensak.db.models import (
             Cache, Log, Attribute, Trackable, Waypoint, UserNote,
         )
         from sqlalchemy.orm import joinedload, selectinload
 
+        # Both databases get private sessions (session_for) — the app-wide
+        # engine is never swapped from this thread, so the GUI thread keeps
+        # reading the active database while the move runs.
         try:
             # ── 1. Load full caches from source DB ────────────────────────
-            init_db(db_path=self.source_db_path)
             cache_snapshots = []
-            with get_session() as session:
+            with session_for(self.source_db_path) as session:
                 caches = (
                     session.query(Cache)
                     .options(
@@ -77,15 +79,13 @@ class _MoveWorker(QThread):
                 return
 
             # ── 2. Insert into target DB ──────────────────────────────────
-            init_db(db_path=self.target_db_path)
-            with get_session() as session:
+            with session_for(self.target_db_path) as session:
                 for snap in cache_snapshots:
                     _insert_snapshot(session, snap)
 
             # ── 3. Delete from source DB (move only) ──────────────────
             if not self.copy_only:
-                init_db(db_path=self.source_db_path)
-                with get_session() as session:
+                with session_for(self.source_db_path) as session:
                     cache_ids = [
                         row[0]
                         for row in session.query(Cache.id)
@@ -112,17 +112,9 @@ class _MoveWorker(QThread):
                             Cache.id.in_(cache_ids)
                         ).delete(synchronize_session=False)
 
-            # ── 4. Restore source DB as active ────────────────────────────
-            init_db(db_path=self.source_db_path)
-
             self.finished.emit(len(cache_snapshots))
 
         except Exception as exc:
-            # Always try to restore the source DB
-            try:
-                init_db(db_path=self.source_db_path)
-            except Exception:
-                pass
             self.error.emit(str(exc))
 
 
