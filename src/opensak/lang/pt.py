@@ -1294,6 +1294,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Remover",
     "settings_folder_perm_add_title": "Escolha uma pasta para macros",
     "settings_folder_perm_duplicate": "Esta pasta já está na lista.",
+    "settings_folder_perm_root": "{path} é a raiz de uma unidade. As macros não podem aceder a uma unidade inteira — escolha antes uma pasta dessa unidade.",
     "settings_folder_perm_no_rights_title": "Sem permissões",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnão tem permissão de leitura nem de escrita. Removê-la da lista?",
     "gc_not_logged_in":             "Sessão não iniciada",

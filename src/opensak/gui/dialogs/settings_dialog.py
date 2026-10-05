@@ -125,6 +125,7 @@ class SettingsDialog(QDialog):
         # the list of folders they may access.
         from opensak.utils import flags
         self._perm_table: QTableWidget | None = None
+        self._perm_loaded: list = []
         if flags.lua_macros:
             self._tabs.addTab(self._build_folder_permissions_tab(),
                               tr("settings_tab_folder_permissions"))
@@ -900,7 +901,8 @@ class SettingsDialog(QDialog):
         table.verticalHeader().setDefaultSectionSize(24)
         self._perm_table = table
 
-        for perm in load_permissions():
+        self._perm_loaded = load_permissions()
+        for perm in self._perm_loaded:
             self._append_perm_row(perm.path, perm.read, perm.write)
         table.itemChanged.connect(self._on_perm_item_changed)
         table.itemSelectionChanged.connect(self._update_perm_buttons)
@@ -1005,10 +1007,18 @@ class SettingsDialog(QDialog):
 
     def _add_perm_folder(self, chosen: str) -> None:
         """Add *chosen* with read permission. It is stored resolved, so the
-        list shows the folder the access check really compares against."""
-        from opensak.macro.permissions import resolve_path
+        list shows the folder the access check really compares against.
+        A filesystem root is refused — it would open the whole drive."""
+        from opensak.macro.permissions import is_root_folder, resolve_path
 
         folder = resolve_path(chosen)
+        if is_root_folder(folder):
+            QMessageBox.warning(
+                self,
+                tr("settings_tab_folder_permissions"),
+                tr("settings_folder_perm_root", path=str(folder)),
+            )
+            return
         table = self._perms()
         for row in range(table.rowCount()):
             if resolve_path(self._perm_path(row)) == folder:
@@ -1713,9 +1723,13 @@ class SettingsDialog(QDialog):
 
         s.sync()
 
+        # Only a changed list is stored, so the defaults are not frozen into
+        # opensak.json just because some other setting was saved.
         if self._perm_table is not None:
             from opensak.macro.permissions import save_permissions
-            save_permissions(self._collect_permissions())
+            permissions = self._collect_permissions()
+            if permissions != self._perm_loaded:
+                save_permissions(permissions)
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store

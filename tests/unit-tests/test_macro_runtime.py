@@ -17,6 +17,7 @@ from opensak.filters.engine import (
     apply_filters_auto,
 )
 from opensak.macro import MacroError, MacroRuntime, build_filterset
+from opensak.macro.permissions import FolderPermission
 
 
 class FakeHost:
@@ -240,9 +241,15 @@ def _run_csv_import(csv_fixture, tmp_path, host=None):
     """Run the csv_import.lua fixture against a copy of *csv_fixture*."""
     (tmp_path / "corrected_coords.csv").write_bytes((FIXTURES / csv_fixture).read_bytes())
     host, out = host or DbHost(), []
-    MacroRuntime(host, output=out.append).run(
+    MacroRuntime(host, output=out.append, folder_permissions=_rw(tmp_path)).run(
         (FIXTURES / "csv_import.lua").read_text(encoding="utf-8"), base_dir=tmp_path)
     return host, out
+
+
+def _rw(folder):
+    """Read/write permission for *folder* only (tmp_path is no longer inside
+    the default temp folder)."""
+    return [FolderPermission(str(folder), read=True, write=True)]
 
 
 def _add_caches(codes):
@@ -285,7 +292,7 @@ def test_read_csv_sniffs_separator_and_resolves_relative_path(tmp_path):
         "﻿code ; lat;lon\nGC1;47.1;8.2\n\nGC2;46;7\n", encoding="utf-8")
     (tmp_path / "b.csv").write_text("code|x\nGC3|y\n", encoding="utf-8")
     out: list[str] = []
-    MacroRuntime(FakeHost(), output=out.append).run("""
+    MacroRuntime(FakeHost(), output=out.append, folder_permissions=_rw(tmp_path)).run("""
         local rows = opensak.read_csv("a.csv")
         print(#rows, rows[1].code, rows[1].lat, rows[2].lon)
         print(opensak.read_csv("b.csv", "|")[1].x)
@@ -295,7 +302,7 @@ def test_read_csv_sniffs_separator_and_resolves_relative_path(tmp_path):
 
 def test_read_csv_missing_file(tmp_path):
     with pytest.raises(MacroError, match="file not found"):
-        MacroRuntime(FakeHost(), output=lambda _: None).run(
+        MacroRuntime(FakeHost(), output=lambda _: None, folder_permissions=_rw(tmp_path)).run(
             'opensak.read_csv("nope.csv")', base_dir=tmp_path)
 
 
@@ -335,8 +342,10 @@ def test_temp_and_macros_dir():
 def test_read_csv_from_temp_dir():
     import tempfile
 
+    from opensak.macro.permissions import temp_dir
+
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".csv", delete=False, encoding="utf-8"
+        "w", suffix=".csv", delete=False, encoding="utf-8", dir=temp_dir()
     ) as f:
         f.write("code\nGC1\n")
     try:

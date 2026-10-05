@@ -246,7 +246,7 @@ if not opensak.confirm("Update 12 caches?") then return end
 opensak.temp_dir()
 ```
 
-The system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
+OpenSAK's folder inside the system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
 
 Returns `string` — Folder path.
 

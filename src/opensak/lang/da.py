@@ -1293,6 +1293,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Fjern",
     "settings_folder_perm_add_title": "Vælg en mappe til makroer",
     "settings_folder_perm_duplicate": "Denne mappe er allerede på listen.",
+    "settings_folder_perm_root": "{path} er roden af et drev. Makroer må ikke få adgang til et helt drev — vælg i stedet en mappe på det.",
     "settings_folder_perm_no_rights_title": "Ingen tilladelser",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhar hverken læse- eller skrivetilladelse. Fjern den fra listen?",
     "gc_not_logged_in":             "Ikke logget ind",

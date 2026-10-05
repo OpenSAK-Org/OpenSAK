@@ -1293,6 +1293,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Ta bort",
     "settings_folder_perm_add_title": "Välj en mapp för makron",
     "settings_folder_perm_duplicate": "Den här mappen finns redan i listan.",
+    "settings_folder_perm_root": "{path} är roten på en enhet. Makron får inte komma åt en hel enhet — välj en mapp på den i stället.",
     "settings_folder_perm_no_rights_title": "Inga behörigheter",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhar varken läs- eller skrivbehörighet. Ta bort den från listan?",
     "gc_not_logged_in":             "Inte inloggad",
