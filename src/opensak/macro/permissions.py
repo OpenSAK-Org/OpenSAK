@@ -18,6 +18,12 @@ Windows junctions) cannot lead out of a permitted folder. When folders are
 nested, the most specific entry decides — a sub-folder listed without
 rights therefore blocks it even if a parent folder is permitted.
 
+Every file a macro writes goes through safe_write(): it refuses a target
+with more than one hard link (resolve() cannot see through those, so a
+link in a permitted folder could otherwise lead to e.g. opensak.json) and
+writes to a temporary file first, which then replaces the target. The
+check is repeated right before the replace.
+
 A filesystem root (/, a drive such as C:\\ or a network share such as
 \\\\server\\share) is never a permitted folder, since it would open the
 whole drive: Settings refuses to add one, and an entry for a root in
@@ -33,6 +39,7 @@ folder inside the data folder) and SQLite files (.db, .db3, .sqlite,
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -298,3 +305,71 @@ def check_access(
             "Settings → Folder permissions"
         )
     return target
+
+
+def _refuse_hard_link(target: Path) -> None:
+    """Raise if *target* exists with more than one hard link — writing to
+    it would change the other names too, which no folder check can see."""
+    try:
+        st = target.stat()
+    except FileNotFoundError:
+        return
+    if st.st_nlink > 1:
+        raise FolderAccessDenied(
+            f"macros may not write {target} — the file has more than one "
+            "hard link, so writing to it would also change another file"
+        )
+
+
+def safe_write(
+    path: str | Path,
+    data: bytes | str,
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    encoding: str = "utf-8",
+) -> Path:
+    """Write *data* to *path* for a macro and return the resolved path.
+
+    The only way macro API functions may write files:
+      * check_access(write=True), so the deny list and folder list apply;
+      * a target with more than one hard link is refused;
+      * the data goes to a temporary file in the same folder, which then
+        replaces the target with os.replace(). The rename swaps the folder
+        entry instead of writing into the old file, so a hard link that
+        appears after the check no longer reaches the other file, and a
+        failed write never leaves a half-written file behind;
+      * the access check runs again right before the replace, so a folder
+        swapped for a link in the meantime is caught.
+
+    Raises FolderAccessDenied or OSError; the temporary file is removed on
+    any failure.
+    """
+    if permissions is not None:
+        permissions = list(permissions)    # iterated twice
+    target = check_access(path, write=True, permissions=permissions)
+    _refuse_hard_link(target)
+    payload = data.encode(encoding) if isinstance(data, str) else data
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(tmp, flags, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(payload)
+        final = check_access(path, write=True, permissions=permissions)
+        if final != target:
+            raise FolderAccessDenied(
+                f"macros may not write {path} — the path changed while writing "
+                f"(now {final})"
+            )
+        _refuse_hard_link(final)
+        try:
+            # Keep the permission bits of a file that is overwritten.
+            os.chmod(tmp, final.stat().st_mode & 0o7777)
+        except FileNotFoundError:
+            pass
+        os.replace(tmp, final)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return final
