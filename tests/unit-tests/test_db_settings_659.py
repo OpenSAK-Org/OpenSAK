@@ -131,6 +131,68 @@ class TestStoredInFile:
         assert get_value("home_lat", None) == 1.0
 
 
+# ── Unchanged values are not rewritten (#959) ─────────────────────────────────
+
+def _count_writes(engine):
+    from sqlalchemy import event
+    writes: list[str] = []
+
+    def _on(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith("INSERT"):
+            writes.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _on)
+    return writes, lambda: event.remove(engine, "before_cursor_execute", _on)
+
+
+class TestUnchangedValues:
+    """
+    #959: the cache table re-emits its sort order every time the list
+    loads, so the same sort was written back on every start — new WAL pages
+    each time, which the back-up-on-exit check rightly sees as a change.
+    """
+
+    def test_same_value_is_not_written_again(self, manager):
+        from opensak.db import database
+        set_value("sort.field", None, "distance")
+        writes, stop = _count_writes(database._engine)
+        try:
+            set_value("sort.field", None, "distance")
+        finally:
+            stop()
+        assert writes == []
+
+    def test_same_value_leaves_the_wal_alone(self, manager):
+        set_value("sort.ascending", None, False)
+        wal = Path(str(manager.active.path) + "-wal")
+        before = wal.stat().st_size if wal.exists() else 0
+        for _ in range(5):
+            set_value("sort.ascending", None, False)
+        after = wal.stat().st_size if wal.exists() else 0
+        assert after == before
+
+    def test_changed_value_is_written(self, manager):
+        from opensak.db import database
+        set_value("sort.field", None, "distance")
+        writes, stop = _count_writes(database._engine)
+        try:
+            set_value("sort.field", None, "name")
+        finally:
+            stop()
+        assert len(writes) == 1
+        assert read_file(manager.active.path)["sort.field"] == "name"
+
+    def test_compared_as_stored_json(self, manager):
+        """True and 1 are equal in Python but not as stored values."""
+        set_value("sort.ascending", None, 1)
+        set_value("sort.ascending", None, True)
+        assert read_file(manager.active.path)["sort.ascending"] is True
+
+    def test_first_write_of_a_key_is_never_skipped(self, manager):
+        set_value("map_nearby_max_caches", None, None)
+        assert "map_nearby_max_caches" in read_file(manager.active.path)
+
+
 # ── Per database ──────────────────────────────────────────────────────────────
 
 class TestPerDatabase:

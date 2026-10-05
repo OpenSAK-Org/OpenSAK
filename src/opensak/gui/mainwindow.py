@@ -5,7 +5,7 @@ src/opensak/gui/mainwindow.py — Main application window.
 from __future__ import annotations
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
@@ -203,6 +203,11 @@ _MACRO_ROW_REFRESH_LIMIT = 50
 
 
 class MainWindow(QMainWindow):
+    # #959: the back-up-on-exit flow. While a backup runs the controller is
+    # kept here; once it says "close", the second close skips the prompt.
+    _exit_backup: Any = None
+    _close_after_exit_backup = False
+
     def __init__(self):
         super().__init__()
         self.setMinimumSize(800, 500)
@@ -1300,6 +1305,24 @@ class MainWindow(QMainWindow):
         self._dock_map_back()
 
     def closeEvent(self, event) -> None:
+        # #959: offer a backup first — before any layout is torn down, so
+        # Cancel leaves the window exactly as it was. Closing writes nothing
+        # to the database, so deciding here sees the final state.
+        if not self._close_after_exit_backup:
+            if self._exit_backup is not None:
+                event.ignore()   # a backup is running; its progress dialog cancels it
+                return
+            from opensak.gui.dialogs.exit_backup_dialog import ExitBackupController
+            controller = ExitBackupController(self)
+            controller.done.connect(self._on_exit_backup_done)
+            decision = controller.start()
+            if decision is None:
+                self._exit_backup = controller
+                event.ignore()
+                return
+            if not decision:
+                event.ignore()
+                return
         # Restore normal layout before saving so ratios reflect the user's
         # intended panel sizes, not the maximized state.
         if self._map_popped_out:
@@ -1338,6 +1361,13 @@ class MainWindow(QMainWindow):
         if map_widget is not None:
             map_widget._cleanup_webengine()
         super().closeEvent(event)
+
+    def _on_exit_backup_done(self, close: bool) -> None:
+        """#959: the on-exit backup finished, failed or was cancelled."""
+        self._exit_backup = None
+        if close:
+            self._close_after_exit_backup = True
+            QTimer.singleShot(0, self.close)
 
     # ── Cache list ────────────────────────────────────────────────────────────
 
@@ -3706,6 +3736,9 @@ class MainWindow(QMainWindow):
             # nye versions filer. Luk derfor pænt via den normale closeEvent
             # (gemmer layout osv.) — ingen automatisk genstart (uden for
             # scope i #893); brugeren åbner selv den nye version.
+            # #959: ingen backup-prompt — bundlen er allerede udskiftet.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             self.close()
 
         _ERROR_MESSAGES = {

@@ -240,6 +240,8 @@ Each database has its own:
 ### Backing Up
 Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into *Documents/OpenSAK Backups* unless you choose another folder; a folder on another disk or an external drive is safest. Backups you make this way are never deleted by OpenSAK.
 
+When you close OpenSAK and something has changed since your last backup, OpenSAK asks whether to back up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in OpenSAK. Tick **Don't ask again** to always back up or never ask; change it later, together with how many automatic backups to keep (5 by default), under **Settings → Advanced → Backups**. Only the oldest automatic backups are deleted.
+
 ### Restoring a Backup
 Go to **File → Restore from backup…**, pick a backup and the databases you want, and click **Restore**. A restored database is always added as a new database — nothing you have now is overwritten — and it opens exactly as it was when the backup was taken.
 

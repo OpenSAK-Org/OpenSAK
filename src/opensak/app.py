@@ -259,6 +259,13 @@ def main() -> None:
     app.setOrganizationName("OpenSAK Project")
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
+    # #959: when the OS session ends (logout/shutdown) there is no time for
+    # a backup, so the window closes without the back-up-on-exit prompt.
+    # Windows and Linux/X11 report this; macOS can't tell a logout from Quit.
+    # If the user cancels the logout, the prompt stays off for this run.
+    from opensak.backup.exit_state import suppress_exit_backup
+    app.commitDataRequest.connect(lambda _manager: suppress_exit_backup())
+
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
     from opensak.logger import setup_logging

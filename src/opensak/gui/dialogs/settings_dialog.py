@@ -687,6 +687,31 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(update_group)
 
+        # ── Backup (#959) ─────────────────────────────────────────────────────
+        backup_group = QGroupBox(tr("settings_group_backup"))
+        backup_form = QFormLayout(backup_group)
+
+        from opensak.backup import exit_state
+        self._backup_on_exit_combo: QComboBox = QComboBox()
+        for value, key in (
+            (exit_state.ON_EXIT_ASK,    "settings_backup_on_exit_ask"),
+            (exit_state.ON_EXIT_ALWAYS, "settings_backup_on_exit_always"),
+            (exit_state.ON_EXIT_NEVER,  "settings_backup_on_exit_never"),
+        ):
+            self._backup_on_exit_combo.addItem(tr(key), value)
+        backup_form.addRow(tr("settings_backup_on_exit_label"), self._backup_on_exit_combo)
+
+        self._backup_keep_auto: QSpinBox = QSpinBox()
+        self._backup_keep_auto.setRange(1, 99)
+        backup_form.addRow(tr("settings_backup_keep_auto_label"), self._backup_keep_auto)
+
+        backup_hint = QLabel(tr("settings_backup_hint"))
+        backup_hint.setWordWrap(True)
+        backup_hint.setStyleSheet(hint_style())
+        backup_form.addRow(backup_hint)
+
+        layout.addWidget(backup_group)
+
         # ── Distance calculation ───────────────────────────────────────────────
         dist_group = QGroupBox(tr("settings_group_distance"))
         dist_layout = QVBoxLayout(dist_group)
@@ -710,7 +735,7 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
         # Issue #805: Advanced has the most stacked group boxes of any tab
-        # (Folders, Search, Location refinement, Updates, Distance), and was
+        # (Folders, Search, Location refinement, Updates, Backup, Distance), and was
         # the only tab besides General not wrapped in a QScrollArea — on
         # small/high-DPI screens the dialog can't grow to fit everything, and
         # Qt squashes the controls instead of letting the user scroll.
@@ -817,6 +842,9 @@ class SettingsDialog(QDialog):
 
         if confirm_and_uninstall(self):
             self.accept()
+            # #959: OpenSAK (and maybe its data) is gone — no backup prompt.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
 
@@ -830,6 +858,9 @@ class SettingsDialog(QDialog):
 
         if confirm_and_uninstall(self):
             self.accept()
+            # #959: OpenSAK (and maybe its data) is gone — no backup prompt.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
 
@@ -1601,6 +1632,11 @@ class SettingsDialog(QDialog):
             self._nominatim_cb.setChecked(s.nominatim_enabled)
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
+        from opensak.backup import exit_state
+        from opensak.backup.backupset import get_keep_auto
+        idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
+        self._backup_on_exit_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._backup_keep_auto.setValue(get_keep_auto())
         idx = self._distance_method_combo.findData(s.distance_method)
         self._distance_method_combo.setCurrentIndex(idx if idx >= 0 else 0)
         # Opdater GC-status
@@ -1655,6 +1691,13 @@ class SettingsDialog(QDialog):
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()
+
+        # Backup (#959) — stored in opensak.json via the settings store.
+        from opensak.backup import exit_state
+        from opensak.backup.backupset import KEEP_AUTO_KEY
+        from opensak.settings_store import get_store as _get_store
+        exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
+        _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
 
         # PQ Email (issue #443) — kodeordet gemmes kun i OS keyring
         # (opensak.email.credentials), aldrig i opensak.json. Et tomt

@@ -121,6 +121,14 @@ def set_value(key: str, legacy_key: Optional[str], value: Any) -> None:
         try:
             with _lock:
                 values = _values(engine)
+                # #959: callers often store a value again that is already
+                # there (the cache table re-emits its sort order every time
+                # the list loads, so the sort was rewritten on every start).
+                # Each such write lands in the WAL and counts as a change
+                # for the back-up-on-exit check, so skip it. Compared as
+                # JSON, as stored, so True and 1 aren't taken as equal.
+                if key in values and json.dumps(values[key]) == json.dumps(value):
+                    return
                 with engine.begin() as conn:
                     conn.exec_driver_sql(
                         f"INSERT OR REPLACE INTO {TABLE} (key, value) VALUES (?, ?)",
