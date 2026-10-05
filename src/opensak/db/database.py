@@ -68,7 +68,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -1013,6 +1013,19 @@ def _run_migrations(engine: Engine) -> None:
             conn.commit()
             print(f"Migration: tilføjede caches.{', caches.'.join(added_23)}")
 
+        # ── Migration 25: partial index on caches missing a distance ─────────
+        logger.debug("[migrations] entering migration 25 (+%.2fs)", time.monotonic() - _mig_t0)
+        # distances_up_to_date() looks for a cache without a distance on
+        # every startup and database switch. On an up-to-date database that
+        # is a full table scan (~1 s at 180k caches); this index holds only
+        # the rows still missing one, so the lookup is instant. Rows leave it
+        # as recalculate_distances() fills them, so its upkeep is negligible.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_caches_distance_missing "
+            "ON caches (id) WHERE distance IS NULL"
+        ))
+        conn.commit()
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1385,8 +1398,8 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     if abs(fresh_distance - stored_distance) > _DISTANCE_EPSILON_KM:
         return False
 
-    # Stops at the first hit; only a database that is up to date pays for
-    # the full scan.
+    # Served by the partial index ix_caches_distance_missing (migration 25),
+    # so this stays cheap on large databases.
     with _session_on(db_path) as session:
         missing = session.execute(
             text(
