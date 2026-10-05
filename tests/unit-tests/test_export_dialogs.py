@@ -222,17 +222,23 @@ class TestFileExportDialog:
         dlg._btn_ggz.setChecked(True)
         assert dlg._current_fmt() == "ggz"
 
-    def test_do_export_cancel_does_nothing(self, qtbot, monkeypatch):
+    def test_do_export_folder_cancel_does_nothing(self, qtbot, monkeypatch):
         dlg = FileExportDialog([_cache()])
         qtbot.addWidget(dlg)
-        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName", lambda *a, **k: ("", ""))
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory", lambda *a, **k: "")
         dlg._do_export()
         assert dlg._btn_export.isEnabled() is True  # untouched
 
-    def test_do_export_launches_worker_with_suffix(self, qtbot, monkeypatch):
+    def test_do_export_launches_worker_with_suffix(self, qtbot, monkeypatch, tmp_path):
         dlg = FileExportDialog([_cache()])
         qtbot.addWidget(dlg)
-        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName", lambda *a, **k: ("/tmp/noext", "f"))
+        dlg._edit_folder.setText(str(tmp_path))
+
+        def no_dialog(*a, **k):
+            raise AssertionError("no file dialog expected")
+
+        monkeypatch.setattr(fed.QFileDialog, "getSaveFileName", no_dialog)
+        monkeypatch.setattr(fed.QFileDialog, "getExistingDirectory", no_dialog)
         captured = {}
 
         class FakeWorker:
@@ -248,7 +254,7 @@ class TestFileExportDialog:
         monkeypatch.setattr(fed, "_ExportWorker", FakeWorker)
         dlg._do_export()
         assert captured["started"] is True
-        assert str(captured["path"]).endswith(".gpx")
+        assert captured["path"] == tmp_path / "opensak_export.gpx"
         assert dlg._btn_export.isEnabled() is False
 
     def test_on_progress_makes_bar_determinate(self, qtbot):
