@@ -11,7 +11,7 @@ GSAK stores every saved filter as one row in ``gsak.db3``::
 
 Some installations also carry a ``TranslateFilters`` table with the same
 layout — a copy made outside GSAK, not something GSAK itself maintains — so
-it is only read when ``Settings`` is missing.
+it is only read when ``Settings`` is missing or holds no filters.
 
 OpenSAK stores one JSON file per filter profile (see
 ``opensak.filters.engine.FilterProfile``). This module converts the former
@@ -2374,7 +2374,9 @@ def find_gsak_filter_db(path: Path) -> Path:
 
 
 # Where saved filters live: GSAK's own Settings table first; TranslateFilters
-# is a copy some installations carry and is only a fallback.
+# is a copy some installations carry and is only a fallback when Settings is
+# missing or has no Type 'FI' rows (Settings exists in practically every
+# gsak.db3, so its mere presence says nothing about where the filters are).
 _FILTER_TABLES = ("Settings", "TranslateFilters")
 
 
@@ -2388,12 +2390,16 @@ def load_gsak_filters(db_path: Path) -> list[tuple[str, str]]:
             conn.text_factory = lambda b: b.decode("utf-8", errors="replace")
             tables = {name.lower() for (name,) in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table'")}
-            table = next((t for t in _FILTER_TABLES if t.lower() in tables), None)
-            if table is None:
+            present = [t for t in _FILTER_TABLES if t.lower() in tables]
+            if not present:
                 raise GsakFilterSourceError("no such table: Settings")
-            rows = conn.execute(
-                f"SELECT Description, Data FROM {table} WHERE Type = 'FI'"
-            ).fetchall()
+            rows = []
+            for table in present:
+                rows = conn.execute(
+                    f"SELECT Description, Data FROM {table} WHERE Type = 'FI'"
+                ).fetchall()
+                if rows:
+                    break
     except sqlite3.Error as exc:
         raise GsakFilterSourceError(str(exc)) from exc
     return sorted(

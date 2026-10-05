@@ -649,6 +649,16 @@ class TestSource:
         conn.close()
         assert [name for name, _ in load_gsak_filters(db)] == ["Copy"]
 
+    def test_translatefilters_is_read_when_settings_has_no_filters(self, tmp_path):
+        db = _make_gsak_db(tmp_path / "gsak.db3", {})
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO Settings VALUES ('XX', 'Not a filter', '')")
+        conn.execute("CREATE TABLE TranslateFilters (Type, Description, Data)")
+        conn.execute("INSERT INTO TranslateFilters VALUES ('FI', 'Copy', '')")
+        conn.commit()
+        conn.close()
+        assert [name for name, _ in load_gsak_filters(db)] == ["Copy"]
+
     def test_filters_are_listed_alphabetically(self, tmp_path):
         db = _make_gsak_db(tmp_path / "gsak.db3",
                            {"zulu": _blob({}), "Alpha": _blob({})})
