@@ -97,6 +97,8 @@ STRINGS: dict[str, str] = {
     "macro_btn_open":               "Openen…",
     "macro_btn_run":                "▶  Uitvoeren",
     "macro_open_title":             "Lua-macro openen",
+    "menu_macro_examples":          "Voorbeeld openen",
+    "macro_example_error":          "Voorbeeld {name} kon niet worden gekopieerd: {msg}",
     "macro_done":                   "Macro voltooid.",
     "macro_error":                  "Macrofout: {msg}",
     "action_update_location":       "🌍  Waypointlocaties bijwerken…",

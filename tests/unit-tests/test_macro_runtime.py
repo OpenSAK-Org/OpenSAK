@@ -299,6 +299,32 @@ def test_read_csv_missing_file(tmp_path):
             'opensak.read_csv("nope.csv")', base_dir=tmp_path)
 
 
+def test_read_csv_without_base_dir_resolves_in_macros_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr("opensak.config.get_macros_dir", lambda: tmp_path)
+    (tmp_path / "solved.csv").write_text("code\nGC9\n", encoding="utf-8")
+    _, out = _run('print(opensak.read_csv("solved.csv")[1].code)')
+    assert out == ["GC9"]
+
+
+def test_install_example_copies_macro_and_csv_into_macros_folder(tmp_path, monkeypatch):
+    from opensak.macro.examples import install_example, list_examples
+
+    monkeypatch.setattr("opensak.config.get_macros_dir", lambda: tmp_path)
+    assert "corrected_coords_from_csv.lua" in list_examples()
+    path = install_example("corrected_coords_from_csv.lua")
+    assert path == tmp_path / "examples" / "corrected_coords_from_csv.lua"
+    assert (tmp_path / "examples" / "corrected_coords.csv").is_file()
+    assert not (tmp_path / "examples" / "export_filters_to_gpx.lua").exists()
+
+    # A second open keeps the user's edits.
+    path.write_text("-- edited", encoding="utf-8")
+    install_example("corrected_coords_from_csv.lua")
+    assert path.read_text(encoding="utf-8") == "-- edited"
+
+    with pytest.raises(FileNotFoundError):
+        install_example("nope.lua")
+
+
 def test_temp_and_macros_dir():
     from opensak.macro.permissions import macros_dir, temp_dir
 

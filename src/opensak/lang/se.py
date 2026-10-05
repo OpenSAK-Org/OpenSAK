@@ -94,6 +94,8 @@ STRINGS: dict[str, str] = {
     "macro_btn_open":               "Öppna…",
     "macro_btn_run":                "▶  Kör",
     "macro_open_title":             "Öppna Lua-makro",
+    "menu_macro_examples":          "Öppna exempel",
+    "macro_example_error":          "Kunde inte kopiera exemplet {name}: {msg}",
     "macro_done":                   "Makrot är klart.",
     "macro_error":                  "Makrofel: {msg}",
     "action_update_location":       "Update waypoint locations…",

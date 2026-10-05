@@ -22,8 +22,8 @@
 -- Nothing is written until you confirm the summary ("12 will be set,
 -- 2 cleared — continue?").
 --
--- Open this file via Macros → Run macro… → Open… so the relative CSV path
--- is resolved against this folder.
+-- Open it via Macros → Open example: that copies this macro and the sample
+-- CSV into your macros folder, where the relative CSV path is resolved.
 
 local CSV_FILE = "corrected_coords.csv"
 

@@ -94,6 +94,8 @@ STRINGS: dict[str, str] = {
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
     "macro_open_title":             "Otevřít makro Lua",
+    "menu_macro_examples":          "Otevřít příklad",
+    "macro_example_error":          "Příklad {name} nelze zkopírovat: {msg}",
     "macro_done":                   "Makro dokončeno.",
     "macro_error":                  "Chyba makra: {msg}",
     "action_update_location":       "Update waypoint locations…",

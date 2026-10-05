@@ -578,6 +578,14 @@ class MainWindow(QMainWindow):
         act_run_macro.triggered.connect(self._open_macro_dialog)
         macros_menu.addAction(act_run_macro)
 
+        from opensak.macro.examples import list_examples
+        examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
+        for name in list_examples():
+            act = QAction(name, self)
+            act.triggered.connect(lambda _=False, n=name: self._open_macro_example(n))
+            examples_menu.addAction(act)
+        examples_menu.setEnabled(not examples_menu.isEmpty())
+
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
 
@@ -3175,6 +3183,19 @@ class MainWindow(QMainWindow):
         self._macro_dialog.show()
         self._macro_dialog.raise_()
         self._macro_dialog.activateWindow()
+
+    def _open_macro_example(self, name: str) -> None:
+        """Copy a shipped example into the macros folder and open the copy."""
+        from opensak.macro.examples import install_example
+        try:
+            path = install_example(name)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, tr("macro_title"), tr("macro_example_error", name=name, msg=str(exc))
+            )
+            return
+        self._open_macro_dialog()
+        self._macro_dialog.open_path(path)
 
     def apply_filter(self, filterset, label: str) -> int:
         """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result

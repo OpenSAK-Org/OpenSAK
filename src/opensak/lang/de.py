@@ -94,6 +94,8 @@ STRINGS: dict[str, str] = {
     "macro_btn_open":               "Öffnen…",
     "macro_btn_run":                "▶  Ausführen",
     "macro_open_title":             "Lua-Makro öffnen",
+    "menu_macro_examples":          "Beispiel öffnen",
+    "macro_example_error":          "Beispiel {name} konnte nicht kopiert werden: {msg}",
     "macro_done":                   "Makro beendet.",
     "macro_error":                  "Makrofehler: {msg}",
     "action_update_location":       "Standortdaten der Wegpunkte aktualisieren…",

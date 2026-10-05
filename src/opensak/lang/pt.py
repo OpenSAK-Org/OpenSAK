@@ -94,6 +94,8 @@ STRINGS: dict[str, str] = {
     "macro_btn_open":               "Abrir…",
     "macro_btn_run":                "▶  Executar",
     "macro_open_title":             "Abrir macro Lua",
+    "menu_macro_examples":          "Abrir exemplo",
+    "macro_example_error":          "Não foi possível copiar o exemplo {name}: {msg}",
     "macro_done":                   "Macro concluída.",
     "macro_error":                  "Erro na macro: {msg}",
     "action_update_location":       "Update waypoint locations…",

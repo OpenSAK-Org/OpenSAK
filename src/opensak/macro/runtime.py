@@ -474,7 +474,7 @@ class MacroRuntime:
             raise MacroError("opensak.read_csv: separator must be a string")
         file = Path(path).expanduser()
         if not file.is_absolute():
-            file = (self._base_dir or Path.cwd()) / file
+            file = (self._base_dir or macros_dir()) / file
         try:
             file = check_access(file, write=False, permissions=self._folder_permissions)
         except FolderAccessDenied as exc:
@@ -490,7 +490,7 @@ class MacroRuntime:
         """Execute *source*. Raises MacroError on any failure.
 
         *base_dir* (usually the macro file's folder) is where relative paths
-        given to opensak.read_csv() are looked up; the working directory
+        given to opensak.read_csv() are looked up; the macros folder
         otherwise.
         """
         self._base_dir = base_dir

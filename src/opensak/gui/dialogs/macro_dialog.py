@@ -105,11 +105,16 @@ class MacroDialog(QDialog):
         path, _ = QFileDialog.getOpenFileName(
             self, tr("macro_open_title"), str(get_macros_dir()), "Lua (*.lua);;* (*)"
         )
-        if not path:
-            return
-        self._editor.setPlainText(Path(path).read_text(encoding="utf-8"))
-        self._chunk_name = Path(path).name
-        self._base_dir = Path(path).parent
+        if path:
+            self.open_path(Path(path))
+
+    def open_path(self, path: Path) -> None:
+        """Load *path* into the editor; relative read_csv() paths then
+        resolve against its folder."""
+        self._editor.setPlainText(path.read_text(encoding="utf-8"))
+        self._output.clear()
+        self._chunk_name = path.name
+        self._base_dir = path.parent
 
     def _append_output(self, text: str) -> None:
         self._output.appendPlainText(text)
