@@ -4,6 +4,83 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.3] — 2026-10-05
+
+> Headline: **choose where exports go** — the export dialog now has its own
+> folder and file name, with variables like the database name and date, so
+> repeated exports land in the right place without a save dialog. This beta
+> also closes two security holes where text from imported cache data could
+> run as code or open unsafe links, and fixes imports into another database
+> that could reach the one you had open.
+>
+> This version makes a small update to each database, so OpenSAK makes its
+> usual one-time backup of each database the first time you open it.
+>
+> The new export texts are machine-translated in all languages except
+> Danish and English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Export folder and file name in the dialog (#965, #773)** — The export
+  dialog now has a folder and a file name, both saved with the export
+  settings, and exports straight there without a save dialog. The file
+  name can be fixed text or use variables such as `{database}`,
+  `{filter}`, `{date}`, `{time}`, `{format}` and `{count}`; an info
+  button lists them all and a preview shows the exact file that will be
+  written. A new option decides what happens when the file already
+  exists: ask, overwrite or skip.
+
+### Changed
+
+- **Faster start and database switch on large databases (#964)** —
+  Checking whether any distances need recalculating now takes a fraction
+  of a millisecond instead of around a second on a database with 180,000
+  caches. This needs a small update to each database, so OpenSAK makes its
+  usual one-time backup of each database the first time you open it in
+  this version.
+- **GSAK import of several databases into one (#964)** — When several GSAK
+  databases are imported into the same OpenSAK database, distances are
+  now recalculated once at the end instead of after each one, and the
+  progress bar shows that work is still going on.
+
+### Security
+
+- **Cache data could run as code on the map (#972, fixes #971)** — Cache
+  names, GC codes and waypoint names from an imported GPX or GSAK
+  database were inserted into the map without being escaped, so a crafted
+  file could run script code inside OpenSAK's map. All of this text is
+  now passed and shown as plain text.
+- **Log and trackable panels showed raw HTML and opened any link (#970,
+  fixes #969)** — Log texts, finder names and trackable names are now
+  shown as plain text, and links in them only open when they are ordinary
+  web links (http/https). Other kinds of links, such as to local files or
+  network shares, are ignored.
+
+### Fixed
+
+- **Importing into another database could touch the open one (#963,
+  fixes #957)** — GSAK, GPX/ZIP and Pocket Query e-mail imports into
+  another database, and moving or copying caches between databases, used
+  to switch OpenSAK's active database in the background while they ran.
+  Anything the main window read or saved meanwhile could end up in the
+  wrong database. These jobs now work on the other database directly, and
+  the database you have open is never switched.
+- **GSAK filter import found no filters in some backups (#967, fixes
+  #966)** — Saved GSAK filters are now read from GSAK's own `Settings`
+  table, with the `TranslateFilters` table some installations carry as a
+  fallback.
+- **Distances calculated from the wrong place with no active home point
+  (fixes #962)** — With no active home point, the home drop-down showed
+  one point as selected while distances were calculated from a built-in
+  default location. The point the drop-down shows is now the active one.
+- **Moving databases to a new folder lost their settings (fixes #961)** —
+  When you changed the database folder in Settings and chose to move your
+  existing databases along, their home location, sort order and filter
+  profile were lost. They are now carried over, as they already were when
+  renaming or copying a database.
+
+---
+
 ## [1.21.0-beta.2] — 2026-10-02
 
 > Headline: **backup and restore** — the first big part of Backup Support
