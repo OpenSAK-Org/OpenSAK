@@ -4,6 +4,8 @@
 
 *1 October 2026 (#953): OpenSAK has no Database menu — database actions live in the File menu, so backup and restore are File → Back up now… and File → Restore from backup….*
 
+*5 October 2026 (#959): change detection ignores an empty `-wal` and records the state again after the database is closed — see "When nothing changed, nobody is asked". A manual backup of only some databases records only those.*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.
@@ -138,6 +140,13 @@ flowchart TD
 Never, nothing changed, Not now and Cancel all close the window without a backup; rotation runs only after a completed backup.
 
 **When nothing changed, nobody is asked.** After every successful backup OpenSAK records, per database, the size and modification time of the `.db` and `-wal` files, plus the newest change in filters/ and column_views/ (`backup.last_state` in opensak.json). On exit, if all of these still match, there is nothing new to protect and the window just closes. opensak.json itself is left out of the check: OpenSAK writes the window geometry to it on every exit.
+
+Two details keep this check honest (#959):
+
+- **SQLite rewrites the files on close.** When the last connection closes, SQLite checkpoints the WAL into the `.db` file, so its size and modification time change although the content doesn't, and the next start creates an empty `-wal` with a new modification time. So an empty or missing `-wal` counts as no WAL, and when the window closes with nothing left to back up (nothing changed, or the on-exit backup just finished), OpenSAK closes the database after the event loop ends and records the state once more (`exit_state.finalize_after_close()`, called from app.py). Without this, every exit after a session with changes would ask again at the next exit.
+- **A manual backup of some databases** records only those. A database that was left out keeps its earlier recorded state, so a change to it still counts. A database whose file is missing is recorded as it is, since no backup can include it.
+
+OpenSAK also closes itself without a normal close: after an in-app update has replaced the app, after an in-app uninstall, and when the OS session ends. None of these offer a backup (`exit_state.suppress_exit_backup()`). On macOS a logout can't be told apart from Quit, so the prompt may appear then and hold up the logout until it is answered.
 
 Sorting a column or changing the home location now writes to the database (#659), so it counts as a change. That is intended: it is something a restore would bring back.
 

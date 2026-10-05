@@ -412,7 +412,13 @@ def main() -> None:
     QTimer.singleShot(500, window.show_premigration_backup_notices)
 
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # #959: if the window closed with everything backed up, record the backup
+    # state again now that the database has been checkpointed on dispose —
+    # otherwise the checkpoint itself would count as a change at the next exit.
+    from opensak.backup.exit_state import finalize_after_close
+    finalize_after_close()
+    sys.exit(exit_code)
 
 
 def _report_app_control_block(exc: BaseException) -> bool:

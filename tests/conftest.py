@@ -110,6 +110,16 @@ def _no_network_update_check(monkeypatch):
     monkeypatch.setattr("opensak.updater.fetch_latest_release", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_exit_backup_prompt(monkeypatch):
+    """#959: closing a MainWindow must never open the modal back-up-on-exit
+    prompt in a test (it would block the run). Tests of the close flow set
+    exit_state._suppressed back to False themselves."""
+    from opensak.backup import exit_state
+    monkeypatch.setattr(exit_state, "_suppressed", True)
+    monkeypatch.setattr(exit_state, "_clean_on_close", False)
+
+
 @pytest.fixture(scope="module")
 def tmp_db(tmp_path_factory):
     # Create a fresh SQLite DB in a temp directory for a test module.

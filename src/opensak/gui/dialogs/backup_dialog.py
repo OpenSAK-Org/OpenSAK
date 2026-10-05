@@ -33,6 +33,7 @@ from opensak.backup.backupset import (
     validate_backup_dir,
     write_backup_set,
 )
+from opensak.backup.exit_state import record_backup_state
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
@@ -121,6 +122,7 @@ class BackupDialog(QDialog):
         self._folder = get_backup_dir()
         self._worker: Optional[BackupWorker] = None
         self._progress_dialog: Optional[QProgressDialog] = None
+        self._backing_up: list[Any] = []   # the databases of the running backup
 
         layout = QVBoxLayout(self)
 
@@ -252,6 +254,7 @@ class BackupDialog(QDialog):
         progress.setValue(0)
         self._progress_dialog = progress
 
+        self._backing_up = list(databases)
         worker = BackupWorker(databases, KIND_MANUAL, self._folder, parent=self)
         worker.progress.connect(self._on_progress)
         worker.succeeded.connect(self._on_succeeded)
@@ -277,6 +280,13 @@ class BackupDialog(QDialog):
 
     def _on_succeeded(self, result: BackupResult) -> None:
         self._finish()
+        # #959: a manual backup counts as "the last backup", so closing
+        # straight after it doesn't ask again. Only the databases that were
+        # ticked are recorded; a change to an unticked one still counts.
+        try:
+            record_backup_state(self._backing_up)
+        except Exception:
+            logger.warning("backup: could not record the backup state", exc_info=True)
         text = tr("backup_done_msg", path=str(result.backup_set.path))
         if result.skipped:
             text += "\n\n" + tr("backup_done_skipped", names=", ".join(result.skipped))

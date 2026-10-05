@@ -226,6 +226,21 @@ class TestBackupDialog:
         assert dlg.result() == BackupDialog.DialogCode.Accepted
         assert not dlg.is_running()
 
+    def test_manual_backup_counts_as_the_last_backup(self, dlg, tmp_path, sync_worker):
+        """#959: closing straight after a manual backup doesn't ask again."""
+        from opensak.backup import exit_state
+        assert exit_state.has_changes_since_backup() is True
+        dlg.choose_folder(tmp_path / "usb")
+        dlg._start()
+        assert exit_state.has_changes_since_backup() is False
+
+    def test_failed_backup_records_nothing(self, dlg, tmp_path, sync_worker):
+        from opensak.backup import exit_state
+        dlg.choose_folder(tmp_path / "usb")
+        with patch.object(bdlg, "write_backup_set", side_effect=BackupError("x")):
+            dlg._start()
+        assert get_store().get(exit_state.LAST_STATE_KEY) is None
+
     def test_success_message_names_the_folder(self, dlg, tmp_path, sync_worker, boxes):
         dlg.choose_folder(tmp_path / "usb")
         dlg._start()
