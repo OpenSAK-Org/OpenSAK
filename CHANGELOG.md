@@ -4,6 +4,79 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.4] — 2026-10-05
+
+> Headline: **back up when you close OpenSAK** — the next part of Backup
+> Support (Roadmap #1, #942). When something has changed since your last
+> backup, OpenSAK offers to back up before it closes, and keeps the last
+> five automatic backups. Also in this beta: the beta-only **macros** can
+> now set **corrected coordinates from a CSV file**, with folder
+> permissions that keep macros away from OpenSAK's own data.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Back up when you close OpenSAK (#959)** — When you close OpenSAK and
+  something has changed since your last backup, it asks whether to back
+  up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in
+  OpenSAK. If nothing has changed, it closes without asking. A progress
+  window shows how far a large backup has got, and Cancel stops it without
+  leaving a half-finished backup behind. If the backup folder is on a
+  drive that isn't connected, you can choose another folder right there.
+  Tick **Don't ask again** to always back up or never ask. The new
+  **Settings → Advanced → Backups** section holds this choice and how many
+  automatic backups to keep (5 by default); only the oldest automatic
+  backups are deleted, and backups made with **File → Back up now…** are
+  never deleted by OpenSAK. A backup made with Back up now also counts as
+  your last backup, so closing straight after it doesn't ask again.
+- **`{center}` in export file names (#977, fixes #976)** — The export file
+  name can now include the name of the active center point, for example
+  `{filter}_{center}`.
+- **Macros: corrected coordinates from a CSV file (#949, part of #938)** —
+  *Beta builds only.* Macros can now set and clear corrected coordinates
+  (`set_corrected`, `clear_corrected`), read CSV files (`read_csv`) and ask
+  the user to confirm (`confirm`). **Macros → Open example** copies a
+  ready-made example macro and a sample CSV into your macros folder and
+  opens it: it reads solved coordinates per GC code, shows a summary, and
+  changes nothing until you confirm. A blank cell never deletes a
+  solution.
+- **Macros: folder permissions (#949, #979)** — *Beta builds only.* A new
+  **Settings → Folder permissions** tab lists the folders macros may read
+  or write. By default that is an `opensak` folder inside the system temp
+  folder (read and write) and OpenSAK's macros folder (read only); macros
+  can find them with `temp_dir()` and `macros_dir()`.
+- **Macros: API reference and editor support (#949)** — The macro
+  functions are documented in
+  [docs/macros/api.md](docs/macros/api.md), generated from the code so it
+  is always current, and `macros/types/opensak.lua` gives autocompletion
+  and inline help in VS Code with the Lua extension. `api_version()`
+  tells a macro which version of the API it is running against.
+
+### Security
+
+- **Macros can never reach OpenSAK's own data (#979)** — Whatever the
+  folder permissions say, macros can't read or write OpenSAK's settings,
+  its Geocaching.com login, its data and database folders (except the
+  macros folder), or any database file. A whole drive can't be given to
+  macros, and a file with several hard links can't be written, since that
+  would also change another file.
+
+### Fixed
+
+- **New installs put the first database in the wrong folder (fixes
+  #973)** — When you chose your own database folder in the Welcome Wizard
+  on a fresh install, the Default database was still created in the
+  installation folder. It is now created in the folder you chose.
+- **Sort order saved again on every start (#959)** — Opening a database
+  wrote its sort order and filter profile back to the database each time,
+  even when nothing had changed. Settings are now only written when they
+  actually change; this also kept OpenSAK from recognizing that nothing
+  had changed since your last backup.
+
+---
+
 ## [1.21.0-beta.3] — 2026-10-05
 
 > Headline: **choose where exports go** — the export dialog now has its own
