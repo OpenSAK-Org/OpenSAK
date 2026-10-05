@@ -137,6 +137,39 @@ def _click_button_with_text(monkeypatch, tr_key):
 
 
 class TestOfferMoveDatabases:
+    @pytest.fixture(autouse=True)
+    def _known_database(self, tmp_path):
+        """
+        Issue #973: _offer_move_databases() only consults the manager when
+        databases.list has entries. Register one, so these tests exercise
+        the dialog with the fake manager rather than the fresh-install
+        early return.
+        """
+        ss.get_store().set(
+            "databases.list",
+            [{"name": "Default", "path": str(tmp_path / "olddb" / "Default.db")}],
+        )
+
+    def test_empty_database_list_never_creates_manager(self, wizard, monkeypatch, tmp_path):
+        """
+        Issue #973: on a fresh install (empty databases.list) the manager
+        must not be created here — doing so before databases.dir is saved
+        put the auto-created Default database in the installation folder.
+        """
+        ss.get_store().set("databases.list", [])
+
+        def _fail_if_called():
+            raise AssertionError("get_db_manager() must not be called on a fresh install")
+
+        monkeypatch.setattr("opensak.db.manager.get_db_manager", _fail_if_called)
+
+        def _fail_dialog(self):
+            raise AssertionError("dialog should not be shown on a fresh install")
+
+        monkeypatch.setattr(ww.QMessageBox, "exec", _fail_dialog)
+
+        wizard._offer_move_databases(tmp_path / "olddb", tmp_path / "newdb")
+
     def test_no_databases_skips_dialog_entirely(self, wizard, monkeypatch, tmp_path):
         manager = _FakeManager(databases=[])
         monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
@@ -503,7 +536,13 @@ class TestSaveAllCleansUpOldFolders:
         old_db = old_install / "Data"
         old_db.mkdir(parents=True)
         (old_install / "opensak.json").write_text(
-            json.dumps({"databases.dir": str(old_db)}), encoding="utf-8",
+            json.dumps({
+                "databases.dir": str(old_db),
+                "databases.list": [
+                    {"name": "Default", "path": str(old_db / "Default.db")},
+                ],
+            }),
+            encoding="utf-8",
         )
         (old_db / "Default.db").write_text("db content", encoding="utf-8")
         ss.set_install_dir(old_install)
@@ -532,6 +571,7 @@ class TestSaveAllCleansUpOldFolders:
 
         w._save_all(use_defaults=False)
 
+        assert manager.move_calls == [(new_db, True)]
         assert not old_db.exists()
         assert not old_install.exists()
 
@@ -542,6 +582,11 @@ class TestSaveAllCleansUpOldFolders:
         install_dir.mkdir()
         ss.set_install_dir(install_dir)
         ss.get_store().set("databases.dir", str(old_db))
+        # Issue #973: a known database, so the move dialog is actually offered.
+        ss.get_store().set(
+            "databases.list",
+            [{"name": "Default", "path": str(old_db / "Default.db")}],
+        )
         ss.reset_store()
 
         w = ww.WelcomeWizard()
@@ -555,6 +600,7 @@ class TestSaveAllCleansUpOldFolders:
 
         w._save_all(use_defaults=False)
 
+        assert manager.move_calls == [(tmp_path / "new_db", False)]
         assert old_db.exists()  # "keep" was chosen — must not be touched
 
     def test_move_errors_prevent_old_db_folder_cleanup(self, tmp_path, monkeypatch, qtbot):
@@ -566,6 +612,11 @@ class TestSaveAllCleansUpOldFolders:
         install_dir.mkdir()
         ss.set_install_dir(install_dir)
         ss.get_store().set("databases.dir", str(old_db))
+        # Issue #973: a known database, so the move dialog is actually offered.
+        ss.get_store().set(
+            "databases.list",
+            [{"name": "Default", "path": str(old_db / "Default.db")}],
+        )
         ss.reset_store()
 
         w = ww.WelcomeWizard()
@@ -583,6 +634,7 @@ class TestSaveAllCleansUpOldFolders:
 
         w._save_all(use_defaults=False)
 
+        assert manager.move_calls == [(tmp_path / "new_db", True)]
         assert old_db.exists()  # errors occurred — must not be cleaned up
 
     def test_icons_folder_moved_and_old_main_folder_fully_removed(
@@ -770,3 +822,45 @@ class TestMoveRemainingSkips:
 
         assert not (old_dir / "opensak.log.previous").exists()
         assert not (new_dir / "opensak.log.previous").exists()
+
+
+# ── Issue #973: fresh install with a custom database folder ─────────────────
+
+class TestFreshInstallCustomDbDir:
+    """
+    Issue #973: on a fresh install, choosing a custom database folder in the
+    wizard still created the Default database in the installation folder.
+    _offer_move_databases() ran before databases.dir was saved and called
+    get_db_manager(), which created the DatabaseManager singleton with a
+    "Default" entry at get_db_dir() — still the installation folder — and
+    saved it to databases.list. The app then reused that cached manager.
+    """
+
+    def test_default_database_is_created_in_chosen_folder(self, tmp_path, qtbot):
+        from opensak.db import manager as dbmanager
+
+        install_dir = tmp_path / "install"
+        custom_db = tmp_path / "custom_db"
+        install_dir.mkdir()
+        ss.set_install_dir(install_dir)
+        assert ss.get_store().get("databases.list") is None  # truly fresh
+
+        w = ww.WelcomeWizard()
+        qtbot.addWidget(w)
+        w._install_row.set_path(install_dir)
+        w._db_row.set_path(custom_db)
+
+        w._save_all(use_defaults=False)
+
+        # The wizard must not have created the manager (or a Default entry)
+        # before databases.dir was saved.
+        assert dbmanager._manager is None
+        assert not ss.get_store().get("databases.list")
+
+        active = dbmanager.get_db_manager().active
+        assert active is not None
+        assert active.name == "Default"
+        assert active.path == custom_db / "Default.db"
+        assert ss.get_store().get("databases.list") == [
+            {"name": "Default", "path": str(custom_db / "Default.db")}
+        ]

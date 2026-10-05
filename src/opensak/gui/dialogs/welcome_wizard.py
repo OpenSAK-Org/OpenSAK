@@ -635,6 +635,18 @@ class WelcomeWizard(QDialog):
         brugeren ændrer mappen.
         """
         from opensak.db.manager import get_db_manager
+        from opensak.settings_store import get_store
+
+        # Issue #973: on a fresh install databases.list is still empty, so
+        # there is nothing to move. Return before get_db_manager(): calling
+        # it here would create the DatabaseManager singleton while
+        # databases.dir is not saved yet, so its auto-created "Default"
+        # entry would point at the installation folder instead of the
+        # folder chosen in the wizard — and that entry would be saved to
+        # databases.list and reused by the app. Returning here lets the
+        # manager be created first after databases.dir has been saved.
+        if not get_store().get("databases.list"):
+            return
 
         manager = get_db_manager()
         # Issue #609: tæl kun databaser der rent faktisk har en fysisk fil
