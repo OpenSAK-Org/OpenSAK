@@ -1,0 +1,7 @@
+code;coords;note
+GC1;N47 21.689 E006 18.718;Mystery solved via checksum
+GC2;N 47° 08.905' E 009° 42.534';Final behind the bridge
+GC3;47.514093, 7.470118;Decimal degrees work too
+GC4;N46 40.099 E006 33.842;Bonus from the multi stages
+GC5;N47° 25' 00.37" E008° 05' 31.97";DMS format
+GC6;N 46.66695 E 8.32197;Decimal degrees with hemisphere letters

@@ -25,6 +25,9 @@ EXAMPLE_MACRO = """\
 -- OpenSAK macro (Lua) — proof of concept
 -- opensak.filter{...}, opensak.filter_profile(name), opensak.clear_filter(),
 -- opensak.count(), opensak.profiles(), print(...)
+-- opensak.set_corrected(code, lat, lon | "N47 22.123 E008 32.456"),
+-- opensak.clear_corrected(code), opensak.read_csv(path [, sep]),
+-- opensak.confirm(message)
 
 local n = opensak.filter{
     type       = {"Traditional", "Multi-cache"},
@@ -60,6 +63,7 @@ class MacroDialog(QDialog):
         )
         self._runtime = MacroRuntime(host, output=self._append_output)
         self._chunk_name = "macro"
+        self._base_dir: Path | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -96,13 +100,21 @@ class MacroDialog(QDialog):
         layout.addLayout(buttons)
 
     def _open_file(self) -> None:
+        from opensak.config import get_macros_dir
+
         path, _ = QFileDialog.getOpenFileName(
-            self, tr("macro_open_title"), "", "Lua (*.lua);;* (*)"
+            self, tr("macro_open_title"), str(get_macros_dir()), "Lua (*.lua);;* (*)"
         )
-        if not path:
-            return
-        self._editor.setPlainText(Path(path).read_text(encoding="utf-8"))
-        self._chunk_name = Path(path).name
+        if path:
+            self.open_path(Path(path))
+
+    def open_path(self, path: Path) -> None:
+        """Load *path* into the editor; relative read_csv() paths then
+        resolve against its folder."""
+        self._editor.setPlainText(path.read_text(encoding="utf-8"))
+        self._output.clear()
+        self._chunk_name = path.name
+        self._base_dir = path.parent
 
     def _append_output(self, text: str) -> None:
         self._output.appendPlainText(text)
@@ -111,7 +123,11 @@ class MacroDialog(QDialog):
         self._output.clear()
         self._btn_run.setEnabled(False)
         try:
-            self._runtime.run(self._editor.toPlainText(), chunk_name=self._chunk_name)
+            self._runtime.run(
+                self._editor.toPlainText(),
+                chunk_name=self._chunk_name,
+                base_dir=self._base_dir,
+            )
             self._append_output(tr("macro_done"))
         except MacroError as exc:
             self._append_output(tr("macro_error", msg=str(exc)))

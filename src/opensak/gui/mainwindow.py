@@ -197,6 +197,11 @@ class InfoBar(QFrame):
         self._owned_lbl.setText(str(owned))
 
 
+# Up to this many caches changed by one macro run are refreshed row by row;
+# more trigger a single full reload of the cache list (see end_macro()).
+_MACRO_ROW_REFRESH_LIMIT = 50
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -225,6 +230,9 @@ class MainWindow(QMainWindow):
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
         self._active_refresh_workers: list[RefreshWorker] = []
+        # GC codes whose corrected coordinates a running Lua macro changed;
+        # refreshed in one go by end_macro() instead of once per call.
+        self._macro_changed_codes: set[GcCode] = set()
         # Issue #558: the toolbar Where box's expression currently in
         # effect — only set once validated on Enter, so a half-typed
         # expression never leaks into refreshes triggered elsewhere.
@@ -569,6 +577,14 @@ class MainWindow(QMainWindow):
         act_run_macro = QAction(tr("action_run_macro"), self)
         act_run_macro.triggered.connect(self._open_macro_dialog)
         macros_menu.addAction(act_run_macro)
+
+        from opensak.macro.examples import list_examples
+        examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
+        for name in list_examples():
+            act = QAction(name, self)
+            act.triggered.connect(lambda _=False, n=name: self._open_macro_example(n))
+            examples_menu.addAction(act)
+        examples_menu.setEnabled(not examples_menu.isEmpty())
 
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
@@ -3169,6 +3185,19 @@ class MainWindow(QMainWindow):
         self._macro_dialog.raise_()
         self._macro_dialog.activateWindow()
 
+    def _open_macro_example(self, name: str) -> None:
+        """Copy a shipped example into the macros folder and open the copy."""
+        from opensak.macro.examples import install_example
+        try:
+            path = install_example(name)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, tr("macro_title"), tr("macro_example_error", name=name, msg=str(exc))
+            )
+            return
+        self._open_macro_dialog()
+        self._macro_dialog.open_path(path)
+
     def apply_filter(self, filterset, label: str) -> int:
         """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result
         leaves the current view untouched and returns 0."""
@@ -3193,6 +3222,48 @@ class MainWindow(QMainWindow):
         row count would still be stale right after the call."""
         with get_session() as session:
             return len(apply_filters_auto(session, self._build_active_filterset()))
+
+    def set_corrected_coords(self, gc_code, lat, lon) -> bool:
+        """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.
+
+        The view is not refreshed here but once in end_macro(): a macro
+        importing a large CSV would otherwise reload the table row, map pin
+        and detail panel for every single row."""
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(gc_code, lat, lon):
+            return False
+        self._macro_changed_codes.add(gc_code)
+        return True
+
+    def confirm(self, message: str) -> bool:
+        """MacroHost: Yes/No question, on top of the macro dialog."""
+        parent = getattr(self, "_macro_dialog", None) or self
+        reply = QMessageBox.question(
+            parent,
+            tr("macro_title"),
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def end_macro(self) -> None:
+        """MacroHost: refresh what the macro's corrected-coordinate changes
+        affect. A handful of caches get the same per-cache refresh as the
+        other entry points; beyond that, one full reload of table and map is
+        cheaper than updating each row (refresh_cache_row() scans the whole
+        model and _load_full_cache() loads logs etc. per call)."""
+        changed, self._macro_changed_codes = self._macro_changed_codes, set()
+        if len(changed) <= _MACRO_ROW_REFRESH_LIMIT:
+            for gc_code in sorted(changed):
+                self._on_corrected_coords_changed(gc_code)
+            return
+        self._refresh_cache_list()
+        current = getattr(self._detail_panel, "_current_gc_code", None)
+        if current in changed:
+            full = self._load_full_cache(current)
+            if full:
+                self._detail_panel.show_cache(full)
 
     def _open_found_updater(self) -> None:
         if self._trip_planner_active():
