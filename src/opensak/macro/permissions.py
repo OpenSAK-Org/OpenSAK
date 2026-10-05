@@ -13,6 +13,12 @@ Path.resolve() before comparing, so "../" segments and symlinks (or
 Windows junctions) cannot lead out of a permitted folder. When folders are
 nested, the most specific entry decides — a sub-folder listed without
 rights therefore blocks it even if a parent folder is permitted.
+
+OpenSAK's own data can never be read or written by a macro, whatever the
+list says (see protected_reason()): opensak.json, bootstrap.json, the
+Geocaching.com token, the data and database folders (except the macros
+folder inside the data folder) and SQLite files (.db, .db3, .sqlite,
+.sqlite3 and their -wal/-shm/-journal files) anywhere.
 """
 
 from __future__ import annotations
@@ -93,6 +99,76 @@ def save_permissions(permissions: Iterable[FolderPermission]) -> None:
     get_store().set(STORE_KEY, [p.to_dict() for p in permissions])
 
 
+# ── OpenSAK's own data: never accessible to macros ───────────────────────────
+
+_SQLITE_SUFFIXES = (".db", ".db3", ".sqlite", ".sqlite3")
+_SQLITE_COMPANIONS = ("-wal", "-shm", "-journal")
+
+
+def _is_sqlite_file(path: Path) -> bool:
+    name = path.name.lower()
+    for companion in _SQLITE_COMPANIONS:
+        if name.endswith(companion):
+            name = name[: -len(companion)]
+            break
+    return name.endswith(_SQLITE_SUFFIXES)
+
+
+def _protected_locations() -> tuple[list[Path], list[Path]]:
+    """(folders, files) macros may never touch. Each lookup is guarded, so
+    a broken setting cannot switch the protection off for the others."""
+    folders: list[Path] = []
+    files: list[Path] = []
+
+    def add(target: list[Path], getter) -> None:
+        try:
+            target.append(resolve_path(getter()))
+        except Exception:
+            pass
+
+    from opensak import config, settings_store
+
+    add(folders, settings_store.get_install_dir)
+    add(folders, settings_store.get_db_dir)
+    add(files, lambda: settings_store.get_store().settings_path())
+    add(files, settings_store._bootstrap_path)
+    add(files, config.get_gc_token_path)
+    return folders, files
+
+
+def protected_reason(target: Path) -> Optional[str]:
+    """Why the resolved *target* is off limits to macros, or None.
+
+    Checked before the folder list, so no Settings entry can open
+    OpenSAK's settings, credentials or databases to a macro.
+    """
+    if _is_sqlite_file(target):
+        return "it is a database file"
+    if target.name.lower().startswith("opensak.json"):
+        return "it is OpenSAK's settings file"
+    folders, files = _protected_locations()
+    if target in files:
+        return "it is one of OpenSAK's own files"
+    try:
+        macros = macros_dir()
+    except Exception:
+        macros = None
+    for folder in folders:
+        if not target.is_relative_to(folder):
+            continue
+        # The macros folder normally lives inside the data folder (which is
+        # also the default database folder) and stays usable.
+        if (
+            macros is not None
+            and macros != folder
+            and macros.is_relative_to(folder)
+            and target.is_relative_to(macros)
+        ):
+            continue
+        return f"it is inside OpenSAK's data folder {folder}"
+    return None
+
+
 def _matching_entry(
     target: Path, permissions: Iterable[FolderPermission]
 ) -> Optional[FolderPermission]:
@@ -125,10 +201,13 @@ def check_access(
         target = resolve_path(path)
     except (OSError, RuntimeError) as exc:   # RuntimeError: symlink loop
         raise FolderAccessDenied(f"cannot resolve {path}: {exc}") from None
+    kind = "write" if write else "read"
+    reason = protected_reason(target)
+    if reason is not None:
+        raise FolderAccessDenied(f"macros may not {kind} {target} — {reason}")
     entry = _matching_entry(target, permissions)
     allowed = entry is not None and (entry.write if write else entry.read)
     if not allowed:
-        kind = "write" if write else "read"
         raise FolderAccessDenied(
             f"macros may not {kind} {target} — permitted folders are set in "
             "Settings → Folder permissions"

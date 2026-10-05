@@ -19,6 +19,7 @@ from opensak.macro.permissions import (
     check_access,
     default_permissions,
     load_permissions,
+    protected_reason,
     resolve_path,
     save_permissions,
 )
@@ -59,6 +60,38 @@ def test_load_returns_defaults_until_a_list_is_saved():
 def test_load_skips_malformed_entries():
     get_store().set(STORE_KEY, ["junk", {"read": True}, {"path": "/ok", "read": 1}])
     assert load_permissions() == [FolderPermission("/ok", read=True, write=False)]
+
+
+# ── OpenSAK's own data ───────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("name", [
+    "cache.db", "x.DB3", "y.sqlite", "z.sqlite3", "cache.db-wal", "cache.db-journal",
+    "opensak.json", "opensak.json.bak",
+])
+def test_database_and_settings_files_are_denied_anywhere(tmp_path, name):
+    perms = [_rw(tmp_path)]
+    for write in (False, True):
+        with pytest.raises(FolderAccessDenied, match="may not"):
+            check_access(tmp_path / name, write=write, permissions=perms)
+
+
+def test_own_files_and_folders_are_denied(tmp_path, monkeypatch, macros_dir):
+    from opensak import config, settings_store
+    install, dbs = tmp_path / "install", tmp_path / "dbs"
+    dbs.mkdir()
+    monkeypatch.setattr(settings_store, "get_install_dir", lambda: install)
+    monkeypatch.setattr(settings_store, "get_db_dir", lambda: dbs)
+    perms = [_rw(tmp_path)]
+
+    for target in (install / "gc_token.json", install / "opensak.log",
+                   dbs / "notes.csv", config.get_gc_token_path()):
+        assert protected_reason(resolve_path(target)) is not None
+        with pytest.raises(FolderAccessDenied):
+            check_access(target, write=True, permissions=perms)
+    assert protected_reason(resolve_path(settings_store._bootstrap_path())) is not None
+    # The macros folder inside the data folder stays usable
+    check_access(macros_dir / "a.csv", write=True, permissions=perms)
+    check_access(tmp_path / "elsewhere" / "a.gpx", write=True, permissions=perms)
 
 
 # ── check_access ─────────────────────────────────────────────────────────────
