@@ -44,7 +44,8 @@ def _rw(path, read=True, write=True):
 
 def test_defaults_are_temp_read_write_and_macros_read_only(macros_dir):
     temp, macros = default_permissions()
-    assert Path(temp.path) == resolve_path(tempfile.gettempdir())
+    assert Path(temp.path) == resolve_path(tempfile.gettempdir()) / "opensak"
+    assert Path(temp.path).is_dir()
     assert (temp.read, temp.write) == (True, True)
     assert Path(macros.path) == resolve_path(macros_dir)
     assert (macros.read, macros.write) == (True, False)
@@ -57,6 +58,32 @@ def test_load_returns_defaults_until_a_list_is_saved():
     save_permissions([_rw("/x", write=False)])
     assert get_store().get(STORE_KEY) == [{"path": "/x", "read": True, "write": False}]
     assert load_permissions() == [_rw("/x", write=False)]
+
+
+def test_saving_the_defaults_stores_nothing():
+    save_permissions(default_permissions())
+    assert get_store().get(STORE_KEY) is None
+    save_permissions([_rw("/x")])
+    save_permissions(default_permissions())
+    assert get_store().get(STORE_KEY) is None
+
+
+def test_old_stored_defaults_are_migrated(macros_dir):
+    get_store().set(STORE_KEY, [
+        {"path": tempfile.gettempdir(), "read": True, "write": True},
+        {"path": str(macros_dir), "read": True, "write": False},
+    ])
+    assert load_permissions() == default_permissions()
+    assert get_store().get(STORE_KEY) is None
+
+
+def test_customised_list_with_whole_temp_folder_is_kept(macros_dir):
+    stored = [
+        {"path": tempfile.gettempdir(), "read": True, "write": False},
+        {"path": str(macros_dir), "read": True, "write": False},
+    ]
+    get_store().set(STORE_KEY, stored)
+    assert [p.to_dict() for p in load_permissions()] == stored
 
 
 def test_load_skips_malformed_entries():
@@ -322,6 +349,11 @@ def test_add_refuses_root_folder(dlg, tmp_path, monkeypatch):
     dlg._add_perm_folder(tmp_path.anchor)
     warn.assert_called_once()
     assert len(_rows(dlg)) == 2
+
+
+def test_saving_other_settings_does_not_store_the_defaults(dlg):
+    dlg._save()
+    assert get_store().get(STORE_KEY) is None
 
 
 def test_remove_selected_and_save_empty_list(dlg):

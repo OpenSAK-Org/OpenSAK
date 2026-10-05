@@ -139,7 +139,7 @@ function opensak.read_csv(path, sep) end
 ---@return boolean # true on Yes.
 function opensak.confirm(message) end
 
----The system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
+---OpenSAK's folder inside the system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
 ---
 ---Since API version 1.
 ---

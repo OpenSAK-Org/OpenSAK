@@ -732,9 +732,9 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="temp_dir",
-        description="The system temp folder (read and write permission by "
-                    "default), without a trailing separator. \"/\" works as "
-                    "separator on every platform.",
+        description="OpenSAK's folder inside the system temp folder (read "
+                    "and write permission by default), without a trailing "
+                    "separator. \"/\" works as separator on every platform.",
         example='local rows = opensak.read_csv(opensak.temp_dir() .. "/solved.csv")',
         since=1,
         bind=lambda rt, lua: lambda: str(temp_dir()),

@@ -3,9 +3,13 @@ src/opensak/macro/permissions.py — folders Lua macros may read or write.
 
 The list lives in opensak.json under "macros.folder_permissions" as
 [{"path": ..., "read": bool, "write": bool}, ...] and is edited in
-Settings → Folder permissions. Until the user saves a list of their own,
-the defaults apply: the system temp folder (read/write) and OpenSAK's
-macros folder (read only).
+Settings → Folder permissions. Until the user changes the list, nothing
+is stored and the defaults apply: an "opensak" folder inside the system
+temp folder (read/write) and OpenSAK's macros folder (read only). Saving a
+list equal to the defaults stores nothing either, so a later change of the
+defaults reaches everyone who never customised them; a list stored by an
+older version that equals the old defaults (the whole temp folder) is
+dropped on load for the same reason.
 
 Every path a macro hands to a file function goes through check_access().
 Both the requested path and the listed folders are run through
@@ -83,9 +87,17 @@ def _is_root(path: PurePath) -> bool:
     return path.parent == path
 
 
-def temp_dir() -> Path:
+def system_temp_dir() -> Path:
     """The system temp folder, resolved (on macOS e.g. /private/var/folders/…/T)."""
     return resolve_path(tempfile.gettempdir())
+
+
+def temp_dir() -> Path:
+    """OpenSAK's folder inside the system temp folder (created if needed),
+    resolved — the default read/write folder for macros."""
+    d = system_temp_dir() / "opensak"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def macros_dir() -> Path:
@@ -102,13 +114,49 @@ def default_permissions() -> list[FolderPermission]:
     ]
 
 
+def _legacy_default_permissions() -> list[FolderPermission]:
+    """The defaults before the temp folder was narrowed to temp/opensak.
+    Settings stored them on every save, so many opensak.json files hold
+    exactly this list without the user ever having chosen it."""
+    return [
+        FolderPermission(str(system_temp_dir()), read=True, write=True),
+        FolderPermission(str(macros_dir()), read=True, write=False),
+    ]
+
+
+def _same_permissions(
+    a: Iterable[FolderPermission], b: Iterable[FolderPermission]
+) -> bool:
+    """Equal lists, comparing folders after resolving them."""
+    def key(perms):
+        out = []
+        for p in perms:
+            try:
+                path = str(resolve_path(p.path))
+            except (OSError, RuntimeError):
+                path = p.path
+            out.append((path, p.read, p.write))
+        return out
+
+    return key(a) == key(b)
+
+
 def load_permissions() -> list[FolderPermission]:
     """The saved list, or the defaults if the user never saved one."""
     from opensak.settings_store import get_store
 
-    raw = get_store().get(STORE_KEY)
+    store = get_store()
+    raw = store.get(STORE_KEY)
     if not isinstance(raw, list):
         return default_permissions()
+    perms = _parse(raw)
+    if _same_permissions(perms, _legacy_default_permissions()):
+        store.delete(STORE_KEY)
+        return default_permissions()
+    return perms
+
+
+def _parse(raw: list) -> list[FolderPermission]:
     return [
         perm
         for perm in (
@@ -121,9 +169,17 @@ def load_permissions() -> list[FolderPermission]:
 
 
 def save_permissions(permissions: Iterable[FolderPermission]) -> None:
+    """Store *permissions*; a list equal to the defaults removes the stored
+    list instead, so the defaults keep following future versions."""
     from opensak.settings_store import get_store
 
-    get_store().set(STORE_KEY, [p.to_dict() for p in permissions])
+    permissions = list(permissions)
+    store = get_store()
+    if _same_permissions(permissions, default_permissions()):
+        if store.get(STORE_KEY) is not None:
+            store.delete(STORE_KEY)
+        return
+    store.set(STORE_KEY, [p.to_dict() for p in permissions])
 
 
 # ── OpenSAK's own data: never accessible to macros ───────────────────────────
