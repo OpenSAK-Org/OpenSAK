@@ -13,6 +13,7 @@ from opensak.db.database import (
     get_engine,
     make_session,
     dispose_engine,
+    session_for,
     db_health_check,
     reload_caches_full,
 )
@@ -261,6 +262,64 @@ class TestDisposeEngine:
         init_db(db_path=target)
         dispose_engine(target)
         assert database._engine is None
+
+
+class TestInitDbDisposesReplacedEngine:
+    def test_old_engine_disposed_on_switch(self, tmp_path, monkeypatch):
+        init_db(db_path=tmp_path / "a.db")
+        old = database._engine
+        disposed = []
+        monkeypatch.setattr(old, "dispose", lambda *a, **k: disposed.append(old))
+        init_db(db_path=tmp_path / "b.db")
+        assert database._engine is not old
+        assert disposed == [old]
+
+    def test_failed_open_keeps_current_engine(self, tmp_path):
+        init_db(db_path=tmp_path / "ok.db")
+        current = database._engine
+        bad = tmp_path / "bad.db"
+        bad.write_bytes(b"not a sqlite database" * 100)
+        with pytest.raises(Exception):
+            init_db(db_path=bad)
+        assert database._engine is current
+
+
+class TestSessionFor:
+    def test_does_not_touch_active_engine(self, tmp_path):
+        init_db(db_path=tmp_path / "active.db")
+        engine, factory = database._engine, database._SessionLocal
+        with session_for(tmp_path / "other.db") as s:
+            s.add(Cache(gc_code="GCOTHER", name="Other", cache_type="Traditional Cache", latitude=1.0, longitude=2.0))
+        assert database._engine is engine
+        assert database._SessionLocal is factory
+        with get_session() as s:
+            assert s.query(Cache).filter_by(gc_code="GCOTHER").first() is None
+
+    def test_commits_to_target_db(self, tmp_path):
+        target = tmp_path / "target.db"
+        with session_for(target) as s:
+            s.add(Cache(gc_code="GCTARGET", name="Target", cache_type="Traditional Cache", latitude=1.0, longitude=2.0))
+        with session_for(target) as s:
+            assert s.query(Cache).filter_by(gc_code="GCTARGET").count() == 1
+
+    def test_rolls_back_on_error(self, tmp_path):
+        target = tmp_path / "rb.db"
+        with pytest.raises(RuntimeError):
+            with session_for(target) as s:
+                s.add(Cache(gc_code="GCROLL", name="Roll", cache_type="Traditional Cache", latitude=1.0, longitude=2.0))
+                s.flush()
+                raise RuntimeError("boom")
+        with session_for(target) as s:
+            assert s.query(Cache).filter_by(gc_code="GCROLL").first() is None
+
+    def test_make_session_binds_to_given_engine(self, tmp_path):
+        init_db(db_path=tmp_path / "active.db")
+        with session_for(tmp_path / "other.db") as s:
+            inner = make_session(s.get_bind())
+            try:
+                assert inner.get_bind() is s.get_bind()
+            finally:
+                inner.close()
 
 
 class TestModelReprs:

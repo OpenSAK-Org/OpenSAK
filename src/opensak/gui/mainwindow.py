@@ -3095,7 +3095,9 @@ class MainWindow(QMainWindow):
             )
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
-        dlg = FileExportDialog(caches, parent=self)
+        dlg = FileExportDialog(
+            caches, parent=self, filter_name=self._active_filter_name
+        )
         dlg.exec()
 
     def _open_kml_export(self) -> None:
