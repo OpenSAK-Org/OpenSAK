@@ -117,12 +117,14 @@ class _ExportWorker(QThread):
 class FileExportDialog(QDialog):
     """Dialog for exporting filtered caches to GPX, LOC or GGZ format."""
 
-    def __init__(self, caches: list, parent=None, filter_name: str = ""):
+    def __init__(self, caches: list, parent=None, filter_name: str = "",
+                 center_name: str = ""):
         super().__init__(parent)
         self.setWindowTitle(tr("file_export_dialog_title"))
         self.setMinimumWidth(480)
         self._caches = caches
         self._filter_name = filter_name   # active saved filter ("" = none)
+        self._center_name = center_name   # active centre point ("" = none)
         self._worker: _ExportWorker | None = None
         self._output_path = ""
         self._setup_ui()
@@ -314,6 +316,7 @@ class FileExportDialog(QDialog):
             self._edit_file_name.text(),
             database=self._database_name(),
             filter_name=self._filter_name,
+            center_name=self._center_name,
             fmt=fmt,
             count=self._export_count(),
         )

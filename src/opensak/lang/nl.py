@@ -1353,7 +1353,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Exportmap kiezen",
     "file_export_file_name": "Bestandsnaam:",
     "file_export_file_name_help_title": "Variabelen in de bestandsnaam",
-    "file_export_file_name_help": "De bestandsnaam kan vaste tekst, variabelen of beide zijn. De extensie wordt automatisch toegevoegd.\n\n{database} – naam van de actieve database\n{filter} – naam van het actieve opgeslagen filter\n{date} – datum, bijv. 2026-10-03\n{time} – tijd, bijv. 20-32-35\n{datetime} – datum en tijd, bijv. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – delen van datum en tijd\n{format} – gpx, loc of ggz\n{count} – aantal geëxporteerde caches\n\nVoorbeeld: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "De bestandsnaam kan vaste tekst, variabelen of beide zijn. De extensie wordt automatisch toegevoegd.\n\n{database} – naam van de actieve database\n{filter} – naam van het actieve opgeslagen filter\n{center} – naam van het actieve middelpunt\n{date} – datum, bijv. 2026-10-03\n{time} – tijd, bijv. 20-32-35\n{datetime} – datum en tijd, bijv. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – delen van datum en tijd\n{format} – gpx, loc of ggz\n{count} – aantal geëxporteerde caches\n\nVoorbeeld: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Exporteren naar: {name}",
     "file_export_if_exists": "Als het bestand bestaat:",
     "file_export_if_exists_ask": "Vragen",

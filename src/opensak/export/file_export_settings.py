@@ -31,7 +31,7 @@ IF_EXISTS_CHOICES = ("overwrite", "ask", "skip")
 # Variables a file name template may contain, in the order they are listed
 # to the user. Names are matched case-insensitively.
 FILE_NAME_VARIABLES = (
-    "database", "filter", "date", "time", "datetime",
+    "database", "filter", "center", "date", "time", "datetime",
     "year", "month", "day", "hour", "minute", "second",
     "format", "count",
 )
@@ -119,6 +119,7 @@ def expand_file_name(
     *,
     database: str = "",
     filter_name: str = "",
+    center_name: str = "",
     fmt: str = "gpx",
     count: int = 0,
     now: Optional[datetime] = None,
@@ -137,6 +138,7 @@ def expand_file_name(
     values = {
         "database": database,
         "filter": filter_name,
+        "center": center_name,
         "date": now.strftime("%Y-%m-%d"),
         "time": now.strftime("%H-%M-%S"),
         "datetime": now.strftime("%Y-%m-%d_%H-%M-%S"),

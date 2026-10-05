@@ -1355,7 +1355,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Vælg eksportmappe",
     "file_export_file_name": "Filnavn:",
     "file_export_file_name_help_title": "Variabler i filnavnet",
-    "file_export_file_name_help": "Filnavnet kan være fast tekst, variabler eller begge dele. Filendelsen tilføjes automatisk.\n\n{database} – navnet på den aktive database\n{filter} – navnet på det aktive gemte filter\n{date} – dato, f.eks. 2026-10-03\n{time} – klokkeslæt, f.eks. 20-32-35\n{datetime} – dato og klokkeslæt, f.eks. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – dele af dato og klokkeslæt\n{format} – gpx, loc eller ggz\n{count} – antal eksporterede caches\n\nEksempel: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "Filnavnet kan være fast tekst, variabler eller begge dele. Filendelsen tilføjes automatisk.\n\n{database} – navnet på den aktive database\n{filter} – navnet på det aktive gemte filter\n{center} – navnet på det aktive centerpunkt\n{date} – dato, f.eks. 2026-10-03\n{time} – klokkeslæt, f.eks. 20-32-35\n{datetime} – dato og klokkeslæt, f.eks. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – dele af dato og klokkeslæt\n{format} – gpx, loc eller ggz\n{count} – antal eksporterede caches\n\nEksempel: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Eksportér til: {name}",
     "file_export_if_exists": "Hvis filen findes:",
     "file_export_if_exists_ask": "Spørg",
