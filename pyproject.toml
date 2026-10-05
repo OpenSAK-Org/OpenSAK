@@ -48,7 +48,7 @@ dev = [
     "pytest>=8.0,<10",
     "pytest-cov>=5.0,<8",
     "pytest-qt>=4.0,<5",
-    "mypy>=1.8,<2.4",
+    "mypy>=1.8,<2.5",
     "pillow>=10.0,<13",
 ]
 # Release builds only (build.yml, build-msix.yml): `pip install -e ".[build]"`
