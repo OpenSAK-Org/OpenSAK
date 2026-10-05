@@ -3096,7 +3096,8 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
         dlg = FileExportDialog(
-            caches, parent=self, filter_name=self._active_filter_name
+            caches, parent=self, filter_name=self._active_filter_name,
+            center_name=get_settings().active_home_name or "",
         )
         dlg.exec()
 

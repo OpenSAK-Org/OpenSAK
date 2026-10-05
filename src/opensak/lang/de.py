@@ -1356,7 +1356,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Exportordner wählen",
     "file_export_file_name": "Dateiname:",
     "file_export_file_name_help_title": "Variablen im Dateinamen",
-    "file_export_file_name_help": "Der Dateiname kann fester Text, Variablen oder beides sein. Die Dateiendung wird automatisch ergänzt.\n\n{database} – Name der aktiven Datenbank\n{filter} – Name des aktiven gespeicherten Filters\n{date} – Datum, z. B. 2026-10-03\n{time} – Uhrzeit, z. B. 20-32-35\n{datetime} – Datum und Uhrzeit, z. B. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – Teile von Datum und Uhrzeit\n{format} – gpx, loc oder ggz\n{count} – Anzahl exportierter Caches\n\nBeispiel: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "Der Dateiname kann fester Text, Variablen oder beides sein. Die Dateiendung wird automatisch ergänzt.\n\n{database} – Name der aktiven Datenbank\n{filter} – Name des aktiven gespeicherten Filters\n{center} – Name des aktiven Mittelpunkts\n{date} – Datum, z. B. 2026-10-03\n{time} – Uhrzeit, z. B. 20-32-35\n{datetime} – Datum und Uhrzeit, z. B. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – Teile von Datum und Uhrzeit\n{format} – gpx, loc oder ggz\n{count} – Anzahl exportierter Caches\n\nBeispiel: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Export nach: {name}",
     "file_export_if_exists": "Wenn die Datei existiert:",
     "file_export_if_exists_ask": "Nachfragen",

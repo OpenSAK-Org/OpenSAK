@@ -130,6 +130,11 @@ class TestExpandFileName:
                             filter_name="Tradis") == "DB_Tradis"
         assert self._expand("{filter}") == "opensak_export"   # no saved filter
 
+    def test_center_variable(self):
+        assert self._expand("{filter}_{center}", filter_name="Tradis",
+                            center_name="Home") == "Tradis_Home"
+        assert self._expand("{center}") == "opensak_export"   # no centre point
+
     def test_variables_are_case_insensitive(self):
         assert self._expand("{Database}_{DATE}", database="DB") == "DB_2026-10-03"
 
@@ -316,10 +321,13 @@ class TestFileExportDialogSettings:
     def test_preview_follows_template_and_format(self, qtbot, fed, monkeypatch):
         monkeypatch.setattr(fed.FileExportDialog, "_database_name",
                             staticmethod(lambda: "Home"))
-        dlg = fed.FileExportDialog([_cache(), _cache()], filter_name="Tradis")
+        dlg = fed.FileExportDialog([_cache(), _cache()], filter_name="Tradis",
+                                   center_name="Zurich HB")
         qtbot.addWidget(dlg)
         dlg._edit_file_name.setText("{database}-{filter}")
         assert dlg._expanded_file_name() == "Home-Tradis.gpx"
+        dlg._edit_file_name.setText("{center}")
+        assert dlg._expanded_file_name() == "Zurich HB.gpx"
         dlg._edit_file_name.setText("{database}-{count}")
         assert dlg._expanded_file_name() == "Home-2.gpx"
         dlg._btn_ggz.setChecked(True)

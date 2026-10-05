@@ -1351,7 +1351,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Vyberte složku pro export",
     "file_export_file_name": "Název souboru:",
     "file_export_file_name_help_title": "Proměnné v názvu souboru",
-    "file_export_file_name_help": "Název souboru může být pevný text, proměnné nebo obojí. Přípona se doplní automaticky.\n\n{database} – název aktivní databáze\n{filter} – název aktivního uloženého filtru\n{date} – datum, např. 2026-10-03\n{time} – čas, např. 20-32-35\n{datetime} – datum a čas, např. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – části data a času\n{format} – gpx, loc nebo ggz\n{count} – počet exportovaných keší\n\nPříklad: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "Název souboru může být pevný text, proměnné nebo obojí. Přípona se doplní automaticky.\n\n{database} – název aktivní databáze\n{filter} – název aktivního uloženého filtru\n{center} – název aktivního středového bodu\n{date} – datum, např. 2026-10-03\n{time} – čas, např. 20-32-35\n{datetime} – datum a čas, např. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – části data a času\n{format} – gpx, loc nebo ggz\n{count} – počet exportovaných keší\n\nPříklad: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Exportovat do: {name}",
     "file_export_if_exists": "Pokud soubor existuje:",
     "file_export_if_exists_ask": "Zeptat se",

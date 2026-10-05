@@ -1356,7 +1356,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Wybierz folder eksportu",
     "file_export_file_name": "Nazwa pliku:",
     "file_export_file_name_help_title": "Zmienne w nazwie pliku",
-    "file_export_file_name_help": "Nazwa pliku może być stałym tekstem, zmiennymi lub jednym i drugim. Rozszerzenie jest dodawane automatycznie.\n\n{database} – nazwa aktywnej bazy danych\n{filter} – nazwa aktywnego zapisanego filtra\n{date} – data, np. 2026-10-03\n{time} – godzina, np. 20-32-35\n{datetime} – data i godzina, np. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – części daty i godziny\n{format} – gpx, loc lub ggz\n{count} – liczba wyeksportowanych skrzynek\n\nPrzykład: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "Nazwa pliku może być stałym tekstem, zmiennymi lub jednym i drugim. Rozszerzenie jest dodawane automatycznie.\n\n{database} – nazwa aktywnej bazy danych\n{filter} – nazwa aktywnego zapisanego filtra\n{center} – nazwa aktywnego punktu środkowego\n{date} – data, np. 2026-10-03\n{time} – godzina, np. 20-32-35\n{datetime} – data i godzina, np. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – części daty i godziny\n{format} – gpx, loc lub ggz\n{count} – liczba wyeksportowanych skrzynek\n\nPrzykład: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Eksportuj do: {name}",
     "file_export_if_exists": "Jeśli plik istnieje:",
     "file_export_if_exists_ask": "Pytaj",

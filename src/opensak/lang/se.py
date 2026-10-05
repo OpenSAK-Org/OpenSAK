@@ -1355,7 +1355,7 @@ STRINGS: dict[str, str] = {
     "file_export_folder_dialog_title": "Välj exportmapp",
     "file_export_file_name": "Filnamn:",
     "file_export_file_name_help_title": "Variabler i filnamnet",
-    "file_export_file_name_help": "Filnamnet kan vara fast text, variabler eller båda. Filändelsen läggs till automatiskt.\n\n{database} – namnet på den aktiva databasen\n{filter} – namnet på det aktiva sparade filtret\n{date} – datum, t.ex. 2026-10-03\n{time} – tid, t.ex. 20-32-35\n{datetime} – datum och tid, t.ex. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – delar av datum och tid\n{format} – gpx, loc eller ggz\n{count} – antal exporterade cacher\n\nExempel: {database}_{date} → Zurich_2026-10-03",
+    "file_export_file_name_help": "Filnamnet kan vara fast text, variabler eller båda. Filändelsen läggs till automatiskt.\n\n{database} – namnet på den aktiva databasen\n{filter} – namnet på det aktiva sparade filtret\n{center} – namnet på den aktiva mittpunkten\n{date} – datum, t.ex. 2026-10-03\n{time} – tid, t.ex. 20-32-35\n{datetime} – datum och tid, t.ex. 2026-10-03_20-32-35\n{year} {month} {day} {hour} {minute} {second} – delar av datum och tid\n{format} – gpx, loc eller ggz\n{count} – antal exporterade cacher\n\nExempel: {database}_{date} → Zurich_2026-10-03",
     "file_export_file_name_preview": "Exportera till: {name}",
     "file_export_if_exists": "Om filen finns:",
     "file_export_if_exists_ask": "Fråga",
