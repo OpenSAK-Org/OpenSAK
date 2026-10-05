@@ -49,8 +49,23 @@ _MD_LINK_RE = re.compile(r'\[([^\[\]]+)\]\((https?://[^\s)]+)\)')
 
 
 def _convert_markdown_links(text: str) -> str:
-    """Konverter markdown-links [tekst](url) i logtekst til klikbare HTML-links."""
+    """Konverter markdown-links [tekst](url) i logtekst til klikbare HTML-links.
+
+    Teksten skal allerede være HTML-escaped, så kun de links regex'en selv
+    genkender (http/https) bliver til <a> tags.
+    """
     return _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
+
+
+def _open_http_link(url: QUrl) -> None:
+    """Åbn et link fra log/trackable-panelerne i systemets browser.
+
+    Log- og trackable-tekst er skrevet af tredjepart, så kun http/https må
+    åbnes — samme regel som _DescWebPage bruger for beskrivelsen. Andre
+    skemaer (file:, smb:, ms-…: osv.) ignoreres.
+    """
+    if url.scheme() in ("http", "https"):
+        webbrowser.open(url.toString())
 
 
 class _DescWebPage(QWebEnginePage):
@@ -348,7 +363,9 @@ class CacheDetailPanel(QWidget):
         log_layout.setSpacing(4)
 
         self._log_browser = QTextBrowser()
-        self._log_browser.setOpenExternalLinks(True)  # issue #219 — links åbnes i systemets browser
+        # issue #219 — links åbnes i systemets browser, men kun http/https
+        self._log_browser.setOpenLinks(False)
+        self._log_browser.anchorClicked.connect(_open_http_link)
         log_layout.addWidget(self._log_browser)
         self._tabs.addTab(log_widget, tr("detail_tab_logs"))
 
@@ -371,7 +388,8 @@ class CacheDetailPanel(QWidget):
         tb_layout = QVBoxLayout(tb_widget)
         tb_layout.setContentsMargins(0, 4, 0, 0)
         self._tb_browser = QTextBrowser()
-        self._tb_browser.setOpenExternalLinks(True)
+        self._tb_browser.setOpenLinks(False)
+        self._tb_browser.anchorClicked.connect(_open_http_link)
         tb_layout.addWidget(self._tb_browser)
         self._tabs.addTab(tb_widget, tr("col_trackables"))
 
@@ -743,22 +761,24 @@ class CacheDetailPanel(QWidget):
             return
 
         colours = LOG_COLOURS
-        html = []
+        parts = []
         for log in logs:
             colour = colours.get(log.log_type, "#555555")
             date_str = _format_date(log.log_date) if log.log_date else "?"
             # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
-            text = log.text or ""
+            # Logtekst er tredjeparts-indhold: escape først, så kun de
+            # markdown-links vi selv genkender bliver til <a> tags
+            text = html.escape(log.text or "")
             # issue #219 — markdown-links [tekst](url) gøres til klikbare <a> tags
             text = _convert_markdown_links(text)
-            html.append(
-                f'<p><b style="color:{colour}">{log.log_type}</b> '
-                f'— {log.finder or "?"} '
+            parts.append(
+                f'<p><b style="color:{colour}">{html.escape(log.log_type or "")}</b> '
+                f'— {html.escape(log.finder or "?")} '
                 f'<span style="color:{hint_text_color()}">({date_str})</span><br>'
                 f'{text}</p><hr>'
             )
 
-        self._log_browser.setHtml("".join(html))
+        self._log_browser.setHtml("".join(parts))
 
     def _render_waypoints(self, cache: Cache) -> None:
         wps = cache.waypoints
@@ -823,15 +843,16 @@ class CacheDetailPanel(QWidget):
         self._tabs.setTabText(
             tab_idx, tr("detail_tab_trackables_count", count=len(trackables))
         )
-        html = []
+        parts = []
         for t in trackables:
-            name = t.name or "?"
+            name = html.escape(t.name or "?")
             if t.ref:
-                link = f'<a href="https://coord.info/{t.ref}">{t.ref}</a>'
-                html.append(f'<p>🐛 {name} ({link})</p>')
+                ref = html.escape(t.ref)
+                link = f'<a href="https://coord.info/{ref}">{ref}</a>'
+                parts.append(f'<p>🐛 {name} ({link})</p>')
             else:
-                html.append(f'<p>🐛 {name}</p>')
-        self._tb_browser.setHtml("".join(html))
+                parts.append(f'<p>🐛 {name}</p>')
+        self._tb_browser.setHtml("".join(parts))
 
     def _on_tab_changed(self, idx: int) -> None:
         if idx == 3:
