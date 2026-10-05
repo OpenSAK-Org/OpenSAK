@@ -1276,6 +1276,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Verwijderen",
     "settings_folder_perm_add_title": "Kies een map voor macro's",
     "settings_folder_perm_duplicate": "Deze map staat al in de lijst.",
+    "settings_folder_perm_root": "{path} is de hoofdmap van een station. Macro's mogen geen volledig station benaderen — kies in plaats daarvan een map daarop.",
     "settings_folder_perm_no_rights_title": "Geen machtigingen",
     "settings_folder_perm_no_rights_msg": "{path}\n\nheeft geen lees- of schrijfmachtiging. Uit de lijst verwijderen?",
     "gc_not_logged_in":             "Niet ingelogd",

@@ -1280,6 +1280,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Usuń",
     "settings_folder_perm_add_title": "Wybierz folder dla makr",
     "settings_folder_perm_duplicate": "Ten folder jest już na liście.",
+    "settings_folder_perm_root": "{path} to katalog główny dysku. Makra nie mogą mieć dostępu do całego dysku — wybierz zamiast tego folder na nim.",
     "settings_folder_perm_no_rights_title": "Brak uprawnień",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnie ma uprawnień do odczytu ani zapisu. Usunąć go z listy?",
     "gc_not_logged_in":             "Niezalogowany",

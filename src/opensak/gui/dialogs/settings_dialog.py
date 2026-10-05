@@ -974,10 +974,18 @@ class SettingsDialog(QDialog):
 
     def _add_perm_folder(self, chosen: str) -> None:
         """Add *chosen* with read permission. It is stored resolved, so the
-        list shows the folder the access check really compares against."""
-        from opensak.macro.permissions import resolve_path
+        list shows the folder the access check really compares against.
+        A filesystem root is refused — it would open the whole drive."""
+        from opensak.macro.permissions import is_root_folder, resolve_path
 
         folder = resolve_path(chosen)
+        if is_root_folder(folder):
+            QMessageBox.warning(
+                self,
+                tr("settings_tab_folder_permissions"),
+                tr("settings_folder_perm_root", path=str(folder)),
+            )
+            return
         table = self._perms()
         for row in range(table.rowCount()):
             if resolve_path(self._perm_path(row)) == folder:

@@ -1280,6 +1280,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Quitar",
     "settings_folder_perm_add_title": "Seleccione una carpeta para macros",
     "settings_folder_perm_duplicate": "Esta carpeta ya está en la lista.",
+    "settings_folder_perm_root": "{path} es la raíz de una unidad. Las macros no pueden acceder a una unidad entera; elija en su lugar una carpeta de ella.",
     "settings_folder_perm_no_rights_title": "Sin permisos",
     "settings_folder_perm_no_rights_msg": "{path}\n\nno tiene permiso de lectura ni de escritura. ¿Quitarla de la lista?",
     "gc_not_logged_in":             "No has iniciado sesión",

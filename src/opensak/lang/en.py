@@ -1278,6 +1278,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Remove",
     "settings_folder_perm_add_title": "Select a folder for macros",
     "settings_folder_perm_duplicate": "This folder is already in the list.",
+    "settings_folder_perm_root": "{path} is the root of a drive. Macros may not access a whole drive — choose a folder on it instead.",
     "settings_folder_perm_no_rights_title": "No permissions",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhas neither read nor write permission. Remove it from the list?",
     "gc_not_logged_in":             "Not logged in",

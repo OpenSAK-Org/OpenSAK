@@ -1280,6 +1280,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Entfernen",
     "settings_folder_perm_add_title": "Ordner für Makros auswählen",
     "settings_folder_perm_duplicate": "Dieser Ordner ist bereits in der Liste.",
+    "settings_folder_perm_root": "{path} ist das Stammverzeichnis eines Laufwerks. Makros dürfen nicht auf ein ganzes Laufwerk zugreifen — wählen Sie stattdessen einen Ordner darauf.",
     "settings_folder_perm_no_rights_title": "Keine Berechtigungen",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhat weder Lese- noch Schreibberechtigung. Aus der Liste entfernen?",
     "gc_not_logged_in":             "Nicht eingeloggt",

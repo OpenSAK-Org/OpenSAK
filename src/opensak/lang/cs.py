@@ -1275,6 +1275,7 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_remove":  "Odebrat",
     "settings_folder_perm_add_title": "Vyberte složku pro makra",
     "settings_folder_perm_duplicate": "Tato složka už je v seznamu.",
+    "settings_folder_perm_root": "{path} je kořen jednotky. Makra nesmí přistupovat k celé jednotce — vyberte místo toho složku na ní.",
     "settings_folder_perm_no_rights_title": "Žádná oprávnění",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnemá oprávnění ke čtení ani k zápisu. Odebrat ji ze seznamu?",
     "gc_not_logged_in":             "Nepřihlášen",

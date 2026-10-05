@@ -6,7 +6,7 @@ its use by opensak.read_csv(), and the Settings → Folder permissions tab.
 
 import os
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,8 +16,10 @@ from opensak.macro.permissions import (
     STORE_KEY,
     FolderAccessDenied,
     FolderPermission,
+    _is_root,
     check_access,
     default_permissions,
+    is_root_folder,
     load_permissions,
     protected_reason,
     resolve_path,
@@ -156,6 +158,37 @@ def test_most_specific_folder_wins(tmp_path):
         check_access(tmp_path / "locked" / "a.csv", permissions=perms)
 
 
+@pytest.mark.parametrize("path, expected", [
+    (PurePosixPath("/"), True),                         # Linux / macOS
+    (PureWindowsPath("C:\\"), True),                    # drive
+    (PureWindowsPath("\\\\server\\share\\"), True),     # network share
+    (PurePosixPath("/home"), False),
+    (PurePosixPath("/Volumes/USB"), False),
+    (PureWindowsPath("C:\\Data"), False),
+    (PureWindowsPath("\\\\server\\share\\gpx"), False),
+])
+def test_root_detection_on_every_platform(path, expected):
+    assert _is_root(path) is expected
+
+
+def test_is_root_folder_resolves_first(tmp_path):
+    assert is_root_folder(tmp_path.anchor)
+    assert is_root_folder(os.path.join(str(tmp_path), *[".."] * len(tmp_path.parts)))
+    assert not is_root_folder(tmp_path)
+
+
+def test_root_entry_grants_nothing(tmp_path):
+    with pytest.raises(FolderAccessDenied):
+        check_access(tmp_path / "a.csv", write=True, permissions=[_rw(tmp_path.anchor)])
+    # a real folder below the root still works next to it
+    check_access(tmp_path / "a.csv", permissions=[_rw(tmp_path.anchor), _rw(tmp_path)])
+
+
+def test_load_drops_root_entries(tmp_path):
+    save_permissions([_rw(tmp_path.anchor), _rw(tmp_path)])
+    assert load_permissions() == [_rw(tmp_path)]
+
+
 def test_listed_folder_with_env_var(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENSAK_TEST_DIR", str(tmp_path))
     check_access(tmp_path / "a.csv", permissions=[_rw(os.path.join("$OPENSAK_TEST_DIR"))])
@@ -280,6 +313,15 @@ def test_add_stores_resolved_path_and_rejects_duplicates(dlg, tmp_path, monkeypa
     dlg._add_perm_folder(str(tmp_path / "data"))
     info.assert_called_once()
     assert len(_rows(dlg)) == 3
+
+
+def test_add_refuses_root_folder(dlg, tmp_path, monkeypatch):
+    from opensak.gui.dialogs import settings_dialog as sd
+    warn = MagicMock()
+    monkeypatch.setattr(sd.QMessageBox, "warning", warn)
+    dlg._add_perm_folder(tmp_path.anchor)
+    warn.assert_called_once()
+    assert len(_rows(dlg)) == 2
 
 
 def test_remove_selected_and_save_empty_list(dlg):

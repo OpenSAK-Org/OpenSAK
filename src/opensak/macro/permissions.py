@@ -14,6 +14,11 @@ Windows junctions) cannot lead out of a permitted folder. When folders are
 nested, the most specific entry decides — a sub-folder listed without
 rights therefore blocks it even if a parent folder is permitted.
 
+A filesystem root (/, a drive such as C:\\ or a network share such as
+\\\\server\\share) is never a permitted folder, since it would open the
+whole drive: Settings refuses to add one, and an entry for a root in
+opensak.json (edited by hand) is ignored.
+
 OpenSAK's own data can never be read or written by a macro, whatever the
 list says (see protected_reason()): opensak.json, bootstrap.json, the
 Geocaching.com token, the data and database folders (except the macros
@@ -26,7 +31,7 @@ from __future__ import annotations
 import os
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Iterable, Optional
 
 STORE_KEY = "macros.folder_permissions"
@@ -60,6 +65,24 @@ def resolve_path(path: str | Path) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
 
 
+def is_root_folder(path: str | Path) -> bool:
+    """True if *path* is a filesystem root: "/" on Linux/macOS, a drive
+    ("C:\\") or a network share ("\\\\server\\share") on Windows.
+
+    The path is resolved first, so e.g. "/tmp/.." counts as the root.
+    """
+    try:
+        resolved = resolve_path(path)
+    except (OSError, RuntimeError):
+        return False
+    return _is_root(resolved)
+
+
+def _is_root(path: PurePath) -> bool:
+    # Only a root is its own parent (for both POSIX and Windows paths).
+    return path.parent == path
+
+
 def temp_dir() -> Path:
     """The system temp folder, resolved (on macOS e.g. /private/var/folders/…/T)."""
     return resolve_path(tempfile.gettempdir())
@@ -87,9 +110,13 @@ def load_permissions() -> list[FolderPermission]:
     if not isinstance(raw, list):
         return default_permissions()
     return [
-        FolderPermission.from_dict(entry)
-        for entry in raw
-        if isinstance(entry, dict) and entry.get("path")
+        perm
+        for perm in (
+            FolderPermission.from_dict(entry)
+            for entry in raw
+            if isinstance(entry, dict) and entry.get("path")
+        )
+        if not is_root_folder(perm.path)
     ]
 
 
@@ -179,6 +206,8 @@ def _matching_entry(
         try:
             folder = resolve_path(perm.path)
         except (OSError, RuntimeError):
+            continue
+        if _is_root(folder):
             continue
         if target.is_relative_to(folder) and len(folder.parts) > best_depth:
             best, best_depth = perm, len(folder.parts)
