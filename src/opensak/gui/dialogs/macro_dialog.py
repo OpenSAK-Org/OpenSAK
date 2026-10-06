@@ -223,7 +223,8 @@ class MacroDialog(QDialog):
         last buttons (Help) into the » overflow menu. Capped to the screen."""
         margins = layout.contentsMargins()
         needed = toolbar.sizeHint().width() + margins.left() + margins.right()
-        screen = self.parent().screen() if self.parent() is not None else None
+        parent = self.parentWidget()
+        screen = parent.screen() if parent is not None else None
         if screen is None:
             screen = QApplication.primaryScreen()
         if screen:
