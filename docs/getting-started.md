@@ -39,7 +39,7 @@ See [Installation](installation.md) for all options, how updating works, and how
 The first time you start OpenSAK, the **Welcome Wizard** walks you through a few steps:
 
 1. **Installation folder** — where OpenSAK keeps its settings and log file. The default is fine for most people.
-2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up).
+2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up). If the folder already holds OpenSAK databases — after a reinstall or on a new computer — the wizard lists them and offers to add them; untick any you don't want.
 3. **Backup folder** — where OpenSAK keeps its backups, by default *Documents/OpenSAK Backups*. A folder on another disk, an external drive or a synced folder is safest, because it also protects your data if your computer's disk fails.
 4. **Your Geocaching profile** — optional; you can also set this later in Settings.
 
@@ -229,6 +229,9 @@ OpenSAK supports multiple separate databases — useful if you geocache in diffe
 2. Click **New Database**
 3. Give it a name and set a centre point (home coordinates for that region)
 4. Click **Create**
+
+### Adding Databases You Already Have
+Click **Open existing…** in **File → Manage databases…** to add one database file, or **Scan database folder…** to see every OpenSAK database in your database folder that isn't in the list yet and add the ones you tick. OpenSAK never adds databases by itself, so one you removed from the list stays removed until you add it again.
 
 ### Switching Between Databases
 Go to **File → Manage databases…** and double-click any database to switch to it.

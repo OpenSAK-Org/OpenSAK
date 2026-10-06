@@ -4,6 +4,8 @@ src/opensak/gui/dialogs/welcome_wizard.py — Velkomst-wizard til første opstar
 Issue #210: Bruger vælger installations-mappe og database-mappe ved første opstart.
 Issue #358: Kan også genåbnes manuelt fra Settings → Advanced.
 Issue #986: Backup-mappe som eget trin.
+Issue #985: Tilbyder at tilføje databaser der allerede ligger i den valgte
+databasemappe.
 
 6 trin:
   1. Velkomst + sprog-valg
@@ -220,6 +222,12 @@ class WelcomeWizard(QDialog):
         from opensak.backup.backupset import get_backup_dir
         self._default_backup = get_backup_dir()
 
+        # Issue #985: databases found in the chosen database folder that the
+        # user chose to add, and the folder they were found in — so going
+        # Back and Next again without changing the folder doesn't ask twice.
+        self._dbs_to_add: list[Path] = []
+        self._scanned_db_dir: Path | None = None
+
         self._setup_ui()
         self._update_buttons()
 
@@ -246,6 +254,7 @@ class WelcomeWizard(QDialog):
 
         for p in (p1, p2, p3, p_backup, p5, p6):
             self._stack.addWidget(p)
+        self._db_page_index = self._stack.indexOf(p3)
         self._backup_page_index = self._stack.indexOf(p_backup)
 
         # Knapper
@@ -303,6 +312,8 @@ class WelcomeWizard(QDialog):
             self._update_buttons()
 
     def _go_next(self):
+        if self._current == self._db_page_index:
+            self._offer_found_databases()
         if self._current == self._backup_page_index and not self._check_backup_dir():
             return
         if self._current == self._total - 1:
@@ -326,6 +337,58 @@ class WelcomeWizard(QDialog):
             return
         self._save_all(use_defaults=False)
         self.accept()
+
+    def _offer_found_databases(self) -> None:
+        """
+        Issue #985: if the chosen database folder already holds OpenSAK
+        databases that aren't in the list (a reinstall, a new machine), offer
+        to add them. Only asked again when the folder has changed.
+        """
+        folder = self._db_row.path
+        if folder == self._scanned_db_dir:
+            return
+        self._scanned_db_dir = folder
+        self._dbs_to_add = []
+
+        from opensak.db.discover import find_unregistered_databases
+        from opensak.gui.dialogs.found_databases_dialog import ask_which_to_add
+        found = find_unregistered_databases(folder, self._registered_db_paths(folder))
+        if found:
+            self._dbs_to_add = ask_which_to_add(found, folder, self)
+
+    @staticmethod
+    def _registered_db_paths(folder: Path) -> list[Path]:
+        """
+        Paths already in the database list, read from opensak.json rather
+        than the DatabaseManager: creating the manager before databases.dir
+        is saved would put the Default database in the wrong folder (#973).
+
+        With no list yet (a fresh install), <folder>/Default.db is counted as
+        registered too: the manager picks it up as the Default database by
+        itself, so offering it would only confuse.
+        """
+        from opensak.settings_store import get_store
+        entries = get_store().get("databases.list") or []
+        paths = [
+            Path(e["path"]) for e in entries
+            if isinstance(e, dict) and e.get("path")
+        ]
+        if not paths:
+            paths.append(folder / "Default.db")
+        return paths
+
+    def _add_found_databases(self, db_dir: Path) -> None:
+        """Issue #985: add the databases chosen in _offer_found_databases()."""
+        chosen = [p for p in self._dbs_to_add if p.parent == db_dir]
+        if not chosen:
+            return
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        for path in chosen:
+            try:
+                manager.open_database(path)
+            except Exception as exc:  # noqa: BLE001 — one bad file must not stop the rest
+                logger.warning("wizard: could not add %s: %s", path, exc)
 
     def _check_backup_dir(self) -> bool:
         """
@@ -427,6 +490,11 @@ class WelcomeWizard(QDialog):
 
         store.set("databases.dir", str(db_dir))
         store.set("_wizard_completed", True)
+
+        # Issue #985: only now that databases.dir is saved may the manager be
+        # created (#973). Skip never adds anything — no active choice made.
+        if not use_defaults:
+            self._add_found_databases(db_dir)
 
         # Issue #986: store the backup folder only when the user went through
         # the wizard. Skip leaves backup.dir unset, so the default applies.

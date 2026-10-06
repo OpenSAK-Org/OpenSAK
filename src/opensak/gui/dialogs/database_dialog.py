@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.db.manager import DatabaseManager, DatabaseInfo, get_db_manager
+from opensak.db.discover import find_unregistered_databases
+from opensak.gui.dialogs.found_databases_dialog import ask_which_to_add
 from opensak.lang import tr
 from opensak.gui.theme import hint_text_color
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
@@ -205,6 +207,11 @@ class DatabaseManagerDialog(QDialog):
         self._btn_open.clicked.connect(self._open_database)
         btn_layout.addWidget(self._btn_open)
 
+        # Issue #985: pick up databases already in the database folder.
+        self._btn_scan = QPushButton(tr("db_scan_btn"))
+        self._btn_scan.clicked.connect(self._scan_database_folder)
+        btn_layout.addWidget(self._btn_scan)
+
         self._btn_copy = QPushButton(tr("db_copy_btn"))
         self._btn_copy.setEnabled(False)
         self._btn_copy.clicked.connect(self._copy_database)
@@ -376,6 +383,41 @@ class DatabaseManagerDialog(QDialog):
                 )
             except Exception as e:
                 QMessageBox.warning(self, tr("warning"), str(e))
+
+    def _scan_database_folder(self) -> None:
+        """
+        Issue #985: list the OpenSAK databases in the database folder that
+        aren't in the list, and add the ones the user ticks. Only the
+        configured database folder is scanned, and only when asked.
+        """
+        from opensak.settings_store import get_db_dir
+        folder = get_db_dir()
+        found = find_unregistered_databases(
+            folder, [db.path for db in self._manager.databases]
+        )
+        if not found:
+            QMessageBox.information(
+                self, tr("db_found_title"), tr("db_found_none", folder=str(folder))
+            )
+            return
+        paths = ask_which_to_add(found, folder, self)
+        if not paths:
+            return
+        added: list[DatabaseInfo] = []
+        errors: list[str] = []
+        for path in paths:
+            try:
+                added.append(self._manager.open_database(path))
+            except Exception as e:
+                errors.append(f"{path.name}: {e}")
+        self._refresh_list(select_db=added[0] if added else None)
+        if errors:
+            QMessageBox.warning(self, tr("warning"), "\n".join(errors))
+        if added:
+            QMessageBox.information(
+                self, tr("db_found_title"),
+                tr("db_found_added", names="\n".join(db.name for db in added)),
+            )
 
     def _copy_database(self) -> None:
         db = self._selected_db()
