@@ -533,6 +533,21 @@ class SettingsDialog(QDialog):
         folders_hint.setStyleSheet(hint_style())
         folders_layout.addWidget(folders_hint)
 
+        # Issue #986: the backup folder (#942), next to the other folders.
+        # Takes effect at once — no restart needed.
+        from opensak.backup.backupset import get_backup_dir
+
+        folders_layout.addSpacing(8)
+        folders_layout.addWidget(QLabel(tr("backup_folder_label")))
+        self._backup_dir_row = DirRow(get_backup_dir())
+        folders_layout.addWidget(self._backup_dir_row)
+        backup_dir_note = QLabel(
+            tr("backup_folder_tip") + " " + tr("settings_backup_dir_note")
+        )
+        backup_dir_note.setWordWrap(True)
+        backup_dir_note.setStyleSheet(hint_style())
+        folders_layout.addWidget(backup_dir_note)
+
         # Issue #519: custom icons folder — read-only path (not user-browsable,
         # it's always <install_dir>/icons) plus an "Open folder" button so
         # users can drop in replacement SVGs without knowing the path.
@@ -785,6 +800,8 @@ class SettingsDialog(QDialog):
         new_db_dir = get_db_dir()
         self._install_dir_row.set_path(new_install_dir)
         self._db_dir_row.set_path(new_db_dir)
+        from opensak.backup.backupset import get_backup_dir
+        self._backup_dir_row.set_path(get_backup_dir())
 
         if new_install_dir != old_install_dir:
             QMessageBox.information(
@@ -1595,6 +1612,8 @@ class SettingsDialog(QDialog):
         from opensak.settings_store import get_install_dir, get_db_dir
         self._install_dir_row.set_path(get_install_dir())
         self._db_dir_row.set_path(get_db_dir())
+        from opensak.backup.backupset import get_backup_dir
+        self._backup_dir_row.set_path(get_backup_dir())
         idx = self._unit_combo.findData(s.use_miles)
         self._unit_combo.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._map_provider.findData(s.map_provider)
@@ -1652,12 +1671,37 @@ class SettingsDialog(QDialog):
         # Opdater GC-status
         self._refresh_gc_status_on_open()
 
+    def _backup_dir_is_valid(self) -> bool:
+        """Issue #986: warn and return False if the backup folder is unsuitable."""
+        from opensak.backup.backupset import (
+            BackupError, get_backup_dir, validate_backup_dir,
+        )
+        from opensak.settings_store import get_db_dir
+        new_backup_dir = self._backup_dir_row.path
+        new_db_dir = self._db_dir_row.path
+        if new_backup_dir == get_backup_dir() and new_db_dir == get_db_dir():
+            return True
+        try:
+            validate_backup_dir(new_backup_dir, db_dir=new_db_dir)
+        except BackupError:
+            QMessageBox.warning(
+                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
+            )
+            return False
+        return True
+
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK
         if self._editing_original_name is not None:
             self._add_point()
             if self._editing_original_name is not None:
                 return  # validation failed — keep dialog open
+
+        # Issue #986: refuse an unsuitable backup folder before anything is
+        # saved, so the dialog stays open with nothing half-applied. Checked
+        # against the database folder as entered here, which may be new too.
+        if not self._backup_dir_is_valid():
+            return
 
         s = get_settings()
         s.gc_username       = self._gc_username.text()
@@ -1708,6 +1752,13 @@ class SettingsDialog(QDialog):
         from opensak.settings_store import get_store as _get_store
         exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
         _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
+        # Issue #986: only a changed folder is stored, so the default isn't
+        # frozen into opensak.json just because some other setting was saved.
+        # Existing backups stay where they are.
+        from opensak.backup.backupset import BACKUP_DIR_KEY, get_backup_dir
+        new_backup_dir = self._backup_dir_row.path
+        if new_backup_dir != get_backup_dir():
+            _get_store().set(BACKUP_DIR_KEY, str(new_backup_dir))
 
         # PQ Email (issue #443) — kodeordet gemmes kun i OS keyring
         # (opensak.email.credentials), aldrig i opensak.json. Et tomt

@@ -151,17 +151,26 @@ def set_backup_dir(path: Path) -> None:
     get_store().set(BACKUP_DIR_KEY, str(path))
 
 
-def validate_backup_dir(path: Path) -> None:
+def validate_backup_dir(
+    path: Path,
+    *,
+    install_dir: Optional[Path] = None,
+    db_dir: Optional[Path] = None,
+) -> None:
     """
     Raise BackupError if *path* can't hold backups: it must not be (inside)
     the install folder or the database folder. A backup inside what it
     backs up would copy itself, and an uninstall would remove it.
+
+    *install_dir* and *db_dir* default to the folders in use now. The
+    Welcome Wizard and Settings pass the folders the user has just chosen
+    but not saved yet (#986).
     """
     from opensak.settings_store import get_db_dir, get_install_dir
     candidate = _resolved(Path(path))
     for label, protected in (
-        ("install folder", get_install_dir()),
-        ("database folder", get_db_dir()),
+        ("install folder", install_dir if install_dir is not None else get_install_dir()),
+        ("database folder", db_dir if db_dir is not None else get_db_dir()),
     ):
         root = _resolved(protected)
         if candidate == root or candidate.is_relative_to(root):

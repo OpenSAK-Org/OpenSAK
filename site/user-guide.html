@@ -1083,7 +1083,7 @@ python run.py</code></pre>
 
     <h3>Backing Up</h3>
     <p>Use <strong>File → Back up now…</strong> to make a backup of your databases together with your settings, filter profiles, column views and custom icons. All databases are selected by default; untick any you want to leave out.</p>
-    <p>Backups go into a backup folder, by default <em>Documents/OpenSAK Backups</em>. You can choose another folder in the same dialog. A folder on another disk, an external drive or a synced folder is the safest choice, because it also protects your data if your computer's disk fails. OpenSAK won't store backups inside its own data or database folder.</p>
+    <p>Backups go into a backup folder, by default <em>Documents/OpenSAK Backups</em>. You choose it in the Welcome Wizard, and can change it under <strong>Settings → Advanced → Folders</strong> or in the same dialog. Existing backups stay where they are when you change the folder. A folder on another disk, an external drive or a synced folder is the safest choice, because it also protects your data if your computer's disk fails. OpenSAK won't store backups inside its own data or database folder.</p>
     <p>Each backup is a separate, dated folder, so you can keep as many as you like. Backups you make this way are never deleted by OpenSAK.</p>
 
     <h3>Backing Up When You Close OpenSAK</h3>
@@ -1408,12 +1408,13 @@ python run.py</code></pre>
     <h3>Advanced Tab</h3>
 
     <h4>Folders</h4>
-    <p>Shows the current installation folder (read-only) and the database folder. The database folder can be changed directly here — no need to go through the setup wizard again.</p>
+    <p>Shows the current installation folder (read-only), the database folder and the backup folder. The database and backup folders can be changed directly here — no need to go through the setup wizard again.</p>
     <table>
       <thead><tr><th>Setting</th><th>Description</th></tr></thead>
       <tbody>
         <tr><td>Database folder</td><td>Change where new and existing databases are stored. If existing databases are found in the old location, you're asked whether to move them along (keep originals, delete originals, or leave them and only use the new folder for future databases)</td></tr>
-        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language or installation folder</td></tr>
+        <tr><td>Backup folder</td><td>Where backups are stored (see <a href="#databases">Backing Up</a>). OpenSAK refuses a folder inside its own data or database folder. Changing it doesn't move existing backups, and no restart is needed</td></tr>
+        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language, installation folder or backup folder</td></tr>
       </tbody>
     </table>
 

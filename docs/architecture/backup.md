@@ -8,6 +8,8 @@
 
 *5 October 2026 (#959): the on-exit setting and the number of automatic backups to keep are in Settings → Advanced → Backups. The prompt's button is "Back Up and Close"; with the setting Always and a backup folder that can't be used (e.g. a drive that isn't connected), the prompt is shown instead.*
 
+*6 October 2026 (#986): the Welcome Wizard has a backup folder page after the database folder page, and Settings → Advanced → Folders has a backup folder row. Both check the folder against the install and database folders as entered on screen, before they are saved. Skip leaves `backup.dir` unset; a folder is only stored when the user finishes the wizard or changes the row.*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.

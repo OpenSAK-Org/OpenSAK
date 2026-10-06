@@ -3,13 +3,15 @@ src/opensak/gui/dialogs/welcome_wizard.py — Velkomst-wizard til første opstar
 
 Issue #210: Bruger vælger installations-mappe og database-mappe ved første opstart.
 Issue #358: Kan også genåbnes manuelt fra Settings → Advanced.
+Issue #986: Backup-mappe som eget trin.
 
-5 trin:
+6 trin:
   1. Velkomst + sprog-valg
   2. Installationsmappe (settings + logs)
   3. Databasemappe
-  4. GC profil (brugernavn + hjemkoordinat)
-  5. Færdig
+  4. Backup-mappe
+  5. GC profil (brugernavn + hjemkoordinat)
+  6. Færdig
 """
 
 from __future__ import annotations
@@ -118,8 +120,27 @@ def _page_db_dir(default: Path) -> tuple[QWidget, _DirRow]:
     return page, row
 
 
+def _page_backup_dir(default: Path) -> tuple[QWidget, _DirRow]:
+    """Trin 4: Vælg backup-mappe (#986)."""
+    page = QWidget()
+    lay = QVBoxLayout(page)
+    lay.addWidget(_make_header(
+        tr("wizard_backup_dir_title"),
+        tr("wizard_backup_dir_subtitle"),
+    ))
+    lay.addSpacing(8)
+    row = _DirRow(default)
+    lay.addWidget(row)
+    note = QLabel(tr("backup_folder_tip"))
+    note.setWordWrap(True)
+    note.setStyleSheet("color: palette(mid); font-size: 11px;")
+    lay.addWidget(note)
+    lay.addStretch()
+    return page, row
+
+
 def _page_gc_profile() -> tuple[QWidget, QLineEdit, QLineEdit]:
-    """Trin 4: GC brugernavn + hjemkoordinat."""
+    """Trin 5: GC brugernavn + hjemkoordinat."""
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.addWidget(_make_header(
@@ -148,7 +169,7 @@ def _page_gc_profile() -> tuple[QWidget, QLineEdit, QLineEdit]:
 
 
 def _page_done() -> QWidget:
-    """Trin 5: Færdig."""
+    """Trin 6: Færdig."""
     page = QWidget()
     lay = QVBoxLayout(page)
     lay.addStretch()
@@ -194,6 +215,10 @@ class WelcomeWizard(QDialog):
         # tilfælde), men ved genkørsel af wizarden skal det IKKE foreslå at
         # flytte en allerede valgt databasemappe tilbage til install-mappen.
         self._default_db = get_db_dir()
+        # Issue #986: the folder in use now — the default when none is set,
+        # the chosen one when the wizard is run again from Settings.
+        from opensak.backup.backupset import get_backup_dir
+        self._default_backup = get_backup_dir()
 
         self._setup_ui()
         self._update_buttons()
@@ -215,11 +240,13 @@ class WelcomeWizard(QDialog):
         p1, self._lang_combo = _page_welcome()
         p2, self._install_row = _page_install_dir(self._default_install)
         p3, self._db_row = _page_db_dir(self._default_db)
-        p4, self._username_edit, self._home_edit = _page_gc_profile()
-        p5 = _page_done()
+        p_backup, self._backup_row = _page_backup_dir(self._default_backup)
+        p5, self._username_edit, self._home_edit = _page_gc_profile()
+        p6 = _page_done()
 
-        for p in (p1, p2, p3, p4, p5):
+        for p in (p1, p2, p3, p_backup, p5, p6):
             self._stack.addWidget(p)
+        self._backup_page_index = self._stack.indexOf(p_backup)
 
         # Knapper
         btn_lay = QHBoxLayout()
@@ -276,6 +303,8 @@ class WelcomeWizard(QDialog):
             self._update_buttons()
 
     def _go_next(self):
+        if self._current == self._backup_page_index and not self._check_backup_dir():
+            return
         if self._current == self._total - 1:
             self._finish()
         else:
@@ -289,8 +318,34 @@ class WelcomeWizard(QDialog):
 
     def _finish(self):
         """Gem alle valg og luk wizard."""
+        # Issue #986: the install or database folder may have been changed
+        # after the backup page was passed, so check again before saving.
+        if not self._check_backup_dir():
+            self._stack.setCurrentIndex(self._backup_page_index)
+            self._update_buttons()
+            return
         self._save_all(use_defaults=False)
         self.accept()
+
+    def _check_backup_dir(self) -> bool:
+        """
+        Issue #986: the backup folder must not be inside the install or
+        database folder chosen on the earlier pages (not saved yet). Warn and
+        return False if it is.
+        """
+        from opensak.backup.backupset import BackupError, validate_backup_dir
+        try:
+            validate_backup_dir(
+                self._backup_row.path,
+                install_dir=self._install_row.path,
+                db_dir=self._db_row.path,
+            )
+        except BackupError:
+            QMessageBox.warning(
+                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
+            )
+            return False
+        return True
 
     def _save_all(self, use_defaults: bool = False):
         from opensak.settings_store import (
@@ -372,6 +427,16 @@ class WelcomeWizard(QDialog):
 
         store.set("databases.dir", str(db_dir))
         store.set("_wizard_completed", True)
+
+        # Issue #986: store the backup folder only when the user went through
+        # the wizard. Skip leaves backup.dir unset, so the default applies.
+        # The folder itself is created on first use, not here.
+        if not use_defaults:
+            from opensak.backup.backupset import BackupError, set_backup_dir
+            try:
+                set_backup_dir(self._backup_row.path)
+            except BackupError as exc:  # already checked in _finish()
+                logger.warning("wizard: backup folder not saved: %s", exc)
 
         # #562 follow-up: hvis databasemappen lå som en undermappe af den
         # gamle installationsmappe (fx "…/myOpenSAK" + "…/myOpenSAK/Data"),

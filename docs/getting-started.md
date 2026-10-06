@@ -40,7 +40,8 @@ The first time you start OpenSAK, the **Welcome Wizard** walks you through a few
 
 1. **Installation folder** — where OpenSAK keeps its settings and log file. The default is fine for most people.
 2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up).
-3. **Your Geocaching profile** — optional; you can also set this later in Settings.
+3. **Backup folder** — where OpenSAK keeps its backups, by default *Documents/OpenSAK Backups*. A folder on another disk, an external drive or a synced folder is safest, because it also protects your data if your computer's disk fails.
+4. **Your Geocaching profile** — optional; you can also set this later in Settings.
 
 After the wizard you'll see OpenSAK's three-panel layout: the cache list, the cache details and the map — all empty until you import some caches.
 
@@ -238,7 +239,7 @@ Each database has its own:
 - Filter profiles
 
 ### Backing Up
-Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into *Documents/OpenSAK Backups* unless you choose another folder; a folder on another disk or an external drive is safest. Backups you make this way are never deleted by OpenSAK.
+Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into the backup folder you chose in the Welcome Wizard (by default *Documents/OpenSAK Backups*); change it under **Settings → Advanced → Folders** or in the backup dialog itself. A folder on another disk or an external drive is safest. Existing backups stay where they are when you change the folder. Backups you make this way are never deleted by OpenSAK.
 
 When you close OpenSAK and something has changed since your last backup, OpenSAK asks whether to back up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in OpenSAK. Tick **Don't ask again** to always back up or never ask; change it later, together with how many automatic backups to keep (5 by default), under **Settings → Advanced → Backups**. Only the oldest automatic backups are deleted.
 
