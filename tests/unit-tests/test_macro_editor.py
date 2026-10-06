@@ -525,7 +525,11 @@ def test_help_example_opens_in_editor(make_dialog, macros_dir, monkeypatch):
 
 
 def test_window_is_wide_enough_for_the_whole_toolbar(make_dialog):
-    from PySide6.QtWidgets import QToolBar
+    from PySide6.QtWidgets import QApplication, QToolBar
     d = make_dialog()
     toolbar = d.findChild(QToolBar)
-    assert d.width() >= toolbar.sizeHint().width()
+    # The widening is capped to 90% of the screen; CI's offscreen screen is
+    # small, so only expect as much as that cap allows.
+    screen = d.screen() or QApplication.primaryScreen()
+    cap = int(screen.availableGeometry().width() * 0.9)
+    assert d.width() >= min(toolbar.sizeHint().width(), cap)
