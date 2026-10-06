@@ -142,8 +142,10 @@ class TestExistingCopy:
         beside.parent.mkdir()
         beside.write_bytes(b"earlier copy")
 
-        folder = tmp_path / "Backups"
-        folder.mkdir()
+        # Not tmp_path / "Backups": on macOS and Windows that is the same
+        # folder as the "backups" folder next to the database above.
+        folder = tmp_path / "usb" / "OpenSAK Backups"
+        folder.mkdir(parents=True)
         get_store().set(BACKUP_DIR_KEY, str(folder))
 
         assert backup_before_migration(db, SCHEMA_VERSION) is None
