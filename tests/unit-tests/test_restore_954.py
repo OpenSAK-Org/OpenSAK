@@ -408,9 +408,16 @@ class TestRestoreDialog:
         close.assert_not_called()
         d._worker = None
 
-    # No real-thread test here on purpose. One was written, but it fails when
-    # the whole of test_filter_dialog.py has run earlier in the same process:
-    # the worker finishes, yet none of its queued signals reach the GUI thread.
-    # It passes on its own and in every smaller group. Real-thread delivery for
-    # this worker pattern is covered by test_backup_dialog_953.py; the test
-    # pollution is tracked in its own follow-up issue.
+
+class TestRealThread:
+    def test_restore_on_a_real_worker_thread(self, qtbot, manager, backup, boxes):
+        # The other dialog tests run the worker synchronously; this one checks
+        # the signals really cross from the worker thread. It was left out of
+        # #954 because it timed out after test_filter_dialog.py — see #958 and
+        # pytest_runtest_teardown in tests/conftest.py.
+        boxes.question.return_value = rdlg.QMessageBox.StandardButton.No
+        d = _open(qtbot, backup.path.parent)
+        with qtbot.waitSignal(d.databases_added, timeout=10000):
+            d._start()
+        assert any(db.name.startswith("Trip (restored") for db in manager.databases)
+        assert d._worker is None

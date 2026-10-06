@@ -120,6 +120,38 @@ def _no_exit_backup_prompt(monkeypatch):
     monkeypatch.setattr(exit_state, "_clean_on_close", False)
 
 
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """
+    Issue #958: delete the widgets a test leaves behind before the next test.
+
+    pytest-qt closes every widget registered with ``qtbot.addWidget()`` and
+    calls ``deleteLater()`` on it, then runs ``processEvents()``. Outside a
+    running event loop, ``processEvents()`` never handles deferred deletes,
+    so the widgets survive. They are only destroyed the next time any test
+    spins an event loop (``qtbot.waitSignal()``, ``qtbot.wait()``, a
+    QThread worker) — and that first loop pass then has to tear down
+    everything earlier tests left behind.
+
+    After test_filter_dialog.py that was 208 FilterDialogs with about
+    346,000 child widgets, which took about a minute to delete. A later test
+    waiting for a worker's queued signals timed out while the event loop was
+    still busy deleting (the real-thread restore test in
+    test_restore_954.py).
+
+    This wrapper is the outermost one, so it runs after pytest-qt has closed
+    the widgets and after all fixtures are torn down.
+    """
+    result = yield
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+    except ImportError:  # pragma: no cover — PySide6 is always installed
+        return result
+    if QCoreApplication.instance() is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return result
+
+
 @pytest.fixture(scope="module")
 def tmp_db(tmp_path_factory):
     # Create a fresh SQLite DB in a temp directory for a test module.
