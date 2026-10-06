@@ -1330,6 +1330,12 @@ class MainWindow(QMainWindow):
         self._dock_map_back()
 
     def closeEvent(self, event) -> None:
+        # Unsaved macro edits: the editor asks Save / Discard / Cancel, and
+        # Cancel keeps OpenSAK open.
+        macro_dialog = getattr(self, "_macro_dialog", None)
+        if macro_dialog is not None and macro_dialog.isVisible() and not macro_dialog.close():
+            event.ignore()
+            return
         # #959: offer a backup first — before any layout is torn down, so
         # Cancel leaves the window exactly as it was. Closing writes nothing
         # to the database, so deciding here sees the final state.

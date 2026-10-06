@@ -66,3 +66,21 @@ def test_macro_menu_follows_tools_menu_and_is_gated(macros_flag, seeded_window):
 def test_macro_error_is_shown_in_output(seeded_window):
     out = _run_macro(seeded_window, "opensak.filter{ bogus = 1 }")
     assert "Macro error" in out and "unknown filter key" in out
+
+
+def test_quitting_asks_about_unsaved_macro_edits(seeded_window, monkeypatch):
+    from unittest.mock import MagicMock
+    from opensak.gui.dialogs import macro_dialog as md
+    seeded_window.show()
+    seeded_window._open_macro_dialog()
+    dlg = seeded_window._macro_dialog
+    dlg._editor.selectAll()
+    dlg._editor.insertPlainText("print(1)")
+    ask = MagicMock(return_value=md.QMessageBox.StandardButton.Cancel)
+    monkeypatch.setattr(md.QMessageBox, "question", ask)
+    seeded_window.close()
+    ask.assert_called_once()
+    assert seeded_window.isVisible() and dlg.isVisible()
+    ask.return_value = md.QMessageBox.StandardButton.Discard
+    dlg.close()
+    assert not dlg.isVisible()
