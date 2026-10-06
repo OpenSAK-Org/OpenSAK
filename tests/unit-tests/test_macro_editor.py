@@ -522,3 +522,10 @@ def test_help_example_opens_in_editor(make_dialog, macros_dir, monkeypatch):
     d._show_help()
     d._help.open_example.emit(names[0])
     assert d.path == macros_dir / "examples" / names[0]
+
+
+def test_window_is_wide_enough_for_the_whole_toolbar(make_dialog):
+    from PySide6.QtWidgets import QToolBar
+    d = make_dialog()
+    toolbar = d.findChild(QToolBar)
+    assert d.width() >= toolbar.sizeHint().width()

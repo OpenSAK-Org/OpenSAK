@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QInputDialog, QLabel, QMenu, QMenuBar, QMessageBox,
+    QApplication, QDialog, QFileDialog, QInputDialog, QLabel, QMenu, QMenuBar, QMessageBox,
     QPlainTextEdit, QSplitter, QStatusBar, QStyle, QToolBar, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -215,7 +215,21 @@ class MacroDialog(QDialog):
         layout.addWidget(toolbar)
         layout.addWidget(splitter, 1)
         layout.addWidget(self._status)
+        self._fit_width_to_toolbar(toolbar, layout)
         self._update_position()
+
+    def _fit_width_to_toolbar(self, toolbar: QToolBar, layout: QVBoxLayout) -> None:
+        """Widen the window so the whole toolbar fits, instead of pushing the
+        last buttons (Help) into the » overflow menu. Capped to the screen."""
+        margins = layout.contentsMargins()
+        needed = toolbar.sizeHint().width() + margins.left() + margins.right()
+        screen = self.parent().screen() if self.parent() is not None else None
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        if screen:
+            needed = min(needed, int(screen.availableGeometry().width() * 0.9))
+        if needed > self.width():
+            self.resize(needed, self.height())
 
     # -- State -----------------------------------------------------------------
 
