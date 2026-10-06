@@ -1032,7 +1032,14 @@ class MainWindow(QMainWindow):
         dlg = RestoreDialog(self)
         dlg.database_switched.connect(self._on_database_switched)
         dlg.databases_added.connect(self._reload_db_combo)
+        # #987: after a settings restore the user may choose to close now;
+        # the restore is applied at the next start. Closed once the dialog
+        # is gone, through the normal close path (back-up-on-exit included).
+        close_requested = []
+        dlg.close_app_requested.connect(lambda: close_requested.append(True))
         dlg.exec()
+        if close_requested:
+            QTimer.singleShot(0, self.close)
 
     def _on_database_renamed(self, db_info) -> None:
         """
@@ -1099,6 +1106,21 @@ class MainWindow(QMainWindow):
             for n in notices
         )
         QMessageBox.information(self, tr("premigration_backup_title"), text)
+
+    def show_settings_restore_notice(self, result: str) -> None:
+        """
+        #987: tell the user, once the window is up, that the settings chosen
+        for restore in the last run were applied at this start — or not.
+        """
+        from opensak.backup.settings_restore import APPLIED
+        if result == APPLIED:
+            QMessageBox.information(
+                self, tr("restore_settings_title"), tr("restore_settings_applied")
+            )
+        else:
+            QMessageBox.warning(
+                self, tr("restore_settings_title"), tr("restore_settings_apply_failed")
+            )
 
     def _reload_db_combo(self) -> None:
         """Genindlæs database-dropdown fra manager."""

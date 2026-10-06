@@ -327,6 +327,14 @@ class SettingsStore:
         if self._data is not None:
             self._flush()
 
+    def reload(self) -> None:
+        """
+        Read opensak.json from disk again on next use (#987: after a settings
+        restore was applied to the file at startup). Unlike
+        invalidate_path_cache(), the resolved file path is kept.
+        """
+        self._data = None
+
     def invalidate_path_cache(self) -> None:
         """
         Nulstil den cachede installations-sti og indlæste data.

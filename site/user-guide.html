@@ -1101,6 +1101,8 @@ python run.py</code></pre>
     <p>Use <strong>File → Restore from backup…</strong> to bring a database back. Pick a backup from the list (newest first), tick the databases you want, and click <strong>Restore</strong>. Use <strong>Browse</strong> to open backups stored in another folder.</p>
     <p>A restored database is always added as a <em>new</em> database, named for example <em>Denmark (restored 2026-10-01)</em> — nothing you have now is ever overwritten. It opens exactly as it was when the backup was taken, with its own home location, columns and sort order. Filter profiles from the backup that you have since deleted are added back; profiles you still have are left as they are.</p>
     <p>A backup made with a newer version of OpenSAK can only be restored after updating OpenSAK.</p>
+    <p><strong>Restoring your settings.</strong> Tick <strong>Also restore settings</strong> to bring back your preferences, filter profiles, column views and icons from the backup — useful on a new computer, or after a settings change you regret. You can also restore only the settings, with no database ticked. It is off by default, and OpenSAK asks you to confirm. Your database list, your folders, your backup settings and the window layout are kept as they are now, since they belong to this computer.</p>
+    <p>Before anything changes, your current settings are saved as a backup marked <em>Settings before restore</em>, which is never deleted automatically — restore that one to go back. The restored settings take effect the next time OpenSAK starts; OpenSAK offers to close right away, and settings you change before then are replaced.</p>
 
     <h3>Useful Multi-Database Patterns</h3>
     <table>

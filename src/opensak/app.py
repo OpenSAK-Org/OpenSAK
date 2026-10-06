@@ -300,6 +300,12 @@ def main() -> None:
     )
     migrate_macos_default_paths()
 
+    # #987: a settings restore chosen in the last run is applied now, after
+    # the path migration and before anything reads the settings (the theme
+    # below is the first) — the running app could otherwise overwrite it.
+    from opensak.backup.settings_restore import apply_pending_settings_restore
+    settings_restore_result = apply_pending_settings_restore()
+
     # Anvend Fusion stil + platform-tilpasset font + brugertema
     # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
     # Skal køre EFTER migrate_macos_default_paths() ovenfor — se
@@ -417,6 +423,10 @@ def main() -> None:
     # Issue #549: after the splash has gone, tell the user if the active
     # database was backed up before being migrated during startup.
     QTimer.singleShot(500, window.show_premigration_backup_notices)
+    if settings_restore_result is not None:
+        QTimer.singleShot(
+            600, lambda: window.show_settings_restore_notice(settings_restore_result)
+        )
 
     window.show()
     exit_code = app.exec()

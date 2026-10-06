@@ -6,6 +6,10 @@ Part of the backup epic (#942); design: docs/architecture/backup.md.
 Restore always adds: every restored database becomes a new database in the
 list (see opensak.backup.restore). Cancelling rolls back the databases
 restored so far in the same run, so a cancelled restore leaves nothing.
+
+#987: "Also restore settings" is opt-in. It saves the current settings as a
+safety set and stages the backup's settings for the next start (see
+opensak.backup.settings_restore); the user is offered to close OpenSAK.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from typing import Any, Optional, Sequence
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QProgressDialog, QPushButton, QVBoxLayout,
     QWidget,
 )
@@ -25,6 +29,7 @@ from PySide6.QtWidgets import (
 from opensak.backup.backupset import (
     is_compressed_set_file,
     KIND_AUTO,
+    KIND_SAFETY,
     MANIFEST_NAME,
     BackupError,
     BackupSet,
@@ -38,6 +43,11 @@ from opensak.backup.restore import (
     is_newer_than_this_version,
     restore_database,
     restore_missing_filter_profiles,
+)
+from opensak.backup.settings_restore import (
+    SettingsRestoreError,
+    can_restore_settings,
+    stage_settings_restore,
 )
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
@@ -144,6 +154,7 @@ class RestoreDialog(QDialog):
 
     database_switched = Signal(object)   # DatabaseInfo — the user switched to it
     databases_added = Signal()           # the database list changed
+    close_app_requested = Signal()       # #987: settings staged, close OpenSAK now
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -154,6 +165,8 @@ class RestoreDialog(QDialog):
         self._sets: list[BackupSet] = []
         self._worker: Optional[RestoreWorker] = None
         self._progress_dialog: Optional[QProgressDialog] = None
+        self._also_settings = False   # #987: chosen for the run in progress
+        self._running_set: Optional[BackupSet] = None
 
         layout = QVBoxLayout(self)
 
@@ -182,6 +195,10 @@ class RestoreDialog(QDialog):
         layout.addWidget(QLabel(tr("restore_databases_label")))
         self._db_list = QListWidget()
         layout.addWidget(self._db_list, 1)
+
+        # #987: opt-in, off for every set that is selected.
+        self._settings_cb = QCheckBox(tr("restore_settings_cb"))
+        layout.addWidget(self._settings_cb)
 
         note = QLabel(tr("restore_note"))
         note.setWordWrap(True)
@@ -218,7 +235,10 @@ class RestoreDialog(QDialog):
 
         self._set_list.clear()
         for s in self._sets:
-            kind = tr("restore_kind_auto" if s.kind == KIND_AUTO else "restore_kind_manual")
+            kind = tr({
+                KIND_AUTO: "restore_kind_auto",
+                KIND_SAFETY: "restore_kind_safety",
+            }.get(s.kind, "restore_kind_manual"))
             text = tr(
                 "restore_set_item",
                 date=s.created.astimezone().strftime("%Y-%m-%d %H:%M"),
@@ -236,14 +256,26 @@ class RestoreDialog(QDialog):
             self._set_list.setCurrentRow(0)
         else:
             self._db_list.clear()
+            self._update_settings_cb(None)
 
     def selected_set(self) -> Optional[BackupSet]:
         row = self._set_list.currentRow()
         return self._sets[row] if 0 <= row < len(self._sets) else None
 
+    def _update_settings_cb(self, backup_set: Optional[BackupSet]) -> None:
+        """#987: unticked for every set; disabled with the reason if it can't."""
+        reason = (
+            can_restore_settings(backup_set) if backup_set is not None
+            else tr("restore_settings_none")
+        )
+        self._settings_cb.setChecked(False)
+        self._settings_cb.setEnabled(reason is None)
+        self._settings_cb.setToolTip(reason or "")
+
     def _on_set_selected(self, _row: int) -> None:
         self._db_list.clear()
         backup_set = self.selected_set()
+        self._update_settings_cb(backup_set)
         if backup_set is None:
             return
         for entry in backup_set.databases:
@@ -282,13 +314,29 @@ class RestoreDialog(QDialog):
     def _start(self) -> None:
         backup_set = self.selected_set()
         entries = self.selected_entries()
-        if backup_set is None or not entries:
+        also_settings = self._settings_cb.isChecked() and self._settings_cb.isEnabled()
+        if backup_set is None or not (entries or also_settings):
             QMessageBox.warning(
                 self, tr("restore_dialog_title"), tr("restore_none_selected")
             )
             return
+        if also_settings:
+            answer = QMessageBox.question(
+                self, tr("restore_dialog_title"), tr("restore_settings_confirm"),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._also_settings = also_settings
 
-        for widget in (self._browse_btn, self._set_list, self._db_list, self._start_btn):
+        if not entries:
+            # Settings only: quick and on this thread, no worker needed.
+            self._report(backup_set, RestoreSummary())
+            return
+
+        for widget in (self._browse_btn, self._set_list, self._db_list,
+                       self._settings_cb, self._start_btn):
             widget.setEnabled(False)
 
         progress = QProgressDialog(
@@ -303,6 +351,7 @@ class RestoreDialog(QDialog):
         progress.setValue(0)
         self._progress_dialog = progress
 
+        self._running_set = backup_set
         worker = RestoreWorker(backup_set, entries, parent=self)
         worker.progress.connect(self._on_progress)
         worker.done.connect(self._on_done)
@@ -327,9 +376,26 @@ class RestoreDialog(QDialog):
         for widget in (self._browse_btn, self._set_list, self._db_list):
             widget.setEnabled(True)
         self._start_btn.setEnabled(bool(self._sets))
+        self._update_settings_cb(self.selected_set())
 
     def _on_done(self, summary: RestoreSummary) -> None:
         self._finish()
+        assert self._running_set is not None
+        self._report(self._running_set, summary)
+
+    def _report(self, backup_set: BackupSet, summary: RestoreSummary) -> None:
+        """Stage the settings if chosen (#987), then tell the user what happened."""
+        settings_staged = False
+        settings_text = ""
+        if self._also_settings:
+            self._also_settings = False
+            try:
+                stage_settings_restore(backup_set)
+                settings_staged = True
+                settings_text = tr("restore_settings_staged")
+            except SettingsRestoreError as exc:
+                settings_text = tr("restore_settings_failed", error=str(exc))
+
         parts = []
         if summary.restored:
             parts.append(tr("restore_done_msg",
@@ -340,13 +406,29 @@ class RestoreDialog(QDialog):
         if summary.profiles_added:
             parts.append(tr("restore_done_profiles",
                             names=", ".join(summary.profiles_added)))
+        if settings_text:
+            parts.append(settings_text)
         text = "\n\n".join(parts)
+
+        if summary.restored:
+            self.databases_added.emit()
+
+        if settings_staged:
+            # The app is about to be closed (or will be): don't also ask
+            # about switching to a restored database.
+            answer = QMessageBox.question(
+                self, tr("restore_done_title"),
+                text + "\n\n" + tr("restore_settings_close_now"),
+            )
+            self.accept()
+            if answer == QMessageBox.StandardButton.Yes:
+                self.close_app_requested.emit()
+            return
 
         if not summary.restored:
             QMessageBox.warning(self, tr("restore_failed_title"), text)
             return
 
-        self.databases_added.emit()
         if len(summary.restored) == 1:
             info = summary.restored[0]
             question = text + "\n\n" + tr("restore_switch_question", name=info.name)
@@ -367,12 +449,15 @@ class RestoreDialog(QDialog):
         self.database_switched.emit(info)
 
     def _on_failed(self, reason: str) -> None:
+        # Nothing was restored, so the settings aren't either (#987).
+        self._also_settings = False
         self._finish()
         QMessageBox.critical(
             self, tr("restore_failed_title"), tr("restore_failed_msg", error=reason)
         )
 
     def _on_cancelled(self) -> None:
+        self._also_settings = False
         self._finish()
         QMessageBox.information(
             self, tr("restore_dialog_title"), tr("restore_cancelled_msg")

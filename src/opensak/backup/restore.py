@@ -9,7 +9,7 @@ list, and nothing that exists is ever overwritten. It keeps its ``db_uuid``
 settings live inside the file (#659), it opens exactly as it was.
 
 Restoring the settings themselves (opensak.json, column views, icons) is a
-separate, opt-in step — sub-issue 6 of #942. Only filter profiles that no
+separate, opt-in step — see settings_restore.py (#987). Only filter profiles that no
 longer exist are added back here, so a restored database finds its
 last-used profile.
 """

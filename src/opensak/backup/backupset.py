@@ -51,7 +51,10 @@ DEFAULT_DIRNAME = "OpenSAK Backups"
 
 KIND_AUTO = "auto"
 KIND_MANUAL = "manual"
-_KINDS = (KIND_AUTO, KIND_MANUAL)
+# #987: settings only, written just before a settings restore so it can be
+# undone. Never rotated away — rotation only ever touches KIND_AUTO.
+KIND_SAFETY = "safety"
+_KINDS = (KIND_AUTO, KIND_MANUAL, KIND_SAFETY)
 
 SET_PREFIX = "OpenSAK-backup-"
 PARTIAL_SUFFIX = ".partial"
@@ -68,7 +71,7 @@ _SETTINGS_DIRS = ("filters", "column_views", "icons")
 
 # A set folder OpenSAK made: prefix, timestamp, kind, optional -N suffix.
 _SET_NAME_RE = re.compile(
-    r"^OpenSAK-backup-\d{4}-\d{2}-\d{2}_\d{4}-(auto|manual)(-\d+)?$"
+    r"^OpenSAK-backup-\d{4}-\d{2}-\d{2}_\d{4}-(auto|manual|safety)(-\d+)?$"
 )
 
 # Free space needed on top of the databases' own size.

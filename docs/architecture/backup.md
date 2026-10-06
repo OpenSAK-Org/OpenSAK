@@ -14,6 +14,8 @@
 
 *6 October 2026 (#989): optional compressed sets, setting `backup.compress`, default off (Settings → Advanced → Backups). A compressed set is `<set name>.zip` with the same layout inside (`manifest.json`, `databases/`, `settings/`). It is written as `<name>.zip.partial` and renamed when complete, manifest last; databases are snapshotted one at a time into `<name>.partial/`, added to the zip and removed, so the extra space needed while writing is the largest database plus the zip (~0.6 × total assumed) — less than a folder set for several databases, more for a single big one. Deflate level 1: on a 234 MB test database 3.1 s against 0.8 s for a folder set and 13.7 s at zlib's default level 6, giving 53 MB. Listing reads the manifest from the zip; rotation and partial cleanup handle zips and folders alike. Restore unpacks one database next to its target in the database folder (room for twice its size is checked first), copies it with the usual integrity check and removes the unpacked file, also on cancel. Pre-migration copies are never compressed.*
 
+*6 October 2026 (#987): a settings restore is staged, not applied in the running app. `stage_settings_restore()` writes a settings-only set of kind `safety` (never rotated) and copies the backup's allow-listed settings into `<install>/settings-restore-pending/`; `apply_pending_settings_restore()` runs in `app.main()` right after the macOS path migration, before anything reads the settings, because the running app keeps opensak.json in memory and would overwrite a restore on its next write. There is no automatic restart (as for updates): the dialog offers to close OpenSAK, and the main window reports the result after the next start. Kept from the current opensak.json: `databases.*`, `backup.*`, `window.*`, `paths.*`, `updates.*` and internal `_*` keys. `filters/`, `column_views/` and `icons/` are replaced only where the backup has them. A pending restore that fails to apply is moved to `settings-restore-failed/` and the previous settings stay in use. Settings from a newer OpenSAK version are refused.*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.
@@ -181,7 +183,7 @@ Restore adds; it never replaces. A restored database is always a new entry in th
 - First, the current settings are saved as a settings-only `safety` set, so this step can be undone.
 - filters/, column_views/ and icons/ are replaced by the backup's copies.
 - opensak.json is restored except for the keys that describe this machine or the present: the database list and active database, install, database and backup folders, and the `backup.*` state. Otherwise the restored database entries would vanish again.
-- OpenSAK then restarts to load the restored settings.
+- The restored settings are applied at the next start (no automatic restart; see the #987 note at the top).
 
 ## Edge cases and risks
 
@@ -207,7 +209,7 @@ Seven sub-issues under #942, each its own commit and test run, in this order. 1�
 3. **Restore databases** — File → Restore from backup…: list sets, validate, restore as new with the same `db_uuid`, add missing filter profiles, offer to switch. Depends on 1.
 4. **On-exit prompt** — `backup.on_exit` (Ask / Always / Never), "Don't ask again", change detection, folder choice on first use, closeEvent integration. Depends on 1 and the worker from 2.
 5. **Backup folder in setup** — Welcome Wizard page and Settings → Advanced row, with the other-disk advice. Depends on 1; touches Roadmap #4 (Welcome Wizard).
-6. **Restore settings** — the opt-in part of restore: safety set, replace folders, merge opensak.json, restart. Depends on 3.
+6. **Restore settings** — the opt-in part of restore: safety set, replace folders, merge opensak.json, applied at the next start (#987). Depends on 3.
 7. **Pre-migration backups in the backup folder** — move #549's copies to `<backup folder>/pre-migration/` when a folder is set. Depends on 1.
 
 Each sub-issue updates `docs/` and the User Guide as it lands; `docs/Uninstalling-OpenSAK.md` should say that backups in Documents are kept after an uninstall.

@@ -194,6 +194,7 @@ class TestDbCombo:
             def __init__(self, parent):
                 self.database_switched = SimpleNamespace(connect=lambda f: made.append(("switched", f)))
                 self.databases_added = SimpleNamespace(connect=lambda f: made.append(("added", f)))
+                self.close_app_requested = SimpleNamespace(connect=lambda f: made.append(("close", f)))
 
             def exec(self):
                 made.append(("exec", None))
@@ -202,7 +203,33 @@ class TestDbCombo:
         seeded_window._act_restore_backup.trigger()
         assert ("switched", seeded_window._on_database_switched) in made
         assert ("added", seeded_window._reload_db_combo) in made
+        assert any(kind == "close" for kind, _f in made)
         assert made[-1] == ("exec", None)
+
+    def test_restore_asking_to_close_closes_after_the_dialog(
+        self, seeded_window, monkeypatch, qtbot
+    ):
+        # #987: "Close OpenSAK now?" after a settings restore closes the main
+        # window once the dialog is gone — not while it is still open.
+        events = []
+
+        class _FakeDialog:
+            def __init__(self, parent):
+                self.database_switched = SimpleNamespace(connect=lambda f: None)
+                self.databases_added = SimpleNamespace(connect=lambda f: None)
+                self.close_app_requested = SimpleNamespace(
+                    connect=lambda f: setattr(self, "_request_close", f))
+
+            def exec(self):
+                self._request_close()
+                events.append("dialog closed")
+
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog", _FakeDialog)
+        monkeypatch.setattr(seeded_window, "close", lambda: events.append("window closed"))
+        seeded_window._act_restore_backup.trigger()
+        assert events == ["dialog closed"]
+        qtbot.waitUntil(lambda: "window closed" in events, timeout=2000)
+        assert events == ["dialog closed", "window closed"]
 
     def test_restore_blocked_by_trip(self, seeded_window, monkeypatch):
         monkeypatch.setattr(seeded_window, "_trip_planner_active", lambda: True)
