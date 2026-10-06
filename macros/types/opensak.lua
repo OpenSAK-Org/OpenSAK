@@ -139,6 +139,23 @@ function opensak.read_csv(path, sep) end
 ---@return boolean # true on Yes.
 function opensak.confirm(message) end
 
+---Let the user pick a file in a file dialog. The picked file may be used for the rest of this run without a folder permission: read with mode "open" (the default), written with mode "save". OpenSAK's own settings and database files cannot be picked. The dialog starts in the macro file's folder.
+---
+---Since API version 1.
+---
+---```lua
+---local path = opensak.choose_file("Solved puzzles", "CSV files (*.csv)")
+---if not path then return end      -- cancelled
+---for _, row in ipairs(opensak.read_csv(path)) do
+---    opensak.set_corrected(row.code, row.coords)
+---end
+---```
+---@param title? string Dialog title.
+---@param filter? string File types, e.g. "CSV files (*.csv);;All files (*)".
+---@param mode? "open"|"save" "open" picks an existing file to read (default), "save" a file to write (the dialog asks before replacing an existing one).
+---@return string? # Full path of the picked file, or nil if cancelled.
+function opensak.choose_file(title, filter, mode) end
+
 ---OpenSAK's folder inside the system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
 ---
 ---Since API version 1.

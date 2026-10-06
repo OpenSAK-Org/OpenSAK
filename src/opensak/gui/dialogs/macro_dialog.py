@@ -161,3 +161,16 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
     if clicked is btn_always:
         return FolderApproval.ALWAYS
     return FolderApproval.DENY
+
+
+def choose_file_for_macro(
+    parent, title: str, file_filter: str, save: bool, start_dir: Path
+) -> Path | None:
+    """OpenSAK's file dialog for opensak.choose_file(). The caption always
+    says that a macro asks, whatever *title* the macro passes."""
+    caption = tr("macro_choose_save" if save else "macro_choose_open")
+    if title.strip():
+        caption = tr("macro_choose_caption", caption=caption, title=title.strip())
+    pick = QFileDialog.getSaveFileName if save else QFileDialog.getOpenFileName
+    path, _ = pick(parent, caption, str(start_dir), file_filter or tr("macro_choose_all_files"))
+    return Path(path) if path else None

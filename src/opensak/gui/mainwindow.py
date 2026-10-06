@@ -3314,6 +3314,13 @@ class MainWindow(QMainWindow):
         parent = getattr(self, "_macro_dialog", None) or self
         return ask_folder_approval(parent, target, folder, write)
 
+    def choose_file(self, title: str, file_filter: str, save: bool, start_dir):
+        """MacroHost: file dialog for opensak.choose_file(), on top of the
+        macro dialog."""
+        from opensak.gui.dialogs.macro_dialog import choose_file_for_macro
+        parent = getattr(self, "_macro_dialog", None) or self
+        return choose_file_for_macro(parent, title, file_filter, save, start_dir)
+
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's corrected-coordinate changes
         affect. A handful of caches get the same per-cache refresh as the

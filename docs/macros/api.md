@@ -22,6 +22,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
+| [`opensak.choose_file`](#opensakchoosefile) | 1 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
 
@@ -238,6 +239,34 @@ Example:
 
 ```lua
 if not opensak.confirm("Update 12 caches?") then return end
+```
+
+### opensak.choose_file
+
+```lua
+opensak.choose_file([title] [, filter] [, mode])
+```
+
+Let the user pick a file in a file dialog. The picked file may be used for the rest of this run without a folder permission: read with mode "open" (the default), written with mode "save". OpenSAK's own settings and database files cannot be picked. The dialog starts in the macro file's folder.
+
+Parameters:
+
+- `title` (`string`, optional) — Dialog title.
+- `filter` (`string`, optional) — File types, e.g. "CSV files (*.csv);;All files (*)".
+- `mode` (`"open"|"save"`, optional) — "open" picks an existing file to read (default), "save" a file to write (the dialog asks before replacing an existing one).
+
+Returns `string?` — Full path of the picked file, or nil if cancelled.
+
+Since API version 1.
+
+Example:
+
+```lua
+local path = opensak.choose_file("Solved puzzles", "CSV files (*.csv)")
+if not path then return end      -- cancelled
+for _, row in ipairs(opensak.read_csv(path)) do
+    opensak.set_corrected(row.code, row.coords)
+end
 ```
 
 ### opensak.temp_dir

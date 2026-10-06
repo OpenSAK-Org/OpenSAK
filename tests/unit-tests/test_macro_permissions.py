@@ -497,6 +497,74 @@ def test_read_and_write_are_approved_separately(tmp_path):
     assert [c.args[2] for c in host.approve_folder.call_args_list] == [False, True]
 
 
+# ── opensak.choose_file() ────────────────────────────────────────────────────
+
+def _picker(path):
+    host = MagicMock()
+    host.choose_file.return_value = path
+    host.approve_folder.return_value = FolderApproval.DENY
+    return host
+
+
+def test_picked_file_is_readable_without_folder_permission(tmp_path):
+    (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    host = _picker(tmp_path / "a.csv")
+    out = _run(host, [], 'local p = opensak.choose_file("Solved", "CSV (*.csv)")\n'
+                         'print(p); print(#opensak.read_csv(p))', tmp_path)
+    assert out == [str(resolve_path(tmp_path / "a.csv")), "1"]
+    host.choose_file.assert_called_once_with("Solved", "CSV (*.csv)", False, tmp_path)
+    host.approve_folder.assert_not_called()
+    assert get_store().get(STORE_KEY) is None
+
+
+def test_picked_file_only_not_its_folder(tmp_path):
+    (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("code\nGC1\n", encoding="utf-8")
+    with pytest.raises(MacroError, match="denied by the user"):
+        _run(_picker(tmp_path / "a.csv"), [],
+             'opensak.choose_file(); opensak.read_csv("b.csv")', tmp_path)
+
+
+def test_open_grants_read_and_save_grants_write_only(tmp_path):
+    rt = MacroRuntime(_picker(tmp_path / "a.gpx"), output=lambda _: None,
+                      folder_permissions=[])
+    rt.run('opensak.choose_file(nil, nil, "save")', base_dir=tmp_path)
+    assert rt._check_access(tmp_path / "a.gpx", write=True) == resolve_path(tmp_path / "a.gpx")
+    with pytest.raises(MacroError, match="may not read"):
+        rt._check_access(tmp_path / "a.gpx", write=False)
+    rt.run("opensak.choose_file()", base_dir=tmp_path)
+    rt._check_access(tmp_path / "a.gpx", write=False)
+    with pytest.raises(MacroError, match="may not write"):
+        rt._check_access(tmp_path / "a.gpx", write=True)
+
+
+def test_picked_file_lasts_for_one_run_only(tmp_path):
+    (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    rt = MacroRuntime(_picker(tmp_path / "a.csv"), output=lambda _: None,
+                      folder_permissions=[])
+    rt.run("opensak.read_csv(opensak.choose_file())", base_dir=tmp_path)
+    with pytest.raises(MacroError, match="denied by the user"):
+        rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+
+
+def test_cancel_returns_nil(tmp_path):
+    assert _run(_picker(None), [], "print(opensak.choose_file())", tmp_path) == ["nil"]
+
+
+@pytest.mark.parametrize("name", ["x.db", "opensak.json"])
+def test_protected_file_cannot_be_picked(tmp_path, name):
+    with pytest.raises(MacroError, match="may not read"):
+        _run(_picker(tmp_path / name), [], "opensak.choose_file()", tmp_path)
+
+
+@pytest.mark.parametrize("args", ['nil, nil, "write"', "42", 'nil, string.rep("x", 201)'])
+def test_choose_file_rejects_bad_arguments(tmp_path, args):
+    host = _picker(tmp_path / "a.csv")
+    with pytest.raises(MacroError, match="choose_file"):
+        _run(host, [], f"opensak.choose_file({args})", tmp_path)
+    host.choose_file.assert_not_called()
+
+
 # ── Settings → Folder permissions ────────────────────────────────────────────
 
 pytest.importorskip("pytestqt")
@@ -660,3 +728,28 @@ def test_write_on_plain_folder_does_not_ask(dlg, tmp_path, monkeypatch):
     dlg._perm_table.item(row, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)
     ask.assert_not_called()
     assert dlg._perm_row_checked(row, dlg._PERM_COL_WRITE)
+
+
+@pytest.mark.parametrize("save, title, picked", [
+    (False, "Solved", "C:/x/a.csv"),
+    (True, "", "C:/x/a.gpx"),
+    (False, "", ""),                                  # cancelled
+])
+def test_choose_file_dialog(monkeypatch, tmp_path, save, title, picked):
+    from opensak.gui.dialogs import macro_dialog as md
+    monkeypatch.setattr(md, "tr", lambda key, **kw: " | ".join([key, *kw.values()]))
+    calls = []
+
+    def fake(parent, caption, start, file_filter):
+        calls.append((caption, start, file_filter))
+        return picked, ""
+
+    name = "getSaveFileName" if save else "getOpenFileName"
+    monkeypatch.setattr(md.QFileDialog, name, staticmethod(fake))
+    result = md.choose_file_for_macro(None, title, "", save, tmp_path)
+    assert result == (Path(picked) if picked else None)
+    caption, start, file_filter = calls[0]
+    assert caption.startswith("macro_choose_caption" if title else
+                              "macro_choose_save" if save else "macro_choose_open")
+    assert (title in caption) and start == str(tmp_path)
+    assert file_filter == "macro_choose_all_files"
