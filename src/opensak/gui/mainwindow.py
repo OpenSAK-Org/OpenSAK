@@ -235,6 +235,9 @@ class MainWindow(QMainWindow):
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
         self._active_refresh_workers: list[RefreshWorker] = []
+        # Start time per refresh generation, for the timing log lines in
+        # _on_refresh_result(). Popped when the result (or error) comes back.
+        self._refresh_started_at: dict[int, float] = {}
         # GC codes whose corrected coordinates a running Lua macro changed;
         # refreshed in one go by end_macro() instead of once per call.
         self._macro_changed_codes: set[GcCode] = set()
@@ -1434,20 +1437,24 @@ class MainWindow(QMainWindow):
             fetch_map=map_enabled,
             map_max_caches=get_settings().map_max_caches,
         )
-        worker.result.connect(
-            lambda gen, table_caches, map_caches, _t0=_t0:
-                self._on_refresh_result(gen, table_caches, map_caches, _t0)
-        )
+        # Connected to bound methods, not lambdas: with the window as the
+        # receiver, Qt drops a result that arrives after the window has been
+        # deleted (closed while a slow query was still running) instead of
+        # running the slot on a dead window. A lambda has no receiver, so
+        # it was still called — "CacheTableView already deleted".
+        self._refresh_started_at[generation] = _t0
+        worker.result.connect(self._on_refresh_result)
         worker.error.connect(self._on_refresh_error)
         worker.finished.connect(lambda w=worker: self._cleanup_refresh_worker(w))
         self._active_refresh_workers.append(worker)
         worker.start()
 
     def _on_refresh_result(
-        self, generation: int, table_caches: list, map_caches: list, _t0: float,
+        self, generation: int, table_caches: list, map_caches: list,
     ) -> None:
         """GUI-thread continuation of _refresh_cache_list() — see RefreshWorker."""
         QApplication.restoreOverrideCursor()
+        _t0 = self._refresh_started_at.pop(generation, time.monotonic())
         if generation != self._refresh_generation:
             # Superseded by a newer refresh request — discard silently.
             return
@@ -1484,6 +1491,7 @@ class MainWindow(QMainWindow):
         setOverrideCursor() in _refresh_cache_list()) even for a stale
         generation, so the cursor stack never gets left unbalanced."""
         QApplication.restoreOverrideCursor()
+        self._refresh_started_at.pop(generation, None)
         logger.error("mainwindow: RefreshWorker failed (generation=%s): %s", generation, message)
         if generation == self._refresh_generation:
             self._statusbar.showMessage(tr("status_refresh_failed"), 6000)
