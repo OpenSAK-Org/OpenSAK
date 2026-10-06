@@ -5,9 +5,15 @@ migration (issue #549).
 The first time OpenSAK opens a database whose schema is behind
 ``SCHEMA_VERSION``, ``init_db()`` migrates it in place — a one-way change.
 Before that happens, ``backup_before_migration()`` saves a snapshot of the
-untouched database in a ``backups`` folder next to it, so the old database
-can be restored by hand if a migration goes wrong, or if the user wants to
-go back to an older OpenSAK build.
+untouched database, so the old database can be restored by hand if a
+migration goes wrong, or if the user wants to go back to an older OpenSAK
+build.
+
+Where the copy goes (#988): into ``<backup folder>/pre-migration/`` once the
+user has set a backup folder (Welcome Wizard, Settings, or a backup dialog)
+and it can be used right now; otherwise into a ``backups`` folder next to the
+database, as before. An unavailable backup folder — an external drive that
+isn't connected — never blocks a migration, it just falls back.
 
 The backup is best-effort: it never raises and never blocks the migration.
 If it can't be made (not enough disk space, no write access, …) a warning
@@ -20,6 +26,7 @@ background action.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import sqlite3
@@ -32,8 +39,13 @@ from opensak.backup.snapshot import snapshot_database
 
 logger = logging.getLogger(__name__)
 
-# Folder, next to the database file, where pre-migration backups are kept.
+# Folder, next to the database file, where pre-migration backups are kept
+# when no backup folder is set.
 BACKUP_DIRNAME = "backups"
+
+# Subfolder of the user's backup folder for pre-migration backups (#988).
+# Never touched by backup-set rotation, which only handles OpenSAK-backup-*.
+BACKUP_FOLDER_SUBDIR = "pre-migration"
 
 # Extra free space required on top of the database's own size, so a backup
 # never fills the disk to the last byte right before a migration needs room.
@@ -58,6 +70,24 @@ def backup_path_for(db_path: Path, from_version: int) -> Path:
     suffix = db_path.suffix or ".db"
     name = f"{db_path.stem}.pre-migration-schema{from_version}{suffix}"
     return db_path.parent / BACKUP_DIRNAME / name
+
+
+def backup_folder_path_for(db_path: Path, from_version: int, folder: Path) -> Path:
+    """
+    Where the pre-migration backup goes inside the backup *folder* (#988).
+
+    One backup folder can hold copies from databases in different places
+    that share a file name (two ``Default.db``), so the name carries a short
+    id: the database's own ``db_uuid`` when it has one (it survives a move
+    and is kept by a restore), else a hash of its path. Both are the same on
+    every attempt, so the "already backed up" check keeps working.
+    """
+    suffix = db_path.suffix or ".db"
+    name = (
+        f"{db_path.stem}.{_short_id(db_path)}"
+        f".pre-migration-schema{from_version}{suffix}"
+    )
+    return Path(folder) / BACKUP_FOLDER_SUBDIR / name
 
 
 def pending_schema_version(db_path: Path, schema_version: int) -> Optional[int]:
@@ -108,16 +138,23 @@ def backup_before_migration(db_path: Path, schema_version: int) -> Optional[Path
         if from_version is None:
             return None
 
-        target = backup_path_for(db_path, from_version)
-        if target.exists():
-            logger.info(
-                "pre-migration backup: keeping existing %s (schema %s)",
-                target, from_version,
-            )
-            return None
+        beside = backup_path_for(db_path, from_version)
+        folder = _usable_backup_folder()
+        in_folder = (
+            backup_folder_path_for(db_path, from_version, folder)
+            if folder is not None else None
+        )
+        for existing in (beside, in_folder):
+            if existing is not None and existing.exists():
+                logger.info(
+                    "pre-migration backup: keeping existing %s (schema %s)",
+                    existing, from_version,
+                )
+                return None
+        target = in_folder if in_folder is not None else beside
 
         needed = _database_size(db_path) + _FREE_SPACE_MARGIN
-        free = shutil.disk_usage(db_path.parent).free
+        free = shutil.disk_usage(_nearest_existing(target.parent)).free
         if free < needed:
             logger.warning(
                 "pre-migration backup of %s skipped: not enough free disk "
@@ -160,6 +197,63 @@ def clear_notices() -> None:
     """Forget pending notices (used by tests)."""
     with _notices_lock:
         _notices.clear()
+
+
+def _usable_backup_folder() -> Optional[Path]:
+    """
+    The backup folder the user has set, if it can take a backup right now;
+    else None (#988). Only an explicitly set folder counts: with none set,
+    the copy stays next to the database as it always did, rather than
+    quietly appearing in Documents.
+    """
+    try:
+        from opensak.backup.backupset import (
+            BACKUP_DIR_KEY, BackupError, folder_available, validate_backup_dir,
+        )
+        from opensak.settings_store import get_store
+        value = get_store().get(BACKUP_DIR_KEY)
+        if not value:
+            return None
+        folder = Path(value)
+        if not folder_available(folder):
+            logger.info(
+                "pre-migration backup: backup folder %s not available — "
+                "using the folder next to the database", folder,
+            )
+            return None
+        try:
+            validate_backup_dir(folder)
+        except BackupError:
+            return None
+        return folder
+    except Exception:  # never let the lookup block a migration
+        logger.warning("pre-migration backup: could not read the backup folder",
+                       exc_info=True)
+        return None
+
+
+def _short_id(db_path: Path) -> str:
+    """First 8 characters of the database's db_uuid, else of a path hash."""
+    try:
+        from opensak.db.db_settings import UUID_KEY, read_file
+        value = read_file(db_path).get(UUID_KEY)
+        if isinstance(value, str) and len(value) >= 8:
+            return value[:8]
+    except Exception:  # an old database without the settings table, or unreadable
+        pass
+    try:
+        key = str(db_path.resolve())
+    except OSError:
+        key = str(db_path.absolute())
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:8]
+
+
+def _nearest_existing(path: Path) -> Path:
+    """*path*, or its nearest parent that exists (for a free-space check)."""
+    for candidate in (path, *path.parents):
+        if candidate.exists():
+            return candidate
+    return path
 
 
 def _database_size(db_path: Path) -> int:

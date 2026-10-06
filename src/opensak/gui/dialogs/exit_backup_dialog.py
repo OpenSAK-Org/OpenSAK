@@ -32,10 +32,10 @@ from PySide6.QtWidgets import (
 
 from opensak.backup import exit_state
 from opensak.backup.backupset import (
+    folder_available,  # moved to the core in #988; still imported from here
     KIND_AUTO,
     BackupError,
     BackupResult,
-    default_backup_dir,
     get_backup_dir,
     set_backup_dir,
     validate_backup_dir,
@@ -55,22 +55,6 @@ class ExitChoice(Enum):
     BACK_UP = "back_up"
     NOT_NOW = "not_now"
     CANCEL = "cancel"
-
-
-def folder_available(folder: Path) -> bool:
-    """
-    True when backups can be written to *folder*: it exists, or it is the
-    default ``<Documents>/OpenSAK Backups``, which the backup core creates
-    on first use (Documents included, if missing). Any other folder was
-    picked with Browse and so existed then; if it's gone now it is most
-    likely on a drive that isn't connected — creating it would put the
-    backups on the wrong disk, or fail on a mount point like /Volumes/USB.
-    """
-    folder = Path(folder)
-    try:
-        return folder.is_dir() or folder == default_backup_dir()
-    except OSError:
-        return False
 
 
 def _folder_usable(folder: Path) -> bool:

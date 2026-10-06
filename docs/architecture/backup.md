@@ -10,6 +10,8 @@
 
 *6 October 2026 (#986): the Welcome Wizard has a backup folder page after the database folder page, and Settings → Advanced → Folders has a backup folder row. Both check the folder against the install and database folders as entered on screen, before they are saved. Skip leaves `backup.dir` unset; a folder is only stored when the user finishes the wizard or changes the row.*
 
+*6 October 2026 (#988): "once a backup folder is set" means `backup.dir` is set explicitly and the folder passes `folder_available()` and `validate_backup_dir()` at migration time; otherwise the copy goes next to the database. File names carry the first 8 characters of `db_uuid`, or of a hash of the database path for a database from before #659, so two `Default.db` from different folders don't collide. `folder_available()` moved from the exit dialog into `backupset.py`.*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.

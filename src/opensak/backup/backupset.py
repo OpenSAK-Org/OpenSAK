@@ -143,6 +143,25 @@ def get_backup_dir() -> Path:
     return Path(value) if value else default_backup_dir()
 
 
+def folder_available(folder: Path) -> bool:
+    """
+    True when backups can be written to *folder*: it exists, or it is the
+    default ``<Documents>/OpenSAK Backups``, which the backup core creates
+    on first use (Documents included, if missing). Any other folder was
+    picked with Browse and so existed then; if it's gone now it is most
+    likely on a drive that isn't connected — creating it would put the
+    backups on the wrong disk, or fail on a mount point like /Volumes/USB.
+
+    Moved here from exit_backup_dialog.py in #988, so the pre-migration
+    backup (which runs without the GUI) can use it too.
+    """
+    folder = Path(folder)
+    try:
+        return folder.is_dir() or folder == default_backup_dir()
+    except OSError:
+        return False
+
+
 def set_backup_dir(path: Path) -> None:
     """Validate and store the backup folder (raises BackupError if unsuitable)."""
     from opensak.settings_store import get_store
