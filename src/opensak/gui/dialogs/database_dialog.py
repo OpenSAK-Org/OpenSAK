@@ -357,10 +357,13 @@ class DatabaseManagerDialog(QDialog):
             )
 
     def _open_database(self) -> None:
-        from opensak.config import get_app_data_dir
+        # Issue #984: start in the configured database folder (Settings →
+        # Advanced / Welcome Wizard), the same folder New database uses
+        # since #562 — not the install folder from get_app_data_dir().
+        from opensak.settings_store import get_db_dir
         path, _ = QFileDialog.getOpenFileName(
             self, tr("db_open_browse_title"),
-            str(get_app_data_dir()),
+            str(get_db_dir()),
             tr("db_file_filter")
         )
         if path:

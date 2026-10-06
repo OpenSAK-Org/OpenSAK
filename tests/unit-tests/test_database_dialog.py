@@ -358,6 +358,30 @@ class TestManagerDialog:
         dlg._open_database()
         warn.assert_called_once()
 
+    def test_open_database_starts_in_db_dir_not_install_dir(
+        self, dlg, manager, monkeypatch, tmp_path
+    ):
+        # Issue #984: Open Existing started in the install folder instead of
+        # the configured database folder. Give the two different paths so the
+        # test can tell which one the file dialog was opened in.
+        install_dir = tmp_path / "install"
+        db_dir = tmp_path / "databases"
+        install_dir.mkdir()
+        db_dir.mkdir()
+        monkeypatch.setattr("opensak.config.get_app_data_dir", lambda: install_dir)
+        monkeypatch.setattr("opensak.settings_store.get_db_dir", lambda: db_dir)
+
+        seen: dict[str, str] = {}
+
+        def fake_open(parent, title, directory, file_filter):
+            seen["directory"] = directory
+            return ("", "")
+
+        monkeypatch.setattr(dd.QFileDialog, "getOpenFileName", fake_open)
+        dlg._open_database()
+        assert seen["directory"] == str(db_dir)
+        manager.open_database.assert_not_called()
+
     def test_copy_database(self, dlg, manager, monkeypatch):
         manager.copy_database.return_value = _DB("Copy", "/data/copy.db")
         monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Copy", True))
