@@ -1325,6 +1325,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} är roten på en enhet. Makron får inte komma åt en hel enhet — välj en mapp på den i stället.",
     "settings_folder_perm_no_rights_title": "Inga behörigheter",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhar varken läs- eller skrivbehörighet. Ta bort den från listan?",
+    "settings_folder_perm_protected_title": "OpenSAK-data i den här mappen",
+    "settings_folder_perm_protected_msg": "{path}\n\ninnehåller OpenSAK:s egna data:\n\n{items}\n\nMakron kan aldrig ändra dessa filer, inte ens med skrivbehörighet — men de kan skapa, skriva över eller fylla allt annat i den här mappen. En snävare mapp är säkrare.\n\nTillåt skrivning i den här mappen ändå?",
     "gc_not_logged_in":             "Inte inloggad",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Ansluten",

@@ -1324,6 +1324,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} is the root of a drive. Macros may not access a whole drive — choose a folder on it instead.",
     "settings_folder_perm_no_rights_title": "No permissions",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhas neither read nor write permission. Remove it from the list?",
+    "settings_folder_perm_protected_title": "OpenSAK data in this folder",
+    "settings_folder_perm_protected_msg": "{path}\n\ncontains OpenSAK's own data:\n\n{items}\n\nMacros can never change these files, even with write permission — but they could create, overwrite or fill up everything else in this folder. A narrower folder is safer.\n\nAllow writing in this folder anyway?",
     "gc_not_logged_in":             "Not logged in",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Connected",

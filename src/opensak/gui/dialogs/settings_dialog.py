@@ -1007,6 +1007,10 @@ class SettingsDialog(QDialog):
         if item.column() not in (self._PERM_COL_READ, self._PERM_COL_WRITE):
             return
         row = item.row()
+        if item.column() == self._PERM_COL_WRITE and \
+                item.checkState() == Qt.CheckState.Checked:
+            self._confirm_write_near_own_data(item)
+            return
         if self._perm_row_checked(row, self._PERM_COL_READ) or \
                 self._perm_row_checked(row, self._PERM_COL_WRITE):
             return
@@ -1018,6 +1022,33 @@ class SettingsDialog(QDialog):
         )
         if answer == QMessageBox.StandardButton.Yes:
             self._perms().removeRow(row)
+
+    def _confirm_write_near_own_data(self, item: QTableWidgetItem) -> None:
+        """Write just ticked for a folder holding OpenSAK's own data → warn.
+
+        Macros can never change that data, but write access to e.g. the
+        home folder opens everything else in it. Answering No clears the
+        box again (which may in turn offer to drop the folder).
+        """
+        from opensak.macro.permissions import protected_inside
+
+        path = self._perm_path(item.row())
+        inside = protected_inside(path)
+        if not inside:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("settings_folder_perm_protected_title"),
+            tr(
+                "settings_folder_perm_protected_msg",
+                path=path,
+                items="\n".join(f"• {p}" for p in inside),
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            item.setCheckState(Qt.CheckState.Unchecked)
 
     def _on_add_perm_folder(self) -> None:
         from PySide6.QtWidgets import QFileDialog

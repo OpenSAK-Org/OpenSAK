@@ -1326,6 +1326,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} é a raiz de uma unidade. As macros não podem aceder a uma unidade inteira — escolha antes uma pasta dessa unidade.",
     "settings_folder_perm_no_rights_title": "Sem permissões",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnão tem permissão de leitura nem de escrita. Removê-la da lista?",
+    "settings_folder_perm_protected_title": "Dados do OpenSAK nesta pasta",
+    "settings_folder_perm_protected_msg": "{path}\n\ncontém dados do próprio OpenSAK:\n\n{items}\n\nAs macros nunca podem alterar estes ficheiros, mesmo com permissão de escrita — mas podem criar, substituir ou encher tudo o resto nesta pasta. Uma pasta mais restrita é mais segura.\n\nPermitir mesmo assim a escrita nesta pasta?",
     "gc_not_logged_in":             "Sessão não iniciada",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Ligado",

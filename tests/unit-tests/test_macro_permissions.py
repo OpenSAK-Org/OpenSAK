@@ -24,6 +24,7 @@ from opensak.macro.permissions import (
     default_permissions,
     is_root_folder,
     load_permissions,
+    protected_inside,
     protected_reason,
     resolve_path,
     safe_write,
@@ -126,6 +127,32 @@ def test_own_files_and_folders_are_denied(tmp_path, monkeypatch, macros_dir):
     # The macros folder inside the data folder stays usable
     check_access(macros_dir / "a.csv", write=True, permissions=perms)
     check_access(tmp_path / "elsewhere" / "a.gpx", write=True, permissions=perms)
+
+
+def _own_data(tmp_path, monkeypatch, databases=()):
+    from types import SimpleNamespace
+    from opensak import settings_store
+    install, dbs = tmp_path / "home" / "install", tmp_path / "home" / "dbs"
+    install.mkdir(parents=True)
+    dbs.mkdir()
+    monkeypatch.setattr(settings_store, "get_install_dir", lambda: install)
+    monkeypatch.setattr(settings_store, "get_db_dir", lambda: dbs)
+    manager = SimpleNamespace(databases=[SimpleNamespace(path=d) for d in databases])
+    monkeypatch.setattr("opensak.db.manager.get_db_manager", lambda: manager)
+    return install, dbs
+
+
+def test_protected_inside_lists_own_data_below_the_folder(tmp_path, monkeypatch):
+    elsewhere = tmp_path / "gc" / "other.db"
+    install, dbs = _own_data(tmp_path, monkeypatch,
+                             databases=[tmp_path / "home" / "dbs" / "a.db", elsewhere])
+    found = protected_inside(tmp_path)
+    assert resolve_path(install) in found and resolve_path(dbs) in found
+    assert resolve_path(elsewhere) in found
+    assert resolve_path(dbs / "a.db") not in found       # covered by its folder
+    assert protected_inside(tmp_path / "gc") == [resolve_path(elsewhere)]
+    (tmp_path / "gpx").mkdir()
+    assert protected_inside(tmp_path / "gpx") == []
 
 
 # ── safe_write ───────────────────────────────────────────────────────────────
@@ -603,3 +630,33 @@ def test_approval_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected)
     assert str(target) in seen["text"] and str(tmp_path) in seen["text"]
     assert seen["plain"] == md.Qt.TextFormat.PlainText
     assert seen["default"] == tr("macro_access_deny")
+
+
+@pytest.mark.parametrize("answer, checked", [("Yes", True), ("No", False)])
+def test_write_on_folder_with_own_data_asks(dlg, tmp_path, monkeypatch, answer, checked):
+    from PySide6.QtCore import Qt
+    from opensak.gui.dialogs import settings_dialog as sd
+    _own_data(tmp_path, monkeypatch)
+    ask = MagicMock(return_value=getattr(sd.QMessageBox.StandardButton, answer))
+    monkeypatch.setattr(sd.QMessageBox, "question", ask)
+    dlg._add_perm_folder(str(tmp_path))
+    row = dlg._perm_table.rowCount() - 1
+    dlg._perm_table.item(row, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)
+    ask.assert_called_once()
+    assert ask.call_args.args[1] == sd.tr("settings_folder_perm_protected_title")
+    assert dlg._perm_row_checked(row, dlg._PERM_COL_WRITE) is checked
+    assert dlg._perm_row_checked(row, dlg._PERM_COL_READ)
+
+
+def test_write_on_plain_folder_does_not_ask(dlg, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from opensak.gui.dialogs import settings_dialog as sd
+    _own_data(tmp_path, monkeypatch)
+    ask = MagicMock()
+    monkeypatch.setattr(sd.QMessageBox, "question", ask)
+    (tmp_path / "gpx").mkdir()
+    dlg._add_perm_folder(str(tmp_path / "gpx"))
+    row = dlg._perm_table.rowCount() - 1
+    dlg._perm_table.item(row, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)
+    ask.assert_not_called()
+    assert dlg._perm_row_checked(row, dlg._PERM_COL_WRITE)

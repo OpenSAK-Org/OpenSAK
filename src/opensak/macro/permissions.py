@@ -274,6 +274,38 @@ def protected_reason(target: Path) -> Optional[str]:
     return None
 
 
+def protected_inside(folder: str | Path) -> list[Path]:
+    """OpenSAK's own data in *folder* or below it: the data and database
+    folders, opensak.json, bootstrap.json, the token and every listed
+    database. A file inside one of the listed folders is not repeated.
+
+    Macros can never write these anyway; Settings uses this to warn before
+    write access is granted to such a folder (e.g. the home folder).
+    """
+    try:
+        root = resolve_path(folder)
+    except (OSError, RuntimeError):
+        return []
+    folders, files = _protected_locations()
+    try:
+        from opensak.db.manager import get_db_manager
+
+        for db in get_db_manager().databases:
+            try:
+                files.append(resolve_path(db.path))
+            except (OSError, RuntimeError):
+                pass
+    except Exception:
+        pass
+    inside_folders = sorted({f for f in folders if f.is_relative_to(root)})
+    inside_files = sorted({
+        f for f in files
+        if f.is_relative_to(root)
+        and not any(f.is_relative_to(d) for d in inside_folders)
+    })
+    return inside_folders + inside_files
+
+
 def _matching_entry(
     target: Path, permissions: Iterable[FolderPermission]
 ) -> Optional[FolderPermission]:

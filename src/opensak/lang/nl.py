@@ -1322,6 +1322,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} is de hoofdmap van een station. Macro's mogen geen volledig station benaderen — kies in plaats daarvan een map daarop.",
     "settings_folder_perm_no_rights_title": "Geen machtigingen",
     "settings_folder_perm_no_rights_msg": "{path}\n\nheeft geen lees- of schrijfmachtiging. Uit de lijst verwijderen?",
+    "settings_folder_perm_protected_title": "OpenSAK-gegevens in deze map",
+    "settings_folder_perm_protected_msg": "{path}\n\nbevat eigen gegevens van OpenSAK:\n\n{items}\n\nMacro's kunnen deze bestanden nooit wijzigen, ook niet met schrijfrechten — maar ze kunnen al het andere in deze map aanmaken, overschrijven of volschrijven. Een beperktere map is veiliger.\n\nToch schrijven in deze map toestaan?",
     "gc_not_logged_in":             "Niet ingelogd",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Verbonden",

@@ -1326,6 +1326,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} ist das Stammverzeichnis eines Laufwerks. Makros dürfen nicht auf ein ganzes Laufwerk zugreifen — wählen Sie stattdessen einen Ordner darauf.",
     "settings_folder_perm_no_rights_title": "Keine Berechtigungen",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhat weder Lese- noch Schreibberechtigung. Aus der Liste entfernen?",
+    "settings_folder_perm_protected_title": "OpenSAK-Daten in diesem Ordner",
+    "settings_folder_perm_protected_msg": "{path}\n\nenthält OpenSAKs eigene Daten:\n\n{items}\n\nMakros können diese Dateien nie ändern, auch nicht mit Schreibberechtigung — aber sie könnten alles andere in diesem Ordner erstellen, überschreiben oder auffüllen. Ein enger gefasster Ordner ist sicherer.\n\nSchreiben in diesem Ordner trotzdem erlauben?",
     "gc_not_logged_in":             "Nicht eingeloggt",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Verbunden",

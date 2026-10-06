@@ -1326,6 +1326,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} est la racine d'un lecteur. Les macros ne peuvent pas accéder à un lecteur entier — choisissez plutôt un dossier de ce lecteur.",
     "settings_folder_perm_no_rights_title": "Aucune autorisation",
     "settings_folder_perm_no_rights_msg": "{path}\n\nn'a ni autorisation de lecture ni d'écriture. Le retirer de la liste ?",
+    "settings_folder_perm_protected_title": "Données OpenSAK dans ce dossier",
+    "settings_folder_perm_protected_msg": "{path}\n\ncontient les données propres d'OpenSAK :\n\n{items}\n\nLes macros ne peuvent jamais modifier ces fichiers, même avec l'autorisation d'écriture — mais elles pourraient créer, écraser ou remplir tout le reste de ce dossier. Un dossier plus restreint est plus sûr.\n\nAutoriser quand même l'écriture dans ce dossier ?",
     "gc_not_logged_in":             "Non connecté",
     "gc_status_offline":            "Hors ligne",
     "gc_status_online":             "Connecté",

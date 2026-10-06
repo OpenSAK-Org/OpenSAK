@@ -1326,6 +1326,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} to katalog główny dysku. Makra nie mogą mieć dostępu do całego dysku — wybierz zamiast tego folder na nim.",
     "settings_folder_perm_no_rights_title": "Brak uprawnień",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnie ma uprawnień do odczytu ani zapisu. Usunąć go z listy?",
+    "settings_folder_perm_protected_title": "Dane OpenSAK w tym folderze",
+    "settings_folder_perm_protected_msg": "{path}\n\nzawiera własne dane OpenSAK:\n\n{items}\n\nMakra nigdy nie mogą zmienić tych plików, nawet z uprawnieniem do zapisu — ale mogą tworzyć, nadpisywać lub zapełniać wszystko inne w tym folderze. Węższy folder jest bezpieczniejszy.\n\nMimo to zezwolić na zapis w tym folderze?",
     "gc_not_logged_in":             "Niezalogowany",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Połączono",

@@ -1325,6 +1325,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} er roden af et drev. Makroer må ikke få adgang til et helt drev — vælg i stedet en mappe på det.",
     "settings_folder_perm_no_rights_title": "Ingen tilladelser",
     "settings_folder_perm_no_rights_msg": "{path}\n\nhar hverken læse- eller skrivetilladelse. Fjern den fra listen?",
+    "settings_folder_perm_protected_title": "OpenSAK-data i denne mappe",
+    "settings_folder_perm_protected_msg": "{path}\n\nindeholder OpenSAK's egne data:\n\n{items}\n\nMakroer kan aldrig ændre disse filer, heller ikke med skrivetilladelse — men de kan oprette, overskrive eller fylde alt andet i denne mappe. En mere afgrænset mappe er sikrere.\n\nTillad skrivning i denne mappe alligevel?",
     "gc_not_logged_in":             "Ikke logget ind",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Forbundet",

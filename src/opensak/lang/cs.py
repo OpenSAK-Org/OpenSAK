@@ -1321,6 +1321,8 @@ STRINGS: dict[str, str] = {
     "settings_folder_perm_root": "{path} je kořen jednotky. Makra nesmí přistupovat k celé jednotce — vyberte místo toho složku na ní.",
     "settings_folder_perm_no_rights_title": "Žádná oprávnění",
     "settings_folder_perm_no_rights_msg": "{path}\n\nnemá oprávnění ke čtení ani k zápisu. Odebrat ji ze seznamu?",
+    "settings_folder_perm_protected_title": "Data OpenSAK v této složce",
+    "settings_folder_perm_protected_msg": "{path}\n\nobsahuje vlastní data OpenSAK:\n\n{items}\n\nMakra tyto soubory nikdy nemohou změnit, ani s oprávněním k zápisu — mohou ale vytvořit, přepsat nebo zaplnit vše ostatní v této složce. Užší složka je bezpečnější.\n\nPřesto povolit zápis do této složky?",
     "gc_not_logged_in":             "Nepřihlášen",
     "gc_status_offline":            "Offline",
     "gc_status_online":             "Připojeno",
