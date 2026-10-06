@@ -668,6 +668,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Vždy zálohovat",
     "settings_backup_on_exit_never": "Nikdy nezálohovat",
     "settings_backup_keep_auto_label": "Ponechat automatických záloh:",
+    "settings_backup_compress_label": "Komprimovat zálohy (menší, ale pomalejší)",
+    "settings_backup_compress_hint": "Komprimovaná záloha je jeden soubor zip a obvykle zabere asi třetinu místa, velké zálohy ale trvají znatelně déle. Platí pro nové zálohy; stávající zůstanou beze změny.",
     "settings_backup_hint": "OpenSAK se ptá jen tehdy, když se od poslední zálohy něco změnilo. Nejstarší automatické zálohy se mažou, pokud jich je víc než tento počet; zálohy vytvořené přes Soubor → Zálohovat nyní… se nikdy nemažou automaticky.",
     "settings_backup_dir_note": "Stávající zálohy zůstanou tam, kde jsou, když složku změníte.",
     "restore_db_name": "{name} (obnoveno {date})",

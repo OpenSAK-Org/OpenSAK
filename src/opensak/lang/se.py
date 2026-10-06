@@ -668,6 +668,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Säkerhetskopiera alltid",
     "settings_backup_on_exit_never": "Säkerhetskopiera aldrig",
     "settings_backup_keep_auto_label": "Automatiska säkerhetskopior att behålla:",
+    "settings_backup_compress_label": "Komprimera säkerhetskopior (mindre, men långsammare)",
+    "settings_backup_compress_hint": "En komprimerad säkerhetskopia är en enda zip-fil och tar oftast ungefär en tredjedel av utrymmet, men stora säkerhetskopior tar märkbart längre tid. Gäller nya säkerhetskopior; befintliga lämnas som de är.",
     "settings_backup_hint": "OpenSAK frågar bara när något har ändrats sedan den senaste säkerhetskopian. De äldsta automatiska säkerhetskopiorna tas bort när det finns fler än så; säkerhetskopior gjorda med Fil → Säkerhetskopiera nu… tas aldrig bort automatiskt.",
     "settings_backup_dir_note": "Befintliga säkerhetskopior ligger kvar där de är när du byter mapp.",
     "restore_db_name": "{name} (återställd {date})",

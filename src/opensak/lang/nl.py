@@ -671,6 +671,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Altijd een back-up maken",
     "settings_backup_on_exit_never": "Nooit een back-up maken",
     "settings_backup_keep_auto_label": "Automatische back-ups bewaren:",
+    "settings_backup_compress_label": "Back-ups comprimeren (kleiner, maar trager)",
+    "settings_backup_compress_hint": "Een gecomprimeerde back-up is één zip-bestand en neemt meestal ongeveer een derde van de ruimte in, maar grote back-ups duren merkbaar langer. Geldt voor nieuwe back-ups; bestaande blijven zoals ze zijn.",
     "settings_backup_hint": "OpenSAK vraagt alleen als er iets is gewijzigd sinds de laatste back-up. De oudste automatische back-ups worden verwijderd als er meer zijn dan dit aantal; back-ups gemaakt via Bestand → Nu back-up maken… worden nooit automatisch verwijderd.",
     "settings_backup_dir_note": "Bestaande back-ups blijven staan waar ze zijn als u de map wijzigt.",
     "restore_db_name": "{name} (hersteld {date})",

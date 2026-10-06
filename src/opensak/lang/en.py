@@ -667,6 +667,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Always back up",
     "settings_backup_on_exit_never": "Never back up",
     "settings_backup_keep_auto_label": "Automatic backups to keep:",
+    "settings_backup_compress_label": "Compress backups (smaller, but slower)",
+    "settings_backup_compress_hint": "A compressed backup is one zip file and usually takes about a third of the space, but large backups take noticeably longer. Applies to new backups; existing ones are left as they are.",
     "settings_backup_hint": "OpenSAK only asks when something has changed since the last backup. The oldest automatic backups are deleted when there are more than this; backups made with File → Back up now… are never deleted automatically.",
     "settings_backup_dir_note": "Existing backups stay where they are when you change the folder.",
     "restore_db_name": "{name} (restored {date})",

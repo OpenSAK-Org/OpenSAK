@@ -12,6 +12,8 @@
 
 *6 October 2026 (#988): "once a backup folder is set" means `backup.dir` is set explicitly and the folder passes `folder_available()` and `validate_backup_dir()` at migration time; otherwise the copy goes next to the database. File names carry the first 8 characters of `db_uuid`, or of a hash of the database path for a database from before #659, so two `Default.db` from different folders don't collide. `folder_available()` moved from the exit dialog into `backupset.py`.*
 
+*6 October 2026 (#989): optional compressed sets, setting `backup.compress`, default off (Settings → Advanced → Backups). A compressed set is `<set name>.zip` with the same layout inside (`manifest.json`, `databases/`, `settings/`). It is written as `<name>.zip.partial` and renamed when complete, manifest last; databases are snapshotted one at a time into `<name>.partial/`, added to the zip and removed, so the extra space needed while writing is the largest database plus the zip (~0.6 × total assumed) — less than a folder set for several databases, more for a single big one. Deflate level 1: on a 234 MB test database 3.1 s against 0.8 s for a folder set and 13.7 s at zlib's default level 6, giving 53 MB. Listing reads the manifest from the zip; rotation and partial cleanup handle zips and folders alike. Restore unpacks one database next to its target in the database folder (room for twice its size is checked first), copies it with the usual integrity check and removes the unpacked file, also on cancel. Pre-migration copies are never compressed.*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.
@@ -69,7 +71,7 @@ Existing backups stay where they are and are not moved. The Restore dialog lists
 
 ## Backup set format
 
-Each backup is one plain folder, not a zip, so a user can restore by hand without OpenSAK and large databases aren't slowed down by compression.
+Each backup is one plain folder by default, so a user can restore by hand without OpenSAK and large databases aren't slowed down by compression. Compression is an opt-in setting (#989, see below).
 
 ```
 OpenSAK Backups/
@@ -213,7 +215,6 @@ Each sub-issue updates `docs/` and the User Guide as it lands; `docs/Uninstallin
 ## Out of scope for now
 
 - Scheduled backups while OpenSAK is running (daily, weekly). They fit naturally with the headless CLI import (#937) once that lands.
-- Compressed (zip) backup sets: smaller, but slow for large databases and harder to restore by hand. Could be an option later.
 - Cloud or network targets beyond pointing the backup folder at a synced folder.
 - A restore that replaces a database in place. Ruled out in #659: restore always adds.
 - Cleaning up the legacy per-database keys in opensak.json (#659), once 1.20 no longer matters.

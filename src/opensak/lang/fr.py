@@ -669,6 +669,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Toujours sauvegarder",
     "settings_backup_on_exit_never": "Ne jamais sauvegarder",
     "settings_backup_keep_auto_label": "Sauvegardes automatiques à conserver :",
+    "settings_backup_compress_label": "Compresser les sauvegardes (plus petites, mais plus lentes)",
+    "settings_backup_compress_hint": "Une sauvegarde compressée est un seul fichier zip et occupe généralement environ un tiers de la place, mais les grosses sauvegardes prennent nettement plus de temps. S'applique aux nouvelles sauvegardes ; les existantes restent telles quelles.",
     "settings_backup_hint": "OpenSAK ne demande que si quelque chose a changé depuis la dernière sauvegarde. Les sauvegardes automatiques les plus anciennes sont supprimées au-delà de ce nombre ; les sauvegardes faites avec Fichier → Sauvegarder maintenant… ne sont jamais supprimées automatiquement.",
     "settings_backup_dir_note": "Les sauvegardes existantes restent là où elles sont lorsque vous changez de dossier.",
     "restore_db_name": "{name} (restaurée le {date})",

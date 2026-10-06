@@ -28,6 +28,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 BACKUP_DIR_KEY = "backup.dir"
 KEEP_AUTO_KEY = "backup.keep_auto"
+# Issue #989: write new sets as one zip file. Off unless the user turns it on.
+COMPRESS_KEY = "backup.compress"
 DEFAULT_KEEP_AUTO = 5
 DEFAULT_DIRNAME = "OpenSAK Backups"
 
@@ -52,6 +55,7 @@ _KINDS = (KIND_AUTO, KIND_MANUAL)
 
 SET_PREFIX = "OpenSAK-backup-"
 PARTIAL_SUFFIX = ".partial"
+ZIP_SUFFIX = ".zip"   # a compressed set: <set name>.zip (#989)
 MANIFEST_NAME = "manifest.json"
 MANIFEST_FORMAT = 1
 DATABASES_DIRNAME = "databases"
@@ -69,6 +73,18 @@ _SET_NAME_RE = re.compile(
 
 # Free space needed on top of the databases' own size.
 _FREE_SPACE_FACTOR = 1.10
+
+# Compressed sets (#989): room assumed for the zip, as a fraction of the
+# databases' size. Typical databases shrink to about a third; this leaves
+# margin for ones that compress worse. Only one database is ever staged
+# uncompressed at a time, so that needs room on top of this.
+_ZIP_SPACE_FACTOR = 0.6
+_ZIP_CHUNK = 1024 * 1024
+# Deflate level 1: on a 234 MB test database it took 2.7 s against 11.7 s at
+# zlib's default level 6, for a zip about a third larger (53 vs 39 MB) —
+# still far smaller than the database. Speed matters most here: the backup
+# on exit runs while the user waits for OpenSAK to close.
+_ZIP_LEVEL = 1
 
 # (database name, fraction of that database done, fraction of the whole set)
 ProgressCallback = Callable[[str, float, float], None]
@@ -111,6 +127,7 @@ class BackupSet:
     databases: tuple[DatabaseEntry, ...]
     settings: bool
     format: int
+    compressed: bool = False        # one .zip file instead of a folder (#989)
 
 
 @dataclass(frozen=True)
@@ -198,6 +215,12 @@ def validate_backup_dir(
             )
 
 
+def get_compress() -> bool:
+    """Whether new backup sets are written as a zip (#989). Off by default."""
+    from opensak.settings_store import get_store
+    return bool(get_store().get(COMPRESS_KEY, False))
+
+
 def get_keep_auto() -> int:
     """How many automatic sets rotation keeps (at least 1)."""
     from opensak.settings_store import get_store
@@ -217,10 +240,14 @@ def write_backup_set(
     *,
     folder: Optional[Path] = None,
     now: Optional[datetime] = None,
+    compress: Optional[bool] = None,
 ) -> BackupResult:
     """
     Back up *databases* and the settings into a new set in *folder*
     (default: the backup folder).
+
+    With *compress* (default: the ``backup.compress`` setting, #989) the set
+    is one zip file with the same layout inside, instead of a folder.
 
     Databases whose file doesn't exist are skipped and reported in the
     result; the rest of the backup still completes. *progress* may raise to
@@ -254,15 +281,30 @@ def write_backup_set(
 
     cleanup_partials(folder)
 
+    if compress is None:
+        compress = get_compress()
+
     total = sum(size for _db, size in present)
+    if compress:
+        largest = max((size for _db, size in present), default=0)
+        needed = largest * _FREE_SPACE_FACTOR + total * _ZIP_SPACE_FACTOR
+    else:
+        needed = total * _FREE_SPACE_FACTOR
     free = shutil.disk_usage(folder).free
-    if free < total * _FREE_SPACE_FACTOR:
+    if free < needed:
         raise NotEnoughSpaceError(
             f"Not enough free space in {folder}: about "
-            f"{_mb(total * _FREE_SPACE_FACTOR)} MB needed, {_mb(free)} MB free"
+            f"{_mb(needed)} MB needed, {_mb(free)} MB free"
         )
 
     name = _unique_set_name(folder, now, kind)
+    if compress:
+        final = _write_compressed_set(
+            present, total, folder, name, kind, now, progress,
+        )
+        logger.info("backup: wrote %s (compressed, %d skipped)", final, len(skipped_names))
+        return BackupResult(read_backup_set(final), skipped_names)
+
     partial = folder / (name + PARTIAL_SUFFIX)
     final = folder / name
 
@@ -290,12 +332,107 @@ def write_backup_set(
     return BackupResult(read_backup_set(final), skipped_names)
 
 
+def _write_compressed_set(
+    present: list[tuple[_DatabaseLike, int]],
+    total: int,
+    folder: Path,
+    name: str,
+    kind: str,
+    now: datetime,
+    progress: Optional[ProgressCallback],
+) -> Path:
+    """
+    Write a compressed set (#989): ``<name>.zip`` with the same layout as a
+    folder set. Databases are staged one at a time in ``<name>.partial/``
+    and removed as soon as they are in the zip, so the extra space needed is
+    the largest database, not all of them. The zip is written as
+    ``<name>.zip.partial`` and renamed when complete, manifest last — never
+    half a backup. On any failure or cancel both are removed.
+    """
+    staging = folder / (name + PARTIAL_SUFFIX)
+    zip_partial = folder / (name + ZIP_SUFFIX + PARTIAL_SUFFIX)
+    final = folder / (name + ZIP_SUFFIX)
+    try:
+        (staging / DATABASES_DIRNAME).mkdir(parents=True)
+        with zipfile.ZipFile(
+            zip_partial, "w", compression=zipfile.ZIP_DEFLATED,
+            compresslevel=_ZIP_LEVEL, allowZip64=True,
+        ) as zf:
+            def _add_database(target: Path, arcname: str,
+                              report: Callable[[float], None]) -> None:
+                _zip_file(zf, target, arcname, report)
+                target.unlink()
+
+            entries = _write_databases(
+                present, total, staging, progress,
+                snapshot_share=0.5, after_each=_add_database,
+            )
+            settings_dir = staging / SETTINGS_DIRNAME
+            settings = _copy_settings(settings_dir)
+            for path in sorted(p for p in settings_dir.rglob("*") if p.is_file()):
+                arcname = f"{SETTINGS_DIRNAME}/{path.relative_to(settings_dir).as_posix()}"
+                zf.write(path, arcname)
+            manifest = _manifest(kind, now, entries, settings)
+            zf.writestr(
+                MANIFEST_NAME,
+                json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+            )
+        os.replace(zip_partial, final)
+    except BaseException as exc:
+        try:
+            zip_partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+        shutil.rmtree(staging, ignore_errors=True)
+        if isinstance(exc, BackupError):
+            raise
+        if isinstance(exc, (SnapshotError, OSError, sqlite3.Error, zipfile.BadZipFile)):
+            raise BackupError(str(exc)) from exc
+        raise
+    shutil.rmtree(staging, ignore_errors=True)
+    return final
+
+
+def _zip_file(
+    zf: zipfile.ZipFile, path: Path, arcname: str, report: Callable[[float], None],
+) -> None:
+    """Add *path* to *zf* in chunks, reporting progress (which may raise)."""
+    info = zipfile.ZipInfo.from_file(path, arcname)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    # ZipFile.open() takes the level from the ZipInfo, not the ZipFile.
+    # Python 3.13 renamed the attribute; 3.12 only has the private name.
+    if hasattr(info, "compress_level"):
+        info.compress_level = _ZIP_LEVEL
+    else:
+        info._compresslevel = _ZIP_LEVEL  # type: ignore[attr-defined]
+    size = info.file_size
+    done = 0
+    with path.open("rb") as src, zf.open(info, "w") as dst:
+        while True:
+            chunk = src.read(_ZIP_CHUNK)
+            if not chunk:
+                break
+            dst.write(chunk)
+            done += len(chunk)
+            report(done / size if size else 1.0)
+    report(1.0)
+
+
 def _write_databases(
     present: list[tuple[_DatabaseLike, int]],
     total: int,
     partial: Path,
     progress: Optional[ProgressCallback],
+    *,
+    snapshot_share: float = 1.0,
+    after_each: Optional[Callable[[Path, str, Callable[[float], None]], None]] = None,
 ) -> list[DatabaseEntry]:
+    """
+    Snapshot each database into *partial*/databases/. *after_each* (used for
+    compressed sets) gets each finished copy, its name inside the set, and a
+    progress reporter for its own work; the snapshot then counts for
+    *snapshot_share* of that database's progress.
+    """
     from opensak.db.db_settings import ensure_seeded, read_file
 
     entries: list[DatabaseEntry] = []
@@ -317,26 +454,32 @@ def _write_databases(
                 exc_info=True,
             )
 
-        def _db_progress(done: int, pages: int, *, _name: str = db.name,
-                         _before: int = done_before, _size: int = size) -> None:
+        def _report(fraction: float, *, _name: str = db.name,
+                    _before: int = done_before, _size: int = size) -> None:
             if progress is None:
                 return
-            fraction = done / pages if pages else 1.0
             overall = (_before + fraction * _size) / total if total else 1.0
             progress(_name, fraction, overall)
 
-        snapshot_database(src, target, _db_progress)
-        if progress is not None:
-            progress(db.name, 1.0, (done_before + size) / total if total else 1.0)
-        done_before += size
+        def _db_progress(done: int, pages: int, *, _report=_report) -> None:
+            _report((done / pages if pages else 1.0) * snapshot_share)
 
-        entries.append(DatabaseEntry(
+        snapshot_database(src, target, _db_progress)
+        entry = DatabaseEntry(
             name=db.name,
             file=f"{DATABASES_DIRNAME}/{file_name}",
             db_uuid=_str_or_none(read_file(target).get("db_uuid")),
             schema_version=_user_version(target),
             size_bytes=target.stat().st_size,
-        ))
+        )
+        if after_each is not None:
+            def _after_report(f: float, *, _report=_report) -> None:
+                _report(snapshot_share + f * (1 - snapshot_share))
+
+            after_each(target, entry.file, _after_report)
+        _report(1.0)
+        done_before += size
+        entries.append(entry)
     return entries
 
 
@@ -386,12 +529,17 @@ def _manifest(
 def read_backup_set(path: Path) -> BackupSet:
     """Read the set at *path* from its manifest (raises BackupError if invalid)."""
     path = Path(path)
-    manifest_path = path / MANIFEST_NAME
+    compressed = is_compressed_set_file(path)
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
+        if compressed:
+            # #989: read the manifest straight from the zip.
+            with zipfile.ZipFile(path) as zf:
+                data = json.loads(zf.read(MANIFEST_NAME).decode("utf-8"))
+        else:
+            data = json.loads((path / MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (FileNotFoundError, KeyError) as exc:
         raise BackupError(f"Not a complete backup (no manifest): {path}") from exc
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
         raise BackupError(f"Unreadable manifest in {path}: {exc}") from exc
 
     try:
@@ -428,6 +576,7 @@ def read_backup_set(path: Path) -> BackupSet:
             databases=databases,
             settings=bool(data.get("settings", False)),
             format=fmt,
+            compressed=compressed,
         )
     except BackupError:
         raise
@@ -446,7 +595,7 @@ def list_backup_sets(folder: Optional[Path] = None) -> list[BackupSet]:
         return []
     sets: list[BackupSet] = []
     for child in folder.iterdir():
-        if not child.is_dir() or not _SET_NAME_RE.match(child.name):
+        if not _is_set(child):
             continue
         try:
             sets.append(read_backup_set(child))
@@ -470,10 +619,13 @@ def rotate(folder: Optional[Path] = None, keep: Optional[int] = None) -> list[Pa
     deleted = cleanup_partials(folder)
     autos = [s for s in list_backup_sets(folder) if s.kind == KIND_AUTO]
     for old in autos[keep:]:
-        if old.path.parent != folder or not _SET_NAME_RE.match(old.path.name):
+        if old.path.parent != folder or not _is_set(old.path):
             continue  # defensive: never delete outside our own set folders
         try:
-            shutil.rmtree(old.path)
+            if old.compressed:
+                old.path.unlink()
+            else:
+                shutil.rmtree(old.path)
             deleted.append(old.path)
             logger.info("backup: rotated away %s", old.path.name)
         except OSError:
@@ -482,11 +634,15 @@ def rotate(folder: Optional[Path] = None, keep: Optional[int] = None) -> list[Pa
 
 
 def cleanup_partials(folder: Path) -> list[Path]:
-    """Remove ``.partial`` set folders left behind by an interrupted backup."""
+    """
+    Remove ``.partial`` set folders — and ``.zip.partial`` files of
+    compressed sets (#989) — left behind by an interrupted backup.
+    """
     folder = Path(folder)
     removed: list[Path] = []
     if not folder.is_dir():
         return removed
+    zip_partial = ZIP_SUFFIX + PARTIAL_SUFFIX
     for child in folder.iterdir():
         if (
             child.is_dir()
@@ -494,10 +650,38 @@ def cleanup_partials(folder: Path) -> list[Path]:
             and _SET_NAME_RE.match(child.name[: -len(PARTIAL_SUFFIX)])
         ):
             shutil.rmtree(child, ignore_errors=True)
-            if not child.exists():
-                removed.append(child)
-                logger.info("backup: removed leftover %s", child.name)
+        elif (
+            child.is_file()
+            and child.name.endswith(zip_partial)
+            and _SET_NAME_RE.match(child.name[: -len(zip_partial)])
+        ):
+            try:
+                child.unlink()
+            except OSError:
+                pass
+        else:
+            continue
+        if not child.exists():
+            removed.append(child)
+            logger.info("backup: removed leftover %s", child.name)
     return removed
+
+
+def is_compressed_set_file(path: Path) -> bool:
+    """True if *path* is a compressed set file by its name (#989)."""
+    path = Path(path)
+    return (
+        path.name.endswith(ZIP_SUFFIX)
+        and bool(_SET_NAME_RE.match(path.name[: -len(ZIP_SUFFIX)]))
+        and path.is_file()
+    )
+
+
+def _is_set(path: Path) -> bool:
+    """A set OpenSAK made: a folder, or a compressed set file (#989)."""
+    return (path.is_dir() and bool(_SET_NAME_RE.match(path.name))) or (
+        is_compressed_set_file(path)
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -534,7 +718,10 @@ def _xdg_documents_dir(home: Path) -> Optional[Path]:
 def _unique_set_name(folder: Path, now: datetime, kind: str) -> str:
     base = f"{SET_PREFIX}{now.astimezone():%Y-%m-%d_%H%M}-{kind}"
     name, n = base, 1
-    while (folder / name).exists() or (folder / (name + PARTIAL_SUFFIX)).exists():
+    while any(
+        (folder / (name + suffix)).exists()
+        for suffix in ("", PARTIAL_SUFFIX, ZIP_SUFFIX, ZIP_SUFFIX + PARTIAL_SUFFIX)
+    ):
         n += 1
         name = f"{base}-{n}"
     return name

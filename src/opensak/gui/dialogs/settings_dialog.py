@@ -721,6 +721,14 @@ class SettingsDialog(QDialog):
         self._backup_keep_auto.setRange(1, 99)
         backup_form.addRow(tr("settings_backup_keep_auto_label"), self._backup_keep_auto)
 
+        # Issue #989: off by default — the user has to turn it on.
+        self._backup_compress_cb = QCheckBox(tr("settings_backup_compress_label"))
+        backup_form.addRow(self._backup_compress_cb)
+        compress_hint = QLabel(tr("settings_backup_compress_hint"))
+        compress_hint.setWordWrap(True)
+        compress_hint.setStyleSheet(hint_style())
+        backup_form.addRow(compress_hint)
+
         backup_hint = QLabel(tr("settings_backup_hint"))
         backup_hint.setWordWrap(True)
         backup_hint.setStyleSheet(hint_style())
@@ -1662,10 +1670,11 @@ class SettingsDialog(QDialog):
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
         from opensak.backup import exit_state
-        from opensak.backup.backupset import get_keep_auto
+        from opensak.backup.backupset import get_compress, get_keep_auto
         idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
         self._backup_on_exit_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._backup_keep_auto.setValue(get_keep_auto())
+        self._backup_compress_cb.setChecked(get_compress())
         idx = self._distance_method_combo.findData(s.distance_method)
         self._distance_method_combo.setCurrentIndex(idx if idx >= 0 else 0)
         # Opdater GC-status
@@ -1752,6 +1761,9 @@ class SettingsDialog(QDialog):
         from opensak.settings_store import get_store as _get_store
         exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
         _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
+        from opensak.backup.backupset import COMPRESS_KEY, get_compress
+        if self._backup_compress_cb.isChecked() != get_compress():
+            _get_store().set(COMPRESS_KEY, self._backup_compress_cb.isChecked())
         # Issue #986: only a changed folder is stored, so the default isn't
         # frozen into opensak.json just because some other setting was saved.
         # Existing backups stay where they are.

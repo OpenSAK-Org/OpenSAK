@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.backup.backupset import (
+    is_compressed_set_file,
     KIND_AUTO,
     MANIFEST_NAME,
     BackupError,
@@ -203,7 +204,8 @@ class RestoreDialog(QDialog):
     def load(self, path: Path) -> None:
         """Show the sets in folder *path*, or the single set *path* itself."""
         path = Path(path)
-        if (path / MANIFEST_NAME).is_file():
+        # A single set: a set folder, or a compressed set file (#989).
+        if (path / MANIFEST_NAME).is_file() or is_compressed_set_file(path):
             try:
                 self._sets = [read_backup_set(path)]
             except BackupError as exc:

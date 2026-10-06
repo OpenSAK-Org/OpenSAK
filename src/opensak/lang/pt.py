@@ -668,6 +668,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Fazer sempre cópia",
     "settings_backup_on_exit_never": "Nunca fazer cópia",
     "settings_backup_keep_auto_label": "Cópias automáticas a manter:",
+    "settings_backup_compress_label": "Comprimir cópias de segurança (mais pequenas, mas mais lentas)",
+    "settings_backup_compress_hint": "Uma cópia comprimida é um único ficheiro zip e ocupa normalmente cerca de um terço do espaço, mas as cópias grandes demoram bastante mais. Aplica-se a novas cópias; as existentes ficam como estão.",
     "settings_backup_hint": "O OpenSAK só pergunta se algo mudou desde a última cópia de segurança. As cópias automáticas mais antigas são apagadas quando existem mais do que este número; as cópias feitas com Ficheiro → Fazer cópia de segurança agora… nunca são apagadas automaticamente.",
     "settings_backup_dir_note": "As cópias de segurança existentes ficam onde estão quando muda de pasta.",
     "restore_db_name": "{name} (restaurada em {date})",

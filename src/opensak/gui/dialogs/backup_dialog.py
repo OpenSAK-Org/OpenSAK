@@ -300,7 +300,12 @@ class BackupDialog(QDialog):
         box.addButton(QMessageBox.StandardButton.Ok)
         box.exec()
         if box.clickedButton() is open_btn:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.backup_set.path)))
+            # A compressed set (#989) is a zip file: open the folder it's in
+            # rather than the archive itself.
+            target = result.backup_set.path
+            if result.backup_set.compressed:
+                target = target.parent
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
         self.backup_made.emit(result)
         self.accept()
 

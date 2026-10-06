@@ -670,6 +670,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_always": "Immer sichern",
     "settings_backup_on_exit_never": "Nie sichern",
     "settings_backup_keep_auto_label": "Automatische Sicherungen behalten:",
+    "settings_backup_compress_label": "Sicherungen komprimieren (kleiner, aber langsamer)",
+    "settings_backup_compress_hint": "Eine komprimierte Sicherung ist eine einzige ZIP-Datei und braucht meist etwa ein Drittel des Platzes, grosse Sicherungen dauern aber deutlich länger. Gilt für neue Sicherungen; vorhandene bleiben unverändert.",
     "settings_backup_hint": "OpenSAK fragt nur, wenn sich seit der letzten Sicherung etwas geändert hat. Die ältesten automatischen Sicherungen werden gelöscht, wenn es mehr als diese Anzahl gibt; Sicherungen über Datei → Jetzt sichern… werden nie automatisch gelöscht.",
     "settings_backup_dir_note": "Vorhandene Sicherungen bleiben, wo sie sind, wenn Sie den Ordner ändern.",
     "restore_db_name": "{name} (wiederhergestellt {date})",

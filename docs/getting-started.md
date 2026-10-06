@@ -242,7 +242,7 @@ Each database has its own:
 - Filter profiles
 
 ### Backing Up
-Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into the backup folder you chose in the Welcome Wizard (by default *Documents/OpenSAK Backups*); change it under **Settings → Advanced → Folders** or in the backup dialog itself. A folder on another disk or an external drive is safest. Existing backups stay where they are when you change the folder. Backups you make this way are never deleted by OpenSAK.
+Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into the backup folder you chose in the Welcome Wizard (by default *Documents/OpenSAK Backups*); change it under **Settings → Advanced → Folders** or in the backup dialog itself. A folder on another disk or an external drive is safest. Existing backups stay where they are when you change the folder. Backups you make this way are never deleted by OpenSAK. To save space, turn on **Compress backups** under **Settings → Advanced → Backups**: new backups are then one zip file, usually a third or less of the size, but they take longer to make.
 
 When you close OpenSAK and something has changed since your last backup, OpenSAK asks whether to back up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in OpenSAK. Tick **Don't ask again** to always back up or never ask; change it later, together with how many automatic backups to keep (5 by default), under **Settings → Advanced → Backups**. Only the oldest automatic backups are deleted.
 

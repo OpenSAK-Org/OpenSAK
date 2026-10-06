@@ -16,12 +16,14 @@ last-used profile.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import shutil
 import sqlite3
+import zipfile
 from datetime import date
-from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 from opensak.backup.backupset import (
     SETTINGS_DIRNAME,
@@ -37,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 # (pages_done, pages_total) — as for snapshot_database()
 ProgressCallback = Callable[[int, int], None]
+
+# Extra free space needed when unpacking from a compressed set (#989).
+_EXTRACT_MARGIN = 50 * 1024 * 1024
+_EXTRACT_CHUNK = 1024 * 1024
 
 
 class RestoreError(Exception):
@@ -73,29 +79,25 @@ def restore_database(
     from opensak.db.manager import get_db_manager
     from opensak.lang import tr
 
-    source = _entry_path(backup_set, entry)
-    if not source.is_file():
-        raise RestoreError(f"{entry.file} is missing from the backup")
-
-    actual_version = _user_version(source)
-    if actual_version is None:
-        raise RestoreError(f"{entry.name} is not a readable database")
-    if actual_version > SCHEMA_VERSION:
-        raise RestoreError(
-            f"{entry.name} was backed up from OpenSAK "
-            f"{backup_set.opensak_version or 'a newer version'}, which uses a "
-            f"newer database format; update OpenSAK to restore it"
-        )
-
     manager = get_db_manager()
     today = today or date.today()
     base = tr("restore_db_name", name=entry.name, date=today.isoformat())
     name, target = _free_name_and_path(manager, base)
 
-    try:
-        snapshot_database(source, target, progress)   # verify=True: integrity
-    except SnapshotError as exc:
-        raise RestoreError(f"{entry.name} could not be restored: {exc}") from exc
+    with _source_file(backup_set, entry, target, progress) as (source, copy_progress):
+        actual_version = _user_version(source)
+        if actual_version is None:
+            raise RestoreError(f"{entry.name} is not a readable database")
+        if actual_version > SCHEMA_VERSION:
+            raise RestoreError(
+                f"{entry.name} was backed up from OpenSAK "
+                f"{backup_set.opensak_version or 'a newer version'}, which uses a "
+                f"newer database format; update OpenSAK to restore it"
+            )
+        try:
+            snapshot_database(source, target, copy_progress)   # verify=True: integrity
+        except SnapshotError as exc:
+            raise RestoreError(f"{entry.name} could not be restored: {exc}") from exc
 
     try:
         info = manager.add_existing(target, name)
@@ -114,11 +116,30 @@ def restore_missing_filter_profiles(backup_set: BackupSet) -> list[str]:
     """
     from opensak.config import get_app_data_dir
 
+    dst_dir = get_app_data_dir() / "filters"
+    added: list[str] = []
+
+    if backup_set.compressed:
+        # #989: the profiles are members settings/filters/<name>.json.
+        prefix = f"{SETTINGS_DIRNAME}/filters/"
+        with zipfile.ZipFile(backup_set.path) as zf:
+            for member in sorted(zf.namelist()):
+                rest = member[len(prefix):] if member.startswith(prefix) else ""
+                if not rest.endswith(".json") or "/" in rest or "\\" in rest:
+                    continue
+                dst = dst_dir / rest
+                if dst.exists():
+                    continue
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes(zf.read(member))
+                added.append(dst.stem)
+        if added:
+            logger.info("restore: added filter profiles %s", ", ".join(added))
+        return added
+
     src_dir = backup_set.path / SETTINGS_DIRNAME / "filters"
     if not src_dir.is_dir():
         return []
-    dst_dir = get_app_data_dir() / "filters"
-    added: list[str] = []
     for src in sorted(src_dir.glob("*.json")):
         dst = dst_dir / src.name
         if dst.exists():
@@ -132,6 +153,90 @@ def restore_missing_filter_profiles(backup_set: BackupSet) -> list[str]:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+@contextlib.contextmanager
+def _source_file(
+    backup_set: BackupSet,
+    entry: DatabaseEntry,
+    target: Path,
+    progress: Optional[ProgressCallback],
+) -> Iterator[tuple[Path, Optional[ProgressCallback]]]:
+    """
+    The database file to restore from, and the progress callback to copy it
+    with. For a folder set that is the file inside the set. For a compressed
+    set (#989) the database is first unpacked next to *target* — on the disk
+    it is restored to — and the unpacked copy is removed afterwards, also on
+    failure or cancel; unpacking and copying then each count for half.
+    """
+    if not backup_set.compressed:
+        source = _entry_path(backup_set, entry)
+        if not source.is_file():
+            raise RestoreError(f"{entry.file} is missing from the backup")
+        yield source, progress
+        return
+
+    member = _zip_member(entry)
+    unpacked = target.with_name(target.name + ".unpacking")
+    try:
+        with zipfile.ZipFile(backup_set.path) as zf:
+            try:
+                info = zf.getinfo(member)
+            except KeyError as exc:
+                raise RestoreError(f"{entry.file} is missing from the backup") from exc
+            _check_room_to_unpack(target.parent, info.file_size, entry)
+            _unpack(zf, info, unpacked, progress)
+        yield unpacked, _second_half(progress)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RestoreError(f"{entry.name} could not be unpacked: {exc}") from exc
+    finally:
+        _remove_database_file(unpacked)
+
+
+def _zip_member(entry: DatabaseEntry) -> str:
+    """The member name of *entry* — never anything outside the set's own tree."""
+    member = PurePosixPath(entry.file)
+    if member.is_absolute() or ".." in member.parts or "\\" in entry.file:
+        raise RestoreError(f"Invalid file name in the backup: {entry.file}")
+    return str(member)
+
+
+def _check_room_to_unpack(folder: Path, size: int, entry: DatabaseEntry) -> None:
+    """Unpacked copy plus the restored database must both fit (#989)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    needed = 2 * size + _EXTRACT_MARGIN
+    free = shutil.disk_usage(folder).free
+    if free < needed:
+        raise RestoreError(
+            f"Not enough free space in {folder} to restore {entry.name}: about "
+            f"{needed // 2**20 + 1} MB needed, {free // 2**20} MB free"
+        )
+
+
+def _unpack(
+    zf: zipfile.ZipFile, info: zipfile.ZipInfo, dest: Path,
+    progress: Optional[ProgressCallback],
+) -> None:
+    size = info.file_size
+    done = 0
+    with zf.open(info) as src, dest.open("wb") as dst:
+        while True:
+            chunk = src.read(_EXTRACT_CHUNK)
+            if not chunk:
+                break
+            dst.write(chunk)
+            done += len(chunk)
+            if progress is not None:
+                progress(done, 2 * size)   # first half of this database
+
+
+def _second_half(progress: Optional[ProgressCallback]) -> Optional[ProgressCallback]:
+    if progress is None:
+        return None
+
+    def _report(done: int, pages: int) -> None:
+        progress(pages + done, 2 * pages)
+    return _report
+
 
 def _entry_path(backup_set: BackupSet, entry: DatabaseEntry) -> Path:
     """The database file inside the set — never anywhere outside it."""
