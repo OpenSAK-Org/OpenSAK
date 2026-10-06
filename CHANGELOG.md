@@ -4,6 +4,74 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.5] — 2026-10-06
+
+> Headline: **Backup Support is complete** (Roadmap #1, #942). Choose your
+> backup folder in the Welcome Wizard or in Settings, turn on compressed
+> backups if you want them smaller, and restore your settings — not just
+> your databases — from a backup. After a reinstall or on a new computer,
+> OpenSAK now offers to add the databases it finds in your database
+> folder.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Backup folder in setup (#986)** — The Welcome Wizard has a new step
+  for the backup folder (by default *Documents/OpenSAK Backups*), with the
+  advice to use another disk or a synced folder. **Settings → Advanced →
+  Folders** has the same row. A folder inside OpenSAK's own data or
+  database folder is refused. Changing the folder doesn't move the
+  backups you already have.
+- **Restore settings (#987)** — **File → Restore from backup…** has a new
+  **Also restore settings** option (off by default) that brings back your
+  preferences, filter profiles, column views and icons. You can restore
+  settings on their own, too. Your database list, folders, backup
+  settings and window layout are kept. Before anything changes, your
+  current settings are saved as a backup marked *Settings before restore*,
+  so you can go back. The restored settings take effect the next time
+  OpenSAK starts; OpenSAK offers to close right away.
+- **Compressed backups (#989)** — Turn on **Compress backups** under
+  **Settings → Advanced → Backups** (off by default) and each new backup
+  is one zip file instead of a folder, typically a third or less of the
+  size. It takes longer to write — in our tests about four times as long
+  as a normal backup. Both kinds can be restored, and the zip can be
+  opened with your system's own tools. Suggested by GeePa67.
+- **Add databases you already have (#985)** — When the database folder
+  you choose in the Welcome Wizard already holds OpenSAK databases (after
+  a reinstall or on a new computer), OpenSAK lists them and offers to add
+  them. **File → Manage databases… → Scan database folder…** does the
+  same at any time. OpenSAK still never adds databases by itself, so one
+  you removed from the list stays removed until you add it again.
+
+### Changed
+
+- **Pre-migration copies go into your backup folder (#988)** — When a new
+  OpenSAK version updates a database to a new format, the copy it saves
+  first now goes into the *pre-migration* subfolder of your backup folder,
+  once you have chosen one. Without one, or if the backup folder is on a
+  drive that isn't connected, the copy goes next to the database as
+  before.
+
+### Fixed
+
+- **Open Existing started in the wrong folder (#984)** — **Manage
+  databases → Open existing…** opened in OpenSAK's installation folder
+  instead of your database folder.
+- **A list refresh could run into a closed window** — If the main window
+  was closed while the cache list was still being refreshed, the late
+  result could reach the closed window. It is now dropped.
+
+### Development
+
+- **Test suite runs about twice as fast (#958)** — Widgets left by one test
+  are now deleted before the next. Previously they piled up (around
+  346,000 after the filter dialog tests), slowing everything down and
+  making one real-thread restore test time out.
+
+---
+
 ## [1.21.0-beta.4] — 2026-10-05
 
 > Headline: **back up when you close OpenSAK** — the next part of Backup

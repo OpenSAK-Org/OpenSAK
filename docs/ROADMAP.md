@@ -1,7 +1,6 @@
 # OpenSAK Roadmap
 
-*Last updated: 29 September 2026 (priority order revised — backup, macros and GSAK
-field compatibility moved up; completed items moved to "Done" at the bottom)*
+*Last updated: 6 October 2026 (Backup Support complete in the 1.21.0 betas)*
 
 *This reflects the current priority order for planned work. It's a living
 document and will be updated as things progress — not a fixed release schedule
@@ -18,8 +17,13 @@ user's data today, and because it's a safety net for the automation coming next:
 once macros and scheduled imports can change many caches unattended, an easy way
 back matters.
 
-*Status: not started. Until then, **Help → OpenSAK File Locations…** (1.20.0)
-shows exactly which folders to back up.*
+*Status: complete in the 1.21.0 betas, moving to "Done" with 1.21.0 (#942).
+**File → Back up now…** and **File → Restore from backup…**, an offer to back up
+when you close OpenSAK (keeping the last five automatic backups), a backup folder
+chosen in the Welcome Wizard or Settings, optional compressed backups, restoring
+your settings as well as databases, and an automatic copy of a database before
+a new OpenSAK version updates its format. Scheduled backups while OpenSAK runs
+are planned as a follow-up.*
 
 ### 2. Macro & Scripting Support
 Give users a way to automate OpenSAK, as a modern successor to the GSAK Macro
