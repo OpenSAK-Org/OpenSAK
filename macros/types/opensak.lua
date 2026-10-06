@@ -114,7 +114,7 @@ function opensak.set_corrected(code, lat, lon) end
 ---@return boolean # false if the cache is not in the database.
 function opensak.clear_corrected(code) end
 
----Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. The file must lie in a folder with read permission (Settings → Folder permissions) and may be at most 10 MB.
+---Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. If the file's folder has no read permission (Settings → Folder permissions), OpenSAK asks the user to allow it for this run or always. The file may be at most 10 MB.
 ---
 ---Since API version 1.
 ---

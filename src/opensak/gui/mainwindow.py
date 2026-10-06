@@ -3307,6 +3307,13 @@ class MainWindow(QMainWindow):
         )
         return reply == QMessageBox.StandardButton.Yes
 
+    def approve_folder(self, target, folder, write: bool):
+        """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
+        dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_folder_approval
+        parent = getattr(self, "_macro_dialog", None) or self
+        return ask_folder_approval(parent, target, folder, write)
+
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's corrected-coordinate changes
         affect. A handful of caches get the same per-cache refresh as the

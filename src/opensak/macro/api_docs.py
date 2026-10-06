@@ -96,7 +96,11 @@ def render_api_markdown() -> str:
         "",
         "Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK "
         "through the global `opensak` table. File access is limited to the "
-        "folders listed in Settings → Folder permissions.",
+        "folders listed in Settings → Folder permissions. When a macro needs "
+        "a file in another folder, OpenSAK asks the user whether to allow "
+        "that folder for this run only or always, or to deny it; reading and "
+        "writing are asked separately. OpenSAK's own settings and database "
+        "files are never accessible.",
         "",
         "See [Example macros](#example-macros) for complete scripts and "
         "[Editor support](#editor-support-vs-code) for autocompletion in VS Code.",

@@ -30,6 +30,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
@@ -54,10 +55,15 @@ from opensak.filters.engine import (
 from opensak.coords import parse_coords
 from opensak.macro.permissions import (
     FolderAccessDenied,
+    FolderNotApproved,
     FolderPermission,
+    approvable_folder,
     check_access,
+    grant_permanently,
+    load_permissions,
     macros_dir,
     temp_dir,
+    with_grant,
 )
 from opensak.utils.constants import CACHE_TYPES
 
@@ -194,6 +200,14 @@ class MacroError(Exception):
     """A macro failed — Lua syntax/runtime error or a bad API call."""
 
 
+class FolderApproval(Enum):
+    """The user's answer when a macro needs a folder that is not permitted."""
+
+    ONCE = "once"       # for the rest of this run
+    ALWAYS = "always"   # added to Settings → Folder permissions
+    DENY = "deny"
+
+
 class MacroHost(Protocol):
     """What a macro may do to the running application."""
 
@@ -228,6 +242,15 @@ class MacroHost(Protocol):
 
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
+
+    def approve_folder(self, target: Path, folder: Path, write: bool) -> FolderApproval:
+        """Ask the user whether the macro may read (or write) *target*, by
+        permitting *folder* for this run only or always.
+
+        Must be OpenSAK's own dialog showing the full path — never anything
+        the macro can word or answer itself. Read and write are asked
+        separately. Anything but ONCE or ALWAYS counts as DENY.
+        """
 
     def end_macro(self) -> None:
         """Called once after every run, also when the macro failed — apply
@@ -409,7 +432,8 @@ class MacroRuntime:
     ):
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
-        changes apply without reopening the macro window."""
+        changes apply without reopening the macro window. Folders the user
+        approves during a run are added to a copy of the list for that run."""
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
@@ -417,6 +441,9 @@ class MacroRuntime:
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
         self._base_dir: Optional[Path] = None
+        self._run_permissions: list[FolderPermission] = []
+        # (folder, write) the user denied during this run — not asked again
+        self._denied: set[tuple[Path, bool]] = set()
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -475,12 +502,35 @@ class MacroRuntime:
         file = Path(path).expanduser()
         if not file.is_absolute():
             file = (self._base_dir or macros_dir()) / file
-        try:
-            file = check_access(file, write=False, permissions=self._folder_permissions)
-        except FolderAccessDenied as exc:
-            raise MacroError(str(exc)) from None
+        file = self._check_access(file, write=False)
         rows = read_csv_rows(file, sep)
         return lua.table_from([lua.table_from(r) for r in rows])
+
+    def _check_access(self, path: Path, write: bool) -> Path:
+        """check_access() against this run's list. A folder that is merely
+        not listed is put to the user (host.approve_folder) instead of
+        failing; protected data and roots fail without asking."""
+        try:
+            return check_access(path, write=write, permissions=self._run_permissions)
+        except FolderNotApproved as exc:
+            folder = approvable_folder(exc.target)
+            if folder is None:
+                raise MacroError(str(exc)) from None
+            if (folder, write) not in self._denied:
+                answer = self._host.approve_folder(exc.target, folder, write)
+                if answer not in (FolderApproval.ONCE, FolderApproval.ALWAYS):
+                    self._denied.add((folder, write))
+            if (folder, write) in self._denied:
+                raise MacroError(f"{exc} (denied by the user)") from None
+            if answer is FolderApproval.ALWAYS:
+                grant_permanently(folder, write)
+            self._run_permissions = with_grant(self._run_permissions, folder, write)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
+        try:
+            return check_access(path, write=write, permissions=self._run_permissions)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
 
     # -- Running ---------------------------------------------------------------
 
@@ -494,6 +544,12 @@ class MacroRuntime:
         otherwise.
         """
         self._base_dir = base_dir
+        self._run_permissions = (
+            list(self._folder_permissions)
+            if self._folder_permissions is not None
+            else load_permissions()
+        )
+        self._denied = set()
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
@@ -706,9 +762,10 @@ API: tuple[ApiFunction, ...] = (
         name="read_csv",
         description="Read a CSV file (UTF-8) into an array of rows keyed by the "
                     "header line. A relative path is resolved against the "
-                    "macro file's folder. The file must lie in a folder with "
-                    "read permission (Settings → Folder permissions) and may "
-                    f"be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
+                    "macro file's folder. If the file's folder has no read "
+                    "permission (Settings → Folder permissions), OpenSAK asks "
+                    "the user to allow it for this run or always. The file "
+                    f"may be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
         example='for _, row in ipairs(opensak.read_csv("solved.csv")) do\n'
                 "    opensak.set_corrected(row.code, row.coords)\nend",
         since=1,
