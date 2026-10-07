@@ -28,6 +28,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import time
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -88,6 +89,19 @@ _ZIP_CHUNK = 1024 * 1024
 # still far smaller than the database. Speed matters most here: the backup
 # on exit runs while the user waits for OpenSAK to close.
 _ZIP_LEVEL = 1
+
+# Issue #1002: compressed sets stage their databases in this folder inside
+# the install folder, not in the backup folder. A cloud-synced backup folder
+# (OneDrive, Dropbox, …) would otherwise start uploading every staged
+# database only for it to be deleted seconds later, and may hold on to the
+# staging folder so it can't be removed. The install folder is local by
+# default, never the backup folder (validate_backup_dir), and closed to
+# macros.
+STAGING_DIRNAME = "backup-staging"
+# Removing a folder another program (sync client, antivirus, indexer) has
+# just looked at often fails on Windows; try a few times before giving up.
+_REMOVE_ATTEMPTS = 5
+_REMOVE_DELAY_S = 0.2
 
 # (database name, fraction of that database done, fraction of the whole set)
 ProgressCallback = Callable[[str, float, float], None]
@@ -283,27 +297,31 @@ def write_backup_set(
     skipped_names = tuple(skipped)
 
     cleanup_partials(folder)
+    cleanup_staging()
 
     if compress is None:
         compress = get_compress()
 
     total = sum(size for _db, size in present)
+    staging_root = folder
     if compress:
+        staging_root = _staging_root(folder)
         largest = max((size for _db, size in present), default=0)
-        needed = largest * _FREE_SPACE_FACTOR + total * _ZIP_SPACE_FACTOR
+        staged = largest * _FREE_SPACE_FACTOR
+        zipped = total * _ZIP_SPACE_FACTOR
+        if _same_volume(staging_root, folder):
+            _check_free_space(folder, staged + zipped)
+        else:
+            _check_free_space(staging_root, staged)
+            _check_free_space(folder, zipped)
     else:
-        needed = total * _FREE_SPACE_FACTOR
-    free = shutil.disk_usage(folder).free
-    if free < needed:
-        raise NotEnoughSpaceError(
-            f"Not enough free space in {folder}: about "
-            f"{_mb(needed)} MB needed, {_mb(free)} MB free"
-        )
+        _check_free_space(folder, total * _FREE_SPACE_FACTOR)
 
     name = _unique_set_name(folder, now, kind)
     if compress:
         final = _write_compressed_set(
             present, total, folder, name, kind, now, progress,
+            staging_root=staging_root,
         )
         logger.info("backup: wrote %s (compressed, %d skipped)", final, len(skipped_names))
         return BackupResult(read_backup_set(final), skipped_names)
@@ -321,7 +339,7 @@ def write_backup_set(
     except BaseException as exc:
         # BaseException: a cancelled worker or Ctrl+C must not leave a
         # .partial folder behind either.
-        shutil.rmtree(partial, ignore_errors=True)
+        _remove_tree(partial)
         if isinstance(exc, BackupError):
             raise
         if isinstance(exc, (SnapshotError, OSError, sqlite3.Error)):
@@ -343,16 +361,21 @@ def _write_compressed_set(
     kind: str,
     now: datetime,
     progress: Optional[ProgressCallback],
+    *,
+    staging_root: Optional[Path] = None,
 ) -> Path:
     """
     Write a compressed set (#989): ``<name>.zip`` with the same layout as a
     folder set. Databases are staged one at a time in ``<name>.partial/``
-    and removed as soon as they are in the zip, so the extra space needed is
-    the largest database, not all of them. The zip is written as
-    ``<name>.zip.partial`` and renamed when complete, manifest last — never
-    half a backup. On any failure or cancel both are removed.
+    under *staging_root* — normally the install folder's backup-staging
+    folder (#1002), *folder* if not given — and removed as soon as they are
+    in the zip, so the extra space needed is the largest database, not all
+    of them. The zip is written as ``<name>.zip.partial`` in *folder* and
+    renamed when complete, manifest last — never half a backup. On any
+    failure or cancel both are removed.
     """
-    staging = folder / (name + PARTIAL_SUFFIX)
+    root = staging_root if staging_root is not None else folder
+    staging = root / (name + PARTIAL_SUFFIX)
     zip_partial = folder / (name + ZIP_SUFFIX + PARTIAL_SUFFIX)
     final = folder / (name + ZIP_SUFFIX)
     try:
@@ -386,14 +409,86 @@ def _write_compressed_set(
             zip_partial.unlink(missing_ok=True)
         except OSError:
             pass
-        shutil.rmtree(staging, ignore_errors=True)
+        _remove_tree(staging)
         if isinstance(exc, BackupError):
             raise
         if isinstance(exc, (SnapshotError, OSError, sqlite3.Error, zipfile.BadZipFile)):
             raise BackupError(str(exc)) from exc
         raise
-    shutil.rmtree(staging, ignore_errors=True)
+    _remove_tree(staging)
     return final
+
+
+def _staging_dir() -> Path:
+    """The install folder's backup-staging folder (#1002), not created."""
+    from opensak.config import get_app_data_dir
+    return get_app_data_dir() / STAGING_DIRNAME
+
+
+def _staging_root(folder: Path) -> Path:
+    """
+    Where a compressed set stages its databases (#1002): the backup-staging
+    folder, created if needed. Falls back to the backup folder *folder*
+    itself if that folder can't be created.
+    """
+    try:
+        root = _staging_dir()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    except Exception:
+        logger.warning(
+            "backup: cannot use the staging folder, staging in %s instead",
+            folder, exc_info=True,
+        )
+        return folder
+
+
+def cleanup_staging() -> list[Path]:
+    """
+    Remove ``<set name>.partial`` folders left in the backup-staging folder
+    by an interrupted compressed backup (#1002). Nothing else is touched.
+    """
+    try:
+        root = _staging_dir()
+    except Exception:
+        return []
+    return cleanup_partials(root)
+
+
+def _same_volume(a: Path, b: Path) -> bool:
+    """True if *a* and *b* are on the same file system (or we can't tell)."""
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return True
+
+
+def _check_free_space(folder: Path, needed: float) -> None:
+    free = shutil.disk_usage(folder).free
+    if free < needed:
+        raise NotEnoughSpaceError(
+            f"Not enough free space in {folder}: about "
+            f"{_mb(needed)} MB needed, {_mb(free)} MB free"
+        )
+
+
+def _remove_tree(path: Path) -> bool:
+    """
+    Remove the folder *path*, retrying briefly: on Windows a sync client,
+    antivirus or the search indexer often holds a just-written file or
+    folder for a moment (#1002). Returns False, and logs a warning, if it is
+    still there; cleanup_partials() removes it at the next backup.
+    """
+    for attempt in range(_REMOVE_ATTEMPTS):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return True
+        if attempt < _REMOVE_ATTEMPTS - 1:
+            time.sleep(_REMOVE_DELAY_S)
+    logger.warning(
+        "backup: could not remove %s; it will be removed at the next backup", path,
+    )
+    return False
 
 
 def _zip_file(
