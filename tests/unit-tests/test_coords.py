@@ -445,3 +445,59 @@ class TestParseCoordsHemisphereDecimalDegrees:
 
     def test_dmm_degree_sign_format_still_takes_precedence(self):
         assert parse_coords("N 34° 58.088' E 034° 03.281'") == pytest.approx((34.968133333333334, 34.05468333333334))
+
+
+# ── Issue #765: tighter separators, more minute/seconds marks ────────────────
+
+DMS_EXPECTED = (55.7875, 12.0 + 25 / 60)
+
+
+class TestParseCoords765:
+    @pytest.mark.parametrize("text", [
+        "55.78750, 12.41667",
+        "55.78750,12.41667",
+        "55.78750 , 12.41667",
+        "55.78750 12.41667",
+    ])
+    def test_dd_one_comma_or_whitespace(self, text):
+        assert parse_coords(text) == pytest.approx((55.7875, 12.41667))
+
+    @pytest.mark.parametrize("text", [
+        "56.789 ,, ,  ,,,  12.345",
+        "56.789,,12.345",
+        "56.789, ,12.345",
+    ])
+    def test_dd_more_than_one_comma_is_rejected(self, text):
+        assert parse_coords(text) is None
+
+    @pytest.mark.parametrize("minute, second", [
+        ("'", '"'),          # apostrophe, quotation mark
+        ("′", "″"),          # prime, double prime
+        ("’", "”"),          # what Word turns ' and " into
+        ("'", "''"),         # two apostrophes for seconds
+    ])
+    def test_dms_minute_and_seconds_marks(self, minute, second):
+        text = f"N55° 47{minute} 15.00{second} E012° 25{minute} 00.00{second}"
+        assert parse_coords(text) == pytest.approx(DMS_EXPECTED)
+
+    def test_dms_without_marks(self):
+        assert parse_coords("N55 47 15 E012 25 00") == pytest.approx(DMS_EXPECTED)
+
+    def test_dms_no_space_after_seconds_mark(self):
+        assert parse_coords("N55° 47' 15.00\"E012° 25' 00.00\"") == pytest.approx(
+            DMS_EXPECTED)
+
+    @pytest.mark.parametrize("text", [
+        # several quotes and spaces after the seconds (the case in #765)
+        "N 56° 12' 34.567 \" \"\" E 12° 34' 56.789 \"\" \"",
+        "N55° 47' 15.00\"\" E012° 25' 00.00\"",
+        # the seconds mark must follow the number
+        "N55° 47' 15.00 \" E012° 25' 00.00\"",
+        "N55° 47' 15.00\" E012° 25' 00.00 \"",
+    ])
+    def test_dms_stray_seconds_marks_are_rejected(self, text):
+        assert parse_coords(text) is None
+
+    def test_dmm_degree_format_takes_word_apostrophe(self):
+        assert parse_coords("N 34° 58.088’ E 034° 03.281’") == pytest.approx(
+            parse_coords("N 34° 58.088' E 034° 03.281'"))

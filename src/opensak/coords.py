@@ -141,6 +141,12 @@ def _valid_range(lat: float, lon: float) -> bool:
     return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
 
 
+# Minute and seconds marks accepted by parse_coords() (#765). Word turns
+# ' and " into ’ and ” when coordinates are typed or pasted there.
+_MIN_MARK = "['′’]"
+_SEC_MARK = "(?:[\"″”]|'')"
+
+
 def parse_coords(text: str) -> Coordinate | None:
     """
     Try to parse a coordinate string in any supported format.
@@ -155,13 +161,21 @@ def parse_coords(text: str) -> Coordinate | None:
     DMM°:  N 34° 58.088 E 034° 03.281     (uden apostrof — fixes #59)
     DMM°:  N38° 33.502 W90° 22.774        (uden mellemrum efter hemisphere)
     DMS :  N55° 47' 15.00" E012° 25' 00.00"
+
+    Minutes may be marked ' (apostrophe), ′ (prime) or ’ (the right single
+    quotation mark Word substitutes), seconds " (quotation mark), ″ (double
+    prime), ” or '' (two apostrophes). Issue #765: DD takes one comma or
+    whitespace between latitude and longitude, and DMS one seconds mark,
+    right after the number.
     """
     import re
     text = text.strip()
 
     # ── DD: "55.78750, 12.41667" or "55.78750 12.41667" ──────────────────────
+    # Issue #765: exactly one comma (spaces around it allowed) or whitespace —
+    # not "56.789 ,, ,  ,,,  12.345".
     m = re.match(
-        r'^([+-]?\d+\.\d+)[,\s]+([+-]?\d+\.\d+)$', text
+        r'^([+-]?\d+\.\d+)(?:\s*,\s*|\s+)([+-]?\d+\.\d+)$', text
     )
     if m:
         lat, lon = float(m.group(1)), float(m.group(2))
@@ -196,8 +210,8 @@ def parse_coords(text: str) -> Coordinate | None:
     # ── DMM°: "N 34° 58.088' E 034° 03.281'" (geocaching.com format) ─────────
     # Grads-tegn efter grader, apostrof efter minutter er valgfri (fixes #59)
     m = re.match(
-        r'^([NSns])\s*(\d{1,3})\s*°?\s*(\d+(?:\.\d+)?)\s*[\'′]?\s*'
-        r'([EWew])\s*(\d{1,3})\s*°?\s*(\d+(?:\.\d+)?)\s*[\'′]?\s*$',
+        rf'^([NSns])\s*(\d{{1,3}})\s*°?\s*(\d+(?:\.\d+)?)\s*{_MIN_MARK}?\s*'
+        rf'([EWew])\s*(\d{{1,3}})\s*°?\s*(\d+(?:\.\d+)?)\s*{_MIN_MARK}?\s*$',
         text
     )
     if m:
@@ -217,9 +231,13 @@ def parse_coords(text: str) -> Coordinate | None:
     # branch is needed.
 
     # ── DMS: "N55° 47' 15.00" E012° 25' 00.00"" ──────────────────────────────
+    # Issue #765: at most one seconds mark, right after the number (the old
+    # pattern took any number of quotes and spaces), and ″ ” '' as well as ".
     m = re.match(
-        r'^([NSns])\s*(\d{1,3})[°\s]\s*(\d{1,2})[\'′\s]\s*(\d+(?:\.\d+)?)["\s]*'
-        r'\s+([EWew])\s*(\d{1,3})[°\s]\s*(\d{1,2})[\'′\s]\s*(\d+(?:\.\d+)?)["\s]*$',
+        rf'^([NSns])\s*(\d{{1,3}})[°\s]\s*(\d{{1,2}})(?:{_MIN_MARK}|\s)\s*'
+        rf'(\d+(?:\.\d+)?)(?:{_SEC_MARK}\s*|\s+)'
+        rf'([EWew])\s*(\d{{1,3}})[°\s]\s*(\d{{1,2}})(?:{_MIN_MARK}|\s)\s*'
+        rf'(\d+(?:\.\d+)?){_SEC_MARK}?$',
         text
     )
     if m:
