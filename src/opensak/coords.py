@@ -146,6 +146,71 @@ def _valid_range(lat: float, lon: float) -> bool:
 _MIN_MARK = "['′’]"
 _SEC_MARK = "(?:[\"″”]|'')"
 
+# Issue #767: one coordinate (latitude or longitude) of a hemisphere format.
+# The hemisphere letter may come before or after the value, but exactly once
+# (checked in _hemisphere_match), and a value never has a sign of its own.
+_LAT_H = "[NSns]"
+_LON_H = "[EWew]"
+# Decimal degrees with an optional degree sign: "59.99999", "35.123°".
+_DD_VALUE = r"(\d{1,3}(?:\.\d+)?)\s*°?"
+# Degrees and decimal minutes: "55 47.250", "34° 58.088'". Degrees and
+# minutes must be split by a degree sign or whitespace, so the regex can't
+# hand digits of the degrees to the minutes (the #751 trap).
+_DMM_VALUE = rf"(\d{{1,3}})(?:\s*°\s*|\s+)(\d+(?:\.\d+)?)\s*{_MIN_MARK}?"
+# Degrees, minutes and seconds: "55° 47' 15.00\"", "32 22 16.56".
+_DMS_VALUE = (
+    rf"(\d{{1,3}})[°\s]\s*(\d{{1,2}})(?:{_MIN_MARK}|\s)\s*"
+    rf"(\d+(?:\.\d+)?){_SEC_MARK}?"
+)
+
+
+def _coordinate_pattern(hemisphere: str, value: str) -> str:
+    return rf"(?:({hemisphere})\s*)?{value}(?:\s*({hemisphere}))?"
+
+
+def _hemisphere_match(
+    text: str, value: str,
+) -> tuple[str, tuple[str, ...], str, tuple[str, ...]] | None:
+    """
+    Match *text* as latitude and longitude, each written with *value* and one
+    hemisphere letter before or after it, separated by whitespace and/or one
+    comma. Returns (lat letter, lat value groups, lon letter, lon value
+    groups) — letters upper-case — or None.
+    """
+    import re
+    m = re.match(
+        rf"^{_coordinate_pattern(_LAT_H, value)}(\s*,?\s*)"
+        rf"{_coordinate_pattern(_LON_H, value)}$",
+        text,
+    )
+    if not m:
+        return None
+    groups = m.groups()
+    n = (len(groups) - 1) // 2           # leading letter, values, trailing letter
+    lat_g, lon_g = groups[:n], groups[n + 1:]
+    lat_h = _single_hemisphere(lat_g[0], lat_g[-1])
+    lon_h = _single_hemisphere(lon_g[0], lon_g[-1])
+    if lat_h is None or lon_h is None:
+        return None
+    # Two numbers with nothing between them ("…32.5115.8…") can't be told
+    # apart: something (a letter, a comma, whitespace, a mark) must come
+    # between the latitude's last number and the longitude's first. Groups
+    # are 1-based: lat's last value is group n - 1, lon's first n + 3.
+    if m.end(n - 1) == m.start(n + 3):
+        return None
+    return lat_h, lat_g[1:-1], lon_h, lon_g[1:-1]
+
+
+def _single_hemisphere(before: str | None, after: str | None) -> str | None:
+    """The coordinate's hemisphere letter, or None unless there is exactly one."""
+    if (before is None) == (after is None):
+        return None
+    return (before or after or "").upper()
+
+
+def _signed(value: float, hemisphere: str) -> float:
+    return -value if hemisphere in ("S", "W") else value
+
 
 def parse_coords(text: str) -> Coordinate | None:
     """
@@ -156,11 +221,17 @@ def parse_coords(text: str) -> Coordinate | None:
     Accepted formats
     ----------------
     DD  :  55.78750, 12.41667
+    DD  :  N 59.99999 E 12.99999          (hemisphere letters)
     DMM :  N55 47.250 E012 25.000
     DMM°:  N 34° 58.088' E 034° 03.281'   (med apostrof)
     DMM°:  N 34° 58.088 E 034° 03.281     (uden apostrof — fixes #59)
     DMM°:  N38° 33.502 W90° 22.774        (uden mellemrum efter hemisphere)
     DMS :  N55° 47' 15.00" E012° 25' 00.00"
+
+    In the hemisphere formats each coordinate has its letter (N/S, E/W)
+    either before or after the value — "32.371267S 115.827467E",
+    "32° 22.276 S 115° 49.648 E", "S 35.123° 86.543° W" (#767) — but exactly
+    once, and never together with a minus sign.
 
     Minutes may be marked ' (apostrophe), ′ (prime) or ’ (the right single
     quotation mark Word substitutes), seconds " (quotation mark), ″ (double
@@ -184,74 +255,38 @@ def parse_coords(text: str) -> Coordinate | None:
     # ── DD with hemisphere letters: "N 59.99999 E 12.99999" ──────────────────
     # Issue #751: without this branch, a plain decimal-degree value written
     # with an N/S/E/W hemisphere letter instead of a +/- sign (no separate
-    # minutes component at all) fell through to the DMM° branch below.
-    # There, regex backtracking let the degrees group (\d{1,3}, normally
-    # greedy) give back digits to the minutes group whenever keeping them
-    # would leave an unmatchable "." right after — so "59.99999" silently
-    # got reinterpreted as degrees=5, minutes=9.99999 instead of being
-    # rejected or recognised as decimal degrees, producing wildly wrong
-    # coordinates (5.16667° instead of 59.99999°) with no error shown.
-    # Checked before the DMM° branch since it's the more specific/exact
-    # match for this exact input shape.
-    m = re.match(
-        r'^([NSns])\s*(\d{1,3}(?:\.\d+)?)\s+([EWew])\s*(\d{1,3}(?:\.\d+)?)\s*$',
-        text
-    )
-    if m:
-        lat_h, lat_val, lon_h, lon_val = m.groups()
-        lat = float(lat_val)
-        lon = float(lon_val)
-        if lat_h.upper() == "S":
-            lat = -lat
-        if lon_h.upper() == "W":
-            lon = -lon
+    # minutes component at all) fell through to the DMM° branch below and
+    # was silently misread as degrees=5, minutes=9.99999. Checked before the
+    # DMM branch since it's the more specific match for this input shape.
+    hit = _hemisphere_match(text, _DD_VALUE)
+    if hit:
+        lat_h, (lat_v,), lon_h, (lon_v,) = hit
+        lat = _signed(float(lat_v), lat_h)
+        lon = _signed(float(lon_v), lon_h)
         return (lat, lon) if _valid_range(lat, lon) else None
 
-    # ── DMM°: "N 34° 58.088' E 034° 03.281'" (geocaching.com format) ─────────
+    # ── DMM / DMM°: "N55 47.250 E012 25.000", "N 34° 58.088' E 034° 03.281'" ─
     # Grads-tegn efter grader, apostrof efter minutter er valgfri (fixes #59)
-    m = re.match(
-        rf'^([NSns])\s*(\d{{1,3}})\s*°?\s*(\d+(?:\.\d+)?)\s*{_MIN_MARK}?\s*'
-        rf'([EWew])\s*(\d{{1,3}})\s*°?\s*(\d+(?:\.\d+)?)\s*{_MIN_MARK}?\s*$',
-        text
-    )
-    if m:
-        lat_h, lat_d, lat_m, lon_h, lon_d, lon_m = m.groups()
+    hit = _hemisphere_match(text, _DMM_VALUE)
+    if hit:
+        lat_h, (lat_d, lat_m), lon_h, (lon_d, lon_m) = hit
         if float(lat_m) >= 60.0 or float(lon_m) >= 60.0:
             return None
-        lat = int(lat_d) + float(lat_m) / 60
-        lon = int(lon_d) + float(lon_m) / 60
-        if lat_h.upper() == "S":
-            lat = -lat
-        if lon_h.upper() == "W":
-            lon = -lon
+        lat = _signed(int(lat_d) + float(lat_m) / 60, lat_h)
+        lon = _signed(int(lon_d) + float(lon_m) / 60, lon_h)
         return (lat, lon) if _valid_range(lat, lon) else None
 
-    # Plain DMM "N55 47.250 E012 25.000" is already matched by the DMM° branch
-    # above (the degree sign and apostrophe are optional there), so no separate
-    # branch is needed.
-
     # ── DMS: "N55° 47' 15.00" E012° 25' 00.00"" ──────────────────────────────
-    # Issue #765: at most one seconds mark, right after the number (the old
-    # pattern took any number of quotes and spaces), and ″ ” '' as well as ".
-    m = re.match(
-        rf'^([NSns])\s*(\d{{1,3}})[°\s]\s*(\d{{1,2}})(?:{_MIN_MARK}|\s)\s*'
-        rf'(\d+(?:\.\d+)?)(?:{_SEC_MARK}\s*|\s+)'
-        rf'([EWew])\s*(\d{{1,3}})[°\s]\s*(\d{{1,2}})(?:{_MIN_MARK}|\s)\s*'
-        rf'(\d+(?:\.\d+)?){_SEC_MARK}?$',
-        text
-    )
-    if m:
-        lat_h, lat_d, lat_m, lat_s, lon_h, lon_d, lon_m, lon_s = m.groups()
+    # Issue #765: at most one seconds mark, right after the number.
+    hit = _hemisphere_match(text, _DMS_VALUE)
+    if hit:
+        lat_h, (lat_d, lat_m, lat_s), lon_h, (lon_d, lon_m, lon_s) = hit
         if int(lat_m) >= 60 or int(lon_m) >= 60:
             return None
         if float(lat_s) >= 60.0 or float(lon_s) >= 60.0:
             return None
-        lat = int(lat_d) + int(lat_m) / 60 + float(lat_s) / 3600
-        lon = int(lon_d) + int(lon_m) / 60 + float(lon_s) / 3600
-        if lat_h.upper() == "S":
-            lat = -lat
-        if lon_h.upper() == "W":
-            lon = -lon
+        lat = _signed(int(lat_d) + int(lat_m) / 60 + float(lat_s) / 3600, lat_h)
+        lon = _signed(int(lon_d) + int(lon_m) / 60 + float(lon_s) / 3600, lon_h)
         return (lat, lon) if _valid_range(lat, lon) else None
 
     return None
