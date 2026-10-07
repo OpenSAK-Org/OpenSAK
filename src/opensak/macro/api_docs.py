@@ -45,7 +45,7 @@ def _example_summary(path: Path) -> str:
     return ""
 
 
-def _examples_section() -> list[str]:
+def _examples_section(examples_dir: Path) -> list[str]:
     lines = [
         "",
         "## Example macros",
@@ -55,7 +55,7 @@ def _examples_section() -> list[str]:
         "does and which files it expects.",
         "",
     ]
-    for path in sorted(EXAMPLES_DIR.glob("*.lua")):
+    for path in sorted(examples_dir.glob("*.lua")):
         summary = _example_summary(path)
         entry = f"- [`{path.name}`]({_EXAMPLES_LINK}/{path.name})"
         lines.append(f"{entry} — {summary}" if summary else entry)
@@ -86,7 +86,10 @@ def _param_line(p: Param) -> str:
     return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
 
 
-def render_api_markdown() -> str:
+def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
+    """The API reference as Markdown. *examples_dir* is where the example
+    macros listed at the end are looked up (the in-app help passes the
+    bundled folder)."""
     lines = [
         f"<!-- {_GENERATED} -->",
         "",
@@ -144,7 +147,7 @@ def render_api_markdown() -> str:
         value = doc.value.replace("|", "\\|")
         lines.append(f"| {keys} | `{value}` | {doc.description} |")
 
-    lines += _examples_section()
+    lines += _examples_section(examples_dir)
     lines += _editor_section()
 
     lines += [
