@@ -787,6 +787,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Uložit zobrazení",
     "column_view_name_label": "Název zobrazení:",
     "column_view_saved_msg": "Zobrazení '{name}' bylo uloženo.",
+    "column_view_overwrite_title": "Přepsat zobrazení",
+    "column_view_overwrite_msg": "Zobrazení '{name}' už existuje. Přepsat ho?",
     "column_view_delete_title": "Smazat zobrazení",
     "column_view_delete_msg": "Smazat zobrazení '{name}'?",
     "column_view_load_error": "Zobrazení nelze načíst:\n{error}",

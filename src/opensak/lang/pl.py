@@ -788,6 +788,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Zapisz widok",
     "column_view_name_label": "Nazwa widoku kolumn:",
     "column_view_saved_msg": "Widok „{name}” został zapisany.",
+    "column_view_overwrite_title": "Nadpisz widok",
+    "column_view_overwrite_msg": "Widok kolumn „{name}” już istnieje. Nadpisać go?",
     "column_view_delete_title": "Usuń widok",
     "column_view_delete_msg": "Usunąć widok kolumn „{name}”?",
     "column_view_load_error": "Nie udało się wczytać widoku:\n{error}",

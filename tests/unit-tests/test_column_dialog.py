@@ -396,3 +396,85 @@ class TestDialogPreselectsView:
             if dlg._list.item(i).checkState() == Qt.CheckState.Checked
         }
         assert checked == {"name", "gc_code", "found"} | ALWAYS_VISIBLE
+
+
+# ── Issue #995: Save asks before overwriting an existing view ────────────────
+
+class TestSaveViewOverwrite:
+    @pytest.fixture
+    def save_as(self, monkeypatch):
+        """Return (dialog_factory, asked) — the dialog's Save prompts are
+        stubbed: the name dialog returns *name*, the overwrite question
+        records its text and answers *answer*."""
+        from PySide6.QtWidgets import QMessageBox as QtMessageBox
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)  # real message text
+        asked: list[str] = []
+
+        def run(qtbot, name: str, answer=QtMessageBox.StandardButton.No):
+            monkeypatch.setattr(cd.QInputDialog, "getText",
+                                staticmethod(lambda *a, **k: (name, True)))
+
+            def _question(parent, title, text, *a, **k):
+                asked.append(text)
+                return answer
+            monkeypatch.setattr(cd.QMessageBox, "question", staticmethod(_question))
+            monkeypatch.setattr(cd.QMessageBox, "information",
+                                staticmethod(lambda *a, **k: None))
+            dlg = ColumnChooserDialog()
+            qtbot.addWidget(dlg)
+            dlg._save_view()
+            return dlg
+
+        return run, asked
+
+    def test_new_name_saves_without_asking(self, qtbot, store, views_dir, save_as):
+        run, asked = save_as
+        run(qtbot, "Fresh")
+        assert asked == []
+        assert ColumnView.load(ColumnView.path_for("Fresh")).name == "Fresh"
+
+    def test_existing_name_no_keeps_old_view(self, qtbot, store, views_dir, save_as):
+        run, asked = save_as
+        path = ColumnView("Trip", visible_columns=["gc_code", "name", "found"]).save()
+        run(qtbot, "Trip")
+        assert len(asked) == 1 and "Trip" in asked[0]
+        assert ColumnView.load(path).visible_columns == ["gc_code", "name", "found"]
+
+    def test_existing_name_yes_overwrites(self, qtbot, store, views_dir, save_as):
+        from PySide6.QtWidgets import QMessageBox as QtMessageBox
+        run, asked = save_as
+        path = ColumnView("Trip", visible_columns=["gc_code", "name", "found"]).save()
+        run(qtbot, "Trip", QtMessageBox.StandardButton.Yes)
+        assert len(asked) == 1
+        assert ColumnView.load(path).visible_columns == get_visible_columns()
+
+    def test_same_file_name_counts_as_existing(self, qtbot, store, views_dir, save_as):
+        # "My/View" and "My_View" both map to My_View.json.
+        from PySide6.QtWidgets import QMessageBox as QtMessageBox
+        run, asked = save_as
+        path = ColumnView("My_View", visible_columns=["gc_code", "name"]).save()
+        run(qtbot, "My/View", QtMessageBox.StandardButton.Yes)
+        assert len(asked) == 1 and "My_View" in asked[0]
+        assert ColumnView.load(path).name == "My/View"
+
+    def test_overwritten_default_view_stays_default_under_new_name(
+        self, qtbot, store, views_dir, save_as,
+    ):
+        from PySide6.QtWidgets import QMessageBox as QtMessageBox
+        run, _ = save_as
+        ColumnView("My_View", visible_columns=["gc_code", "name"]).save()
+        set_default_view_name("My_View")
+        run(qtbot, "My/View", QtMessageBox.StandardButton.Yes)
+        assert get_default_view_name() == "My/View"
+        assert get_default_view() is not None
+
+    def test_default_untouched_when_overwrite_declined(
+        self, qtbot, store, views_dir, save_as,
+    ):
+        run, _ = save_as
+        ColumnView("My_View", visible_columns=["gc_code", "name"]).save()
+        set_default_view_name("My_View")
+        run(qtbot, "My/View")
+        assert get_default_view_name() == "My_View"

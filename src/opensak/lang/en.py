@@ -786,6 +786,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Save view",
     "column_view_name_label": "Column view name:",
     "column_view_saved_msg": "View '{name}' has been saved.",
+    "column_view_overwrite_title": "Overwrite view",
+    "column_view_overwrite_msg": "Column view '{name}' already exists. Overwrite it?",
     "column_view_delete_title": "Delete view",
     "column_view_delete_msg": "Delete column view '{name}'?",
     "column_view_load_error": "Could not load view:\n{error}",

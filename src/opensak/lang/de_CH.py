@@ -789,6 +789,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Ansicht speichern",
     "column_view_name_label": "Name der Ansicht:",
     "column_view_saved_msg": "Ansicht '{name}' wurde gespeichert.",
+    "column_view_overwrite_title": "Ansicht überschreiben",
+    "column_view_overwrite_msg": "Die Ansicht '{name}' existiert bereits. Überschreiben?",
     "column_view_delete_title": "Ansicht löschen",
     "column_view_delete_msg": "Ansicht '{name}' löschen?",
     "column_view_load_error": "Ansicht kann nicht geladen werden:\n{error}",

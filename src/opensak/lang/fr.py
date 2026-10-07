@@ -788,6 +788,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Enregistrer la vue",
     "column_view_name_label": "Nom de la vue:",
     "column_view_saved_msg": "La vue '{name}' a été enregistrée.",
+    "column_view_overwrite_title": "Écraser la vue",
+    "column_view_overwrite_msg": "La vue '{name}' existe déjà. Voulez-vous l'écraser ?",
     "column_view_delete_title": "Supprimer la vue",
     "column_view_delete_msg": "Supprimer la vue '{name}'?",
     "column_view_load_error": "Impossible de charger la vue:\n{error}",

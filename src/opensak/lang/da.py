@@ -787,6 +787,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Gem view",
     "column_view_name_label": "Navn på view:",
     "column_view_saved_msg": "View '{name}' er gemt.",
+    "column_view_overwrite_title": "Overskriv view",
+    "column_view_overwrite_msg": "Viewet '{name}' findes allerede. Vil du overskrive det?",
     "column_view_delete_title": "Slet view",
     "column_view_delete_msg": "Slet viewet '{name}'?",
     "column_view_load_error": "Kunne ikke indlæse view:\n{error}",

@@ -221,12 +221,20 @@ class ColumnView:
     def _safe_filename(name: str) -> str:
         return "".join(c if c.isalnum() or c in "-_ " else "_" for c in name)
 
+    @classmethod
+    def path_for(cls, name: str, views_dir: Optional[Path] = None) -> Path:
+        """The file a view called *name* is saved to. Different names can map
+        to the same file, e.g. "My/View" and "My_View" (#995)."""
+        if views_dir is None:
+            views_dir = cls._views_dir()
+        return views_dir / f"{cls._safe_filename(name)}.json"
+
     def save(self, views_dir: Optional[Path] = None) -> Path:
         """Gem dette view til disk som JSON. Returnerer den gemte filsti."""
         if views_dir is None:
             views_dir = self._views_dir()
         views_dir.mkdir(parents=True, exist_ok=True)
-        path = views_dir / f"{self._safe_filename(self.name)}.json"
+        path = self.path_for(self.name, views_dir)
 
         data = {
             "name": self.name,
@@ -629,6 +637,30 @@ class ColumnChooserDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
+        # Issue #995: never overwrite an existing view silently. The check is
+        # on the target file, so a different name that maps to the same file
+        # name (e.g. "My/View" vs "My_View") is caught too.
+        target = ColumnView.path_for(name)
+        rename_default = False
+        if target.exists():
+            try:
+                existing_name = ColumnView.load(target).name
+            except Exception:
+                existing_name = name
+            reply = QMessageBox.question(
+                self, tr("column_view_overwrite_title"),
+                tr("column_view_overwrite_msg", name=existing_name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            # The overwritten view was the default under its old name: keep
+            # the default pointing at the same view under its new name (done
+            # after save(), since get_default_view() drops a default whose
+            # name no saved view carries).
+            rename_default = (existing_name != name
+                              and get_default_view_name() == existing_name)
         view = ColumnView(
             name=name,
             visible_columns=self._current_checked_columns(),
@@ -637,6 +669,8 @@ class ColumnChooserDialog(QDialog):
             type_display=self._type_display_combo.currentData(),
         )
         view.save()
+        if rename_default:
+            set_default_view_name(name)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
         self._view_combo.blockSignals(False)

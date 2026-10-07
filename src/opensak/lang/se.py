@@ -787,6 +787,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Spara vy",
     "column_view_name_label": "Vynamn:",
     "column_view_saved_msg": "Vyn '{name}' har sparats.",
+    "column_view_overwrite_title": "Skriv över vy",
+    "column_view_overwrite_msg": "Vyn '{name}' finns redan. Vill du skriva över den?",
     "column_view_delete_title": "Ta bort vy",
     "column_view_delete_msg": "Ta bort vyn '{name}'?",
     "column_view_load_error": "Kunde inte ladda vy:\n{error}",

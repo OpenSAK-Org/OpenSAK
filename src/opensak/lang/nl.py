@@ -790,6 +790,8 @@ STRINGS: dict[str, str] = {
     "column_view_save_title": "Weergave opslaan",
     "column_view_name_label": "Naam weergave:",
     "column_view_saved_msg": "Weergave '{name}' is opgeslagen.",
+    "column_view_overwrite_title": "Weergave overschrijven",
+    "column_view_overwrite_msg": "Weergave '{name}' bestaat al. Wilt u deze overschrijven?",
     "column_view_delete_title": "Weergave verwijderen",
     "column_view_delete_msg": "Weergave '{name}' verwijderen?",
     "column_view_load_error": "Kan weergave niet laden:\n{error}",
