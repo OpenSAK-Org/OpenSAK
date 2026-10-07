@@ -17,8 +17,8 @@ instructions, not work inside C functions. Lua pattern matching backtracks
 in C, so e.g. string.rep("a", 100):find(".-.-.-.-.-b") runs ~12 s despite
 instruction_limit=100_000, and longer subjects take minutes. The memory
 limit does not help either (matching allocates nothing). Consequences:
-  * Planned regex functions should use a linear-time engine (google-re2) or
-    the `regex` module with its timeout= argument, not Python's `re`.
+  * The opensak.re functions therefore use the `regex` module with its
+    timeout= argument, not Python's `re` (see helpers.py).
   * A worker thread keeps the GUI responsive and lets a Cancel button
     abandon the run, but cannot stop a call that is already running; only a
     subprocess can be terminated hard. This belongs to the threading decision.
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import io
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -52,7 +53,12 @@ from opensak.filters.engine import (
     TerrainFilter,
     WhereClauseFilter,
 )
+from opensak import __version__, geodesy
 from opensak.coords import parse_coords
+from opensak.filters.line_polygon import LineShape, parse_point, read_points_file
+from opensak.hint_detect import rot13
+from opensak.macro import helpers
+from opensak.macro.errors import MacroError
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -79,6 +85,10 @@ MAX_CHOOSE_FILE_TEXT = 200
 # opensak.read_csv() refuses larger files — it is meant for small lists
 # (solved puzzles, corrections), not for bulk imports.
 MAX_CSV_BYTES = 10 * 1024 * 1024
+# opensak.sleep(): longest single pause, and total pause time per run (the
+# instruction limit does not count time spent sleeping).
+MAX_SLEEP_MS = 10_000
+SLEEP_BUDGET_S = 60.0
 
 _TEXT_FILTERS = {
     "name": NameFilter,
@@ -198,10 +208,6 @@ local os_time, os_date, os_clock = os.time, os.date, os.clock
 os = { time = os_time, date = os_date, clock = os_clock }
 io, debug, package, require, dofile, loadfile, load, collectgarbage, python = nil
 """
-
-
-class MacroError(Exception):
-    """A macro failed — Lua syntax/runtime error or a bad API call."""
 
 
 class FolderApproval(Enum):
@@ -422,6 +428,53 @@ def read_csv_rows(path: Path, sep: Optional[str] = None) -> list[dict[str, str]]
     return rows
 
 
+# ── Coordinate helpers ───────────────────────────────────────────────────────
+
+
+def take_points(args: tuple, count: int, func: str) -> tuple[list[tuple[float, float]], list]:
+    """Read *count* points from the front of *args*, then return them and
+    the remaining arguments.
+
+    Each point is either two numbers (lat, lon) or one coordinate string
+    such as "N47 22.123 E008 32.456", so opensak.coords.distance(a, b) and
+    opensak.coords.distance(lat1, lon1, lat2, lon2) both work.
+    """
+    rest = list(args)
+    points = []
+    for _ in range(count):
+        if not rest:
+            raise MacroError(
+                f"{func} expects {count} point(s), each lat, lon or a coordinate string"
+            )
+        first = rest.pop(0)
+        if isinstance(first, str) and _number(first) is None:
+            points.append(resolve_coords(first))
+        else:
+            points.append(resolve_coords(first, rest.pop(0) if rest else None))
+    return points, rest
+
+
+def polygon_points(value: Any) -> list[tuple[float, float]]:
+    """A Lua array of points → [(lat, lon), …]. A point is a coordinate
+    string, {lat, lon} or {lat = …, lon = …}."""
+    points = []
+    for item in _as_list(value):
+        if isinstance(item, str):
+            point = parse_point(item)
+            if point is None:
+                raise MacroError(f"cannot parse coordinates {item!r}")
+            points.append(point)
+        elif hasattr(item, "values"):
+            lat = item["lat"] if item["lat"] is not None else item[1]
+            lon = item["lon"] if item["lon"] is not None else item[2]
+            points.append(resolve_coords(lat, lon))
+        else:
+            raise MacroError(
+                f"polygon points must be coordinate strings or {{lat, lon}} tables, got {item!r}"
+            )
+    return points
+
+
 # ── Runtime ──────────────────────────────────────────────────────────────────
 
 
@@ -458,6 +511,16 @@ class MacroRuntime:
         # (file, write) picked by the user in opensak.choose_file() — usable
         # for the rest of this run only, whatever the folder list says
         self._picked: set[tuple[Path, bool]] = set()
+        self._cancelled = threading.Event()
+        # Per-run state, reset by run()
+        self._slept = 0.0
+        self._polygons: dict[Path, LineShape] = {}
+        self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
+
+    def cancel(self) -> None:
+        """Ask the running macro to stop. Safe to call from another thread;
+        takes effect at the next opensak.sleep()."""
+        self._cancelled.set()
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -508,16 +571,20 @@ class MacroRuntime:
             raise MacroError("opensak.confirm expects a message")
         return bool(self._host.confirm(message))
 
+    def _readable_file(self, path: str) -> Path:
+        """*path* resolved against the macro's folder and checked against the
+        folder permissions (asking the user for an unapproved folder)."""
+        file = Path(path).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or macros_dir()) / file
+        return self._check_access(file, write=False)
+
     def _read_csv(self, lua, path=None, sep=None):
         if not isinstance(path, str) or not path.strip():
             raise MacroError("opensak.read_csv expects a file path")
         if sep is not None and not isinstance(sep, str):
             raise MacroError("opensak.read_csv: separator must be a string")
-        file = Path(path).expanduser()
-        if not file.is_absolute():
-            file = (self._base_dir or macros_dir()) / file
-        file = self._check_access(file, write=False)
-        rows = read_csv_rows(file, sep)
+        rows = read_csv_rows(self._readable_file(path), sep)
         return lua.table_from([lua.table_from(r) for r in rows])
 
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
@@ -577,6 +644,96 @@ class MacroRuntime:
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
 
+    def _sleep(self, ms=None) -> None:
+        value = _number(ms)
+        if value is None or value < 0:
+            raise MacroError(f"opensak.sleep expects milliseconds >= 0, got {ms!r}")
+        seconds = min(value, MAX_SLEEP_MS) / 1000
+        if self._slept + seconds > SLEEP_BUDGET_S:
+            raise MacroError(
+                f"opensak.sleep: a macro may sleep at most {SLEEP_BUDGET_S:g} s in total"
+            )
+        self._slept += seconds
+        if self._cancelled.wait(seconds):
+            raise MacroError("macro cancelled")
+
+    # -- opensak.coords --------------------------------------------------------
+
+    @staticmethod
+    def _coords_parse(text=None):
+        if not isinstance(text, str):
+            raise MacroError(f"opensak.coords.parse expects a string, got {text!r}")
+        return parse_point(text)
+
+    @staticmethod
+    def _coords_format(*args) -> str:
+        (point,), rest = take_points(args, 1, "opensak.coords.format")
+        return helpers.format_coordinate(*point, rest[0] if rest else None)
+
+    @staticmethod
+    def _coords_distance(*args) -> float:
+        (a, b), _ = take_points(args, 2, "opensak.coords.distance")
+        return geodesy.distance_km(*a, *b)
+
+    @staticmethod
+    def _coords_bearing(*args) -> float:
+        (a, b), _ = take_points(args, 2, "opensak.coords.bearing")
+        return geodesy.bearing(*a, *b)
+
+    @staticmethod
+    def _coords_project(*args) -> tuple[float, float]:
+        func = "opensak.coords.project"
+        (point,), rest = take_points(args, 1, func)
+        brng, km = (_number(v) for v in (rest + [None, None])[:2])
+        if brng is None or km is None:
+            raise MacroError(f"{func} expects a point, a bearing in degrees and a distance in km")
+        return geodesy.project(*point, brng, km)
+
+    @staticmethod
+    def _coords_midpoint(*args) -> tuple[float, float]:
+        (a, b), _ = take_points(args, 2, "opensak.coords.midpoint")
+        return geodesy.midpoint(*a, *b)
+
+    def _polygon(self, value: Any) -> LineShape:
+        func = "opensak.coords.inside"
+        if isinstance(value, str):
+            file = self._readable_file(value)
+            if file in self._polygons:
+                return self._polygons[file]
+            try:
+                points = read_points_file(file)
+            except Exception as exc:  # OSError, ParseError, ValueError
+                raise MacroError(f"{func}: cannot read {file}: {exc}") from None
+        elif hasattr(value, "values"):
+            file = None
+            points = polygon_points(value)
+        else:
+            raise MacroError(f"{func} expects a polygon file path or a table of points")
+        if len(points) < 3:
+            raise MacroError(f"{func}: a polygon needs at least 3 points, got {len(points)}")
+        shape = LineShape(points, "polygon", 0.0)
+        if file is not None:
+            self._polygons[file] = shape
+        return shape
+
+    def _coords_inside(self, *args) -> bool:
+        (point,), rest = take_points(args, 1, "opensak.coords.inside")
+        if not rest:
+            raise MacroError("opensak.coords.inside expects a polygon after the point")
+        return self._polygon(rest[0]).contains(*point)
+
+    def _coords_location(self, lua, *args):
+        (point,), _ = take_points(args, 1, "opensak.coords.location")
+        if self._boundaries is None:
+            from opensak.geo import BoundaryStore, TerritoryResolver
+
+            store = BoundaryStore()
+            if not store.available():
+                return None
+            self._boundaries = (store, TerritoryResolver(store))
+        loc = self._boundaries[1].resolve(*point)
+        return lua.table_from(loc._asdict())
+
     # -- Running ---------------------------------------------------------------
 
     def run(
@@ -596,6 +753,9 @@ class MacroRuntime:
         )
         self._denied = set()
         self._picked = set()
+        self._cancelled.clear()
+        self._slept = 0.0
+        self._polygons = {}
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
@@ -616,9 +776,15 @@ class MacroRuntime:
 
         g = lua.globals()
         g.print = self._lua_print
-        g.opensak = lua.table_from(
-            {func.name: self._wrap(func.bind(self, lua)) for func in API}
-        )
+        # "coords.parse" → opensak.coords.parse
+        api: dict[str, Any] = {}
+        for func in API:
+            *namespaces, name = func.name.split(".")
+            table = api
+            for ns in namespaces:
+                table = table.setdefault(ns, {})
+            table[name] = self._wrap(func.bind(self, lua))
+        g.opensak = lua.table_from(api, recursive=True)
 
         try:
             fn = lua.compile(source, name=f"={chunk_name}")
@@ -636,6 +802,9 @@ class MacroRuntime:
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
         finally:
+            if self._boundaries is not None:
+                self._boundaries[0].close()
+                self._boundaries = None
             self._host.end_macro()
 
     @staticmethod
@@ -656,7 +825,7 @@ class MacroRuntime:
         return call
 
     def _lua_print(self, *args) -> None:
-        self._output("\t".join(_lua_tostring(a) for a in args))
+        self._output("\t".join(helpers.lua_tostring(a) for a in args))
 
 
 # ── Lua API registry ─────────────────────────────────────────────────────────
@@ -669,7 +838,7 @@ class MacroRuntime:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 1
+API_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -717,6 +886,33 @@ class ApiFunction:
 
 
 _CODE = Param("code", "string", 'GC code, e.g. "GC12345".')
+_LAT = Param("lat", "number", "Latitude in decimal degrees.")
+_LON = Param("lon", "number", "Longitude in decimal degrees.")
+_COORDS = Param("coords", "string", 'Coordinates, e.g. "N47 22.123 E008 32.456".')
+_TWO_POINTS = (
+    Param("lat1", "number", "Latitude of the first point."),
+    Param("lon1", "number", "Longitude of the first point."),
+    Param("lat2", "number", "Latitude of the second point."),
+    Param("lon2", "number", "Longitude of the second point."),
+)
+_TWO_POINT_STRINGS = (
+    Param("a", "string", "First point as a coordinate string."),
+    Param("b", "string", "Second point as a coordinate string."),
+)
+_BEARING = Param("bearing", "number", "Direction in degrees, 0 = North, clockwise.")
+_DIST = Param("km", "number", "Distance in km.")
+_POLYGON = Param("polygon", "string|table", "Polygon file path, or a table of points.")
+_TEXT = Param("text", "string", "The text.")
+_PATTERN = Param("pattern", "string", "Regular expression (Python syntax); a "
+                                      "long bracket string [[...]] avoids "
+                                      "doubling backslashes.")
+
+
+def _rot13(text=None) -> str:
+    if not isinstance(text, str):
+        raise MacroError(f"opensak.text.rot13 expects a string, got {text!r}")
+    return rot13(text)
+
 
 API: tuple[ApiFunction, ...] = (
     ApiFunction(
@@ -845,7 +1041,7 @@ API: tuple[ApiFunction, ...] = (
                 'if not path then return end      -- cancelled\n'
                 'for _, row in ipairs(opensak.read_csv(path)) do\n'
                 '    opensak.set_corrected(row.code, row.coords)\nend',
-        since=1,
+        since=2,
         bind=lambda rt, lua: rt._choose_file,
         params=(
             Param("title", "string", "Dialog title.", optional=True),
@@ -879,16 +1075,281 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: lambda: str(macros_dir()),
         returns=("string", "Folder path."),
     ),
+    ApiFunction(
+        name="version",
+        description="The OpenSAK version this macro runs in.",
+        example='print("Running in OpenSAK " .. opensak.version())',
+        since=2,
+        bind=lambda rt, lua: lambda: __version__,
+        returns=("string", 'Version, e.g. "1.21.0-beta.3".'),
+    ),
+    ApiFunction(
+        name="sleep",
+        description=f"Pause the macro. One pause lasts at most {MAX_SLEEP_MS // 1000} s "
+                    f"and all pauses of a run together at most {SLEEP_BUDGET_S:g} s; "
+                    "a cancelled macro stops at its next pause.",
+        example="opensak.sleep(500)",
+        since=2,
+        bind=lambda rt, lua: rt._sleep,
+        params=(Param("ms", "number", "Milliseconds."),),
+    ),
+
+    # -- opensak.coords: pure coordinate math, no permissions needed ----------
+    # Every point can be given as lat, lon (decimal degrees) or as one
+    # coordinate string in any format opensak.coords.parse() understands.
+    ApiFunction(
+        name="coords.parse",
+        description="Parse a coordinate string in any format OpenSAK "
+                    "understands (DMM, DMS, decimal degrees).",
+        example='local lat, lon = opensak.coords.parse("N47 22.123 E008 32.456")\n'
+                'if not lat then error("not a coordinate") end',
+        since=2,
+        bind=lambda rt, lua: rt._coords_parse,
+        params=(Param("text", "string", "The coordinates."),),
+        returns=("number?, number?", "Latitude and longitude, or nil if the "
+                                    "text cannot be parsed."),
+    ),
+    ApiFunction(
+        name="coords.format",
+        description="Format coordinates. Formats: `\"dmm\"` (default), `\"dms\"`, "
+                    "`\"dd\"`, `\"utm\"`, `\"ch1903\"` (Swiss LV03) and "
+                    "`\"ch1903+\"` (Swiss LV95). The Swiss formats are only "
+                    "meaningful in and around Switzerland.",
+        example='print(opensak.coords.format(47.36872, 8.54093, "utm"))\n'
+                'print(opensak.coords.format("N47 22.123 E008 32.456", "ch1903"))',
+        since=2,
+        bind=lambda rt, lua: rt._coords_format,
+        params=(
+            _LAT, _LON,
+            Param("fmt", "string", 'Output format, "dmm" if omitted.', optional=True),
+        ),
+        overloads=((_COORDS, Param("fmt", "string", "Output format.", optional=True)),),
+        returns=("string", 'E.g. "N47 22.123  E008 32.456" or "32T E 465123 N 5247123".'),
+    ),
+    ApiFunction(
+        name="coords.distance",
+        description="Great-circle distance between two points.",
+        example='local km = opensak.coords.distance("N47 22.123 E008 32.456",\n'
+                '                                   "N47 23.000 E008 33.000")',
+        since=2,
+        bind=lambda rt, lua: rt._coords_distance,
+        params=_TWO_POINTS,
+        overloads=(_TWO_POINT_STRINGS,),
+        returns=("number", "Distance in km."),
+    ),
+    ApiFunction(
+        name="coords.bearing",
+        description="Initial bearing from the first point to the second.",
+        example='local deg = opensak.coords.bearing(47.36872, 8.54093, 47.38333, 8.55)',
+        since=2,
+        bind=lambda rt, lua: rt._coords_bearing,
+        params=_TWO_POINTS,
+        overloads=(_TWO_POINT_STRINGS,),
+        returns=("number", "Degrees, 0 = North, clockwise."),
+    ),
+    ApiFunction(
+        name="coords.project",
+        description="Waypoint projection: the point a given distance away in a "
+                    "given direction.",
+        example='local lat, lon = opensak.coords.project("N47 22.123 E008 32.456", 45, 0.25)\n'
+                "print(opensak.coords.format(lat, lon))",
+        since=2,
+        bind=lambda rt, lua: rt._coords_project,
+        params=(_LAT, _LON, _BEARING, _DIST),
+        overloads=((_COORDS, _BEARING, _DIST),),
+        returns=("number, number", "Latitude and longitude of the projected point."),
+    ),
+    ApiFunction(
+        name="coords.midpoint",
+        description="The point halfway between two points (along the great circle).",
+        example='local lat, lon = opensak.coords.midpoint(47.0, 8.0, 48.0, 9.0)',
+        since=2,
+        bind=lambda rt, lua: rt._coords_midpoint,
+        params=_TWO_POINTS,
+        overloads=(_TWO_POINT_STRINGS,),
+        returns=("number, number", "Latitude and longitude of the midpoint."),
+    ),
+    ApiFunction(
+        name="coords.inside",
+        description="Whether a point lies inside a polygon. The polygon is "
+                    "either a file (GPX track/route/waypoints, KML, or a text "
+                    "file with one coordinate per line; read permission "
+                    "needed, relative paths are resolved against the macro "
+                    "file's folder) or a table of points, each a coordinate "
+                    "string, `{lat, lon}` or `{lat = ..., lon = ...}`. Edges "
+                    "are straight lines in latitude/longitude, as in the "
+                    "line/polygon filter.",
+        example='local area = { "N47 20 E008 30", "N47 25 E008 30", "N47 25 E008 40" }\n'
+                "print(opensak.coords.inside(47.37, 8.54, area))",
+        since=2,
+        bind=lambda rt, lua: rt._coords_inside,
+        params=(_LAT, _LON, _POLYGON),
+        overloads=((_COORDS, _POLYGON),),
+        returns=("boolean", "true if the point is inside."),
+    ),
+    ApiFunction(
+        name="coords.location",
+        description="Offline reverse geocoding with the boundary data used by "
+                    "Update location. A field is nil where no region matches.",
+        example='local loc = opensak.coords.location(47.36872, 8.54093)\n'
+                'if loc then print(loc.country, loc.state, loc.county) end',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._coords_location(lua, *a),
+        params=(_LAT, _LON),
+        overloads=((_COORDS,),),
+        returns=("{country: string?, state: string?, county: string?}?",
+                 "nil if the boundary data is not installed."),
+    ),
+
+    # -- opensak.re: regular expressions (Python syntax, with a time limit) ---
+    ApiFunction(
+        name="re.find",
+        description="Search for the first match of a regular expression "
+                    f"(Python syntax). Each call may run at most "
+                    f"{helpers.REGEX_TIMEOUT_S:g} s.",
+        example='local whole, n, e = opensak.re.find(desc, [[N\\s*(\\d+)\\D+E\\s*(\\d+)]])',
+        since=2,
+        bind=lambda rt, lua: helpers.re_find,
+        params=(_TEXT, _PATTERN),
+        returns=("string?, string?...", "The whole match followed by the captures "
+                                        "(nil for a group that did not take part), "
+                                        "or nil if there is no match."),
+    ),
+    ApiFunction(
+        name="re.match",
+        description="Whether the text contains a match. Use `^` and `$` to "
+                    "match the whole text.",
+        example='if opensak.re.match(c.name, [[(?i)^bonus]]) then print("bonus cache") end',
+        since=2,
+        bind=lambda rt, lua: helpers.re_match,
+        params=(_TEXT, _PATTERN),
+        returns=("boolean", "true if the pattern matches."),
+    ),
+    ApiFunction(
+        name="re.findall",
+        description="All non-overlapping matches. Without capture groups each "
+                    "item is the whole match, with one group it is the "
+                    "capture, with several it is an array of the captures.",
+        example='for _, number in ipairs(opensak.re.findall("A=3, B=12", [[\\d+]])) do\n'
+                "    print(number)\nend",
+        since=2,
+        bind=lambda rt, lua: lambda *a: lua.table_from(helpers.re_findall(*a), recursive=True),
+        params=(_TEXT, _PATTERN),
+        returns=("string[]|string[][]", "The matches."),
+    ),
+    ApiFunction(
+        name="re.replace",
+        description="Replace matches. In a replacement string, `\\1` or "
+                    "`\\g<name>` insert a capture. A replacement function gets "
+                    "the whole match and the captures and returns the new "
+                    "text (nil or false keeps the match).",
+        example='local text = opensak.re.replace("A=3 B=12", [[\\d+]], function(n)\n'
+                "    return n * 2\nend)",
+        since=2,
+        bind=lambda rt, lua: helpers.re_replace,
+        params=(
+            _TEXT, _PATTERN,
+            Param("repl", "string|fun(match: string, ...: string?): any",
+                  "Replacement text or function."),
+            Param("count", "integer", "Replace at most this many matches; all if "
+                                      "omitted.", optional=True),
+        ),
+        returns=("string, integer", "The new text and the number of replacements."),
+    ),
+    ApiFunction(
+        name="re.split",
+        description="Split the text at every non-empty match.",
+        example='local parts = opensak.re.split("a, b;c", [[[,;]\\s*]])  -- {"a", "b", "c"}',
+        since=2,
+        bind=lambda rt, lua: lambda *a: lua.table_from(helpers.re_split(*a)),
+        params=(_TEXT, _PATTERN),
+        returns=("string[]", "The pieces between the matches."),
+    ),
+
+    # -- opensak.text ---------------------------------------------------------
+    ApiFunction(
+        name="text.html_to_text",
+        description="Turn HTML (e.g. a cache description) into plain text: "
+                    "tags removed, entities decoded, block elements and "
+                    "`<br>` become line breaks.",
+        example='print(opensak.text.html_to_text("<p>Stage&nbsp;1:<br>N47 22.123</p>"))',
+        since=2,
+        bind=lambda rt, lua: helpers.html_to_text,
+        params=(Param("html", "string", "The HTML."),),
+        returns=("string", "The text."),
+    ),
+    ApiFunction(
+        name="text.rot13",
+        description="ROT13 as used for hints. Text in [square brackets] stays "
+                    "unchanged, like on geocaching.com.",
+        example='print(opensak.text.rot13("haqre gur fgbar [Ubhfr]"))',
+        since=2,
+        bind=lambda rt, lua: _rot13,
+        params=(_TEXT,),
+        returns=("string", "The decoded (or encoded) text."),
+    ),
+    ApiFunction(
+        name="text.digit_sum",
+        description="Cross sum: the sum of all digits; other characters are ignored.",
+        example="print(opensak.text.digit_sum(1987))  -- 25",
+        since=2,
+        bind=lambda rt, lua: helpers.digit_sum,
+        params=(Param("n", "number|string", "The number or text."),),
+        returns=("integer", "Sum of the digits."),
+    ),
+    ApiFunction(
+        name="text.word_value",
+        description="Letter value sum (A=1 … Z=26). Accents are dropped (Ä "
+                    "counts as A); other characters are ignored.",
+        example='print(opensak.text.word_value("Geocache"))  -- 47',
+        since=2,
+        bind=lambda rt, lua: helpers.word_value,
+        params=(_TEXT,),
+        returns=("integer", "Sum of the letter values."),
+    ),
+    ApiFunction(
+        name="text.normalize_name",
+        description="Make a string safe as a database or file name on every "
+                    "platform: characters such as `\\ / : * ? \" < > |` become "
+                    "`_`, white space is collapsed, leading/trailing dots and "
+                    f"spaces are removed and the length is limited to "
+                    f"{helpers.MAX_NAME_LENGTH}. Never empty.",
+        example='local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"',
+        since=2,
+        bind=lambda rt, lua: helpers.normalize_name,
+        params=(Param("s", "string", "The name."),),
+        returns=("string", "The safe name."),
+    ),
+
+    # -- opensak.date ---------------------------------------------------------
+    ApiFunction(
+        name="date.parse",
+        description="Parse a date into seconds since the epoch, the same kind "
+                    "of value as `os.time()`. Without a format, ISO 8601 "
+                    '(`"2026-10-06"`, `"2026-10-06T14:30:00Z"`) and '
+                    '`"06.10.2026 [14:30[:00]]"` are understood. Times without '
+                    "a zone are local time.",
+        example='local t = opensak.date.parse("2026-10-06")\n'
+                'local t2 = opensak.date.parse("10/06/2026", "%m/%d/%Y")',
+        since=2,
+        bind=lambda rt, lua: helpers.date_parse,
+        params=(
+            _TEXT,
+            Param("fmt", "string", "strptime format, e.g. \"%d/%m/%Y\".", optional=True),
+        ),
+        returns=("integer?", "Seconds since the epoch, or nil if the text does not parse."),
+    ),
+    ApiFunction(
+        name="date.format",
+        description="Format seconds since the epoch (e.g. from `os.time()` or "
+                    "`opensak.date.parse()`) in local time.",
+        example='print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))',
+        since=2,
+        bind=lambda rt, lua: helpers.date_format,
+        params=(
+            Param("t", "number", "Seconds since the epoch."),
+            Param("fmt", "string", 'strftime format, "%Y-%m-%d" if omitted.', optional=True),
+        ),
+        returns=("string", "The formatted date."),
+    ),
 )
-
-
-def _lua_tostring(value: Any) -> str:
-    if value is None:
-        return "nil"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)

@@ -114,8 +114,8 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "|---|---|",
     ]
     for func in API:
-        lines.append(f"| [`opensak.{func.name}`](#opensak{func.name.replace('_', '')}) "
-                     f"| {func.since} |")
+        anchor = func.name.replace("_", "").replace(".", "")
+        lines.append(f"| [`opensak.{func.name}`](#opensak{anchor}) | {func.since} |")
 
     for func in API:
         lines += ["", f"### opensak.{func.name}", ""]
@@ -171,6 +171,33 @@ def _comment(text: str) -> list[str]:
     return [f"---{line}".rstrip() for line in text.splitlines()]
 
 
+def _split_types(types: str) -> list[str]:
+    """"number?, number?" → ["number?", "number?"]; commas inside <> or ()
+    (e.g. "table<string, string>") do not split."""
+    parts, depth, start = [], 0, 0
+    for i, ch in enumerate(types):
+        if ch in "<({":
+            depth += 1
+        elif ch in ">)}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(types[start:i].strip())
+            start = i + 1
+    parts.append(types[start:].strip())
+    return parts
+
+
+def _return_lines(types: str, description: str) -> list[str]:
+    lines = []
+    for i, t in enumerate(_split_types(types)):
+        name = ""
+        if t.endswith("..."):
+            t, name = t[:-3], " ..."
+        comment = f" # {description}" if i == 0 else ""
+        lines.append(f"---@return {t}{name}{comment}")
+    return lines
+
+
 def _overload(params: tuple[Param, ...], returns: str | None) -> str:
     args = ", ".join(f"{p.name}{'?' if p.optional else ''}: {p.type}" for p in params)
     return f"fun({args})" + (f": {returns}" if returns else "")
@@ -194,15 +221,20 @@ def render_lua_stub() -> str:
         "---The OpenSAK API, available as a global in every macro.",
         "opensak = {}",
     ]
+    namespaces: set[str] = set()
     for func in API:
         lines.append("")
+        namespace = func.name.rpartition(".")[0]
+        if namespace and namespace not in namespaces:
+            namespaces.add(namespace)
+            lines += [f"opensak.{namespace} = {{}}", ""]
         lines += _comment(func.description)
         lines += ["---", f"---Since API version {func.since}.", "---"]
         lines += _comment(f"```lua\n{func.example}\n```")
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")
         if func.returns:
-            lines.append(f"---@return {func.returns[0]} # {func.returns[1]}")
+            lines += _return_lines(*func.returns)
         for form in func.overloads:
             lines.append(f"---@overload {_overload(form, func.returns and func.returns[0])}")
         args = ", ".join(p.name for p in func.params)

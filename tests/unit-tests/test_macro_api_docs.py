@@ -38,7 +38,11 @@ class _Host:
 def test_every_exposed_function_is_documented():
     out: list[str] = []
     MacroRuntime(_Host(), output=out.append).run(  # type: ignore[arg-type]
-        "for name in pairs(opensak) do print(name) end")
+        "for name, value in pairs(opensak) do\n"
+        "  if type(value) == 'table' then\n"
+        "    for sub in pairs(value) do print(name .. '.' .. sub) end\n"
+        "  else print(name) end\n"
+        "end")
     assert sorted(out) == sorted(f.name for f in API)
 
 

@@ -41,6 +41,8 @@ dependencies = [
     "keyring>=25.0,<26",
     # Lua macros (proof of concept, roadmap item 2)
     "lupa>=2.0,<3",
+    # Regex for macros (opensak.re): timeout= stops catastrophic backtracking
+    "regex>=2024.4",
 ]
 
 [project.optional-dependencies]
