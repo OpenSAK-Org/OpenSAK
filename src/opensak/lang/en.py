@@ -1057,6 +1057,7 @@ STRINGS: dict[str, str] = {
     "ctx_copy_coords_original": "📋  Copy original coordinates",
     "ctx_coord_converter":  "⇄  Coordinate converter…",
     "ctx_edit_cache":       "✏️  Edit cache…",
+    "ctx_delete_cache": "🗑️  Delete cache…",
     "ctx_mark_found":       "☑  Mark as found",
     "ctx_edit_found_date":  "📅  Edit found date…",
     "ctx_mark_not_found":   "☐  Mark as not found",

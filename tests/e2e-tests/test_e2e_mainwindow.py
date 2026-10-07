@@ -1107,6 +1107,40 @@ class TestWaypoints:
         seeded_window._delete_waypoint()
         assert seeded_window._load_full_cache("GC12345") is not None
 
+    def _right_click_delete(self, window, monkeypatch, gc_code):
+        """Right-click *gc_code*'s row and choose "Delete cache…" (#693)."""
+        from opensak.gui import cache_table as ct
+        from opensak.lang import tr
+        table = window._cache_table
+        menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        row = next(r for r in range(table._model.rowCount())
+                   if table._model.cache_at(r).gc_code == gc_code)
+        table._show_context_menu(table.visualRect(table._model.index(row, 0)).center())
+        next(a for a in menus[-1].actions()
+             if a.text() == tr("ctx_delete_cache")).trigger()
+
+    def test_context_menu_deletes_the_right_clicked_cache(
+        self, seeded_window, monkeypatch, mbox_yes,
+    ):
+        # Issue #693: with GC12345 selected, right-clicking GC99999 and
+        # choosing Delete removes GC99999 — not the selected cache.
+        seeded_window._cache_table.select_by_gc_code("GC12345")
+        self._right_click_delete(seeded_window, monkeypatch, "GC99999")
+        assert seeded_window._load_full_cache("GC99999") is None
+        assert seeded_window._load_full_cache("GC12345") is not None
+
+    def test_context_menu_delete_declined(self, seeded_window, monkeypatch, mbox_no):
+        self._right_click_delete(seeded_window, monkeypatch, "GC99999")
+        assert seeded_window._load_full_cache("GC99999") is not None
+
 
 # ── bulk delete / flags ───────────────────────────────────────────────────────
 

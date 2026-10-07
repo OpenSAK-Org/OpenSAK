@@ -1058,6 +1058,7 @@ STRINGS: dict[str, str] = {
     "ctx_copy_coords_original": "📋  Kopiera ursprungliga koordinater",
     "ctx_coord_converter":  "⇄  Koordinatkonverterare…",
     "ctx_edit_cache":       "✏️  Redigera cache…",
+    "ctx_delete_cache": "🗑️  Ta bort cache…",
     "ctx_mark_found":       "☑  Flagga som hittad",
     "ctx_edit_found_date":  "📅  Redigera hittad datum…",
     "ctx_mark_not_found":   "☐  Flagga som inte hittad",

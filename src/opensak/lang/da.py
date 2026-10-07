@@ -1058,6 +1058,7 @@ STRINGS: dict[str, str] = {
     "ctx_copy_coords_original": "📋  Kopiér originale koordinater",
     "ctx_coord_converter":  "⇄  Koordinatkonverter…",
     "ctx_edit_cache":       "✏️  Rediger cache…",
+    "ctx_delete_cache": "🗑️  Slet cache…",
     "ctx_mark_found":       "☑  Marker som fundet",
     "ctx_edit_found_date":  "📅  Rediger fundet dato…",
     "ctx_mark_not_found":   "☐  Marker som ikke fundet",

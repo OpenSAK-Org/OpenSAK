@@ -1060,6 +1060,7 @@ STRINGS: dict[str, str] = {
     "ctx_copy_coords_original": "📋  Originale Koordinaten kopieren",
     "ctx_coord_converter":  "⇄  Koordinaten-Konverter",
     "ctx_edit_cache":       "✏️  Cache bearbeiten…",
+    "ctx_delete_cache": "🗑️  Cache löschen…",
     "ctx_mark_found":       "☑  Als gefunden markieren",
     "ctx_edit_found_date":  "📅  Funddatum bearbeiten…",
     "ctx_mark_not_found":   "☐  Als nicht gefunden markieren",

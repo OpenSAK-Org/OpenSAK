@@ -1432,6 +1432,7 @@ class CacheTableView(QTableView):
     sort_changed = Signal(str, bool)  # (col_id, ascending) videresendes fra model
     location_updated = Signal()       # emitted after right-click location update
     edit_requested = Signal(object)   # emitted when user requests edit of a cache
+    delete_requested = Signal(object)  # Cache — "Delete cache…" in the context menu (#693)
     center_point_requested = Signal(object)  # emitted with a Cache — "Sæt som centerpunkt" (#511)
     corrected_coords_changed = Signal(str)  # gc_code — emitted after Add/Edit/Clear
     found_status_changed = Signal(str)  # gc_code — emitted after Mark as Found (#649)
@@ -1820,6 +1821,12 @@ class CacheTableView(QTableView):
         act_edit = menu.addAction(tr("ctx_edit_cache"))
         act_edit.triggered.connect(
             lambda checked=False, c=cache: self.edit_requested.emit(c)
+        )
+        # Issue #693: the cache under the mouse, which is not necessarily
+        # the selected one — a right-click doesn't change the selection.
+        act_delete = menu.addAction(tr("ctx_delete_cache"))
+        act_delete.triggered.connect(
+            lambda checked=False, c=cache: self.delete_requested.emit(c)
         )
 
         menu.addSeparator()

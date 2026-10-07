@@ -1825,6 +1825,43 @@ class TestView:
             "ctx_coord_converter": (55.0, 12.0),
         }
 
+    def test_context_menu_delete_emits_right_clicked_cache(
+        self, view, qtbot, monkeypatch,
+    ):
+        # Issue #693: "Delete cache…" deletes the cache under the mouse. A
+        # right-click doesn't change the selection, so with A selected and B
+        # right-clicked, B must be the one sent.
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+
+        a = _cache(gc_code="GCAAAAA", name="A")
+        b = _cache(gc_code="GCBBBBB", name="B")
+        view.load_caches([a, b])
+        view.show()
+        qtbot.addWidget(view)
+        row_of = {view._model.cache_at(r).gc_code: r for r in range(2)}
+        view.selectRow(row_of["GCAAAAA"])
+
+        pos = view.visualRect(view._model.index(row_of["GCBBBBB"], 0)).center()
+        view._show_context_menu(pos)
+        act = next(x for x in built_menus[-1].actions()
+                   if x.text() == tr("ctx_delete_cache"))
+        with qtbot.waitSignal(view.delete_requested, timeout=1000) as blocker:
+            act.trigger()
+        assert blocker.args[0].gc_code == "GCBBBBB"
+        assert view.selected_cache().gc_code == "GCAAAAA"
+
     def test_context_menu_no_cache_noop(self, view):
         view.load_caches([])
         from PySide6.QtCore import QPoint

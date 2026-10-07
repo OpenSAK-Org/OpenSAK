@@ -292,6 +292,7 @@ class MainWindow(QMainWindow):
         self._cache_table.sort_changed.connect(self._on_sort_changed)
         self._cache_table.location_updated.connect(self._refresh_cache_list)
         self._cache_table.edit_requested.connect(self._edit_waypoint_from_cache)
+        self._cache_table.delete_requested.connect(self._delete_cache)
         self._cache_table.center_point_requested.connect(self._set_cache_as_center)
         self._cache_table.corrected_coords_changed.connect(self._on_corrected_coords_changed)
         self._cache_table.found_status_changed.connect(self._on_found_status_changed)
@@ -2487,9 +2488,15 @@ class MainWindow(QMainWindow):
             )
 
     def _delete_waypoint(self) -> None:
+        """Waypoint → Delete cache… / the Delete key: the selected cache."""
         cache = self._cache_table.selected_cache()
         if not cache:
             return
+        self._delete_cache(cache)
+
+    def _delete_cache(self, cache: Cache) -> None:
+        """Ask, then delete *cache*. Also used by the cache list's context
+        menu (#693), which passes the cache that was right-clicked."""
         from opensak.db.database import get_session
         from opensak.db.models import Cache
         reply = QMessageBox.question(
