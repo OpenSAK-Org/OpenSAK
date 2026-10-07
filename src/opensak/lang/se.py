@@ -1055,6 +1055,7 @@ STRINGS: dict[str, str] = {
     "ctx_set_as_center":    "📍  Ange som centrumpunkt",
     "ctx_copy_gc":          "📋  Kopiera GC kod",
     "ctx_copy_coords":      "📋  Kopiera koordinater",
+    "ctx_copy_coords_original": "📋  Kopiera ursprungliga koordinater",
     "ctx_coord_converter":  "⇄  Koordinatkonverterare…",
     "ctx_edit_cache":       "✏️  Redigera cache…",
     "ctx_mark_found":       "☑  Flagga som hittad",

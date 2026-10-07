@@ -1056,6 +1056,7 @@ STRINGS: dict[str, str] = {
     "ctx_set_as_center":    "📍  Nastavit jako středový bod",
     "ctx_copy_gc":          "📋  Kopírovat GC kód",
     "ctx_copy_coords":      "📋  Kopírovat souřadnice",
+    "ctx_copy_coords_original": "📋  Kopírovat původní souřadnice",
     "ctx_coord_converter":  "⇄  Převodník souřadnic…",
     "ctx_edit_cache":       "✏️  Upravit keš…",
     "ctx_mark_found":       "☑  Označit jako nalezené",

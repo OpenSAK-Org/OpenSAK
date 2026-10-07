@@ -1767,20 +1767,32 @@ class CacheTableView(QTableView):
         act_copy_gc = menu.addAction(tr("ctx_copy_gc"))
         act_copy_gc.triggered.connect(lambda: self._copy_to_clipboard(cache.gc_code))
 
-        # Kopiér koordinater — i det valgte format
+        # Kopiér koordinater — i det valgte format. Issue #1003: som "Åbn i
+        # kortapp" (#951) bruges de effektive koordinater (corrected hvis
+        # sat), og de originale får et ekstra punkt når cachen er korrigeret.
         if cache.latitude and cache.longitude:
             fmt = get_settings().coord_format
-            coords = format_coords(cache.latitude, cache.longitude, fmt)
+            eff_lat, eff_lon = CacheTableModel._effective_coords(cache)
+            if eff_lat is None or eff_lon is None:   # not reached: originals are set
+                eff_lat, eff_lon = cache.latitude, cache.longitude
+            coords = format_coords(eff_lat, eff_lon, fmt)
             act_copy_coords = menu.addAction(tr("ctx_copy_coords"))
             act_copy_coords.triggered.connect(
-                lambda: self._copy_to_clipboard(coords)
+                lambda checked=False, text=coords: self._copy_to_clipboard(text)
             )
+            if (eff_lat, eff_lon) != (cache.latitude, cache.longitude):
+                orig_coords = format_coords(cache.latitude, cache.longitude, fmt)
+                act_copy_orig = menu.addAction(tr("ctx_copy_coords_original"))
+                act_copy_orig.triggered.connect(
+                    lambda checked=False, text=orig_coords:
+                        self._copy_to_clipboard(text)
+                )
 
-            # Åbn koordinatkonverter
+            # Åbn koordinatkonverter — med de effektive koordinater (#1003)
             act_converter = menu.addAction(tr("ctx_coord_converter"))
-            lat, lon = cache.latitude, cache.longitude
             act_converter.triggered.connect(
-                lambda checked=False, la=lat, lo=lon: self._open_converter(la, lo)
+                lambda checked=False, la=eff_lat, lo=eff_lon:
+                    self._open_converter(la, lo)
             )
 
         menu.addSeparator()

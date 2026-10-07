@@ -1764,6 +1764,67 @@ class TestView:
             tr("ctx_open_maps_original", map_name="OpenStreetMap"),
         }
 
+    def _coord_actions(self, view, qtbot, monkeypatch, cache):
+        """Build the context menu for *cache*, trigger its copy-coordinates
+        and coordinate-converter actions, and return {key: what it did}."""
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        keys = {tr(k): k for k in (
+            "ctx_copy_coords", "ctx_copy_coords_original", "ctx_coord_converter")}
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        monkeypatch.setattr(ct, "format_coords", lambda lat, lon, fmt: f"{lat},{lon}")
+        done: list = []
+        monkeypatch.setattr(view, "_copy_to_clipboard", lambda text: done.append(text))
+        monkeypatch.setattr(view, "_open_converter",
+                            lambda lat, lon: done.append((lat, lon)))
+
+        view.load_caches([cache])
+        view.show()
+        qtbot.addWidget(view)
+        pos = view.visualRect(view._model.index(0, 0)).center()
+        view._show_context_menu(pos)
+
+        result = {}
+        for action in built_menus[-1].actions():
+            if action.text() in keys:
+                done.clear()
+                action.trigger()
+                result[keys[action.text()]] = done[0]
+        return result
+
+    def test_copy_and_converter_use_corrected_coords(self, view, qtbot, monkeypatch):
+        # Issue #1003: like "Open in <map>" (#951), copying and the converter
+        # use the corrected coordinates, and the original ones can be copied
+        # from their own entry.
+        c = _cache(gc_code="GCCORR", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        assert self._coord_actions(view, qtbot, monkeypatch, c) == {
+            "ctx_copy_coords": "56.0,13.0",
+            "ctx_copy_coords_original": "55.0,12.0",
+            "ctx_coord_converter": (56.0, 13.0),
+        }
+
+    @pytest.mark.parametrize("note", [None, "not_corrected"])
+    def test_copy_and_converter_use_original_coords_without_correction(
+        self, view, qtbot, monkeypatch, note,
+    ):
+        c = _cache(gc_code="GCORIG", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0, corrected=False) if note else None
+        assert self._coord_actions(view, qtbot, monkeypatch, c) == {
+            "ctx_copy_coords": "55.0,12.0",
+            "ctx_coord_converter": (55.0, 12.0),
+        }
+
     def test_context_menu_no_cache_noop(self, view):
         view.load_caches([])
         from PySide6.QtCore import QPoint

@@ -1057,6 +1057,7 @@ STRINGS: dict[str, str] = {
     "ctx_set_as_center":    "📍  Instellen als middelpunt",
     "ctx_copy_gc":          "📋  GC-code kopiëren",
     "ctx_copy_coords":      "📋  Coördinaten kopiëren",
+    "ctx_copy_coords_original": "📋  Originele coördinaten kopiëren",
     "ctx_coord_converter":  "⇄  Coördinaatconverter…",
     "ctx_edit_cache":       "✏️  Cache bewerken…",
     "ctx_mark_found":       "☑  Markeren als gevonden",
