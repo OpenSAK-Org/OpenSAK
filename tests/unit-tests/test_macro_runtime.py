@@ -7,17 +7,19 @@ database, so "a Lua script selects caches" is covered end to end.
 
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from opensak.db.corrected_coords import set_corrected_coords
 from opensak.db.database import get_session
 from opensak.db.models import Cache, UserNote
+from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
 from opensak.filters.engine import (
-    CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, NotFoundFilter,
-    apply_filters_auto,
+    CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, GcCodeFilter,
+    NotFoundFilter, apply_filters_auto,
 )
-from opensak.macro import MacroError, MacroRuntime, build_filterset
+from opensak.macro import FolderApproval, MacroError, MacroRuntime, build_filterset
 from opensak.macro import cache_data
 from opensak.macro.permissions import FolderPermission
 
@@ -43,6 +45,15 @@ class FakeHost:
     def filtered_caches(self):
         return self.caches
 
+    def filter_name(self):
+        return self.applied[-1][1] if self.applied else ""
+
+    def database_name(self):
+        return "TestDB"
+
+    def center_name(self):
+        return "Home"
+
     def set_corrected_coords(self, gc_code, lat, lon):
         self.corrected = getattr(self, "corrected", [])
         self.corrected.append((gc_code, lat, lon))
@@ -66,6 +77,9 @@ class FakeHost:
     def end_macro(self):
         self.ended = getattr(self, "ended", 0) + 1
 
+    def approve_folder(self, target, folder, write):
+        return FolderApproval.DENY
+
 
 class DbHost(FakeHost):
     """Applies the filter against the test DB and remembers the selection."""
@@ -86,6 +100,9 @@ class DbHost(FakeHost):
     def filtered_caches(self):
         with get_session() as s:
             return apply_filters_auto(s, self.filterset)
+
+    def filter_name(self):
+        return self.label
 
     def set_corrected_coords(self, gc_code, lat, lon):
         return set_corrected_coords(gc_code, lat, lon)
@@ -752,3 +769,218 @@ def test_description(full_cache):
         print(d.short, d.long, d.html, opensak.description("GCNONE"))
     """)
     assert out == ["short	<p>long</p>	true	nil"]
+
+
+# ── GPX export ───────────────────────────────────────────────────────────────
+
+def _export_runtime(tmp_path, host=None, **settings):
+    """Runtime with an export setting "GPX Export" (writing to tmp_path/out
+    unless *settings* say otherwise) and write permission for tmp_path."""
+    settings.setdefault("folder", str(tmp_path / "out"))
+    FileExportProfile("GPX Export", FileExportSettings(**settings)).save(
+        tmp_path / "export_settings")
+    out: list[str] = []
+    runtime = MacroRuntime(
+        host or DbHost(), output=out.append,
+        profiles_dir=tmp_path / "filters",
+        export_settings_dir=tmp_path / "export_settings",
+        folder_permissions=[FolderPermission(str(tmp_path), read=True, write=True)],
+    )
+    return runtime, out
+
+
+def _exported(path: Path) -> set[str]:
+    text = path.read_text(encoding="utf-8")
+    return {code for code in ("GCMAC1", "GCMAC2", "GCMAC3", "GCMAC4", "GCMAC5")
+            if code in text}
+
+
+def test_export_file_writes_caches_of_active_filter(tmp_path):
+    runtime, out = _export_runtime(tmp_path, file_name="{filter}_{count}_{database}_{center}")
+    runtime.run("""
+        opensak.filter{ type = "Multi-cache", label = "Multis" }
+        print(opensak.export_file("GPX Export"))
+    """)
+    target = (tmp_path / "out" / "Multis_1_TestDB_Home.gpx").resolve()
+    assert out == [f"{target}\t1"]
+    assert _exported(target) == {"GCMAC3"}
+
+
+def test_export_file_follows_format_and_record_limit(tmp_path):
+    runtime, out = _export_runtime(tmp_path, fmt="loc", file_name="{count}", max_records=2)
+    runtime.run("""
+        opensak.filter{ type = "Traditional", code = "GCMAC" }
+        local path, n = opensak.export_file("GPX Export")
+        print(n)
+    """)
+    assert out == ["2"]
+    assert len(_exported(tmp_path / "out" / "2.loc")) == 2
+
+
+@pytest.mark.parametrize("if_exists, answer, written", [
+    ("overwrite", None, True),
+    ("skip", None, False),
+    ("ask", True, True),
+    ("ask", False, False),
+])
+def test_export_file_if_exists(tmp_path, if_exists, answer, written):
+    target = tmp_path / "out" / "x.gpx"
+    target.parent.mkdir()
+    target.write_text("old", encoding="utf-8")
+    host = DbHost()
+    host.answer = answer
+    runtime, out = _export_runtime(tmp_path, host, file_name="x", if_exists=if_exists)
+    runtime.run("""
+        opensak.filter{ type = "Multi-cache" }
+        print(opensak.export_file("GPX Export") ~= nil)
+    """)
+    assert out == [str(written).lower()]
+    assert (target.read_text(encoding="utf-8") != "old") is written
+    assert len(getattr(host, "asked", [])) == (1 if if_exists == "ask" else 0)
+
+
+def test_export_file_writes_nothing_without_caches(tmp_path):
+    host = FakeHost()
+    host.caches = [SimpleNamespace(latitude=None)]
+    runtime, out = _export_runtime(tmp_path, host)
+    runtime.run('print(opensak.export_file("GPX Export"))')
+    assert out == ["nil"]
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("call, folder, msg", [
+    ("opensak.export_file()", None, "expects the name"),
+    ('opensak.export_file("Missing")', None, "no saved export setting"),
+    ('opensak.export_file("GPX Export")', "", "has no folder"),
+    ('opensak.export_file("GPX Export")', "<outside>", "may not write"),
+])
+def test_export_file_rejects_bad_setup(tmp_path, tmp_path_factory, call, folder, msg):
+    settings = {}
+    if folder is not None:
+        settings["folder"] = (str(tmp_path_factory.mktemp("no_permission"))
+                              if folder == "<outside>" else folder)
+    runtime, _ = _export_runtime(tmp_path, **settings)
+    with pytest.raises(MacroError, match=msg):
+        runtime.run(f'opensak.filter{{ type = "Multi-cache" }} {call}')
+    if folder:
+        assert not list(Path(settings["folder"]).iterdir())
+
+
+def test_export_file_folder_argument_overrides_setting(tmp_path):
+    runtime, out = _export_runtime(tmp_path, folder="", file_name="{filter}")
+    runtime.run(f"""
+        opensak.filter{{ type = "Multi-cache", label = "Multis" }}
+        print(opensak.export_file("GPX Export", {str(tmp_path / "other")!r}))
+    """)
+    target = (tmp_path / "other" / "Multis.gpx").resolve()
+    assert out == [f"{target}	1"]
+    assert _exported(target) == {"GCMAC3"}
+
+
+@pytest.mark.parametrize("answer, written", [
+    (FolderApproval.ONCE, True),
+    (FolderApproval.DENY, False),
+])
+def test_export_file_asks_before_writing_to_unapproved_folder(
+        tmp_path, tmp_path_factory, answer, written):
+    folder = tmp_path_factory.mktemp("unapproved")
+    asked = []
+
+    class Host(DbHost):
+        def approve_folder(self, target, folder, write):
+            asked.append((folder, write))
+            return answer
+
+    runtime, out = _export_runtime(tmp_path, Host(), folder=str(folder), file_name="x")
+    script = 'opensak.filter{ type = "Multi-cache" } print(opensak.export_file("GPX Export"))'
+    if written:
+        runtime.run(script)
+        assert out == [f"{(folder / 'x.gpx').resolve()}	1"]
+    else:
+        with pytest.raises(MacroError, match="denied by the user"):
+            runtime.run(script)
+    assert asked == [(folder.resolve(), True)]
+    assert (folder / "x.gpx").exists() is written
+
+
+# ── Example: export_filters_to_gpx.lua ───────────────────────────────────────
+
+EXPORT_EXAMPLE = EXAMPLES / "export_filters_to_gpx.lua"
+
+# The filters named in the example's FILTERS list, narrowed to the seeded caches.
+_EXAMPLE_FILTERS = {
+    "Traditionals": "Traditional Cache",
+    "Multi-caches": "Multi-cache",
+    "Mysteries": "Unknown Cache",
+}
+
+
+def _save_example_filters(tmp_path, names=tuple(_EXAMPLE_FILTERS)):
+    for name in names:
+        fs = FilterSet(mode="AND")
+        fs.add(CacheTypeFilter([_EXAMPLE_FILTERS[name]]))
+        fs.add(GcCodeFilter("GCMAC"))
+        FilterProfile(name, fs).save(tmp_path / "filters")
+
+
+@pytest.fixture
+def example_temp_dir(tmp_path, monkeypatch):
+    """opensak.temp_dir() as the example sees it: tmp_path/out."""
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr("opensak.macro.runtime.temp_dir", lambda: out_dir)
+    return out_dir
+
+
+def _run_export_example(runtime):
+    runtime.run(EXPORT_EXAMPLE.read_text(encoding="utf-8"), base_dir=EXAMPLES)
+
+
+def test_export_example_writes_one_file_per_filter(tmp_path, example_temp_dir):
+    _save_example_filters(tmp_path)
+    runtime, out = _export_runtime(tmp_path, folder="", file_name="{filter}",
+                                   if_exists="overwrite")
+
+    _run_export_example(runtime)
+
+    out_dir = tmp_path / "out"
+    assert sorted(p.name for p in out_dir.iterdir()) == [
+        "Multi-caches.gpx", "Mysteries.gpx", "Traditionals.gpx"]
+    assert _exported(out_dir / "Traditionals.gpx") == {"GCMAC1", "GCMAC2", "GCMAC4"}
+    assert _exported(out_dir / "Multi-caches.gpx") == {"GCMAC3"}
+    assert _exported(out_dir / "Mysteries.gpx") == {"GCMAC5"}
+    assert out[0] == f"Traditionals: 3 caches → {(out_dir / 'Traditionals.gpx').resolve()}"
+    assert out[-1] == f"Done: 3 exported, 0 skipped (folder: {out_dir})"
+
+
+def test_export_example_skips_unsaved_and_empty_filters(tmp_path, example_temp_dir):
+    _save_example_filters(tmp_path, ("Traditionals",))
+    FilterProfile("Mysteries", FilterSet().add(GcCodeFilter("GCNOMATCH"))).save(
+        tmp_path / "filters")
+    runtime, out = _export_runtime(tmp_path, file_name="{filter}")
+
+    _run_export_example(runtime)
+
+    assert "Multi-caches: no saved filter with this name — skipped" in out
+    assert "Mysteries: no caches match — skipped" in out
+    assert out[-1] == f"Done: 1 exported, 2 skipped (folder: {example_temp_dir})"
+    assert [p.name for p in (tmp_path / "out").iterdir()] == ["Traditionals.gpx"]
+
+
+def test_export_example_reports_existing_file(tmp_path, example_temp_dir):
+    _save_example_filters(tmp_path, ("Traditionals",))
+    (tmp_path / "out" / "Traditionals.gpx").write_text("old", encoding="utf-8")
+    runtime, out = _export_runtime(tmp_path, file_name="{filter}", if_exists="skip")
+
+    _run_export_example(runtime)
+
+    assert "Traditionals: file exists — not overwritten" in out
+    assert (tmp_path / "out" / "Traditionals.gpx").read_text(encoding="utf-8") == "old"
+
+
+def test_export_example_stops_when_file_name_lacks_filter(tmp_path, example_temp_dir):
+    _save_example_filters(tmp_path)
+    runtime, _ = _export_runtime(tmp_path, file_name="caches", if_exists="overwrite")
+
+    with pytest.raises(MacroError, match="Traditionals and Multi-caches both exported to"):
+        _run_export_example(runtime)

@@ -57,6 +57,12 @@ from opensak.filters.engine import (
 from opensak import __version__, geodesy
 from opensak.coords import parse_coords
 from opensak.db.database import get_engine
+from opensak.export.file_export import select_for_export, write_export_file
+from opensak.export.file_export_settings import (
+    FileExportProfile,
+    FileExportSettings,
+    expand_file_name,
+)
 from opensak.filters.line_polygon import LineShape, parse_point, read_points_file
 from opensak.hint_detect import rot13
 from opensak.macro import helpers
@@ -275,6 +281,17 @@ class MacroHost(Protocol):
 
     def selected_codes(self) -> list[str]:
         """GC codes of all selected grid rows, in grid order."""
+
+    def filter_name(self) -> str:
+        """Name of the active filter ("" = none) — the {filter} variable of
+        an export file name."""
+
+    def database_name(self) -> str:
+        """Name of the active database — the {database} variable."""
+
+    def center_name(self) -> str:
+        """Name of the active centre point ("" = none) — the {center}
+        variable."""
 
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
@@ -543,6 +560,7 @@ class MacroRuntime:
         host: MacroHost,
         output: Optional[Callable[[str], None]] = None,
         profiles_dir: Optional[Path] = None,
+        export_settings_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
@@ -554,6 +572,7 @@ class MacroRuntime:
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
+        self._export_settings_dir = export_settings_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
@@ -878,6 +897,59 @@ class MacroRuntime:
             self._boundaries = (store, TerritoryResolver(store))
         loc = self._boundaries[1].resolve(*point)
         return lua.table_from(loc._asdict())
+
+    def _load_export_settings(self, name: str) -> FileExportSettings:
+        for path in FileExportProfile.list_profiles(self._export_settings_dir):
+            try:
+                profile = FileExportProfile.load(path)
+            except Exception:
+                continue
+            if profile.name == name:
+                return profile.settings
+        raise MacroError(f"no saved export setting named {name!r}")
+
+    def _export_file(self, name=None, folder=None):
+        if not isinstance(name, str) or not name.strip():
+            raise MacroError("opensak.export_file expects the name of a saved export setting")
+        if folder is not None and (not isinstance(folder, str) or not folder.strip()):
+            raise MacroError("opensak.export_file: folder must be a non-empty string")
+        settings = self._load_export_settings(name)
+        if folder is None and not settings.folder.strip():
+            raise MacroError(
+                f"export setting {name!r} has no folder — choose one in the "
+                "export dialog and save the setting again, or pass a folder"
+            )
+        caches = select_for_export(self._host.filtered_caches(), settings.max_records)
+        if not caches:
+            return None
+        file_name = expand_file_name(
+            settings.file_name,
+            database=self._host.database_name(),
+            filter_name=self._host.filter_name(),
+            center_name=self._host.center_name(),
+            fmt=settings.fmt,
+            count=len(caches),
+        )
+        folder = Path((folder or settings.folder).strip()).expanduser()
+        if not folder.is_absolute():
+            folder = (self._base_dir or macros_dir()) / folder
+        target = self._check_access(folder / f"{file_name}.{settings.fmt}", write=True)
+        if target.exists():
+            if settings.if_exists == "skip":
+                return None
+            if settings.if_exists == "ask":
+                from opensak.lang import tr
+
+                if not self._host.confirm(tr("file_export_overwrite_msg", path=str(target))):
+                    return None
+        try:
+            count = write_export_file(
+                caches, target, settings.fmt,
+                use_corrected=settings.use_corrected_coords,
+            )
+        except OSError as exc:
+            raise MacroError(f"cannot write {target}: {exc}") from None
+        return str(target), count
 
     # -- Running ---------------------------------------------------------------
 
@@ -1298,6 +1370,34 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("table<string, string>[]", "One table per data row, keyed by header."),
+    ),
+    ApiFunction(
+        name="export_file",
+        description="Export the caches of the active filter with a saved export "
+                    "setting (File → Export → GPX/LOC/GGZ: format, folder, file "
+                    "name, if the file exists, corrected coordinates, max. "
+                    "caches). The file name variables are filled in as in the "
+                    "dialog, {filter} with the name of the active filter and "
+                    "{center} with the active centre point. The file goes "
+                    "into *folder* if given, else into the setting's folder. "
+                    "That folder needs write permission (Settings → Folder "
+                    "permissions); for an unapproved one the user is asked "
+                    "first. Nothing is "
+                    "written when no cache with coordinates is shown, or when "
+                    "the file exists and the setting says skip (or ask, and "
+                    "the user answers No).",
+        example='local path, n = opensak.export_file("GPX Export")\n'
+                'if path then print(n .. " caches → " .. path) end',
+        since=1,
+        bind=lambda rt, lua: rt._export_file,
+        params=(
+            Param("setting", "string", "Name of the saved export setting."),
+            Param("folder", "string", "Folder to write to instead of the "
+                  "setting's folder, e.g. opensak.temp_dir().", optional=True),
+        ),
+        returns=("string?, integer?",
+                 "The file written and the number of caches in it; nil if "
+                 "nothing was written."),
     ),
     ApiFunction(
         name="confirm",
