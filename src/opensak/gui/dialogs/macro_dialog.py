@@ -433,12 +433,12 @@ class MacroDialog(QDialog):
         if not self._maybe_save():
             return
         try:
-            restore = False
+            restore: Optional[bool] = False
             if example_differs(name):
                 restore = self._ask_restore_example(name)
                 if restore is None:
                     return
-            path = install_example(name, restore=restore)
+            path = install_example(name, restore=bool(restore))
         except OSError as exc:
             QMessageBox.warning(self, tr("macro_title"),
                                 tr("macro_example_error", name=name, msg=str(exc)))
