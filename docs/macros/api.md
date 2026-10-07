@@ -31,7 +31,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
-| [`opensak.export_file`](#opensakexportfile) | 1 |
+| [`opensak.export_file`](#opensakexportfile) | 2 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
@@ -484,7 +484,7 @@ Parameters:
 
 Returns `string?, integer?` — The file written and the number of caches in it; nil if nothing was written.
 
-Since API version 1.
+Since API version 2.
 
 Example:
 

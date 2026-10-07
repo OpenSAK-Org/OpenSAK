@@ -1388,7 +1388,7 @@ API: tuple[ApiFunction, ...] = (
                     "the user answers No).",
         example='local path, n = opensak.export_file("GPX Export")\n'
                 'if path then print(n .. " caches → " .. path) end',
-        since=1,
+        since=2,
         bind=lambda rt, lua: rt._export_file,
         params=(
             Param("setting", "string", "Name of the saved export setting."),
