@@ -1050,6 +1050,7 @@ STRINGS: dict[str, str] = {
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Otevřít na geocaching.com",
     "ctx_open_maps":        "🗺️  Otevřít v {map_name}",
+    "ctx_open_maps_original": "🗺️  Otevřít původní souřadnice v {map_name}",
     "ctx_set_as_center":    "📍  Nastavit jako středový bod",
     "ctx_copy_gc":          "📋  Kopírovat GC kód",
     "ctx_copy_coords":      "📋  Kopírovat souřadnice",

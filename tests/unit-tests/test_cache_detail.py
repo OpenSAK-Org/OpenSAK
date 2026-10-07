@@ -916,3 +916,37 @@ def test_edit_corrected_passes_original_coords(monkeypatch, tmp_path, qapp):
     assert captured["gc_code"] == "GCNOTES1"
     assert captured["orig_lat"] == pytest.approx(55.0)
     assert captured["orig_lon"] == pytest.approx(10.0)
+
+
+# ── Issue #951: map links use Settings.get_maps_url() ──────────────────────────
+
+def _maps_settings() -> SimpleNamespace:
+    s = _fake_settings()
+    s.get_maps_url = lambda lat, lon: f"https://maps?{lat},{lon}"
+    return s
+
+
+def test_open_in_maps_uses_settings_url(monkeypatch, qapp):
+    monkeypatch.setattr(cd, "get_settings", _maps_settings)
+    opened: list[str] = []
+    monkeypatch.setattr(cd.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    panel = CacheDetailPanel()
+    panel._current_lat, panel._current_lon = 55.0, 12.0
+    panel._corrected_lat, panel._corrected_lon = 56.0, 13.0
+
+    panel._open_in_maps(None)
+    panel._open_corrected_in_maps(None)
+    assert opened == ["https://maps?55.0,12.0", "https://maps?56.0,13.0"]
+
+
+def test_open_in_maps_without_coords_does_nothing(monkeypatch, qapp):
+    monkeypatch.setattr(cd, "get_settings", _maps_settings)
+    opened: list[str] = []
+    monkeypatch.setattr(cd.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    panel = CacheDetailPanel()
+    panel._current_lat = panel._current_lon = None
+    panel._corrected_lat = panel._corrected_lon = None
+
+    panel._open_in_maps(None)
+    panel._open_corrected_in_maps(None)
+    assert opened == []

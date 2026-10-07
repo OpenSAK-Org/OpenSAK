@@ -1731,18 +1731,27 @@ class CacheTableView(QTableView):
             lambda: webbrowser.open(f"https://coord.info/{cache.gc_code}")
         )
 
-        # Åbn i kortapp
+        # Åbn i kortapp — issue #951: brug de effektive koordinater
+        # (corrected hvis sat, ellers original), samme regel som lat/lon-
+        # kolonnerne, kortet og GPS-eksport. Har cachen korrigerede
+        # koordinater, tilbydes de originale som et ekstra menupunkt.
         if cache.latitude and cache.longitude:
-            from opensak.gui.settings import get_settings
             s = get_settings()
             map_name = "OpenStreetMap" if s.map_provider == "osm" else "Google Maps"
+            lat, lon = CacheTableModel._effective_coords(cache)
             act_maps = menu.addAction(tr("ctx_open_maps", map_name=map_name))
-            lat, lon = cache.latitude, cache.longitude
             act_maps.triggered.connect(
-                lambda checked=False, la=lat, lo=lon: webbrowser.open(
-                    get_settings().get_maps_url(la, lo)
-                )
+                lambda checked=False, la=lat, lo=lon: self._open_in_maps(la, lo)
             )
+            if (lat, lon) != (cache.latitude, cache.longitude):
+                act_maps_orig = menu.addAction(
+                    tr("ctx_open_maps_original", map_name=map_name)
+                )
+                orig_lat, orig_lon = cache.latitude, cache.longitude
+                act_maps_orig.triggered.connect(
+                    lambda checked=False, la=orig_lat, lo=orig_lon:
+                        self._open_in_maps(la, lo)
+                )
 
             # Sæt som centerpunkt (issue #511 — GSAK's CenterPoint > Current
             # Cache). Genberegner Distance-kolonnen for alle caches ud fra
@@ -1824,6 +1833,11 @@ class CacheTableView(QTableView):
             )
 
         menu.exec(self.viewport().mapToGlobal(pos))
+
+    @staticmethod
+    def _open_in_maps(lat: float, lon: float) -> None:
+        """Åbn koordinaterne i den valgte kortudbyder (Settings → Map)."""
+        webbrowser.open(get_settings().get_maps_url(lat, lon))
 
     def _edit_corrected(self, cache: Cache) -> None:
         """Åbn dialog til at sætte/redigere korrigerede koordinater."""

@@ -1049,6 +1049,7 @@ STRINGS: dict[str, str] = {
     # ── Højreklik kontekstmenu ────────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Åbn på geocaching.com",
     "ctx_open_maps":        "🗺️  Åbn i {map_name}",
+    "ctx_open_maps_original": "🗺️  Åbn originale koordinater i {map_name}",
     "ctx_set_as_center":    "📍  Sæt som centerpunkt",
     "ctx_copy_gc":          "📋  Kopiér GC kode",
     "ctx_copy_coords":      "📋  Kopiér koordinater",

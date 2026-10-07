@@ -1685,6 +1685,85 @@ class TestView:
             action.trigger()
         assert blocker.args[0].gc_code == "GCCENTER"
 
+    def _maps_actions(self, view, qtbot, monkeypatch, cache):
+        """Build the context menu for *cache* and return {text: url opened}
+        for its "Open in <map>" actions. Real English strings are loaded so
+        the provider name in the menu text is actually checked."""
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        map_texts = {
+            tr(key, map_name=name)
+            for key in ("ctx_open_maps", "ctx_open_maps_original")
+            for name in ("Google Maps", "OpenStreetMap")
+        }
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        opened: list[str] = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+
+        view.load_caches([cache])
+        view.show()
+        qtbot.addWidget(view)
+        pos = view.visualRect(view._model.index(0, 0)).center()
+        view._show_context_menu(pos)
+
+        result = {}
+        for action in built_menus[-1].actions():
+            if action.text() in map_texts:
+                opened.clear()
+                action.trigger()
+                result[action.text()] = opened[0]
+        return result
+
+    def test_context_menu_maps_uses_corrected_coords(self, view, qtbot, monkeypatch):
+        # Issue #951: "Open in <map>" must open the corrected coordinates when
+        # set — like the lat/lon columns, the map and GPS export — and the
+        # original coordinates get their own entry.
+        from opensak.lang import tr
+        c = _cache(gc_code="GCCORR", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert actions == {
+            tr("ctx_open_maps", map_name="Google Maps"): "https://maps?56.0,13.0",
+            tr("ctx_open_maps_original", map_name="Google Maps"): "https://maps?55.0,12.0",
+        }
+
+    @pytest.mark.parametrize("note", [None, "not_corrected"])
+    def test_context_menu_maps_uses_original_coords_without_correction(
+        self, view, qtbot, monkeypatch, note,
+    ):
+        # Issue #951: without (active) corrected coordinates there is a single
+        # map entry, opening the original coordinates.
+        from opensak.lang import tr
+        c = _cache(gc_code="GCORIG", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0, corrected=False) if note else None
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert actions == {
+            tr("ctx_open_maps", map_name="Google Maps"): "https://maps?55.0,12.0",
+        }
+
+    def test_context_menu_maps_names_osm_provider(
+        self, view, qtbot, monkeypatch, fake_settings,
+    ):
+        from opensak.lang import tr
+        fake_settings.map_provider = "osm"
+        c = _cache(gc_code="GCOSM", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert set(actions) == {
+            tr("ctx_open_maps", map_name="OpenStreetMap"),
+            tr("ctx_open_maps_original", map_name="OpenStreetMap"),
+        }
+
     def test_context_menu_no_cache_noop(self, view):
         view.load_caches([])
         from PySide6.QtCore import QPoint

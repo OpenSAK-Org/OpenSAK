@@ -1050,6 +1050,7 @@ STRINGS: dict[str, str] = {
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Abrir en geocaching.com",
     "ctx_open_maps":        "🗺️  Abrir en {map_name}",
+    "ctx_open_maps_original": "🗺️  Abrir coordenadas originales en {map_name}",
     "ctx_set_as_center":    "📍  Establecer como punto central",
     "ctx_copy_gc":          "📋  Copiar código GC",
     "ctx_copy_coords":      "📋  Copiar coordenadas",

@@ -433,27 +433,16 @@ class CacheDetailPanel(QWidget):
         if self._current_gc_code:
             webbrowser.open(f"https://www.geocaching.com/geocache/{self._current_gc_code}")
 
+    # Issue #951: map URLs are built in one place, Settings.get_maps_url().
     def _open_in_maps(self, event) -> None:
-        if self._current_lat is None:
+        if self._current_lat is None or self._current_lon is None:
             return
-        settings = get_settings()
-        app = settings.map_provider
-        lat, lon = self._current_lat, self._current_lon
-        if app == "google":
-            webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
-        else:
-            webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
+        webbrowser.open(get_settings().get_maps_url(self._current_lat, self._current_lon))
 
     def _open_corrected_in_maps(self, event) -> None:
-        if self._corrected_lat is None:
+        if self._corrected_lat is None or self._corrected_lon is None:
             return
-        settings = get_settings()
-        app = settings.map_provider
-        lat, lon = self._corrected_lat, self._corrected_lon
-        if app == "google":
-            webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
-        else:
-            webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
+        webbrowser.open(get_settings().get_maps_url(self._corrected_lat, self._corrected_lon))
 
     def _open_coord_converter(self) -> None:
         if self._current_lat is None:
