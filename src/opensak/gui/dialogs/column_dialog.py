@@ -374,6 +374,32 @@ def set_type_display(mode: str) -> None:
     get_store().set(_TYPE_DISPLAY_KEY, mode)
 
 
+def current_column_view_match() -> Optional[str]:
+    """Return the name of a saved Column View that matches the active
+    database's current column setup (visible columns in order, widths,
+    container/type display) exactly — otherwise None.
+
+    A fresh comparison every time, not a stored "this database follows that
+    view" link. Shared by the toolbar dropdown (mainwindow) and the
+    Choose Columns dialog, so both always show the same view (#996).
+    """
+    current = (
+        list(get_visible_columns()),
+        dict(get_column_widths()),
+        get_container_display(),
+        get_type_display(),
+    )
+    for path in ColumnView.list_views():
+        try:
+            view = ColumnView.load(path)
+        except Exception:
+            continue
+        if (list(view.visible_columns), dict(view.widths),
+                view.container_display, view.type_display) == current:
+            return view.name
+    return None
+
+
 class ColumnChooserDialog(QDialog):
     """Dialog til at vælge hvilke kolonner der vises i cachelisten."""
 
@@ -404,6 +430,13 @@ class ColumnChooserDialog(QDialog):
         self._view_combo.setMinimumWidth(160)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
+        # Issue #996: preselect the saved view the active database is
+        # currently using (same match as the toolbar dropdown), instead of
+        # always showing "(None)". Signals are blocked, so nothing is
+        # re-applied — the view already matches what the dialog shows.
+        match_name = current_column_view_match()
+        if match_name:
+            self._select_view_by_name(match_name)
         self._view_combo.blockSignals(False)
         self._view_combo.currentIndexChanged.connect(self._on_view_selected)
         view_row.addWidget(self._view_combo)
@@ -537,6 +570,13 @@ class ColumnChooserDialog(QDialog):
                 label = f"{self._DEFAULT_MARK}{label}"
             self._view_combo.addItem(label, path)
 
+    def _select_view_by_name(self, name: str) -> None:
+        """Select the combo entry for the saved view *name* (★ mark ignored)."""
+        for i in range(self._view_combo.count()):
+            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
+                self._view_combo.setCurrentIndex(i)
+                break
+
     def _update_view_buttons(self) -> None:
         path = self._view_combo.currentData()
         self._del_view_btn.setEnabled(path is not None)
@@ -600,10 +640,7 @@ class ColumnChooserDialog(QDialog):
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
         self._view_combo.blockSignals(False)
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        self._select_view_by_name(name)
         self._update_view_buttons()
         QMessageBox.information(
             self, tr("filter_saved_title"), tr("column_view_saved_msg", name=name)
@@ -641,10 +678,7 @@ class ColumnChooserDialog(QDialog):
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
         self._view_combo.blockSignals(False)
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == view_name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        self._select_view_by_name(view_name)
         self._update_view_buttons()
         QMessageBox.information(
             self, tr("column_view_default_set_title"),

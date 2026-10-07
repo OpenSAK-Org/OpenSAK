@@ -3060,12 +3060,14 @@ class MainWindow(QMainWindow):
         fravalgt tidligere), så det ændrer intet ved hvordan OK/anvend
         opfører sig — det gør blot comboen til en korrekt visning af den
         aktuelle tilstand i stedet for altid at stå tomt."""
-        from opensak.gui.dialogs.column_dialog import ColumnView, get_default_view_name
+        from opensak.gui.dialogs.column_dialog import (
+            ColumnView, current_column_view_match, get_default_view_name,
+        )
         self._column_view_combo.blockSignals(True)
         self._column_view_combo.clear()
         self._column_view_combo.addItem(tr("column_view_none"), None)
         default_name = get_default_view_name()
-        match_name = self._current_column_view_match()
+        match_name = current_column_view_match()
         match_index = 0
         for path in ColumnView.list_views():
             try:
@@ -3078,29 +3080,6 @@ class MainWindow(QMainWindow):
                 match_index = self._column_view_combo.count() - 1
         self._column_view_combo.setCurrentIndex(match_index)
         self._column_view_combo.blockSignals(False)
-
-    def _current_column_view_match(self) -> Optional[str]:
-        """Returner navnet på et gemt Column View, hvis den aktive databases
-        nuværende kolonneopsætning matcher det byte-for-byte — ellers None."""
-        from opensak.gui.dialogs.column_dialog import (
-            ColumnView, get_visible_columns, get_column_widths,
-            get_container_display, get_type_display,
-        )
-        current = (
-            list(get_visible_columns()),
-            dict(get_column_widths()),
-            get_container_display(),
-            get_type_display(),
-        )
-        for path in ColumnView.list_views():
-            try:
-                view = ColumnView.load(path)
-            except Exception:
-                continue
-            if (list(view.visible_columns), dict(view.widths),
-                    view.container_display, view.type_display) == current:
-                return view.name
-        return None
 
     def _on_column_view_combo_changed(self, index: int) -> None:
         """Bruger har valgt et gemt Column View i toolbar-dropdown.

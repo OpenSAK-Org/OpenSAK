@@ -1,5 +1,7 @@
 # tests/unit-tests/test_column_dialog.py — column chooser dialog + store helpers.
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("pytestqt")
@@ -11,6 +13,7 @@ from opensak.gui.dialogs.column_dialog import (
     ALWAYS_VISIBLE,
     ColumnChooserDialog,
     ColumnView,
+    current_column_view_match,
     get_all_columns,
     get_column_widths,
     get_container_display,
@@ -320,3 +323,76 @@ class TestDefaultView:
         # dangling reference, and fall back cleanly.
         assert get_default_view() is None
         assert get_default_view_name() is None
+
+
+# ── Issue #996: preselect the active database's view ─────────────────────────
+
+def _save_current_setup_as(name: str) -> Path:
+    """Save a ColumnView that matches the active database's current setup."""
+    return ColumnView(
+        name,
+        visible_columns=get_visible_columns(),
+        widths=get_column_widths(),
+        container_display=get_container_display(),
+        type_display=get_type_display(),
+    ).save()
+
+
+class TestCurrentViewMatch:
+    def test_match_returns_view_name(self, store, views_dir):
+        ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
+        _save_current_setup_as("Mine")
+        assert current_column_view_match() == "Mine"
+
+    def test_no_match_returns_none(self, store, views_dir):
+        ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
+        assert current_column_view_match() is None
+
+    def test_corrupt_view_file_is_skipped(self, store, views_dir):
+        views_dir.mkdir(parents=True, exist_ok=True)
+        (views_dir / "broken.json").write_text("{not json", encoding="utf-8")
+        _save_current_setup_as("Mine")
+        assert current_column_view_match() == "Mine"
+
+
+class TestDialogPreselectsView:
+    def test_preselects_matching_view(self, qtbot, store, views_dir):
+        ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
+        path = _save_current_setup_as("Mine")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        assert dlg._view_combo.currentText() == "Mine"
+        assert dlg._view_combo.currentData() == path
+        # The view's buttons follow the preselection.
+        assert dlg._del_view_btn.isEnabled()
+        assert dlg._set_default_btn.isEnabled()
+
+    def test_preselects_matching_default_view(self, qtbot, store, views_dir):
+        # The report: even the default (★) view showed "(None)".
+        _save_current_setup_as("My Standard")
+        set_default_view_name("My Standard")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        assert dlg._view_combo.currentText() == "★ My Standard"
+
+    def test_shows_none_when_nothing_matches(self, qtbot, store, views_dir):
+        ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        assert dlg._view_combo.currentIndex() == 0
+        assert dlg._view_combo.currentData() is None
+        assert not dlg._del_view_btn.isEnabled()
+
+    def test_preselection_does_not_change_the_checkboxes(self, qtbot, store, views_dir):
+        # Preselecting must not re-apply the view (signals are blocked);
+        # the list shows the active database's columns either way.
+        set_visible_columns(["name", "gc_code", "found"])
+        _save_current_setup_as("Mine")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        checked = {
+            dlg._list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(dlg._list.count())
+            if dlg._list.item(i).checkState() == Qt.CheckState.Checked
+        }
+        assert checked == {"name", "gc_code", "found"} | ALWAYS_VISIBLE
