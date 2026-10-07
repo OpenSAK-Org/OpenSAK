@@ -18,6 +18,10 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
+| [`opensak.sql`](#opensaksql) | 2 |
+| [`opensak.sql_each`](#opensaksqleach) | 2 |
+| [`opensak.tables`](#opensaktables) | 2 |
+| [`opensak.columns`](#opensakcolumns) | 2 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
@@ -165,6 +169,96 @@ Example:
 for _, name in ipairs(opensak.profiles()) do
     print(name)
 end
+```
+
+### opensak.sql
+
+```lua
+opensak.sql(query [, params])
+```
+
+Run a read-only SQL query (SQLite) against the active database and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+
+Parameters:
+
+- `query` (`string`) — One SQL statement.
+- `params` (`table`, optional) — Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }).
+
+Returns `table<string, any>[]` — One table per row, keyed by column name.
+
+Since API version 2.
+
+Example:
+
+```lua
+local rows = opensak.sql(
+  "SELECT country, COUNT(*) AS n FROM caches WHERE found = ? GROUP BY country", { 1 })
+for _, r in ipairs(rows) do print(r.country, r.n) end
+```
+
+### opensak.sql_each
+
+```lua
+opensak.sql_each(query [, params])
+```
+
+Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
+
+Parameters:
+
+- `query` (`string`) — One SQL statement.
+- `params` (`table`, optional) — As for opensak.sql().
+
+Returns `fun(): table<string, any>?` — Iterator for a generic `for`.
+
+Since API version 2.
+
+Example:
+
+```lua
+for r in opensak.sql_each("SELECT gc_code, name FROM caches WHERE found = 0") do
+    print(r.gc_code, r.name)
+end
+```
+
+### opensak.tables
+
+```lua
+opensak.tables()
+```
+
+The tables and views of the active database, for use with opensak.sql().
+
+Returns `string[]` — Table and view names, sorted.
+
+Since API version 2.
+
+Example:
+
+```lua
+print(table.concat(opensak.tables(), ", "))
+```
+
+### opensak.columns
+
+```lua
+opensak.columns(table)
+```
+
+The columns of a table or view of the active database.
+
+Parameters:
+
+- `table` (`string`) — Table or view name.
+
+Returns `{name: string, type: string}[]` — Column names and SQL types, in table order.
+
+Since API version 2.
+
+Example:
+
+```lua
+for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end
 ```
 
 ### opensak.set_corrected

@@ -88,6 +88,55 @@ function opensak.count() end
 ---@return string[] # Profile names.
 function opensak.profiles() end
 
+---Run a read-only SQL query (SQLite) against the active database and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+---
+---Since API version 2.
+---
+---```lua
+---local rows = opensak.sql(
+---  "SELECT country, COUNT(*) AS n FROM caches WHERE found = ? GROUP BY country", { 1 })
+---for _, r in ipairs(rows) do print(r.country, r.n) end
+---```
+---@param query string One SQL statement.
+---@param params? table Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }).
+---@return table<string, any>[] # One table per row, keyed by column name.
+function opensak.sql(query, params) end
+
+---Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
+---
+---Since API version 2.
+---
+---```lua
+---for r in opensak.sql_each("SELECT gc_code, name FROM caches WHERE found = 0") do
+---    print(r.gc_code, r.name)
+---end
+---```
+---@param query string One SQL statement.
+---@param params? table As for opensak.sql().
+---@return fun(): table<string, any>? # Iterator for a generic `for`.
+function opensak.sql_each(query, params) end
+
+---The tables and views of the active database, for use with opensak.sql().
+---
+---Since API version 2.
+---
+---```lua
+---print(table.concat(opensak.tables(), ", "))
+---```
+---@return string[] # Table and view names, sorted.
+function opensak.tables() end
+
+---The columns of a table or view of the active database.
+---
+---Since API version 2.
+---
+---```lua
+---for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end
+---```
+---@param table string Table or view name.
+---@return {name: string, type: string}[] # Column names and SQL types, in table order.
+function opensak.columns(table) end
+
 ---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
 ---
 ---Since API version 1.
