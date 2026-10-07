@@ -1,6 +1,6 @@
 ---@meta
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
--- OpenSAK Lua macro API, version 1. Reference: docs/macros/api.md
+-- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
 
 ---Keys understood by `opensak.filter{}`, all combined with AND.
 ---@class opensak.FilterSpec
@@ -141,7 +141,7 @@ function opensak.confirm(message) end
 
 ---Let the user pick a file in a file dialog. The picked file may be used for the rest of this run without a folder permission: read with mode "open" (the default), written with mode "save". OpenSAK's own settings and database files cannot be picked. The dialog starts in the macro file's folder.
 ---
----Since API version 1.
+---Since API version 2.
 ---
 ---```lua
 ---local path = opensak.choose_file("Solved puzzles", "CSV files (*.csv)")
@@ -175,3 +175,300 @@ function opensak.temp_dir() end
 ---```
 ---@return string # Folder path.
 function opensak.macros_dir() end
+
+---The OpenSAK version this macro runs in.
+---
+---Since API version 2.
+---
+---```lua
+---print("Running in OpenSAK " .. opensak.version())
+---```
+---@return string # Version, e.g. "1.21.0-beta.3".
+function opensak.version() end
+
+---Pause the macro. One pause lasts at most 10 s and all pauses of a run together at most 60 s; a cancelled macro stops at its next pause.
+---
+---Since API version 2.
+---
+---```lua
+---opensak.sleep(500)
+---```
+---@param ms number Milliseconds.
+function opensak.sleep(ms) end
+
+opensak.coords = {}
+
+---Parse a coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+---
+---Since API version 2.
+---
+---```lua
+---local lat, lon = opensak.coords.parse("N47 22.123 E008 32.456")
+---if not lat then error("not a coordinate") end
+---```
+---@param text string The coordinates.
+---@return number? # Latitude and longitude, or nil if the text cannot be parsed.
+---@return number?
+function opensak.coords.parse(text) end
+
+---Format coordinates. Formats: `"dmm"` (default), `"dms"`, `"dd"`, `"utm"`, `"ch1903"` (Swiss LV03) and `"ch1903+"` (Swiss LV95). The Swiss formats are only meaningful in and around Switzerland.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.coords.format(47.36872, 8.54093, "utm"))
+---print(opensak.coords.format("N47 22.123 E008 32.456", "ch1903"))
+---```
+---@param lat number Latitude in decimal degrees.
+---@param lon number Longitude in decimal degrees.
+---@param fmt? string Output format, "dmm" if omitted.
+---@return string # E.g. "N47 22.123  E008 32.456" or "32T E 465123 N 5247123".
+---@overload fun(coords: string, fmt?: string): string
+function opensak.coords.format(lat, lon, fmt) end
+
+---Great-circle distance between two points.
+---
+---Since API version 2.
+---
+---```lua
+---local km = opensak.coords.distance("N47 22.123 E008 32.456",
+---                                   "N47 23.000 E008 33.000")
+---```
+---@param lat1 number Latitude of the first point.
+---@param lon1 number Longitude of the first point.
+---@param lat2 number Latitude of the second point.
+---@param lon2 number Longitude of the second point.
+---@return number # Distance in km.
+---@overload fun(a: string, b: string): number
+function opensak.coords.distance(lat1, lon1, lat2, lon2) end
+
+---Initial bearing from the first point to the second.
+---
+---Since API version 2.
+---
+---```lua
+---local deg = opensak.coords.bearing(47.36872, 8.54093, 47.38333, 8.55)
+---```
+---@param lat1 number Latitude of the first point.
+---@param lon1 number Longitude of the first point.
+---@param lat2 number Latitude of the second point.
+---@param lon2 number Longitude of the second point.
+---@return number # Degrees, 0 = North, clockwise.
+---@overload fun(a: string, b: string): number
+function opensak.coords.bearing(lat1, lon1, lat2, lon2) end
+
+---Waypoint projection: the point a given distance away in a given direction.
+---
+---Since API version 2.
+---
+---```lua
+---local lat, lon = opensak.coords.project("N47 22.123 E008 32.456", 45, 0.25)
+---print(opensak.coords.format(lat, lon))
+---```
+---@param lat number Latitude in decimal degrees.
+---@param lon number Longitude in decimal degrees.
+---@param bearing number Direction in degrees, 0 = North, clockwise.
+---@param km number Distance in km.
+---@return number # Latitude and longitude of the projected point.
+---@return number
+---@overload fun(coords: string, bearing: number, km: number): number, number
+function opensak.coords.project(lat, lon, bearing, km) end
+
+---The point halfway between two points (along the great circle).
+---
+---Since API version 2.
+---
+---```lua
+---local lat, lon = opensak.coords.midpoint(47.0, 8.0, 48.0, 9.0)
+---```
+---@param lat1 number Latitude of the first point.
+---@param lon1 number Longitude of the first point.
+---@param lat2 number Latitude of the second point.
+---@param lon2 number Longitude of the second point.
+---@return number # Latitude and longitude of the midpoint.
+---@return number
+---@overload fun(a: string, b: string): number, number
+function opensak.coords.midpoint(lat1, lon1, lat2, lon2) end
+
+---Whether a point lies inside a polygon. The polygon is either a file (GPX track/route/waypoints, KML, or a text file with one coordinate per line; read permission needed, relative paths are resolved against the macro file's folder) or a table of points, each a coordinate string, `{lat, lon}` or `{lat = ..., lon = ...}`. Edges are straight lines in latitude/longitude, as in the line/polygon filter.
+---
+---Since API version 2.
+---
+---```lua
+---local area = { "N47 20 E008 30", "N47 25 E008 30", "N47 25 E008 40" }
+---print(opensak.coords.inside(47.37, 8.54, area))
+---```
+---@param lat number Latitude in decimal degrees.
+---@param lon number Longitude in decimal degrees.
+---@param polygon string|table Polygon file path, or a table of points.
+---@return boolean # true if the point is inside.
+---@overload fun(coords: string, polygon: string|table): boolean
+function opensak.coords.inside(lat, lon, polygon) end
+
+---Offline reverse geocoding with the boundary data used by Update location. A field is nil where no region matches.
+---
+---Since API version 2.
+---
+---```lua
+---local loc = opensak.coords.location(47.36872, 8.54093)
+---if loc then print(loc.country, loc.state, loc.county) end
+---```
+---@param lat number Latitude in decimal degrees.
+---@param lon number Longitude in decimal degrees.
+---@return {country: string?, state: string?, county: string?}? # nil if the boundary data is not installed.
+---@overload fun(coords: string): {country: string?, state: string?, county: string?}?
+function opensak.coords.location(lat, lon) end
+
+opensak.re = {}
+
+---Search for the first match of a regular expression (Python syntax). Each call may run at most 2 s.
+---
+---Since API version 2.
+---
+---```lua
+---local whole, n, e = opensak.re.find(desc, [[N\s*(\d+)\D+E\s*(\d+)]])
+---```
+---@param text string The text.
+---@param pattern string Regular expression (Python syntax); a long bracket string [[...]] avoids doubling backslashes.
+---@return string? # The whole match followed by the captures (nil for a group that did not take part), or nil if there is no match.
+---@return string? ...
+function opensak.re.find(text, pattern) end
+
+---Whether the text contains a match. Use `^` and `$` to match the whole text.
+---
+---Since API version 2.
+---
+---```lua
+---if opensak.re.match(c.name, [[(?i)^bonus]]) then print("bonus cache") end
+---```
+---@param text string The text.
+---@param pattern string Regular expression (Python syntax); a long bracket string [[...]] avoids doubling backslashes.
+---@return boolean # true if the pattern matches.
+function opensak.re.match(text, pattern) end
+
+---All non-overlapping matches. Without capture groups each item is the whole match, with one group it is the capture, with several it is an array of the captures.
+---
+---Since API version 2.
+---
+---```lua
+---for _, number in ipairs(opensak.re.findall("A=3, B=12", [[\d+]])) do
+---    print(number)
+---end
+---```
+---@param text string The text.
+---@param pattern string Regular expression (Python syntax); a long bracket string [[...]] avoids doubling backslashes.
+---@return string[]|string[][] # The matches.
+function opensak.re.findall(text, pattern) end
+
+---Replace matches. In a replacement string, `\1` or `\g<name>` insert a capture. A replacement function gets the whole match and the captures and returns the new text (nil or false keeps the match).
+---
+---Since API version 2.
+---
+---```lua
+---local text = opensak.re.replace("A=3 B=12", [[\d+]], function(n)
+---    return n * 2
+---end)
+---```
+---@param text string The text.
+---@param pattern string Regular expression (Python syntax); a long bracket string [[...]] avoids doubling backslashes.
+---@param repl string|fun(match: string, ...: string?): any Replacement text or function.
+---@param count? integer Replace at most this many matches; all if omitted.
+---@return string # The new text and the number of replacements.
+---@return integer
+function opensak.re.replace(text, pattern, repl, count) end
+
+---Split the text at every non-empty match.
+---
+---Since API version 2.
+---
+---```lua
+---local parts = opensak.re.split("a, b;c", [[[,;]\s*]])  -- {"a", "b", "c"}
+---```
+---@param text string The text.
+---@param pattern string Regular expression (Python syntax); a long bracket string [[...]] avoids doubling backslashes.
+---@return string[] # The pieces between the matches.
+function opensak.re.split(text, pattern) end
+
+opensak.text = {}
+
+---Turn HTML (e.g. a cache description) into plain text: tags removed, entities decoded, block elements and `<br>` become line breaks.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.text.html_to_text("<p>Stage&nbsp;1:<br>N47 22.123</p>"))
+---```
+---@param html string The HTML.
+---@return string # The text.
+function opensak.text.html_to_text(html) end
+
+---ROT13 as used for hints. Text in [square brackets] stays unchanged, like on geocaching.com.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.text.rot13("haqre gur fgbar [Ubhfr]"))
+---```
+---@param text string The text.
+---@return string # The decoded (or encoded) text.
+function opensak.text.rot13(text) end
+
+---Cross sum: the sum of all digits; other characters are ignored.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.text.digit_sum(1987))  -- 25
+---```
+---@param n number|string The number or text.
+---@return integer # Sum of the digits.
+function opensak.text.digit_sum(n) end
+
+---Letter value sum (A=1 … Z=26). Accents are dropped (Ä counts as A); other characters are ignored.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.text.word_value("Geocache"))  -- 47
+---```
+---@param text string The text.
+---@return integer # Sum of the letter values.
+function opensak.text.word_value(text) end
+
+---Make a string safe as a database or file name on every platform: characters such as `\ / : * ? " < > |` become `_`, white space is collapsed, leading/trailing dots and spaces are removed and the length is limited to 100. Never empty.
+---
+---Since API version 2.
+---
+---```lua
+---local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"
+---```
+---@param s string The name.
+---@return string # The safe name.
+function opensak.text.normalize_name(s) end
+
+opensak.date = {}
+
+---Parse a date into seconds since the epoch, the same kind of value as `os.time()`. Without a format, ISO 8601 (`"2026-10-06"`, `"2026-10-06T14:30:00Z"`) and `"06.10.2026 [14:30[:00]]"` are understood. Times without a zone are local time.
+---
+---Since API version 2.
+---
+---```lua
+---local t = opensak.date.parse("2026-10-06")
+---local t2 = opensak.date.parse("10/06/2026", "%m/%d/%Y")
+---```
+---@param text string The text.
+---@param fmt? string strptime format, e.g. "%d/%m/%Y".
+---@return integer? # Seconds since the epoch, or nil if the text does not parse.
+function opensak.date.parse(text, fmt) end
+
+---Format seconds since the epoch (e.g. from `os.time()` or `opensak.date.parse()`) in local time.
+---
+---Since API version 2.
+---
+---```lua
+---print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))
+---```
+---@param t number Seconds since the epoch.
+---@param fmt? string strftime format, "%Y-%m-%d" if omitted.
+---@return string # The formatted date.
+function opensak.date.format(t, fmt) end
