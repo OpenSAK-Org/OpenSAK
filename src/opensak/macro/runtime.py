@@ -30,6 +30,7 @@ from __future__ import annotations
 import csv
 import io
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
 
@@ -54,10 +55,17 @@ from opensak.filters.engine import (
 from opensak.coords import parse_coords
 from opensak.macro.permissions import (
     FolderAccessDenied,
+    FolderNotApproved,
     FolderPermission,
+    approvable_folder,
     check_access,
+    grant_permanently,
+    load_permissions,
     macros_dir,
+    protected_reason,
+    resolve_path,
     temp_dir,
+    with_grant,
 )
 from opensak.utils.constants import CACHE_TYPES
 
@@ -66,6 +74,8 @@ from opensak.utils.constants import CACHE_TYPES
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
 # Upper bound for the Lua heap, so e.g. string.rep("x", 1e10) cannot exhaust RAM.
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
+# opensak.choose_file(): longest accepted title / file type filter
+MAX_CHOOSE_FILE_TEXT = 200
 # opensak.read_csv() refuses larger files — it is meant for small lists
 # (solved puzzles, corrections), not for bulk imports.
 MAX_CSV_BYTES = 10 * 1024 * 1024
@@ -194,6 +204,14 @@ class MacroError(Exception):
     """A macro failed — Lua syntax/runtime error or a bad API call."""
 
 
+class FolderApproval(Enum):
+    """The user's answer when a macro needs a folder that is not permitted."""
+
+    ONCE = "once"       # for the rest of this run
+    ALWAYS = "always"   # added to Settings → Folder permissions
+    DENY = "deny"
+
+
 class MacroHost(Protocol):
     """What a macro may do to the running application."""
 
@@ -228,6 +246,22 @@ class MacroHost(Protocol):
 
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
+
+    def approve_folder(self, target: Path, folder: Path, write: bool) -> FolderApproval:
+        """Ask the user whether the macro may read (or write) *target*, by
+        permitting *folder* for this run only or always.
+
+        Must be OpenSAK's own dialog showing the full path — never anything
+        the macro can word or answer itself. Read and write are asked
+        separately. Anything but ONCE or ALWAYS counts as DENY.
+        """
+
+    def choose_file(
+        self, title: str, file_filter: str, save: bool, start_dir: Path
+    ) -> Optional[Path]:
+        """Let the user pick a file to open (or, with *save*, a file to
+        write) in OpenSAK's file dialog; None if cancelled. *title* and
+        *file_filter* come from the macro and may be empty."""
 
     def end_macro(self) -> None:
         """Called once after every run, also when the macro failed — apply
@@ -409,7 +443,8 @@ class MacroRuntime:
     ):
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
-        changes apply without reopening the macro window."""
+        changes apply without reopening the macro window. Folders the user
+        approves during a run are added to a copy of the list for that run."""
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
@@ -417,6 +452,12 @@ class MacroRuntime:
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
         self._base_dir: Optional[Path] = None
+        self._run_permissions: list[FolderPermission] = []
+        # (folder, write) the user denied during this run — not asked again
+        self._denied: set[tuple[Path, bool]] = set()
+        # (file, write) picked by the user in opensak.choose_file() — usable
+        # for the rest of this run only, whatever the folder list says
+        self._picked: set[tuple[Path, bool]] = set()
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -475,12 +516,66 @@ class MacroRuntime:
         file = Path(path).expanduser()
         if not file.is_absolute():
             file = (self._base_dir or macros_dir()) / file
-        try:
-            file = check_access(file, write=False, permissions=self._folder_permissions)
-        except FolderAccessDenied as exc:
-            raise MacroError(str(exc)) from None
+        file = self._check_access(file, write=False)
         rows = read_csv_rows(file, sep)
         return lua.table_from([lua.table_from(r) for r in rows])
+
+    def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
+        for name, value in (("title", title), ("filter", file_filter)):
+            if value is not None and (
+                not isinstance(value, str) or len(value) > MAX_CHOOSE_FILE_TEXT
+            ):
+                raise MacroError(
+                    f"opensak.choose_file: {name} must be a string of at most "
+                    f"{MAX_CHOOSE_FILE_TEXT} characters"
+                )
+        if mode not in (None, "open", "save"):
+            raise MacroError('opensak.choose_file: mode must be "open" or "save"')
+        save = mode == "save"
+        chosen = self._host.choose_file(
+            title or "", file_filter or "", save, self._base_dir or macros_dir()
+        )
+        if not chosen:
+            return None
+        try:
+            target = resolve_path(chosen)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {chosen}: {exc}") from None
+        reason = protected_reason(target)
+        if reason is not None:
+            kind = "write" if save else "read"
+            raise MacroError(f"macros may not {kind} {target} — {reason}")
+        self._picked.add((target, save))
+        return str(target)
+
+    def _check_access(self, path: Path, write: bool) -> Path:
+        """check_access() against this run's list. A folder that is merely
+        not listed is put to the user (host.approve_folder) instead of
+        failing; protected data and roots fail without asking. A file the
+        user picked in opensak.choose_file() needs no folder permission."""
+        try:
+            return check_access(path, write=write, permissions=self._run_permissions)
+        except FolderNotApproved as exc:
+            if (exc.target, write) in self._picked:
+                return exc.target
+            folder = approvable_folder(exc.target)
+            if folder is None:
+                raise MacroError(str(exc)) from None
+            if (folder, write) not in self._denied:
+                answer = self._host.approve_folder(exc.target, folder, write)
+                if answer not in (FolderApproval.ONCE, FolderApproval.ALWAYS):
+                    self._denied.add((folder, write))
+            if (folder, write) in self._denied:
+                raise MacroError(f"{exc} (denied by the user)") from None
+            if answer is FolderApproval.ALWAYS:
+                grant_permanently(folder, write)
+            self._run_permissions = with_grant(self._run_permissions, folder, write)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
+        try:
+            return check_access(path, write=write, permissions=self._run_permissions)
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
 
     # -- Running ---------------------------------------------------------------
 
@@ -494,6 +589,13 @@ class MacroRuntime:
         otherwise.
         """
         self._base_dir = base_dir
+        self._run_permissions = (
+            list(self._folder_permissions)
+            if self._folder_permissions is not None
+            else load_permissions()
+        )
+        self._denied = set()
+        self._picked = set()
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
@@ -706,9 +808,10 @@ API: tuple[ApiFunction, ...] = (
         name="read_csv",
         description="Read a CSV file (UTF-8) into an array of rows keyed by the "
                     "header line. A relative path is resolved against the "
-                    "macro file's folder. The file must lie in a folder with "
-                    "read permission (Settings → Folder permissions) and may "
-                    f"be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
+                    "macro file's folder. If the file's folder has no read "
+                    "permission (Settings → Folder permissions), OpenSAK asks "
+                    "the user to allow it for this run or always. The file "
+                    f"may be at most {MAX_CSV_BYTES // (1024 * 1024)} MB.",
         example='for _, row in ipairs(opensak.read_csv("solved.csv")) do\n'
                 "    opensak.set_corrected(row.code, row.coords)\nend",
         since=1,
@@ -729,6 +832,33 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._confirm,
         params=(Param("message", "string", "The question."),),
         returns=("boolean", "true on Yes."),
+    ),
+    ApiFunction(
+        name="choose_file",
+        description="Let the user pick a file in a file dialog. The picked "
+                    "file may be used for the rest of this run without a "
+                    "folder permission: read with mode \"open\" (the "
+                    "default), written with mode \"save\". OpenSAK's own "
+                    "settings and database files cannot be picked. The "
+                    "dialog starts in the macro file's folder.",
+        example='local path = opensak.choose_file("Solved puzzles", "CSV files (*.csv)")\n'
+                'if not path then return end      -- cancelled\n'
+                'for _, row in ipairs(opensak.read_csv(path)) do\n'
+                '    opensak.set_corrected(row.code, row.coords)\nend',
+        since=1,
+        bind=lambda rt, lua: rt._choose_file,
+        params=(
+            Param("title", "string", "Dialog title.", optional=True),
+            Param("filter", "string",
+                  'File types, e.g. "CSV files (*.csv);;All files (*)".',
+                  optional=True),
+            Param("mode", '"open"|"save"',
+                  '"open" picks an existing file to read (default), '
+                  '"save" a file to write (the dialog asks before '
+                  "replacing an existing one).",
+                  optional=True),
+        ),
+        returns=("string?", "Full path of the picked file, or nil if cancelled."),
     ),
     ApiFunction(
         name="temp_dir",

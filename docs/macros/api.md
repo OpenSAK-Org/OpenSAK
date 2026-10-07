@@ -4,7 +4,7 @@
 
 API version: **1** (`opensak.api_version()`).
 
-Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions.
+Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. OpenSAK's own settings and database files are never accessible.
 
 See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support-vs-code) for autocompletion in VS Code.
 
@@ -22,6 +22,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
+| [`opensak.choose_file`](#opensakchoosefile) | 1 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
 
@@ -199,7 +200,7 @@ opensak.clear_corrected("GC12345")
 opensak.read_csv(path [, sep])
 ```
 
-Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. The file must lie in a folder with read permission (Settings → Folder permissions) and may be at most 10 MB.
+Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. If the file's folder has no read permission (Settings → Folder permissions), OpenSAK asks the user to allow it for this run or always. The file may be at most 10 MB.
 
 Parameters:
 
@@ -238,6 +239,34 @@ Example:
 
 ```lua
 if not opensak.confirm("Update 12 caches?") then return end
+```
+
+### opensak.choose_file
+
+```lua
+opensak.choose_file([title] [, filter] [, mode])
+```
+
+Let the user pick a file in a file dialog. The picked file may be used for the rest of this run without a folder permission: read with mode "open" (the default), written with mode "save". OpenSAK's own settings and database files cannot be picked. The dialog starts in the macro file's folder.
+
+Parameters:
+
+- `title` (`string`, optional) — Dialog title.
+- `filter` (`string`, optional) — File types, e.g. "CSV files (*.csv);;All files (*)".
+- `mode` (`"open"|"save"`, optional) — "open" picks an existing file to read (default), "save" a file to write (the dialog asks before replacing an existing one).
+
+Returns `string?` — Full path of the picked file, or nil if cancelled.
+
+Since API version 1.
+
+Example:
+
+```lua
+local path = opensak.choose_file("Solved puzzles", "CSV files (*.csv)")
+if not path then return end      -- cancelled
+for _, row in ipairs(opensak.read_csv(path)) do
+    opensak.set_corrected(row.code, row.coords)
+end
 ```
 
 ### opensak.temp_dir

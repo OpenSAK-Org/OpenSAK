@@ -7,9 +7,11 @@ the available functions.
 """
 
 from opensak.macro.permissions import FolderPermission, check_access
-from opensak.macro.runtime import MacroError, MacroHost, MacroRuntime, build_filterset
+from opensak.macro.runtime import (
+    FolderApproval, MacroError, MacroHost, MacroRuntime, build_filterset,
+)
 
 __all__ = [
-    "FolderPermission", "MacroError", "MacroHost", "MacroRuntime",
+    "FolderApproval", "FolderPermission", "MacroError", "MacroHost", "MacroRuntime",
     "build_filterset", "check_access",
 ]

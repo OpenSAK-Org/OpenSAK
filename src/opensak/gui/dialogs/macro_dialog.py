@@ -13,13 +13,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QPlainTextEdit, QPushButton,
-    QSplitter, QVBoxLayout,
+    QDialog, QFileDialog, QHBoxLayout, QMessageBox, QPlainTextEdit,
+    QPushButton, QSplitter, QVBoxLayout,
 )
 
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
-from opensak.macro import MacroError, MacroHost, MacroRuntime
+from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime
 
 EXAMPLE_MACRO = """\
 -- OpenSAK macro (Lua) — proof of concept
@@ -133,3 +133,44 @@ class MacroDialog(QDialog):
             self._append_output(tr("macro_error", msg=str(exc)))
         finally:
             self._btn_run.setEnabled(True)
+
+
+def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> FolderApproval:
+    """OpenSAK's question when a macro needs *target* outside its permitted
+    folders: allow *folder* this time only, always, or deny (the default,
+    also on Escape). The paths come from the macro, so they are shown as
+    plain text."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("macro_access_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.setText(tr(
+        "macro_access_write" if write else "macro_access_read",
+        path=str(target), folder=str(folder),
+    ))
+    box.setInformativeText(tr("macro_access_hint"))
+    btn_once = box.addButton(tr("macro_access_once"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+    btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_deny)
+    box.setEscapeButton(btn_deny)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is btn_once:
+        return FolderApproval.ONCE
+    if clicked is btn_always:
+        return FolderApproval.ALWAYS
+    return FolderApproval.DENY
+
+
+def choose_file_for_macro(
+    parent, title: str, file_filter: str, save: bool, start_dir: Path
+) -> Path | None:
+    """OpenSAK's file dialog for opensak.choose_file(). The caption always
+    says that a macro asks, whatever *title* the macro passes."""
+    caption = tr("macro_choose_save" if save else "macro_choose_open")
+    if title.strip():
+        caption = tr("macro_choose_caption", caption=caption, title=title.strip())
+    pick = QFileDialog.getSaveFileName if save else QFileDialog.getOpenFileName
+    path, _ = pick(parent, caption, str(start_dir), file_filter or tr("macro_choose_all_files"))
+    return Path(path) if path else None

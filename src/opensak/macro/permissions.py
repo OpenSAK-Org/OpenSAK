@@ -29,6 +29,11 @@ A filesystem root (/, a drive such as C:\\ or a network share such as
 whole drive: Settings refuses to add one, and an entry for a root in
 opensak.json (edited by hand) is ignored.
 
+When no listed folder grants an access, check_access() raises
+FolderNotApproved, and the runtime asks the user (through OpenSAK's own
+dialog, never through the macro) to approve the file's folder for this run
+only or permanently. Protected data and roots are never offered.
+
 OpenSAK's own data can never be read or written by a macro, whatever the
 list says (see protected_reason()): opensak.json, bootstrap.json, the
 Geocaching.com token, the data and database folders (except the macros
@@ -50,6 +55,16 @@ STORE_KEY = "macros.folder_permissions"
 
 class FolderAccessDenied(PermissionError):
     """A macro tried to read or write outside its permitted folders."""
+
+
+class FolderNotApproved(FolderAccessDenied):
+    """Denied only because no listed folder grants the access — unlike a
+    protected file, the user may approve it (see approvable_folder())."""
+
+    def __init__(self, message: str, target: Path, write: bool):
+        super().__init__(message)
+        self.target = target
+        self.write = write
 
 
 @dataclass
@@ -259,6 +274,38 @@ def protected_reason(target: Path) -> Optional[str]:
     return None
 
 
+def protected_inside(folder: str | Path) -> list[Path]:
+    """OpenSAK's own data in *folder* or below it: the data and database
+    folders, opensak.json, bootstrap.json, the token and every listed
+    database. A file inside one of the listed folders is not repeated.
+
+    Macros can never write these anyway; Settings uses this to warn before
+    write access is granted to such a folder (e.g. the home folder).
+    """
+    try:
+        root = resolve_path(folder)
+    except (OSError, RuntimeError):
+        return []
+    folders, files = _protected_locations()
+    try:
+        from opensak.db.manager import get_db_manager
+
+        for db in get_db_manager().databases:
+            try:
+                files.append(resolve_path(db.path))
+            except (OSError, RuntimeError):
+                pass
+    except Exception:
+        pass
+    inside_folders = sorted({f for f in folders if f.is_relative_to(root)})
+    inside_files = sorted({
+        f for f in files
+        if f.is_relative_to(root)
+        and not any(f.is_relative_to(d) for d in inside_folders)
+    })
+    return inside_folders + inside_files
+
+
 def _matching_entry(
     target: Path, permissions: Iterable[FolderPermission]
 ) -> Optional[FolderPermission]:
@@ -300,11 +347,57 @@ def check_access(
     entry = _matching_entry(target, permissions)
     allowed = entry is not None and (entry.write if write else entry.read)
     if not allowed:
-        raise FolderAccessDenied(
+        raise FolderNotApproved(
             f"macros may not {kind} {target} — permitted folders are set in "
-            "Settings → Folder permissions"
+            "Settings → Folder permissions",
+            target,
+            write,
         )
     return target
+
+
+# ── Approval while a macro runs ──────────────────────────────────────────────
+
+def approvable_folder(target: Path) -> Optional[Path]:
+    """The folder the user is asked to approve for the resolved *target*:
+    the folder containing it. None if that is a filesystem root, which can
+    never be permitted."""
+    folder = target.parent
+    return None if _is_root(folder) else folder
+
+
+def with_grant(
+    permissions: Iterable[FolderPermission], folder: Path, write: bool
+) -> list[FolderPermission]:
+    """A copy of *permissions* that also grants read (or write) on *folder*.
+
+    An entry for the same folder is extended instead of duplicated, keeping
+    its other right. Otherwise a new entry is added; since *folder* contains
+    the requested file, it is then the most specific match for it.
+    """
+    result: list[FolderPermission] = []
+    found = False
+    for perm in permissions:
+        try:
+            same = resolve_path(perm.path) == folder
+        except (OSError, RuntimeError):
+            same = False
+        if same and not found:
+            found = True
+            perm = FolderPermission(
+                perm.path,
+                read=perm.read or not write,
+                write=perm.write or write,
+            )
+        result.append(FolderPermission(perm.path, perm.read, perm.write))
+    if not found:
+        result.append(FolderPermission(str(folder), read=not write, write=write))
+    return result
+
+
+def grant_permanently(folder: Path, write: bool) -> None:
+    """Add read (or write) on *folder* to the list saved in Settings."""
+    save_permissions(with_grant(load_permissions(), folder, write))
 
 
 def _refuse_hard_link(target: Path) -> None:
