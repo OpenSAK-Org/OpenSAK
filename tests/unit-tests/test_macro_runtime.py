@@ -371,6 +371,36 @@ def test_install_example_copies_macro_and_csv_into_macros_folder(tmp_path, monke
         install_example("nope.lua")
 
 
+def test_install_example_restore_keeps_changed_copy_as_bak(tmp_path, monkeypatch):
+    from opensak.macro.examples import (
+        bundled_examples_dir, example_differs, install_example,
+    )
+
+    monkeypatch.setattr("opensak.config.get_macros_dir", lambda: tmp_path)
+    name = "corrected_coords_from_csv.lua"
+    original = (bundled_examples_dir() / name).read_text(encoding="utf-8")
+    assert not example_differs(name)             # not installed yet
+    path = install_example(name)
+    assert not example_differs(name)             # installed, unchanged
+
+    # Restoring an unchanged copy writes no backup.
+    install_example(name, restore=True)
+    assert not list(path.parent.glob("*.bak"))
+
+    # An edited (or outdated) copy differs; restore brings the original
+    # back and keeps the old copy, data files stay as they are.
+    path.write_text("-- edited", encoding="utf-8")
+    csv = path.parent / "corrected_coords.csv"
+    csv.write_text("code\nGC1\n", encoding="utf-8")
+    assert example_differs(name)
+    assert install_example(name, restore=True) == path
+    assert path.read_text(encoding="utf-8") == original
+    assert not example_differs(name)
+    [bak] = path.parent.glob(f"{name}.*.bak")
+    assert bak.read_text(encoding="utf-8") == "-- edited"
+    assert csv.read_text(encoding="utf-8") == "code\nGC1\n"
+
+
 def test_temp_and_macros_dir():
     from opensak.macro.permissions import macros_dir, temp_dir
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QTextCursor
@@ -419,22 +419,47 @@ class MacroDialog(QDialog):
         from opensak.gui.dialogs.macro_help import MacroHelpDialog
         if self._help is None:
             self._help = MacroHelpDialog(self)
-            self._help.open_example.connect(self._open_example)
+            self._help.open_example.connect(self.open_example)
         self._help.show()
         self._help.raise_()
         self._help.activateWindow()
 
-    def _open_example(self, name: str) -> None:
-        from opensak.macro.examples import install_example
+    def open_example(self, name: str) -> None:
+        """Copy shipped example *name* into the macros folder and open the
+        copy, asking first about unsaved changes. If the copy there differs
+        from the shipped one (edited, or the example was updated in a later
+        release), ask whether to open it or restore the original."""
+        from opensak.macro.examples import example_differs, install_example
+        if not self._maybe_save():
+            return
         try:
-            path = install_example(name)
+            restore = False
+            if example_differs(name):
+                restore = self._ask_restore_example(name)
+                if restore is None:
+                    return
+            path = install_example(name, restore=restore)
         except OSError as exc:
             QMessageBox.warning(self, tr("macro_title"),
                                 tr("macro_example_error", name=name, msg=str(exc)))
             return
-        if self.open_path(path):
+        if self.open_path(path, ask=False):
             self.raise_()
             self.activateWindow()
+
+    def _ask_restore_example(self, name: str) -> Optional[bool]:
+        """Open the user's changed copy of an example (False) or restore the
+        shipped original (True); None when cancelled."""
+        box = QMessageBox(QMessageBox.Icon.Question, tr("macro_title"),
+                          tr("macro_example_changed_msg", name=name),
+                          QMessageBox.StandardButton.Cancel, self)
+        keep = box.addButton(tr("macro_example_keep"), QMessageBox.ButtonRole.AcceptRole)
+        restore = box.addButton(tr("macro_example_restore"),
+                                QMessageBox.ButtonRole.DestructiveRole)
+        box.setDefaultButton(keep)
+        box.exec()
+        clicked = box.clickedButton()
+        return True if clicked is restore else False if clicked is keep else None
 
     # -- Window ----------------------------------------------------------------
 

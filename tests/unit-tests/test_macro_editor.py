@@ -524,6 +524,45 @@ def test_help_example_opens_in_editor(make_dialog, macros_dir, monkeypatch):
     assert d.path == macros_dir / "examples" / names[0]
 
 
+@pytest.mark.parametrize("answer, expected", [
+    (False, "-- edited"),     # open my copy
+    (True, None),             # restore original
+])
+def test_open_example_asks_when_copy_differs(make_dialog, macros_dir, monkeypatch,
+                                             answer, expected):
+    from opensak.macro.examples import bundled_examples_dir, install_example
+    name = "corrected_coords_from_csv.lua"
+    path = install_example(name)
+    original = path.read_text(encoding="utf-8")
+    d = make_dialog()
+
+    asked = []
+    monkeypatch.setattr(d, "_ask_restore_example", lambda n: asked.append(n) or answer)
+    d.open_example(name)        # unchanged copy: no question
+    assert asked == []
+
+    path.write_text("-- edited", encoding="utf-8")
+    d.open_example(name)
+    assert asked == [name]
+    assert d.path == path
+    assert d._editor.toPlainText() == (expected or original)
+    assert path.read_text(encoding="utf-8") == (expected or
+        (bundled_examples_dir() / name).read_text(encoding="utf-8"))
+
+
+def test_open_example_cancel_keeps_editor_and_copy(make_dialog, macros_dir, monkeypatch):
+    from opensak.macro.examples import install_example
+    name = "corrected_coords_from_csv.lua"
+    path = install_example(name)
+    path.write_text("-- edited", encoding="utf-8")
+    d = make_dialog()
+    before = d._editor.toPlainText()
+    monkeypatch.setattr(d, "_ask_restore_example", lambda n: None)
+    d.open_example(name)
+    assert d._editor.toPlainText() == before
+    assert path.read_text(encoding="utf-8") == "-- edited"
+
+
 def test_window_is_wide_enough_for_the_whole_toolbar(make_dialog):
     from PySide6.QtWidgets import QApplication, QToolBar
     d = make_dialog()

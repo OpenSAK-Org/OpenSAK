@@ -3239,16 +3239,8 @@ class MainWindow(QMainWindow):
 
     def _open_macro_example(self, name: str) -> None:
         """Copy a shipped example into the macros folder and open the copy."""
-        from opensak.macro.examples import install_example
-        try:
-            path = install_example(name)
-        except OSError as exc:
-            QMessageBox.warning(
-                self, tr("macro_title"), tr("macro_example_error", name=name, msg=str(exc))
-            )
-            return
         self._open_macro_dialog()
-        self._macro_dialog.open_path(path)
+        self._macro_dialog.open_example(name)
 
     def apply_filter(self, filterset, label: str) -> int:
         """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result
