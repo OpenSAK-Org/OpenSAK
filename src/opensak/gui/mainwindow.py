@@ -3275,6 +3275,15 @@ class MainWindow(QMainWindow):
         with get_session() as session:
             return len(apply_filters_auto(session, self._build_active_filterset()))
 
+    def filtered_caches(self) -> list:
+        """MacroHost: caches matching the active filter, in table order —
+        from the database for the same reason as cache_count()."""
+        with get_session() as session:
+            return apply_filters_auto(
+                session, self._build_active_filterset(), self._current_sort,
+                columns=self._visible_table_columns(),
+            )
+
     def set_corrected_coords(self, gc_code, lat, lon) -> bool:
         """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.
 
@@ -3286,6 +3295,17 @@ class MainWindow(QMainWindow):
             return False
         self._macro_changed_codes.add(gc_code)
         return True
+
+    def current_code(self) -> Optional[str]:
+        """MacroHost: GC code of the cache selected in the grid."""
+        cache = self._cache_table.selected_cache()
+        return cache.gc_code if cache is not None else None
+
+    def selected_codes(self) -> list[str]:
+        """MacroHost: GC codes of the selected grid rows, in grid order."""
+        model = self._cache_table._model
+        rows = sorted(i.row() for i in self._cache_table.selectionModel().selectedRows())
+        return [c.gc_code for c in map(model.cache_at, rows) if c is not None]
 
     def confirm(self, message: str) -> bool:
         """MacroHost: Yes/No question, on top of the macro dialog."""

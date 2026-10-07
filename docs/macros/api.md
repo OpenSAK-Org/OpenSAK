@@ -18,6 +18,12 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
+| [`opensak.cache`](#opensakcache) | 2 |
+| [`opensak.caches`](#opensakcaches) | 2 |
+| [`opensak.current`](#opensakcurrent) | 2 |
+| [`opensak.selected`](#opensakselected) | 2 |
+| [`opensak.codes`](#opensakcodes) | 2 |
+| [`opensak.description`](#opensakdescription) | 2 |
 | [`opensak.sql`](#opensaksql) | 2 |
 | [`opensak.sql_each`](#opensaksqleach) | 2 |
 | [`opensak.tables`](#opensaktables) | 2 |
@@ -169,6 +175,133 @@ Example:
 for _, name in ipairs(opensak.profiles()) do
     print(name)
 end
+```
+
+### opensak.cache
+
+```lua
+opensak.cache(code)
+```
+
+One cache as a table (see Cache fields). It is a snapshot: changing it changes nothing in the database.
+
+Parameters:
+
+- `code` (`string`) — GC code, e.g. "GC12345".
+
+Returns `opensak.Cache?` — The cache, or nil if it is not in the database.
+
+Since API version 2.
+
+Example:
+
+```lua
+local c = opensak.cache("GC12345")
+if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
+```
+
+### opensak.caches
+
+```lua
+opensak.caches([spec])
+```
+
+Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+
+Parameters:
+
+- `spec` (`opensak.CachesSpec`, optional) — Filter keys and/or `fields`; nothing = the active filter.
+
+Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
+
+Since API version 2.
+
+Example:
+
+```lua
+for c in opensak.caches() do print(c.code, c.name) end
+for c in opensak.caches{ found = true, country = "Switzerland",
+                         fields = {"difficulty", "terrain"} } do
+    print(c.code, c.difficulty, c.terrain)
+end
+```
+
+### opensak.current
+
+```lua
+opensak.current()
+```
+
+The cache selected in the grid.
+
+Returns `opensak.Cache?` — The cache, or nil if no row is selected.
+
+Since API version 2.
+
+Example:
+
+```lua
+local c = opensak.current()
+if c then print(c.code .. " " .. c.name) end
+```
+
+### opensak.selected
+
+```lua
+opensak.selected()
+```
+
+The GC codes of the rows selected in the grid.
+
+Returns `string[]` — GC codes; empty if nothing is selected.
+
+Since API version 2.
+
+Example:
+
+```lua
+for _, code in ipairs(opensak.selected()) do print(code) end
+```
+
+### opensak.codes
+
+```lua
+opensak.codes()
+```
+
+The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed.
+
+Returns `string[]` — GC codes.
+
+Since API version 2.
+
+Example:
+
+```lua
+print(table.concat(opensak.codes(), ", "))
+```
+
+### opensak.description
+
+```lua
+opensak.description(code)
+```
+
+The listing description of a cache. Not part of the cache table because it can be large.
+
+Parameters:
+
+- `code` (`string`) — GC code, e.g. "GC12345".
+
+Returns `{short: string?, long: string?, html: boolean}?` — Short and long description and whether they are HTML; nil if the cache is not in the database.
+
+Since API version 2.
+
+Example:
+
+```lua
+local d = opensak.description("GC12345")
+if d and d.long and d.long:find("bonus") then print("bonus cache") end
 ```
 
 ### opensak.sql
@@ -968,6 +1101,57 @@ Keys understood by `opensak.filter{}`, all combined with AND.
 | `name`, `code`, `owner`, `country`, `state`, `county` | `"text"` | "Contains" match on that field. |
 | `where` | `"SQL WHERE clause"` | Raw clause against the caches table. |
 | `label` | `"text"` | Shown in the toolbar (optional, default "Macro"). |
+
+`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included).
+
+## Cache fields
+
+Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensak.caches()`. The table is a snapshot; missing data is `nil`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `code` | `string` | GC code, e.g. "GC12345". |
+| `name` | `string` | Cache name. |
+| `type` | `string` | Cache type, e.g. "Traditional Cache". |
+| `container` | `string?` | Container size, e.g. "Small". |
+| `lat` | `number` | Posted latitude (decimal degrees). |
+| `lon` | `number` | Posted longitude (decimal degrees). |
+| `difficulty` | `number?` | Difficulty 1–5. |
+| `terrain` | `number?` | Terrain 1–5. |
+| `owner` | `string?` | Owner name. |
+| `placed_by` | `string?` | Placed-by name as shown on the listing. |
+| `hidden` | `string?` | Hidden date, "YYYY-MM-DD". |
+| `found` | `boolean` | Found by you. |
+| `found_date` | `string?` | Your find date, "YYYY-MM-DD". |
+| `dnf` | `boolean` | Your latest log is a Didn't find it. |
+| `dnf_date` | `string?` | Date of your DNF, "YYYY-MM-DD". |
+| `ftf` | `boolean` | You were first to find. |
+| `available` | `boolean` | Not disabled. |
+| `archived` | `boolean` | Archived. |
+| `premium` | `boolean` | Premium-member only. |
+| `country` | `string?` | Country. |
+| `state` | `string?` | State / region. |
+| `county` | `string?` | County. |
+| `distance` | `number?` | Distance from the active centre point in km. |
+| `bearing` | `number?` | Bearing from the active centre point in degrees. |
+| `elevation` | `number?` | Elevation in metres. |
+| `favorite_points` | `integer?` | Favourite points (nil until known). |
+| `find_count` | `integer?` | Number of Found it logs by anyone. |
+| `user_flag` | `boolean` | User flag. |
+| `user_sort` | `integer?` | User sort value. |
+| `user_data` | `string[]` | User data fields 1–4; "" when empty. |
+| `color` | `string?` | Colour tag, e.g. "#FF5733". |
+| `locked` | `boolean` | Locked against import changes. |
+| `watch` | `boolean` | On the watchlist. |
+| `note` | `string?` | Your local note. |
+| `gc_note` | `string?` | Personal note from geocaching.com. |
+| `hint` | `string?` | Hint text as imported. |
+| `url` | `string?` | Listing URL. |
+| `corrected` | `{lat: number, lon: number}?` | Corrected coordinates; nil if the cache is not solved. |
+| `waypoint_count` | `integer` | Number of additional waypoints. |
+| `log_count` | `integer` | Number of logs stored. |
+| `trackable_count` | `integer` | Number of trackables in the cache. |
+| `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
 
 ## Example macros
 

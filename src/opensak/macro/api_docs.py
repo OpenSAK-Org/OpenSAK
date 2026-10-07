@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from opensak.macro.cache_data import CACHE_FIELDS
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, Param
 
 DOC_PATH = Path("docs/macros/api.md")
@@ -147,6 +148,23 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         value = doc.value.replace("|", "\\|")
         lines.append(f"| {keys} | `{value}` | {doc.description} |")
 
+    lines += [
+        "",
+        "`opensak.caches{}` also takes `fields`, an array of the cache fields "
+        "to load (`code` is always included).",
+        "",
+        "## Cache fields",
+        "",
+        "Keys of the table returned by `opensak.cache()`, `opensak.current()` "
+        "and `opensak.caches()`. The table is a snapshot; missing data is `nil`.",
+        "",
+        "| Field | Type | Meaning |",
+        "|---|---|---|",
+    ]
+    for field in CACHE_FIELDS:
+        type_ = field.type.replace("|", "\\|")
+        lines.append(f"| `{field.name}` | `{type_}` | {field.description} |")
+
     lines += _examples_section(examples_dir)
     lines += _editor_section()
 
@@ -215,6 +233,18 @@ def render_lua_stub() -> str:
     for doc in FILTER_KEY_DOCS:
         for key in doc.keys:
             lines.append(f"---@field {key}? {doc.type} {doc.description}")
+
+    lines += [
+        "",
+        "---Filter keys plus `fields`, understood by `opensak.caches{}`.",
+        "---@class opensak.CachesSpec: opensak.FilterSpec",
+        "---@field fields? string[] Cache fields to load (`code` is always included).",
+        "",
+        "---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).",
+        "---@class opensak.Cache",
+    ]
+    for field in CACHE_FIELDS:
+        lines.append(f"---@field {field.name} {field.type} {field.description}")
 
     lines += [
         "",
