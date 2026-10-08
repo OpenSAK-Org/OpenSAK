@@ -1050,6 +1050,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #716: follow-up derived columns ──────────────────────────────
     "col_last_found_date":   "Naposledy nalezeno",
     "col_last_gpx_update":   "Poslední aktualizace GPX",
+    "col_last_gpx_update_short": "Poslední GPX",
     "col_last_four_logs":    "Poslední čtyři logy",
     "col_last_four_logs_short": "L4",
 

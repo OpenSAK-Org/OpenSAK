@@ -2036,3 +2036,33 @@ class TestLastFourLogsCompact:
             model.set_short_header("last_four_logs", True)
         with qtbot.assertNotEmitted(model.headerDataChanged):
             model.set_short_header("last_four_logs", True)
+
+
+# ── Issue #1004: short "Last GPX" header ─────────────────────────────────────
+
+class TestLastGpxShortHeader:
+    @pytest.fixture
+    def gpx_view(self, monkeypatch, qtbot, fake_settings):
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "last_gpx_update"])
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {})
+        monkeypatch.setattr(ct, "set_column_widths", lambda w: None)
+        v = CacheTableView()
+        qtbot.addWidget(v)
+        return v
+
+    def _header(self, view, role=Qt.ItemDataRole.DisplayRole):
+        return view._model.headerData(1, Qt.Orientation.Horizontal, role)
+
+    def test_short_when_narrow_full_when_wide(self, gpx_view):
+        gpx_view.setColumnWidth(1, 60)
+        assert self._header(gpx_view) == "Last GPX"
+        gpx_view.setColumnWidth(1, 400)
+        assert self._header(gpx_view) == "Last GPX update"
+
+    def test_tooltip_is_always_the_full_title(self, gpx_view):
+        gpx_view.setColumnWidth(1, 60)
+        assert self._header(gpx_view, Qt.ItemDataRole.ToolTipRole) == "Last GPX update"

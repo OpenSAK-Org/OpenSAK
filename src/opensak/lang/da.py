@@ -1049,6 +1049,7 @@ STRINGS: dict[str, str] = {
     # ── Issue #716: follow-up derived columns ──────────────────────────────
     "col_last_found_date":   "Senest fundet",
     "col_last_gpx_update":   "Seneste GPX-opdatering",
+    "col_last_gpx_update_short": "Seneste GPX",
     "col_last_four_logs":    "Seneste fire logs",
     "col_last_four_logs_short": "L4",
 

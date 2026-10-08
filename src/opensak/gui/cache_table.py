@@ -146,6 +146,7 @@ def get_column_defs() -> dict:
 # when the column is too narrow for it (GSAK calls "Last four logs" "L4").
 SHORT_HEADER_KEYS: dict[str, str] = {
     "last_four_logs": "col_last_four_logs_short",
+    "last_gpx_update": "col_last_gpx_update_short",   # #1004, GSAK's "Last GPX"
 }
 
 # Room for the sort indicator next to a header's text, in pixels.
