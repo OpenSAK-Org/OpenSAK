@@ -52,6 +52,7 @@ from opensak.filters.engine import (
     StateFilter,
     TerrainFilter,
     WhereClauseFilter,
+    apply_filters_auto,
 )
 from opensak import __version__, geodesy
 from opensak.coords import parse_coords
@@ -60,6 +61,16 @@ from opensak.filters.line_polygon import LineShape, parse_point, read_points_fil
 from opensak.hint_detect import rot13
 from opensak.macro import helpers
 from opensak.macro.errors import MacroError
+from opensak.db.database import get_session
+from opensak.macro.cache_data import (
+    CACHE_FIELDS,
+    CacheField,
+    UnknownField,
+    iter_records,
+    load_description,
+    load_records,
+    resolve_fields,
+)
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -252,6 +263,19 @@ class MacroHost(Protocol):
         caches does not refresh the view thousands of times.
         """
 
+    def filtered_caches(self) -> list:
+        """The caches matching the active filter, in the order shown.
+
+        Like cache_count(), must be up to date right after apply_filter()/
+        clear_filter() — ask the database, not the UI.
+        """
+
+    def current_code(self) -> Optional[str]:
+        """GC code of the cache selected in the grid (None = no selection)."""
+
+    def selected_codes(self) -> list[str]:
+        """GC codes of all selected grid rows, in grid order."""
+
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
 
@@ -372,6 +396,14 @@ def _sql_args(func: str, query: Any, params: Any) -> tuple[str, Any]:
     raise MacroError(
         f"{func}: parameters must be an array {{ v1, v2 }} or a table {{ name = v }}, not both"
     )
+
+
+def _cache_fields(value: Any) -> tuple[CacheField, ...]:
+    """The `fields` option of opensak.caches{} → the fields to load."""
+    try:
+        return resolve_fields(str(v) for v in _as_list(value))
+    except UnknownField as exc:
+        raise MacroError(str(exc)) from None
 
 
 def _number(value: Any) -> Optional[float]:
@@ -632,6 +664,52 @@ class MacroRuntime:
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         return lua.table_from([lua.table_from(c) for c in columns])
+
+    # Cache access: plain-table snapshots (cache_data.py), straight from the
+    # database, so they are current even right after a write.
+
+    def _active_codes(self) -> list[str]:
+        return [c.gc_code for c in self._host.filtered_caches()]
+
+    def _cache(self, lua, code=None):
+        gc_code = _gc_code(code, "opensak.cache")
+        with get_session() as session:
+            records = load_records(session, [gc_code])
+        return lua.table_from(records[0], recursive=True) if records else None
+
+    def _caches(self, lua, spec=None):
+        if spec is not None and not hasattr(spec, "items"):
+            raise MacroError(
+                "opensak.caches expects nothing or a table, e.g. "
+                'opensak.caches{ found = true, fields = {"code", "name"} }'
+            )
+        spec = dict(spec.items()) if spec is not None else {}
+        fields = CACHE_FIELDS
+        if "fields" in spec:
+            fields = _cache_fields(spec.pop("fields"))
+        if spec:
+            filterset, _label = build_filterset(spec)
+            with get_session() as session:
+                codes = [c.gc_code for c in apply_filters_auto(session, filterset)]
+        else:
+            codes = self._active_codes()
+        records = iter_records(get_session, codes, fields)
+
+        def step(*_):
+            record = next(records, None)
+            return None if record is None else lua.table_from(record, recursive=True)
+
+        return step
+
+    def _current(self, lua):
+        code = self._host.current_code()
+        return self._cache(lua, code) if code else None
+
+    def _description(self, lua, code=None):
+        gc_code = _gc_code(code, "opensak.description")
+        with get_session() as session:
+            description = load_description(session, gc_code)
+        return lua.table_from(description) if description else None
 
     def _confirm(self, message=None) -> bool:
         if not isinstance(message, str) or not message.strip():
@@ -1040,6 +1118,79 @@ API: tuple[ApiFunction, ...] = (
         since=1,
         bind=lambda rt, lua: lambda: lua.table_from(rt._profile_names()),
         returns=("string[]", "Profile names."),
+    ),
+    ApiFunction(
+        name="cache",
+        description="One cache as a table (see Cache fields). It is a "
+                    "snapshot: changing it changes nothing in the database.",
+        example='local c = opensak.cache("GC12345")\n'
+                'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
+        params=(_CODE,),
+        returns=("opensak.Cache?", "The cache, or nil if it is not in the database."),
+    ),
+    ApiFunction(
+        name="caches",
+        description="Iterate over caches, one table per cache (see Cache "
+                    "fields), in a generic `for`. Without arguments: the "
+                    "caches of the active filter, in grid order. With filter "
+                    "keys (see Filter keys): the caches matching them, sorted "
+                    "by name; the view and the active filter stay "
+                    "unchanged. `fields` limits the fields loaded (`code` is "
+                    "always included), which makes loops over many caches "
+                    "faster. Caches are loaded in chunks, so large databases "
+                    "do not hit the memory limit.",
+        example="for c in opensak.caches() do print(c.code, c.name) end\n"
+                'for c in opensak.caches{ found = true, country = "Switzerland",\n'
+                '                         fields = {"difficulty", "terrain"} } do\n'
+                "    print(c.code, c.difficulty, c.terrain)\nend",
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
+        params=(Param("spec", "opensak.CachesSpec",
+                      "Filter keys and/or `fields`; nothing = the active filter.",
+                      optional=True),),
+        returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
+    ),
+    ApiFunction(
+        name="current",
+        description="The cache selected in the grid.",
+        example="local c = opensak.current()\n"
+                'if c then print(c.code .. " " .. c.name) end',
+        since=2,
+        bind=lambda rt, lua: lambda: rt._current(lua),
+        returns=("opensak.Cache?", "The cache, or nil if no row is selected."),
+    ),
+    ApiFunction(
+        name="selected",
+        description="The GC codes of the rows selected in the grid.",
+        example="for _, code in ipairs(opensak.selected()) do print(code) end",
+        since=2,
+        bind=lambda rt, lua: lambda: lua.table_from(list(rt._host.selected_codes())),
+        returns=("string[]", "GC codes; empty if nothing is selected."),
+    ),
+    ApiFunction(
+        name="codes",
+        description="The GC codes of the caches of the active filter, in grid "
+                    "order. Cheaper than opensak.caches() when only the codes "
+                    "are needed.",
+        example='print(table.concat(opensak.codes(), ", "))',
+        since=2,
+        bind=lambda rt, lua: lambda: lua.table_from(rt._active_codes()),
+        returns=("string[]", "GC codes."),
+    ),
+    ApiFunction(
+        name="description",
+        description="The listing description of a cache. Not part of the "
+                    "cache table because it can be large.",
+        example='local d = opensak.description("GC12345")\n'
+                'if d and d.long and d.long:find("bonus") then print("bonus cache") end',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._description(lua, *a),
+        params=(_CODE,),
+        returns=("{short: string?, long: string?, html: boolean}?",
+                 "Short and long description and whether they are HTML; "
+                 "nil if the cache is not in the database."),
     ),
     ApiFunction(
         name="sql",
