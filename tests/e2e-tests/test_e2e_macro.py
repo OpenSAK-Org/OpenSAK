@@ -59,6 +59,27 @@ def test_macro_reads_selected_cache_and_filtered_codes(seeded_window):
     assert out.splitlines()[:2] == [f"{shown[1]}\ttrue\t{shown[1]}", ",".join(shown)]
 
 
+def test_macro_export_file_writes_caches_of_active_filter(seeded_window, tmp_path):
+    from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
+    from opensak.macro.permissions import FolderPermission, save_permissions
+
+    FileExportProfile("E2E", FileExportSettings(
+        folder=str(tmp_path / "out"), file_name="{filter}", if_exists="overwrite",
+    )).save()
+    save_permissions([FolderPermission(str(tmp_path), read=True, write=True)])
+
+    out = _run_macro(seeded_window, """
+        opensak.filter{ code = "GCAAA0", label = "From macro" }
+        print(opensak.export_file("E2E"))
+    """)
+
+    target = (tmp_path / "out" / "From macro.gpx").resolve()
+    assert out.splitlines()[0] == f"{target}\t2"
+    content = target.read_text(encoding="utf-8")
+    codes = {c.gc_code for c in seeded_window._cache_table.get_all_caches()}
+    assert codes and all(code in content for code in codes)
+
+
 
 
 @pytest.fixture

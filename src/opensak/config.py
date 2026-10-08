@@ -72,8 +72,9 @@ def get_macros_dir() -> Path:
     """
     Return (and create if needed) the user's Lua macros directory.
 
-    Lives under <install_dir>/macros so macros survive app updates. Macros
-    may read files here by default (see opensak.macro.permissions).
+    Lives in the OpenSAK data folder (macros/ next to opensak.json), so
+    macros survive app updates. Macros may read files here by default (see
+    opensak.macro.permissions).
     """
     d = get_app_data_dir() / "macros"
     d.mkdir(parents=True, exist_ok=True)

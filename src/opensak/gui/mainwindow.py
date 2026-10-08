@@ -3239,16 +3239,8 @@ class MainWindow(QMainWindow):
 
     def _open_macro_example(self, name: str) -> None:
         """Copy a shipped example into the macros folder and open the copy."""
-        from opensak.macro.examples import install_example
-        try:
-            path = install_example(name)
-        except OSError as exc:
-            QMessageBox.warning(
-                self, tr("macro_title"), tr("macro_example_error", name=name, msg=str(exc))
-            )
-            return
         self._open_macro_dialog()
-        self._macro_dialog.open_path(path)
+        self._macro_dialog.open_example(name)
 
     def apply_filter(self, filterset, label: str) -> int:
         """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result
@@ -3283,6 +3275,19 @@ class MainWindow(QMainWindow):
                 session, self._build_active_filterset(), self._current_sort,
                 columns=self._visible_table_columns(),
             )
+
+    def filter_name(self) -> str:
+        """MacroHost: name of the active filter ("" = none)."""
+        return self._active_filter_name
+
+    def database_name(self) -> str:
+        """MacroHost: name of the active database."""
+        from opensak.export.file_export import active_database_name
+        return active_database_name()
+
+    def center_name(self) -> str:
+        """MacroHost: name of the active centre point ("" = none)."""
+        return get_settings().active_home_name or ""
 
     def set_corrected_coords(self, gc_code, lat, lon) -> bool:
         """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.

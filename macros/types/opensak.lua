@@ -296,6 +296,20 @@ function opensak.clear_corrected(code) end
 ---@return table<string, string>[] # One table per data row, keyed by header.
 function opensak.read_csv(path, sep) end
 
+---Export the caches of the active filter with a saved export setting (File → Export → GPX/LOC/GGZ: format, folder, file name, if the file exists, corrected coordinates, max. caches). The file name variables are filled in as in the dialog, {filter} with the name of the active filter and {center} with the active centre point. The file goes into *folder* if given, else into the setting's folder. That folder needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. Nothing is written when no cache with coordinates is shown, or when the file exists and the setting says skip (or ask, and the user answers No).
+---
+---Since API version 2.
+---
+---```lua
+---local path, n = opensak.export_file("GPX Export")
+---if path then print(n .. " caches → " .. path) end
+---```
+---@param setting string Name of the saved export setting.
+---@param folder? string Folder to write to instead of the setting's folder, e.g. opensak.temp_dir().
+---@return string? # The file written and the number of caches in it; nil if nothing was written.
+---@return integer?
+function opensak.export_file(setting, folder) end
+
 ---Ask the user a Yes/No question.
 ---
 ---Since API version 1.

@@ -32,6 +32,9 @@ from opensak.export.file_export_settings import (
     DEFAULT_FILE_NAME, FileExportProfile, FileExportSettings,
     expand_file_name,
 )
+from opensak.export.file_export import (
+    active_database_name, select_for_export, write_export_file,
+)
 
 
 class _ElidedLabel(QLabel):
@@ -81,27 +84,11 @@ class _ExportWorker(QThread):
 
     def run(self) -> None:
         try:
-            from opensak.gps.garmin import generate_gpx, generate_loc, generate_ggz
-            from opensak.db.database import reload_caches_full
-
-            self._output_path.parent.mkdir(parents=True, exist_ok=True)
-            caches = reload_caches_full(self._caches)
-            cb = make_progress_cb(self.progress.emit)
-
-            if self._fmt == "gpx":
-                content = generate_gpx(caches, self._output_path.stem, progress_cb=cb,
-                                       use_corrected=self._use_corrected)
-                self._output_path.write_text(content, encoding="utf-8")
-            elif self._fmt == "loc":
-                content = generate_loc(caches, progress_cb=cb,
-                                       use_corrected=self._use_corrected)
-                self._output_path.write_text(content, encoding="utf-8")
-            elif self._fmt == "ggz":
-                data = generate_ggz(caches, self._output_path.stem, progress_cb=cb,
-                                    use_corrected=self._use_corrected)
-                self._output_path.write_bytes(data)
-
-            count = len([c for c in caches if c.latitude is not None])
+            count = write_export_file(
+                self._caches, self._output_path, self._fmt,
+                use_corrected=self._use_corrected,
+                progress_cb=make_progress_cb(self.progress.emit),
+            )
             self.finished.emit(
                 tr("file_export_done_msg").format(
                     count=count, path=str(self._output_path)
@@ -296,18 +283,11 @@ class FileExportDialog(QDialog):
     @staticmethod
     def _database_name() -> str:
         """Name of the active database, or "" when there is none."""
-        try:
-            from opensak.db.manager import get_db_manager
-            active = get_db_manager().active
-            return active.name if active else ""
-        except Exception:
-            return ""
+        return active_database_name()
 
     def _export_count(self) -> int:
         """Number of caches the export will write (with the record limit)."""
-        count = len([c for c in self._caches if c.latitude is not None])
-        max_records = self._spin_max.value()
-        return min(count, max_records) if max_records else count
+        return len(select_for_export(self._caches, self._spin_max.value()))
 
     def _expanded_file_name(self) -> str:
         """File name (with extension) the template currently stands for."""
@@ -480,10 +460,7 @@ class FileExportDialog(QDialog):
         self._btn_export.setEnabled(False)
 
         # Only caches with coordinates are exported, so the limit counts those.
-        caches = [c for c in self._caches if c.latitude is not None]
-        max_records = self._spin_max.value()
-        if max_records:
-            caches = caches[:max_records]
+        caches = select_for_export(self._caches, self._spin_max.value())
 
         self._worker = _ExportWorker(
             caches, output_path, fmt,
