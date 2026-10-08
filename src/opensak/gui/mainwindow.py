@@ -414,6 +414,10 @@ class MainWindow(QMainWindow):
         act_kml_export.triggered.connect(self._open_kml_export)
         file_menu.addAction(act_kml_export)
 
+        act_poi_export = QAction(tr("action_poi_export"), self)
+        act_poi_export.triggered.connect(self._open_poi_export)
+        file_menu.addAction(act_poi_export)
+
         file_menu.addSeparator()
 
         self._act_quit = QAction(tr("action_quit"), self)
@@ -3206,6 +3210,29 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
         dlg = FileExportDialog(
+            caches, parent=self, filter_name=self._active_filter_name,
+            center_name=get_settings().active_home_name or "",
+        )
+        dlg.exec()
+
+    def _open_poi_export(self) -> None:
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        caches = [
+            self._cache_table._model.cache_at(i)
+            for i in range(self._cache_table.row_count())
+        ]
+        caches = [c for c in caches if c is not None]
+        if not caches:
+            QMessageBox.information(
+                self,
+                tr("kml_no_caches_title"),
+                tr("kml_no_caches_msg"),
+            )
+            return
+        from opensak.gui.dialogs.poi_export_dialog import PoiExportDialog
+        dlg = PoiExportDialog(
             caches, parent=self, filter_name=self._active_filter_name,
             center_name=get_settings().active_home_name or "",
         )
