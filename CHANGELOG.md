@@ -4,6 +4,159 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.6] — 2026-10-08
+
+> Headline: **macros grow up** — the beta-only macro window is now a real
+> editor, macros can read your caches and query the database, export
+> GPX/LOC/GGZ files, and use a new set of coordinate, regex, text and date
+> helpers (macro API version 2). Macros now ask before using a folder
+> instead of failing. Also in this beta: **Delete cache** and corrected
+> coordinates throughout the right-click menu, a GSAK-style compact
+> **L4** column, a coordinate parser that understands more ways of writing
+> coordinates, and a fix for compressed backups to OneDrive and other
+> synced folders.
+>
+> Macros are still beta-only, and the API may change before it is
+> settled (#938). The new texts are machine-translated in all languages
+> except Danish and English — corrections from native speakers are very
+> welcome.
+
+### Added
+
+- **Macro editor (#998, fixes #994)** — *Beta builds only.* **Macros →
+  Run macro (Lua)…** opens a full editor: New, Open, Open recent, Save,
+  Save as, Run (F5) and Save & Run (Ctrl+F5), Find (Ctrl+F) and Replace
+  (Ctrl+H), Go to line, and comment/uncomment. It has Lua syntax
+  colouring, line numbers and auto-indent, and marks the line of a Lua
+  error. **F1** opens the macro API reference in its own window, with
+  contents and search. Unsaved changes are shown in the title, and you're
+  asked about them before they're lost — also when you close OpenSAK.
+  Contributed by nagisml.
+- **Macros ask before using a folder (#993)** — *Beta builds only.* When a
+  macro needs a file in a folder that isn't in **Settings → Folder
+  permissions**, OpenSAK now asks — **This time only**, **Always** or
+  **Deny** — instead of stopping the macro. Read and write are asked
+  about separately, **Always** adds the folder to the list, and a denied
+  folder isn't asked about again in the same run. `choose_file()` lets a
+  macro show a file dialog; the file you pick can be used for the rest of
+  that run without a folder permission. Contributed by nagisml.
+- **Macros: read your caches (#1006)** — *Beta builds only.*
+  `opensak.cache(code)`, `opensak.caches()`, `opensak.current()`,
+  `opensak.selected()`, `opensak.codes()` and `opensak.description(code)`
+  give macros the caches of the active filter, the selected rows or any
+  cache by GC code, as read-only snapshots with stable field names
+  (`code`, `lat`, `lon`, `owner`, `corrected`, …). Large databases are
+  read in chunks, and a macro can ask for just the fields it needs.
+  Contributed by nagisml.
+- **Macros: read-only SQL (#1007)** — *Beta builds only.* `opensak.sql()`
+  and `opensak.sql_each()` run `SELECT` queries against the active
+  database, with `?` or `:name` parameters; `opensak.tables()` and
+  `opensak.columns()` show what's in it. Read-only is enforced by the
+  database connection itself, not by inspecting the SQL: writes,
+  `ATTACH` and most `PRAGMA`s are refused, and a query is stopped after
+  60 seconds. Contributed by nagisml.
+- **Macros: export GPX, LOC and GGZ files (#1005)** — *Beta builds only.*
+  `opensak.export_file(setting [, folder])` exports the caches of the
+  active filter with one of your saved export settings from **File →
+  Export**, including its file name variables (`{filter}`, `{database}`,
+  `{count}`, `{center}`). It's the first macro function that writes a
+  file, and it always goes through the folder permissions. A new example
+  macro writes one GPX file per saved filter. Contributed by nagisml.
+- **Macros: coordinate, regex, text and date helpers (#999)** — *Beta
+  builds only.* `opensak.coords.*` parses, formats and converts
+  coordinates, and calculates distance, bearing, projections, midpoints
+  and whether a point is inside a polygon. `opensak.re.*` gives real
+  regular expressions (find, match, findall, replace, split) with a time
+  limit against runaway patterns. `opensak.text.*` has puzzle helpers such
+  as ROT13, digit sum and word value, plus HTML to text. `opensak.date.*`
+  parses and formats dates, and `opensak.sleep()` pauses a macro. The
+  macro API version is now 2. Contributed by nagisml.
+- **Macros: restore a changed example (#1005)** — *Beta builds only.*
+  **Macros → Open example** now notices when your copy differs from the
+  one shipped with OpenSAK and offers to restore the original. Your copy
+  is kept next to it as a `.bak` file, and data files used by the
+  examples are left alone. Contributed by nagisml.
+- **Delete cache from the right-click menu (#693)** — The cache list's
+  right-click menu has **Delete cache…**. It deletes the cache you
+  right-clicked, which isn't necessarily the selected one, and asks first,
+  like **Waypoint → Delete cache…** and the Delete key.
+- **Compact "L4" column (#1000)** — When the **Last four logs** column is
+  narrow, the four log squares are drawn as a GSAK-style 2×2 stack (1st
+  log top left, 2nd top right, 3rd bottom left, 4th bottom right) instead
+  of thin stripes, and the heading shows **L4** instead of a cut-off
+  title. Your column views keep the width you choose. Suggested by
+  ChemeinerWill.
+- **Hemisphere letter after the value (#767)** — Coordinates can now be
+  written with N/S/E/W after the value as well as before it, in decimal
+  degrees, DMM and DMS — for example `32.371267S 115.827467E`,
+  `32° 22.276 S 115° 49.648 E` or `S 35.123° 86.543° W`. Each coordinate
+  must have its letter exactly once, and never together with a minus sign,
+  so ambiguous input is rejected instead of guessed. A comma between the
+  two coordinates is now accepted in these formats too. Suggested by
+  pjacklam.
+
+### Changed
+
+- **Stricter, more forgiving coordinate input (#765)** — Decimal degrees
+  take one comma or a space between latitude and longitude, not any run of
+  commas, and DMS takes one seconds mark, right after the number. Minutes
+  can be marked ' ′ or ’ and seconds " ″ ” or '', so coordinates copied
+  from Word work. Suggested by pjacklam.
+- **Short "Last GPX" heading (#1004)** — The **Last GPX update** column
+  shows **Last GPX** when it's too narrow for the full title, like GSAK.
+  The full name stays in the tooltip, in **Choose Columns** and in the
+  filter dialog. Suggested by ChemeinerWill.
+- **File → Export shares its code with macros (#1005)** — The GPX, LOC and
+  GGZ export behind **File → Export** has moved into a module that the
+  export dialog and `opensak.export_file()` both use. Nothing should look
+  different — please report it if anything does.
+
+### Fixed
+
+- **Open in maps used the original coordinates (#951)** — **Open in
+  Google Maps / OpenStreetMap** in the cache list's right-click menu now
+  opens the corrected coordinates when a cache has them, like the
+  coordinate columns, the map and GPS export. Caches with corrected
+  coordinates get an extra **Open original coordinates in …** entry. The
+  map links in the cache details now open the same addresses as the menu
+  (OpenStreetMap at zoom 16).
+- **Copy coordinates and the converter used the original coordinates
+  (#1003)** — **Copy coordinates** and **Coordinate converter…** in the
+  right-click menu now use the corrected coordinates too, and **Copy
+  original coordinates** is there when a cache has corrected ones.
+- **Choose Columns always showed "(None)" (#996)** — **View → Choose
+  Columns** now shows the saved column view the database is using, the
+  same as the toolbar dropdown — including the default view. Reported by
+  ChemeinerWill.
+- **Saving a column view overwrote an existing one without asking
+  (#995)** — Saving under a name that's already taken now asks first.
+  That includes names that end up as the same file, such as "My/View" and
+  "My_View". Reported by ChemeinerWill.
+- **Compressed backups left an empty folder in the backup folder
+  (#1002)** — A compressed backup now prepares its files in OpenSAK's own
+  folder and only writes the finished zip to your backup folder. With a
+  backup folder in OneDrive or another synced folder, the sync client no
+  longer starts uploading copies of your databases that are deleted
+  seconds later, and no empty `.partial` folder is left behind. Reported
+  by GeePa67.
+
+### Security
+
+- **Warning before opening an OpenSAK folder to macros (#993)** —
+  *Beta builds only.* Ticking **Write** in **Settings → Folder
+  permissions** for a folder that contains OpenSAK's data, its databases
+  or its settings now asks first. Macros still can't change those files,
+  but the rest of the folder would be open to them.
+
+### For developers
+
+- **New dependency: `regex` (#999)** — The macro regex helpers use the
+  `regex` package (added to `pyproject.toml`). After pulling, run
+  `pip install -e ".[dev]"` in your virtual environment, or the
+  `opensak.re` tests fail with *No module named 'regex'*.
+
+---
+
 ## [1.21.0-beta.5] — 2026-10-06
 
 > Headline: **Backup Support is complete** (Roadmap #1, #942). Choose your
