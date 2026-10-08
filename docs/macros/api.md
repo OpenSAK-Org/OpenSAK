@@ -1336,6 +1336,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `log_count` | `integer` | Number of logs stored. |
 | `trackable_count` | `integer` | Number of trackables in the cache. |
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
+| `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh. |
 
 ## Example macros
 

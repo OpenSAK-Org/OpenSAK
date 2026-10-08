@@ -30,6 +30,10 @@ def _date(value: Optional[datetime]) -> Optional[str]:
     return value.strftime("%Y-%m-%d") if value else None
 
 
+def _datetime(value: Optional[datetime]) -> Optional[str]:
+    return value.strftime("%Y-%m-%dT%H:%M:%S") if value else None
+
+
 def _bool(value: Any) -> bool:
     return bool(value)
 
@@ -128,6 +132,10 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
                (Cache.trackable_count,)),
     CacheField("last_log_date", "string?", 'Date of the latest log, "YYYY-MM-DD".',
                (Cache.last_log_date,), _date),
+    CacheField("last_gpx_update", "string?",
+               'When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; '
+               "finds caches the latest Pocket Query did not refresh.",
+               (Cache.last_gpx_update,), _datetime),
 )
 
 _BY_NAME = {f.name: f for f in CACHE_FIELDS}

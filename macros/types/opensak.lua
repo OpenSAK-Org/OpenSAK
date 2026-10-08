@@ -72,6 +72,7 @@
 ---@field log_count integer Number of logs stored.
 ---@field trackable_count integer Number of trackables in the cache.
 ---@field last_log_date string? Date of the latest log, "YYYY-MM-DD".
+---@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh.
 
 ---The OpenSAK API, available as a global in every macro.
 opensak = {}

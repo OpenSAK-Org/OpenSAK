@@ -694,6 +694,7 @@ def full_cache(seed):
             short_description="short", long_description="<p>long</p>",
             long_desc_html=True, waypoint_count=2, log_count=5,
             last_log_date=datetime(2025, 3, 4, 10, 0),
+            last_gpx_update=datetime(2026, 9, 30, 18, 5, 9),
         )
         s.add(cache)
         s.flush()
@@ -710,6 +711,7 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
         print(c.user_flag, c.user_sort, #c.user_data, c.user_data[1] == "", c.user_data[2])
         print(c.color, c.note, c.hint, c.url, c.corrected.lat, c.corrected.lon)
         print(c.distance, c.bearing, c.waypoint_count, c.log_count, c.last_log_date)
+        print(c.last_gpx_update, opensak.date.parse(c.last_gpx_update) ~= nil)
         c.name = "changed"
         print(opensak.cache("GCACC1").name, opensak.cache("GCNONE"))
     """)
@@ -720,6 +722,7 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
         "true	7	4	true	Solved",
         "#FF5733	my note	under the stone	https://coord.info/GCACC1	47.2	8.3",
         "12.5	90	2	5	2025-03-04",
+        "2026-09-30T18:05:09	true",
         "All fields	nil",
     ]
 
