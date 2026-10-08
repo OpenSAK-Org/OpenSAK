@@ -1051,6 +1051,7 @@ STRINGS: dict[str, str] = {
     "col_last_found_date":   "Ostatnio znaleziona",
     "col_last_gpx_update":   "Ostatnia aktualizacja GPX",
     "col_last_four_logs":    "Ostatnie cztery logi",
+    "col_last_four_logs_short": "L4",
 
     # ── Right-click context menu ──────────────────────────────────────────────
     "ctx_open_geocaching":  "🌐  Otwórz na geocaching.com",

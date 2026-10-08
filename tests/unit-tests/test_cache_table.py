@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import Qt, QModelIndex
+from PySide6.QtCore import Qt, QModelIndex, QRect
 from PySide6.QtGui import QPixmap, QPainter, QFont
 
 from opensak.gui import cache_table as ct
@@ -1952,3 +1952,87 @@ class TestView:
                 )
                 assert header_icon.availableSizes()[0].width() == cell_icon.availableSizes()[0].width()
 
+
+
+# ── Issue #1000: compact "L4" display of the last four logs ──────────────────
+
+class TestLastFourLogsCompact:
+    def test_wide_column_draws_a_row_of_four(self, qapp):
+        rects = ct.LastFourLogsDelegate().square_rects(QRect(0, 0, 70, 22))
+        assert len(rects) == 4
+        assert len({r.y() for r in rects}) == 1
+        assert [r.x() for r in rects] == sorted(r.x() for r in rects)
+
+    def test_narrow_column_draws_a_2x2_stack_in_gsak_order(self, qapp):
+        cell = QRect(10, 100, 30, 22)
+        tl, tr_, bl, br = ct.LastFourLogsDelegate().square_rects(cell)
+        # 1st top left, 2nd top right, 3rd bottom left, 4th bottom right.
+        assert tl.y() == tr_.y() < bl.y() == br.y()
+        assert tl.x() == bl.x() < tr_.x() == br.x()
+        for r in (tl, tr_, bl, br):
+            assert r.width() == r.height() >= 3
+            assert cell.contains(r)
+
+    def test_grid_threshold(self, qapp):
+        d = ct.LastFourLogsDelegate()
+        below = d.square_rects(QRect(0, 0, d._GRID_BELOW - 1, 22))
+        at = d.square_rects(QRect(0, 0, d._GRID_BELOW, 22))
+        assert below[0].y() != below[2].y()     # stacked
+        assert len({r.y() for r in at}) == 1    # in a row
+
+    def _with_last_four_logs(self, monkeypatch, qtbot):
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "name", "last_four_logs"])
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {})
+        monkeypatch.setattr(ct, "set_column_widths", lambda w: None)
+        v = CacheTableView()
+        qtbot.addWidget(v)
+        return v
+
+    def _header(self, view, role=Qt.ItemDataRole.DisplayRole):
+        return view._model.headerData(2, Qt.Orientation.Horizontal, role)
+
+    def test_header_is_short_when_the_title_does_not_fit(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        view.setColumnWidth(2, 40)
+        assert self._header(view) == "L4"
+        view.setColumnWidth(2, 400)
+        assert self._header(view) == "Last four logs"
+
+    def test_header_at_the_default_width(self, monkeypatch, qtbot, fake_settings):
+        # The default width (70 px) is too narrow for "Last four logs", and
+        # no resize signal comes when a width doesn't change.
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        assert view.columnWidth(2) == ct.get_column_defs()["last_four_logs"][1]
+        assert self._header(view) == "L4"
+
+    def test_header_tooltip_is_always_the_full_title(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        view.setColumnWidth(2, 40)
+        assert self._header(view, Qt.ItemDataRole.ToolTipRole) == "Last four logs"
+
+    def test_header_follows_widths_applied_from_a_view(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        # Widths applied while _applying_widths is set (column views,
+        # start-up) must switch the header too.
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {"last_four_logs": 30})
+        view._apply_column_widths()
+        assert self._header(view) == "L4"
+
+    def test_set_short_header_signals_only_on_change(self, monkeypatch, qtbot):
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "last_four_logs"])
+        model = CacheTableModel()
+        with qtbot.waitSignal(model.headerDataChanged, timeout=500):
+            model.set_short_header("last_four_logs", True)
+        with qtbot.assertNotEmitted(model.headerDataChanged):
+            model.set_short_header("last_four_logs", True)

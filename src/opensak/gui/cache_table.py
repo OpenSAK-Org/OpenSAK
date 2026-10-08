@@ -142,6 +142,16 @@ def get_column_defs() -> dict:
     }
 
 
+# Issue #1000: columns with a short header, shown instead of the full title
+# when the column is too narrow for it (GSAK calls "Last four logs" "L4").
+SHORT_HEADER_KEYS: dict[str, str] = {
+    "last_four_logs": "col_last_four_logs_short",
+}
+
+# Room for the sort indicator next to a header's text, in pixels.
+_SORT_INDICATOR_ROOM = 16
+
+
 def _get_active_columns() -> list[str]:
     from opensak.gui.dialogs.column_dialog import get_visible_columns
     # Issue #488: persisted per-database column visibility (opensak.json,
@@ -512,10 +522,17 @@ class LastFourLogsDelegate(QStyledItemDelegate):
 
     Same segmented-square structure as SizeBarDelegate above, just 4
     fixed-color squares instead of a size-proportional fill.
+
+    Issue #1000: in a column narrower than _GRID_BELOW the squares are drawn
+    as GSAK's "L4" 2×2 stack instead — 1st log top left, 2nd top right, 3rd
+    bottom left, 4th bottom right — so the column can be made narrow without
+    the squares turning into thin stripes.
     """
 
     _SQUARE_COUNT = 4
     _SQUARE_GAP = 2
+    _GRID_BELOW = 54   # column width (px) below which the 2×2 stack is used
+    _GRID_GAP = 1
     _COLOR_FOUND = QColor("#7dcea0")   # green
     _COLOR_DNF   = QColor("#f1948a")   # red
     _COLOR_OTHER = QColor("#f9e79f")   # yellow
@@ -542,25 +559,39 @@ class LastFourLogsDelegate(QStyledItemDelegate):
         else:
             super().paint(painter, option, index)
 
-        rect = option.rect
-        margin_x, margin_y = 4, 4
-        total_w = rect.width() - 2 * margin_x
-        total_h = rect.height() - 2 * margin_y
-        x0 = rect.x() + margin_x
-        y0 = rect.y() + margin_y
-
-        sq_w = max(4, (total_w - self._SQUARE_GAP * (self._SQUARE_COUNT - 1)) // self._SQUARE_COUNT)
-        sq_h = max(4, total_h)
-
-        for i in range(self._SQUARE_COUNT):
-            sx = x0 + i * (sq_w + self._SQUARE_GAP)
-            sq_rect = QRect(sx, y0, sq_w, sq_h)
+        for i, sq_rect in enumerate(self.square_rects(option.rect)):
             color = self._color_for(logs[i][1]) if i < len(logs) else self._COLOR_EMPTY
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
             painter.drawRoundedRect(sq_rect, 1, 1)
 
         painter.restore()
+
+    def square_rects(self, rect: QRect) -> list[QRect]:
+        """The four squares for a cell, in log order (most recent first): a
+        row of four, or the 2×2 stack in a narrow column (#1000)."""
+        margin_x, margin_y = 4, 4
+        total_w = rect.width() - 2 * margin_x
+        total_h = rect.height() - 2 * margin_y
+
+        if rect.width() < self._GRID_BELOW:
+            gap = self._GRID_GAP
+            sq = max(3, min((total_h - gap) // 2, (total_w - gap) // 2))
+            x0 = rect.x() + (rect.width() - (2 * sq + gap)) // 2
+            y0 = rect.y() + (rect.height() - (2 * sq + gap)) // 2
+            return [
+                QRect(x0 + (i % 2) * (sq + gap), y0 + (i // 2) * (sq + gap), sq, sq)
+                for i in range(self._SQUARE_COUNT)
+            ]
+
+        x0 = rect.x() + margin_x
+        y0 = rect.y() + margin_y
+        sq_w = max(4, (total_w - self._SQUARE_GAP * (self._SQUARE_COUNT - 1)) // self._SQUARE_COUNT)
+        sq_h = max(4, total_h)
+        return [
+            QRect(x0 + i * (sq_w + self._SQUARE_GAP), y0, sq_w, sq_h)
+            for i in range(self._SQUARE_COUNT)
+        ]
 
     def sizeHint(self, option, index):
         sh = super().sizeHint(option, index)
@@ -684,6 +715,9 @@ class CacheTableModel(QAbstractTableModel):
         self._distances: dict[int, float] = {}
         self._bearings: dict[int, float] = {}
         self._columns: list[str] = _get_active_columns()
+        # Issue #1000: columns currently showing their short header ("L4")
+        # because the full title doesn't fit — set by CacheTableView.
+        self._short_headers: set[str] = set()
 
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
@@ -770,6 +804,18 @@ class CacheTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._columns)
 
+    def set_short_header(self, col_id: str, short: bool) -> None:
+        """Show *col_id*'s short header (True) or its full title (#1000)."""
+        if (col_id in self._short_headers) == short:
+            return
+        if short:
+            self._short_headers.add(col_id)
+        else:
+            self._short_headers.discard(col_id)
+        if col_id in self._columns:
+            section = self._columns.index(col_id)
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, section, section)
+
     def headerData(self, section: int, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
@@ -789,9 +835,14 @@ class CacheTableModel(QAbstractTableModel):
                     # stadig som tooltip (ToolTipRole nedenfor) og i Column
                     # Chooser (via get_column_defs(), uændret).
                     return ""
+                if col_id in self._short_headers and col_id in SHORT_HEADER_KEYS:
+                    return tr(SHORT_HEADER_KEYS[col_id])
                 return get_column_defs().get(col_id, (col_id, 80))[0]
             if role == Qt.ItemDataRole.ToolTipRole:
                 col_id = self._columns[section]
+                if col_id in SHORT_HEADER_KEYS:
+                    # Issue #1000: the full title, also when "L4" is shown.
+                    return get_column_defs().get(col_id, (col_id, 80))[0]
                 if col_id == "corrected":
                     return tr("col_corrected_header_tooltip")
                 if col_id == "user_flag":
@@ -1578,6 +1629,9 @@ class CacheTableView(QTableView):
                 default_width = get_column_defs().get(col_id, (col_id, 80))[1]
                 width = saved.get(col_id, default_width)
                 self.setColumnWidth(i, width)
+                # setColumnWidth() emits no sectionResized when the width
+                # doesn't change, so set the short header here too (#1000).
+                self._update_short_header(col_id, width)
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
                 if col_id == "container":
                     if get_container_display() == "text":
@@ -1622,15 +1676,30 @@ class CacheTableView(QTableView):
             self._applying_widths = False
 
     def _on_column_resized(self, logical_index: int, _old: int, new_size: int) -> None:
-        if self._applying_widths:
-            return
         columns = self._model._columns
         if logical_index >= len(columns):
             return
         col_id = columns[logical_index]
+        # Before the _applying_widths check, so the header also follows the
+        # widths applied from a column view or at start-up (#1000).
+        self._update_short_header(col_id, new_size)
+        if self._applying_widths:
+            return
         widths = get_column_widths()
         widths[col_id] = new_size
         set_column_widths(widths)
+
+    def _update_short_header(self, col_id: str, width: int) -> None:
+        """Show the short header ("L4") when the full title wouldn't fit in a
+        column *width* pixels wide, instead of a cut-off title (#1000)."""
+        if col_id not in SHORT_HEADER_KEYS:
+            return
+        header = self.horizontalHeader()
+        title = get_column_defs().get(col_id, (col_id, 80))[0]
+        margin = header.style().pixelMetric(QStyle.PixelMetric.PM_HeaderMargin, None, header)
+        needed = (header.fontMetrics().horizontalAdvance(title)
+                  + 2 * margin + _SORT_INDICATOR_ROOM)
+        self._model.set_short_header(col_id, width < needed)
 
     def _on_column_moved(self, _logical_index: int, old_visual: int, new_visual: int) -> None:
         """Gem ny kolonne-rækkefølge når brugeren trækker en kolonne (issue #199)."""
