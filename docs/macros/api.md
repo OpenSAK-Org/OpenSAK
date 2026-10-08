@@ -42,6 +42,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
 | [`opensak.export_gpx`](#opensakexportgpx) | 2 |
+| [`opensak.export_poi`](#opensakexportpoi) | 3 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
@@ -738,6 +739,30 @@ local path, n = opensak.export_gpx{
   pois = { child_waypoints = false },
 }
 if path then print(n .. " caches → " .. path) end
+```
+
+### opensak.export_poi
+
+```lua
+opensak.export_poi(setting [, folder])
+```
+
+Export the caches of the active filter and/or their child waypoints as Garmin POI files (.gpi) with a saved POI export setting (File → Export Garmin POI: folder, file name, if the file exists, which points, name/description/extra templates, category, proximity alert, icon, max. points). The file name variables are filled in as in the dialog. With "one file per waypoint type" a file is written for the caches and one for every waypoint type. The files go into *folder* if given, else into the setting's folder, which needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. An existing file is skipped when the setting says skip (or ask, and the user answers No).
+
+Parameters:
+
+- `setting` (`string`) — Name of the saved POI export setting.
+- `folder` (`string`, optional) — Folder to write to instead of the setting's folder, e.g. the device's Garmin/POI folder.
+
+Returns `string[]?, integer?` — The files written and the number of POIs in them; nil if nothing was written.
+
+Since API version 3.
+
+Example:
+
+```lua
+local files, n = opensak.export_poi("Garmin POI")
+if files then print(n .. " POIs → " .. table.concat(files, ", ")) end
 ```
 
 ### opensak.confirm

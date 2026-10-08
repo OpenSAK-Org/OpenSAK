@@ -67,6 +67,131 @@ class _ElidedLabel(QLabel):
         ))
 
 
+# ── Saved settings ────────────────────────────────────────────────────────────
+
+class SavedSettingsDialog(QDialog):
+    """Base of the export dialogs with an "Export settings" box: a combo
+    with "… last used" and the saved settings, plus Save and Delete.
+
+    Subclasses set _profile_cls (a FileExportProfile class) and implement
+    _collect_settings() and _apply_settings().
+    """
+
+    _profile_cls: type[FileExportProfile] = FileExportProfile
+
+    def _collect_settings(self):
+        raise NotImplementedError
+
+    def _apply_settings(self, settings) -> None:
+        raise NotImplementedError
+
+    def _build_settings_group(self) -> QGroupBox:
+        settings_group = QGroupBox(tr("file_export_settings_label"))
+        settings_row = QHBoxLayout(settings_group)
+        self._settings_combo = QComboBox()
+        self._settings_combo.setMinimumWidth(200)
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._settings_combo.blockSignals(False)
+        self._settings_combo.currentIndexChanged.connect(self._on_profile_selected)
+        settings_row.addWidget(self._settings_combo, 1)
+
+        save_btn = QPushButton(tr("save"))
+        save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        save_btn.setAutoDefault(False)
+        save_btn.clicked.connect(self._save_profile)
+        settings_row.addWidget(save_btn)
+
+        self._del_btn = QPushButton(tr("delete"))
+        self._del_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._del_btn.setAutoDefault(False)
+        self._del_btn.setEnabled(False)
+        self._del_btn.clicked.connect(self._delete_profile)
+        settings_row.addWidget(self._del_btn)
+        return settings_group
+
+    def _load_profiles_into_combo(self) -> None:
+        self._settings_combo.clear()
+        self._settings_combo.addItem(tr("file_export_settings_last_used"), None)
+        for path in self._profile_cls.list_profiles():
+            try:
+                self._settings_combo.addItem(self._profile_cls.load(path).name, path)
+            except Exception:
+                pass
+
+    def _select_profile(self, name: str) -> None:
+        for i in range(self._settings_combo.count()):
+            if (self._settings_combo.itemData(i) is not None
+                    and self._settings_combo.itemText(i) == name):
+                self._settings_combo.setCurrentIndex(i)
+                return
+
+    def _on_profile_selected(self, index: int) -> None:
+        path = self._settings_combo.currentData()
+        self._del_btn.setEnabled(path is not None)
+        try:
+            if path is None:
+                self._apply_settings(self._profile_cls.load_last_used())
+            else:
+                self._apply_settings(self._profile_cls.load(path).settings)
+        except Exception as e:
+            QMessageBox.warning(
+                self, tr("error"), tr("file_export_settings_load_error", error=e)
+            )
+
+    def _save_profile(self) -> None:
+        current = (
+            self._settings_combo.currentText()
+            if self._settings_combo.currentData() is not None
+            else ""
+        )
+        name, ok = QInputDialog.getText(
+            self, tr("file_export_settings_save_title"),
+            tr("file_export_settings_name_label"), text=current,
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if self._profile_cls.profile_path(name).exists():
+            reply = QMessageBox.question(
+                self, tr("file_export_settings_save_title"),
+                tr("file_export_settings_overwrite_msg", name=name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        self._profile_cls(name, self._collect_settings()).save()
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._select_profile(name)
+        self._settings_combo.blockSignals(False)
+        self._del_btn.setEnabled(self._settings_combo.currentData() is not None)
+
+    def _delete_profile(self) -> None:
+        path = self._settings_combo.currentData()
+        if path is None:
+            return
+        name = self._settings_combo.currentText()
+        reply = QMessageBox.question(
+            self, tr("delete"),
+            tr("file_export_settings_delete_msg", name=name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+        # Keep the options currently shown — only the stored copy is gone.
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._settings_combo.blockSignals(False)
+        self._del_btn.setEnabled(False)
+
+
 # ── Background worker ─────────────────────────────────────────────────────────
 
 class _ExportWorker(QThread):
@@ -101,7 +226,7 @@ class _ExportWorker(QThread):
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
-class FileExportDialog(QDialog):
+class FileExportDialog(SavedSettingsDialog):
     """Dialog for exporting filtered caches to GPX, LOC or GGZ format."""
 
     def __init__(self, caches: list, parent=None, filter_name: str = "",
@@ -199,29 +324,7 @@ class FileExportDialog(QDialog):
         layout.addWidget(opt_group)
 
         # Saved settings
-        settings_group = QGroupBox(tr("file_export_settings_label"))
-        settings_row = QHBoxLayout(settings_group)
-        self._settings_combo = QComboBox()
-        self._settings_combo.setMinimumWidth(200)
-        self._settings_combo.blockSignals(True)
-        self._load_profiles_into_combo()
-        self._settings_combo.blockSignals(False)
-        self._settings_combo.currentIndexChanged.connect(self._on_profile_selected)
-        settings_row.addWidget(self._settings_combo, 1)
-
-        save_btn = QPushButton(tr("save"))
-        save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        save_btn.setAutoDefault(False)
-        save_btn.clicked.connect(self._save_profile)
-        settings_row.addWidget(save_btn)
-
-        self._del_btn = QPushButton(tr("delete"))
-        self._del_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self._del_btn.setAutoDefault(False)
-        self._del_btn.setEnabled(False)
-        self._del_btn.clicked.connect(self._delete_profile)
-        settings_row.addWidget(self._del_btn)
-        layout.addWidget(settings_group)
+        layout.addWidget(self._build_settings_group())
 
         # Progress / log area
         self._log = QTextEdit()
@@ -331,87 +434,6 @@ class FileExportDialog(QDialog):
             return False
         self._edit_folder.setText(str(Path(folder)))
         return True
-
-    def _load_profiles_into_combo(self) -> None:
-        self._settings_combo.clear()
-        self._settings_combo.addItem(tr("file_export_settings_last_used"), None)
-        for path in FileExportProfile.list_profiles():
-            try:
-                self._settings_combo.addItem(FileExportProfile.load(path).name, path)
-            except Exception:
-                pass
-
-    def _select_profile(self, name: str) -> None:
-        for i in range(self._settings_combo.count()):
-            if (self._settings_combo.itemData(i) is not None
-                    and self._settings_combo.itemText(i) == name):
-                self._settings_combo.setCurrentIndex(i)
-                return
-
-    def _on_profile_selected(self, index: int) -> None:
-        path = self._settings_combo.currentData()
-        self._del_btn.setEnabled(path is not None)
-        try:
-            if path is None:
-                self._apply_settings(FileExportProfile.load_last_used())
-            else:
-                self._apply_settings(FileExportProfile.load(path).settings)
-        except Exception as e:
-            QMessageBox.warning(
-                self, tr("error"), tr("file_export_settings_load_error", error=e)
-            )
-
-    def _save_profile(self) -> None:
-        current = (
-            self._settings_combo.currentText()
-            if self._settings_combo.currentData() is not None
-            else ""
-        )
-        name, ok = QInputDialog.getText(
-            self, tr("file_export_settings_save_title"),
-            tr("file_export_settings_name_label"), text=current,
-        )
-        if not ok or not name.strip():
-            return
-        name = name.strip()
-        if FileExportProfile.profile_path(name).exists():
-            reply = QMessageBox.question(
-                self, tr("file_export_settings_save_title"),
-                tr("file_export_settings_overwrite_msg", name=name),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-        FileExportProfile(name, self._collect_settings()).save()
-        self._settings_combo.blockSignals(True)
-        self._load_profiles_into_combo()
-        self._select_profile(name)
-        self._settings_combo.blockSignals(False)
-        self._del_btn.setEnabled(self._settings_combo.currentData() is not None)
-
-    def _delete_profile(self) -> None:
-        path = self._settings_combo.currentData()
-        if path is None:
-            return
-        name = self._settings_combo.currentText()
-        reply = QMessageBox.question(
-            self, tr("delete"),
-            tr("file_export_settings_delete_msg", name=name),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            Path(path).unlink()
-        except OSError:
-            pass
-        # Keep the options currently shown — only the stored copy is gone.
-        self._settings_combo.blockSignals(True)
-        self._load_profiles_into_combo()
-        self._settings_combo.blockSignals(False)
-        self._del_btn.setEnabled(False)
 
     # ── Logic ─────────────────────────────────────────────────────────────────
 
