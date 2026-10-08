@@ -188,7 +188,7 @@ end
 ### opensak.cache
 
 ```lua
-opensak.cache(code)
+opensak.cache(code [, options])
 ```
 
 One cache as a table (see Cache fields). It is a snapshot: changing it changes nothing in the database.
@@ -196,6 +196,7 @@ One cache as a table (see Cache fields). It is a snapshot: changing it changes n
 Parameters:
 
 - `code` (`string`) — GC code, e.g. "GC12345".
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `opensak.Cache?` — The cache, or nil if it is not in the database.
 
@@ -206,6 +207,7 @@ Example:
 ```lua
 local c = opensak.cache("GC12345")
 if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
+local found = opensak.cache("GC12345", { database = "Found" })
 ```
 
 ### opensak.caches
@@ -214,11 +216,11 @@ if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
 opensak.caches([spec])
 ```
 
-Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 
 Parameters:
 
-- `spec` (`opensak.CachesSpec`, optional) — Filter keys and/or `fields`; nothing = the active filter.
+- `spec` (`opensak.CachesSpec`, optional) — Filter keys, `database` and/or `fields`; nothing = the active filter.
 
 Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
 
@@ -231,6 +233,9 @@ for c in opensak.caches() do print(c.code, c.name) end
 for c in opensak.caches{ found = true, country = "Switzerland",
                          fields = {"difficulty", "terrain"} } do
     print(c.code, c.difficulty, c.terrain)
+end
+for c in opensak.caches{ database = "Found", fields = {"corrected"} } do
+    print(c.code, c.corrected and c.corrected.lat)
 end
 ```
 
@@ -292,7 +297,7 @@ print(table.concat(opensak.codes(), ", "))
 ### opensak.description
 
 ```lua
-opensak.description(code)
+opensak.description(code [, options])
 ```
 
 The listing description of a cache. Not part of the cache table because it can be large.
@@ -300,6 +305,7 @@ The listing description of a cache. Not part of the cache table because it can b
 Parameters:
 
 - `code` (`string`) — GC code, e.g. "GC12345".
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `{short: string?, long: string?, html: boolean}?` — Short and long description and whether they are HTML; nil if the cache is not in the database.
 
@@ -315,15 +321,16 @@ if d and d.long and d.long:find("bonus") then print("bonus cache") end
 ### opensak.sql
 
 ```lua
-opensak.sql(query [, params])
+opensak.sql(query [, params] [, options])
 ```
 
-Run a read-only SQL query (SQLite) against the active database and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 
 Parameters:
 
 - `query` (`string`) — One SQL statement.
-- `params` (`table`, optional) — Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }).
+- `params` (`table`, optional) — Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }); `nil` or `{}` for none.
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `table<string, any>[]` — One table per row, keyed by column name.
 
@@ -340,7 +347,7 @@ for _, r in ipairs(rows) do print(r.country, r.n) end
 ### opensak.sql_each
 
 ```lua
-opensak.sql_each(query [, params])
+opensak.sql_each(query [, params] [, options])
 ```
 
 Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
@@ -349,6 +356,7 @@ Parameters:
 
 - `query` (`string`) — One SQL statement.
 - `params` (`table`, optional) — As for opensak.sql().
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `fun(): table<string, any>?` — Iterator for a generic `for`.
 
@@ -365,10 +373,14 @@ end
 ### opensak.tables
 
 ```lua
-opensak.tables()
+opensak.tables([options])
 ```
 
-The tables and views of the active database, for use with opensak.sql().
+The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql().
+
+Parameters:
+
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `string[]` — Table and view names, sorted.
 
@@ -383,14 +395,15 @@ print(table.concat(opensak.tables(), ", "))
 ### opensak.columns
 
 ```lua
-opensak.columns(table)
+opensak.columns(table [, options])
 ```
 
-The columns of a table or view of the active database.
+The columns of a table or view of the active database (or the one named by the `database` option).
 
 Parameters:
 
 - `table` (`string`) — Table or view name.
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `{name: string, type: string}[]` — Column names and SQL types, in table order.
 
@@ -1286,7 +1299,11 @@ Keys understood by `opensak.filter{}`, all combined with AND.
 | `where` | `"SQL WHERE clause"` | Raw clause against the caches table. |
 | `label` | `"text"` | Shown in the toolbar (optional, default "Macro"). |
 
-`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included).
+`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included), and `database`.
+
+## Reading another database
+
+`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, `opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and `opensak.columns()` take a `database` option with the name of a database from `opensak.databases()`. It reads that database without switching to it, so the active filter stays. The database is opened read-only. A database last opened by an older OpenSAK version must be opened once first, so its schema is updated. Naming the active database is the same as leaving `database` out.
 
 ## Cache fields
 

@@ -30,10 +30,16 @@ from __future__ import annotations
 import csv
 import io
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Iterator, Optional, Protocol
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.filters.engine import (
     AvailableFilter,
@@ -56,7 +62,7 @@ from opensak.filters.engine import (
 )
 from opensak import __version__, geodesy
 from opensak.coords import parse_coords
-from opensak.db.database import get_engine
+from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
 from opensak.export.file_export import select_for_export, write_export_file
@@ -93,7 +99,13 @@ from opensak.macro.permissions import (
     temp_dir,
     with_grant,
 )
-from opensak.macro.sql import MAX_ROWS, QUERY_TIMEOUT_S, ReadOnlyDatabase, SqlError
+from opensak.macro.sql import (
+    MAX_ROWS,
+    QUERY_TIMEOUT_S,
+    ReadOnlyDatabase,
+    SqlError,
+    connect_read_only,
+)
 from opensak.utils.constants import CACHE_TYPES
 
 # A runaway `while true do end` would freeze the GUI thread, so the script is
@@ -612,6 +624,10 @@ class MacroRuntime:
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
         # Opened by the first opensak.sql*() call of a run, closed after it.
         self._sql_db: Optional[ReadOnlyDatabase] = None
+        # Databases other than the active one, read with the `database`
+        # option: opened read-only on first use, closed after the run.
+        self._other_sql: dict[Path, ReadOnlyDatabase] = {}
+        self._other_engines: dict[Path, Engine] = {}
 
     def cancel(self) -> None:
         """Ask the running macro to stop. Safe to call from another thread;
@@ -669,22 +685,28 @@ class MacroRuntime:
             self._sql_db.close()
             self._sql_db = None
 
-    def _sql(self) -> ReadOnlyDatabase:
+    def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
+        if db is not None:
+            if db.path not in self._other_sql:
+                self._other_sql[db.path] = ReadOnlyDatabase(db.path)
+            return self._other_sql[db.path]
         if self._sql_db is None:
             self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
         return self._sql_db
 
-    def _query(self, lua, query=None, params=None):
+    def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
+        db = self._read_options("opensak.sql", options)
         try:
-            rows = self._sql().query(query, params)
+            rows = self._sql(db).query(query, params)
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         return lua.table_from([lua.table_from(r) for r in rows])
 
-    def _query_each(self, lua, query=None, params=None):
+    def _query_each(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql_each", query, params)
-        rows = self._sql().iterate(query, params)
+        db = self._read_options("opensak.sql_each", options)
+        rows = self._sql(db).iterate(query, params)
 
         def step(*_):
             try:
@@ -696,17 +718,19 @@ class MacroRuntime:
         # The query runs on the first step, so errors surface in the loop.
         return self._wrap(step)
 
-    def _tables(self, lua):
+    def _tables(self, lua, options=None):
+        db = self._read_options("opensak.tables", options)
         try:
-            return lua.table_from(self._sql().tables())
+            return lua.table_from(self._sql(db).tables())
         except SqlError as exc:
             raise MacroError(str(exc)) from None
 
-    def _columns(self, lua, table=None):
+    def _columns(self, lua, table=None, options=None):
         if not isinstance(table, str) or not table.strip():
             raise MacroError("opensak.columns expects a table name")
+        db = self._read_options("opensak.columns", options)
         try:
-            columns = self._sql().columns(table)
+            columns = self._sql(db).columns(table)
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         return lua.table_from([lua.table_from(c) for c in columns])
@@ -717,9 +741,10 @@ class MacroRuntime:
     def _active_codes(self) -> list[str]:
         return [c.gc_code for c in self._host.filtered_caches()]
 
-    def _cache(self, lua, code=None):
+    def _cache(self, lua, code=None, options=None):
         gc_code = _gc_code(code, "opensak.cache")
-        with get_session() as session:
+        db = self._read_options("opensak.cache", options)
+        with self._session_factory(db, "opensak.cache")() as session:
             records = load_records(session, [gc_code])
         return lua.table_from(records[0], recursive=True) if records else None
 
@@ -733,13 +758,16 @@ class MacroRuntime:
         fields = CACHE_FIELDS
         if "fields" in spec:
             fields = _cache_fields(spec.pop("fields"))
-        if spec:
-            filterset, _label = build_filterset(spec)
-            with get_session() as session:
+        db = self._other_database("opensak.caches", spec.pop("database", None))
+        session_factory = self._session_factory(db, "opensak.caches")
+        if spec or db is not None:
+            # Another database has no active filter: no keys = all its caches.
+            filterset = build_filterset(spec)[0] if spec else None
+            with session_factory() as session:
                 codes = [c.gc_code for c in apply_filters_auto(session, filterset)]
         else:
             codes = self._active_codes()
-        records = iter_records(get_session, codes, fields)
+        records = iter_records(session_factory, codes, fields)
 
         def step(*_):
             record = next(records, None)
@@ -751,11 +779,91 @@ class MacroRuntime:
         code = self._host.current_code()
         return self._cache(lua, code) if code else None
 
-    def _description(self, lua, code=None):
+    def _description(self, lua, code=None, options=None):
         gc_code = _gc_code(code, "opensak.description")
-        with get_session() as session:
+        db = self._read_options("opensak.description", options)
+        with self._session_factory(db, "opensak.description")() as session:
             description = load_description(session, gc_code)
         return lua.table_from(description) if description else None
+
+    # Reading another database (the `database` option of the read
+    # functions): no switch, so the active filter stays. The file is opened
+    # read-only, for raw SQL (_sql) and for the cache snapshots alike.
+
+    def _read_options(self, func: str, options: Any) -> Optional[DatabaseInfo]:
+        """The options table of a read function → the database to read,
+        None for the active one."""
+        if options is None:
+            return None
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ database = "Found" }}')
+        opts = dict(options.items())
+        unknown = set(opts) - {"database"}
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(unknown)}; valid: database")
+        return self._other_database(func, opts.get("database"))
+
+    def _other_database(self, func: str, name: Any) -> Optional[DatabaseInfo]:
+        """The database named *name*; None if *name* is nil or names the
+        active database."""
+        if name is None:
+            return None
+        db = self._require_database(name, func)
+        if db.path == get_db_manager().active_path:
+            return None
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        return db
+
+    def _session_factory(self, db: Optional[DatabaseInfo], func: str) -> Callable[[], Any]:
+        """get_session for the active database, else read-only sessions on *db*."""
+        if db is None:
+            return get_session
+        engine = self._other_engines.get(db.path)
+        if engine is None:
+            engine = self._open_other_engine(db, func)
+            self._other_engines[db.path] = engine
+        factory = sessionmaker(bind=engine, autoflush=False)
+
+        @contextmanager
+        def session() -> Iterator[Session]:
+            s = factory()
+            try:
+                yield s
+            except SQLAlchemyError as exc:
+                raise MacroError(f"{func}: cannot read database {db.name!r}: {exc}") from None
+            finally:
+                s.close()
+
+        return session
+
+    @staticmethod
+    def _open_other_engine(db: DatabaseInfo, func: str) -> Engine:
+        # No migrations (they would write), so an older schema may lack
+        # columns the cache fields read: refuse it with a clear message.
+        engine = create_engine("sqlite://", creator=lambda: connect_read_only(db.path))
+        try:
+            with engine.connect() as conn:
+                version = conn.exec_driver_sql("PRAGMA user_version").scalar() or 0
+        except SQLAlchemyError as exc:
+            engine.dispose()
+            raise MacroError(f"{func}: cannot open database {db.name!r} read-only: {exc}") from None
+        if version < SCHEMA_VERSION:
+            engine.dispose()
+            raise MacroError(
+                f"{func}: database {db.name!r} was last opened by an older OpenSAK "
+                "version; open it once (Manage Databases or opensak.switch_database) "
+                "so it is updated"
+            )
+        return engine
+
+    def _close_other_databases(self) -> None:
+        for conn in self._other_sql.values():
+            conn.close()
+        self._other_sql = {}
+        for engine in self._other_engines.values():
+            engine.dispose()
+        self._other_engines = {}
 
     # Databases: thin wrappers around DatabaseManager and db/transfer.py.
 
@@ -1127,6 +1235,7 @@ class MacroRuntime:
                 self._boundaries[0].close()
                 self._boundaries = None
             self._close_sql()
+            self._close_other_databases()
             self._host.end_macro()
 
     @staticmethod
@@ -1208,6 +1317,9 @@ class ApiFunction:
 
 
 _CODE = Param("code", "string", 'GC code, e.g. "GC12345".')
+_READ_OPTIONS = Param("options", "opensak.ReadOptions",
+                      "`database`: read another database instead of the active one.",
+                      optional=True)
 _LAT = Param("lat", "number", "Latitude in decimal degrees.")
 _LON = Param("lon", "number", "Longitude in decimal degrees.")
 _COORDS = Param("coords", "string", 'Coordinates, e.g. "N47 22.123 E008 32.456".')
@@ -1298,10 +1410,11 @@ API: tuple[ApiFunction, ...] = (
         description="One cache as a table (see Cache fields). It is a "
                     "snapshot: changing it changes nothing in the database.",
         example='local c = opensak.cache("GC12345")\n'
-                'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end',
+                'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end\n'
+                'local found = opensak.cache("GC12345", { database = "Found" })',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
-        params=(_CODE,),
+        params=(_CODE, _READ_OPTIONS),
         returns=("opensak.Cache?", "The cache, or nil if it is not in the database."),
     ),
     ApiFunction(
@@ -1311,18 +1424,24 @@ API: tuple[ApiFunction, ...] = (
                     "caches of the active filter, in grid order. With filter "
                     "keys (see Filter keys): the caches matching them, sorted "
                     "by name; the view and the active filter stay "
-                    "unchanged. `fields` limits the fields loaded (`code` is "
-                    "always included), which makes loops over many caches "
+                    "unchanged. `database` reads another database, without "
+                    "switching: its caches matching the filter keys, or all "
+                    "of them, sorted by name. `fields` limits the fields "
+                    "loaded (`code` is always included), which makes loops "
+                    "over many caches "
                     "faster. Caches are loaded in chunks, so large databases "
                     "do not hit the memory limit.",
         example="for c in opensak.caches() do print(c.code, c.name) end\n"
                 'for c in opensak.caches{ found = true, country = "Switzerland",\n'
                 '                         fields = {"difficulty", "terrain"} } do\n'
-                "    print(c.code, c.difficulty, c.terrain)\nend",
+                "    print(c.code, c.difficulty, c.terrain)\nend\n"
+                'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
+                "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys and/or `fields`; nothing = the active filter.",
+                      "Filter keys, `database` and/or `fields`; nothing = the "
+                      "active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
     ),
@@ -1361,7 +1480,7 @@ API: tuple[ApiFunction, ...] = (
                 'if d and d.long and d.long:find("bonus") then print("bonus cache") end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._description(lua, *a),
-        params=(_CODE,),
+        params=(_CODE, _READ_OPTIONS),
         returns=("{short: string?, long: string?, html: boolean}?",
                  "Short and long description and whether they are HTML; "
                  "nil if the cache is not in the database."),
@@ -1369,7 +1488,8 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="sql",
         description="Run a read-only SQL query (SQLite) against the active "
-                    "database and return all rows. Only reading statements "
+                    "database (or the one named by the `database` option) "
+                    "and return all rows. Only reading statements "
                     "are allowed; the connection itself is read-only. "
                     "Column names follow the database schema, which may "
                     "change between versions (see opensak.tables() and "
@@ -1386,8 +1506,9 @@ API: tuple[ApiFunction, ...] = (
             Param("query", "string", "One SQL statement."),
             Param("params", "table",
                   "Values for `?` placeholders ({ v1, v2 }) or for `:name` "
-                  "placeholders ({ name = v }).",
+                  "placeholders ({ name = v }); `nil` or `{}` for none.",
                   optional=True),
+            _READ_OPTIONS,
         ),
         returns=("table<string, any>[]", "One table per row, keyed by column name."),
     ),
@@ -1403,25 +1524,29 @@ API: tuple[ApiFunction, ...] = (
         params=(
             Param("query", "string", "One SQL statement."),
             Param("params", "table", "As for opensak.sql().", optional=True),
+            _READ_OPTIONS,
         ),
         returns=("fun(): table<string, any>?", "Iterator for a generic `for`."),
     ),
     ApiFunction(
         name="tables",
-        description="The tables and views of the active database, for use "
-                    "with opensak.sql().",
+        description="The tables and views of the active database (or the "
+                    "one named by the `database` option), for use with "
+                    "opensak.sql().",
         example='print(table.concat(opensak.tables(), ", "))',
         since=2,
-        bind=lambda rt, lua: lambda: rt._tables(lua),
+        bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),
+        params=(_READ_OPTIONS,),
         returns=("string[]", "Table and view names, sorted."),
     ),
     ApiFunction(
         name="columns",
-        description="The columns of a table or view of the active database.",
+        description="The columns of a table or view of the active database "
+                    "(or the one named by the `database` option).",
         example='for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
-        params=(Param("table", "string", "Table or view name."),),
+        params=(Param("table", "string", "Table or view name."), _READ_OPTIONS),
         returns=("{name: string, type: string}[]", "Column names and SQL types, in table order."),
     ),
     ApiFunction(

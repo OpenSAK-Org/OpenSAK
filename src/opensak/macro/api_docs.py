@@ -151,7 +151,18 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     lines += [
         "",
         "`opensak.caches{}` also takes `fields`, an array of the cache fields "
-        "to load (`code` is always included).",
+        "to load (`code` is always included), and `database`.",
+        "",
+        "## Reading another database",
+        "",
+        "`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, "
+        "`opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and "
+        "`opensak.columns()` take a `database` option with the name of a "
+        "database from `opensak.databases()`. It reads that database without "
+        "switching to it, so the active filter stays. The database is opened "
+        "read-only. A database last opened by an older OpenSAK version must be "
+        "opened once first, so its schema is updated. Naming the active "
+        "database is the same as leaving `database` out.",
         "",
         "## Cache fields",
         "",
@@ -236,9 +247,14 @@ def render_lua_stub() -> str:
 
     lines += [
         "",
-        "---Filter keys plus `fields`, understood by `opensak.caches{}`.",
+        "---Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.",
         "---@class opensak.CachesSpec: opensak.FilterSpec",
         "---@field fields? string[] Cache fields to load (`code` is always included).",
+        "---@field database? string Read this database instead of the active one.",
+        "",
+        "---Options of the read functions (`opensak.cache()`, `opensak.sql()`, ...).",
+        "---@class opensak.ReadOptions",
+        "---@field database? string Read this database instead of the active one.",
         "",
         "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
         "---@class opensak.TransferOptions",
