@@ -468,3 +468,140 @@ def test_csv_import_never_clears_on_empty_or_half_filled_rows(tmp_path):
     assert got["GCE3"] == (1.0, 2.0)
     assert got["GCE4"] == (None, None)
     assert got["GCE5"] == (pytest.approx(47.5), pytest.approx(8.5))
+
+
+# ── Raw SQL, read-only ───────────────────────────────────────────────────────
+
+def test_sql_returns_rows_keyed_by_column():
+    _, out = _run("""
+        local rows = opensak.sql(
+            "SELECT gc_code, difficulty FROM caches WHERE gc_code LIKE 'GCMAC%' "
+            .. "AND found = ? ORDER BY gc_code", { false })
+        for _, r in ipairs(rows) do print(r.gc_code, r.difficulty) end
+        local n = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE cache_type = :t "
+            .. "AND gc_code LIKE :p", { t = "Traditional Cache", p = "GCMAC%" })[1].n
+        local r = opensak.sql("SELECT NULL AS gone, 'x' AS kept")[1]
+        print(n, r.gone, r.kept)
+    """)
+    assert out == ["GCMAC1\t1.5", "GCMAC2\t4", "GCMAC3\t1", "3\tnil\tx"]
+
+
+def test_sql_each_streams_rows(monkeypatch):
+    from opensak.macro import sql
+    monkeypatch.setattr(sql, "FETCH_SIZE", 2)
+    _, out = _run("""
+        local codes = {}
+        for r in opensak.sql_each("SELECT gc_code FROM caches WHERE gc_code LIKE ? "
+                                  .. "ORDER BY gc_code", { "GCMAC%" }) do
+            codes[#codes + 1] = r.gc_code
+        end
+        print(table.concat(codes, ","))
+    """)
+    assert out == ["GCMAC1,GCMAC2,GCMAC3,GCMAC4"]
+
+
+def test_sql_sees_writes_made_earlier_in_the_macro():
+    _add_caches(["GCSQL1"])
+    _, out = _run("""
+        opensak.set_corrected("GCSQL1", 46.5, 7.5)
+        print(opensak.sql("SELECT n.corrected_lat AS lat FROM user_notes n "
+            .. "JOIN caches c ON c.id = n.cache_id WHERE c.gc_code = 'GCSQL1'")[1].lat)
+    """, host=DbHost())
+    assert out == ["46.5"]
+
+
+@pytest.mark.parametrize("query", [
+    "DELETE FROM caches",
+    "UPDATE caches SET name = 'x'",
+    "INSERT INTO caches (gc_code) VALUES ('GCX')",
+    "WITH x AS (SELECT 1) DELETE FROM caches",
+    "CREATE TABLE t (x)",
+    "DROP TABLE caches",
+    "PRAGMA query_only = OFF",
+    "PRAGMA journal_mode = DELETE",
+    "ATTACH DATABASE 'other.db' AS other",
+    "BEGIN",
+])
+def test_sql_is_read_only(query):
+    with pytest.raises(MacroError, match="read-only"):
+        _run(f'opensak.sql("{query}")')
+    _, out = _run("print(opensak.sql(\"SELECT COUNT(*) AS n FROM caches WHERE gc_code LIKE 'GCMAC%'\")[1].n)")
+    assert out == ["4"]
+
+
+def test_sql_connection_is_read_only_even_without_authorizer(monkeypatch):
+    """Defence in depth: mode=ro refuses writes at the file level."""
+    import sqlite3
+
+    from opensak.db.database import get_engine
+    from opensak.macro import sql
+    monkeypatch.setattr(sql, "_authorizer", lambda *a: sqlite3.SQLITE_OK)
+    db = sql.ReadOnlyDatabase(get_engine().url.database)
+    try:
+        db.query("PRAGMA query_only = OFF")
+        with pytest.raises(sql.SqlError, match="readonly"):
+            db.query("DELETE FROM caches")
+    finally:
+        db.close()
+
+
+def test_sql_rejects_several_statements():
+    with pytest.raises(MacroError, match="one statement"):
+        _run('opensak.sql("SELECT 1; DELETE FROM caches")')
+
+
+def test_sql_aborts_slow_query():
+    from opensak.db.database import get_engine
+    from opensak.macro import sql
+    db = sql.ReadOnlyDatabase(get_engine().url.database, timeout_s=0.05)
+    try:
+        with pytest.raises(sql.SqlError, match="took longer than 0.05 s"):
+            db.query("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) "
+                     "SELECT COUNT(*) FROM n")
+        assert db.query("SELECT 1 AS one") == [{"one": 1}]
+    finally:
+        db.close()
+
+
+def test_sql_row_limit():
+    from opensak.db.database import get_engine
+    from opensak.macro import sql
+    db = sql.ReadOnlyDatabase(get_engine().url.database)
+    try:
+        assert len(db.query("SELECT gc_code FROM caches LIMIT 2", max_rows=2)) == 2
+        with pytest.raises(sql.SqlError, match="more than 2 rows"):
+            db.query("SELECT gc_code FROM caches LIMIT 3", max_rows=2)
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("call,msg", [
+    ("opensak.sql()", "opensak.sql expects an SQL query"),
+    ('opensak.sql("SELECT ?", 1)', "parameters must be a table"),
+    ('opensak.sql("SELECT ?", { {} })', "SQL parameters must be numbers"),
+    ('opensak.sql("SELECT ?, :a", { 1, a = 2 })', "not both"),
+    ('opensak.sql("SELECT * FROM nope")', "SQL error: no such table"),
+    ('for r in opensak.sql_each("SELECT * FROM nope") do end', "SQL error: no such table"),
+    ('opensak.columns("nope")', "no table named 'nope'"),
+])
+def test_sql_rejects_bad_input(call, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(call)
+
+
+def test_tables_and_columns():
+    _, out = _run("""
+        local t = {}
+        for _, name in ipairs(opensak.tables()) do t[name] = true end
+        print(t.caches, t.logs, t.user_notes)
+        local c = opensak.columns("caches")[2]
+        print(c.name, c.type)
+    """)
+    assert out == ["true\ttrue\ttrue", "gc_code\tVARCHAR(16)"]
+
+
+def test_sql_connection_is_closed_after_run():
+    host = FakeHost()
+    runtime = MacroRuntime(host, output=lambda _: None)
+    runtime.run('opensak.sql("SELECT 1")')
+    assert runtime._sql_db is None
