@@ -240,6 +240,11 @@ def render_lua_stub() -> str:
         "---@class opensak.CachesSpec: opensak.FilterSpec",
         "---@field fields? string[] Cache fields to load (`code` is always included).",
         "",
+        "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
+        "---@class opensak.TransferOptions",
+        "---@field codes? string[] GC codes to transfer (default: the caches of the active filter).",
+        '---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").',
+        "",
         "---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).",
         "---@class opensak.Cache",
     ]

@@ -5,11 +5,8 @@ from pathlib import Path
 
 from opensak.db.database import init_db, get_session, make_session
 from opensak.db.models import Cache, Log, Attribute, Trackable, Waypoint, UserNote
-from opensak.gui.dialogs.move_caches_dialog import (
-    _snapshot_cache,
-    _insert_snapshot,
-    _MoveWorker,
-)
+from opensak.db.transfer import _snapshot_cache, _insert_snapshot
+from opensak.gui.dialogs.move_caches_dialog import _MoveWorker
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -333,7 +330,7 @@ class TestMoveWorker:
             _make_cache_with_children(session, "GCERR")
 
         # Sabotage _insert_snapshot to force an error during step 2
-        import opensak.gui.dialogs.move_caches_dialog as mod
+        import opensak.db.transfer as mod
         original = mod._insert_snapshot
 
         def _boom(session, snap):

@@ -57,6 +57,8 @@ from opensak.filters.engine import (
 from opensak import __version__, geodesy
 from opensak.coords import parse_coords
 from opensak.db.database import get_engine
+from opensak.db.manager import DatabaseInfo, get_db_manager
+from opensak.db.transfer import IF_EXISTS, transfer_caches
 from opensak.export.file_export import select_for_export, write_export_file
 from opensak.export.file_export_settings import (
     FileExportProfile,
@@ -293,6 +295,20 @@ class MacroHost(Protocol):
         """Name of the active centre point ("" = none) — the {center}
         variable."""
 
+    def switch_database(self, name: str) -> None:
+        """Make the database *name* active and clear the active filter.
+
+        Raises if the database cannot be opened; the previous one then
+        stays active."""
+
+    def database_list_changed(self) -> None:
+        """A database was added to the list (e.g. the toolbar dropdown
+        needs reloading)."""
+
+    def caches_removed(self) -> None:
+        """Caches were moved out of the active database. The host should
+        reload the view, but may defer that to end_macro()."""
+
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
 
@@ -394,6 +410,12 @@ def _gc_code(code: Any, func: str) -> str:
     if not isinstance(code, str) or not code.strip():
         raise MacroError(f"{func} expects a GC code as first argument, got {code!r}")
     return code.strip().upper()
+
+
+def _db_name(name: Any, func: str) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise MacroError(f"{func} expects a database name")
+    return name.strip()
 
 
 def _sql_args(func: str, query: Any, params: Any) -> tuple[str, Any]:
@@ -642,6 +664,11 @@ class MacroRuntime:
 
     # Raw SQL: a separate read-only connection (sql.py), opened on first use.
 
+    def _close_sql(self) -> None:
+        if self._sql_db is not None:
+            self._sql_db.close()
+            self._sql_db = None
+
     def _sql(self) -> ReadOnlyDatabase:
         if self._sql_db is None:
             self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
@@ -729,6 +756,83 @@ class MacroRuntime:
         with get_session() as session:
             description = load_description(session, gc_code)
         return lua.table_from(description) if description else None
+
+    # Databases: thin wrappers around DatabaseManager and db/transfer.py.
+
+    @staticmethod
+    def _find_database(name: str) -> Optional[DatabaseInfo]:
+        return next((db for db in get_db_manager().databases if db.name == name), None)
+
+    def _require_database(self, name: Any, func: str) -> DatabaseInfo:
+        db = self._find_database(_db_name(name, func))
+        if db is None:
+            raise MacroError(f"{func}: no database named {name!r} — see opensak.databases()")
+        return db
+
+    def _databases(self, lua):
+        manager = get_db_manager()
+        rows = [
+            lua.table_from({
+                "name": db.name,
+                "path": str(db.path),
+                "active": db.path == manager.active_path,
+                "size_mb": round(db.size_mb, 2),
+            })
+            for db in manager.databases
+        ]
+        return lua.table_from(rows)
+
+    def _database_exists(self, name=None) -> bool:
+        return self._find_database(_db_name(name, "opensak.database_exists")) is not None
+
+    def _create_database(self, name=None) -> str:
+        name = _db_name(name, "opensak.create_database")
+        if self._find_database(name):
+            raise MacroError(f"opensak.create_database: a database named {name!r} exists already")
+        try:
+            db = get_db_manager().new_database(name)
+        except ValueError as exc:
+            raise MacroError(f"opensak.create_database: {exc}") from None
+        self._host.database_list_changed()
+        return db.name
+
+    def _switch_database(self, name=None) -> None:
+        db = self._require_database(name, "opensak.switch_database")
+        # The read-only SQL connection belongs to the old database.
+        self._close_sql()
+        try:
+            self._host.switch_database(db.name)
+        except Exception as exc:
+            raise MacroError(f"opensak.switch_database: cannot open {db.name!r}: {exc}") from None
+
+    def _transfer(self, func: str, copy_only: bool, target=None, options=None) -> int:
+        db = self._require_database(target, func)
+        active = get_db_manager().active
+        if active is None or db.path == active.path:
+            raise MacroError(f"{func}: {db.name!r} is the active database")
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        if options is not None and not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "skip" }}')
+        opts = dict(options.items()) if options is not None else {}
+        unknown = set(opts) - {"codes", "if_exists"}
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(unknown)}; valid: codes, if_exists")
+        if "codes" in opts:
+            codes = [_gc_code(c, func) for c in _as_list(opts["codes"])]
+        else:
+            codes = self._active_codes()
+        if_exists = opts.get("if_exists", "newer")
+        if if_exists not in IF_EXISTS:
+            raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, got {if_exists!r}")
+        try:
+            count = transfer_caches(codes, active.path, db.path, copy_only=copy_only,
+                                    if_exists=if_exists)
+        except Exception as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        if count and not copy_only:
+            self._host.caches_removed()
+        return count
 
     def _confirm(self, message=None) -> bool:
         if not isinstance(message, str) or not message.strip():
@@ -1022,9 +1126,7 @@ class MacroRuntime:
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
-            if self._sql_db is not None:
-                self._sql_db.close()
-                self._sql_db = None
+            self._close_sql()
             self._host.end_macro()
 
     @staticmethod
@@ -1321,6 +1423,91 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
         params=(Param("table", "string", "Table or view name."),),
         returns=("{name: string, type: string}[]", "Column names and SQL types, in table order."),
+    ),
+    ApiFunction(
+        name="databases",
+        description="All databases in OpenSAK's database list, sorted by name.",
+        example="for _, db in ipairs(opensak.databases()) do\n"
+                '    print(db.name, db.active and "(active)" or "", db.size_mb .. " MB")\nend',
+        since=2,
+        bind=lambda rt, lua: lambda: rt._databases(lua),
+        returns=("{name: string, path: string, active: boolean, size_mb: number}[]",
+                 "One table per database."),
+    ),
+    ApiFunction(
+        name="database",
+        description="The name of the active database.",
+        example='print("Working on " .. opensak.database())',
+        since=2,
+        bind=lambda rt, lua: lambda: rt._host.database_name(),
+        returns=("string", "Database name."),
+    ),
+    ApiFunction(
+        name="database_exists",
+        description="Whether a database with this name is in the database "
+                    "list (exact, case-sensitive match).",
+        example='if not opensak.database_exists("CH_Zurich") then\n'
+                '    opensak.create_database("CH_Zurich")\nend',
+        since=2,
+        bind=lambda rt, lua: rt._database_exists,
+        params=(Param("name", "string", "Database name."),),
+        returns=("boolean", "true if it exists."),
+    ),
+    ApiFunction(
+        name="create_database",
+        description="Create a new, empty database in the default database "
+                    "folder and add it to the list. The active database does "
+                    "not change. Fails if the name is taken or its file "
+                    "already exists.",
+        example='local name = opensak.create_database("CH_Zurich")',
+        since=2,
+        bind=lambda rt, lua: rt._create_database,
+        params=(Param("name", "string", "Name of the new database."),),
+        returns=("string", "The name actually used (surrounding spaces removed)."),
+    ),
+    ApiFunction(
+        name="switch_database",
+        description="Make another database the active one, as the toolbar "
+                    "dropdown does. The active filter is cleared.",
+        example='opensak.switch_database("CH_Zurich")\n'
+                'print(opensak.count() .. " caches in " .. opensak.database())',
+        since=2,
+        bind=lambda rt, lua: rt._switch_database,
+        params=(Param("name", "string", "Database name."),),
+    ),
+    ApiFunction(
+        name="move_caches",
+        description="Move caches from the active database to another one, "
+                    "with all logs, waypoints, attributes, trackables and "
+                    "notes (like Database → Move caches). By default the "
+                    "caches of the active filter. When a cache already "
+                    "exists in the target, `if_exists` decides: `\"newer\"` "
+                    "(default) replaces it only if the active database's copy "
+                    "was imported later, `\"replace\"` always, `\"skip\"` "
+                    "never. A cache not written to the target stays in the "
+                    "active database.",
+        example='local n = opensak.move_caches("CH_Zurich")\n'
+                'print(n .. " caches moved")',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._transfer("opensak.move_caches", False, *a),
+        params=(
+            Param("target", "string", "Name of the target database (not the active one)."),
+            Param("options", "opensak.TransferOptions", "codes, if_exists.", optional=True),
+        ),
+        returns=("integer", "Number of caches moved."),
+    ),
+    ApiFunction(
+        name="copy_caches",
+        description="Like opensak.move_caches(), but the caches stay in the "
+                    "active database.",
+        example='local n = opensak.copy_caches("CH_Zurich", { codes = {"GC1", "GC2"}, if_exists = "replace" })',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._transfer("opensak.copy_caches", True, *a),
+        params=(
+            Param("target", "string", "Name of the target database (not the active one)."),
+            Param("options", "opensak.TransferOptions", "codes, if_exists.", optional=True),
+        ),
+        returns=("integer", "Number of caches copied."),
     ),
     ApiFunction(
         name="set_corrected",

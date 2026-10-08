@@ -241,6 +241,9 @@ class MainWindow(QMainWindow):
         # GC codes whose corrected coordinates a running Lua macro changed;
         # refreshed in one go by end_macro() instead of once per call.
         self._macro_changed_codes: set[GcCode] = set()
+        # A running macro moved caches out of the active database; the view
+        # is reloaded once by end_macro().
+        self._macro_caches_removed = False
         # Issue #558: the toolbar Where box's expression currently in
         # effect — only set once validated on Enter, so a half-typed
         # expression never leaks into refreshes triggered elsewhere.
@@ -3301,6 +3304,36 @@ class MainWindow(QMainWindow):
         self._macro_changed_codes.add(gc_code)
         return True
 
+    def switch_database(self, name: str) -> None:
+        """MacroHost: switch like the toolbar dropdown does, then clear the
+        filter the new database may have restored. Raises if the database
+        cannot be opened (the previous one stays active)."""
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        db = next((d for d in manager.databases if d.name == name), None)
+        if db is None:
+            raise ValueError(f"no database named {name!r}")
+        if db != manager.active:
+            try:
+                manager.switch_to(db)
+            except Exception:
+                self._reload_db_combo()
+                raise
+            # Pending refreshes belong to the previous database.
+            self._macro_changed_codes.clear()
+            self._macro_caches_removed = False
+            self._on_database_switched(db)
+        self._clear_filter()
+
+    def database_list_changed(self) -> None:
+        """MacroHost: a database was created — reload the toolbar dropdown."""
+        self._reload_db_combo()
+
+    def caches_removed(self) -> None:
+        """MacroHost: caches were moved out of the active database; the view
+        is reloaded once in end_macro()."""
+        self._macro_caches_removed = True
+
     def current_code(self) -> Optional[str]:
         """MacroHost: GC code of the cache selected in the grid."""
         cache = self._cache_table.selected_cache()
@@ -3345,6 +3378,10 @@ class MainWindow(QMainWindow):
         cheaper than updating each row (refresh_cache_row() scans the whole
         model and _load_full_cache() loads logs etc. per call)."""
         changed, self._macro_changed_codes = self._macro_changed_codes, set()
+        if self._macro_caches_removed:
+            self._macro_caches_removed = False
+            self._on_caches_moved()
+            return
         if len(changed) <= _MACRO_ROW_REFRESH_LIMIT:
             for gc_code in sorted(changed):
                 self._on_corrected_coords_changed(gc_code)

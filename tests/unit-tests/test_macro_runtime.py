@@ -454,6 +454,7 @@ def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
     calls = {"row": [], "full": 0, "detail": []}
     win = SimpleNamespace(
         _macro_changed_codes={f"GC{i}" for i in range(n)},
+        _macro_caches_removed=False,
         _on_corrected_coords_changed=calls["row"].append,
         _refresh_cache_list=lambda: calls.__setitem__("full", calls["full"] + 1),
         _detail_panel=SimpleNamespace(_current_gc_code="GC1",
@@ -466,6 +467,23 @@ def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
     assert calls["full"] == full_reloads
     assert calls["detail"] == (["GC1"] if full_reloads else [])
     assert win._macro_changed_codes == set()
+
+
+def test_mainwindow_reloads_once_after_macro_moved_caches():
+    from types import SimpleNamespace
+    from opensak.gui import mainwindow as mw
+
+    calls = {"row": [], "moved": 0}
+    win = SimpleNamespace(
+        _macro_changed_codes={"GC1"},
+        _macro_caches_removed=True,
+        _on_corrected_coords_changed=calls["row"].append,
+        _on_caches_moved=lambda: calls.__setitem__("moved", calls["moved"] + 1),
+    )
+    mw.MainWindow.end_macro(win)
+
+    assert calls == {"row": [], "moved": 1}
+    assert win._macro_changed_codes == set() and win._macro_caches_removed is False
 
 
 @pytest.mark.parametrize("script", sorted(EXAMPLES.glob("*.lua")), ids=lambda p: p.name)
