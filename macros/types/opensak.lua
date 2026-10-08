@@ -62,6 +62,19 @@
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
 ---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").
 
+---What `opensak.export_gpx{}` writes.
+---@class opensak.ExportSpec
+---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).
+---@field format? "gpx"|"ggz"|"loc"|"kml" Default: from the extension of `path`, else "gpx" (a device takes gpx or ggz).
+---@field corrected? boolean Use corrected coordinates where set (default true).
+---@field max? integer At most this many caches (default 0 = all).
+---@field rename? fun(c: opensak.Cache): string? Name to write instead of the cache name.
+---@field description? fun(c: opensak.Cache): string? Waypoint description to write (GPX desc, LOC label, KML pop-up).
+---@field pois? {attributes?: boolean, child_waypoints?: boolean} Leave out attributes (GPX/GGZ) or child waypoints (GPX/GGZ/KML); both default true.
+---@field if_exists? "overwrite"|"skip"|"ask" When the file exists (default "overwrite").
+---@field target? "file"|"device" "device": the GPX/GGZ folder of the connected Garmin (default "file").
+---@field device? string The device's folder, when several Garmin devices are connected.
+
 ---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).
 ---@class opensak.Cache
 ---@field code string GC code, e.g. "GC12345".
@@ -462,6 +475,23 @@ function opensak.read_csv(path, sep) end
 ---@return string? # The file written and the number of caches in it; nil if nothing was written.
 ---@return integer?
 function opensak.export_file(setting, folder) end
+
+---Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No).
+---
+---Since API version 2.
+---
+---```lua
+---local path, n = opensak.export_gpx{
+---  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",
+---  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+---  pois = { child_waypoints = false },
+---}
+---if path then print(n .. " caches → " .. path) end
+---```
+---@param spec opensak.ExportSpec What to export and where.
+---@return string? # The file written and the number of caches in it; nil if nothing was written.
+---@return integer?
+function opensak.export_gpx(spec) end
 
 ---Ask the user a Yes/No question.
 ---

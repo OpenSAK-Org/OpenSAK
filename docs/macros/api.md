@@ -41,6 +41,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
+| [`opensak.export_gpx`](#opensakexportgpx) | 2 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
@@ -703,6 +704,33 @@ Example:
 
 ```lua
 local path, n = opensak.export_file("GPX Export")
+if path then print(n .. " caches → " .. path) end
+```
+
+### opensak.export_gpx
+
+```lua
+opensak.export_gpx(spec)
+```
+
+Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No).
+
+Parameters:
+
+- `spec` (`opensak.ExportSpec`) — What to export and where.
+
+Returns `string?, integer?` — The file written and the number of caches in it; nil if nothing was written.
+
+Since API version 2.
+
+Example:
+
+```lua
+local path, n = opensak.export_gpx{
+  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",
+  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+  pois = { child_waypoints = false },
+}
 if path then print(n .. " caches → " .. path) end
 ```
 

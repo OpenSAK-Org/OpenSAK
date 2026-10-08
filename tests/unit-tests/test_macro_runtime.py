@@ -1175,3 +1175,129 @@ def test_every_sort_key_is_a_sort_field():
     from opensak.filters.engine import SORT_FIELDS
     from opensak.macro.runtime import SORT_KEYS
     assert set(SORT_KEYS.values()) <= set(SORT_FIELDS)
+
+
+# ── Ad-hoc export (opensak.export_gpx) ───────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def export_cache(seed):
+    """GCEXP1, with an attribute, a child waypoint and corrected coordinates."""
+    from opensak.db.models import Attribute, Waypoint
+    with get_session() as s:
+        cache = Cache(gc_code="GCEXP1", name="Export me", cache_type="Multi-cache",
+                      difficulty=2.0, terrain=3.5, latitude=46.0, longitude=7.0)
+        s.add(cache)
+        s.flush()
+        s.add(Attribute(cache_id=cache.id, attribute_id=1, name="Dogs", is_on=True))
+        s.add(Waypoint(cache_id=cache.id, prefix="PK", name="Parking", wp_type="Parking Area",
+                       latitude=46.01, longitude=7.01))
+    set_corrected_coords("GCEXP1", 46.5, 7.5)
+
+
+def _export_gpx(tmp_path, spec: str, host=None):
+    """Run opensak.export_gpx{spec} on GCEXP1; return (out, runtime host)."""
+    runtime, out = _export_runtime(tmp_path, host)
+    runtime.run(f"""
+        opensak.filter{{ codes = {{"GCEXP1"}}, label = "One" }}
+        print(opensak.export_gpx{{ {spec} }})
+    """)
+    return out
+
+
+def test_export_gpx_renames_and_describes(tmp_path, export_cache):
+    out = _export_gpx(tmp_path, f"""
+        path = {str(tmp_path / "out" / "{filter}_{count}.gpx")!r},
+        rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+        description = function(c) return c.code .. " " .. c.type end,
+    """)
+    target = (tmp_path / "out" / "One_1.gpx").resolve()
+    assert out == [f"{target}\t1"]
+    text = target.read_text(encoding="utf-8")
+    assert "<groundspeak:name>2.0/3.5 Export me</groundspeak:name>" in text
+    assert "<desc>GCEXP1 Multi-cache</desc>" in text
+    assert 'lat="46.500000"' in text                     # corrected by default
+    assert "<groundspeak:attributes>" in text and "PKEXP1" in text
+
+
+def test_export_gpx_options_and_formats(tmp_path, export_cache):
+    import zipfile
+    _export_gpx(tmp_path, f"""
+        path = {str(tmp_path / "out" / "a.gpx")!r}, corrected = false,
+        pois = {{ attributes = false, child_waypoints = false }},
+        rename = function(c) return nil end,
+    """)
+    text = (tmp_path / "out" / "a.gpx").read_text(encoding="utf-8")
+    assert 'lat="46.000000"' in text
+    assert "<groundspeak:name>Export me</groundspeak:name>" in text
+    assert "groundspeak:attributes" not in text and "PKEXP1" not in text
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "b.ggz")!r}, '
+                          'rename = function(c) return "R " .. c.name end')
+    with zipfile.ZipFile(tmp_path / "out" / "b.ggz") as z:
+        index = z.read("index/com/garmin/geocaches/v0/index.xml").decode()
+        gpx = z.read("data/b.gpx").decode()
+    assert "<name>R Export me</name>" in index and "R Export me" in gpx
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "c.loc")!r}, '
+                          'description = function(c) return "Label " .. c.code end')
+    assert "<![CDATA[Label GCEXP1]]>" in (tmp_path / "out" / "c.loc").read_text(encoding="utf-8")
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "d")!r}, format = "kml", '
+                          'corrected = false, rename = function(c) return "K" end')
+    kml = (tmp_path / "out" / "d.kml").read_text(encoding="utf-8")
+    assert "GCEXP1 K" in kml and "7.0,46.0,0" in kml
+
+
+@pytest.mark.parametrize("if_exists, written", [("overwrite", True), ("skip", False)])
+def test_export_gpx_if_exists(tmp_path, export_cache, if_exists, written):
+    target = tmp_path / "out" / "x.gpx"
+    target.parent.mkdir()
+    target.write_text("old", encoding="utf-8")
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, if_exists = "{if_exists}"')
+    assert (out == ["nil"]) is not written
+    assert (target.read_text(encoding="utf-8") != "old") is written
+
+
+def test_export_gpx_to_device(tmp_path, export_cache, monkeypatch):
+    import opensak.gps.garmin as garmin
+    device = tmp_path / "GARMIN_DRIVE"
+    (device / "Garmin" / "GPX").mkdir(parents=True)
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    out = _export_gpx(tmp_path, 'target = "device", format = "ggz"')
+    target = (device / "Garmin" / "GGZ" / "TestDB.ggz").resolve()
+    assert out == [f"{target}\t1"]
+
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device, tmp_path / "SD"])
+    with pytest.raises(MacroError, match="several Garmin devices"):
+        _export_gpx(tmp_path, 'target = "device"')
+    out = _export_gpx(tmp_path, f'target = "device", device = {str(device)!r}, path = "pick"')
+    assert out == [f"{(device / 'Garmin' / 'GPX' / 'pick.gpx').resolve()}\t1"]
+
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    monkeypatch.setattr(garmin, "is_mtp_device", lambda root: True)
+    with pytest.raises(MacroError, match="MTP device"):
+        _export_gpx(tmp_path, 'target = "device"')
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [])
+    with pytest.raises(MacroError, match="no Garmin device connected"):
+        _export_gpx(tmp_path, 'target = "device"')
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ("", "needs path"),
+    ('path = "a.gpx", folder = "x"', r"unknown key\(s\) \['folder'\]"),
+    ('path = "a.txt", format = "txt"', "format must be one of gpx, loc, ggz, kml"),
+    ('target = "device", format = "kml"', "format must be one of gpx, ggz"),
+    ('path = "a.gpx", target = "phone"', 'target must be "file" or "device"'),
+    ('path = "a.gpx", device = "E:"', 'device needs target = "device"'),
+    ('path = "a.gpx", max = -1', "max must be a whole number"),
+    ('path = "a.gpx", corrected = "yes"', "corrected must be true or false"),
+    ('path = "a.gpx", if_exists = "never"', "if_exists must be one of"),
+    ('path = "a.gpx", rename = "x"', "rename must be a function"),
+    ('path = "a.gpx", pois = { logs = false }', r"unknown pois key\(s\) \['logs'\]"),
+    ('path = "a.gpx", description = function(c) return {} end', "description must return a string"),
+    ('path = "a.gpx", rename = function(c) error("boom") end', "boom"),
+])
+def test_export_gpx_rejects_bad_input(tmp_path, export_cache, spec, msg):
+    with pytest.raises(MacroError, match=msg):
+        _export_gpx(tmp_path, spec)
+    assert not (tmp_path / "out").exists()

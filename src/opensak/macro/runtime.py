@@ -94,7 +94,8 @@ from opensak.coords import parse_coords
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
-from opensak.export.file_export import select_for_export, write_export_file
+from opensak.export.cache_text import ExportText
+from opensak.export.file_export import EXPORT_FORMATS, select_for_export, write_export_file
 from opensak.export.file_export_settings import (
     FileExportProfile,
     FileExportSettings,
@@ -151,6 +152,15 @@ MAX_CSV_BYTES = 10 * 1024 * 1024
 # instruction limit does not count time spent sleeping).
 MAX_SLEEP_MS = 10_000
 SLEEP_BUDGET_S = 60.0
+# opensak.export_gpx{}: the keys of its table, and what to do with an
+# existing file.
+EXPORT_KEYS = frozenset({
+    "path", "format", "corrected", "max", "rename", "description", "pois",
+    "if_exists", "target", "device",
+})
+EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
+# Formats a Garmin device reads from its GPX / GGZ folder.
+DEVICE_FORMATS = ("gpx", "ggz")
 
 _TEXT_FILTERS = {
     "name": NameFilter,
@@ -1510,6 +1520,177 @@ class MacroRuntime:
             raise MacroError(f"cannot write {target}: {exc}") from None
         return str(target), count
 
+    # Ad-hoc export (opensak.export_gpx): like export_file, but every option
+    # comes from the macro, including per-cache names and descriptions.
+
+    def _export_gpx(self, lua, spec=None):
+        func = "opensak.export_gpx"
+        if spec is None or not hasattr(spec, "items"):
+            raise MacroError(
+                f'{func} expects a table, e.g. {func}{{ path = "out.gpx" }}'
+            )
+        opts = dict(spec.items())
+        unknown = set(opts) - EXPORT_KEYS
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown key(s) {sorted(unknown)}; valid: {', '.join(sorted(EXPORT_KEYS))}"
+            )
+        target = opts.get("target", "file")
+        if target not in ("file", "device"):
+            raise MacroError(f'{func}: target must be "file" or "device", got {target!r}')
+        path = opts.get("path")
+        if path is None and target == "device":
+            path = "{database}"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} needs path, the file to write")
+        fmt = opts.get("format")
+        if fmt is None:
+            suffix = Path(path).suffix.lower().lstrip(".")
+            fmt = suffix if suffix in EXPORT_FORMATS else "gpx"
+        allowed = DEVICE_FORMATS if target == "device" else EXPORT_FORMATS
+        if fmt not in allowed:
+            raise MacroError(f"{func}: format must be one of {', '.join(allowed)}, got {fmt!r}")
+        corrected = opts.get("corrected", True)
+        if not isinstance(corrected, bool):
+            raise MacroError(f"{func}: corrected must be true or false, got {corrected!r}")
+        max_records = opts.get("max", 0)
+        if isinstance(max_records, bool) or not isinstance(max_records, (int, float)) \
+                or max_records < 0 or max_records != int(max_records):
+            raise MacroError(f"{func}: max must be a whole number >= 0, got {max_records!r}")
+        if_exists = opts.get("if_exists", "overwrite")
+        if if_exists not in EXPORT_IF_EXISTS:
+            raise MacroError(
+                f"{func}: if_exists must be one of {', '.join(EXPORT_IF_EXISTS)}, got {if_exists!r}"
+            )
+        rename = self._lua_function(func, "rename", opts.get("rename"))
+        describe = self._lua_function(func, "description", opts.get("description"))
+        attributes, child_waypoints = self._export_pois(func, opts.get("pois"))
+        if target == "device":
+            folder = self._garmin_folder(func, opts.get("device"), fmt)
+        else:
+            if "device" in opts:
+                raise MacroError(f'{func}: device needs target = "device"')
+            folder = Path(path).expanduser().parent
+            if not folder.is_absolute():
+                folder = (self._base_dir or macros_dir()) / folder
+
+        caches = select_for_export(self._host.filtered_caches(), int(max_records))
+        if not caches:
+            return None
+        file_name = expand_file_name(
+            Path(path).name,
+            database=self._host.database_name(),
+            filter_name=self._host.filter_name(),
+            center_name=self._host.center_name(),
+            fmt=fmt,
+            count=len(caches),
+        )
+        output = self._check_access(folder / f"{file_name}.{fmt}", write=True)
+        if output.exists():
+            if if_exists == "skip":
+                return None
+            if if_exists == "ask":
+                from opensak.lang import tr
+
+                if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
+                    return None
+        text = self._export_text(lua, func, caches, rename, describe)
+        try:
+            count = write_export_file(
+                caches, output, fmt, use_corrected=corrected, text=text,
+                attributes=attributes, child_waypoints=child_waypoints,
+            )
+        except OSError as exc:
+            raise MacroError(f"cannot write {output}: {exc}") from None
+        return str(output), count
+
+    @staticmethod
+    def _lua_function(func: str, key: str, value: Any) -> Optional[Any]:
+        if value is None:
+            return None
+        from lupa.lua54 import lua_type
+
+        if lua_type(value) != "function":
+            raise MacroError(f"{func}: {key} must be a function(c), got {value!r}")
+        return value
+
+    @staticmethod
+    def _export_pois(func: str, value: Any) -> tuple[bool, bool]:
+        """The pois table → (attributes, child_waypoints), both on by default."""
+        if value is None:
+            return True, True
+        if not hasattr(value, "items"):
+            raise MacroError(f"{func}: pois must be a table, e.g. {{ child_waypoints = false }}")
+        pois = dict(value.items())
+        unknown = set(pois) - {"attributes", "child_waypoints"}
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown pois key(s) {sorted(unknown)}; valid: attributes, child_waypoints"
+            )
+        result = []
+        for key in ("attributes", "child_waypoints"):
+            on = pois.get(key, True)
+            if not isinstance(on, bool):
+                raise MacroError(f"{func}: pois.{key} must be true or false, got {on!r}")
+            result.append(on)
+        return result[0], result[1]
+
+    def _export_text(self, lua, func: str, caches: list, rename, describe) -> ExportText:
+        """Call the macro's rename / description functions once per cache,
+        with the cache table (see Cache fields)."""
+        if rename is None and describe is None:
+            return ExportText()
+        names: dict[str, str] = {}
+        descriptions: dict[str, str] = {}
+        codes = [c.gc_code for c in caches]
+        for record in iter_records(get_session, codes):
+            table = lua.table_from(record, recursive=True)
+            for fn, key, result in ((rename, "rename", names),
+                                    (describe, "description", descriptions)):
+                if fn is None:
+                    continue
+                value = fn(table)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                    raise MacroError(
+                        f"{func}: {key} must return a string (or nil to keep the "
+                        f"default), got {value!r} for {record['code']}"
+                    )
+                result[record["code"]] = str(value)
+        return ExportText(names, descriptions)
+
+    def _garmin_folder(self, func: str, device: Any, fmt: str) -> Path:
+        """The GPX or GGZ folder of the connected Garmin device (the one
+        named by *device* when several are connected)."""
+        from opensak.gps.garmin import (
+            find_garmin_devices,
+            get_garmin_ggz_path,
+            get_garmin_gpx_path,
+            is_mtp_device,
+        )
+
+        if device is not None and (not isinstance(device, str) or not device.strip()):
+            raise MacroError(f"{func}: device must be the device's folder, e.g. \"E:\\\"")
+        devices = find_garmin_devices()
+        if not devices:
+            raise MacroError(f"{func}: no Garmin device connected")
+        if device is not None:
+            wanted = Path(device.strip()).expanduser()
+            devices = [d for d in devices if str(d) == device.strip() or Path(str(d)) == wanted]
+            if not devices:
+                raise MacroError(f"{func}: no Garmin device at {device!r}")
+        elif len(devices) > 1:
+            names = ", ".join(repr(str(d)) for d in devices)
+            raise MacroError(f"{func}: several Garmin devices connected ({names}); choose one with device = ...")
+        root = devices[0]
+        if not isinstance(root, Path) or is_mtp_device(root):
+            raise MacroError(
+                f"{func}: {root} is an MTP device, which macros cannot write to yet "
+                "— use GPS → Send to GPS"
+            )
+        return get_garmin_ggz_path(root) if fmt == "ggz" else get_garmin_gpx_path(root)
+
     # -- Running ---------------------------------------------------------------
 
     def run(
@@ -2079,6 +2260,37 @@ API: tuple[ApiFunction, ...] = (
             Param("folder", "string", "Folder to write to instead of the "
                   "setting's folder, e.g. opensak.temp_dir().", optional=True),
         ),
+        returns=("string?, integer?",
+                 "The file written and the number of caches in it; nil if "
+                 "nothing was written."),
+    ),
+    ApiFunction(
+        name="export_gpx",
+        description="Export the caches of the active filter without a saved "
+                    "export setting. `path` is the file to write; its name "
+                    "may use the variables of the export dialog ({database}, "
+                    "{filter}, {center}, {date}, {count}, ...), and a "
+                    "relative path is resolved against the macro file's "
+                    "folder. Its folder needs write permission, like "
+                    "opensak.export_file(). `rename(c)` and `description(c)` "
+                    "are called with each cache table (see Cache fields) and "
+                    "return the name and the waypoint description to write "
+                    "(nil keeps the default). With `target = \"device\"`, "
+                    "the file goes into the GPX or GGZ folder of the "
+                    "connected Garmin device instead (`path` is then only "
+                    "the file name; MTP devices are not supported yet). "
+                    "Nothing is written when no cache with coordinates is "
+                    "shown, or when the file exists and `if_exists` says "
+                    "skip (or ask, and the user answers No).",
+        example='local path, n = opensak.export_gpx{\n'
+                '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
+                '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'
+                '  pois = { child_waypoints = false },\n'
+                '}\n'
+                'if path then print(n .. " caches → " .. path) end',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._export_gpx(lua, *a),
+        params=(Param("spec", "opensak.ExportSpec", "What to export and where."),),
         returns=("string?, integer?",
                  "The file written and the number of caches in it; nil if "
                  "nothing was written."),
