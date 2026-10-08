@@ -2,7 +2,7 @@
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
 -- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
 
----Keys understood by `opensak.filter{}`, all combined with AND.
+---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
 ---@field type? string|string[] Cache type(s); the " Cache" suffix may be left out.
 ---@field container? string|string[] Container size(s).
@@ -10,13 +10,42 @@
 ---@field terrain? number|number[] Exact value or {min, max}.
 ---@field found? boolean Only found or only unfound caches.
 ---@field available? boolean Only available caches (not disabled or archived).
----@field name? string "Contains" match on that field.
----@field code? string "Contains" match on that field.
----@field owner? string "Contains" match on that field.
----@field country? string "Contains" match on that field.
----@field state? string "Contains" match on that field.
----@field county? string "Contains" match on that field.
+---@field archived? boolean Only archived caches, or only caches that are not archived.
+---@field corrected? boolean With or without corrected coordinates.
+---@field user_flag? boolean That flag set, or not set.
+---@field locked? boolean That flag set, or not set.
+---@field dnf? boolean That flag set, or not set.
+---@field ftf? boolean That flag set, or not set.
+---@field premium? boolean That flag set, or not set.
+---@field has_trackables? boolean With or without trackables in the cache.
+---@field owned? boolean Owned by you (owner = your geocaching.com username in Settings), or not.
+---@field near? table Within `km` of a coordinate or of a saved centre point.
+---@field distance? number|number[] Km from the active centre point: at most a number, or {min, max} where nil leaves a side open.
+---@field bearing? number[] Bearing from the active centre point, clockwise from the first to the second value.
+---@field favorites? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
+---@field elevation? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
+---@field hidden? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field found_date? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field last_gpx_update? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field attributes? string|string[] Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed).
+---@field name? string "Contains" match on that field (`note` = your local note).
+---@field code? string "Contains" match on that field (`note` = your local note).
+---@field owner? string "Contains" match on that field (`note` = your local note).
+---@field placed_by? string "Contains" match on that field (`note` = your local note).
+---@field country? string "Contains" match on that field (`note` = your local note).
+---@field state? string "Contains" match on that field (`note` = your local note).
+---@field county? string "Contains" match on that field (`note` = your local note).
+---@field user_data1? string "Contains" match on that field (`note` = your local note).
+---@field user_data2? string "Contains" match on that field (`note` = your local note).
+---@field user_data3? string "Contains" match on that field (`note` = your local note).
+---@field user_data4? string "Contains" match on that field (`note` = your local note).
+---@field gc_note? string "Contains" match on that field (`note` = your local note).
+---@field note? string "Contains" match on that field (`note` = your local note).
+---@field text? string Full-text search in description, logs and notes.
+---@field polygon? string|table Inside a polygon: a file (as for opensak.coords.inside) or a table of points.
+---@field codes? string[] Exactly these GC codes, e.g. from an opensak.sql() result.
 ---@field where? string Raw clause against the caches table.
+---@field mode? "AND"|"OR" How the criteria are combined (default AND).
 ---@field label? string Shown in the toolbar (optional, default "Macro").
 
 ---Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.
@@ -94,7 +123,7 @@ opensak = {}
 ---@return integer # The API version.
 function opensak.api_version() end
 
----Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
+---Build a filter from the given keys (see Filter keys; combined with AND unless `mode = "OR"`) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
 ---
 ---Since API version 1.
 ---
@@ -105,6 +134,27 @@ function opensak.api_version() end
 ---@param spec opensak.FilterSpec The filter keys.
 ---@return integer # Number of matching caches (0 = view unchanged).
 function opensak.filter(spec) end
+
+---The name of the active filter: the `label` of opensak.filter{}, a profile name, or "" when no filter is active. The same as the {filter} variable of an export file name.
+---
+---Since API version 2.
+---
+---```lua
+---print("Filter: " .. opensak.filter_name())
+---```
+---@return string # The filter name; "" for none.
+function opensak.filter_name() end
+
+---Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+---
+---Since API version 2.
+---
+---```lua
+---opensak.sort("difficulty", "desc")
+---```
+---@param field string A cache field, e.g. "difficulty".
+---@param direction? "asc"|"desc" "asc" if omitted.
+function opensak.sort(field, direction) end
 
 ---Apply a saved filter profile.
 ---

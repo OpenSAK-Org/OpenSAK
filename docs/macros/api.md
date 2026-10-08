@@ -14,6 +14,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 |---|---|
 | [`opensak.api_version`](#opensakapiversion) | 1 |
 | [`opensak.filter`](#opensakfilter) | 1 |
+| [`opensak.filter_name`](#opensakfiltername) | 2 |
+| [`opensak.sort`](#opensaksort) | 2 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.count`](#opensakcount) | 1 |
@@ -92,7 +94,7 @@ end
 opensak.filter(spec)
 ```
 
-Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
+Build a filter from the given keys (see Filter keys; combined with AND unless `mode = "OR"`) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
 
 Parameters:
 
@@ -107,6 +109,45 @@ Example:
 ```lua
 local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
 print("Easy unfound traditionals: " .. n)
+```
+
+### opensak.filter_name
+
+```lua
+opensak.filter_name()
+```
+
+The name of the active filter: the `label` of opensak.filter{}, a profile name, or "" when no filter is active. The same as the {filter} variable of an export file name.
+
+Returns `string` — The filter name; "" for none.
+
+Since API version 2.
+
+Example:
+
+```lua
+print("Filter: " .. opensak.filter_name())
+```
+
+### opensak.sort
+
+```lua
+opensak.sort(field [, direction])
+```
+
+Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+
+Parameters:
+
+- `field` (`string`) — A cache field, e.g. "difficulty".
+- `direction` (`"asc"|"desc"`, optional) — "asc" if omitted.
+
+Since API version 2.
+
+Example:
+
+```lua
+opensak.sort("difficulty", "desc")
 ```
 
 ### opensak.filter_profile
@@ -1285,7 +1326,7 @@ print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))
 
 ## Filter keys
 
-Keys understood by `opensak.filter{}`, all combined with AND.
+Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 
 | Key | Value | Meaning |
 |---|---|---|
@@ -1295,8 +1336,23 @@ Keys understood by `opensak.filter{}`, all combined with AND.
 | `terrain` | `2 \| {1, 2.5}` | Exact value or {min, max}. |
 | `found` | `true \| false` | Only found or only unfound caches. |
 | `available` | `true` | Only available caches (not disabled or archived). |
-| `name`, `code`, `owner`, `country`, `state`, `county` | `"text"` | "Contains" match on that field. |
+| `archived` | `true \| false` | Only archived caches, or only caches that are not archived. |
+| `corrected` | `true \| false` | With or without corrected coordinates. |
+| `user_flag`, `locked`, `dnf`, `ftf`, `premium` | `true \| false` | That flag set, or not set. |
+| `has_trackables` | `true \| false` | With or without trackables in the cache. |
+| `owned` | `true \| false` | Owned by you (owner = your geocaching.com username in Settings), or not. |
+| `near` | `{lat = 47.37, lon = 8.54, km = 10} \| {point = "Home", km = 10}` | Within `km` of a coordinate or of a saved centre point. |
+| `distance` | `25 \| {5, 25} \| {10, nil}` | Km from the active centre point: at most a number, or {min, max} where nil leaves a side open. |
+| `bearing` | `{45, 135} \| {315, 45}` | Bearing from the active centre point, clockwise from the first to the second value. |
+| `favorites`, `elevation` | `10 \| {10, nil} \| {nil, 500}` | Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open. |
+| `hidden`, `found_date`, `last_gpx_update` | `{"2020-01-01", "2020-12-31"} \| {nil, "2026-09-01"}` | Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00". |
+| `attributes` | `"Dogs" \| {"Dogs", "-Night cache", 13}` | Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed). |
+| `name`, `code`, `owner`, `placed_by`, `country`, `state`, `county`, `user_data1`, `user_data2`, `user_data3`, `user_data4`, `gc_note`, `note` | `"text"` | "Contains" match on that field (`note` = your local note). |
+| `text` | `"Brücke"` | Full-text search in description, logs and notes. |
+| `polygon` | `"area.kml" \| {{47.1, 8.1}, {47.2, 8.1}, {47.2, 8.3}}` | Inside a polygon: a file (as for opensak.coords.inside) or a table of points. |
+| `codes` | `{"GC1", "GC2"}` | Exactly these GC codes, e.g. from an opensak.sql() result. |
 | `where` | `"SQL WHERE clause"` | Raw clause against the caches table. |
+| `mode` | `"OR"` | How the criteria are combined (default AND). |
 | `label` | `"text"` | Shown in the toolbar (optional, default "Macro"). |
 
 `opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included), and `database`.

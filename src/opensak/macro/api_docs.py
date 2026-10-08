@@ -138,7 +138,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "",
         "## Filter keys",
         "",
-        "Keys understood by `opensak.filter{}`, all combined with AND.",
+        "Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).",
         "",
         "| Key | Value | Meaning |",
         "|---|---|---|",
@@ -238,7 +238,7 @@ def render_lua_stub() -> str:
         f"-- {_GENERATED}",
         f"-- OpenSAK Lua macro API, version {API_VERSION}. Reference: {DOC_PATH.as_posix()}",
         "",
-        "---Keys understood by `opensak.filter{}`, all combined with AND.",
+        "---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).",
         "---@class opensak.FilterSpec",
     ]
     for doc in FILTER_KEY_DOCS:

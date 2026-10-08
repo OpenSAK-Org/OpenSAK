@@ -48,6 +48,9 @@ class FakeHost:
     def filter_name(self):
         return self.applied[-1][1] if self.applied else ""
 
+    def set_sort(self, sort):
+        self.sort = sort
+
     def database_name(self):
         return "TestDB"
 
@@ -1035,3 +1038,140 @@ def test_export_example_stops_when_file_name_lacks_filter(tmp_path, example_temp
 
     with pytest.raises(MacroError, match="Traditionals and Multi-caches both exported to"):
         _run_export_example(runtime)
+
+
+# ── More filter keys, filter_name, sort ──────────────────────────────────────
+
+def _filters(lua_spec: str):
+    """The filters opensak.filter{...} builds from *lua_spec*, via real Lua
+    tables (so {nil, x} is covered)."""
+    host, _ = _run(f"opensak.filter{{ {lua_spec} }}")
+    return host.applied[-1][0]
+
+
+def test_flag_keys_map_to_filters():
+    fs = _filters("corrected = true, user_flag = false, locked = true, dnf = true, "
+                  "ftf = false, premium = false, archived = false, has_trackables = false")
+    names = [type(f).__name__ for f in fs._filters]
+    assert names == ["HasCorrectedFilter", "UserFlagFilter", "LockedFilter", "DnfFilter",
+                     "FtfFilter", "NonPremiumFilter", "AvailabilityFilter", "FilterSet"]
+    assert fs._filters[1].flagged is False and fs._filters[4].has_ftf is False
+    archived = fs._filters[6]
+    assert (archived.show_avail, archived.show_unavail, archived.show_archived) == (True, True, False)
+    assert fs._filters[7].negate is True
+
+
+def test_range_keys_with_open_sides():
+    fs = _filters("favorites = {10, nil}, elevation = {nil, 500}, distance = {5, 25}, "
+                  "bearing = {315, 45}")
+    dist, bearing, fav, elev = fs._filters
+    assert (fav.op, fav.pts1) == ("at_least", 10)
+    assert (elev.op, elev.elev1_m) == ("at_most", 500.0)
+    assert (dist.op, dist.dist1_km, dist.dist2_km) == ("between", 5.0, 25.0)
+    assert (bearing.op, bearing.deg1, bearing.deg2) == ("between", 315.0, 45.0)
+    (dist,) = _filters("distance = 10")._filters
+    assert (dist.op, dist.dist1_km) == ("at_most", 10.0)
+
+
+def test_date_keys():
+    fs = _filters('hidden = {"2020-01-01", "2020-12-31"}, found_date = {"2026-01-01", nil}, '
+                  'last_gpx_update = {nil, "2026-09-01T18:30"}')
+    hidden, found, gpx = fs._filters
+    assert (hidden.field, hidden.op, str(hidden.date1), str(hidden.date2)) == \
+        ("hidden_date", "between", "2020-01-01", "2020-12-31")
+    assert (found.op, str(found.date1)) == ("on_or_after", "2026-01-01")
+    assert (gpx.field, gpx.op, gpx.date1) == ("last_gpx_update", "on_or_before",
+                                               datetime(2026, 9, 1, 18, 30))
+
+
+def test_text_keys_attributes_codes_and_mode():
+    fs = _filters('user_data2 = "solved", note = "x", placed_by = "P", text = "Brücke", '
+                  'attributes = {"Dogs", "-night cache", 13}, codes = {"gc1", "GC2"}, mode = "or"')
+    assert fs.mode == "OR"
+    names = [type(f).__name__ for f in fs._filters]
+    assert names == ["AttributeFilter"] * 3 + ["PlacedByFilter", "UserData2Filter",
+                                               "UserNoteFilter", "TextSearchFilter", "GcCodeFilter"]
+    assert [(f.attribute_id, f.is_on) for f in fs._filters[:3]] == [(1, True), (52, False), (13, True)]
+    assert (fs._filters[-1].op, fs._filters[-1].text) == ("in_list", "GC1;GC2")
+
+
+def test_near_point_and_owned():
+    from opensak.gui.settings import HomePoint, get_settings
+    settings = get_settings()
+    settings.home_points = [HomePoint("Cabin", 46.5, 7.5)]
+    settings.gc_username = "Me"
+    owned, near = _filters('near = { point = "Cabin", km = 3 }, owned = true')._filters
+    assert (near.lat, near.lon, near.op, near.dist1_km) == (46.5, 7.5, "at_most", 3.0)
+    assert (owned.text, owned.op) == ("Me", "equals")
+    (near,) = _filters("near = { lat = 47, lon = 8, km = 1 }")._filters
+    assert (near.lat, near.lon) == (47.0, 8.0)
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ("favorites = {}", "favorites must be a number or"),
+    ('hidden = "2020"', "hidden must be {from, to}"),
+    ('hidden = {"01.01.2020", nil}', 'dates must be "YYYY-MM-DD"'),
+    ("bearing = 45", "bearing must be {from, to}"),
+    ("corrected = 1", "corrected must be true or false"),
+    ('attributes = "Unicorns"', "unknown attribute 'Unicorns'"),
+    ('near = { point = "Nowhere", km = 1 }', "no centre point named 'Nowhere'"),
+    ("near = { lat = 47, lon = 8 }", "near needs km"),
+    ("owned = true", "username in Settings"),
+    ('mode = "XOR", found = true', 'mode must be "AND" or "OR"'),
+    ('polygon = "missing.kml"', "macro is not allowed|cannot read"),
+])
+def test_new_filter_keys_reject_bad_input(spec, msg):
+    with pytest.raises(MacroError, match=msg):
+        _filters(spec)
+
+
+def test_polygon_without_runtime_is_refused():
+    with pytest.raises(MacroError, match="only available in macros"):
+        build_filterset({"polygon": "area.kml"})
+
+
+def test_new_keys_select_caches_in_db(full_cache):
+    host = DbHost()
+    _, out = _run("""
+        print(opensak.filter{ codes = {"gcmac2", "GCMAC3", "GCNONE"} })
+        print(opensak.filter{ codes = {} })
+        print(opensak.filter{ user_flag = true }, opensak.filter{ premium = true })
+        print(opensak.filter{ mode = "OR", codes = {"GCMAC1"}, name = "All fields" })
+        print(opensak.filter{ near = { lat = 47.1, lon = 8.2, km = 1 } })
+        -- polygon tests the corrected coordinates (47.2, 8.3), as on the map
+        print(opensak.filter{ polygon = {{47.15, 8.25}, {47.25, 8.25}, {47.25, 8.35}, {47.15, 8.35}} })
+        print(opensak.filter{ hidden = {"2020-05-17", "2020-05-17"} })
+        print(opensak.filter{ text = "LONG" }, opensak.filter{ note = "my note" })
+        print(opensak.filter_name())
+    """, host)
+    assert out == ["2", "0", "1\t1", "2", "1", "1", "1", "1\t1", "Macro"]
+    assert host.selected == {"GCACC1"}
+
+
+def test_filter_name_is_the_label():
+    _, out = _run('print(opensak.filter_name()) opensak.filter{ found = true, label = "Mine" } '
+                  "print(opensak.filter_name())")
+    assert out == ["", "Mine"]
+
+
+def test_sort_reaches_host():
+    host, _ = _run('opensak.sort("difficulty", "DESC")')
+    assert (host.sort.field, host.sort.ascending) == ("difficulty", False)
+    host, _ = _run('opensak.sort("hidden")')
+    assert (host.sort.field, host.sort.ascending) == ("hidden_date", True)
+
+
+@pytest.mark.parametrize("call, msg", [
+    ('opensak.sort("elevation")', "cannot sort by 'elevation'"),
+    ("opensak.sort()", "cannot sort by None"),
+    ('opensak.sort("name", "down")', 'direction must be "asc" or "desc"'),
+])
+def test_sort_rejects_bad_input(call, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(call)
+
+
+def test_every_sort_key_is_a_sort_field():
+    from opensak.filters.engine import SORT_FIELDS
+    from opensak.macro.runtime import SORT_KEYS
+    assert set(SORT_KEYS.values()) <= set(SORT_FIELDS)

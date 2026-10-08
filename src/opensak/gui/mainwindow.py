@@ -3283,6 +3283,13 @@ class MainWindow(QMainWindow):
         """MacroHost: name of the active filter ("" = none)."""
         return self._active_filter_name
 
+    def set_sort(self, sort) -> None:
+        """MacroHost: sort the list like a column-header click. filtered_caches()
+        reads _current_sort, so the new order applies to it at once."""
+        self._current_sort = sort
+        self._save_sort_for_active_db()
+        self._cache_table.apply_sort(sort.field, sort.ascending)
+
     def database_name(self) -> str:
         """MacroHost: name of the active database."""
         from opensak.export.file_export import active_database_name
