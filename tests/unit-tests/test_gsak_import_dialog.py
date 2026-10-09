@@ -845,3 +845,39 @@ class TestGsakImportDialogLocations:
         dlg._filters_cb.setChecked(False)
         _run(dlg, qtbot)
         assert "gsak_location_import_failed" in dlg._log.toPlainText()
+
+    def test_picking_gsak_db3_itself_imports_only_its_locations(
+            self, dlg, manager, tmp_path, qtbot, monkeypatch, auto_location_import):
+        # The crash reported on #1001: gsak.db3 was queued as a cache
+        # database and the notes pre-scan died on the missing CacheMemo.
+        from opensak.gui.settings import get_settings
+        monkeypatch.setattr(dlg, "_run_filter_import", lambda p: None)
+        settings_db = tmp_path / "gsak" / "gsak.db3"
+        settings_db.parent.mkdir(parents=True)
+        conn = sqlite3.connect(settings_db)
+        conn.execute("CREATE TABLE Settings (Type TEXT, Description TEXT, Data TEXT)")
+        conn.execute("INSERT INTO Settings VALUES ('LO', 'Location', 'Zurich,47.37, 8.54')")
+        conn.commit()
+        conn.close()
+        known = [db.name for db in manager.databases]
+
+        dlg.set_path(settings_db)
+        assert dlg._table.rowCount() == 0
+        assert not dlg._locations_cb.isHidden() and dlg._import_btn.isEnabled()
+        _run(dlg, qtbot)
+
+        assert [p.name for p in get_settings().home_points] == ["Zurich"]
+        assert [db.name for db in manager.databases] == known   # nothing created
+        assert settings_db.exists()                               # user's file kept
+
+    def test_foreign_db3_is_reported_not_crashing(self, dlg, tmp_path, qtbot, monkeypatch):
+        monkeypatch.setattr(gdlg, "tr", lambda key, **kw: key)
+        other = tmp_path / "data" / "Odd" / "sqlite.db3"
+        other.parent.mkdir(parents=True)
+        conn = sqlite3.connect(other)
+        conn.execute("CREATE TABLE Something (x)")
+        conn.commit()
+        conn.close()
+        dlg.set_path(other)
+        _run(dlg, qtbot)
+        assert "import_failed" in dlg._log.toPlainText()

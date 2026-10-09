@@ -305,7 +305,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Před čárkou chybí název",
     "gsak_location_import_error_no_coord": "Za názvem chybí souřadnice",
     "gsak_location_import_error_bad_coord": "Neplatné souřadnice",
-    "gsak_location_import_error_reserved": "Název ★ Home je vyhrazen",
     "gsak_location_import_error_duplicate": "Název je již použit na dřívějším řádku",
     "gsak_location_import_existing_title": "Existující uživatelská místa",
     "gsak_location_import_existing_body": "Tato uživatelská místa již v OpenSAK existují:\n\n{names}\n\nPřepsat: nahradit jejich souřadnice souřadnicemi z GSAK.\nPřeskočit: ponechat místa v OpenSAK beze změny.",

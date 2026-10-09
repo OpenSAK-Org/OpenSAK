@@ -305,7 +305,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Inget namn före kommatecknet",
     "gsak_location_import_error_no_coord": "Inga koordinater efter namnet",
     "gsak_location_import_error_bad_coord": "Ogiltiga koordinater",
-    "gsak_location_import_error_reserved": "Namnet ★ Home är reserverat",
     "gsak_location_import_error_duplicate": "Namnet används redan på en tidigare rad",
     "gsak_location_import_existing_title": "Befintliga användarplatser",
     "gsak_location_import_existing_body": "Dessa användarplatser finns redan i OpenSAK:\n\n{names}\n\nSkriv över: ersätt deras koordinater med dem från GSAK.\nHoppa över: behåll OpenSAK-platserna oförändrade.",

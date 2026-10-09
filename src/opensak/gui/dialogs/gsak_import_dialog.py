@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -799,7 +800,14 @@ class GsakImportDialog(QDialog):
             return "continue"
         from opensak.importer.gsak_importer import scan_gsak_notes_for_embedded_images
 
-        scan = scan_gsak_notes_for_embedded_images(db3_path)
+        try:
+            scan = scan_gsak_notes_for_embedded_images(db3_path)
+        except sqlite3.Error:
+            # Not a GSAK cache database after all (no CacheMemo, …): nothing
+            # to warn about — the import itself reports the error and the
+            # run goes on with the next database.
+            logger.warning("GSAK import: pre-scan failed for %s", db3_path, exc_info=True)
+            return "continue"
         if not scan["affected_notes"]:
             return "continue"
 

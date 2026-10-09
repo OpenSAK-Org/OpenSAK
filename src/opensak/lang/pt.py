@@ -305,7 +305,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Sem nome antes da vírgula",
     "gsak_location_import_error_no_coord": "Sem coordenadas depois do nome",
     "gsak_location_import_error_bad_coord": "Coordenadas inválidas",
-    "gsak_location_import_error_reserved": "O nome ★ Home está reservado",
     "gsak_location_import_error_duplicate": "Nome já usado numa linha anterior",
     "gsak_location_import_existing_title": "Localizações de utilizador existentes",
     "gsak_location_import_existing_body": "Estas localizações de utilizador já existem no OpenSAK:\n\n{names}\n\nSubstituir: trocar as coordenadas pelas do GSAK.\nIgnorar: manter as localizações do OpenSAK inalteradas.",

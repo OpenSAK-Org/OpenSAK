@@ -38,7 +38,7 @@ _ERROR_KEYS = {
     ERROR_NO_NAME:   "gsak_location_import_error_no_name",
     ERROR_NO_COORD:  "gsak_location_import_error_no_coord",
     ERROR_BAD_COORD: "gsak_location_import_error_bad_coord",
-    ERROR_RESERVED:  "gsak_location_import_error_reserved",
+    ERROR_RESERVED:  "settings_hp_home_protected_hint",
     ERROR_DUPLICATE: "gsak_location_import_error_duplicate",
 }
 
