@@ -111,6 +111,31 @@ class TestListBackup:
         db.write_bytes(b"x")
         assert list_gsak_backup(db).databases[0].name == "Export"
 
+    def test_single_gsak_db3_is_the_settings_database(self, tmp_path):
+        # #1001: picking gsak.db3 itself must not queue it as a cache database.
+        settings = tmp_path / "gsak" / "gsak.db3"
+        settings.parent.mkdir(parents=True)
+        settings.write_bytes(b"s")
+        contents = list_gsak_backup(settings)
+        assert contents.databases == []
+        assert contents.settings_path == settings
+
+    def test_renamed_settings_database_is_recognised_by_its_tables(self, tmp_path):
+        import sqlite3
+        settings = tmp_path / "gsak-copy.db3"
+        conn = sqlite3.connect(settings)
+        conn.execute("CREATE TABLE Settings (Type TEXT, Description TEXT, Data TEXT)")
+        conn.commit()
+        conn.close()
+        contents = list_gsak_backup(settings)
+        assert contents.databases == []
+        assert contents.settings_path == settings
+
+    def test_real_cache_database_stays_a_database(self, tmp_path):
+        db = _make_gsak_db(tmp_path / "Export.db3", caches=[{"Code": "GC1"}])
+        contents = list_gsak_backup(db)
+        assert [d.name for d in contents.databases] == ["Export"]
+
 
 # ── Unpacking ────────────────────────────────────────────────────────────────
 

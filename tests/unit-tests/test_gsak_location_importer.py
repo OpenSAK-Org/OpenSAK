@@ -67,7 +67,7 @@ class TestParse:
         assert (loc.lat, loc.lon) == pytest.approx((32.7123, -101.2045))
 
     def test_dmm_with_hemisphere_letters(self):
-        (loc,) = parse_gsak_locations("Home, S32 25.921  E 115 47.050")
+        (loc,) = parse_gsak_locations("Perth, S32 25.921  E 115 47.050")
         assert loc.valid
         assert loc.lat == pytest.approx(-(32 + 25.921 / 60))
 
@@ -101,6 +101,10 @@ class TestParse:
         ("Nowhere, 123 abc", gli.ERROR_BAD_COORD),
         ("Nowhere, 95.0, 8.5", gli.ERROR_BAD_COORD),
         ("★ Home, 47.1, 8.5", gli.ERROR_RESERVED),
+        ("Home, 47.1, 8.5", gli.ERROR_RESERVED),
+        ("home, 47.1, 8.5", gli.ERROR_RESERVED),
+        ("HOME, 47.1, 8.5", gli.ERROR_RESERVED),
+        ("  ★home , 47.1, 8.5", gli.ERROR_RESERVED),
     ])
     def test_invalid_lines_are_kept_with_reason(self, line, error):
         (loc,) = parse_gsak_locations(line)
@@ -113,7 +117,11 @@ class TestParse:
         assert locs[0].lat == pytest.approx(47.1)
 
     def test_names_are_case_sensitive(self):
-        locs = parse_gsak_locations("Home, 47.1, 8.5\nhome, 46.0, 7.0")
+        locs = parse_gsak_locations("Work, 47.1, 8.5\nwork, 46.0, 7.0")
+        assert all(l.valid for l in locs)
+
+    def test_names_merely_containing_home_are_fine(self):
+        locs = parse_gsak_locations("Home 2, 47.1, 8.5\nMy Home, 46.0, 7.0")
         assert all(l.valid for l in locs)
 
 
@@ -200,7 +208,8 @@ class TestApply:
 
     def test_home_point_is_never_stored(self, settings):
         settings.gc_home_location = "N55 47.250 E012 25.000"
-        apply_locations(parse_gsak_locations("★ Home, 1.0, 2.0\nA, 1.0, 2.0"),
+        apply_locations(parse_gsak_locations("★ Home, 1.0, 2.0\nHome, 3.0, 4.0\n"
+                                             "A, 1.0, 2.0"),
                         overwrite=True)
         from opensak import settings_store
         stored = settings_store.get_store().get("homepoints.list")

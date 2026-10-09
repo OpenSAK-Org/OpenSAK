@@ -307,7 +307,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Brak nazwy przed przecinkiem",
     "gsak_location_import_error_no_coord": "Brak współrzędnych po nazwie",
     "gsak_location_import_error_bad_coord": "Nieprawidłowe współrzędne",
-    "gsak_location_import_error_reserved": "Nazwa ★ Home jest zarezerwowana",
     "gsak_location_import_error_duplicate": "Nazwa użyta już we wcześniejszym wierszu",
     "gsak_location_import_existing_title": "Istniejące lokalizacje użytkownika",
     "gsak_location_import_existing_body": "Te lokalizacje użytkownika już istnieją w OpenSAK:\n\n{names}\n\nZastąp: zamień ich współrzędne na te z GSAK.\nPomiń: pozostaw lokalizacje OpenSAK bez zmian.",

@@ -36,6 +36,15 @@ from typing import Optional
 # in the location list, so an imported location can't take its name.
 HOME_NAME = "★ Home"
 
+
+def is_home_name(name: str) -> bool:
+    """True for any spelling of the home point: "Home", "HOME", "★ home", …
+
+    GSAK's own "Home" location would otherwise become a second home next to
+    ★ Home, which only the Geocaching profile sets.
+    """
+    return name.replace("★", "").strip().casefold() == "home"
+
 # Why a line can't be imported (see GsakLocation.error)
 ERROR_NO_NAME = "no_name"
 ERROR_NO_COORD = "no_coord"
@@ -127,7 +136,7 @@ def parse_gsak_locations(text: str) -> list[GsakLocation]:
         loc.name, loc.coord_text = name.strip(), coord.strip()
         if not loc.name:
             loc.error = ERROR_NO_NAME
-        elif loc.name == HOME_NAME:
+        elif is_home_name(loc.name):
             loc.error = ERROR_RESERVED
         elif loc.name in seen:
             loc.error = ERROR_DUPLICATE

@@ -308,7 +308,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Geen naam vóór de komma",
     "gsak_location_import_error_no_coord": "Geen coördinaten na de naam",
     "gsak_location_import_error_bad_coord": "Ongeldige coördinaten",
-    "gsak_location_import_error_reserved": "De naam ★ Home is gereserveerd",
     "gsak_location_import_error_duplicate": "Naam al gebruikt op een eerdere regel",
     "gsak_location_import_existing_title": "Bestaande gebruikerslocaties",
     "gsak_location_import_existing_body": "Deze gebruikerslocaties bestaan al in OpenSAK:\n\n{names}\n\nOverschrijven: hun coördinaten vervangen door die uit GSAK.\nOverslaan: de OpenSAK-locaties ongewijzigd laten.",

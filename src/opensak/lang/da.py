@@ -305,7 +305,6 @@ STRINGS: dict[str, str] = {
     "gsak_location_import_error_no_name": "Intet navn før kommaet",
     "gsak_location_import_error_no_coord": "Ingen koordinater efter navnet",
     "gsak_location_import_error_bad_coord": "Ugyldige koordinater",
-    "gsak_location_import_error_reserved": "Navnet ★ Home er reserveret",
     "gsak_location_import_error_duplicate": "Navnet er allerede brugt på en tidligere linje",
     "gsak_location_import_existing_title": "Eksisterende brugerlokationer",
     "gsak_location_import_existing_body": "Disse brugerlokationer findes allerede i OpenSAK:\n\n{names}\n\nOverskriv: erstat deres koordinater med dem fra GSAK.\nSpring over: behold OpenSAK-lokationerne uændret.",
