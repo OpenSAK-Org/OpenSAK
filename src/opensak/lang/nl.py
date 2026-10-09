@@ -106,6 +106,7 @@ STRINGS: dict[str, str] = {
     "macro_example_keep":           "Mijn kopie openen",
     "macro_example_restore":        "Origineel herstellen",
     "macro_done":                   "Macro voltooid.",
+    "macro_done_code":              "Macro voltooid (afsluitcode {code}).",
     "macro_error":                  "Macrofout: {msg}",
     "macro_access_title":           "Bestandstoegang van macro",
     "macro_access_read":            "De actieve macro wil dit bestand lezen:\n\n{path}\n\nMag de macro bestanden in deze map lezen?\n\n{folder}",

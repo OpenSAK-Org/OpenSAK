@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "macro_example_keep":           "Otevřít mou kopii",
     "macro_example_restore":        "Obnovit originál",
     "macro_done":                   "Makro dokončeno.",
+    "macro_done_code":              "Makro dokončeno (kód ukončení {code}).",
     "macro_error":                  "Chyba makra: {msg}",
     "macro_access_title":           "Přístup makra k souborům",
     "macro_access_read":            "Spuštěné makro chce číst tento soubor:\n\n{path}\n\nPovolit makru číst soubory v této složce?\n\n{folder}",
