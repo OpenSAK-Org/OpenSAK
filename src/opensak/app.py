@@ -401,6 +401,17 @@ def main() -> None:
         sys.exit(1)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
 
+    # #1012: keep the LuaLS stub and .luarc.json in the macros folder
+    # current, so an external editor completes opensak.* after an update.
+    import opensak.utils.flags as flags
+    if flags.lua_macros:
+        from opensak.macro.editor_support import install_editor_support
+        try:
+            install_editor_support()
+        except OSError:
+            logger.warning("startup: could not install macro editor support",
+                           exc_info=True)
+
     # Opret hovedvindue
     splash_msg("Starter OpenSAK...")
     logger.info("startup: building main window (+%.2fs)", time.monotonic() - _startup_t0)
