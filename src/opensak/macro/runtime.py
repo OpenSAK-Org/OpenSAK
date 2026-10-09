@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import csv
 import io
+import locale
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -161,6 +162,25 @@ EXPORT_KEYS = frozenset({
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
+
+
+
+@contextmanager
+def _c_numeric_locale() -> Iterator[None]:
+    """Keep LC_NUMERIC at "C" while a macro runs (#1015).
+
+    Lua turns numbers into text (tostring, "..", string.format) with the C
+    library, which follows LC_NUMERIC. Qt sets the locale from the system,
+    so on e.g. a Danish or German system 2.5 would become "2,5". Qt and
+    Python do their own number formatting and are not affected.
+    """
+    previous = locale.setlocale(locale.LC_NUMERIC)
+    locale.setlocale(locale.LC_NUMERIC, "C")
+    try:
+        yield
+    finally:
+        locale.setlocale(locale.LC_NUMERIC, previous)
+
 
 _TEXT_FILTERS = {
     "name": NameFilter,
@@ -1702,6 +1722,10 @@ class MacroRuntime:
         given to opensak.read_csv() are looked up; the macros folder
         otherwise.
         """
+        with _c_numeric_locale():
+            self._run(source, chunk_name, base_dir)
+
+    def _run(self, source: str, chunk_name: str, base_dir: Optional[Path]) -> None:
         self._base_dir = base_dir
         self._run_permissions = (
             list(self._folder_permissions)

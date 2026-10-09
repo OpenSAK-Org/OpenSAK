@@ -118,6 +118,37 @@ def _run(source, host=None, **kwargs):
     return host, out
 
 
+@pytest.fixture
+def comma_locale():
+    """Switch LC_NUMERIC to a decimal-comma locale, as Qt does on such systems."""
+    import locale
+    previous = locale.setlocale(locale.LC_NUMERIC)
+    for name in ("da_DK.UTF-8", "de_DE.UTF-8", "fr_FR.UTF-8", "da_DK", "de_DE",
+                 "German_Germany.1252", "Danish_Denmark.1252"):
+        try:
+            locale.setlocale(locale.LC_NUMERIC, name)
+        except locale.Error:
+            continue
+        if locale.localeconv()["decimal_point"] == ",":
+            break
+    else:
+        locale.setlocale(locale.LC_NUMERIC, previous)
+        pytest.skip("no decimal-comma locale installed")
+    yield
+    locale.setlocale(locale.LC_NUMERIC, previous)
+
+
+def test_numbers_use_decimal_point_on_comma_locale(comma_locale):
+    import locale
+    before = locale.setlocale(locale.LC_NUMERIC)
+    _, out = _run(
+        'print(tostring(2.0) .. "/" .. 3.5 .. " " .. string.format("%.2f", 55.5)'
+        ' .. " " .. tonumber("1.25"))'
+    )
+    assert out == ["2.0/3.5 55.50 1.25"]
+    assert locale.setlocale(locale.LC_NUMERIC) == before    # restored after the run
+
+
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
 
 def test_build_filterset_maps_keys():

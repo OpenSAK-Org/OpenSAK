@@ -2,6 +2,7 @@
 app.py — Application entry point for OpenSAK.
 """
 
+import locale
 import logging
 import sys
 import time
@@ -252,6 +253,9 @@ def main() -> None:
     )
 
     app = QApplication(sys.argv)
+    # #1015: QApplication sets the C locale from the system; keep numbers in
+    # C library formatting (e.g. Lua macros) with a decimal point.
+    locale.setlocale(locale.LC_NUMERIC, "C")
     app.setWindowIcon(get_app_icon())
     app.setApplicationName("OpenSAK")
     from opensak import __version__ as _ver
