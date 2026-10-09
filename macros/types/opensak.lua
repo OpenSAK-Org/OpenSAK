@@ -23,6 +23,11 @@
 ---@class opensak.CachesSpec: opensak.FilterSpec
 ---@field fields? string[] Cache fields to load (`code` is always included).
 
+---Options of `opensak.move_caches()` and `opensak.copy_caches()`.
+---@class opensak.TransferOptions
+---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
+---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").
+
 ---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).
 ---@class opensak.Cache
 ---@field code string GC code, e.g. "GC12345".
@@ -255,6 +260,88 @@ function opensak.tables() end
 ---@param table string Table or view name.
 ---@return {name: string, type: string}[] # Column names and SQL types, in table order.
 function opensak.columns(table) end
+
+---All databases in OpenSAK's database list, sorted by name.
+---
+---Since API version 2.
+---
+---```lua
+---for _, db in ipairs(opensak.databases()) do
+---    print(db.name, db.active and "(active)" or "", db.size_mb .. " MB")
+---end
+---```
+---@return {name: string, path: string, active: boolean, size_mb: number}[] # One table per database.
+function opensak.databases() end
+
+---The name of the active database.
+---
+---Since API version 2.
+---
+---```lua
+---print("Working on " .. opensak.database())
+---```
+---@return string # Database name.
+function opensak.database() end
+
+---Whether a database with this name is in the database list (exact, case-sensitive match).
+---
+---Since API version 2.
+---
+---```lua
+---if not opensak.database_exists("CH_Zurich") then
+---    opensak.create_database("CH_Zurich")
+---end
+---```
+---@param name string Database name.
+---@return boolean # true if it exists.
+function opensak.database_exists(name) end
+
+---Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists.
+---
+---Since API version 2.
+---
+---```lua
+---local name = opensak.create_database("CH_Zurich")
+---```
+---@param name string Name of the new database.
+---@return string # The name actually used (surrounding spaces removed).
+function opensak.create_database(name) end
+
+---Make another database the active one, as the toolbar dropdown does. The active filter is cleared.
+---
+---Since API version 2.
+---
+---```lua
+---opensak.switch_database("CH_Zurich")
+---print(opensak.count() .. " caches in " .. opensak.database())
+---```
+---@param name string Database name.
+function opensak.switch_database(name) end
+
+---Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database.
+---
+---Since API version 2.
+---
+---```lua
+---local n = opensak.move_caches("CH_Zurich")
+---print(n .. " caches moved")
+---```
+---@param target string Name of the target database (not the active one).
+---@param options? opensak.TransferOptions codes, if_exists.
+---@return integer # Number of caches moved.
+function opensak.move_caches(target, options) end
+
+---Like opensak.move_caches(), but the caches stay in the active database.
+---
+---Since API version 2.
+---
+---```lua
+---local n = opensak.copy_caches("CH_Zurich", { codes = {"GC1", "GC2"}, if_exists = "replace" })
+---```
+---@param target string Name of the target database (not the active one).
+---@param options? opensak.TransferOptions codes, if_exists.
+---@return integer # Number of caches copied.
+function opensak.copy_caches(target, options) end
 
 ---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
 ---

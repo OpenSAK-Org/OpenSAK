@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal
 
+from opensak.db.transfer import transfer_caches
 from opensak.lang import tr
 
 
@@ -44,181 +45,15 @@ class _MoveWorker(QThread):
         self.copy_only = copy_only
 
     def run(self) -> None:
-        from opensak.db.database import session_for
-        from opensak.db.models import (
-            Cache, Log, Attribute, Trackable, Waypoint, UserNote,
-        )
-        from sqlalchemy.orm import joinedload, selectinload
-
-        # Both databases get private sessions (session_for) — the app-wide
-        # engine is never swapped from this thread, so the GUI thread keeps
-        # reading the active database while the move runs.
         try:
-            # ── 1. Load full caches from source DB ────────────────────────
-            cache_snapshots = []
-            with session_for(self.source_db_path) as session:
-                caches = (
-                    session.query(Cache)
-                    .options(
-                        selectinload(Cache.logs),
-                        selectinload(Cache.attributes),
-                        selectinload(Cache.waypoints),
-                        selectinload(Cache.trackables),
-                        joinedload(Cache.user_note),
-                    )
-                    .filter(Cache.gc_code.in_(self.gc_codes))
-                    .all()
-                )
-                # Snapshot all data while session is open
-                for c in caches:
-                    snap = _snapshot_cache(c)
-                    cache_snapshots.append(snap)
-
-            if not cache_snapshots:
-                self.finished.emit(0)
-                return
-
-            # ── 2. Insert into target DB ──────────────────────────────────
-            with session_for(self.target_db_path) as session:
-                for snap in cache_snapshots:
-                    _insert_snapshot(session, snap)
-
-            # ── 3. Delete from source DB (move only) ──────────────────
-            if not self.copy_only:
-                with session_for(self.source_db_path) as session:
-                    cache_ids = [
-                        row[0]
-                        for row in session.query(Cache.id)
-                        .filter(Cache.gc_code.in_(self.gc_codes))
-                        .all()
-                    ]
-                    if cache_ids:
-                        session.query(Log).filter(
-                            Log.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                        session.query(Attribute).filter(
-                            Attribute.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                        session.query(Trackable).filter(
-                            Trackable.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                        session.query(Waypoint).filter(
-                            Waypoint.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                        session.query(UserNote).filter(
-                            UserNote.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                        session.query(Cache).filter(
-                            Cache.id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-
-            self.finished.emit(len(cache_snapshots))
-
+            count = transfer_caches(
+                self.gc_codes, self.source_db_path, self.target_db_path,
+                copy_only=self.copy_only,
+            )
         except Exception as exc:
             self.error.emit(str(exc))
-
-
-def _snapshot_cache(cache) -> dict:
-    """Extract all cache data into a plain dict while the session is open."""
-    snap: dict = {}
-
-    # Scalar columns (skip id and relationships)
-    for col in cache.__table__.columns:
-        if col.name == "id":
-            continue
-        snap[col.name] = getattr(cache, col.name)
-
-    # Child records
-    snap["_logs"] = []
-    for log in (cache.logs or []):
-        d = {}
-        for col in log.__table__.columns:
-            if col.name in ("id", "cache_id"):
-                continue
-            d[col.name] = getattr(log, col.name)
-        snap["_logs"].append(d)
-
-    snap["_attributes"] = []
-    for attr in (cache.attributes or []):
-        d = {}
-        for col in attr.__table__.columns:
-            if col.name in ("id", "cache_id"):
-                continue
-            d[col.name] = getattr(attr, col.name)
-        snap["_attributes"].append(d)
-
-    snap["_trackables"] = []
-    for tb in (cache.trackables or []):
-        d = {}
-        for col in tb.__table__.columns:
-            if col.name in ("id", "cache_id"):
-                continue
-            d[col.name] = getattr(tb, col.name)
-        snap["_trackables"].append(d)
-
-    snap["_waypoints"] = []
-    for wp in (cache.waypoints or []):
-        d = {}
-        for col in wp.__table__.columns:
-            if col.name in ("id", "cache_id"):
-                continue
-            d[col.name] = getattr(wp, col.name)
-        snap["_waypoints"].append(d)
-
-    snap["_user_note"] = None
-    if cache.user_note:
-        d = {}
-        for col in cache.user_note.__table__.columns:
-            if col.name in ("id", "cache_id"):
-                continue
-            d[col.name] = getattr(cache.user_note, col.name)
-        snap["_user_note"] = d
-
-    return snap
-
-
-def _insert_snapshot(session, snap: dict) -> None:
-    """Insert a snapshot dict into the current session's database.
-
-    If a cache with the same gc_code already exists in the target, it is
-    replaced (all child records are deleted first).
-    """
-    from opensak.db.models import (
-        Cache, Log, Attribute, Trackable, Waypoint, UserNote,
-    )
-
-    gc_code = snap["gc_code"]
-
-    # Remove existing cache with same gc_code (if any)
-    existing = session.query(Cache).filter_by(gc_code=gc_code).first()
-    if existing:
-        session.delete(existing)
-        session.flush()
-
-    # Build new Cache from scalar columns
-    cache_data = {k: v for k, v in snap.items() if not k.startswith("_")}
-    new_cache = Cache(**cache_data)
-    session.add(new_cache)
-    session.flush()  # assigns new_cache.id
-
-    # Child records
-    for log_data in snap["_logs"]:
-        # Clear log_id to avoid unique constraint conflicts
-        log_data_copy = dict(log_data)
-        log_data_copy.pop("log_id", None)
-        session.add(Log(cache_id=new_cache.id, **log_data_copy))
-
-    for attr_data in snap["_attributes"]:
-        session.add(Attribute(cache_id=new_cache.id, **attr_data))
-
-    for tb_data in snap["_trackables"]:
-        session.add(Trackable(cache_id=new_cache.id, **tb_data))
-
-    for wp_data in snap["_waypoints"]:
-        session.add(Waypoint(cache_id=new_cache.id, **wp_data))
-
-    if snap["_user_note"]:
-        session.add(UserNote(cache_id=new_cache.id, **snap["_user_note"]))
+            return
+        self.finished.emit(count)
 
 
 class MoveCachesDialog(QDialog):

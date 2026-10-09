@@ -28,6 +28,13 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.sql_each`](#opensaksqleach) | 2 |
 | [`opensak.tables`](#opensaktables) | 2 |
 | [`opensak.columns`](#opensakcolumns) | 2 |
+| [`opensak.databases`](#opensakdatabases) | 2 |
+| [`opensak.database`](#opensakdatabase) | 2 |
+| [`opensak.database_exists`](#opensakdatabaseexists) | 2 |
+| [`opensak.create_database`](#opensakcreatedatabase) | 2 |
+| [`opensak.switch_database`](#opensakswitchdatabase) | 2 |
+| [`opensak.move_caches`](#opensakmovecaches) | 2 |
+| [`opensak.copy_caches`](#opensakcopycaches) | 2 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
@@ -393,6 +400,158 @@ Example:
 
 ```lua
 for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end
+```
+
+### opensak.databases
+
+```lua
+opensak.databases()
+```
+
+All databases in OpenSAK's database list, sorted by name.
+
+Returns `{name: string, path: string, active: boolean, size_mb: number}[]` — One table per database.
+
+Since API version 2.
+
+Example:
+
+```lua
+for _, db in ipairs(opensak.databases()) do
+    print(db.name, db.active and "(active)" or "", db.size_mb .. " MB")
+end
+```
+
+### opensak.database
+
+```lua
+opensak.database()
+```
+
+The name of the active database.
+
+Returns `string` — Database name.
+
+Since API version 2.
+
+Example:
+
+```lua
+print("Working on " .. opensak.database())
+```
+
+### opensak.database_exists
+
+```lua
+opensak.database_exists(name)
+```
+
+Whether a database with this name is in the database list (exact, case-sensitive match).
+
+Parameters:
+
+- `name` (`string`) — Database name.
+
+Returns `boolean` — true if it exists.
+
+Since API version 2.
+
+Example:
+
+```lua
+if not opensak.database_exists("CH_Zurich") then
+    opensak.create_database("CH_Zurich")
+end
+```
+
+### opensak.create_database
+
+```lua
+opensak.create_database(name)
+```
+
+Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists.
+
+Parameters:
+
+- `name` (`string`) — Name of the new database.
+
+Returns `string` — The name actually used (surrounding spaces removed).
+
+Since API version 2.
+
+Example:
+
+```lua
+local name = opensak.create_database("CH_Zurich")
+```
+
+### opensak.switch_database
+
+```lua
+opensak.switch_database(name)
+```
+
+Make another database the active one, as the toolbar dropdown does. The active filter is cleared.
+
+Parameters:
+
+- `name` (`string`) — Database name.
+
+Since API version 2.
+
+Example:
+
+```lua
+opensak.switch_database("CH_Zurich")
+print(opensak.count() .. " caches in " .. opensak.database())
+```
+
+### opensak.move_caches
+
+```lua
+opensak.move_caches(target [, options])
+```
+
+Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database.
+
+Parameters:
+
+- `target` (`string`) — Name of the target database (not the active one).
+- `options` (`opensak.TransferOptions`, optional) — codes, if_exists.
+
+Returns `integer` — Number of caches moved.
+
+Since API version 2.
+
+Example:
+
+```lua
+local n = opensak.move_caches("CH_Zurich")
+print(n .. " caches moved")
+```
+
+### opensak.copy_caches
+
+```lua
+opensak.copy_caches(target [, options])
+```
+
+Like opensak.move_caches(), but the caches stay in the active database.
+
+Parameters:
+
+- `target` (`string`) — Name of the target database (not the active one).
+- `options` (`opensak.TransferOptions`, optional) — codes, if_exists.
+
+Returns `integer` — Number of caches copied.
+
+Since API version 2.
+
+Example:
+
+```lua
+local n = opensak.copy_caches("CH_Zurich", { codes = {"GC1", "GC2"}, if_exists = "replace" })
 ```
 
 ### opensak.set_corrected

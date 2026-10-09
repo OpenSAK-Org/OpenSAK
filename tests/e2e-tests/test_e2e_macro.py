@@ -80,6 +80,35 @@ def test_macro_export_file_writes_caches_of_active_filter(seeded_window, tmp_pat
     assert codes and all(code in content for code in codes)
 
 
+def test_macro_moves_caches_and_switches_database(seeded_window, monkeypatch):
+    import opensak.db.manager as mgr_module
+    from opensak.db.manager import DatabaseManager
+    from tests.data import wait_for_refresh
+
+    # A real manager (the fixture's stand-in cannot create or switch).
+    manager = DatabaseManager()
+    active = manager.add_existing(mgr_module.get_db_manager().active_path, "E2ETest")
+    manager.switch_to(active)
+    monkeypatch.setattr(mgr_module, "_manager", manager)
+    window = seeded_window
+    total = window._cache_table.row_count()
+    code = window._cache_table._model.cache_at(0).gc_code
+
+    out = _run_macro(window, f"""
+        opensak.create_database("Archive")
+        local n = opensak.move_caches("Archive", {{ codes = {{ "{code}" }} }})
+        print(n, opensak.count())
+        opensak.switch_database("Archive")
+        print(opensak.database(), opensak.count(), opensak.codes()[1])
+    """)
+    wait_for_refresh(window)
+
+    assert out.splitlines()[:2] == [f"1\t{total - 1}", f"Archive\t1\t{code}"]
+    assert manager.active.name == "Archive"
+    assert window._db_combo.currentText() == "Archive"
+    assert window._cache_table.row_count() == 1
+
+
 
 
 @pytest.fixture
