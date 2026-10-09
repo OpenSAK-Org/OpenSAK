@@ -1183,6 +1183,61 @@ class TestBulkAndFlags:
         self._flag(seeded_window, "GC12345")
         seeded_window._on_flags_changed()
 
+    # Issue #293: set/clear the flag on every cache in the active filter.
+
+    def _flagged_codes(self):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+        with get_session() as s:
+            return {c.gc_code for c in s.query(Cache).filter(Cache.user_flag == True)}  # noqa: E712
+
+    def _all_codes(self):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+        with get_session() as s:
+            return {c.gc_code for c in s.query(Cache)}
+
+    def test_flag_all_in_filter_confirmed(self, seeded_window, mbox_yes):
+        seeded_window._set_flag_for_filtered(True)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == self._all_codes()
+        table = seeded_window._cache_table
+        assert len(table.get_flagged_caches()) == table.row_count() > 0
+
+    def test_flag_all_in_filter_declined(self, seeded_window, mbox_no):
+        seeded_window._set_flag_for_filtered(True)
+        assert self._flagged_codes() == set()
+
+    def test_flag_only_touches_caches_in_filter(self, seeded_window, mbox_yes):
+        # Narrow the grid to one cache: only that one gets the flag.
+        from opensak.filters.engine import FilterSet, GcCodeFilter
+        seeded_window._current_filterset = FilterSet().add(GcCodeFilter("GC12345", "equals"))
+        seeded_window._refresh_cache_list()
+        wait_for_refresh(seeded_window)
+        assert seeded_window._cache_table.row_count() == 1
+        seeded_window._set_flag_for_filtered(True)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == {"GC12345"}
+
+    def test_unflag_all_in_filter_confirmed(self, seeded_window, mbox_yes):
+        self._flag(seeded_window, "GC12345")
+        seeded_window._set_flag_for_filtered(False)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == set()
+
+    def test_flag_all_in_filter_empty(self, empty_window, mbox_ok):
+        empty_window._set_flag_for_filtered(True)  # info, returns
+
+    def test_user_flags_submenu_actions(self, seeded_window):
+        # Uses the window's own reference: QAction.menu() hands back a
+        # wrapper that can delete the C++ menu when it is garbage-collected.
+        from opensak.lang import tr
+        menu = seeded_window._user_flags_menu
+        assert menu.title() == tr("menu_user_flags")
+        texts = [a.text() for a in menu.actions() if not a.isSeparator()]
+        assert texts == [tr("action_flag_filtered"), tr("action_unflag_filtered"),
+                         tr("action_clear_flags")]
+
 
 # ── sort save/load ────────────────────────────────────────────────────────────
 

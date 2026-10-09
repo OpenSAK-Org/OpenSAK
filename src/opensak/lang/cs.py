@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Smazat označené keše…",
     "action_delete_filtered":       "🗑️  Smazat všechny keše ve filtru…",
-    "action_clear_flags":           "Odebrat všechny příznaky",
+    "menu_user_flags":              "🚩  Uživatelské příznaky",
+    "action_flag_filtered":         "Nastavit příznak u všech kešů ve filtru…",
+    "action_unflag_filtered":       "Odebrat příznak u všech kešů ve filtru…",
+    "action_clear_flags":           "Odebrat všechny příznaky v databázi…",
 
     # View menu
     "action_refresh":               "&Obnovit seznam",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Keš {gc_code} smazána",
     "status_deleted_count":         "{count} kešů smazáno",
     "status_flags_cleared":         "Všechny příznaky odebrány",
+    "status_flags_set":             "Příznak nastaven u {count} kešů",
+    "status_flags_unset":           "Příznak odebrán u {count} kešů",
     "status_flagged_count":         "{flagged} z {total} kešů označeno",
     "status_db_name":               "Databáze: {db_name}",
     "status_refresh_failed":        "Nepodařilo se obnovit seznam kešek",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Žádné keše v aktivním filtru.",
     "delete_filtered_msg":          "Opravdu chcete smazat VŠECHNY {count} keše ve filtru?\nTuto akci nelze vrátit.",
     "clear_flags_msg":              "Odebrat příznaky ze všech kešů v aktivní databázi?",
+    "flag_filtered_msg":            "Nastavit příznak u všech {count} kešů ve filtru?",
+    "unflag_filtered_msg":          "Odebrat příznak u všech {count} kešů ve filtru?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Import GPX / PQ Zip",

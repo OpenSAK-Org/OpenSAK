@@ -71,7 +71,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Gemarkeerde caches verwijderen…",
     "action_delete_filtered":       "🗑️  Alle caches in filter verwijderen…",
-    "action_clear_flags":           "Alle markeringen wissen",
+    "menu_user_flags":              "🚩  Gebruikersmarkeringen",
+    "action_flag_filtered":         "Alle caches in filter markeren…",
+    "action_unflag_filtered":       "Markering wissen van alle caches in filter…",
+    "action_clear_flags":           "Alle markeringen in de database wissen…",
 
     # View menu
     "action_refresh":               "&Lijst vernieuwen",
@@ -224,6 +227,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} verwijderd",
     "status_deleted_count":         "{count} caches verwijderd",
     "status_flags_cleared":         "Alle markeringen gewist",
+    "status_flags_set":             "{count} caches gemarkeerd",
+    "status_flags_unset":           "Markering gewist van {count} caches",
     "status_flagged_count":         "{flagged} van {total} caches gemarkeerd",
     "status_db_name":               "Database: {db_name}",
     "status_refresh_failed":        "Vernieuwen van cachelijst mislukt",
@@ -244,6 +249,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Geen caches in het huidige filter.",
     "delete_filtered_msg":          "Weet je zeker dat je ALLE {count} caches in het filter wilt verwijderen?\nDeze actie kan niet ongedaan worden gemaakt.",
     "clear_flags_msg":              "Markeringen wissen van alle caches in de actieve database?",
+    "flag_filtered_msg":            "Alle {count} caches in het filter markeren?",
+    "unflag_filtered_msg":          "Markering wissen van alle {count} caches in het filter?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "GPX / PQ Zip importeren",

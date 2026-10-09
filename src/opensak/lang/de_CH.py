@@ -69,7 +69,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Markierte Caches löschen…",
     "action_delete_filtered":       "🗑️  Alle Caches im Filter löschen…",
-    "action_clear_flags":           "Alle Markierungen entfernen",
+    "menu_user_flags":              "🚩  Benutzer-Markierungen",
+    "action_flag_filtered":         "Markierung bei allen Caches im Filter setzen…",
+    "action_unflag_filtered":       "Markierung bei allen Caches im Filter entfernen…",
+    "action_clear_flags":           "Alle Markierungen in der Datenbank entfernen…",
 
     # View menu
     "action_refresh":               "&Liste aktualisieren",
@@ -222,6 +225,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} gelöscht",
     "status_deleted_count":         "{count} Caches gelöscht",
     "status_flags_cleared":         "Alle Markierungen entfernt",
+    "status_flags_set":             "Markierung bei {count} Caches gesetzt",
+    "status_flags_unset":           "Markierung bei {count} Caches entfernt",
     "status_flagged_count":         "{flagged} von {total} Caches markiert",
     "status_db_name":               "Datenbank: {db_name}",
     "status_refresh_failed":        "Aktualisierung der Cache-Liste fehlgeschlagen",
@@ -242,6 +247,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Keine Caches im aktiven Filter.",
     "delete_filtered_msg":          "Möchten Sie wirklich ALLE {count} Caches im Filter löschen?\nDiese Aktion kann nicht rückgängig gemacht werden.",
     "clear_flags_msg":              "Markierungen von allen Caches in der aktiven Datenbank entfernen?",
+    "flag_filtered_msg":            "Markierung bei allen {count} Caches im Filter setzen?",
+    "unflag_filtered_msg":          "Markierung bei allen {count} Caches im Filter entfernen?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "GPX / PQ-Zip importieren",

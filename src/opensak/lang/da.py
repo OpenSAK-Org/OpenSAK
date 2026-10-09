@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Slet flere / Flag operationer
     "action_delete_flagged":        "🚩  Slet markerede (Flag) caches…",
     "action_delete_filtered":       "🗑️  Slet alle caches i filter…",
-    "action_clear_flags":           "Fjern alle flag",
+    "menu_user_flags":              "🚩  Brugerflag",
+    "action_flag_filtered":         "Sæt flag på alle caches i filter…",
+    "action_unflag_filtered":       "Fjern flag fra alle caches i filter…",
+    "action_clear_flags":           "Fjern alle flag i databasen…",
 
     # Vis-menu
     "action_refresh":               "&Opdater liste",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} slettet",
     "status_deleted_count":         "{count} caches slettet",
     "status_flags_cleared":         "Alle flag fjernet",
+    "status_flags_set":             "Flag sat på {count} caches",
+    "status_flags_unset":           "Flag fjernet fra {count} caches",
     "status_flagged_count":         "{flagged} af {total} caches er markeret",
     "status_db_name":               "Database: {db_name}",
     "status_refresh_failed":        "Kunne ikke opdatere cache-listen",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Ingen caches i det aktive filter.",
     "delete_filtered_msg":          "Er du sikker på at du vil slette ALLE {count} caches i filteret?\nDenne handling kan ikke fortrydes.",
     "clear_flags_msg":              "Fjern flag fra alle caches i den aktive database?",
+    "flag_filtered_msg":            "Sæt flag på alle {count} caches i filteret?",
+    "unflag_filtered_msg":          "Fjern flag fra alle {count} caches i filteret?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Importer GPX / PQ Zip",

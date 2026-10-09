@@ -70,7 +70,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Usuń oznaczone skrytki…",
     "action_delete_filtered":       "🗑️  Usuń wszystkie skrytki w filtrze…",
-    "action_clear_flags":           "Wyczyść wszystkie oznaczenia",
+    "menu_user_flags":              "🚩  Oznaczenia użytkownika",
+    "action_flag_filtered":         "Oznacz wszystkie skrytki w filtrze…",
+    "action_unflag_filtered":       "Usuń oznaczenie ze wszystkich skrytek w filtrze…",
+    "action_clear_flags":           "Wyczyść wszystkie oznaczenia w bazie danych…",
 
     # View menu
     "action_refresh":               "&Odśwież listę",
@@ -223,6 +226,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Usunięto skrytkę {gc_code}",
     "status_deleted_count":         "Usunięto {count} skrytek",
     "status_flags_cleared":         "Wyczyszczono wszystkie oznaczenia",
+    "status_flags_set":             "Oznaczono {count} skrytek",
+    "status_flags_unset":           "Usunięto oznaczenie z {count} skrytek",
     "status_flagged_count":         "Oznaczono {flagged} z {total} skrytek",
     "status_db_name":               "Baza danych: {db_name}",
     "status_refresh_failed":        "Nie udało się odświeżyć listy skrytek",
@@ -243,6 +248,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Brak skrytek w bieżącym filtrze.",
     "delete_filtered_msg":          "Czy na pewno chcesz usunąć WSZYSTKIE {count} skrytek w filtrze?\nTej operacji nie można cofnąć.",
     "clear_flags_msg":              "Wyczyścić oznaczenia wszystkich skrytek w aktywnej bazie danych?",
+    "flag_filtered_msg":            "Oznaczyć wszystkie {count} skrytek w filtrze?",
+    "unflag_filtered_msg":          "Usunąć oznaczenie ze wszystkich {count} skrytek w filtrze?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Import GPX / PQ Zip",

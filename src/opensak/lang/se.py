@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Ta bort markerade cachar…",
     "action_delete_filtered":       "🗑️  Ta bort alla cachar i filtret…",
-    "action_clear_flags":           "Rensa alla flaggor",
+    "menu_user_flags":              "🚩  Användarflaggor",
+    "action_flag_filtered":         "Flagga alla cachar i filtret…",
+    "action_unflag_filtered":       "Ta bort flaggan från alla cachar i filtret…",
+    "action_clear_flags":           "Rensa alla flaggor i databasen…",
 
     # View menu
     "action_refresh":               "&Uppdatera listan",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} borttagen",
     "status_deleted_count":         "{count} cachar borttagna",
     "status_flags_cleared":         "Alla flaggor rensade",
+    "status_flags_set":             "{count} cachar flaggade",
+    "status_flags_unset":           "Flaggan borttagen från {count} cachar",
     "status_flagged_count":         "{flagged} av {total} cachar markerade",
     "status_db_name":               "Databas: {db_name}",
     "status_refresh_failed":        "Det gick inte att uppdatera cachelistan",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Inga cachar i det aktiva filtret.",
     "delete_filtered_msg":          "Är du säker på att du vill ta bort ALLA {count} cachar i filtret?\nDenna åtgärd kan inte ångras.",
     "clear_flags_msg":              "Rensa flaggor från alla cachar i den aktiva databasen?",
+    "flag_filtered_msg":            "Flagga alla {count} cachar i filtret?",
+    "unflag_filtered_msg":          "Ta bort flaggan från alla {count} cachar i filtret?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Importera GPX / PQ Zip",

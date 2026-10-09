@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Delete flagged caches…",
     "action_delete_filtered":       "🗑️  Delete all caches in filter…",
-    "action_clear_flags":           "Clear all flags",
+    "menu_user_flags":              "🚩  User flags",
+    "action_flag_filtered":         "Set flag on all caches in filter…",
+    "action_unflag_filtered":       "Clear flag on all caches in filter…",
+    "action_clear_flags":           "Clear all flags in database…",
 
     # View menu
     "action_refresh":               "&Refresh list",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} deleted",
     "status_deleted_count":         "{count} caches deleted",
     "status_flags_cleared":         "All flags cleared",
+    "status_flags_set":             "Flag set on {count} caches",
+    "status_flags_unset":           "Flag cleared on {count} caches",
     "status_flagged_count":         "{flagged} of {total} caches flagged",
     "status_db_name":               "Database: {db_name}",
     "status_refresh_failed":        "Failed to refresh the cache list",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "No caches in the current filter.",
     "delete_filtered_msg":          "Are you sure you want to delete ALL {count} caches in the filter?\nThis action cannot be undone.",
     "clear_flags_msg":              "Clear flags from all caches in the active database?",
+    "flag_filtered_msg":            "Set the flag on all {count} caches in the filter?",
+    "unflag_filtered_msg":          "Clear the flag on all {count} caches in the filter?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Import GPX / PQ Zip",

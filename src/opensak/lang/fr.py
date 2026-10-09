@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Supprimer les caches marquées…",
     "action_delete_filtered":       "🗑️  Supprimer toutes les caches du filtre…",
-    "action_clear_flags":           "Effacer tous les drapeaux",
+    "menu_user_flags":              "🚩  Drapeaux utilisateur",
+    "action_flag_filtered":         "Placer un drapeau sur toutes les caches du filtre…",
+    "action_unflag_filtered":       "Retirer le drapeau de toutes les caches du filtre…",
+    "action_clear_flags":           "Effacer tous les drapeaux de la base…",
 
     # View menu
     "action_refresh":               "&Rafraîchir la liste",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} supprimée",
     "status_deleted_count":         "{count} caches supprimées",
     "status_flags_cleared":         "Tous les drapeaux effacés",
+    "status_flags_set":             "Drapeau placé sur {count} caches",
+    "status_flags_unset":           "Drapeau retiré de {count} caches",
     "status_flagged_count":         "{flagged} sur {total} caches marquées",
     "status_db_name":               "Base de données : {db_name}",
     "status_refresh_failed":        "Échec de l'actualisation de la liste des caches",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Aucune cache dans le filtre actif.",
     "delete_filtered_msg":          "Voulez-vous vraiment supprimer TOUTES les {count} caches du filtre ?\nCette action est irréversible.",
     "clear_flags_msg":              "Effacer les drapeaux de toutes les caches de la base active ?",
+    "flag_filtered_msg":            "Placer un drapeau sur les {count} caches du filtre ?",
+    "unflag_filtered_msg":          "Retirer le drapeau des {count} caches du filtre ?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Importer GPX / Zip de PQ",

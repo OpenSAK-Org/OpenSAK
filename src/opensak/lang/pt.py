@@ -68,7 +68,10 @@ STRINGS: dict[str, str] = {
     # Delete multiple / Flag operations
     "action_delete_flagged":        "🚩  Excluir caches marcados…",
     "action_delete_filtered":       "🗑️  Excluir todos os caches no filtro…",
-    "action_clear_flags":           "Limpar todos os marcadores",
+    "menu_user_flags":              "🚩  Marcadores do utilizador",
+    "action_flag_filtered":         "Marcar todos os caches no filtro…",
+    "action_unflag_filtered":       "Desmarcar todos os caches no filtro…",
+    "action_clear_flags":           "Limpar todos os marcadores da base de dados…",
 
     # View menu
     "action_refresh":               "&Atualizar lista",
@@ -221,6 +224,8 @@ STRINGS: dict[str, str] = {
     "status_cache_deleted":         "Cache {gc_code} excluída",
     "status_deleted_count":         "{count} caches excluídos",
     "status_flags_cleared":         "Todos os marcadores limpos",
+    "status_flags_set":             "{count} caches marcados",
+    "status_flags_unset":           "{count} caches desmarcados",
     "status_flagged_count":         "{flagged} de {total} caches marcados",
     "status_db_name":               "Base de dados: {db_name}",
     "status_refresh_failed":        "Falha ao atualizar a lista de caches",
@@ -241,6 +246,8 @@ STRINGS: dict[str, str] = {
     "delete_filtered_none":         "Nenhum cache no filtro ativo.",
     "delete_filtered_msg":          "Tem certeza que deseja excluir TODOS os {count} caches no filtro?\nEsta ação não pode ser desfeita.",
     "clear_flags_msg":              "Limpar marcadores de todos os caches na base de dados ativa?",
+    "flag_filtered_msg":            "Marcar todos os {count} caches no filtro?",
+    "unflag_filtered_msg":          "Desmarcar todos os {count} caches no filtro?",
 
     # ── Import dialog ─────────────────────────────────────────────────────────
     "import_dialog_title":          "Importar GPX / PQ Zip",

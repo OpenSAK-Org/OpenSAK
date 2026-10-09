@@ -453,9 +453,23 @@ class MainWindow(QMainWindow):
 
         wp_menu.addSeparator()
 
+        # Issue #293: bulk user-flag actions — the caches in the active
+        # filter, or (the original action) every cache in the database.
+        self._user_flags_menu = wp_menu.addMenu(tr("menu_user_flags"))
+
+        act_flag_filtered = QAction(tr("action_flag_filtered"), self)
+        act_flag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(True))
+        self._user_flags_menu.addAction(act_flag_filtered)
+
+        act_unflag_filtered = QAction(tr("action_unflag_filtered"), self)
+        act_unflag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(False))
+        self._user_flags_menu.addAction(act_unflag_filtered)
+
+        self._user_flags_menu.addSeparator()
+
         act_clear_flags = QAction(tr("action_clear_flags"), self)
         act_clear_flags.triggered.connect(self._clear_all_flags)
-        wp_menu.addAction(act_clear_flags)
+        self._user_flags_menu.addAction(act_clear_flags)
 
         wp_menu.addSeparator()
 
@@ -2600,11 +2614,36 @@ class MainWindow(QMainWindow):
                 session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
                 session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
 
+    def _set_flag_for_filtered(self, flagged: bool) -> None:
+        """Issue #293: set or clear the user flag on every cache in the
+        active filter (as shown in the grid), after a confirmation."""
+        from opensak.db.user_flags import set_user_flag
+
+        title = tr("action_flag_filtered" if flagged else "action_unflag_filtered").rstrip("…")
+        caches = self._cache_table.get_all_caches()
+        if not caches:
+            QMessageBox.information(self, title, tr("delete_filtered_none"))
+            return
+        reply = QMessageBox.question(
+            self,
+            title,
+            tr("flag_filtered_msg" if flagged else "unflag_filtered_msg", count=len(caches)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        changed = set_user_flag((c.gc_code for c in caches), flagged)
+        self._refresh_cache_list()
+        self._statusbar.showMessage(
+            tr("status_flags_set" if flagged else "status_flags_unset", count=changed), 3000
+        )
+
     def _clear_all_flags(self) -> None:
         """Fjern alle flag (user_flag=False) på alle caches i aktiv database."""
         reply = QMessageBox.question(
             self,
-            tr("action_clear_flags"),
+            tr("action_clear_flags").rstrip("…"),
             tr("clear_flags_msg"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
