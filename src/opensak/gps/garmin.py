@@ -262,6 +262,8 @@ def _gio_remove(path: Path) -> bool:
             ["gio", "remove", str(path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
             env=_gio_subprocess_env(),
         )
@@ -364,6 +366,8 @@ def _linux_mounts() -> list[Path]:
             ["lsblk", "--output", "MOUNTPOINT", "--raw", "--noheadings"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         for line in result.stdout.splitlines():
@@ -378,7 +382,7 @@ def _linux_mounts() -> list[Path]:
 
     # ── Metode 2: /proc/mounts (fallback) ─────────────────────────────────────
     try:
-        with open("/proc/mounts") as f:
+        with open("/proc/mounts", encoding="utf-8", errors="replace") as f:
             for line in f:
                 parts = line.split()
                 if len(parts) < 3:
@@ -434,7 +438,8 @@ def _is_removable_path(path: Path) -> bool:
     try:
         result = subprocess.run(
             ["lsblk", "--output", "MOUNTPOINT,RM", "--raw", "--noheadings"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=3,
         )
         for line in result.stdout.splitlines():
             parts = line.strip().split()
