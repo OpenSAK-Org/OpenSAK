@@ -17,13 +17,13 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Iterable
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from opensak.backup.premigration import backup_before_migration
+from opensak.backup.premigration import backup_before_migration, pending_schema_version
 from opensak.db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -1135,6 +1135,35 @@ def session_for(db_path: Path) -> Generator[Session, None, None]:
             session.close()
     finally:
         engine.dispose()
+
+
+def needs_migration(db_path: Path) -> bool:
+    """True if opening *db_path* would migrate its schema (an existing
+    database from an older OpenSAK build)."""
+    return pending_schema_version(Path(db_path), SCHEMA_VERSION) is not None
+
+
+def migrate_databases(paths: Iterable[Path]) -> list[tuple[Path, Exception]]:
+    """
+    Bring each database in *paths* up to SCHEMA_VERSION — with the usual
+    pre-migration backup (#549) — on a private engine, so the active
+    database is left untouched ("Apply to all databases").
+
+    Databases already up to date are skipped. A failure on one database is
+    logged and does not stop the others; returns the (path, error) pairs
+    of those that failed.
+    """
+    failed: list[tuple[Path, Exception]] = []
+    for db_path in paths:
+        db_path = Path(db_path)
+        if not needs_migration(db_path):
+            continue
+        try:
+            _open_engine(db_path).dispose()
+        except Exception as e:
+            logger.exception("migrate_databases: %s failed", db_path)
+            failed.append((db_path, e))
+    return failed
 
 
 def _session_on(db_path: Path | None):

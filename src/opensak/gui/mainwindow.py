@@ -1123,7 +1123,86 @@ class MainWindow(QMainWindow):
                file=n.db_path.name, path=str(n.backup_path))
             for n in notices
         )
-        QMessageBox.information(self, tr("premigration_backup_title"), text)
+        # The other databases in the list are most likely just as old —
+        # offer to back up and update them all now, instead of one dialog
+        # each time the user switches to one of them.
+        from opensak.db.database import needs_migration
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        active = manager.active_path
+        pending = [
+            db for db in manager.databases
+            if db.path != active and db.exists and needs_migration(db.path)
+        ]
+        if not pending:
+            QMessageBox.information(self, tr("premigration_backup_title"), text)
+            return
+        text += "\n\n" + tr("premigration_apply_all_question", count=len(pending))
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle(tr("premigration_backup_title"))
+        msg.setText(text)
+        btn_all = msg.addButton(
+            tr("premigration_apply_all_btn", count=len(pending)),
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        btn_ok = msg.addButton(QMessageBox.StandardButton.Ok)
+        msg.setDefaultButton(btn_ok)
+        msg.exec()
+        if msg.clickedButton() is btn_all:
+            self._migrate_other_databases(pending)
+
+    def _migrate_other_databases(self, pending: list) -> None:
+        """
+        Back up and update the *pending* databases to the current schema
+        ("Apply to all databases"). Each one is opened on a private engine,
+        so the active database stays selected throughout.
+        """
+        from opensak.backup.premigration import take_notices
+        from opensak.db.database import migrate_databases
+        progress = QProgressDialog(
+            tr("premigration_apply_all_progress"), "", 0, len(pending), self
+        )
+        progress.setWindowTitle(tr("premigration_backup_title"))
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        failed = []
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for i, db in enumerate(pending):
+                progress.setLabelText(
+                    tr("premigration_apply_all_progress_db", name=db.name)
+                )
+                progress.setValue(i)
+                QApplication.processEvents()
+                failed += migrate_databases([db.path])
+            progress.setValue(len(pending))
+        finally:
+            QApplication.restoreOverrideCursor()
+            progress.close()
+
+        names = {db.path: db.name for db in pending}
+        parts = [
+            tr("premigration_apply_all_done", count=len(pending) - len(failed))
+        ]
+        backups = take_notices()
+        if backups:
+            parts.append(tr("premigration_apply_all_backups") + "\n" + "\n".join(
+                f"{names.get(n.db_path, n.db_path.name)}: {n.backup_path}"
+                for n in backups
+            ))
+        if failed:
+            parts.append(tr("premigration_apply_all_failed") + "\n" + "\n".join(
+                f"{names.get(path, path.name)}: {err}" for path, err in failed
+            ))
+            QMessageBox.warning(
+                self, tr("premigration_backup_title"), "\n\n".join(parts)
+            )
+        else:
+            QMessageBox.information(
+                self, tr("premigration_backup_title"), "\n\n".join(parts)
+            )
 
     def show_settings_restore_notice(self, result: str) -> None:
         """
