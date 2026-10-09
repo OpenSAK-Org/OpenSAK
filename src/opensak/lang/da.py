@@ -1119,12 +1119,17 @@ STRINGS: dict[str, str] = {
     # ── Koordinatkonverter dialog ─────────────────────────────────────────────
     "coord_conv_title":             "Koordinatkonverter",
     "coord_conv_input_group":       "Indtast koordinater",
-    "coord_conv_input_hint":        "Skriv i et vilkårligt format: DMM, DMS eller DD — konverteringen sker automatisk",
+    "coord_conv_input_hint":        "Skriv i et vilkårligt format: DMM, DMS, DD, UTM, MGRS, schweizisk/hollandsk/britisk/svensk/tysk grid, Plus Code, Geohash eller Maidenhead — konverteringen sker automatisk",
     "coord_conv_placeholder":       "f.eks. N55 47.250 E012 25.000",
     "coord_conv_output_group":      "Alle formater",
     "coord_conv_copy_btn":          "Kopiér",
     "coord_conv_open_in":           "Åbn i:",
     "coord_conv_parse_error":       "Ukendt koordinatformat — prøv f.eks. N55 47.250 E012 25.000",
+    "coord_conv_input_format":      "Inputformat:",
+    "coord_conv_fmt_auto":          "Genkend automatisk",
+    "coord_conv_fmt_latlon":        "Bredde/længde (DD, DMM, DMS)",
+    "coord_conv_detected":          "Genkendt: {fmt}",
+    "coord_conv_outside_area":      "uden for dækningsområdet",
 
     # ── Koordinatprojektion dialog ────────────────────────────────────────────
     "proj_title":                   "Koordinatprojektion",

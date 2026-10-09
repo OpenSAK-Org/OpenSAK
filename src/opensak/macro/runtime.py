@@ -91,7 +91,7 @@ from opensak.filters.engine import (
     apply_filters_auto,
 )
 from opensak import __version__, geodesy
-from opensak.coords import parse_coords
+from opensak.coord_formats import INPUT_KEYS, parse_any
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
@@ -102,7 +102,7 @@ from opensak.export.file_export_settings import (
     FileExportSettings,
     expand_file_name,
 )
-from opensak.filters.line_polygon import LineShape, parse_point, read_points_file
+from opensak.filters.line_polygon import LineShape, read_points_file
 from opensak.hint_detect import rot13
 from opensak.macro import helpers
 from opensak.macro.errors import MacroError
@@ -857,10 +857,10 @@ def resolve_coords(lat: Any, lon: Any = None) -> tuple[float, float]:
             raise MacroError(
                 'expected lat, lon or a coordinate string such as "N47 22.123 E008 32.456"'
             )
-        parsed = parse_coords(lat)
+        parsed = parse_any(lat)
         if parsed is None:
             raise MacroError(f"cannot parse coordinates {lat!r}")
-        return parsed
+        return parsed[0], parsed[1]
     la, lo = _number(lat), _number(lon)
     if la is None or lo is None:
         raise MacroError(f"lat/lon must be numbers, got {lat!r}, {lon!r}")
@@ -940,10 +940,7 @@ def polygon_points(value: Any) -> list[tuple[float, float]]:
     points = []
     for item in _as_list(value):
         if isinstance(item, str):
-            point = parse_point(item)
-            if point is None:
-                raise MacroError(f"cannot parse coordinates {item!r}")
-            points.append(point)
+            points.append(resolve_coords(item))
         elif hasattr(item, "values"):
             lat = item["lat"] if item["lat"] is not None else item[1]
             lon = item["lon"] if item["lon"] is not None else item[2]
@@ -1420,10 +1417,18 @@ class MacroRuntime:
     # -- opensak.coords --------------------------------------------------------
 
     @staticmethod
-    def _coords_parse(text=None):
+    def _coords_parse(text=None, fmt=None):
+        func = "opensak.coords.parse"
         if not isinstance(text, str):
-            raise MacroError(f"opensak.coords.parse expects a string, got {text!r}")
-        return parse_point(text)
+            raise MacroError(f"{func} expects a string, got {text!r}")
+        if fmt is not None and not isinstance(fmt, str):
+            raise MacroError(f"{func}: format must be a string, got {fmt!r}")
+        try:
+            return parse_any(text, fmt)
+        except ValueError:
+            raise MacroError(
+                f"{func}: unknown format {fmt!r}; valid: {', '.join(INPUT_KEYS)}"
+            ) from None
 
     @staticmethod
     def _coords_format(*args) -> str:
@@ -2410,24 +2415,48 @@ API: tuple[ApiFunction, ...] = (
     # coordinate string in any format opensak.coords.parse() understands.
     ApiFunction(
         name="coords.parse",
-        description="Parse a coordinate string in any format OpenSAK "
-                    "understands (DMM, DMS, decimal degrees).",
+        description="Parse a coordinate string. Without `fmt` the format is "
+                    "detected: latitude/longitude (DMM, DMS, decimal degrees), "
+                    "UTM, MGRS, British grid letters (\"TQ 30268 79642\"), "
+                    "Plus Codes, Maidenhead locators, geohashes (5+ characters "
+                    "mixing letters and digits) and the Swiss, Dutch, Swedish "
+                    "and German grids as number pairs, which are only accepted "
+                    "inside their country. Pass `fmt` to read one format only — "
+                    "needed for numeric British grid positions, short geohashes "
+                    "and to rule out a wrong guess. Formats: " + ", ".join(
+                        f"`\"{k}\"`" for k in INPUT_KEYS) + " (`\"latlon\"` "
+                    "covers DD, DMM and DMS; every name `opensak.coords.format` "
+                    "takes works too).",
         example='local lat, lon = opensak.coords.parse("N47 22.123 E008 32.456")\n'
-                'if not lat then error("not a coordinate") end',
+                'if not lat then error("not a coordinate") end\n'
+                'local lat2, lon2, fmt = opensak.coords.parse("32T MT 65339 46242")\n'
+                'print(fmt)  -- mgrs\n'
+                'print(opensak.coords.parse("530268 179642", "osgb"))',
         since=2,
         bind=lambda rt, lua: rt._coords_parse,
-        params=(Param("text", "string", "The coordinates."),),
-        returns=("number?, number?", "Latitude and longitude, or nil if the "
-                                    "text cannot be parsed."),
+        params=(
+            Param("text", "string", "The coordinates."),
+            Param("fmt", "string", "Read only this format; detect it if omitted.",
+                  optional=True),
+        ),
+        returns=("number?, number?, string?", "Latitude, longitude and the "
+                 "format that was read, or nil if the text cannot be parsed."),
     ),
     ApiFunction(
         name="coords.format",
         description="Format coordinates. Formats: `\"dmm\"` (default), `\"dms\"`, "
-                    "`\"dd\"`, `\"utm\"`, `\"ch1903\"` (Swiss LV03) and "
-                    "`\"ch1903+\"` (Swiss LV95). The Swiss formats are only "
-                    "meaningful in and around Switzerland.",
+                    "`\"dd\"`, `\"utm\"`, `\"mgrs\"`, `\"ch1903\"` (Swiss LV03), "
+                    "`\"ch1903+\"` (Swiss LV95), `\"rd\"` (Dutch RD), `\"osgb\"` "
+                    "(British National Grid), `\"sweref99\"` (SWEREF 99 TM), "
+                    "`\"gk\"` (German Gauss-Krüger), `\"olc\"` (Plus Code), "
+                    "`\"geohash\"` and `\"maidenhead\"`. Aliases: `\"lv03\"`, "
+                    "`\"lv95\"`, `\"bng\"`, `\"sweref\"`, `\"gauss-krueger\"`, "
+                    "`\"pluscode\"`, `\"qth\"`. The national grids are only "
+                    "meaningful in and around their country; `\"osgb\"` and "
+                    "`\"utm\"` raise an error where they are not defined.",
         example='print(opensak.coords.format(47.36872, 8.54093, "utm"))\n'
-                'print(opensak.coords.format("N47 22.123 E008 32.456", "ch1903"))',
+                'print(opensak.coords.format("N47 22.123 E008 32.456", "ch1903"))\n'
+                'print(opensak.coords.format(51.50072, -0.12462, "osgb"))',
         since=2,
         bind=lambda rt, lua: rt._coords_format,
         params=(

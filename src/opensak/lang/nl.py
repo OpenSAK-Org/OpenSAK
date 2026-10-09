@@ -1121,12 +1121,17 @@ STRINGS: dict[str, str] = {
     # ── Coordinate converter dialog ───────────────────────────────────────────
     "coord_conv_title":             "Coördinaatconverter",
     "coord_conv_input_group":       "Coördinaten invoeren",
-    "coord_conv_input_hint":        "Typ in elk formaat: DMM, DMS of DD — conversie gebeurt automatisch",
+    "coord_conv_input_hint":        "Typ in elk formaat: DMM, DMS, DD, UTM, MGRS, Zwitsers/RD/Brits/Zweeds/Duits grid, Plus Code, Geohash of Maidenhead — conversie gebeurt automatisch",
     "coord_conv_placeholder":       "bijv. N55 47.250 E012 25.000",
     "coord_conv_output_group":      "Alle formaten",
     "coord_conv_copy_btn":          "Kopiëren",
     "coord_conv_open_in":           "Openen in:",
     "coord_conv_parse_error":       "Onbekend coördinaatformaat — probeer bijv. N55 47.250 E012 25.000",
+    "coord_conv_input_format":      "Invoerformaat:",
+    "coord_conv_fmt_auto":          "Automatisch herkennen",
+    "coord_conv_fmt_latlon":        "Breedte/lengte (DD, DMM, DMS)",
+    "coord_conv_detected":          "Herkend: {fmt}",
+    "coord_conv_outside_area":      "buiten het dekkingsgebied",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Coördinaatprojectie",

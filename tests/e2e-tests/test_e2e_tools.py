@@ -84,6 +84,45 @@ def test_coord_converter_dd_round_trip(qtbot):
     assert abs(lon_out - lon_in) < 0.0001
 
 
+def test_coord_converter_grid_input_detected_and_national_grids_limited(qtbot):
+    # A Swiss grid input is detected; grids of other countries stay empty.
+    from opensak.gui.dialogs.coord_converter_dialog import CoordConverterDialog
+
+    dlg = CoordConverterDialog()
+    qtbot.addWidget(dlg)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+
+    dlg._input.setText("2683259 / 1247015")
+    qtbot.wait(50)
+
+    assert dlg._detected_lbl.text() != ""
+    assert dlg._rows["ch1903"][1].text() == "683259 / 247015"
+    assert dlg._rows["mgrs"][1].text().startswith("32T MT")
+    assert dlg._rows["rd"][1].text() == ""
+    assert not dlg._rows["rd"][2].isEnabled()
+    assert dlg._rows["osgb"][1].text() == ""
+
+
+def test_coord_converter_input_format_override(qtbot):
+    # Numeric British grid positions are read only with OSGB chosen.
+    from opensak.gui.dialogs.coord_converter_dialog import CoordConverterDialog
+
+    dlg = CoordConverterDialog()
+    qtbot.addWidget(dlg)
+    dlg.show()
+    qtbot.waitExposed(dlg)
+
+    dlg._input.setText("530268 179642")
+    qtbot.wait(50)
+    assert dlg._rows["osgb"][1].text() == ""
+
+    dlg._fmt_combo.setCurrentIndex(dlg._fmt_combo.findData("osgb"))
+    qtbot.wait(50)
+    assert dlg._rows["osgb"][1].text().startswith("TQ 3026")
+    assert dlg._detected_lbl.text() == ""
+
+
 # ── ChecksumDialog ─────────────────────────────────────────────────────────────
 
 

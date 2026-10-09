@@ -1120,12 +1120,17 @@ STRINGS: dict[str, str] = {
     # ── Coordinate converter dialog ───────────────────────────────────────────
     "coord_conv_title":             "Convertidor de coordenadas",
     "coord_conv_input_group":       "Introducir coordenadas",
-    "coord_conv_input_hint":        "Escribe en cualquier formato: GMM, GMS o GD — la conversión se hace automáticamente",
+    "coord_conv_input_hint":        "Escribe en cualquier formato: GMM, GMS, GD, UTM, MGRS, cuadrícula suiza/neerlandesa/británica/sueca/alemana, Plus Code, Geohash o Maidenhead — la conversión se hace automáticamente",
     "coord_conv_placeholder":       "p. ej. N55 47.250 E012 25.000",
     "coord_conv_output_group":      "Todos los formatos",
     "coord_conv_copy_btn":          "Copiar",
     "coord_conv_open_in":           "Abrir en:",
     "coord_conv_parse_error":       "Formato de coordenadas desconocido — prueba p. ej. N55 47.250 E012 25.000",
+    "coord_conv_input_format":      "Formato de entrada:",
+    "coord_conv_fmt_auto":          "Detectar automáticamente",
+    "coord_conv_fmt_latlon":        "Lat/Lon (GD, GMM, GMS)",
+    "coord_conv_detected":          "Detectado: {fmt}",
+    "coord_conv_outside_area":      "fuera del área de cobertura",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Proyección de coordenadas",

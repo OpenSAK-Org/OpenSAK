@@ -1120,12 +1120,17 @@ STRINGS: dict[str, str] = {
     # ── Coordinate converter dialog ───────────────────────────────────────────
     "coord_conv_title":             "Převodník souřadnic",
     "coord_conv_input_group":       "Zadejte souřadnice",
-    "coord_conv_input_hint":        "Zadejte v libovolném formátu: DMM, DMS nebo DD — převod probíhá automaticky",
+    "coord_conv_input_hint":        "Zadejte v libovolném formátu: DMM, DMS, DD, UTM, MGRS, švýcarská/nizozemská/britská/švédská/německá síť, Plus Code, Geohash nebo Maidenhead — převod probíhá automaticky",
     "coord_conv_placeholder":       "např. N50 47.750 E014 21.450",
     "coord_conv_output_group":      "Všechny formáty",
     "coord_conv_copy_btn":          "Kopírovat",
     "coord_conv_open_in":           "Otevřít v:",
     "coord_conv_parse_error":       "Neznámý formát souřadnic — zkuste např. N50 47.750 E014 21.450",
+    "coord_conv_input_format":      "Vstupní formát:",
+    "coord_conv_fmt_auto":          "Rozpoznat automaticky",
+    "coord_conv_fmt_latlon":        "Šířka/délka (DD, DMM, DMS)",
+    "coord_conv_detected":          "Rozpoznáno: {fmt}",
+    "coord_conv_outside_area":      "mimo oblast pokrytí",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Projekce souřadnic",
