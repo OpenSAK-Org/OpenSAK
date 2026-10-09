@@ -35,6 +35,20 @@ class HomePoint:
         return f"HomePoint({self.name!r}, {self.lat}, {self.lon})"
 
 
+def sort_home_points(points: list[HomePoint]) -> list[HomePoint]:
+    """Order for the centre-point drop-downs: ★ Home first, then A–Z,
+    ignoring case and accents ("Zürich" sorts as "Zurich")."""
+    import unicodedata
+
+    def key(p: HomePoint) -> tuple[str, str]:
+        plain = "".join(c for c in unicodedata.normalize("NFKD", p.name)
+                        if not unicodedata.combining(c))
+        return plain.casefold(), p.name
+
+    home = [p for p in points if p.name == "★ Home"]
+    return home + sorted((p for p in points if p.name != "★ Home"), key=key)
+
+
 class AppSettings:
     """
     Typed getters/setters over settings_store.

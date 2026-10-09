@@ -14,17 +14,19 @@ named after its GSAK folder (editable), which is created when it doesn't
 exist yet. An existing OpenSAK database is only touched after the user
 confirmed it — overwritten (emptied first) or merged into. When the backup
 also contains ``gsak.db3`` the saved filters can be migrated afterwards via
-the regular GSAK filter import dialog. A single ``.db3`` file (or a zip with
-just one database) is simply a list with one entry.
+the regular GSAK filter import dialog, and the user locations (#1001) via a
+preview of GSAK's location list. A single ``.db3`` file (or a zip with just
+one database) is simply a list with one entry.
 
 Only the selected databases are unpacked, into one temp folder that is
-removed once the import (and the optional filter migration) is done.
+removed once the import (and the optional gsak.db3 migrations) is done.
 """
 
 from __future__ import annotations
 
 import logging
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -233,6 +235,7 @@ class GsakImportDialog(QDialog):
     import_completed  = Signal()   # the import created/updated at least one cache
     databases_changed = Signal()   # at least one OpenSAK database was created
     filters_imported  = Signal()   # the follow-up filter import wrote profiles
+    locations_imported = Signal()  # the follow-up location import changed the list
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -248,7 +251,8 @@ class GsakImportDialog(QDialog):
         self._temp_dir: Optional[Path] = None
         self._extracted: Optional[dict] = None      # what the extract worker unpacked
         self._wants_filters = False             # migrate gsak.db3's filters at the end
-        self._stage_filters = False             # the running extraction is gsak.db3
+        self._wants_locations = False           # migrate gsak.db3's user locations at the end
+        self._stage_settings = False            # the running extraction is gsak.db3
         self._images_confirmed = False          # #472 warning answered with Continue
         self._changed = False                   # any cache created/updated this run
         self._setup_ui()
@@ -303,6 +307,11 @@ class GsakImportDialog(QDialog):
         self._filters_cb.toggled.connect(lambda _on: self._update_import_button())
         layout.addWidget(self._filters_cb)
 
+        self._locations_cb = QCheckBox(tr("gsak_import_locations_checkbox"))
+        self._locations_cb.setVisible(False)
+        self._locations_cb.toggled.connect(lambda _on: self._update_import_button())
+        layout.addWidget(self._locations_cb)
+
         # Import + Close row
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -344,8 +353,9 @@ class GsakImportDialog(QDialog):
         self._file_label.setToolTip(str(path))
         self._table.setRowCount(0)
         self._contents = None
-        self._filters_cb.setVisible(False)
-        self._filters_cb.setChecked(False)
+        for cb in (self._filters_cb, self._locations_cb):
+            cb.setVisible(False)
+            cb.setChecked(False)
         self._found_label.setText("")
 
         try:
@@ -374,8 +384,9 @@ class GsakImportDialog(QDialog):
             tr("gsak_import_databases_found", count=len(contents.databases))
         )
         if contents.has_settings_db:
-            self._filters_cb.setVisible(True)
-            self._filters_cb.setChecked(True)
+            for cb in (self._filters_cb, self._locations_cb):
+                cb.setVisible(True)
+                cb.setChecked(True)
         self._set_list_enabled(bool(contents.databases))
         self._update_import_button()
 
@@ -526,18 +537,23 @@ class GsakImportDialog(QDialog):
             if self._gsak_item(row).checkState() == Qt.CheckState.Checked
         ]
 
+    @staticmethod
+    def _wanted(cb: QCheckBox) -> bool:
+        return not cb.isHidden() and cb.isChecked()
+
     def _update_import_button(self) -> None:
         running = self._worker is not None and self._worker.isRunning()
-        wants_filters = not self._filters_cb.isHidden() and self._filters_cb.isChecked()
+        wants_settings = self._wanted(self._filters_cb) or self._wanted(self._locations_cb)
         self._import_btn.setEnabled(
             not running and self._contents is not None
-            and (bool(self._checked_rows()) or wants_filters)
+            and (bool(self._checked_rows()) or wants_settings)
         )
 
     def _set_busy(self, busy: bool) -> None:
         self._browse_btn.setEnabled(not busy)
         self._import_btn.setEnabled(not busy)
         self._filters_cb.setEnabled(not busy)
+        self._locations_cb.setEnabled(not busy)
         self._set_list_enabled(not busy and self._table.rowCount() > 0)
         self._progress.setVisible(busy)
         if busy:
@@ -631,8 +647,8 @@ class GsakImportDialog(QDialog):
     # register the target → import → delete the unpacked copy. So the temp
     # folder never holds more than one database (a full backup is several
     # GB), nothing is created for a database that is skipped, and one failing
-    # database is logged and skipped instead of aborting the rest. The saved
-    # filters (gsak.db3) come last.
+    # database is logged and skipped instead of aborting the rest. The user
+    # locations and saved filters (gsak.db3) come last.
 
     def _start_import(self) -> None:
         if self._selected_path is None or self._contents is None:
@@ -644,8 +660,9 @@ class GsakImportDialog(QDialog):
         jobs = self._confirm_existing(jobs)
         if jobs is None:
             return
-        wants_filters = not self._filters_cb.isHidden() and self._filters_cb.isChecked()
-        if not jobs and not wants_filters:
+        wants_filters = self._wanted(self._filters_cb)
+        wants_locations = self._wanted(self._locations_cb)
+        if not jobs and not wants_filters and not wants_locations:
             return
 
         self._jobs = jobs
@@ -653,6 +670,7 @@ class GsakImportDialog(QDialog):
         self._changed = False
         self._images_confirmed = False
         self._wants_filters = wants_filters
+        self._wants_locations = wants_locations
         self._log.clear()
         self._set_busy(True)
         if self._contents.is_zip:
@@ -667,7 +685,7 @@ class GsakImportDialog(QDialog):
     def _run_next_job(self) -> None:
         job = self._current_job()
         if job is None:
-            self._start_filter_stage()
+            self._start_settings_stage()
             return
         if job.db3_path is None:
             assert job.member is not None and self._temp_dir is not None
@@ -717,10 +735,10 @@ class GsakImportDialog(QDialog):
         path = (self._extracted or {}).get("file")
         self._extracted = None
 
-        if self._stage_filters:
-            self._stage_filters = False
+        if self._stage_settings:
+            self._stage_settings = False
             if path is not None:
-                self._run_filter_import(path)
+                self._run_settings_imports(path)
             self._finish()
             return
 
@@ -782,7 +800,14 @@ class GsakImportDialog(QDialog):
             return "continue"
         from opensak.importer.gsak_importer import scan_gsak_notes_for_embedded_images
 
-        scan = scan_gsak_notes_for_embedded_images(db3_path)
+        try:
+            scan = scan_gsak_notes_for_embedded_images(db3_path)
+        except sqlite3.Error:
+            # Not a GSAK cache database after all (no CacheMemo, …): nothing
+            # to warn about — the import itself reports the error and the
+            # run goes on with the next database.
+            logger.warning("GSAK import: pre-scan failed for %s", db3_path, exc_info=True)
+            return "continue"
         if not scan["affected_notes"]:
             return "continue"
 
@@ -858,21 +883,30 @@ class GsakImportDialog(QDialog):
         self._job_index += 1
         self._run_next_job()
 
-    # ── Saved filters ────────────────────────────────────────────────────────
+    # ── gsak.db3: user locations and saved filters ───────────────────────────
 
-    def _start_filter_stage(self) -> None:
+    def _start_settings_stage(self) -> None:
         contents = self._contents
-        if not self._wants_filters or contents is None:
+        if not (self._wants_filters or self._wants_locations) or contents is None:
             self._finish()
             return
-        self._wants_filters = False
         if contents.settings_member is not None and self._temp_dir is not None:
-            self._stage_filters = True
+            self._stage_settings = True
             self._start_extract(contents.settings_member, self._temp_dir / "settings", 0)
             return
         if contents.settings_path is not None:
-            self._run_filter_import(contents.settings_path)
+            self._run_settings_imports(contents.settings_path)
         self._finish()
+
+    def _run_settings_imports(self, db3_path: Path) -> None:
+        """Run the gsak.db3 migrations that were asked for — one unpacked
+        copy serves both."""
+        wants_locations, self._wants_locations = self._wants_locations, False
+        wants_filters, self._wants_filters = self._wants_filters, False
+        if wants_locations:
+            self._run_location_import(db3_path)
+        if wants_filters:
+            self._run_filter_import(db3_path)
 
     def _on_progress(self, done: int, total: int) -> None:
         if total > 0:
@@ -934,6 +968,44 @@ class GsakImportDialog(QDialog):
         self._import_btn.setText(tr("import_again"))
         self._update_import_button()
 
+    def _run_location_import(self, db3_path: Path) -> None:
+        """Issue #1001: preview GSAK's user locations and save the chosen ones."""
+        from opensak.gui.dialogs.gsak_location_import_dialog import (
+            GsakLocationImportDialog, location_error_text,
+        )
+        from opensak.importer.gsak_location_importer import (
+            GsakLocationSourceError, load_gsak_locations, parse_gsak_locations,
+        )
+
+        try:
+            locations = parse_gsak_locations(load_gsak_locations(db3_path))
+        except GsakLocationSourceError as exc:
+            self._append_log(tr("gsak_location_import_failed", error=str(exc)))
+            return
+        if not locations:
+            self._append_log(tr("gsak_location_import_none"))
+            return
+
+        dlg = GsakLocationImportDialog(locations, self)
+        dlg.exec()
+        result = dlg.result_data
+        if result is None:
+            self._append_log(tr("gsak_location_import_cancelled"))
+            return
+
+        lines = [tr("gsak_location_import_result", added=len(result.added),
+                    updated=len(result.updated), skipped=len(result.skipped))]
+        invalid = [loc for loc in locations if not loc.valid]
+        if invalid:
+            lines.append(tr("gsak_location_import_invalid_header", count=len(invalid)))
+            for loc in invalid:
+                lines.append("    - " + tr("gsak_location_import_invalid_line",
+                                           line=loc.line_no, text=loc.text,
+                                           error=location_error_text(loc)))
+        self._append_log("\n".join(lines))
+        if result.added or result.updated:
+            self.locations_imported.emit()
+
     def _run_filter_import(self, db3_path: Path) -> None:
         """Hand gsak.db3 to the regular GSAK filter import dialog."""
         from opensak.gui.dialogs.gsak_filter_import_dialog import GsakFilterImportDialog
@@ -955,7 +1027,8 @@ class GsakImportDialog(QDialog):
         """Closing mid-run: let the running worker finish, start nothing new."""
         self._jobs = []
         self._wants_filters = False
-        self._stage_filters = False
+        self._wants_locations = False
+        self._stage_settings = False
         self._extracted = None
         try:
             if self._worker and self._worker.isRunning():

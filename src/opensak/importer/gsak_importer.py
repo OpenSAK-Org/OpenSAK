@@ -450,6 +450,26 @@ def _gsak_db_name_for_file(db3_path: Path) -> str:
     return db3_path.stem
 
 
+def _is_gsak_settings_db(path: Path) -> bool:
+    """True when *path* is GSAK's settings database rather than a cache
+    database: named gsak.db3, or holding a Settings table but no Caches
+    (a renamed copy). Anything unreadable counts as a cache database, so
+    the import reports it as before."""
+    if path.name.lower() == GSAK_SETTINGS_DB_NAME:
+        return True
+    if not path.is_file():
+        return False
+    from contextlib import closing
+    try:
+        uri = f"file:{path.as_posix()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            tables = {name.lower() for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    except sqlite3.Error:
+        return False
+    return "settings" in tables and "caches" not in tables
+
+
 def list_gsak_backup(path: Path) -> GsakBackupContents:
     """List the GSAK cache databases (and gsak.db3) in *path* without
     unpacking anything.
@@ -459,12 +479,17 @@ def list_gsak_backup(path: Path) -> GsakBackupContents:
     root is named after the zip itself) — or a single database file, which
     becomes the only entry. For a single file, a ``gsak.db3`` in the GSAK
     install it belongs to (``<gsak>/data/<name>/sqlite.db3``) is picked up
-    too, so its filters can be offered alongside.
+    too, so its filters can be offered alongside. A single file that is
+    gsak.db3 itself lists no databases, only the settings database (#1001).
     """
     path = Path(path)
     contents = GsakBackupContents(path)
 
     if not contents.is_zip:
+        if _is_gsak_settings_db(path):
+            # gsak.db3 itself: no caches, only what gsak.db3 offers.
+            contents.settings_path = path
+            return contents
         size = path.stat().st_size if path.exists() else 0
         contents.databases.append(
             GsakBackupDatabase(_gsak_db_name_for_file(path), size, path=path)

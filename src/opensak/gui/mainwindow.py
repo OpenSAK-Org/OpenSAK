@@ -28,7 +28,7 @@ from opensak.filters.engine import (
 from opensak.gui.cache_table import CacheTableView
 from opensak.gui.cache_detail import CacheDetailPanel
 from opensak.coords import format_coords
-from opensak.gui.settings import get_settings
+from opensak.gui.settings import get_settings, sort_home_points
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
@@ -2019,7 +2019,19 @@ class MainWindow(QMainWindow):
         )
         dlg.databases_changed.connect(self._reload_db_combo)
         dlg.filters_imported.connect(self._on_filter_profiles_imported)
+        dlg.locations_imported.connect(self._on_home_points_imported)
         dlg.exec()
+
+    def _on_home_points_imported(self) -> None:
+        """Issue #1001: GSAK's user locations were added to the list. Only
+        an overwritten active location moves the centre — recalculate then."""
+        self._reload_home_combo()
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not distances_up_to_date(s.home_lat, s.home_lon):
+                recalculate_distances(s.home_lat, s.home_lon)
+                self._refresh_cache_list()
 
     def _open_gsak_filter_import_dialog(self) -> None:
         """Import GSAK's saved filters as OpenSAK filter profiles.
@@ -2226,7 +2238,7 @@ class MainWindow(QMainWindow):
         gemt hjemmepunkt eller en ny cache.
         """
         s = get_settings()
-        points = s.home_points
+        points = sort_home_points(s.home_points)
         active = s.active_home_name
         self._home_combo.blockSignals(True)
         self._home_combo.clear()
