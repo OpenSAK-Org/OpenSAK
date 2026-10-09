@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "macro_example_keep":           "Öppna min kopia",
     "macro_example_restore":        "Återställ original",
     "macro_done":                   "Makrot är klart.",
+    "macro_done_code":              "Makrot är klart (slutkod {code}).",
     "macro_error":                  "Makrofel: {msg}",
     "macro_access_title":           "Makrots filåtkomst",
     "macro_access_read":            "Det körande makrot vill läsa den här filen:\n\n{path}\n\nFår makrot läsa filer i den här mappen?\n\n{folder}",
