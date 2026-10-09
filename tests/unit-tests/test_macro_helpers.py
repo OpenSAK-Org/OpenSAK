@@ -74,13 +74,49 @@ def test_ch1903_matches_swisstopo_example():
 
 # ── opensak.coords ───────────────────────────────────────────────────────────
 
-def test_coords_parse_returns_two_values_or_nil():
+def test_coords_parse_returns_point_and_format_or_nil():
     out = _run('print(opensak.coords.parse("N47 22.123 E008 32.456"))\n'
                'print(opensak.coords.parse("nonsense"))')
-    lat, lon = map(float, out[0].split("\t"))
-    assert lat == pytest.approx(47 + 22.123 / 60)
-    assert lon == pytest.approx(8 + 32.456 / 60)
+    lat, lon, fmt = out[0].split("\t")
+    assert float(lat) == pytest.approx(47 + 22.123 / 60)
+    assert float(lon) == pytest.approx(8 + 32.456 / 60)
+    assert fmt == "latlon"
     assert out[1] == "nil"
+
+
+@pytest.mark.parametrize("text, fmt", [
+    ("32T E 465340 N 5246242", "utm"),
+    ("32T MT 65340 46241", "mgrs"),
+    ("683259 / 247015", "ch1903"),
+    ("2683259 / 1247015", "ch1903"),
+    ("R 3465403 H 5247900", "gk"),
+    ("8FVC9G9R+F9M", "olc"),
+    ("u0qj6r5qf", "geohash"),
+])
+def test_coords_parse_detects_format(text, fmt):
+    out = _run(f'print(opensak.coords.parse("{text}"))')
+    lat, lon, detected = out[0].split("\t")
+    assert detected == fmt
+    assert float(lat) == pytest.approx(47 + 22.123 / 60, abs=2e-5)
+    assert float(lon) == pytest.approx(8 + 32.456 / 60, abs=2e-5)
+
+
+def test_coords_parse_with_explicit_format():
+    # Numeric British grid positions are only read when asked for.
+    out = _run('print(opensak.coords.parse("530268 179642", "osgb"))\n'
+               'print(opensak.coords.parse("N47 22.123 E008 32.456", "utm"))')
+    lat, lon, fmt = out[0].split("\t")
+    assert float(lat) == pytest.approx(51.5007, abs=1e-4)
+    assert float(lon) == pytest.approx(-0.1246, abs=1e-4)
+    assert fmt == "osgb"
+    assert out[1] == "nil"
+    with pytest.raises(MacroError, match="unknown format"):
+        _run('opensak.coords.parse("x", "nope")')
+
+
+def test_coords_functions_take_any_format():
+    out = _run('print(opensak.coords.distance("32T MT 65340 46241", "N47 22.123 E008 32.456"))')
+    assert float(out[0]) < 0.002
 
 
 @pytest.mark.parametrize("fmt, expected", [
@@ -89,6 +125,12 @@ def test_coords_parse_returns_two_values_or_nil():
     ("utm", "32T E 465340 N 5246242"),
     ("ch1903", "683259 / 247015"),
     ("ch1903+", "2683259 / 1247015"),
+    ("lv95", "2683259 / 1247015"),
+    ("mgrs", "32T MT 65340 46241"),
+    ("gk", "R 3465403 H 5247900"),
+    ("olc", "8FVC9G9R+F9M"),
+    ("geohash", "u0qj6r5qf"),
+    ("maidenhead", "JN47gi48"),
 ])
 def test_coords_format(fmt, expected):
     out = _run(f'print(opensak.coords.format("N47 22.123 E008 32.456", "{fmt}"))\n'
@@ -98,7 +140,9 @@ def test_coords_format(fmt, expected):
 
 def test_coords_format_rejects_unknown_format():
     with pytest.raises(MacroError, match="unknown format"):
-        _run('opensak.coords.format(47, 8, "mgrs")')
+        _run('opensak.coords.format(47, 8, "nope")')
+    with pytest.raises(MacroError, match="outside the British National Grid"):
+        _run('opensak.coords.format(47, 8, "osgb")')
 
 
 def test_distance_bearing_project_midpoint_agree():

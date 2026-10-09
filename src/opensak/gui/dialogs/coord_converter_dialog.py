@@ -1,8 +1,9 @@
 """
 src/opensak/gui/dialogs/coord_converter_dialog.py — Coordinate converter popup.
 
-The user can type coordinates in any of the three supported formats.
-All three formats are shown simultaneously and update live.
+The user can type coordinates in any format opensak.coord_formats reads —
+detected automatically, or forced with the input format box. Every output
+format is shown simultaneously and updates live.
 """
 
 from __future__ import annotations
@@ -11,12 +12,13 @@ import webbrowser
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QPushButton, QGroupBox,
+    QLabel, QLineEdit, QPushButton, QGroupBox, QComboBox,
     QDialogButtonBox, QApplication, QFrame, QSizePolicy
 )
 from PySide6.QtGui import QFont, QFontMetrics
 
-from opensak.coords import parse_coords, format_coords
+from opensak.coord_formats import INPUT_KEYS, SYSTEMS, in_area, parse_any
+from opensak.coords import format_coords
 from opensak.utils.types import CoordFormat
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
@@ -26,10 +28,18 @@ from opensak.gui.theme import hint_style
 _WIDEST_COORD = 'S89° 59\' 59.96"  W179° 59\' 59.96"'
 
 
+def _input_label(key: str) -> str:
+    if key == "latlon":
+        return tr("coord_conv_fmt_latlon")
+    if key == "ch1903":
+        return "CH1903 / CH1903+ (LV03 / LV95)"
+    return SYSTEMS[key].label
+
+
 class CoordConverterDialog(QDialog):
     """
     Popup coordinate converter.
-    Accepts DD, DMM or DMS input and shows all three formats live.
+    Accepts every format in opensak.coord_formats and shows all of them live.
     Optionally pre-filled with a known lat/lon.
     """
 
@@ -71,7 +81,24 @@ class CoordConverterDialog(QDialog):
             QFontMetrics(font).horizontalAdvance(_WIDEST_COORD) + 16
         )
         self._input.textChanged.connect(self._on_input_changed)
+
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel(tr("coord_conv_input_format")))
+        self._fmt_combo = QComboBox()
+        self._fmt_combo.addItem(tr("coord_conv_fmt_auto"), None)
+        for key in INPUT_KEYS:
+            self._fmt_combo.addItem(_input_label(key), key)
+        self._fmt_combo.currentIndexChanged.connect(
+            lambda _: self._on_input_changed(self._input.text())
+        )
+        fmt_row.addWidget(self._fmt_combo)
+        fmt_row.addStretch()
+        in_layout.addLayout(fmt_row)
         in_layout.addWidget(self._input)
+
+        self._detected_lbl = QLabel("")
+        self._detected_lbl.setStyleSheet(hint_style())
+        in_layout.addWidget(self._detected_lbl)
 
         self._error_lbl = QLabel("")
         self._error_lbl.setStyleSheet("color: #c62828; font-size: 10px;")
@@ -88,13 +115,13 @@ class CoordConverterDialog(QDialog):
         mono.setFamily("monospace")
         mono.setPointSize(10)
 
-        self._dmm_row = self._make_output_row(mono)
-        self._dms_row = self._make_output_row(mono)
-        self._dd_row  = self._make_output_row(mono)
-
-        out_form.addRow("DMM:", self._dmm_row[0])
-        out_form.addRow("DMS:", self._dms_row[0])
-        out_form.addRow("DD:", self._dd_row[0])
+        self._rows: dict[str, tuple] = {}
+        for key, system in SYSTEMS.items():
+            self._rows[key] = self._make_output_row(mono)
+            out_form.addRow(f"{system.label}:", self._rows[key][0])
+        self._dmm_row = self._rows["dmm"]
+        self._dms_row = self._rows["dms"]
+        self._dd_row = self._rows["dd"]
 
         layout.addWidget(out_group)
 
@@ -150,29 +177,34 @@ class CoordConverterDialog(QDialog):
         return container, edit, copy_btn
 
     def _on_input_changed(self, text: str) -> None:
-        result = parse_coords(text)
+        result = parse_any(text, self._fmt_combo.currentData())
         if result:
-            lat, lon = result
+            lat, lon, key = result
             self._lat, self._lon = lat, lon
             self._error_lbl.setText("")
+            self._detected_lbl.setText(
+                tr("coord_conv_detected", fmt=_input_label(key))
+                if self._fmt_combo.currentData() is None else ""
+            )
             self._update_outputs(lat, lon)
         else:
             self._error_lbl.setText(
                 tr("coord_conv_parse_error") if text.strip() else ""
             )
+            self._detected_lbl.setText("")
             self._clear_outputs()
 
     def _update_outputs(self, lat: float, lon: float) -> None:
-        dmm = format_coords(lat, lon, CoordFormat.DMM)
-        dms = format_coords(lat, lon, CoordFormat.DMS)
-        dd  = format_coords(lat, lon, CoordFormat.DD)
-
-        self._dmm_row[1].setText(dmm)
-        self._dms_row[1].setText(dms)
-        self._dd_row[1].setText(dd)
-
-        for _, _, btn in (self._dmm_row, self._dms_row, self._dd_row):
-            btn.setEnabled(True)
+        for key, (_, edit, btn) in self._rows.items():
+            text = ""
+            if in_area(key, lat, lon):
+                try:
+                    text = SYSTEMS[key].format(lat, lon)
+                except ValueError:
+                    pass
+            edit.setText(text)
+            edit.setPlaceholderText("—" if text else tr("coord_conv_outside_area"))
+            btn.setEnabled(bool(text))
 
         self._osm_btn.setEnabled(True)
         self._gmaps_btn.setEnabled(True)
@@ -180,8 +212,9 @@ class CoordConverterDialog(QDialog):
     def _clear_outputs(self) -> None:
         self._lat = None
         self._lon = None
-        for _, edit, btn in (self._dmm_row, self._dms_row, self._dd_row):
+        for _, edit, btn in self._rows.values():
             edit.clear()
+            edit.setPlaceholderText("—")
             btn.setEnabled(False)
         self._osm_btn.setEnabled(False)
         self._gmaps_btn.setEnabled(False)
