@@ -1120,12 +1120,17 @@ STRINGS: dict[str, str] = {
     # ── Coordinate converter dialog ───────────────────────────────────────────
     "coord_conv_title":             "Konwerter współrzędnych",
     "coord_conv_input_group":       "Wprowadź współrzędne",
-    "coord_conv_input_hint":        "Wpisz w dowolnym formacie: DMM, DMS lub DD — konwersja odbywa się automatycznie",
+    "coord_conv_input_hint":        "Wpisz w dowolnym formacie: DMM, DMS, DD, UTM, MGRS, siatka szwajcarska/holenderska/brytyjska/szwedzka/niemiecka, Plus Code, Geohash lub Maidenhead — konwersja odbywa się automatycznie",
     "coord_conv_placeholder":       "np. N55 47.250 E012 25.000",
     "coord_conv_output_group":      "Wszystkie formaty",
     "coord_conv_copy_btn":          "Kopiuj",
     "coord_conv_open_in":           "Otwórz w:",
     "coord_conv_parse_error":       "Nieznany format współrzędnych — spróbuj np. N55 47.250 E012 25.000",
+    "coord_conv_input_format":      "Format wejściowy:",
+    "coord_conv_fmt_auto":          "Wykryj automatycznie",
+    "coord_conv_fmt_latlon":        "Szer./dł. (DD, DMM, DMS)",
+    "coord_conv_detected":          "Wykryto: {fmt}",
+    "coord_conv_outside_area":      "poza obszarem pokrycia",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Projekcja współrzędnych",

@@ -1119,12 +1119,17 @@ STRINGS: dict[str, str] = {
     # ── Coordinate converter dialog ───────────────────────────────────────────
     "coord_conv_title":             "Koordinatkonverterare",
     "coord_conv_input_group":       "Ange koordinater",
-    "coord_conv_input_hint":        "Ange i något format: DMM, DMS or DD — konvertering sker automatiskt",
+    "coord_conv_input_hint":        "Ange i något format: DMM, DMS, DD, UTM, MGRS, schweiziskt/holländskt/brittiskt/svenskt/tyskt rutnät, Plus Code, Geohash eller Maidenhead — konvertering sker automatiskt",
     "coord_conv_placeholder":       "t.e.x. N59 49.250 E017 37.000",
     "coord_conv_output_group":      "Alla format",
     "coord_conv_copy_btn":          "Kopiera",
     "coord_conv_open_in":           "Öppna i:",
     "coord_conv_parse_error":       "Okänt koordinatformat — försök t.e.x. N59 49.250 E017 37.000",
+    "coord_conv_input_format":      "Inmatningsformat:",
+    "coord_conv_fmt_auto":          "Identifiera automatiskt",
+    "coord_conv_fmt_latlon":        "Lat/Long (DD, DMM, DMS)",
+    "coord_conv_detected":          "Identifierat: {fmt}",
+    "coord_conv_outside_area":      "utanför täckningsområdet",
 
     # ── Coordinate projection dialog ──────────────────────────────────────────
     "proj_title":                   "Koordinateprojicering",

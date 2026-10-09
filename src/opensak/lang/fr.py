@@ -1120,12 +1120,17 @@ STRINGS: dict[str, str] = {
     # ── Convertisseur de coordonnées ──────────────────────────────────────────
     "coord_conv_title":             "Convertisseur de coordonnées",
     "coord_conv_input_group":       "Entrer les coordonnées",
-    "coord_conv_input_hint":        "Saisissez dans n'importe quel format : DMM, DMS ou DD — la conversion est automatique",
+    "coord_conv_input_hint":        "Saisissez dans n'importe quel format : DMM, DMS, DD, UTM, MGRS, grille suisse/néerlandaise/britannique/suédoise/allemande, Plus Code, Geohash ou Maidenhead — la conversion est automatique",
     "coord_conv_placeholder":       "ex. N55 47.250 E012 25.000",
     "coord_conv_output_group":      "Tous les formats",
     "coord_conv_copy_btn":          "Copier",
     "coord_conv_open_in":           "Ouvrir dans:",
     "coord_conv_parse_error":       "Format de coordonnées inconnu — essayez ex. N55 47.250 E012 25.000",
+    "coord_conv_input_format":      "Format d'entrée :",
+    "coord_conv_fmt_auto":          "Détection automatique",
+    "coord_conv_fmt_latlon":        "Lat/Lon (DD, DMM, DMS)",
+    "coord_conv_detected":          "Détecté : {fmt}",
+    "coord_conv_outside_area":      "hors de la zone de couverture",
 
     # ── Projection de coordonnées ─────────────────────────────────────────────
     "proj_title":                   "Projection de coordonnées",
