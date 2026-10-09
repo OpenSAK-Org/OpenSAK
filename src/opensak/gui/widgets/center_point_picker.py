@@ -196,7 +196,7 @@ class CenterPointPicker(QWidget):
         return data[0] if data else None
 
     def _rebuild_combo(self, keep_kind: Optional[str] = None) -> None:
-        from opensak.gui.settings import get_settings
+        from opensak.gui.settings import get_settings, sort_home_points
         s = get_settings()
 
         self._combo.blockSignals(True)
@@ -206,7 +206,7 @@ class CenterPointPicker(QWidget):
         # home_lat/home_lon), så det får ikke en ekstra post — ellers stod
         # "★ Home" der to gange (og "★ ★ Home", fordi navnet selv har en ★).
         active = getattr(s, "active_home_name", "") or ""
-        points = list(s.home_points)
+        points = sort_home_points(list(s.home_points))
         if not any(p.name == active for p in points):
             self._combo.addItem(active or tr("center_point_home"), (_KIND_HOME, active))
         for p in points:

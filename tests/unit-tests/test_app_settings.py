@@ -71,6 +71,25 @@ class TestPerDbKeys:
 
 # ── home points list ─────────────────────────────────────────────────────────────
 
+class TestSortHomePoints:
+    """Centre-point drop-downs: ★ Home first, then A–Z (#1001 follow-up)."""
+
+    def test_home_first_then_alphabetical(self):
+        from opensak.gui.settings import sort_home_points
+        points = [HomePoint("zug", 1, 1), HomePoint("Bern", 1, 1),
+                  HomePoint("★ Home", 1, 1), HomePoint("aarau", 1, 1),
+                  HomePoint("Zürich", 1, 1), HomePoint("Ölten", 1, 1)]
+        assert [p.name for p in sort_home_points(points)] == [
+            "★ Home", "aarau", "Bern", "Ölten", "zug", "Zürich",
+        ]
+
+    def test_without_home_and_empty(self):
+        from opensak.gui.settings import sort_home_points
+        assert sort_home_points([]) == []
+        assert [p.name for p in sort_home_points([HomePoint("B", 1, 1),
+                                                  HomePoint("A", 1, 1)])] == ["A", "B"]
+
+
 class TestHomePoints:
     def test_empty_by_default(self, s):
         assert s.home_points == []

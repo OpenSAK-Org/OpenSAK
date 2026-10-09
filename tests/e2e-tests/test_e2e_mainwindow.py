@@ -1609,6 +1609,20 @@ class TestHomeAndCwExtra:
         assert s.home_lat == pytest.approx(56.0)
         assert s.home_lon == pytest.approx(10.0)
 
+    def test_reload_home_combo_sorts_home_first_then_a_to_z(self, seeded_window):
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = "N55 40.566 E012 34.098"
+        s.home_points = [HomePoint("Zug", 47.2, 8.5), HomePoint("bern", 46.9, 7.4),
+                         HomePoint("Aarau", 47.4, 8.0)]
+        s.active_home_name = "Zug"
+        seeded_window._reload_home_combo()
+        combo = seeded_window._home_combo
+        assert [combo.itemText(i) for i in range(combo.count())] == [
+            "★ Home", "Aarau", "bern", "Zug",
+        ]
+        assert combo.currentData() == "Zug"
+
     def test_reload_home_combo_without_points_changes_nothing(self, seeded_window):
         # Issue #962: the placeholder item has no data — never activate it.
         from opensak.gui.settings import get_settings
