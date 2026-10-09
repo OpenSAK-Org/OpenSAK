@@ -4,6 +4,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.8] — 2026-10-09
+
+> Headline: **autocompletion for macros in VS Code now works in installed
+> builds**, not only in a copy of the source code.
+
+### Fixed
+
+- **Macros: editor support in installed builds (#1012)** — *Beta builds
+  only.* The type definitions behind autocompletion and inline help
+  (`opensak.lua`) were only in the source repository, so the VS Code
+  instructions in the macro API reference didn't work for anyone who had
+  installed OpenSAK. They are now included in every build, and on each
+  start OpenSAK copies them to `types/opensak.lua` in its macros folder,
+  so they always match the installed version. It also puts a
+  `.luarc.json` next to your macros that points the Lua extension at
+  them — only if there is none yet, so your own settings are kept. To use
+  it, install the extension "Lua" by sumneko, open OpenSAK's macros
+  folder in VS Code (**Open macros folder** in the macro window) and type
+  `opensak.`. The macro API reference now describes these steps.
+  Reported by GeePa67, contributed by nagisml.
+
+---
+
 ## [1.21.0-beta.7] — 2026-10-09
 
 > Headline: **macros can work across databases** — create, switch between
