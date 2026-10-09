@@ -138,7 +138,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "",
         "## Filter keys",
         "",
-        "Keys understood by `opensak.filter{}`, all combined with AND.",
+        "Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).",
         "",
         "| Key | Value | Meaning |",
         "|---|---|---|",
@@ -151,7 +151,18 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     lines += [
         "",
         "`opensak.caches{}` also takes `fields`, an array of the cache fields "
-        "to load (`code` is always included).",
+        "to load (`code` is always included), and `database`.",
+        "",
+        "## Reading another database",
+        "",
+        "`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, "
+        "`opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and "
+        "`opensak.columns()` take a `database` option with the name of a "
+        "database from `opensak.databases()`. It reads that database without "
+        "switching to it, so the active filter stays. The database is opened "
+        "read-only. A database last opened by an older OpenSAK version must be "
+        "opened once first, so its schema is updated. Naming the active "
+        "database is the same as leaving `database` out.",
         "",
         "## Cache fields",
         "",
@@ -227,7 +238,7 @@ def render_lua_stub() -> str:
         f"-- {_GENERATED}",
         f"-- OpenSAK Lua macro API, version {API_VERSION}. Reference: {DOC_PATH.as_posix()}",
         "",
-        "---Keys understood by `opensak.filter{}`, all combined with AND.",
+        "---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).",
         "---@class opensak.FilterSpec",
     ]
     for doc in FILTER_KEY_DOCS:
@@ -236,14 +247,32 @@ def render_lua_stub() -> str:
 
     lines += [
         "",
-        "---Filter keys plus `fields`, understood by `opensak.caches{}`.",
+        "---Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.",
         "---@class opensak.CachesSpec: opensak.FilterSpec",
         "---@field fields? string[] Cache fields to load (`code` is always included).",
+        "---@field database? string Read this database instead of the active one.",
+        "",
+        "---Options of the read functions (`opensak.cache()`, `opensak.sql()`, ...).",
+        "---@class opensak.ReadOptions",
+        "---@field database? string Read this database instead of the active one.",
         "",
         "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
         "---@class opensak.TransferOptions",
         "---@field codes? string[] GC codes to transfer (default: the caches of the active filter).",
         '---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").',
+        "",
+        "---What `opensak.export_gpx{}` writes.",
+        "---@class opensak.ExportSpec",
+        '---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).',
+        '---@field format? "gpx"|"ggz"|"loc"|"kml" Default: from the extension of `path`, else "gpx" (a device takes gpx or ggz).',
+        "---@field corrected? boolean Use corrected coordinates where set (default true).",
+        "---@field max? integer At most this many caches (default 0 = all).",
+        "---@field rename? fun(c: opensak.Cache): string? Name to write instead of the cache name.",
+        "---@field description? fun(c: opensak.Cache): string? Waypoint description to write (GPX desc, LOC label, KML pop-up).",
+        "---@field pois? {attributes?: boolean, child_waypoints?: boolean} Leave out attributes (GPX/GGZ) or child waypoints (GPX/GGZ/KML); both default true.",
+        '---@field if_exists? "overwrite"|"skip"|"ask" When the file exists (default "overwrite").',
+        '---@field target? "file"|"device" "device": the GPX/GGZ folder of the connected Garmin (default "file").',
+        "---@field device? string The device's folder, when several Garmin devices are connected.",
         "",
         "---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).",
         "---@class opensak.Cache",

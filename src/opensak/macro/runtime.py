@@ -30,36 +30,72 @@ from __future__ import annotations
 import csv
 import io
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Iterator, Optional, Protocol
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.filters.engine import (
+    DATETIME_FILTER_FIELDS,
+    ArchivedFilter,
+    AttributeFilter,
+    AvailabilityFilter,
     AvailableFilter,
     CacheTypeFilter,
     ContainerFilter,
     CountryFilter,
     CountyFilter,
+    DateFilter,
     DifficultyFilter,
+    DirectionFilter,
+    DistanceFilter,
+    DnfFilter,
+    ElevationFilter,
+    FavoritePointsFilter,
     FilterProfile,
     FilterSet,
     FoundFilter,
+    FtfFilter,
     GcCodeFilter,
+    GcNoteFilter,
+    HasCorrectedFilter,
+    HasTrackableFilter,
+    LinePolygonFilter,
+    LockedFilter,
     NameFilter,
+    NoCorrectedFilter,
+    NonPremiumFilter,
     NotFoundFilter,
     OwnerFilter,
+    PlacedByFilter,
+    PremiumFilter,
+    SortSpec,
     StateFilter,
     TerrainFilter,
+    TextSearchFilter,
+    UserData1Filter,
+    UserData2Filter,
+    UserData3Filter,
+    UserData4Filter,
+    UserFlagFilter,
+    UserNoteFilter,
     WhereClauseFilter,
     apply_filters_auto,
 )
 from opensak import __version__, geodesy
 from opensak.coords import parse_coords
-from opensak.db.database import get_engine
+from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
-from opensak.export.file_export import select_for_export, write_export_file
+from opensak.export.cache_text import ExportText
+from opensak.export.file_export import EXPORT_FORMATS, select_for_export, write_export_file
 from opensak.export.file_export_settings import (
     FileExportProfile,
     FileExportSettings,
@@ -93,8 +129,14 @@ from opensak.macro.permissions import (
     temp_dir,
     with_grant,
 )
-from opensak.macro.sql import MAX_ROWS, QUERY_TIMEOUT_S, ReadOnlyDatabase, SqlError
-from opensak.utils.constants import CACHE_TYPES
+from opensak.macro.sql import (
+    MAX_ROWS,
+    QUERY_TIMEOUT_S,
+    ReadOnlyDatabase,
+    SqlError,
+    connect_read_only,
+)
+from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
 
 # A runaway `while true do end` would freeze the GUI thread, so the script is
 # aborted after this many Lua VM instructions.
@@ -110,14 +152,48 @@ MAX_CSV_BYTES = 10 * 1024 * 1024
 # instruction limit does not count time spent sleeping).
 MAX_SLEEP_MS = 10_000
 SLEEP_BUDGET_S = 60.0
+# opensak.export_gpx{}: the keys of its table, and what to do with an
+# existing file.
+EXPORT_KEYS = frozenset({
+    "path", "format", "corrected", "max", "rename", "description", "pois",
+    "if_exists", "target", "device",
+})
+EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
+# Formats a Garmin device reads from its GPX / GGZ folder.
+DEVICE_FORMATS = ("gpx", "ggz")
 
 _TEXT_FILTERS = {
     "name": NameFilter,
     "code": GcCodeFilter,
     "owner": OwnerFilter,
+    "placed_by": PlacedByFilter,
     "country": CountryFilter,
     "state": StateFilter,
     "county": CountyFilter,
+    "user_data1": UserData1Filter,
+    "user_data2": UserData2Filter,
+    "user_data3": UserData3Filter,
+    "user_data4": UserData4Filter,
+    "gc_note": GcNoteFilter,
+    "note": UserNoteFilter,
+}
+# key → (filter for true, filter for false)
+_FLAG_FILTERS: dict[str, tuple[Callable[[], Any], Callable[[], Any]]] = {
+    "corrected": (HasCorrectedFilter, NoCorrectedFilter),
+    "user_flag": (lambda: UserFlagFilter(True), lambda: UserFlagFilter(False)),
+    "locked": (lambda: LockedFilter(True), lambda: LockedFilter(False)),
+    "dnf": (lambda: DnfFilter(True), lambda: DnfFilter(False)),
+    "ftf": (lambda: FtfFilter(True), lambda: FtfFilter(False)),
+    "premium": (PremiumFilter, NonPremiumFilter),
+    "archived": (ArchivedFilter, lambda: AvailabilityFilter(True, True, False)),
+    "has_trackables": (HasTrackableFilter,
+                       lambda: FilterSet(negate=True).add(HasTrackableFilter())),
+}
+# key → DateFilter field
+_DATE_FILTERS = {
+    "hidden": "hidden_date",
+    "found_date": "found_date",
+    "last_gpx_update": "last_gpx_update",
 }
 FILTER_KEYS = sorted(
     {
@@ -127,11 +203,56 @@ FILTER_KEYS = sorted(
         "terrain",
         "found",
         "available",
+        "near",
+        "distance",
+        "bearing",
+        "owned",
+        "attributes",
+        "favorites",
+        "elevation",
+        "text",
+        "polygon",
+        "codes",
         "where",
+        "mode",
         "label",
     }
-    | set(_TEXT_FILTERS)
+    | set(_TEXT_FILTERS) | set(_FLAG_FILTERS) | set(_DATE_FILTERS)
 )
+# opensak.sort(): cache field name → SortSpec field. Only fields the
+# database query orders by (not the grid-only placeholders in SORT_FIELDS),
+# so opensak.caches() runs in the same order as the grid.
+SORT_KEYS = {
+    "name": "name",
+    "code": "gc_code",
+    "type": "cache_type",
+    "container": "container",
+    "difficulty": "difficulty",
+    "terrain": "terrain",
+    "hidden": "hidden_date",
+    "placed_by": "placed_by",
+    "country": "country",
+    "state": "state",
+    "county": "county",
+    "found": "found",
+    "found_date": "found_date",
+    "dnf": "dnf",
+    "dnf_date": "dnf_date",
+    "ftf": "first_to_find",
+    "archived": "archived",
+    "premium": "premium_only",
+    "distance": "distance",
+    "bearing": "bearing",
+    "favorite_points": "favorite_points",
+    "trackable_count": "trackables",
+    "user_flag": "user_flag",
+    "locked": "locked",
+    "user_sort": "user_sort",
+    "user_data1": "user_data_1",
+    "user_data2": "user_data_2",
+    "user_data3": "user_data_3",
+    "user_data4": "user_data_4",
+}
 
 
 @dataclass(frozen=True)
@@ -160,10 +281,54 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
                  "Only found or only unfound caches."),
     FilterKeyDoc(("available",), "boolean", "true",
                  "Only available caches (not disabled or archived)."),
+    FilterKeyDoc(("archived",), "boolean", "true | false",
+                 "Only archived caches, or only caches that are not archived."),
+    FilterKeyDoc(("corrected",), "boolean", "true | false",
+                 "With or without corrected coordinates."),
+    FilterKeyDoc(("user_flag", "locked", "dnf", "ftf", "premium"), "boolean",
+                 "true | false", "That flag set, or not set."),
+    FilterKeyDoc(("has_trackables",), "boolean", "true | false",
+                 "With or without trackables in the cache."),
+    FilterKeyDoc(("owned",), "boolean", "true | false",
+                 "Owned by you (owner = your geocaching.com username in "
+                 "Settings), or not."),
+    FilterKeyDoc(("near",), "table",
+                 '{lat = 47.37, lon = 8.54, km = 10} | {point = "Home", km = 10}',
+                 "Within `km` of a coordinate or of a saved centre point."),
+    FilterKeyDoc(("distance",), "number|number[]", "25 | {5, 25} | {10, nil}",
+                 "Km from the active centre point: at most a number, or "
+                 "{min, max} where nil leaves a side open."),
+    FilterKeyDoc(("bearing",), "number[]", "{45, 135} | {315, 45}",
+                 "Bearing from the active centre point, clockwise from the "
+                 "first to the second value."),
+    FilterKeyDoc(("favorites", "elevation"), "number|number[]",
+                 "10 | {10, nil} | {nil, 500}",
+                 "Favourite points / elevation in metres: exact value, or "
+                 "{min, max} where nil leaves a side open."),
+    FilterKeyDoc(tuple(_DATE_FILTERS), "string[]",
+                 '{"2020-01-01", "2020-12-31"} | {nil, "2026-09-01"}',
+                 'Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil '
+                 "leaves a side open. `last_gpx_update` also takes a time, "
+                 '"2026-09-01T18:00".'),
+    FilterKeyDoc(("attributes",), "string|string[]",
+                 '"Dogs" | {"Dogs", "-Night cache", 13}',
+                 "Attributes the cache must have (all of them): English "
+                 "name or Groundspeak id; a leading `-` means the attribute's "
+                 '"no" form (e.g. "-Dogs" = no dogs allowed).'),
     FilterKeyDoc(tuple(_TEXT_FILTERS), "string", '"text"',
-                 '"Contains" match on that field.'),
+                 '"Contains" match on that field (`note` = your local note).'),
+    FilterKeyDoc(("text",), "string", '"Brücke"',
+                 "Full-text search in description, logs and notes."),
+    FilterKeyDoc(("polygon",), "string|table",
+                 '"area.kml" | {{47.1, 8.1}, {47.2, 8.1}, {47.2, 8.3}}',
+                 "Inside a polygon: a file (as for opensak.coords.inside) or "
+                 "a table of points."),
+    FilterKeyDoc(("codes",), "string[]", '{"GC1", "GC2"}',
+                 "Exactly these GC codes, e.g. from an opensak.sql() result."),
     FilterKeyDoc(("where",), "string", '"SQL WHERE clause"',
                  "Raw clause against the caches table."),
+    FilterKeyDoc(("mode",), '"AND"|"OR"', '"OR"',
+                 "How the criteria are combined (default AND)."),
     FilterKeyDoc(("label",), "string", '"text"',
                  'Shown in the toolbar (optional, default "Macro").'),
 )
@@ -288,6 +453,11 @@ class MacroHost(Protocol):
         """Name of the active filter ("" = none) — the {filter} variable of
         an export file name."""
 
+    def set_sort(self, sort: SortSpec) -> None:
+        """Sort the cache list, like a click on a column header (also when
+        the column is hidden). filtered_caches() must return the new order
+        right away."""
+
     def database_name(self) -> str:
         """Name of the active database — the {database} variable."""
 
@@ -366,10 +536,141 @@ def _range(key: str, value: Any) -> tuple[float, float]:
     raise MacroError(f"{key} must be a number or {{min, max}}, got {value!r}")
 
 
-def build_filterset(spec: dict) -> tuple[FilterSet, str]:
+def _pair(value: Any) -> Optional[tuple[Any, Any]]:
+    """{a, b} → (a, b), where either may be nil — so read by index: a Lua
+    {nil, 5} has no [1], and its values() would be just (5,)."""
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+    elif hasattr(value, "items"):
+        d = dict(value.items())
+        if not set(d) <= {1, 2}:
+            return None
+        items = [d.get(1), d.get(2)]
+    else:
+        return None
+    if len(items) != 2:
+        return None
+    return items[0], items[1]
+
+
+def _open_range(key: str, value: Any, number_op: str) -> tuple[str, float, float]:
+    """A number (→ *number_op*) or {min, max} with nil for an open side →
+    (DISTANCE_OPS operator, value1, value2)."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return number_op, float(value), 0.0
+    pair = _pair(value)
+    if pair is not None:
+        lo, hi = (_number(v) if v is not None else None for v in pair)
+        if (lo is not None or pair[0] is None) and (hi is not None or pair[1] is None):
+            if lo is not None and hi is not None:
+                return "between", lo, hi
+            if lo is not None:
+                return "at_least", lo, 0.0
+            if hi is not None:
+                return "at_most", hi, 0.0
+    raise MacroError(f"{key} must be a number or {{min, max}} (nil = open), got {value!r}")
+
+
+def _date_bound(key: str, value: Any, with_time: bool) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.strip())
+        except ValueError:
+            pass
+        else:
+            return parsed if with_time else parsed.date()
+    raise MacroError(f'{key}: dates must be "YYYY-MM-DD", got {value!r}')
+
+
+def _date_filter(key: str, field: str, value: Any) -> DateFilter:
+    pair = _pair(value)
+    if pair is None or pair == (None, None):
+        raise MacroError(f'{key} must be {{from, to}}, e.g. {{"2020-01-01", nil}}, got {value!r}')
+    with_time = field in DATETIME_FILTER_FIELDS
+    lo, hi = (_date_bound(key, v, with_time) for v in pair)
+    if lo is not None and hi is not None:
+        return DateFilter(field, "between", lo, hi)
+    if lo is not None:
+        return DateFilter(field, "on_or_after", lo)
+    return DateFilter(field, "on_or_before", hi)
+
+
+def _bool_value(key: str, value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise MacroError(f"{key} must be true or false, got {value!r}")
+    return value
+
+
+def _attribute_names() -> dict[str, int]:
+    """Lower-cased English attribute names and ids → Groundspeak id."""
+    from opensak.lang.en import STRINGS
+    names: dict[str, int] = {}
+    for attr_id, key in ATTRIBUTES:
+        names[str(attr_id)] = attr_id
+        names[key.removeprefix("attr_")] = attr_id
+        if key in STRINGS:
+            names[STRINGS[key].lower()] = attr_id
+    return names
+
+
+def _attribute_filter(value: Any) -> AttributeFilter:
+    text = str(int(value)) if isinstance(value, (int, float)) and not isinstance(value, bool) \
+        else str(value).strip()
+    is_on = not text.startswith("-")
+    name = text.lstrip("-").strip().lower()
+    attr_id = _attribute_names().get(name)
+    if attr_id is None:
+        raise MacroError(f"attributes: unknown attribute {value!r}")
+    return AttributeFilter(attr_id, is_on)
+
+
+def _active_center() -> tuple[float, float]:
+    from opensak.gui.settings import get_settings
+    settings = get_settings()
+    return settings.home_lat, settings.home_lon
+
+
+def _near_filter(value: Any) -> DistanceFilter:
+    if not hasattr(value, "items") and not isinstance(value, dict):
+        raise MacroError('near must be a table, e.g. { lat = 47.37, lon = 8.54, km = 10 }')
+    opts = dict(value.items())
+    unknown = set(opts) - {"lat", "lon", "point", "km"}
+    if unknown:
+        raise MacroError(f"near: unknown key(s) {sorted(unknown)}; valid: lat, lon, point, km")
+    km = _number(opts.get("km"))
+    if km is None or km < 0:
+        raise MacroError(f"near needs km, a distance >= 0, got {opts.get('km')!r}")
+    if "point" in opts:
+        from opensak.gui.settings import get_settings
+        name = str(opts["point"])
+        point = next((p for p in get_settings().home_points if p.name == name), None)
+        if point is None:
+            raise MacroError(f"near: no centre point named {name!r}")
+        lat, lon = point.lat, point.lon
+    else:
+        lat, lon = resolve_coords(opts.get("lat"), opts.get("lon"))
+    return DistanceFilter(lat, lon, op="at_most", dist1_km=km)
+
+
+def _owned_filter(value: Any) -> OwnerFilter:
+    from opensak.gui.settings import get_settings
+    username = get_settings().gc_username.strip()
+    if not username:
+        raise MacroError("owned: set your geocaching.com username in Settings first")
+    return OwnerFilter(username, op="equals" if _bool_value("owned", value) else "not_equals")
+
+
+def build_filterset(
+    spec: dict, polygon: Optional[Callable[[Any], list[tuple[float, float]]]] = None
+) -> tuple[FilterSet, str]:
     """Translate the table passed to opensak.filter{} into a FilterSet.
 
-    Returns (filterset, label). Raises MacroError for unknown keys or values.
+    *polygon* reads the `polygon` key's file or point table (the runtime
+    passes one that checks the folder permissions); without it, the key is
+    refused. Returns (filterset, label). Raises MacroError for unknown keys
+    or values.
     """
     unknown = set(spec) - set(FILTER_KEYS)
     if unknown:
@@ -377,7 +678,10 @@ def build_filterset(spec: dict) -> tuple[FilterSet, str]:
             f"unknown filter key(s) {sorted(unknown)}; valid keys: {', '.join(FILTER_KEYS)}"
         )
 
-    fs = FilterSet(mode="AND")
+    mode = str(spec.get("mode", "AND")).upper()
+    if mode not in ("AND", "OR"):
+        raise MacroError(f'mode must be "AND" or "OR", got {spec["mode"]!r}')
+    fs = FilterSet(mode=mode)
     if "type" in spec:
         fs.add(
             CacheTypeFilter([_resolve_cache_type(t) for t in _as_list(spec["type"])])
@@ -392,15 +696,67 @@ def build_filterset(spec: dict) -> tuple[FilterSet, str]:
         fs.add(FoundFilter() if spec["found"] else NotFoundFilter())
     if spec.get("available"):
         fs.add(AvailableFilter())
+    for key, (on, off) in _FLAG_FILTERS.items():
+        if key in spec:
+            fs.add(on() if _bool_value(key, spec[key]) else off())
+    if "owned" in spec:
+        fs.add(_owned_filter(spec["owned"]))
+    if "near" in spec:
+        fs.add(_near_filter(spec["near"]))
+    if "distance" in spec:
+        op, d1, d2 = _open_range("distance", spec["distance"], "at_most")
+        fs.add(DistanceFilter(*_active_center(), op=op, dist1_km=d1, dist2_km=d2))
+    if "bearing" in spec:
+        pair = _pair(spec["bearing"])
+        deg1, deg2 = (_number(v) for v in pair) if pair else (None, None)
+        if deg1 is None or deg2 is None:
+            raise MacroError(f"bearing must be {{from, to}} in degrees, got {spec['bearing']!r}")
+        fs.add(DirectionFilter(op="between", deg1=deg1, deg2=deg2))
+    if "favorites" in spec:
+        op, a, b = _open_range("favorites", spec["favorites"], "equal")
+        fs.add(FavoritePointsFilter(op, int(a), int(b)))
+    if "elevation" in spec:
+        op, a, b = _open_range("elevation", spec["elevation"], "equal")
+        fs.add(ElevationFilter(op, a, b))
+    for key, field in _DATE_FILTERS.items():
+        if key in spec:
+            fs.add(_date_filter(key, field, spec[key]))
+    if "attributes" in spec:
+        for attr in _as_list(spec["attributes"]):
+            fs.add(_attribute_filter(attr))
     for key, cls in _TEXT_FILTERS.items():
         if key in spec:
             fs.add(cls(str(spec[key])))
+    if "text" in spec:
+        fs.add(TextSearchFilter(str(spec["text"])))
+    if "polygon" in spec:
+        if polygon is None:
+            raise MacroError("polygon is only available in macros")
+        fs.add(LinePolygonFilter(polygon(spec["polygon"]), mode="polygon"))
+    if "codes" in spec:
+        codes = [str(c).strip().upper() for c in _as_list(spec["codes"])]
+        # An empty in_list would match everything; an empty code list must
+        # match nothing, like the empty SQL result it may come from (every
+        # cache has a GC code).
+        fs.add(GcCodeFilter(";".join(codes), op="in_list") if codes
+               else GcCodeFilter("", op="empty"))
     if "where" in spec:
         fs.add(WhereClauseFilter(str(spec["where"])))
 
     if len(fs) == 0:
         raise MacroError("opensak.filter{} needs at least one criterion")
     return fs, str(spec.get("label") or "Macro")
+
+
+def sort_spec(field: Any, direction: Any = None) -> SortSpec:
+    """The arguments of opensak.sort() → a SortSpec."""
+    if not isinstance(field, str) or field not in SORT_KEYS:
+        raise MacroError(f"opensak.sort: cannot sort by {field!r}; valid: {', '.join(SORT_KEYS)}")
+    if direction is None:
+        direction = "asc"
+    if not isinstance(direction, str) or direction.lower() not in ("asc", "desc"):
+        raise MacroError(f'opensak.sort: direction must be "asc" or "desc", got {direction!r}')
+    return SortSpec(SORT_KEYS[field], ascending=direction.lower() == "asc")
 
 
 # ── Corrected coordinates / CSV ──────────────────────────────────────────────
@@ -612,6 +968,10 @@ class MacroRuntime:
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
         # Opened by the first opensak.sql*() call of a run, closed after it.
         self._sql_db: Optional[ReadOnlyDatabase] = None
+        # Databases other than the active one, read with the `database`
+        # option: opened read-only on first use, closed after the run.
+        self._other_sql: dict[Path, ReadOnlyDatabase] = {}
+        self._other_engines: dict[Path, Engine] = {}
 
     def cancel(self) -> None:
         """Ask the running macro to stop. Safe to call from another thread;
@@ -625,8 +985,16 @@ class MacroRuntime:
             raise MacroError(
                 "opensak.filter expects a table, e.g. opensak.filter{ found = false }"
             )
-        fs, label = build_filterset(dict(spec.items()))
+        fs, label = build_filterset(dict(spec.items()), self._filter_polygon)
         return self._host.apply_filter(fs, label)
+
+    def _filter_polygon(self, value: Any) -> list[tuple[float, float]]:
+        if isinstance(value, str):
+            value = self._readable_file(value)
+        return self._polygon_points(value, "opensak.filter: polygon")
+
+    def _sort(self, field=None, direction=None) -> None:
+        self._host.set_sort(sort_spec(field, direction))
 
     def _load_profile(self, name: str) -> FilterProfile:
         for path in FilterProfile.list_profiles(self._profiles_dir):
@@ -669,22 +1037,28 @@ class MacroRuntime:
             self._sql_db.close()
             self._sql_db = None
 
-    def _sql(self) -> ReadOnlyDatabase:
+    def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
+        if db is not None:
+            if db.path not in self._other_sql:
+                self._other_sql[db.path] = ReadOnlyDatabase(db.path)
+            return self._other_sql[db.path]
         if self._sql_db is None:
             self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
         return self._sql_db
 
-    def _query(self, lua, query=None, params=None):
+    def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
+        db = self._read_options("opensak.sql", options)
         try:
-            rows = self._sql().query(query, params)
+            rows = self._sql(db).query(query, params)
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         return lua.table_from([lua.table_from(r) for r in rows])
 
-    def _query_each(self, lua, query=None, params=None):
+    def _query_each(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql_each", query, params)
-        rows = self._sql().iterate(query, params)
+        db = self._read_options("opensak.sql_each", options)
+        rows = self._sql(db).iterate(query, params)
 
         def step(*_):
             try:
@@ -696,17 +1070,19 @@ class MacroRuntime:
         # The query runs on the first step, so errors surface in the loop.
         return self._wrap(step)
 
-    def _tables(self, lua):
+    def _tables(self, lua, options=None):
+        db = self._read_options("opensak.tables", options)
         try:
-            return lua.table_from(self._sql().tables())
+            return lua.table_from(self._sql(db).tables())
         except SqlError as exc:
             raise MacroError(str(exc)) from None
 
-    def _columns(self, lua, table=None):
+    def _columns(self, lua, table=None, options=None):
         if not isinstance(table, str) or not table.strip():
             raise MacroError("opensak.columns expects a table name")
+        db = self._read_options("opensak.columns", options)
         try:
-            columns = self._sql().columns(table)
+            columns = self._sql(db).columns(table)
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         return lua.table_from([lua.table_from(c) for c in columns])
@@ -717,9 +1093,10 @@ class MacroRuntime:
     def _active_codes(self) -> list[str]:
         return [c.gc_code for c in self._host.filtered_caches()]
 
-    def _cache(self, lua, code=None):
+    def _cache(self, lua, code=None, options=None):
         gc_code = _gc_code(code, "opensak.cache")
-        with get_session() as session:
+        db = self._read_options("opensak.cache", options)
+        with self._session_factory(db, "opensak.cache")() as session:
             records = load_records(session, [gc_code])
         return lua.table_from(records[0], recursive=True) if records else None
 
@@ -733,13 +1110,16 @@ class MacroRuntime:
         fields = CACHE_FIELDS
         if "fields" in spec:
             fields = _cache_fields(spec.pop("fields"))
-        if spec:
-            filterset, _label = build_filterset(spec)
-            with get_session() as session:
+        db = self._other_database("opensak.caches", spec.pop("database", None))
+        session_factory = self._session_factory(db, "opensak.caches")
+        if spec or db is not None:
+            # Another database has no active filter: no keys = all its caches.
+            filterset = build_filterset(spec, self._filter_polygon)[0] if spec else None
+            with session_factory() as session:
                 codes = [c.gc_code for c in apply_filters_auto(session, filterset)]
         else:
             codes = self._active_codes()
-        records = iter_records(get_session, codes, fields)
+        records = iter_records(session_factory, codes, fields)
 
         def step(*_):
             record = next(records, None)
@@ -751,11 +1131,91 @@ class MacroRuntime:
         code = self._host.current_code()
         return self._cache(lua, code) if code else None
 
-    def _description(self, lua, code=None):
+    def _description(self, lua, code=None, options=None):
         gc_code = _gc_code(code, "opensak.description")
-        with get_session() as session:
+        db = self._read_options("opensak.description", options)
+        with self._session_factory(db, "opensak.description")() as session:
             description = load_description(session, gc_code)
         return lua.table_from(description) if description else None
+
+    # Reading another database (the `database` option of the read
+    # functions): no switch, so the active filter stays. The file is opened
+    # read-only, for raw SQL (_sql) and for the cache snapshots alike.
+
+    def _read_options(self, func: str, options: Any) -> Optional[DatabaseInfo]:
+        """The options table of a read function → the database to read,
+        None for the active one."""
+        if options is None:
+            return None
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ database = "Found" }}')
+        opts = dict(options.items())
+        unknown = set(opts) - {"database"}
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(unknown)}; valid: database")
+        return self._other_database(func, opts.get("database"))
+
+    def _other_database(self, func: str, name: Any) -> Optional[DatabaseInfo]:
+        """The database named *name*; None if *name* is nil or names the
+        active database."""
+        if name is None:
+            return None
+        db = self._require_database(name, func)
+        if db.path == get_db_manager().active_path:
+            return None
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        return db
+
+    def _session_factory(self, db: Optional[DatabaseInfo], func: str) -> Callable[[], Any]:
+        """get_session for the active database, else read-only sessions on *db*."""
+        if db is None:
+            return get_session
+        engine = self._other_engines.get(db.path)
+        if engine is None:
+            engine = self._open_other_engine(db, func)
+            self._other_engines[db.path] = engine
+        factory = sessionmaker(bind=engine, autoflush=False)
+
+        @contextmanager
+        def session() -> Iterator[Session]:
+            s = factory()
+            try:
+                yield s
+            except SQLAlchemyError as exc:
+                raise MacroError(f"{func}: cannot read database {db.name!r}: {exc}") from None
+            finally:
+                s.close()
+
+        return session
+
+    @staticmethod
+    def _open_other_engine(db: DatabaseInfo, func: str) -> Engine:
+        # No migrations (they would write), so an older schema may lack
+        # columns the cache fields read: refuse it with a clear message.
+        engine = create_engine("sqlite://", creator=lambda: connect_read_only(db.path))
+        try:
+            with engine.connect() as conn:
+                version = conn.exec_driver_sql("PRAGMA user_version").scalar() or 0
+        except SQLAlchemyError as exc:
+            engine.dispose()
+            raise MacroError(f"{func}: cannot open database {db.name!r} read-only: {exc}") from None
+        if version < SCHEMA_VERSION:
+            engine.dispose()
+            raise MacroError(
+                f"{func}: database {db.name!r} was last opened by an older OpenSAK "
+                "version; open it once (Manage Databases or opensak.switch_database) "
+                "so it is updated"
+            )
+        return engine
+
+    def _close_other_databases(self) -> None:
+        for conn in self._other_sql.values():
+            conn.close()
+        self._other_sql = {}
+        for engine in self._other_engines.values():
+            engine.dispose()
+        self._other_engines = {}
 
     # Databases: thin wrappers around DatabaseManager and db/transfer.py.
 
@@ -962,23 +1422,28 @@ class MacroRuntime:
         (a, b), _ = take_points(args, 2, "opensak.coords.midpoint")
         return geodesy.midpoint(*a, *b)
 
-    def _polygon(self, value: Any) -> LineShape:
-        func = "opensak.coords.inside"
-        if isinstance(value, str):
-            file = self._readable_file(value)
-            if file in self._polygons:
-                return self._polygons[file]
+    @staticmethod
+    def _polygon_points(value: Any, func: str) -> list[tuple[float, float]]:
+        """Points of a polygon file (a Path, already permission-checked) or
+        of a Lua table of points."""
+        if isinstance(value, Path):
             try:
-                points = read_points_file(file)
+                points = read_points_file(value)
             except Exception as exc:  # OSError, ParseError, ValueError
-                raise MacroError(f"{func}: cannot read {file}: {exc}") from None
+                raise MacroError(f"{func}: cannot read {value}: {exc}") from None
         elif hasattr(value, "values"):
-            file = None
             points = polygon_points(value)
         else:
             raise MacroError(f"{func} expects a polygon file path or a table of points")
         if len(points) < 3:
             raise MacroError(f"{func}: a polygon needs at least 3 points, got {len(points)}")
+        return points
+
+    def _polygon(self, value: Any) -> LineShape:
+        file = self._readable_file(value) if isinstance(value, str) else None
+        if file is not None and file in self._polygons:
+            return self._polygons[file]
+        points = self._polygon_points(file or value, "opensak.coords.inside")
         shape = LineShape(points, "polygon", 0.0)
         if file is not None:
             self._polygons[file] = shape
@@ -1055,6 +1520,177 @@ class MacroRuntime:
             raise MacroError(f"cannot write {target}: {exc}") from None
         return str(target), count
 
+    # Ad-hoc export (opensak.export_gpx): like export_file, but every option
+    # comes from the macro, including per-cache names and descriptions.
+
+    def _export_gpx(self, lua, spec=None):
+        func = "opensak.export_gpx"
+        if spec is None or not hasattr(spec, "items"):
+            raise MacroError(
+                f'{func} expects a table, e.g. {func}{{ path = "out.gpx" }}'
+            )
+        opts = dict(spec.items())
+        unknown = set(opts) - EXPORT_KEYS
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown key(s) {sorted(unknown)}; valid: {', '.join(sorted(EXPORT_KEYS))}"
+            )
+        target = opts.get("target", "file")
+        if target not in ("file", "device"):
+            raise MacroError(f'{func}: target must be "file" or "device", got {target!r}')
+        path = opts.get("path")
+        if path is None and target == "device":
+            path = "{database}"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} needs path, the file to write")
+        fmt = opts.get("format")
+        if fmt is None:
+            suffix = Path(path).suffix.lower().lstrip(".")
+            fmt = suffix if suffix in EXPORT_FORMATS else "gpx"
+        allowed = DEVICE_FORMATS if target == "device" else EXPORT_FORMATS
+        if fmt not in allowed:
+            raise MacroError(f"{func}: format must be one of {', '.join(allowed)}, got {fmt!r}")
+        corrected = opts.get("corrected", True)
+        if not isinstance(corrected, bool):
+            raise MacroError(f"{func}: corrected must be true or false, got {corrected!r}")
+        max_records = opts.get("max", 0)
+        if isinstance(max_records, bool) or not isinstance(max_records, (int, float)) \
+                or max_records < 0 or max_records != int(max_records):
+            raise MacroError(f"{func}: max must be a whole number >= 0, got {max_records!r}")
+        if_exists = opts.get("if_exists", "overwrite")
+        if if_exists not in EXPORT_IF_EXISTS:
+            raise MacroError(
+                f"{func}: if_exists must be one of {', '.join(EXPORT_IF_EXISTS)}, got {if_exists!r}"
+            )
+        rename = self._lua_function(func, "rename", opts.get("rename"))
+        describe = self._lua_function(func, "description", opts.get("description"))
+        attributes, child_waypoints = self._export_pois(func, opts.get("pois"))
+        if target == "device":
+            folder = self._garmin_folder(func, opts.get("device"), fmt)
+        else:
+            if "device" in opts:
+                raise MacroError(f'{func}: device needs target = "device"')
+            folder = Path(path).expanduser().parent
+            if not folder.is_absolute():
+                folder = (self._base_dir or macros_dir()) / folder
+
+        caches = select_for_export(self._host.filtered_caches(), int(max_records))
+        if not caches:
+            return None
+        file_name = expand_file_name(
+            Path(path).name,
+            database=self._host.database_name(),
+            filter_name=self._host.filter_name(),
+            center_name=self._host.center_name(),
+            fmt=fmt,
+            count=len(caches),
+        )
+        output = self._check_access(folder / f"{file_name}.{fmt}", write=True)
+        if output.exists():
+            if if_exists == "skip":
+                return None
+            if if_exists == "ask":
+                from opensak.lang import tr
+
+                if not self._host.confirm(tr("file_export_overwrite_msg", path=str(output))):
+                    return None
+        text = self._export_text(lua, func, caches, rename, describe)
+        try:
+            count = write_export_file(
+                caches, output, fmt, use_corrected=corrected, text=text,
+                attributes=attributes, child_waypoints=child_waypoints,
+            )
+        except OSError as exc:
+            raise MacroError(f"cannot write {output}: {exc}") from None
+        return str(output), count
+
+    @staticmethod
+    def _lua_function(func: str, key: str, value: Any) -> Optional[Any]:
+        if value is None:
+            return None
+        from lupa.lua54 import lua_type
+
+        if lua_type(value) != "function":
+            raise MacroError(f"{func}: {key} must be a function(c), got {value!r}")
+        return value
+
+    @staticmethod
+    def _export_pois(func: str, value: Any) -> tuple[bool, bool]:
+        """The pois table → (attributes, child_waypoints), both on by default."""
+        if value is None:
+            return True, True
+        if not hasattr(value, "items"):
+            raise MacroError(f"{func}: pois must be a table, e.g. {{ child_waypoints = false }}")
+        pois = dict(value.items())
+        unknown = set(pois) - {"attributes", "child_waypoints"}
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown pois key(s) {sorted(unknown)}; valid: attributes, child_waypoints"
+            )
+        result = []
+        for key in ("attributes", "child_waypoints"):
+            on = pois.get(key, True)
+            if not isinstance(on, bool):
+                raise MacroError(f"{func}: pois.{key} must be true or false, got {on!r}")
+            result.append(on)
+        return result[0], result[1]
+
+    def _export_text(self, lua, func: str, caches: list, rename, describe) -> ExportText:
+        """Call the macro's rename / description functions once per cache,
+        with the cache table (see Cache fields)."""
+        if rename is None and describe is None:
+            return ExportText()
+        names: dict[str, str] = {}
+        descriptions: dict[str, str] = {}
+        codes = [c.gc_code for c in caches]
+        for record in iter_records(get_session, codes):
+            table = lua.table_from(record, recursive=True)
+            for fn, key, result in ((rename, "rename", names),
+                                    (describe, "description", descriptions)):
+                if fn is None:
+                    continue
+                value = fn(table)
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                    raise MacroError(
+                        f"{func}: {key} must return a string (or nil to keep the "
+                        f"default), got {value!r} for {record['code']}"
+                    )
+                result[record["code"]] = str(value)
+        return ExportText(names, descriptions)
+
+    def _garmin_folder(self, func: str, device: Any, fmt: str) -> Path:
+        """The GPX or GGZ folder of the connected Garmin device (the one
+        named by *device* when several are connected)."""
+        from opensak.gps.garmin import (
+            find_garmin_devices,
+            get_garmin_ggz_path,
+            get_garmin_gpx_path,
+            is_mtp_device,
+        )
+
+        if device is not None and (not isinstance(device, str) or not device.strip()):
+            raise MacroError(f"{func}: device must be the device's folder, e.g. \"E:\\\"")
+        devices = find_garmin_devices()
+        if not devices:
+            raise MacroError(f"{func}: no Garmin device connected")
+        if device is not None:
+            wanted = Path(device.strip()).expanduser()
+            devices = [d for d in devices if str(d) == device.strip() or Path(str(d)) == wanted]
+            if not devices:
+                raise MacroError(f"{func}: no Garmin device at {device!r}")
+        elif len(devices) > 1:
+            names = ", ".join(repr(str(d)) for d in devices)
+            raise MacroError(f"{func}: several Garmin devices connected ({names}); choose one with device = ...")
+        root = devices[0]
+        if not isinstance(root, Path) or is_mtp_device(root):
+            raise MacroError(
+                f"{func}: {root} is an MTP device, which macros cannot write to yet "
+                "— use GPS → Send to GPS"
+            )
+        return get_garmin_ggz_path(root) if fmt == "ggz" else get_garmin_gpx_path(root)
+
     # -- Running ---------------------------------------------------------------
 
     def run(
@@ -1127,6 +1763,7 @@ class MacroRuntime:
                 self._boundaries[0].close()
                 self._boundaries = None
             self._close_sql()
+            self._close_other_databases()
             self._host.end_macro()
 
     @staticmethod
@@ -1208,6 +1845,9 @@ class ApiFunction:
 
 
 _CODE = Param("code", "string", 'GC code, e.g. "GC12345".')
+_READ_OPTIONS = Param("options", "opensak.ReadOptions",
+                      "`database`: read another database instead of the active one.",
+                      optional=True)
 _LAT = Param("lat", "number", "Latitude in decimal degrees.")
 _LON = Param("lon", "number", "Longitude in decimal degrees.")
 _COORDS = Param("coords", "string", 'Coordinates, e.g. "N47 22.123 E008 32.456".')
@@ -1249,8 +1889,8 @@ API: tuple[ApiFunction, ...] = (
     ),
     ApiFunction(
         name="filter",
-        description="Build a filter from the given keys (see Filter keys; all "
-                    "combined with AND) and apply it. Usually called with "
+        description="Build a filter from the given keys (see Filter keys; "
+                    "combined with AND unless `mode = \"OR\"`) and apply it. Usually called with "
                     "table syntax: `opensak.filter{ ... }`. When nothing "
                     "matches, the view is left unchanged.",
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
@@ -1259,6 +1899,31 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._filter,
         params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
         returns=("integer", "Number of matching caches (0 = view unchanged)."),
+    ),
+    ApiFunction(
+        name="filter_name",
+        description="The name of the active filter: the `label` of "
+                    "opensak.filter{}, a profile name, or \"\" when no "
+                    "filter is active. The same as the {filter} variable of "
+                    "an export file name.",
+        example='print("Filter: " .. opensak.filter_name())',
+        since=2,
+        bind=lambda rt, lua: lambda: rt._host.filter_name(),
+        returns=("string", "The filter name; \"\" for none."),
+    ),
+    ApiFunction(
+        name="sort",
+        description="Sort the cache list, like a click on a column header. "
+                    "opensak.caches() and opensak.codes() then return the "
+                    "caches in this order. Fields: "
+                    + ", ".join(f"`{k}`" for k in SORT_KEYS) + ".",
+        example='opensak.sort("difficulty", "desc")',
+        since=2,
+        bind=lambda rt, lua: rt._sort,
+        params=(
+            Param("field", "string", "A cache field, e.g. \"difficulty\"."),
+            Param("direction", '"asc"|"desc"', '"asc" if omitted.', optional=True),
+        ),
     ),
     ApiFunction(
         name="filter_profile",
@@ -1298,10 +1963,11 @@ API: tuple[ApiFunction, ...] = (
         description="One cache as a table (see Cache fields). It is a "
                     "snapshot: changing it changes nothing in the database.",
         example='local c = opensak.cache("GC12345")\n'
-                'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end',
+                'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end\n'
+                'local found = opensak.cache("GC12345", { database = "Found" })',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
-        params=(_CODE,),
+        params=(_CODE, _READ_OPTIONS),
         returns=("opensak.Cache?", "The cache, or nil if it is not in the database."),
     ),
     ApiFunction(
@@ -1311,18 +1977,24 @@ API: tuple[ApiFunction, ...] = (
                     "caches of the active filter, in grid order. With filter "
                     "keys (see Filter keys): the caches matching them, sorted "
                     "by name; the view and the active filter stay "
-                    "unchanged. `fields` limits the fields loaded (`code` is "
-                    "always included), which makes loops over many caches "
+                    "unchanged. `database` reads another database, without "
+                    "switching: its caches matching the filter keys, or all "
+                    "of them, sorted by name. `fields` limits the fields "
+                    "loaded (`code` is always included), which makes loops "
+                    "over many caches "
                     "faster. Caches are loaded in chunks, so large databases "
                     "do not hit the memory limit.",
         example="for c in opensak.caches() do print(c.code, c.name) end\n"
                 'for c in opensak.caches{ found = true, country = "Switzerland",\n'
                 '                         fields = {"difficulty", "terrain"} } do\n'
-                "    print(c.code, c.difficulty, c.terrain)\nend",
+                "    print(c.code, c.difficulty, c.terrain)\nend\n"
+                'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
+                "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys and/or `fields`; nothing = the active filter.",
+                      "Filter keys, `database` and/or `fields`; nothing = the "
+                      "active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
     ),
@@ -1361,7 +2033,7 @@ API: tuple[ApiFunction, ...] = (
                 'if d and d.long and d.long:find("bonus") then print("bonus cache") end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._description(lua, *a),
-        params=(_CODE,),
+        params=(_CODE, _READ_OPTIONS),
         returns=("{short: string?, long: string?, html: boolean}?",
                  "Short and long description and whether they are HTML; "
                  "nil if the cache is not in the database."),
@@ -1369,7 +2041,8 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="sql",
         description="Run a read-only SQL query (SQLite) against the active "
-                    "database and return all rows. Only reading statements "
+                    "database (or the one named by the `database` option) "
+                    "and return all rows. Only reading statements "
                     "are allowed; the connection itself is read-only. "
                     "Column names follow the database schema, which may "
                     "change between versions (see opensak.tables() and "
@@ -1386,8 +2059,9 @@ API: tuple[ApiFunction, ...] = (
             Param("query", "string", "One SQL statement."),
             Param("params", "table",
                   "Values for `?` placeholders ({ v1, v2 }) or for `:name` "
-                  "placeholders ({ name = v }).",
+                  "placeholders ({ name = v }); `nil` or `{}` for none.",
                   optional=True),
+            _READ_OPTIONS,
         ),
         returns=("table<string, any>[]", "One table per row, keyed by column name."),
     ),
@@ -1403,25 +2077,29 @@ API: tuple[ApiFunction, ...] = (
         params=(
             Param("query", "string", "One SQL statement."),
             Param("params", "table", "As for opensak.sql().", optional=True),
+            _READ_OPTIONS,
         ),
         returns=("fun(): table<string, any>?", "Iterator for a generic `for`."),
     ),
     ApiFunction(
         name="tables",
-        description="The tables and views of the active database, for use "
-                    "with opensak.sql().",
+        description="The tables and views of the active database (or the "
+                    "one named by the `database` option), for use with "
+                    "opensak.sql().",
         example='print(table.concat(opensak.tables(), ", "))',
         since=2,
-        bind=lambda rt, lua: lambda: rt._tables(lua),
+        bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),
+        params=(_READ_OPTIONS,),
         returns=("string[]", "Table and view names, sorted."),
     ),
     ApiFunction(
         name="columns",
-        description="The columns of a table or view of the active database.",
+        description="The columns of a table or view of the active database "
+                    "(or the one named by the `database` option).",
         example='for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
-        params=(Param("table", "string", "Table or view name."),),
+        params=(Param("table", "string", "Table or view name."), _READ_OPTIONS),
         returns=("{name: string, type: string}[]", "Column names and SQL types, in table order."),
     ),
     ApiFunction(
@@ -1582,6 +2260,37 @@ API: tuple[ApiFunction, ...] = (
             Param("folder", "string", "Folder to write to instead of the "
                   "setting's folder, e.g. opensak.temp_dir().", optional=True),
         ),
+        returns=("string?, integer?",
+                 "The file written and the number of caches in it; nil if "
+                 "nothing was written."),
+    ),
+    ApiFunction(
+        name="export_gpx",
+        description="Export the caches of the active filter without a saved "
+                    "export setting. `path` is the file to write; its name "
+                    "may use the variables of the export dialog ({database}, "
+                    "{filter}, {center}, {date}, {count}, ...), and a "
+                    "relative path is resolved against the macro file's "
+                    "folder. Its folder needs write permission, like "
+                    "opensak.export_file(). `rename(c)` and `description(c)` "
+                    "are called with each cache table (see Cache fields) and "
+                    "return the name and the waypoint description to write "
+                    "(nil keeps the default). With `target = \"device\"`, "
+                    "the file goes into the GPX or GGZ folder of the "
+                    "connected Garmin device instead (`path` is then only "
+                    "the file name; MTP devices are not supported yet). "
+                    "Nothing is written when no cache with coordinates is "
+                    "shown, or when the file exists and `if_exists` says "
+                    "skip (or ask, and the user answers No).",
+        example='local path, n = opensak.export_gpx{\n'
+                '  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",\n'
+                '  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,\n'
+                '  pois = { child_waypoints = false },\n'
+                '}\n'
+                'if path then print(n .. " caches → " .. path) end',
+        since=2,
+        bind=lambda rt, lua: lambda *a: rt._export_gpx(lua, *a),
+        params=(Param("spec", "opensak.ExportSpec", "What to export and where."),),
         returns=("string?, integer?",
                  "The file written and the number of caches in it; nil if "
                  "nothing was written."),

@@ -211,3 +211,93 @@ def test_transfer_refuses_missing_target_file(dbs):
     get_db_manager().new_database("Gone").path.unlink()
     with pytest.raises(MacroError, match="file of database 'Gone' is missing"):
         _run('opensak.copy_caches("Gone")')
+
+
+# ── Reading another database (the `database` option) ────────────────────────
+
+@pytest.fixture
+def two_dbs(dbs):
+    """dbs, plus GCDB2 (renamed, with a description) and GCDB9 in "Target"."""
+    source, target = dbs
+    _add(target.path, "GCDB9", name="Zulu")
+    _add(target.path, "GCDB2", name="Alpha")
+    with session_for(target.path) as s:
+        s.query(Cache).filter_by(gc_code="GCDB2").update({"long_description": "in target"})
+    return source, target
+
+
+def test_cache_and_description_read_another_database(two_dbs):
+    host = Host()
+    host.apply_filter(FilterSet(), "all")
+    _, out = _run("""
+        print(opensak.cache("GCDB2").name, opensak.cache("GCDB2", { database = "Target" }).name)
+        print(opensak.cache("GCDB1", { database = "Target" }), opensak.cache("GCDB9"))
+        print(opensak.cache("GCDB2", { database = "Source" }).name)
+        print(opensak.description("GCDB2", { database = "Target" }).long)
+        print(opensak.description("GCDB2").long)
+    """, host)
+    assert out == ["GCDB2\tAlpha", "nil\tnil", "GCDB2", "in target", "nil"]
+    assert host.switched == []
+    assert host.label == "all"
+
+
+def test_caches_of_another_database(two_dbs):
+    _, out = _run("""
+        for c in opensak.caches{ database = "Target", fields = {"name"} } do
+            print(c.code, c.name, c.note)
+        end
+        for c in opensak.caches{ database = "Target", name = "Zu" } do print(c.code, c.note) end
+        local n = 0
+        for _ in opensak.caches() do n = n + 1 end
+        print(n)
+    """)
+    assert out == ["GCDB2\tAlpha\tnil", "GCDB9\tZulu\tnil", "GCDB9\tnote GCDB9", "3"]
+
+
+def test_sql_functions_read_another_database(two_dbs):
+    _, out = _run("""
+        local opts = { database = "Target" }
+        print(#opensak.sql("SELECT gc_code FROM caches", nil, opts), #opensak.sql("SELECT gc_code FROM caches"))
+        for r in opensak.sql_each("SELECT name FROM caches WHERE gc_code = ?", { "GCDB9" }, opts) do
+            print(r.name)
+        end
+        local has = {}
+        for _, t in ipairs(opensak.tables(opts)) do has[t] = true end
+        print(has.caches, #opensak.columns("caches", opts) > 10)
+    """)
+    assert out == ["2\t3", "Zulu", "true\ttrue"]
+
+
+def test_another_database_is_read_only(two_dbs):
+    with pytest.raises(MacroError, match="read-only"):
+        _run('opensak.sql("DELETE FROM caches", {}, { database = "Target" })')
+    assert set(_codes(two_dbs[1].path)) == {"GCDB2", "GCDB9"}
+
+
+@pytest.mark.parametrize("call, msg", [
+    ('opensak.cache("GCDB1", { database = "Nope" })', "no database named 'Nope'"),
+    ('opensak.cache("GCDB1", "Target")', "options must be a table"),
+    ('opensak.cache("GCDB1", { db = "Target" })', r"unknown option\(s\) \['db'\]"),
+    ('opensak.caches{ database = "Nope" }', "opensak.caches: no database named"),
+    ('opensak.tables({ database = 1 })', "expects a database name"),
+])
+def test_database_option_errors(two_dbs, call, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(call)
+
+
+def test_older_schema_is_refused_for_cache_reads(two_dbs):
+    import sqlite3
+
+    target = two_dbs[1].path
+    conn = sqlite3.connect(target)
+    conn.execute("PRAGMA user_version = 1")
+    conn.close()
+    with pytest.raises(MacroError, match="older OpenSAK version"):
+        _run('opensak.cache("GCDB9", { database = "Target" })')
+    # Raw SQL does not depend on the schema; the file is left as it was.
+    _, out = _run('print(#opensak.sql("SELECT 1 AS x", nil, { database = "Target" }))')
+    assert out == ["1"]
+    conn = sqlite3.connect(target)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()

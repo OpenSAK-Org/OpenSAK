@@ -1,7 +1,8 @@
 """
 src/opensak/macro/sql.py — read-only SQL access for Lua macros.
 
-opensak.sql() runs arbitrary SELECTs against the active database. Read-only
+opensak.sql() runs arbitrary SELECTs against the active database (or another
+one, with the `database` option). Read-only
 is enforced by the connection, never by inspecting the SQL text:
 
   * the file is opened with `mode=ro`, so SQLite refuses every write at the
@@ -68,6 +69,19 @@ def _params(params: Any) -> Any:
     return params
 
 
+def connect_read_only(db_path: Path) -> sqlite3.Connection:
+    """A connection that cannot write: `mode=ro` plus `query_only`. Also used
+    for the ORM reads of opensak.cache{ database = ... } and friends."""
+    uri = f"{Path(db_path).resolve().as_uri()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True, timeout=30, check_same_thread=False)
+    try:
+        conn.execute("PRAGMA query_only = ON")
+    except sqlite3.Error:
+        conn.close()
+        raise
+    return conn
+
+
 class ReadOnlyDatabase:
     """A read-only connection to one SQLite file, opened on first use."""
 
@@ -79,10 +93,8 @@ class ReadOnlyDatabase:
 
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
-            uri = f"{self._db_path.resolve().as_uri()}?mode=ro"
             try:
-                conn = sqlite3.connect(uri, uri=True, timeout=30, check_same_thread=False)
-                conn.execute("PRAGMA query_only = ON")
+                conn = connect_read_only(self._db_path)
             except sqlite3.Error as exc:
                 raise SqlError(f"cannot open the database read-only: {exc}") from None
             conn.set_authorizer(_authorizer)

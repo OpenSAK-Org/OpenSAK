@@ -48,6 +48,9 @@ class FakeHost:
     def filter_name(self):
         return self.applied[-1][1] if self.applied else ""
 
+    def set_sort(self, sort):
+        self.sort = sort
+
     def database_name(self):
         return "TestDB"
 
@@ -694,6 +697,7 @@ def full_cache(seed):
             short_description="short", long_description="<p>long</p>",
             long_desc_html=True, waypoint_count=2, log_count=5,
             last_log_date=datetime(2025, 3, 4, 10, 0),
+            last_gpx_update=datetime(2026, 9, 30, 18, 5, 9),
         )
         s.add(cache)
         s.flush()
@@ -710,6 +714,7 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
         print(c.user_flag, c.user_sort, #c.user_data, c.user_data[1] == "", c.user_data[2])
         print(c.color, c.note, c.hint, c.url, c.corrected.lat, c.corrected.lon)
         print(c.distance, c.bearing, c.waypoint_count, c.log_count, c.last_log_date)
+        print(c.last_gpx_update, opensak.date.parse(c.last_gpx_update) ~= nil)
         c.name = "changed"
         print(opensak.cache("GCACC1").name, opensak.cache("GCNONE"))
     """)
@@ -720,6 +725,7 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
         "true	7	4	true	Solved",
         "#FF5733	my note	under the stone	https://coord.info/GCACC1	47.2	8.3",
         "12.5	90	2	5	2025-03-04",
+        "2026-09-30T18:05:09	true",
         "All fields	nil",
     ]
 
@@ -1032,3 +1038,266 @@ def test_export_example_stops_when_file_name_lacks_filter(tmp_path, example_temp
 
     with pytest.raises(MacroError, match="Traditionals and Multi-caches both exported to"):
         _run_export_example(runtime)
+
+
+# ── More filter keys, filter_name, sort ──────────────────────────────────────
+
+def _filters(lua_spec: str):
+    """The filters opensak.filter{...} builds from *lua_spec*, via real Lua
+    tables (so {nil, x} is covered)."""
+    host, _ = _run(f"opensak.filter{{ {lua_spec} }}")
+    return host.applied[-1][0]
+
+
+def test_flag_keys_map_to_filters():
+    fs = _filters("corrected = true, user_flag = false, locked = true, dnf = true, "
+                  "ftf = false, premium = false, archived = false, has_trackables = false")
+    names = [type(f).__name__ for f in fs._filters]
+    assert names == ["HasCorrectedFilter", "UserFlagFilter", "LockedFilter", "DnfFilter",
+                     "FtfFilter", "NonPremiumFilter", "AvailabilityFilter", "FilterSet"]
+    assert fs._filters[1].flagged is False and fs._filters[4].has_ftf is False
+    archived = fs._filters[6]
+    assert (archived.show_avail, archived.show_unavail, archived.show_archived) == (True, True, False)
+    assert fs._filters[7].negate is True
+
+
+def test_range_keys_with_open_sides():
+    fs = _filters("favorites = {10, nil}, elevation = {nil, 500}, distance = {5, 25}, "
+                  "bearing = {315, 45}")
+    dist, bearing, fav, elev = fs._filters
+    assert (fav.op, fav.pts1) == ("at_least", 10)
+    assert (elev.op, elev.elev1_m) == ("at_most", 500.0)
+    assert (dist.op, dist.dist1_km, dist.dist2_km) == ("between", 5.0, 25.0)
+    assert (bearing.op, bearing.deg1, bearing.deg2) == ("between", 315.0, 45.0)
+    (dist,) = _filters("distance = 10")._filters
+    assert (dist.op, dist.dist1_km) == ("at_most", 10.0)
+
+
+def test_date_keys():
+    fs = _filters('hidden = {"2020-01-01", "2020-12-31"}, found_date = {"2026-01-01", nil}, '
+                  'last_gpx_update = {nil, "2026-09-01T18:30"}')
+    hidden, found, gpx = fs._filters
+    assert (hidden.field, hidden.op, str(hidden.date1), str(hidden.date2)) == \
+        ("hidden_date", "between", "2020-01-01", "2020-12-31")
+    assert (found.op, str(found.date1)) == ("on_or_after", "2026-01-01")
+    assert (gpx.field, gpx.op, gpx.date1) == ("last_gpx_update", "on_or_before",
+                                               datetime(2026, 9, 1, 18, 30))
+
+
+def test_text_keys_attributes_codes_and_mode():
+    fs = _filters('user_data2 = "solved", note = "x", placed_by = "P", text = "Brücke", '
+                  'attributes = {"Dogs", "-night cache", 13}, codes = {"gc1", "GC2"}, mode = "or"')
+    assert fs.mode == "OR"
+    names = [type(f).__name__ for f in fs._filters]
+    assert names == ["AttributeFilter"] * 3 + ["PlacedByFilter", "UserData2Filter",
+                                               "UserNoteFilter", "TextSearchFilter", "GcCodeFilter"]
+    assert [(f.attribute_id, f.is_on) for f in fs._filters[:3]] == [(1, True), (52, False), (13, True)]
+    assert (fs._filters[-1].op, fs._filters[-1].text) == ("in_list", "GC1;GC2")
+
+
+def test_near_point_and_owned():
+    from opensak.gui.settings import HomePoint, get_settings
+    settings = get_settings()
+    settings.home_points = [HomePoint("Cabin", 46.5, 7.5)]
+    settings.gc_username = "Me"
+    owned, near = _filters('near = { point = "Cabin", km = 3 }, owned = true')._filters
+    assert (near.lat, near.lon, near.op, near.dist1_km) == (46.5, 7.5, "at_most", 3.0)
+    assert (owned.text, owned.op) == ("Me", "equals")
+    (near,) = _filters("near = { lat = 47, lon = 8, km = 1 }")._filters
+    assert (near.lat, near.lon) == (47.0, 8.0)
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ("favorites = {}", "favorites must be a number or"),
+    ('hidden = "2020"', "hidden must be {from, to}"),
+    ('hidden = {"01.01.2020", nil}', 'dates must be "YYYY-MM-DD"'),
+    ("bearing = 45", "bearing must be {from, to}"),
+    ("corrected = 1", "corrected must be true or false"),
+    ('attributes = "Unicorns"', "unknown attribute 'Unicorns'"),
+    ('near = { point = "Nowhere", km = 1 }', "no centre point named 'Nowhere'"),
+    ("near = { lat = 47, lon = 8 }", "near needs km"),
+    ("owned = true", "username in Settings"),
+    ('mode = "XOR", found = true', 'mode must be "AND" or "OR"'),
+    ('polygon = "missing.kml"', "macro is not allowed|cannot read"),
+])
+def test_new_filter_keys_reject_bad_input(spec, msg):
+    with pytest.raises(MacroError, match=msg):
+        _filters(spec)
+
+
+def test_polygon_without_runtime_is_refused():
+    with pytest.raises(MacroError, match="only available in macros"):
+        build_filterset({"polygon": "area.kml"})
+
+
+def test_new_keys_select_caches_in_db(full_cache):
+    host = DbHost()
+    _, out = _run("""
+        print(opensak.filter{ codes = {"gcmac2", "GCMAC3", "GCNONE"} })
+        print(opensak.filter{ codes = {} })
+        print(opensak.filter{ user_flag = true }, opensak.filter{ premium = true })
+        print(opensak.filter{ mode = "OR", codes = {"GCMAC1"}, name = "All fields" })
+        print(opensak.filter{ near = { lat = 47.1, lon = 8.2, km = 1 } })
+        -- polygon tests the corrected coordinates (47.2, 8.3), as on the map
+        print(opensak.filter{ polygon = {{47.15, 8.25}, {47.25, 8.25}, {47.25, 8.35}, {47.15, 8.35}} })
+        print(opensak.filter{ hidden = {"2020-05-17", "2020-05-17"} })
+        print(opensak.filter{ text = "LONG" }, opensak.filter{ note = "my note" })
+        print(opensak.filter_name())
+    """, host)
+    assert out == ["2", "0", "1\t1", "2", "1", "1", "1", "1\t1", "Macro"]
+    assert host.selected == {"GCACC1"}
+
+
+def test_filter_name_is_the_label():
+    _, out = _run('print(opensak.filter_name()) opensak.filter{ found = true, label = "Mine" } '
+                  "print(opensak.filter_name())")
+    assert out == ["", "Mine"]
+
+
+def test_sort_reaches_host():
+    host, _ = _run('opensak.sort("difficulty", "DESC")')
+    assert (host.sort.field, host.sort.ascending) == ("difficulty", False)
+    host, _ = _run('opensak.sort("hidden")')
+    assert (host.sort.field, host.sort.ascending) == ("hidden_date", True)
+
+
+@pytest.mark.parametrize("call, msg", [
+    ('opensak.sort("elevation")', "cannot sort by 'elevation'"),
+    ("opensak.sort()", "cannot sort by None"),
+    ('opensak.sort("name", "down")', 'direction must be "asc" or "desc"'),
+])
+def test_sort_rejects_bad_input(call, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(call)
+
+
+def test_every_sort_key_is_a_sort_field():
+    from opensak.filters.engine import SORT_FIELDS
+    from opensak.macro.runtime import SORT_KEYS
+    assert set(SORT_KEYS.values()) <= set(SORT_FIELDS)
+
+
+# ── Ad-hoc export (opensak.export_gpx) ───────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def export_cache(seed):
+    """GCEXP1, with an attribute, a child waypoint and corrected coordinates."""
+    from opensak.db.models import Attribute, Waypoint
+    with get_session() as s:
+        cache = Cache(gc_code="GCEXP1", name="Export me", cache_type="Multi-cache",
+                      difficulty=2.0, terrain=3.5, latitude=46.0, longitude=7.0)
+        s.add(cache)
+        s.flush()
+        s.add(Attribute(cache_id=cache.id, attribute_id=1, name="Dogs", is_on=True))
+        s.add(Waypoint(cache_id=cache.id, prefix="PK", name="Parking", wp_type="Parking Area",
+                       latitude=46.01, longitude=7.01))
+    set_corrected_coords("GCEXP1", 46.5, 7.5)
+
+
+def _export_gpx(tmp_path, spec: str, host=None):
+    """Run opensak.export_gpx{spec} on GCEXP1; return (out, runtime host)."""
+    runtime, out = _export_runtime(tmp_path, host)
+    runtime.run(f"""
+        opensak.filter{{ codes = {{"GCEXP1"}}, label = "One" }}
+        print(opensak.export_gpx{{ {spec} }})
+    """)
+    return out
+
+
+def test_export_gpx_renames_and_describes(tmp_path, export_cache):
+    out = _export_gpx(tmp_path, f"""
+        path = {str(tmp_path / "out" / "{filter}_{count}.gpx")!r},
+        rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+        description = function(c) return c.code .. " " .. c.type end,
+    """)
+    target = (tmp_path / "out" / "One_1.gpx").resolve()
+    assert out == [f"{target}\t1"]
+    text = target.read_text(encoding="utf-8")
+    assert "<groundspeak:name>2.0/3.5 Export me</groundspeak:name>" in text
+    assert "<desc>GCEXP1 Multi-cache</desc>" in text
+    assert 'lat="46.500000"' in text                     # corrected by default
+    assert "<groundspeak:attributes>" in text and "PKEXP1" in text
+
+
+def test_export_gpx_options_and_formats(tmp_path, export_cache):
+    import zipfile
+    _export_gpx(tmp_path, f"""
+        path = {str(tmp_path / "out" / "a.gpx")!r}, corrected = false,
+        pois = {{ attributes = false, child_waypoints = false }},
+        rename = function(c) return nil end,
+    """)
+    text = (tmp_path / "out" / "a.gpx").read_text(encoding="utf-8")
+    assert 'lat="46.000000"' in text
+    assert "<groundspeak:name>Export me</groundspeak:name>" in text
+    assert "groundspeak:attributes" not in text and "PKEXP1" not in text
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "b.ggz")!r}, '
+                          'rename = function(c) return "R " .. c.name end')
+    with zipfile.ZipFile(tmp_path / "out" / "b.ggz") as z:
+        index = z.read("index/com/garmin/geocaches/v0/index.xml").decode()
+        gpx = z.read("data/b.gpx").decode()
+    assert "<name>R Export me</name>" in index and "R Export me" in gpx
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "c.loc")!r}, '
+                          'description = function(c) return "Label " .. c.code end')
+    assert "<![CDATA[Label GCEXP1]]>" in (tmp_path / "out" / "c.loc").read_text(encoding="utf-8")
+
+    _export_gpx(tmp_path, f'path = {str(tmp_path / "out" / "d")!r}, format = "kml", '
+                          'corrected = false, rename = function(c) return "K" end')
+    kml = (tmp_path / "out" / "d.kml").read_text(encoding="utf-8")
+    assert "GCEXP1 K" in kml and "7.0,46.0,0" in kml
+
+
+@pytest.mark.parametrize("if_exists, written", [("overwrite", True), ("skip", False)])
+def test_export_gpx_if_exists(tmp_path, export_cache, if_exists, written):
+    target = tmp_path / "out" / "x.gpx"
+    target.parent.mkdir()
+    target.write_text("old", encoding="utf-8")
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, if_exists = "{if_exists}"')
+    assert (out == ["nil"]) is not written
+    assert (target.read_text(encoding="utf-8") != "old") is written
+
+
+def test_export_gpx_to_device(tmp_path, export_cache, monkeypatch):
+    import opensak.gps.garmin as garmin
+    device = tmp_path / "GARMIN_DRIVE"
+    (device / "Garmin" / "GPX").mkdir(parents=True)
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    out = _export_gpx(tmp_path, 'target = "device", format = "ggz"')
+    target = (device / "Garmin" / "GGZ" / "TestDB.ggz").resolve()
+    assert out == [f"{target}\t1"]
+
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device, tmp_path / "SD"])
+    with pytest.raises(MacroError, match="several Garmin devices"):
+        _export_gpx(tmp_path, 'target = "device"')
+    out = _export_gpx(tmp_path, f'target = "device", device = {str(device)!r}, path = "pick"')
+    assert out == [f"{(device / 'Garmin' / 'GPX' / 'pick.gpx').resolve()}\t1"]
+
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [device])
+    monkeypatch.setattr(garmin, "is_mtp_device", lambda root: True)
+    with pytest.raises(MacroError, match="MTP device"):
+        _export_gpx(tmp_path, 'target = "device"')
+    monkeypatch.setattr(garmin, "find_garmin_devices", lambda: [])
+    with pytest.raises(MacroError, match="no Garmin device connected"):
+        _export_gpx(tmp_path, 'target = "device"')
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ("", "needs path"),
+    ('path = "a.gpx", folder = "x"', r"unknown key\(s\) \['folder'\]"),
+    ('path = "a.txt", format = "txt"', "format must be one of gpx, loc, ggz, kml"),
+    ('target = "device", format = "kml"', "format must be one of gpx, ggz"),
+    ('path = "a.gpx", target = "phone"', 'target must be "file" or "device"'),
+    ('path = "a.gpx", device = "E:"', 'device needs target = "device"'),
+    ('path = "a.gpx", max = -1', "max must be a whole number"),
+    ('path = "a.gpx", corrected = "yes"', "corrected must be true or false"),
+    ('path = "a.gpx", if_exists = "never"', "if_exists must be one of"),
+    ('path = "a.gpx", rename = "x"', "rename must be a function"),
+    ('path = "a.gpx", pois = { logs = false }', r"unknown pois key\(s\) \['logs'\]"),
+    ('path = "a.gpx", description = function(c) return {} end', "description must return a string"),
+    ('path = "a.gpx", rename = function(c) error("boom") end', "boom"),
+])
+def test_export_gpx_rejects_bad_input(tmp_path, export_cache, spec, msg):
+    with pytest.raises(MacroError, match=msg):
+        _export_gpx(tmp_path, spec)
+    assert not (tmp_path / "out").exists()

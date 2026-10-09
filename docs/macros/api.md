@@ -14,6 +14,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 |---|---|
 | [`opensak.api_version`](#opensakapiversion) | 1 |
 | [`opensak.filter`](#opensakfilter) | 1 |
+| [`opensak.filter_name`](#opensakfiltername) | 2 |
+| [`opensak.sort`](#opensaksort) | 2 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.count`](#opensakcount) | 1 |
@@ -39,6 +41,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
+| [`opensak.export_gpx`](#opensakexportgpx) | 2 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
@@ -92,7 +95,7 @@ end
 opensak.filter(spec)
 ```
 
-Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
+Build a filter from the given keys (see Filter keys; combined with AND unless `mode = "OR"`) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
 
 Parameters:
 
@@ -107,6 +110,45 @@ Example:
 ```lua
 local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
 print("Easy unfound traditionals: " .. n)
+```
+
+### opensak.filter_name
+
+```lua
+opensak.filter_name()
+```
+
+The name of the active filter: the `label` of opensak.filter{}, a profile name, or "" when no filter is active. The same as the {filter} variable of an export file name.
+
+Returns `string` — The filter name; "" for none.
+
+Since API version 2.
+
+Example:
+
+```lua
+print("Filter: " .. opensak.filter_name())
+```
+
+### opensak.sort
+
+```lua
+opensak.sort(field [, direction])
+```
+
+Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+
+Parameters:
+
+- `field` (`string`) — A cache field, e.g. "difficulty".
+- `direction` (`"asc"|"desc"`, optional) — "asc" if omitted.
+
+Since API version 2.
+
+Example:
+
+```lua
+opensak.sort("difficulty", "desc")
 ```
 
 ### opensak.filter_profile
@@ -188,7 +230,7 @@ end
 ### opensak.cache
 
 ```lua
-opensak.cache(code)
+opensak.cache(code [, options])
 ```
 
 One cache as a table (see Cache fields). It is a snapshot: changing it changes nothing in the database.
@@ -196,6 +238,7 @@ One cache as a table (see Cache fields). It is a snapshot: changing it changes n
 Parameters:
 
 - `code` (`string`) — GC code, e.g. "GC12345".
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `opensak.Cache?` — The cache, or nil if it is not in the database.
 
@@ -206,6 +249,7 @@ Example:
 ```lua
 local c = opensak.cache("GC12345")
 if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
+local found = opensak.cache("GC12345", { database = "Found" })
 ```
 
 ### opensak.caches
@@ -214,11 +258,11 @@ if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
 opensak.caches([spec])
 ```
 
-Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 
 Parameters:
 
-- `spec` (`opensak.CachesSpec`, optional) — Filter keys and/or `fields`; nothing = the active filter.
+- `spec` (`opensak.CachesSpec`, optional) — Filter keys, `database` and/or `fields`; nothing = the active filter.
 
 Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
 
@@ -231,6 +275,9 @@ for c in opensak.caches() do print(c.code, c.name) end
 for c in opensak.caches{ found = true, country = "Switzerland",
                          fields = {"difficulty", "terrain"} } do
     print(c.code, c.difficulty, c.terrain)
+end
+for c in opensak.caches{ database = "Found", fields = {"corrected"} } do
+    print(c.code, c.corrected and c.corrected.lat)
 end
 ```
 
@@ -292,7 +339,7 @@ print(table.concat(opensak.codes(), ", "))
 ### opensak.description
 
 ```lua
-opensak.description(code)
+opensak.description(code [, options])
 ```
 
 The listing description of a cache. Not part of the cache table because it can be large.
@@ -300,6 +347,7 @@ The listing description of a cache. Not part of the cache table because it can b
 Parameters:
 
 - `code` (`string`) — GC code, e.g. "GC12345".
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `{short: string?, long: string?, html: boolean}?` — Short and long description and whether they are HTML; nil if the cache is not in the database.
 
@@ -315,15 +363,16 @@ if d and d.long and d.long:find("bonus") then print("bonus cache") end
 ### opensak.sql
 
 ```lua
-opensak.sql(query [, params])
+opensak.sql(query [, params] [, options])
 ```
 
-Run a read-only SQL query (SQLite) against the active database and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 
 Parameters:
 
 - `query` (`string`) — One SQL statement.
-- `params` (`table`, optional) — Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }).
+- `params` (`table`, optional) — Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }); `nil` or `{}` for none.
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `table<string, any>[]` — One table per row, keyed by column name.
 
@@ -340,7 +389,7 @@ for _, r in ipairs(rows) do print(r.country, r.n) end
 ### opensak.sql_each
 
 ```lua
-opensak.sql_each(query [, params])
+opensak.sql_each(query [, params] [, options])
 ```
 
 Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
@@ -349,6 +398,7 @@ Parameters:
 
 - `query` (`string`) — One SQL statement.
 - `params` (`table`, optional) — As for opensak.sql().
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `fun(): table<string, any>?` — Iterator for a generic `for`.
 
@@ -365,10 +415,14 @@ end
 ### opensak.tables
 
 ```lua
-opensak.tables()
+opensak.tables([options])
 ```
 
-The tables and views of the active database, for use with opensak.sql().
+The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql().
+
+Parameters:
+
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `string[]` — Table and view names, sorted.
 
@@ -383,14 +437,15 @@ print(table.concat(opensak.tables(), ", "))
 ### opensak.columns
 
 ```lua
-opensak.columns(table)
+opensak.columns(table [, options])
 ```
 
-The columns of a table or view of the active database.
+The columns of a table or view of the active database (or the one named by the `database` option).
 
 Parameters:
 
 - `table` (`string`) — Table or view name.
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
 
 Returns `{name: string, type: string}[]` — Column names and SQL types, in table order.
 
@@ -649,6 +704,33 @@ Example:
 
 ```lua
 local path, n = opensak.export_file("GPX Export")
+if path then print(n .. " caches → " .. path) end
+```
+
+### opensak.export_gpx
+
+```lua
+opensak.export_gpx(spec)
+```
+
+Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No).
+
+Parameters:
+
+- `spec` (`opensak.ExportSpec`) — What to export and where.
+
+Returns `string?, integer?` — The file written and the number of caches in it; nil if nothing was written.
+
+Since API version 2.
+
+Example:
+
+```lua
+local path, n = opensak.export_gpx{
+  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",
+  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+  pois = { child_waypoints = false },
+}
 if path then print(n .. " caches → " .. path) end
 ```
 
@@ -1272,7 +1354,7 @@ print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))
 
 ## Filter keys
 
-Keys understood by `opensak.filter{}`, all combined with AND.
+Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 
 | Key | Value | Meaning |
 |---|---|---|
@@ -1282,11 +1364,30 @@ Keys understood by `opensak.filter{}`, all combined with AND.
 | `terrain` | `2 \| {1, 2.5}` | Exact value or {min, max}. |
 | `found` | `true \| false` | Only found or only unfound caches. |
 | `available` | `true` | Only available caches (not disabled or archived). |
-| `name`, `code`, `owner`, `country`, `state`, `county` | `"text"` | "Contains" match on that field. |
+| `archived` | `true \| false` | Only archived caches, or only caches that are not archived. |
+| `corrected` | `true \| false` | With or without corrected coordinates. |
+| `user_flag`, `locked`, `dnf`, `ftf`, `premium` | `true \| false` | That flag set, or not set. |
+| `has_trackables` | `true \| false` | With or without trackables in the cache. |
+| `owned` | `true \| false` | Owned by you (owner = your geocaching.com username in Settings), or not. |
+| `near` | `{lat = 47.37, lon = 8.54, km = 10} \| {point = "Home", km = 10}` | Within `km` of a coordinate or of a saved centre point. |
+| `distance` | `25 \| {5, 25} \| {10, nil}` | Km from the active centre point: at most a number, or {min, max} where nil leaves a side open. |
+| `bearing` | `{45, 135} \| {315, 45}` | Bearing from the active centre point, clockwise from the first to the second value. |
+| `favorites`, `elevation` | `10 \| {10, nil} \| {nil, 500}` | Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open. |
+| `hidden`, `found_date`, `last_gpx_update` | `{"2020-01-01", "2020-12-31"} \| {nil, "2026-09-01"}` | Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00". |
+| `attributes` | `"Dogs" \| {"Dogs", "-Night cache", 13}` | Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed). |
+| `name`, `code`, `owner`, `placed_by`, `country`, `state`, `county`, `user_data1`, `user_data2`, `user_data3`, `user_data4`, `gc_note`, `note` | `"text"` | "Contains" match on that field (`note` = your local note). |
+| `text` | `"Brücke"` | Full-text search in description, logs and notes. |
+| `polygon` | `"area.kml" \| {{47.1, 8.1}, {47.2, 8.1}, {47.2, 8.3}}` | Inside a polygon: a file (as for opensak.coords.inside) or a table of points. |
+| `codes` | `{"GC1", "GC2"}` | Exactly these GC codes, e.g. from an opensak.sql() result. |
 | `where` | `"SQL WHERE clause"` | Raw clause against the caches table. |
+| `mode` | `"OR"` | How the criteria are combined (default AND). |
 | `label` | `"text"` | Shown in the toolbar (optional, default "Macro"). |
 
-`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included).
+`opensak.caches{}` also takes `fields`, an array of the cache fields to load (`code` is always included), and `database`.
+
+## Reading another database
+
+`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, `opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and `opensak.columns()` take a `database` option with the name of a database from `opensak.databases()`. It reads that database without switching to it, so the active filter stays. The database is opened read-only. A database last opened by an older OpenSAK version must be opened once first, so its schema is updated. Naming the active database is the same as leaving `database` out.
 
 ## Cache fields
 
@@ -1336,6 +1437,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `log_count` | `integer` | Number of logs stored. |
 | `trackable_count` | `integer` | Number of trackables in the cache. |
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
+| `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh. |
 
 ## Example macros
 

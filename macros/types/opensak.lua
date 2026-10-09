@@ -2,7 +2,7 @@
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
 -- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
 
----Keys understood by `opensak.filter{}`, all combined with AND.
+---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
 ---@field type? string|string[] Cache type(s); the " Cache" suffix may be left out.
 ---@field container? string|string[] Container size(s).
@@ -10,23 +10,70 @@
 ---@field terrain? number|number[] Exact value or {min, max}.
 ---@field found? boolean Only found or only unfound caches.
 ---@field available? boolean Only available caches (not disabled or archived).
----@field name? string "Contains" match on that field.
----@field code? string "Contains" match on that field.
----@field owner? string "Contains" match on that field.
----@field country? string "Contains" match on that field.
----@field state? string "Contains" match on that field.
----@field county? string "Contains" match on that field.
+---@field archived? boolean Only archived caches, or only caches that are not archived.
+---@field corrected? boolean With or without corrected coordinates.
+---@field user_flag? boolean That flag set, or not set.
+---@field locked? boolean That flag set, or not set.
+---@field dnf? boolean That flag set, or not set.
+---@field ftf? boolean That flag set, or not set.
+---@field premium? boolean That flag set, or not set.
+---@field has_trackables? boolean With or without trackables in the cache.
+---@field owned? boolean Owned by you (owner = your geocaching.com username in Settings), or not.
+---@field near? table Within `km` of a coordinate or of a saved centre point.
+---@field distance? number|number[] Km from the active centre point: at most a number, or {min, max} where nil leaves a side open.
+---@field bearing? number[] Bearing from the active centre point, clockwise from the first to the second value.
+---@field favorites? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
+---@field elevation? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
+---@field hidden? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field found_date? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field last_gpx_update? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field attributes? string|string[] Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed).
+---@field name? string "Contains" match on that field (`note` = your local note).
+---@field code? string "Contains" match on that field (`note` = your local note).
+---@field owner? string "Contains" match on that field (`note` = your local note).
+---@field placed_by? string "Contains" match on that field (`note` = your local note).
+---@field country? string "Contains" match on that field (`note` = your local note).
+---@field state? string "Contains" match on that field (`note` = your local note).
+---@field county? string "Contains" match on that field (`note` = your local note).
+---@field user_data1? string "Contains" match on that field (`note` = your local note).
+---@field user_data2? string "Contains" match on that field (`note` = your local note).
+---@field user_data3? string "Contains" match on that field (`note` = your local note).
+---@field user_data4? string "Contains" match on that field (`note` = your local note).
+---@field gc_note? string "Contains" match on that field (`note` = your local note).
+---@field note? string "Contains" match on that field (`note` = your local note).
+---@field text? string Full-text search in description, logs and notes.
+---@field polygon? string|table Inside a polygon: a file (as for opensak.coords.inside) or a table of points.
+---@field codes? string[] Exactly these GC codes, e.g. from an opensak.sql() result.
 ---@field where? string Raw clause against the caches table.
+---@field mode? "AND"|"OR" How the criteria are combined (default AND).
 ---@field label? string Shown in the toolbar (optional, default "Macro").
 
----Filter keys plus `fields`, understood by `opensak.caches{}`.
+---Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.
 ---@class opensak.CachesSpec: opensak.FilterSpec
 ---@field fields? string[] Cache fields to load (`code` is always included).
+---@field database? string Read this database instead of the active one.
+
+---Options of the read functions (`opensak.cache()`, `opensak.sql()`, ...).
+---@class opensak.ReadOptions
+---@field database? string Read this database instead of the active one.
 
 ---Options of `opensak.move_caches()` and `opensak.copy_caches()`.
 ---@class opensak.TransferOptions
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
 ---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").
+
+---What `opensak.export_gpx{}` writes.
+---@class opensak.ExportSpec
+---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).
+---@field format? "gpx"|"ggz"|"loc"|"kml" Default: from the extension of `path`, else "gpx" (a device takes gpx or ggz).
+---@field corrected? boolean Use corrected coordinates where set (default true).
+---@field max? integer At most this many caches (default 0 = all).
+---@field rename? fun(c: opensak.Cache): string? Name to write instead of the cache name.
+---@field description? fun(c: opensak.Cache): string? Waypoint description to write (GPX desc, LOC label, KML pop-up).
+---@field pois? {attributes?: boolean, child_waypoints?: boolean} Leave out attributes (GPX/GGZ) or child waypoints (GPX/GGZ/KML); both default true.
+---@field if_exists? "overwrite"|"skip"|"ask" When the file exists (default "overwrite").
+---@field target? "file"|"device" "device": the GPX/GGZ folder of the connected Garmin (default "file").
+---@field device? string The device's folder, when several Garmin devices are connected.
 
 ---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).
 ---@class opensak.Cache
@@ -72,6 +119,7 @@
 ---@field log_count integer Number of logs stored.
 ---@field trackable_count integer Number of trackables in the cache.
 ---@field last_log_date string? Date of the latest log, "YYYY-MM-DD".
+---@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh.
 
 ---The OpenSAK API, available as a global in every macro.
 opensak = {}
@@ -88,7 +136,7 @@ opensak = {}
 ---@return integer # The API version.
 function opensak.api_version() end
 
----Build a filter from the given keys (see Filter keys; all combined with AND) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
+---Build a filter from the given keys (see Filter keys; combined with AND unless `mode = "OR"`) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
 ---
 ---Since API version 1.
 ---
@@ -99,6 +147,27 @@ function opensak.api_version() end
 ---@param spec opensak.FilterSpec The filter keys.
 ---@return integer # Number of matching caches (0 = view unchanged).
 function opensak.filter(spec) end
+
+---The name of the active filter: the `label` of opensak.filter{}, a profile name, or "" when no filter is active. The same as the {filter} variable of an export file name.
+---
+---Since API version 2.
+---
+---```lua
+---print("Filter: " .. opensak.filter_name())
+---```
+---@return string # The filter name; "" for none.
+function opensak.filter_name() end
+
+---Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+---
+---Since API version 2.
+---
+---```lua
+---opensak.sort("difficulty", "desc")
+---```
+---@param field string A cache field, e.g. "difficulty".
+---@param direction? "asc"|"desc" "asc" if omitted.
+function opensak.sort(field, direction) end
 
 ---Apply a saved filter profile.
 ---
@@ -149,12 +218,14 @@ function opensak.profiles() end
 ---```lua
 ---local c = opensak.cache("GC12345")
 ---if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end
+---local found = opensak.cache("GC12345", { database = "Found" })
 ---```
 ---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return opensak.Cache? # The cache, or nil if it is not in the database.
-function opensak.cache(code) end
+function opensak.cache(code, options) end
 
----Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+---Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 ---
 ---Since API version 2.
 ---
@@ -164,8 +235,11 @@ function opensak.cache(code) end
 ---                         fields = {"difficulty", "terrain"} } do
 ---    print(c.code, c.difficulty, c.terrain)
 ---end
+---for c in opensak.caches{ database = "Found", fields = {"corrected"} } do
+---    print(c.code, c.corrected and c.corrected.lat)
+---end
 ---```
----@param spec? opensak.CachesSpec Filter keys and/or `fields`; nothing = the active filter.
+---@param spec? opensak.CachesSpec Filter keys, `database` and/or `fields`; nothing = the active filter.
 ---@return fun(): opensak.Cache? # Iterator for a generic `for`.
 function opensak.caches(spec) end
 
@@ -209,10 +283,11 @@ function opensak.codes() end
 ---if d and d.long and d.long:find("bonus") then print("bonus cache") end
 ---```
 ---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return {short: string?, long: string?, html: boolean}? # Short and long description and whether they are HTML; nil if the cache is not in the database.
-function opensak.description(code) end
+function opensak.description(code, options) end
 
----Run a read-only SQL query (SQLite) against the active database and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+---Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 ---
 ---Since API version 2.
 ---
@@ -222,9 +297,10 @@ function opensak.description(code) end
 ---for _, r in ipairs(rows) do print(r.country, r.n) end
 ---```
 ---@param query string One SQL statement.
----@param params? table Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }).
+---@param params? table Values for `?` placeholders ({ v1, v2 }) or for `:name` placeholders ({ name = v }); `nil` or `{}` for none.
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return table<string, any>[] # One table per row, keyed by column name.
-function opensak.sql(query, params) end
+function opensak.sql(query, params, options) end
 
 ---Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
 ---
@@ -237,20 +313,22 @@ function opensak.sql(query, params) end
 ---```
 ---@param query string One SQL statement.
 ---@param params? table As for opensak.sql().
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return fun(): table<string, any>? # Iterator for a generic `for`.
-function opensak.sql_each(query, params) end
+function opensak.sql_each(query, params, options) end
 
----The tables and views of the active database, for use with opensak.sql().
+---The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql().
 ---
 ---Since API version 2.
 ---
 ---```lua
 ---print(table.concat(opensak.tables(), ", "))
 ---```
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return string[] # Table and view names, sorted.
-function opensak.tables() end
+function opensak.tables(options) end
 
----The columns of a table or view of the active database.
+---The columns of a table or view of the active database (or the one named by the `database` option).
 ---
 ---Since API version 2.
 ---
@@ -258,8 +336,9 @@ function opensak.tables() end
 ---for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end
 ---```
 ---@param table string Table or view name.
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
 ---@return {name: string, type: string}[] # Column names and SQL types, in table order.
-function opensak.columns(table) end
+function opensak.columns(table, options) end
 
 ---All databases in OpenSAK's database list, sorted by name.
 ---
@@ -396,6 +475,23 @@ function opensak.read_csv(path, sep) end
 ---@return string? # The file written and the number of caches in it; nil if nothing was written.
 ---@return integer?
 function opensak.export_file(setting, folder) end
+
+---Export the caches of the active filter without a saved export setting. `path` is the file to write; its name may use the variables of the export dialog ({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is resolved against the macro file's folder. Its folder needs write permission, like opensak.export_file(). `rename(c)` and `description(c)` are called with each cache table (see Cache fields) and return the name and the waypoint description to write (nil keeps the default). With `target = "device"`, the file goes into the GPX or GGZ folder of the connected Garmin device instead (`path` is then only the file name; MTP devices are not supported yet). Nothing is written when no cache with coordinates is shown, or when the file exists and `if_exists` says skip (or ask, and the user answers No).
+---
+---Since API version 2.
+---
+---```lua
+---local path, n = opensak.export_gpx{
+---  path = opensak.temp_dir() .. "/{database}_{filter}.gpx",
+---  rename = function(c) return c.difficulty .. "/" .. c.terrain .. " " .. c.name end,
+---  pois = { child_waypoints = false },
+---}
+---if path then print(n .. " caches → " .. path) end
+---```
+---@param spec opensak.ExportSpec What to export and where.
+---@return string? # The file written and the number of caches in it; nil if nothing was written.
+---@return integer?
+function opensak.export_gpx(spec) end
 
 ---Ask the user a Yes/No question.
 ---
