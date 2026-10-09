@@ -28,7 +28,7 @@ from opensak.filters.engine import (
 from opensak.gui.cache_table import CacheTableView
 from opensak.gui.cache_detail import CacheDetailPanel
 from opensak.coords import format_coords
-from opensak.gui.settings import get_settings
+from opensak.gui.settings import get_settings, sort_home_points
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
@@ -2238,7 +2238,7 @@ class MainWindow(QMainWindow):
         gemt hjemmepunkt eller en ny cache.
         """
         s = get_settings()
-        points = s.home_points
+        points = sort_home_points(s.home_points)
         active = s.active_home_name
         self._home_combo.blockSignals(True)
         self._home_combo.clear()
