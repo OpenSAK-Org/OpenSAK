@@ -26,15 +26,19 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from PySide6 import QtWidgets
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication, QDialog
 
 from opensak.macro import MacroBusy, MacroError, MacroHost, MacroRuntime, macro_running
 from opensak.utils.run_macro import (
     EXIT_BUSY, EXIT_MACRO_ERROR, EXIT_USAGE, decode_lines, encode, format_error,
     server_name,
 )
+
+# QtWidgets.QApplication is looked up at call time rather than imported by
+# name: main() imports this module late, and test_app's smoke test swaps
+# QtWidgets.QApplication for a stub while main() runs.
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +130,7 @@ class _Session(QObject):
                 # Not from within readyRead: Qt does not emit readyRead again
                 # while its slot runs, so a cancel sent while the macro shows
                 # a dialog would not arrive.
-                QTimer.singleShot(0, self, lambda p=path: self._run(p))
+                QTimer.singleShot(0, self, lambda p=path: self._handle(p))
             elif op == "cancel":
                 self._cancel()
 
@@ -149,9 +153,21 @@ class _Session(QObject):
     def _busy_reason(self) -> Optional[str]:
         if macro_running():
             return "another macro is still running"
-        if QApplication.activeModalWidget() is not None or QApplication.activePopupWidget():
+        app = QtWidgets.QApplication
+        if app.activeModalWidget() is not None or app.activePopupWidget() is not None:
             return "a dialog is open — close it first"
         return None
+
+    def _handle(self, raw_path: Any) -> None:
+        """Run the request; whatever goes wrong, the caller gets an exit
+        code instead of waiting forever."""
+        try:
+            self._run(raw_path)
+        except Exception:
+            logger.exception("macro server: request failed")
+            self._runtime = None
+            self._err("opensak: internal error in OpenSAK — see its log file")
+            self._finish(EXIT_MACRO_ERROR)
 
     def _run(self, raw_path: Any) -> None:
         if not self._connected():
@@ -200,6 +216,6 @@ class _Session(QObject):
         if self._runtime is None:
             return
         self._runtime.cancel()
-        dialog = QApplication.activeModalWidget()
-        if isinstance(dialog, QDialog):
+        dialog = QtWidgets.QApplication.activeModalWidget()
+        if isinstance(dialog, QtWidgets.QDialog):
             dialog.reject()

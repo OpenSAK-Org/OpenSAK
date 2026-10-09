@@ -133,7 +133,11 @@ def _client(qtbot, path, timeout=None):
          "" if timeout is None else str(timeout)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
     )
-    qtbot.waitUntil(lambda: proc.poll() is not None, timeout=20000)
+    try:
+        qtbot.waitUntil(lambda: proc.poll() is not None, timeout=20000)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
     out, err = proc.communicate()
     return (proc.returncode, out.decode("utf-8").replace("\r\n", "\n"),
             err.decode("utf-8").replace("\r\n", "\n"))
@@ -176,9 +180,8 @@ def test_busy_while_another_macro_runs(qtbot, server, tmp_path, monkeypatch):
 
 
 def test_busy_while_a_dialog_is_open(qtbot, server, tmp_path, monkeypatch):
-    from opensak.gui import macro_server
-    monkeypatch.setattr(macro_server.QApplication, "activeModalWidget",
-                        staticmethod(lambda: object()))
+    from PySide6.QtWidgets import QApplication
+    monkeypatch.setattr(QApplication, "activeModalWidget", staticmethod(lambda: object()))
     code, _, err = _client(qtbot, _macro(tmp_path, 'print("x")'))
     assert code == EXIT_BUSY
     assert "a dialog is open" in err
@@ -202,6 +205,41 @@ def test_timeout_cancels_the_macro_in_its_dialog(qtbot, server, tmp_path):
     assert code == EXIT_TIMEOUT
     assert out == ""
     assert "timeout" in err
+
+
+def test_unexpected_server_error_still_ends_the_client(qtbot, server, tmp_path, monkeypatch):
+    from opensak.gui import macro_server
+
+    def boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(macro_server, "macro_running", boom)
+    code, _, err = _client(qtbot, _macro(tmp_path, 'print("x")'))
+    assert code == EXIT_MACRO_ERROR
+    assert "internal error" in err
+
+
+def test_works_after_qapplication_was_stubbed_during_import(qtbot, server, tmp_path,
+                                                          monkeypatch):
+    """test_app's smoke test replaces QtWidgets.QApplication while main()
+    imports this module for the first time."""
+    import importlib
+    import PySide6.QtWidgets as W
+    from opensak.gui import macro_server
+    real = W.QApplication
+    monkeypatch.setattr(W, "QApplication", lambda *a, **k: None)
+    importlib.reload(macro_server)
+    monkeypatch.setattr(W, "QApplication", real)
+    name = run_macro.server_name()
+    monkeypatch.setattr(macro_server, "server_name", lambda: name)
+    srv = macro_server.MacroServer(MagicMock())
+    server[0].close()
+    assert srv.start()
+    try:
+        code, out, _ = _client(qtbot, _macro(tmp_path, 'print("ok")'))
+    finally:
+        srv.close()
+    assert (code, out) == (0, "ok\n")
 
 
 def test_not_running(monkeypatch, tmp_path):
