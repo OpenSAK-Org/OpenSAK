@@ -1,7 +1,7 @@
 # OpenSAK Roadmap
 
-*Last updated: 6 October 2026 (Backup Support moved to "Done"; macro status
-updated; reverse-geocoding boundary data moved up and expanded)*
+*Last updated: 9 October 2026 (Full GSAK Field Compatibility: design draft and
+epic #1028)*
 
 *This reflects the current priority order for planned work. It's a living
 document and will be updated as things progress — not a fixed release schedule
@@ -75,8 +75,10 @@ GSAK, establishing full GSAK parity as a foundation to build on. This also matte
 for macros (ported GSAK macros read these fields) and for a Custom tab in the
 Filter dialog, the largest remaining gap in the filter parity work.
 
-*Status: not started. (Separate from the Filter dialog's GSAK parity, #821, which
-largely landed in 1.19.0 and 1.20.0.)*
+*Status: design draft. Tracked in epic #1028; the inventory of a real GSAK
+database and the proposal for custom fields are in
+[`docs/architecture/gsak-fields.md`](architecture/gsak-fields.md). (Separate from
+the Filter dialog's GSAK parity, #821, which largely landed in 1.19.0 and 1.20.0.)*
 
 ### 4. Welcome Wizard Enhancements
 Expand the first-run Welcome Wizard. Candidates to evaluate: language selection,

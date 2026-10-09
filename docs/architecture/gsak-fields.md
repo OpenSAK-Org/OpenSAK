@@ -1,4 +1,4 @@
-# Full GSAK Field Compatibility — Design (Roadmap #3)
+# Full GSAK Field Compatibility — Design (Epic #1028)
 
 *Draft, 9 October 2026. Not agreed yet — the custom-field section in particular is a proposal to settle with nagisml (macros) before any code is written. Update this file in the same commit when a sub-issue changes the design.*
 
