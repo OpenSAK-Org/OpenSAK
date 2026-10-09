@@ -71,6 +71,26 @@ class TestParse:
         assert loc.valid
         assert loc.lat == pytest.approx(-(32 + 25.921 / 60))
 
+    @pytest.mark.parametrize("line, expected", [
+        ("Biel, N47,1395 E7,243", (47.1395, 7.243)),
+        ("Luzern, 47,03555 8,25546", (47.03555, 8.25546)),
+        ("Luzern, 47,03555, 8,25546", (47.03555, 8.25546)),
+        ("Süd, S33,5 W70,6", (-33.5, -70.6)),
+        ("DMM, N47 08,370 E007 14,580", (47 + 8.37 / 60, 7 + 14.58 / 60)),
+    ])
+    def test_decimal_comma(self, line, expected):
+        (loc,) = parse_gsak_locations(line)
+        assert loc.valid, loc.error
+        assert (loc.lat, loc.lon) == pytest.approx(expected)
+
+    def test_decimal_point_with_comma_separator_is_not_reinterpreted(self):
+        (loc,) = parse_gsak_locations("A,47.1,8.5")
+        assert (loc.lat, loc.lon) == pytest.approx((47.1, 8.5))
+
+    def test_decimal_comma_still_needs_a_valid_coordinate(self):
+        (loc,) = parse_gsak_locations("A, 147,5 8,5")
+        assert loc.error == gli.ERROR_BAD_COORD
+
     def test_blank_and_comment_lines_are_ignored(self):
         assert parse_gsak_locations("\n   \n# a comment\n  #indented comment\n") == []
 

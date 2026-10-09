@@ -14,7 +14,9 @@ comma, the rest is the coordinate in any format GSAK accepts — which may
 itself contain a comma (``Zurich,47.371722, 8.537466``). Lines starting
 with ``#`` are comments, blank lines are ignored. The coordinate is read with
 the same ``parse_coords()`` the single-entry field in Settings uses, so what
-can be typed there can be imported here.
+can be typed there can be imported here. GSAK also takes a decimal comma
+(``N47,1395 E7,243``, ``47,03555 8,25546``): when parse_coords() rejects a
+coordinate, it is tried once more with those commas read as decimal points.
 
 The parsed list is shown for review first (``GsakLocationImportDialog``);
 ``apply_locations()`` then writes the chosen ones into OpenSAK's global
@@ -23,6 +25,7 @@ location list.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -39,6 +42,11 @@ ERROR_NO_COORD = "no_coord"
 ERROR_BAD_COORD = "bad_coord"
 ERROR_RESERVED = "reserved"
 ERROR_DUPLICATE = "duplicate"
+
+
+# A comma between two digits is a decimal comma ("47,03555"); the comma that
+# separates latitude from longitude always has whitespace or a letter next to it.
+_DECIMAL_COMMA = re.compile(r"(?<=\d),(?=\d)")
 
 
 class GsakLocationSourceError(Exception):
@@ -87,6 +95,20 @@ def load_gsak_locations(db_path: Path) -> str:
     return "\n".join(str(data) for (data,) in rows if data)
 
 
+def parse_location_coords(text: str) -> Optional[tuple[float, float]]:
+    """parse_coords(), falling back to reading decimal commas as points.
+
+    The fallback only runs when parse_coords() fails, so a coordinate it
+    already accepts (``47.1,8.5``) is never reinterpreted.
+    """
+    from opensak.coords import parse_coords
+
+    coords = parse_coords(text)
+    if coords is None and _DECIMAL_COMMA.search(text):
+        coords = parse_coords(_DECIMAL_COMMA.sub(".", text))
+    return coords
+
+
 def parse_gsak_locations(text: str) -> list[GsakLocation]:
     """Parse GSAK's location list: one entry per non-blank, non-comment line.
 
@@ -94,8 +116,6 @@ def parse_gsak_locations(text: str) -> list[GsakLocation]:
     can be reported line by line. A name that occurs more than once keeps its
     first line; later ones are flagged ERROR_DUPLICATE.
     """
-    from opensak.coords import parse_coords
-
     locations: list[GsakLocation] = []
     seen: set[str] = set()
     for line_no, raw in enumerate(text.splitlines(), start=1):
@@ -114,7 +134,7 @@ def parse_gsak_locations(text: str) -> list[GsakLocation]:
         elif not loc.coord_text:
             loc.error = ERROR_NO_COORD
         else:
-            coords = parse_coords(loc.coord_text)
+            coords = parse_location_coords(loc.coord_text)
             if coords is None:
                 loc.error = ERROR_BAD_COORD
             else:
