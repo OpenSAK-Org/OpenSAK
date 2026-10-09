@@ -4,6 +4,112 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.7] — 2026-10-09
+
+> Headline: **macros can work across databases** — create, switch between
+> and read other databases, move or copy caches into them, filter on many
+> more fields, sort the list, and export GPX, GGZ, LOC or KML files with
+> per-cache names and descriptions, straight to a Garmin if you like. Also
+> in this beta: **set or clear the user flag on every cache in the filter**
+> in one go, and a fix for macros writing `2,5` instead of `2.5` on
+> Danish, German, French and other systems that use a decimal comma.
+>
+> Macros are still beta-only, and the API may change before it is
+> settled (#938). The new texts are machine-translated in all languages
+> except Danish and English — corrections from native speakers are very
+> welcome.
+
+### Added
+
+- **Set or clear the flag on all caches in the filter (#293)** —
+  **Waypoint → 🚩 User flags** has **Set flag on all caches in filter…**
+  and **Clear flag on all caches in filter…**, which work on exactly the
+  caches the list shows, after asking how many. The status bar says how
+  many caches actually changed. The existing action that clears every flag
+  in the database regardless of the filter is now in the same submenu as
+  **Clear all flags in database…**. Suggested by Mike Wood.
+- **Macros: work with databases (#808)** — *Beta builds only.*
+  `opensak.databases()`, `opensak.database()` and
+  `opensak.database_exists(name)` show what's there;
+  `opensak.create_database(name)` makes a new, empty one and
+  `opensak.switch_database(name)` makes another one active, like the
+  toolbar dropdown (the active filter is cleared). There is deliberately
+  no way to delete a database from a macro. Contributed by nagisml.
+- **Macros: move and copy caches (#808)** — *Beta builds only.*
+  `opensak.move_caches(target)` and `opensak.copy_caches(target)` move or
+  copy the caches of the active filter — or a list of GC codes — into
+  another database, with logs, waypoints, attributes, trackables and
+  notes, like **Database → Move caches**. When a cache is already in the
+  target, `if_exists` decides: `"newer"` (the default) replaces it only if
+  your copy was imported later, `"replace"` always, `"skip"` never. A
+  cache that isn't written to the target stays where it is. Contributed by
+  nagisml.
+- **Macros: read another database without switching (#809)** — *Beta
+  builds only.* `opensak.cache()`, `caches()`, `description()`, `sql()`,
+  `sql_each()`, `tables()` and `columns()` take `{ database = "Name" }`
+  to read another database while the active one — and its filter — stays
+  as it is. That database is opened read-only. Contributed by nagisml.
+- **Macros: export with your own names and descriptions (#809)** — *Beta
+  builds only.* `opensak.export_gpx{}` exports the caches of the active
+  filter without a saved export setting. It writes GPX, GGZ, LOC or KML,
+  uses the export dialog's file name variables, and can leave out
+  attributes or child waypoints. Two Lua functions, `rename` and
+  `description`, can give each cache its own name and description in the
+  file — for example a challenge's D/T in front of the name.
+  `target = "device"` writes straight into the GPX folder of a connected
+  Garmin (not yet for MTP devices). Like every macro function that writes
+  a file, it goes through the folder permissions. An existing file is
+  overwritten unless the macro says `if_exists = "skip"` or `"ask"`.
+  Contributed by nagisml.
+- **Macros: filter on many more fields, and sort (#809)** — *Beta builds
+  only.* `opensak.filter{}` now also takes corrected coordinates, user
+  flag, locked, DNF, FTF, premium, archived, trackables and owned by you;
+  distance and bearing from a point or a saved centre point; favourites
+  and elevation; hidden, found and last GPX update date ranges;
+  attributes (including the "no" form), free text, polygons, an exact
+  list of GC codes, user data 1–4, GC note, personal note and placed by.
+  `mode = "OR"` combines them with OR. `opensak.filter_name()` gives the
+  active filter's name, and `opensak.sort(field [, "desc"])` sorts the
+  list like a click on a column header — `opensak.caches()` then follows
+  that order. Contributed by nagisml.
+- **Macros: when a cache was last updated by an import (#813)** — *Beta
+  builds only.* Cache tables have a `last_gpx_update` field (date and
+  time), so a macro can find the caches your latest Pocket Query didn't
+  refresh. Contributed by nagisml.
+
+### Changed
+
+- **Move and copy caches work in steps (#808)** — **Database → Move
+  caches** and **Copy caches** now share their code with the macro
+  functions and work through large selections 200 caches at a time, which
+  keeps memory down and avoids a database limit on very large selections.
+  The dialog still replaces a cache that already exists in the target,
+  as before.
+- **Macros: an empty list of GC codes matches nothing** — *Beta builds
+  only.* `opensak.filter{ codes = {} }` used to match every cache; it now
+  matches none, which is what a macro building that list from an empty
+  result expects.
+
+### Fixed
+
+- **Macros wrote decimal commas on many systems (#1015)** — *Beta builds
+  only.* On Danish, German, French, Dutch and other systems that use a
+  decimal comma, numbers in macros came out as `2,5` instead of `2.5` —
+  in cache names, file names, coordinates and SQL. Numbers in macros now
+  always use a decimal point, whatever the system language. Found by the
+  test suite on a Danish machine, fixed by nagisml.
+- **Macros broke Chinese and Arabic text on some systems (#1015)** —
+  *Beta builds only.* `string.upper()`, `string.lower()` and letter
+  patterns in Lua could damage non-Latin text on Windows with a
+  single-byte code page. They now only change ASCII letters, and
+  `utf8.*` works on whole characters. Contributed by nagisml.
+- **Sending caches to a Garmin from a macro could fail (#1015)** — *Beta
+  builds only.* When a Garmin was mounted under a path with non-English
+  letters, such as `/media/søren/GARMIN`, the device detection stopped
+  the macro with an error. Contributed by nagisml.
+
+---
+
 ## [1.21.0-beta.6] — 2026-10-08
 
 > Headline: **macros grow up** — the beta-only macro window is now a real
