@@ -8,6 +8,12 @@ the file name and a "*" for unsaved changes; closing, opening or starting a
 new macro asks before discarding them. When a run fails, the line named in
 the Lua error is highlighted.
 
+The open file is watched: a change made outside OpenSAK is reloaded when
+the editor has no unsaved changes, and otherwise the user chooses between
+the file on disk and the editor text. Questions wait until the window is
+active, and the same check runs before saving and running, so an external
+change is never overwritten without asking.
+
 Non-modal, so the cache list behind it can be watched while a macro changes
 the filter. The script runs synchronously on the GUI thread; the runtime's
 instruction limit guards against endless loops.
@@ -19,7 +25,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QEvent, QFileSystemWatcher, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QInputDialog, QLabel, QMenu, QMenuBar, QMessageBox,
@@ -81,6 +87,18 @@ class MacroDialog(QDialog):
         )
         self._runtime = MacroRuntime(host, output=self._append_output)
         self._path: Path | None = None
+        # The file's text as last read or written; None when there is no
+        # file, or after the user kept the text of a file deleted on disk.
+        self._disk_text: str | None = None
+        self._checking_disk = False
+        self._watcher = QFileSystemWatcher(self)
+        # Editors often save by writing a temp file and renaming it, which
+        # fires several signals in a row: check once they have settled.
+        self._disk_timer = QTimer(self)
+        self._disk_timer.setSingleShot(True)
+        self._disk_timer.setInterval(200)
+        self._disk_timer.timeout.connect(lambda: self._check_disk(self.isActiveWindow()))
+        self._watcher.fileChanged.connect(lambda _path: self._disk_timer.start())
         self._help: MacroHelpDialog | None = None
         self._setup_ui()
         self._editor.document().modificationChanged.connect(self.setWindowModified)
@@ -243,10 +261,12 @@ class MacroDialog(QDialog):
         self._editor.setPlainText(text)
         self._editor.document().setModified(False)
         self._output.clear()
+        self._disk_text = text if path else None
         self._set_path(path)
 
     def _set_path(self, path: Path | None) -> None:
         self._path = path
+        self._watch()
         name = path.name if path else tr("macro_untitled")
         self.setWindowTitle(f"{name}[*] — {tr('macro_title')}")
         self.setWindowModified(self._editor.document().isModified())
@@ -256,6 +276,16 @@ class MacroDialog(QDialog):
         cursor = self._editor.textCursor()
         self._pos_label.setText(tr("macro_status_pos", line=cursor.blockNumber() + 1,
                                    col=cursor.positionInBlock() + 1))
+
+    def _watch(self) -> None:
+        """Watch the current file (again: a rename-on-save drops the watch)."""
+        files = self._watcher.files()
+        wanted = str(self._path) if self._path and self._path.is_file() else None
+        stale = [f for f in files if f != wanted]
+        if stale:
+            self._watcher.removePaths(stale)
+        if wanted and wanted not in files:
+            self._watcher.addPath(wanted)
 
     def _start_dir(self) -> Path:
         from opensak.config import get_macros_dir
@@ -321,6 +351,7 @@ class MacroDialog(QDialog):
                                 tr("macro_save_error", path=str(path), msg=str(exc)))
             return False
         self._editor.document().setModified(False)
+        self._disk_text = self._editor.toPlainText()
         self._set_path(path)
         add_recent_macro(path)
         self._status.showMessage(tr("macro_saved", path=path.name), 3000)
@@ -329,6 +360,7 @@ class MacroDialog(QDialog):
     def _save(self) -> bool:
         if self._path is None:
             return self._save_as()
+        self._check_disk()
         return self._write(self._path)
 
     def _save_as(self) -> bool:
@@ -364,6 +396,91 @@ class MacroDialog(QDialog):
         from opensak.config import get_macros_dir
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_macros_dir())))
 
+    # -- Changes on disk -------------------------------------------------------
+
+    def _check_disk(self, interactive: bool = True) -> None:
+        """Compare the open file with the text it had when loaded or saved.
+        Changed on disk: reload it when the editor has no unsaved changes,
+        otherwise ask whether to reload or keep the editor text. Deleted or
+        renamed: offer to save it again. Questions are only asked when
+        *interactive*; otherwise they wait for the window to become active."""
+        if self._path is None or self._checking_disk:
+            return
+        self._checking_disk = True
+        try:
+            self._sync_with_disk(self._path, interactive)
+        finally:
+            self._checking_disk = False
+            self._watch()
+
+    def _sync_with_disk(self, path: Path, interactive: bool) -> None:
+        doc = self._editor.document()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            if self._disk_text is None or not interactive:
+                return
+            if self._ask_disk_deleted(path.name):
+                self._write(path)
+            else:
+                self._disk_text = None
+                doc.setModified(True)
+            return
+        except (OSError, UnicodeDecodeError):
+            return      # locked or half written: look again on the next signal
+        if text == self._disk_text:
+            return
+        if text == self._editor.toPlainText():
+            self._disk_text = text
+            doc.setModified(False)
+        elif not doc.isModified():
+            self._reload(text)
+        elif interactive:
+            if self._ask_disk_changed(path.name):
+                self._reload(text)
+            else:
+                self._disk_text = text      # keep mine: saving overwrites it
+
+    def _reload(self, text: str) -> None:
+        """Replace the editor text with *text* from disk as one undo step,
+        keeping the cursor line and scroll position."""
+        line = self._editor.textCursor().blockNumber()
+        scroll = self._editor.verticalScrollBar().value()
+        cursor = QTextCursor(self._editor.document())
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.insertText(text)
+        self._editor.document().setModified(False)
+        self._disk_text = text
+        block = self._editor.document().findBlockByNumber(
+            min(line, self._editor.blockCount() - 1))
+        self._editor.setTextCursor(QTextCursor(block))
+        self._editor.verticalScrollBar().setValue(scroll)
+        name = self._path.name if self._path else ""
+        self._status.showMessage(tr("macro_disk_reloaded", name=name), 5000)
+
+    def _ask_disk_changed(self, name: str) -> bool:
+        """Reload the file changed on disk (True) or keep the editor text."""
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("macro_disk_title"),
+                          tr("macro_disk_changed_msg", name=name), parent=self)
+        reload_ = box.addButton(tr("macro_disk_reload"), QMessageBox.ButtonRole.DestructiveRole)
+        keep = box.addButton(tr("macro_disk_keep"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(keep)
+        box.setEscapeButton(keep)
+        box.exec()
+        return box.clickedButton() is reload_
+
+    def _ask_disk_deleted(self, name: str) -> bool:
+        """Save the editor text to the deleted file again (True) or only
+        keep it in the editor."""
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("macro_disk_title"),
+                          tr("macro_disk_deleted_msg", name=name), parent=self)
+        save = box.addButton(tr("macro_disk_save_again"), QMessageBox.ButtonRole.AcceptRole)
+        keep = box.addButton(tr("macro_disk_keep_editor"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(save)
+        box.setEscapeButton(keep)
+        box.exec()
+        return box.clickedButton() is save
+
     # -- Edit actions ----------------------------------------------------------
 
     def _go_to_line(self) -> None:
@@ -384,6 +501,7 @@ class MacroDialog(QDialog):
         return self._path.name if self._path else "macro"
 
     def _run(self) -> None:
+        self._check_disk()          # run what is on disk unless the user keeps theirs
         self._output.clear()
         self._editor.clear_error_line()
         self._act_run.setEnabled(False)
@@ -470,6 +588,13 @@ class MacroDialog(QDialog):
                 self._find_bar.close_bar()
             return
         super().keyPressEvent(event)
+
+    def changeEvent(self, event) -> None:  # noqa: N802
+        super().changeEvent(event)
+        # Back from an external editor: pick up its changes, and ask the
+        # questions that waited while the window was in the background.
+        if event.type() == QEvent.Type.ActivationChange and self.isActiveWindow():
+            QTimer.singleShot(0, self._check_disk)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._maybe_save():
