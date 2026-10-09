@@ -1448,14 +1448,29 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 
 ## Editor support (VS Code)
 
-[`macros/types/opensak.lua`](../../macros/types/opensak.lua) describes this API for the [Lua Language Server](https://luals.github.io/) (VS Code extension "Lua" by sumneko): autocompletion, parameter hints and these docs while you type. Macros inside the OpenSAK repository pick it up automatically. For macros in another folder, put a `.luarc.json` next to them that points at the folder holding the stub:
+[`macros/types/opensak.lua`](../../macros/types/opensak.lua) describes this API for the [Lua Language Server](https://luals.github.io/) (VS Code extension "Lua" by sumneko): autocompletion, parameter hints and these docs while you type.
+
+OpenSAK keeps a copy of the stub in its macros folder (**Open macros folder** in the macro window) as `types/opensak.lua`, refreshed on every start so it matches the installed version, and puts a `.luarc.json` next to your macros that points the language server at it:
 
 ```json
 {
   "runtime.version": "Lua 5.4",
-  "workspace.library": ["C:/path/to/OpenSAK/macros/types"]
+  "workspace.library": [
+    "types"
+  ],
+  "diagnostics.globals": [
+    "opensak"
+  ]
 }
 ```
+
+To set it up in VS Code:
+
+1. Install the extension "Lua" by sumneko.
+2. **File → Open Folder…** and pick OpenSAK's macros folder.
+3. Open or create a `.lua` file and type `opensak.` — completion, parameter hints and these docs on hover appear.
+
+OpenSAK writes `.luarc.json` only when there is none, so your own settings in it are kept; delete it to get the default back. Macros in another folder can use the stub too: copy `.luarc.json` there and change `types` to the full path of the macros folder's `types` folder. Macros inside the OpenSAK repository pick up [`macros/types/opensak.lua`](../../macros/types/opensak.lua) automatically.
 
 ## Globals
 

@@ -86,6 +86,9 @@ a = Analysis(
         # Example Lua macros (+ their CSV), copied into the user's macros
         # folder by Macros → Open example (opensak.macro.examples).
         ("macros/examples",                       "macros/examples"),
+        # LuaLS stub, copied into <macros>/types on every start (#1012,
+        # opensak.macro.editor_support).
+        ("macros/types",                          "macros/types"),
     ] + certifi_datas + boundary_datas + qt_translation_datas,
     hiddenimports=[
         "PySide6.QtWebEngineWidgets",

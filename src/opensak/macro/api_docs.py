@@ -12,9 +12,11 @@ scripts/generate_macro_api_docs.py; never edit them by hand:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from opensak.macro.cache_data import CACHE_FIELDS
+from opensak.macro.editor_support import LUARC
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, Param
 
 DOC_PATH = Path("docs/macros/api.md")
@@ -71,14 +73,29 @@ def _editor_section() -> list[str]:
         f"[`{STUB_PATH.as_posix()}`]({_STUB_LINK}) describes this API for the "
         "[Lua Language Server](https://luals.github.io/) (VS Code extension "
         '"Lua" by sumneko): autocompletion, parameter hints and these docs '
-        "while you type. Macros inside the OpenSAK repository pick it up "
-        "automatically. For macros in another folder, put a `.luarc.json` "
-        "next to them that points at the folder holding the stub:",
+        "while you type.",
         "",
-        *_code('{\n'
-               '  "runtime.version": "Lua 5.4",\n'
-               '  "workspace.library": ["C:/path/to/OpenSAK/macros/types"]\n'
-               '}', "json"),
+        "OpenSAK keeps a copy of the stub in its macros folder "
+        "(**Open macros folder** in the macro window) as "
+        "`types/opensak.lua`, refreshed on every start so it matches the "
+        "installed version, and puts a `.luarc.json` next to your macros "
+        "that points the language server at it:",
+        "",
+        *_code(json.dumps(LUARC, indent=2), "json"),
+        "",
+        "To set it up in VS Code:",
+        "",
+        '1. Install the extension "Lua" by sumneko.',
+        "2. **File → Open Folder…** and pick OpenSAK's macros folder.",
+        "3. Open or create a `.lua` file and type `opensak.` — completion, "
+        "parameter hints and these docs on hover appear.",
+        "",
+        "OpenSAK writes `.luarc.json` only when there is none, so your own "
+        "settings in it are kept; delete it to get the default back. Macros "
+        "in another folder can use the stub too: copy `.luarc.json` there "
+        "and change `types` to the full path of the macros folder's `types` "
+        "folder. Macros inside the OpenSAK repository pick up "
+        f"[`{STUB_PATH.as_posix()}`]({_STUB_LINK}) automatically.",
     ]
 
 
