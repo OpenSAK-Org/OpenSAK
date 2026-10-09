@@ -102,6 +102,8 @@ from opensak.export.file_export_settings import (
     FileExportSettings,
     expand_file_name,
 )
+from opensak.export.poi_export import write_poi_export
+from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.line_polygon import LineShape, parse_point, read_points_file
 from opensak.hint_detect import rot13
 from opensak.macro import helpers
@@ -971,6 +973,7 @@ class MacroRuntime:
         output: Optional[Callable[[str], None]] = None,
         profiles_dir: Optional[Path] = None,
         export_settings_dir: Optional[Path] = None,
+        poi_settings_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
@@ -983,6 +986,7 @@ class MacroRuntime:
         self._output = output or print
         self._profiles_dir = profiles_dir
         self._export_settings_dir = export_settings_dir
+        self._poi_settings_dir = poi_settings_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
@@ -1723,6 +1727,65 @@ class MacroRuntime:
             )
         return get_garmin_ggz_path(root) if fmt == "ggz" else get_garmin_gpx_path(root)
 
+    def _load_poi_settings(self, name: str) -> PoiExportSettings:
+        for path in PoiExportProfile.list_profiles(self._poi_settings_dir):
+            try:
+                profile = PoiExportProfile.load(path)
+            except Exception:
+                continue
+            if profile.name == name:
+                return profile.settings
+        raise MacroError(f"no saved POI export setting named {name!r}")
+
+    def _export_poi(self, lua, name=None, folder=None):
+        if not isinstance(name, str) or not name.strip():
+            raise MacroError("opensak.export_poi expects the name of a saved POI export setting")
+        if folder is not None and (not isinstance(folder, str) or not folder.strip()):
+            raise MacroError("opensak.export_poi: folder must be a non-empty string")
+        settings = self._load_poi_settings(name)
+        if folder is None and not settings.folder.strip():
+            raise MacroError(
+                f"POI export setting {name!r} has no folder — choose one in the "
+                "POI export dialog and save the setting again, or pass a folder"
+            )
+        caches = select_for_export(self._host.filtered_caches())
+        if not caches:
+            return None
+        folder = Path((folder or settings.folder).strip()).expanduser()
+        if not folder.is_absolute():
+            folder = (self._base_dir or macros_dir()) / folder
+        # Every file goes into this folder, so one check covers them all.
+        folder = self._check_access(folder / "poi.gpi", write=True).parent
+        icon = None
+        if settings.icon.strip():
+            icon = self._check_access(Path(settings.icon.strip()).expanduser(), write=False)
+
+        def should_write(target: Path) -> bool:
+            if settings.if_exists == "skip":
+                return False
+            if settings.if_exists == "ask":
+                from opensak.lang import tr
+
+                return self._host.confirm(tr("file_export_overwrite_msg", path=str(target)))
+            return True
+
+        try:
+            written = write_poi_export(
+                caches, settings, folder,
+                database=self._host.database_name(),
+                filter_name=self._host.filter_name(),
+                center_name=self._host.center_name(),
+                should_write=should_write,
+                icon_path=icon,
+            )
+        except OSError as exc:
+            raise MacroError(f"cannot write POI file: {exc}") from None
+        except ValueError as exc:   # unreadable icon
+            raise MacroError(str(exc)) from None
+        if not written:
+            return None
+        return lua.table_from([str(path) for path, _ in written]), sum(n for _, n in written)
+
     # -- Running ---------------------------------------------------------------
 
     def run(
@@ -1833,7 +1896,7 @@ class MacroRuntime:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 2
+API_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -2329,6 +2392,36 @@ API: tuple[ApiFunction, ...] = (
         params=(Param("spec", "opensak.ExportSpec", "What to export and where."),),
         returns=("string?, integer?",
                  "The file written and the number of caches in it; nil if "
+                 "nothing was written."),
+    ),
+    ApiFunction(
+        name="export_poi",
+        description="Export the caches of the active filter and/or their child "
+                    "waypoints as Garmin POI files (.gpi) with a saved POI "
+                    "export setting (File → Export Garmin POI: folder, file "
+                    "name, if the file exists, which points, name/description/"
+                    "extra templates, category, proximity alert, icon, max. "
+                    "points). The file name variables are filled in as in "
+                    "the dialog. With \"one file per waypoint type\" a file "
+                    "is written for the caches and one for every waypoint "
+                    "type. The files go into *folder* if given, else into "
+                    "the setting's folder, which needs write permission "
+                    "(Settings → Folder permissions); for an unapproved one "
+                    "the user is asked first. An existing file is skipped "
+                    "when the setting says skip (or ask, and the user "
+                    "answers No).",
+        example='local files, n = opensak.export_poi("Garmin POI")\n'
+                'if files then print(n .. " POIs → " .. table.concat(files, ", ")) end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._export_poi(lua, *a),
+        params=(
+            Param("setting", "string", "Name of the saved POI export setting."),
+            Param("folder", "string", "Folder to write to instead of the "
+                  "setting's folder, e.g. the device's Garmin/POI folder.",
+                  optional=True),
+        ),
+        returns=("string[]?, integer?",
+                 "The files written and the number of POIs in them; nil if "
                  "nothing was written."),
     ),
     ApiFunction(

@@ -1,6 +1,6 @@
 ---@meta
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
--- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
+-- OpenSAK Lua macro API, version 3. Reference: docs/macros/api.md
 
 ---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
@@ -492,6 +492,20 @@ function opensak.export_file(setting, folder) end
 ---@return string? # The file written and the number of caches in it; nil if nothing was written.
 ---@return integer?
 function opensak.export_gpx(spec) end
+
+---Export the caches of the active filter and/or their child waypoints as Garmin POI files (.gpi) with a saved POI export setting (File → Export Garmin POI: folder, file name, if the file exists, which points, name/description/extra templates, category, proximity alert, icon, max. points). The file name variables are filled in as in the dialog. With "one file per waypoint type" a file is written for the caches and one for every waypoint type. The files go into *folder* if given, else into the setting's folder, which needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. An existing file is skipped when the setting says skip (or ask, and the user answers No).
+---
+---Since API version 3.
+---
+---```lua
+---local files, n = opensak.export_poi("Garmin POI")
+---if files then print(n .. " POIs → " .. table.concat(files, ", ")) end
+---```
+---@param setting string Name of the saved POI export setting.
+---@param folder? string Folder to write to instead of the setting's folder, e.g. the device's Garmin/POI folder.
+---@return string[]? # The files written and the number of POIs in them; nil if nothing was written.
+---@return integer?
+function opensak.export_poi(setting, folder) end
 
 ---Ask the user a Yes/No question.
 ---

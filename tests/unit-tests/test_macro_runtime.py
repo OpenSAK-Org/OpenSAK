@@ -13,8 +13,9 @@ import pytest
 
 from opensak.db.corrected_coords import set_corrected_coords
 from opensak.db.database import get_session
-from opensak.db.models import Cache, UserNote
+from opensak.db.models import Cache, UserNote, Waypoint
 from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
+from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.engine import (
     CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, GcCodeFilter,
     NotFoundFilter, apply_filters_auto,
@@ -1041,6 +1042,133 @@ def test_export_file_asks_before_writing_to_unapproved_folder(
             runtime.run(script)
     assert asked == [(folder.resolve(), True)]
     assert (folder / "x.gpx").exists() is written
+
+
+# ── POI export ───────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def poi_cache(seed):
+    """A cache with a parking and a trailhead waypoint."""
+    with get_session() as s:
+        cache = Cache(gc_code="GCPOI1", name="Poi cache", cache_type="Traditional Cache",
+                      latitude=46.5, longitude=7.5, difficulty=2.0, terrain=1.5,
+                      placed_by="Placer")
+        s.add(cache)
+        s.flush()
+        for prefix, wp_type in (("PK", "Parking Area"), ("TR", "Trailhead")):
+            s.add(Waypoint(cache_id=cache.id, prefix=prefix, wp_type=wp_type,
+                           name=wp_type, latitude=46.51, longitude=7.51))
+
+
+def _poi_runtime(tmp_path, host=None, **settings):
+    """Runtime with a POI export setting "Garmin POI" (writing to
+    tmp_path/out unless *settings* say otherwise) and write permission for
+    tmp_path."""
+    settings.setdefault("folder", str(tmp_path / "out"))
+    PoiExportProfile("Garmin POI", PoiExportSettings(**settings)).save(tmp_path / "poi_settings")
+    out: list[str] = []
+    runtime = MacroRuntime(
+        host or DbHost(), output=out.append,
+        profiles_dir=tmp_path / "filters",
+        poi_settings_dir=tmp_path / "poi_settings",
+        folder_permissions=[FolderPermission(str(tmp_path), read=True, write=True)],
+    )
+    return runtime, out
+
+
+def test_export_poi_writes_caches_and_waypoints(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, file_name="{filter}_{count}", name="{code} {type}")
+    runtime.run("""
+        opensak.filter{ code = "GCPOI", label = "Poi" }
+        local files, n = opensak.export_poi("Garmin POI")
+        print(#files, files[1], n)
+    """)
+    target = (tmp_path / "out" / "Poi_3.gpi").resolve()
+    assert out == [f"1	{target}	3"]
+    data = target.read_bytes()
+    assert data[8:16] == b"GRMREC00"
+    for name in (b"GCPOI1 Traditional Cache", b"PKPOI1 Parking Area", b"TRPOI1 Trailhead"):
+        assert name in data
+
+
+def test_export_poi_one_file_per_waypoint_type(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, file_name="x", split_by_type=True)
+    runtime.run(f"""
+        opensak.filter{{ code = "GCPOI" }}
+        local files, n = opensak.export_poi("Garmin POI", {str(tmp_path / "split")!r})
+        print(table.concat(files, "|"), n)
+    """)
+    folder = (tmp_path / "split").resolve()
+    names = ("x.gpi", "x - Parking Area.gpi", "x - Trailhead.gpi")
+    assert out == ["|".join(str(folder / name) for name in names) + "	3"]
+
+
+@pytest.mark.parametrize("if_exists, answer, written", [
+    ("overwrite", None, True),
+    ("skip", None, False),
+    ("ask", True, True),
+    ("ask", False, False),
+])
+def test_export_poi_if_exists(tmp_path, poi_cache, if_exists, answer, written):
+    target = tmp_path / "out" / "x.gpi"
+    target.parent.mkdir()
+    target.write_bytes(b"old")
+    host = DbHost()
+    host.answer = answer
+    runtime, out = _poi_runtime(tmp_path, host, file_name="x", if_exists=if_exists)
+    runtime.run("""
+        opensak.filter{ code = "GCPOI" }
+        print(opensak.export_poi("Garmin POI") ~= nil)
+    """)
+    assert out == [str(written).lower()]
+    assert (target.read_bytes() != b"old") is written
+    assert len(getattr(host, "asked", [])) == (1 if if_exists == "ask" else 0)
+
+
+@pytest.mark.parametrize("call, folder, msg", [
+    ("opensak.export_poi()", None, "expects the name"),
+    ('opensak.export_poi("Missing")', None, "no saved POI export setting"),
+    ('opensak.export_poi("Garmin POI", 5)', None, "folder must be"),
+    ('opensak.export_poi("Garmin POI")', "", "has no folder"),
+    ('opensak.export_poi("Garmin POI")', "<outside>", "may not write"),
+])
+def test_export_poi_rejects_bad_setup(tmp_path, tmp_path_factory, poi_cache, call, folder, msg):
+    settings = {}
+    if folder is not None:
+        settings["folder"] = (str(tmp_path_factory.mktemp("no_permission"))
+                              if folder == "<outside>" else folder)
+    runtime, _ = _poi_runtime(tmp_path, **settings)
+    with pytest.raises(MacroError, match=msg):
+        runtime.run(f'opensak.filter{{ code = "GCPOI" }} {call}')
+    if folder:
+        assert not list(Path(settings["folder"]).iterdir())
+
+
+def test_export_poi_writes_nothing_without_points(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, waypoints_only=True)
+    runtime.run("""
+        opensak.filter{ type = "Multi-cache" }
+        print(opensak.export_poi("Garmin POI"))
+    """)
+    assert out == ["nil"]
+    assert not (tmp_path / "out").exists()
+
+
+def test_export_poi_checks_icon_permission(tmp_path, tmp_path_factory, poi_cache):
+    icon = tmp_path_factory.mktemp("icons") / "icon.bmp"
+    icon.write_bytes(b"x")
+    runtime, _ = _poi_runtime(tmp_path, icon=str(icon))
+    with pytest.raises(MacroError, match="may not read"):
+        runtime.run('opensak.filter{ code = "GCPOI" } opensak.export_poi("Garmin POI")')
+
+
+def test_export_poi_reports_unreadable_icon(tmp_path, poi_cache):
+    icon = tmp_path / "icon.bmp"
+    icon.write_bytes(b"x")
+    runtime, _ = _poi_runtime(tmp_path, icon=str(icon))
+    with pytest.raises(MacroError, match="not a readable image"):
+        runtime.run('opensak.filter{ code = "GCPOI" } opensak.export_poi("Garmin POI")')
+    assert not (tmp_path / "out").exists()
 
 
 # ── Example: export_filters_to_gpx.lua ───────────────────────────────────────
