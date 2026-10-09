@@ -389,12 +389,12 @@ class MacroDialog(QDialog):
         self._act_run.setEnabled(False)
         self._act_save_run.setEnabled(False)
         try:
-            self._runtime.run(
+            code = self._runtime.run(
                 self._editor.toPlainText(),
                 chunk_name=self._chunk_name(),
                 base_dir=self._path.parent if self._path else None,
             )
-            self._append_output(tr("macro_done"))
+            self._append_output(tr("macro_done_code", code=code) if code else tr("macro_done"))
         except MacroError as exc:
             self._append_output(tr("macro_error", msg=str(exc)))
             line = self.error_line(str(exc))

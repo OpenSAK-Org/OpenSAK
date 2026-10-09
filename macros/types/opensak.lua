@@ -1,6 +1,6 @@
 ---@meta
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
--- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
+-- OpenSAK Lua macro API, version 3. Reference: docs/macros/api.md
 
 ---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
@@ -560,6 +560,29 @@ function opensak.version() end
 ---```
 ---@param ms number Milliseconds.
 function opensak.sleep(ms) end
+
+---Write a message to OpenSAK's log file and the macro output. Run with `opensak --run-macro`, it goes to stderr while print() goes to stdout.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.log("checked " .. opensak.count() .. " caches")
+---```
+---@param ... any Values, joined with tabs like print().
+function opensak.log(...) end
+
+---End the macro right away. pcall cannot catch it, and it is not an error: the macro window shows the code, and `opensak --run-macro` exits with it.
+---
+---Since API version 3.
+---
+---```lua
+---if opensak.count() == 0 then
+---    opensak.log("nothing to do")
+---    opensak.exit(1)
+---end
+---```
+---@param code? integer Exit code 0-255 (default 0).
+function opensak.exit(code) end
 
 opensak.coords = {}
 

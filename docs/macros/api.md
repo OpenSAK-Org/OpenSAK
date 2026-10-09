@@ -2,7 +2,7 @@
 
 # OpenSAK Lua macro API
 
-API version: **2** (`opensak.api_version()`).
+API version: **3** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. OpenSAK's own settings and database files are never accessible.
 
@@ -48,6 +48,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
 | [`opensak.version`](#opensakversion) | 2 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
+| [`opensak.log`](#opensaklog) | 3 |
+| [`opensak.exit`](#opensakexit) | 3 |
 | [`opensak.coords.parse`](#opensakcoordsparse) | 2 |
 | [`opensak.coords.format`](#opensakcoordsformat) | 2 |
 | [`opensak.coords.distance`](#opensakcoordsdistance) | 2 |
@@ -858,6 +860,49 @@ Example:
 opensak.sleep(500)
 ```
 
+### opensak.log
+
+```lua
+opensak.log(...)
+```
+
+Write a message to OpenSAK's log file and the macro output. Run with `opensak --run-macro`, it goes to stderr while print() goes to stdout.
+
+Parameters:
+
+- `...` (`any`) — Values, joined with tabs like print().
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.log("checked " .. opensak.count() .. " caches")
+```
+
+### opensak.exit
+
+```lua
+opensak.exit([code])
+```
+
+End the macro right away. pcall cannot catch it, and it is not an error: the macro window shows the code, and `opensak --run-macro` exits with it.
+
+Parameters:
+
+- `code` (`integer`, optional) — Exit code 0-255 (default 0).
+
+Since API version 3.
+
+Example:
+
+```lua
+if opensak.count() == 0 then
+    opensak.log("nothing to do")
+    opensak.exit(1)
+end
+```
+
 ### opensak.coords.parse
 
 ```lua
@@ -1472,6 +1517,8 @@ To set it up in VS Code:
 
 OpenSAK writes `.luarc.json` only when there is none, so your own settings in it are kept; delete it to get the default back. Macros in another folder can use the stub too: copy `.luarc.json` there and change `types` to the full path of the macros folder's `types` folder. Macros inside the OpenSAK repository pick up [`macros/types/opensak.lua`](../../macros/types/opensak.lua) automatically.
 
+To run a macro in OpenSAK straight from VS Code or another editor, see [Running macros from an editor](run-from-editor.md).
+
 ## Globals
 
 ### print
@@ -1480,4 +1527,4 @@ OpenSAK writes `.luarc.json` only when there is none, so your own settings in it
 print(...)
 ```
 
-Write the arguments, separated by tabs, to the macro output pane.
+Write the arguments, separated by tabs, to the macro output pane (to stdout when run with `opensak --run-macro`, see [Running macros from an editor](run-from-editor.md)).

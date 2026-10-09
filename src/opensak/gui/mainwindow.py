@@ -3391,9 +3391,22 @@ class MainWindow(QMainWindow):
         rows = sorted(i.row() for i in self._cache_table.selectionModel().selectedRows())
         return [c.gc_code for c in map(model.cache_at, rows) if c is not None]
 
+    def _macro_dialog_parent(self):
+        """Parent for a dialog a macro opens: the macro window if it is
+        open, else the main window — brought to the front, since a macro run
+        from an editor (#1013) starts while OpenSAK is in the background."""
+        parent = getattr(self, "_macro_dialog", None)
+        if parent is None or not parent.isVisible():
+            parent = self
+        if parent.isMinimized():
+            parent.showNormal()
+        parent.raise_()
+        parent.activateWindow()
+        return parent
+
     def confirm(self, message: str) -> bool:
         """MacroHost: Yes/No question, on top of the macro dialog."""
-        parent = getattr(self, "_macro_dialog", None) or self
+        parent = self._macro_dialog_parent()
         reply = QMessageBox.question(
             parent,
             tr("macro_title"),
@@ -3407,14 +3420,14 @@ class MainWindow(QMainWindow):
         """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
         dialog, on top of the macro dialog)."""
         from opensak.gui.dialogs.macro_dialog import ask_folder_approval
-        parent = getattr(self, "_macro_dialog", None) or self
+        parent = self._macro_dialog_parent()
         return ask_folder_approval(parent, target, folder, write)
 
     def choose_file(self, title: str, file_filter: str, save: bool, start_dir):
         """MacroHost: file dialog for opensak.choose_file(), on top of the
         macro dialog."""
         from opensak.gui.dialogs.macro_dialog import choose_file_for_macro
-        parent = getattr(self, "_macro_dialog", None) or self
+        parent = self._macro_dialog_parent()
         return choose_file_for_macro(parent, title, file_filter, save, start_dir)
 
     def end_macro(self) -> None:

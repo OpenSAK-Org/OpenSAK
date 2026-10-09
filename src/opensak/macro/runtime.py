@@ -30,6 +30,7 @@ from __future__ import annotations
 import csv
 import io
 import locale
+import logging
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -139,6 +140,8 @@ from opensak.macro.sql import (
 )
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
 
+logger = logging.getLogger(__name__)
+
 # A runaway `while true do end` would freeze the GUI thread, so the script is
 # aborted after this many Lua VM instructions.
 DEFAULT_INSTRUCTION_LIMIT = 50_000_000
@@ -162,6 +165,22 @@ EXPORT_KEYS = frozenset({
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
+# opensak.exit(code): highest accepted exit code (portable process exit codes)
+MAX_EXIT_CODE = 255
+
+# Held while a macro runs: one macro at a time, whether started in the macro
+# window or from the command line (#1013). A dialog opened by a macro runs a
+# nested event loop on the same thread, so this must not be reentrant.
+_RUN_LOCK = threading.Lock()
+
+
+class MacroBusy(MacroError):
+    """Another macro is still running."""
+
+
+def macro_running() -> bool:
+    """True while a macro runs."""
+    return _RUN_LOCK.locked()
 
 
 
@@ -376,14 +395,27 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #     replaced to install the hook in every new coroutine as well.
 #   * The budget is shared by all threads, so spreading the work over many
 #     coroutines does not multiply it.
+#
+# The chunk returns two functions for the runtime:
+#   * stop(msg) makes the hook sticky with *msg* right away — opensak.exit()
+#     and a cancelled run end the macro this way, so pcall cannot catch it.
+#   * where() returns "macro.lua:12: " for the macro line that called the
+#     API function currently running, so API errors name it like Lua's own
+#     errors do (luaL_where; level 3 = where, the API function, its caller).
 _SANDBOX_SETUP = """
 local limit = ...
-local sethook, co_create, co_resume = debug.sethook, coroutine.create, coroutine.resume
+local sethook, getinfo = debug.sethook, debug.getinfo
+local co_create, co_resume = coroutine.create, coroutine.resume
 local pack, unpack = table.pack, table.unpack
 local main = coroutine.running()
 local step = math.min(limit, 1000)
-local used, tripped = 0, false
+local used, tripped, stopped = 0, false, nil
 local function hook()
+  if stopped then
+    sethook(hook, "", 1)
+    sethook(main, hook, "", 1)
+    error(stopped, 0)
+  end
   if not tripped then
     used = used + step
     if used < limit then return end
@@ -396,7 +428,7 @@ end
 sethook(hook, "", step)
 coroutine.create = function(f)
   local co = co_create(f)
-  sethook(co, hook, "", tripped and 1 or step)
+  sethook(co, hook, "", (tripped or stopped) and 1 or step)
   return co
 end
 coroutine.wrap = function(f)
@@ -425,6 +457,19 @@ end
 local os_time, os_date, os_clock = os.time, os.date, os.clock
 os = { time = os_time, date = os_date, clock = os_clock }
 io, debug, package, require, dofile, loadfile, load, collectgarbage, python = nil
+local function stop(msg)
+  stopped = msg
+  sethook(hook, "", 1)
+  sethook(main, hook, "", 1)
+end
+local function where()
+  local info = getinfo(3, "Sl")
+  if info and info.currentline > 0 then
+    return info.short_src .. ":" .. info.currentline .. ": "
+  end
+  return ""
+end
+return stop, where
 """
 
 
@@ -969,6 +1014,7 @@ class MacroRuntime:
         self,
         host: MacroHost,
         output: Optional[Callable[[str], None]] = None,
+        log: Optional[Callable[[str], None]] = None,
         profiles_dir: Optional[Path] = None,
         export_settings_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
@@ -978,9 +1024,13 @@ class MacroRuntime:
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
         changes apply without reopening the macro window. Folders the user
-        approves during a run are added to a copy of the list for that run."""
+        approves during a run are added to a copy of the list for that run.
+
+        print() goes to *output*; opensak.log() to *log* (default: *output*)
+        and to OpenSAK's log file."""
         self._host = host
         self._output = output or print
+        self._log = log or self._output
         self._profiles_dir = profiles_dir
         self._export_settings_dir = export_settings_dir
         self._instruction_limit = instruction_limit
@@ -995,6 +1045,11 @@ class MacroRuntime:
         self._picked: set[tuple[Path, bool]] = set()
         self._cancelled = threading.Event()
         # Per-run state, reset by run()
+        self._exit_code: Optional[int] = None
+        # The sandbox's stop(msg), set while a run is in progress
+        self._stop: Optional[Callable[[str], None]] = None
+        # The sandbox's where(), set while a run is in progress
+        self._where: Optional[Callable[[], str]] = None
         self._slept = 0.0
         self._polygons: dict[Path, LineShape] = {}
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
@@ -1007,8 +1062,17 @@ class MacroRuntime:
 
     def cancel(self) -> None:
         """Ask the running macro to stop. Safe to call from another thread;
-        takes effect at the next opensak.sleep()."""
+        takes effect at the next opensak.sleep(), print() or API call, or
+        when a dialog the macro opened returns."""
         self._cancelled.set()
+
+    def _check_cancelled(self) -> None:
+        """End a cancelled run — through the sandbox's stop(), so that
+        pcall cannot catch it."""
+        if self._cancelled.is_set():
+            if self._stop is not None:
+                self._stop("macro cancelled")
+            raise MacroError("macro cancelled")
 
     # -- API functions exposed to Lua -----------------------------------------
 
@@ -1404,6 +1468,21 @@ class MacroRuntime:
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
 
+    def _exit(self, code=None) -> None:
+        value = 0 if code is None else _number(code)
+        if value is None or value != int(value) or not 0 <= value <= MAX_EXIT_CODE:
+            raise MacroError(
+                f"opensak.exit expects a whole number 0-{MAX_EXIT_CODE}, got {code!r}"
+            )
+        self._exit_code = int(value)
+        assert self._stop is not None
+        self._stop("opensak.exit")
+
+    def _lua_log(self, *args) -> None:
+        text = "\t".join(helpers.lua_tostring(a) for a in args)
+        logger.info("macro: %s", text)
+        self._log(text)
+
     def _sleep(self, ms=None) -> None:
         value = _number(ms)
         if value is None or value < 0:
@@ -1727,17 +1806,24 @@ class MacroRuntime:
 
     def run(
         self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None
-    ) -> None:
-        """Execute *source*. Raises MacroError on any failure.
+    ) -> int:
+        """Execute *source* and return its exit code: the one passed to
+        opensak.exit(), 0 otherwise. Raises MacroError on any failure, and
+        MacroBusy (without running anything) while another macro runs.
 
         *base_dir* (usually the macro file's folder) is where relative paths
         given to opensak.read_csv() are looked up; the macros folder
         otherwise.
         """
-        with _c_locale():
-            self._run(source, chunk_name, base_dir)
+        if not _RUN_LOCK.acquire(blocking=False):
+            raise MacroBusy("another macro is still running")
+        try:
+            with _c_locale():
+                return self._run(source, chunk_name, base_dir)
+        finally:
+            _RUN_LOCK.release()
 
-    def _run(self, source: str, chunk_name: str, base_dir: Optional[Path]) -> None:
+    def _run(self, source: str, chunk_name: str, base_dir: Optional[Path]) -> int:
         self._base_dir = base_dir
         self._run_permissions = (
             list(self._folder_permissions)
@@ -1747,6 +1833,7 @@ class MacroRuntime:
         self._denied = set()
         self._picked = set()
         self._cancelled.clear()
+        self._exit_code = None
         self._slept = 0.0
         self._polygons = {}
         try:
@@ -1765,10 +1852,10 @@ class MacroRuntime:
             # script only gets the plain functions in the opensak table.
             attribute_filter=self._deny_attribute,
         )
-        lua.execute(_SANDBOX_SETUP, self._instruction_limit)
+        self._stop, self._where = lua.execute(_SANDBOX_SETUP, self._instruction_limit)
 
         g = lua.globals()
-        g.print = self._lua_print
+        g.print = self._wrap(self._lua_print)
         # "coords.parse" → opensak.coords.parse
         api: dict[str, Any] = {}
         for func in API:
@@ -1782,19 +1869,29 @@ class MacroRuntime:
         try:
             fn = lua.compile(source, name=f"={chunk_name}")
             fn()
+            self._check_cancelled()
+            return self._exit_code or 0
         except MacroError:
             raise
-        except LuaMemoryError as exc:
-            raise MacroError(
-                f"macro aborted: memory limit reached ({self._memory_limit // (1024 * 1024)} MB)"
-            ) from exc
         except LuaError as exc:
+            # opensak.exit() and a cancelled run end the script with a Lua
+            # error; that is the expected way out, not a failure of the macro.
+            if self._exit_code is not None:
+                return self._exit_code
+            if self._cancelled.is_set():
+                raise MacroError("macro cancelled") from exc
+            if isinstance(exc, LuaMemoryError):
+                raise MacroError(
+                    "macro aborted: memory limit reached "
+                    f"({self._memory_limit // (1024 * 1024)} MB)"
+                ) from exc
             raise MacroError(str(exc)) from exc
         except Exception as exc:
             # A Python exception raised inside a callback (e.g. the
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
         finally:
+            self._stop = self._where = None
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
@@ -1806,16 +1903,28 @@ class MacroRuntime:
     def _deny_attribute(obj, attr_name, is_setting):
         raise AttributeError("access to Python objects is not allowed in macros")
 
-    @staticmethod
-    def _wrap(func: Callable) -> Callable:
-        """Turn MacroError into a clean Lua error message (no Python traceback)."""
+    def _wrap(self, func: Callable) -> Callable:
+        """Turn MacroError into a clean Lua error message (no Python
+        traceback) naming the calling line, and end a cancelled run before
+        and after the call — a dialog the macro opened may be where the user
+        cancelled."""
         from lupa.lua54 import LuaError
 
         def call(*args):
             try:
-                return func(*args)
+                self._check_cancelled()
+                result = func(*args)
+                self._check_cancelled()
+                return result
             except MacroError as exc:
-                raise LuaError(str(exc)) from None
+                message = str(exc)
+                if self._where is not None and not self._cancelled.is_set():
+                    where = self._where()
+                    # An error from a Lua callback (e.g. an export rename
+                    # function) names its line already.
+                    if not message.startswith(where.split(":", 1)[0] + ":"):
+                        message = where + message
+                raise LuaError(message) from None
 
         return call
 
@@ -1833,7 +1942,7 @@ class MacroRuntime:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 2
+API_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -2403,6 +2512,29 @@ API: tuple[ApiFunction, ...] = (
         since=2,
         bind=lambda rt, lua: rt._sleep,
         params=(Param("ms", "number", "Milliseconds."),),
+    ),
+    ApiFunction(
+        name="log",
+        description="Write a message to OpenSAK's log file and the macro "
+                    "output. Run with `opensak --run-macro`, it goes to "
+                    "stderr while print() goes to stdout.",
+        example='opensak.log("checked " .. opensak.count() .. " caches")',
+        since=3,
+        bind=lambda rt, lua: rt._lua_log,
+        params=(Param("...", "any", "Values, joined with tabs like print()."),),
+    ),
+    ApiFunction(
+        name="exit",
+        description="End the macro right away. pcall cannot catch it, and it "
+                    "is not an error: the macro window shows the code, and "
+                    "`opensak --run-macro` exits with it.",
+        example='if opensak.count() == 0 then\n'
+                '    opensak.log("nothing to do")\n'
+                '    opensak.exit(1)\nend',
+        since=3,
+        bind=lambda rt, lua: rt._exit,
+        params=(Param("code", "integer",
+                      f"Exit code 0-{MAX_EXIT_CODE} (default 0).", optional=True),),
     ),
 
     # -- opensak.coords: pure coordinate math, no permissions needed ----------

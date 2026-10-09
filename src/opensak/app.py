@@ -245,6 +245,13 @@ def main() -> None:
 
     _apply_version_override()
 
+    # #1013: --run-macro hands the macro to the running OpenSAK and exits —
+    # before any of the GUI start-up below.
+    from opensak.utils.run_macro import main as run_macro_main
+    run_macro_code = run_macro_main(sys.argv[1:])
+    if run_macro_code is not None:
+        sys.exit(run_macro_code)
+
     # Disable GPU acceleration for QtWebEngine — prevents black rendering
     # on Windows systems where GPU/OpenGL drivers are incomplete or virtual.
     # This affects map and description panels rendered via QWebEngineView.
@@ -428,6 +435,14 @@ def main() -> None:
             sys.exit(1)
         raise
     logger.info("startup: main window built (+%.2fs total)", time.monotonic() - _startup_t0)
+
+    # #1013: accept macros sent by `opensak --run-macro` (e.g. from an editor).
+    # Kept alive by this local until app.exec() returns.
+    macro_server = None
+    if flags.lua_macros:
+        from opensak.gui.macro_server import MacroServer
+        macro_server = MacroServer(window)
+        macro_server.start()
 
     # Vent til cache-tabellen er loadet før splash lukkes
     def _close_splash():
