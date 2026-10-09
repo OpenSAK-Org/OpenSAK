@@ -166,20 +166,32 @@ DEVICE_FORMATS = ("gpx", "ggz")
 
 
 @contextmanager
-def _c_numeric_locale() -> Iterator[None]:
-    """Keep LC_NUMERIC at "C" while a macro runs (#1015).
+def _c_locale() -> Iterator[None]:
+    """Keep LC_NUMERIC and LC_CTYPE at "C" while a macro runs (#1015).
 
     Lua turns numbers into text (tostring, "..", string.format) with the C
     library, which follows LC_NUMERIC. Qt sets the locale from the system,
-    so on e.g. a Danish or German system 2.5 would become "2,5". Qt and
-    Python do their own number formatting and are not affected.
+    so on e.g. a Danish or German system 2.5 would become "2,5".
+
+    Lua strings are UTF-8 bytes, and string.upper/lower and %a-style
+    patterns classify each byte by LC_CTYPE. Python sets that from the
+    system; with a single-byte code page (e.g. Windows cp1252) the lead
+    byte of a Chinese or Arabic character counts as a Latin letter and
+    gets case-mapped, which breaks the UTF-8. In "C" only ASCII letters
+    are touched.
+
+    Qt and Python do their own number and text handling and are not
+    affected.
     """
-    previous = locale.setlocale(locale.LC_NUMERIC)
-    locale.setlocale(locale.LC_NUMERIC, "C")
+    categories = (locale.LC_NUMERIC, locale.LC_CTYPE)
+    previous = [(cat, locale.setlocale(cat)) for cat in categories]
+    for cat in categories:
+        locale.setlocale(cat, "C")
     try:
         yield
     finally:
-        locale.setlocale(locale.LC_NUMERIC, previous)
+        for cat, value in previous:
+            locale.setlocale(cat, value)
 
 
 _TEXT_FILTERS = {
@@ -1722,7 +1734,7 @@ class MacroRuntime:
         given to opensak.read_csv() are looked up; the macros folder
         otherwise.
         """
-        with _c_numeric_locale():
+        with _c_locale():
             self._run(source, chunk_name, base_dir)
 
     def _run(self, source: str, chunk_name: str, base_dir: Optional[Path]) -> None:

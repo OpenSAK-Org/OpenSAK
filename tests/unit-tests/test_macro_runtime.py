@@ -149,6 +149,61 @@ def test_numbers_use_decimal_point_on_comma_locale(comma_locale):
     assert locale.setlocale(locale.LC_NUMERIC) == before    # restored after the run
 
 
+@pytest.fixture
+def single_byte_ctype():
+    """Switch LC_CTYPE to a single-byte code page, as on Windows (cp1252).
+
+    There the lead bytes of UTF-8 Chinese (E4..E9) and Arabic (D8..DB)
+    characters count as Latin letters, so string.upper/lower would change them.
+    """
+    import locale
+    previous = locale.setlocale(locale.LC_CTYPE)
+    for name in ("German_Germany.1252", "English_United States.1252",
+                 "de_DE.ISO-8859-1", "de_DE.iso88591", "en_US.ISO-8859-1",
+                 "en_US.iso88591"):
+        try:
+            locale.setlocale(locale.LC_CTYPE, name)
+            break
+        except locale.Error:
+            continue
+    else:
+        pytest.skip("no single-byte locale installed")
+    yield
+    locale.setlocale(locale.LC_CTYPE, previous)
+
+
+_UNICODE_TEXT = "Cache 北京 公园 مرحبا بالعالم Grüße"
+_UNICODE_MACRO = f'''
+local s = "{_UNICODE_TEXT}"
+print(string.upper(s))
+print(string.lower(s))
+print(utf8.len(s))
+print(select(2, s:gsub("%a", "")))
+'''
+
+
+def _check_unicode_text(out):
+    assert out == [
+        "CACHE 北京 公园 مرحبا بالعالم GRüßE",   # only ASCII letters are case-mapped
+        "cache 北京 公园 مرحبا بالعالم grüße",
+        str(len(_UNICODE_TEXT)),
+        "8",                                      # %a matches ASCII letters only
+    ]
+
+
+def test_chinese_and_arabic_text_survives_string_functions():
+    _, out = _run(_UNICODE_MACRO)
+    _check_unicode_text(out)
+
+
+def test_chinese_and_arabic_text_on_single_byte_locale(single_byte_ctype):
+    import locale
+    before = locale.setlocale(locale.LC_CTYPE)
+    _, out = _run(_UNICODE_MACRO)
+    _check_unicode_text(out)
+    assert locale.setlocale(locale.LC_CTYPE) == before      # restored after the run
+
+
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
 
 def test_build_filterset_maps_keys():
