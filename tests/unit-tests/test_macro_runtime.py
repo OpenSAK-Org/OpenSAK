@@ -1047,22 +1047,6 @@ def test_export_file_asks_before_writing_to_unapproved_folder(
 
 EXPORT_EXAMPLE = EXAMPLES / "export_filters_to_gpx.lua"
 
-# The filters named in the example's FILTERS list, narrowed to the seeded caches.
-_EXAMPLE_FILTERS = {
-    "Traditionals": "Traditional Cache",
-    "Multi-caches": "Multi-cache",
-    "Mysteries": "Unknown Cache",
-}
-
-
-def _save_example_filters(tmp_path, names=tuple(_EXAMPLE_FILTERS)):
-    for name in names:
-        fs = FilterSet(mode="AND")
-        fs.add(CacheTypeFilter([_EXAMPLE_FILTERS[name]]))
-        fs.add(GcCodeFilter("GCMAC"))
-        FilterProfile(name, fs).save(tmp_path / "filters")
-
-
 @pytest.fixture
 def example_temp_dir(tmp_path, monkeypatch):
     """opensak.temp_dir() as the example sees it: tmp_path/out."""
@@ -1073,57 +1057,36 @@ def example_temp_dir(tmp_path, monkeypatch):
 
 
 def _run_export_example(runtime):
-    runtime.run(EXPORT_EXAMPLE.read_text(encoding="utf-8"), base_dir=EXAMPLES)
+    """Run the example with its filters narrowed to the seeded GCMAC caches."""
+    script = EXPORT_EXAMPLE.read_text(encoding="utf-8")
+    assert script.count("{ label = ") == 3
+    script = script.replace("{ label = ", '{ code = "GCMAC", label = ')
+    runtime.run(script, base_dir=EXAMPLES)
 
 
 def test_export_example_writes_one_file_per_filter(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path)
-    runtime, out = _export_runtime(tmp_path, folder="", file_name="{filter}",
-                                   if_exists="overwrite")
+    runtime, out = _export_runtime(tmp_path)
 
     _run_export_example(runtime)
 
     out_dir = tmp_path / "out"
     assert sorted(p.name for p in out_dir.iterdir()) == [
-        "Multi-caches.gpx", "Mysteries.gpx", "Traditionals.gpx"]
-    assert _exported(out_dir / "Traditionals.gpx") == {"GCMAC1", "GCMAC2", "GCMAC4"}
+        "Easy traditionals.gpx", "Multi-caches.gpx"]
+    assert _exported(out_dir / "Easy traditionals.gpx") == {"GCMAC1", "GCMAC4"}
     assert _exported(out_dir / "Multi-caches.gpx") == {"GCMAC3"}
-    assert _exported(out_dir / "Mysteries.gpx") == {"GCMAC5"}
-    assert out[0] == f"Traditionals: 3 caches → {(out_dir / 'Traditionals.gpx').resolve()}"
-    assert out[-1] == f"Done: 3 exported, 0 skipped (folder: {out_dir})"
+    assert out[0] == ("Easy traditionals: 2 caches → "
+                      f"{(out_dir / 'Easy traditionals.gpx').resolve()}")
+    assert "Solved mysteries: no caches match — skipped" in out
+    assert out[-1] == f"Done: 2 exported, 1 skipped (folder: {out_dir})"
 
 
-def test_export_example_skips_unsaved_and_empty_filters(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path, ("Traditionals",))
-    FilterProfile("Mysteries", FilterSet().add(GcCodeFilter("GCNOMATCH"))).save(
-        tmp_path / "filters")
-    runtime, out = _export_runtime(tmp_path, file_name="{filter}")
-
-    _run_export_example(runtime)
-
-    assert "Multi-caches: no saved filter with this name — skipped" in out
-    assert "Mysteries: no caches match — skipped" in out
-    assert out[-1] == f"Done: 1 exported, 2 skipped (folder: {example_temp_dir})"
-    assert [p.name for p in (tmp_path / "out").iterdir()] == ["Traditionals.gpx"]
-
-
-def test_export_example_reports_existing_file(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path, ("Traditionals",))
-    (tmp_path / "out" / "Traditionals.gpx").write_text("old", encoding="utf-8")
-    runtime, out = _export_runtime(tmp_path, file_name="{filter}", if_exists="skip")
+def test_export_example_overwrites_existing_file(tmp_path, example_temp_dir):
+    (tmp_path / "out" / "Multi-caches.gpx").write_text("old", encoding="utf-8")
+    runtime, _ = _export_runtime(tmp_path)
 
     _run_export_example(runtime)
 
-    assert "Traditionals: file exists — not overwritten" in out
-    assert (tmp_path / "out" / "Traditionals.gpx").read_text(encoding="utf-8") == "old"
-
-
-def test_export_example_stops_when_file_name_lacks_filter(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path)
-    runtime, _ = _export_runtime(tmp_path, file_name="caches", if_exists="overwrite")
-
-    with pytest.raises(MacroError, match="Traditionals and Multi-caches both exported to"):
-        _run_export_example(runtime)
+    assert _exported(tmp_path / "out" / "Multi-caches.gpx") == {"GCMAC3"}
 
 
 # ── More filter keys, filter_name, sort ──────────────────────────────────────
