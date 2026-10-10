@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
-from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime
+from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.macro_help import MacroHelpDialog
@@ -693,6 +693,30 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
         return FolderApproval.ALWAYS
     return FolderApproval.DENY
 
+
+
+def ask_database_write_approval(parent, name: str, path: Path) -> WriteApproval:
+    """OpenSAK's question before a macro first changes the database *name*:
+    deny (the default, also on Escape), allow until OpenSAK closes, or
+    always. The name comes from the database list, shown as plain text."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("macro_db_write_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.setText(tr("macro_db_write_msg", name=name, path=str(path)))
+    box.setInformativeText(tr("macro_db_write_hint"))
+    btn_session = box.addButton(tr("macro_db_write_session"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+    btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_deny)
+    box.setEscapeButton(btn_deny)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is btn_session:
+        return WriteApproval.SESSION
+    if clicked is btn_always:
+        return WriteApproval.ALWAYS
+    return WriteApproval.DENY
 
 def choose_file_for_macro(
     parent, title: str, file_filter: str, save: bool, start_dir: Path

@@ -29,6 +29,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from opensak.macro.cache_data import CACHE_FIELDS
+from opensak.macro.cache_write import INSERT_REQUIRED, PROTECTED_FIELDS, WRITABLE_FIELDS
 from opensak.macro.editor_support import (
     LUARC,
     NPP_NAME,
@@ -44,6 +45,7 @@ from opensak.macro.forms import (
 )
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
+from opensak.macro.sql import PROTECTED_COLUMNS, WRITABLE_TABLES
 
 DOC_PATH = Path("docs/macros/api.md")
 STUB_PATH = Path("macros") / TYPES_DIR / STUB_NAME
@@ -303,6 +305,47 @@ def _forms_section() -> list[str]:
     return lines
 
 
+def _changing_section() -> list[str]:
+    writable = ", ".join(f"`{f.name}`" for f in WRITABLE_FIELDS)
+    required = ", ".join(f"`{k}`" for k in INSERT_REQUIRED)
+    lines = [
+        "",
+        "## Changing caches",
+        "",
+        "`opensak.update()`, `opensak.insert{}`, `opensak.sql_write()`, "
+        "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
+        "active database. Before a macro changes a database for the first "
+        "time, OpenSAK asks whether macros may change it: **Deny** (the "
+        "function fails, and OpenSAK does not ask again during this run), "
+        "**Until OpenSAK closes**, or **Always**. Databases allowed always are "
+        "listed in Settings → Folder permissions, where they can be removed "
+        "again.",
+        "",
+        f"Writable cache fields: {writable}. `false` clears a field that is "
+        'not a boolean, and "" clears a text field. `user_data` takes the '
+        'slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes '
+        "`{ lat = .., lon = .. }` or a coordinate string. Dates are "
+        f'`"YYYY-MM-DD"`. `opensak.insert{{}}` also needs `code`, and {required}.',
+        "",
+        "These fields cannot be written:",
+        "",
+    ]
+    lines += [f"- `{name}` — {why}" for name, why in PROTECTED_FIELDS.items()]
+    lines += [
+        "",
+        "`opensak.sql_write()` may INSERT into and UPDATE these tables; an "
+        "UPDATE may not set the columns listed. Whatever an INSERT puts into "
+        "the columns OpenSAK maintains is recalculated right away.",
+        "",
+        "| Table | Protected columns |",
+        "|---|---|",
+    ]
+    for table in sorted(WRITABLE_TABLES):
+        cols = ", ".join(f"`{c}`" for c in sorted(PROTECTED_COLUMNS[table]))
+        lines.append(f"| `{table}` | {cols} |")
+    return lines
+
+
 def _param_line(p: Param) -> str:
     optional = ", optional" if p.optional else ""
     return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
@@ -408,6 +451,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         type_ = field.type.replace("|", "\\|")
         lines.append(f"| `{field.name}` | `{type_}` | {field.description} |")
 
+    lines += _changing_section()
     lines += _examples_section(examples_dir)
     lines += _editor_section()
 
@@ -539,6 +583,24 @@ def render_lua_stub() -> str:
     ]
     for field in CACHE_FIELDS:
         lines.append(f"---@field {field.name} {field.type} {field.description}")
+
+    descriptions = {f.name: f.description for f in CACHE_FIELDS}
+    lines += [
+        "",
+        "---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.",
+        "---@class opensak.CacheUpdate",
+    ]
+    for field in WRITABLE_FIELDS:
+        lines.append(f"---@field {field.name}? {field.type} {descriptions[field.name]}")
+    lines += [
+        "",
+        "---A new cache for `opensak.insert{}`.",
+        "---@class opensak.CacheInsert: opensak.CacheUpdate",
+        '---@field code string Cache code, e.g. "GC12345".',
+    ]
+    for field in WRITABLE_FIELDS:
+        if field.name in INSERT_REQUIRED:
+            lines.append(f"---@field {field.name} {field.type} {descriptions[field.name]}")
 
     lines += [
         "",

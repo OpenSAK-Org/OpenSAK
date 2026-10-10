@@ -126,6 +126,14 @@ from opensak.macro.cache_data import (
     load_records,
     resolve_fields,
 )
+from opensak.macro import db_access
+from opensak.macro.cache_write import (
+    CacheWriteError,
+    insert_cache,
+    parse_values,
+    update_cache,
+)
+from opensak.macro.db_access import WriteApproval
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -144,7 +152,9 @@ from opensak.macro.sql import (
     MAX_ROWS,
     QUERY_TIMEOUT_S,
     ReadOnlyDatabase,
+    WRITABLE_TABLES,
     SqlError,
+    WritableDatabase,
     connect_read_only,
 )
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
@@ -601,6 +611,21 @@ class MacroHost(Protocol):
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
 
+    def approve_database_write(self, name: str, path: Path) -> WriteApproval:
+        """Ask the user whether macros may change the database *name* (file
+        *path*): never, until OpenSAK closes, or always.
+
+        Asked before a macro's first write to a database that is not
+        approved yet. Must be OpenSAK's own dialog. Anything but SESSION or
+        ALWAYS counts as DENY.
+        """
+
+    def caches_changed(self, codes: list[str], added: bool) -> None:
+        """A macro changed the caches *codes* (opensak.update, insert,
+        sql_write); *added* if new caches were inserted. Like
+        set_corrected_coords(), the host may defer the refresh to
+        end_macro()."""
+
     def approve_folder(self, target: Path, folder: Path, write: bool) -> FolderApproval:
         """Ask the user whether the macro may read (or write) *target*, by
         permitting *folder* for this run only or always.
@@ -961,6 +986,13 @@ def _sql_args(func: str, query: Any, params: Any) -> tuple[str, Any]:
     )
 
 
+def _lua_to_python(value: Any) -> Any:
+    """A Lua table → dict (nested tables too); other values as they are."""
+    if hasattr(value, "items"):
+        return {k: _lua_to_python(v) for k, v in value.items()}
+    return value
+
+
 def _cache_fields(value: Any) -> tuple[CacheField, ...]:
     """The `fields` option of opensak.caches{} → the fields to load."""
     try:
@@ -1209,6 +1241,10 @@ class MacroRuntime:
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
         # Opened by the first opensak.sql*() call of a run, closed after it.
         self._sql_db: Optional[ReadOnlyDatabase] = None
+        # Opened by the first opensak.sql_write() of a run, closed after it.
+        self._sql_write_db: Optional[WritableDatabase] = None
+        # Database paths the user refused to let this run change
+        self._write_denied: set[Path] = set()
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1278,11 +1314,79 @@ class MacroRuntime:
     def _set_corrected(self, code=None, lat=None, lon=None) -> bool:
         gc_code = _gc_code(code, "opensak.set_corrected")
         la, lo = resolve_coords(lat, lon)
+        self._require_write("opensak.set_corrected")
         return bool(self._host.set_corrected_coords(gc_code, la, lo))
 
     def _clear_corrected(self, code=None) -> bool:
         gc_code = _gc_code(code, "opensak.clear_corrected")
+        self._require_write("opensak.clear_corrected")
         return bool(self._host.set_corrected_coords(gc_code, None, None))
+
+    # Changing caches (cache_write.py): only the active database, and only
+    # after the user approved writing to it (db_access.py).
+
+    def _require_write(self, func: str) -> None:
+        """Raise unless the user lets macros change the active database —
+        asking (host.approve_database_write) if that was not decided yet.
+        A refusal holds for the rest of the run."""
+        path = Path(get_engine().url.database or "")
+        if db_access.is_approved(path):
+            return
+        name = self._host.database_name()
+        if path not in self._write_denied:
+            answer = self._host.approve_database_write(name, path)
+            if answer in (WriteApproval.SESSION, WriteApproval.ALWAYS):
+                db_access.approve(path, answer)
+                return
+            self._write_denied.add(path)
+        raise MacroError(f"{func}: the user did not allow macros to change database {name!r}")
+
+    def _field_values(self, func: str, values: Any, insert: bool) -> dict[str, Any]:
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ user_flag = true }}")
+        try:
+            return parse_values(func, _lua_to_python(values), insert=insert)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+
+    def _update(self, code=None, values=None) -> bool:
+        gc_code = _gc_code(code, "opensak.update")
+        parsed = self._field_values("opensak.update", values, insert=False)
+        self._require_write("opensak.update")
+        with get_session() as session:
+            found = update_cache(session, gc_code, parsed)
+        if found:
+            self._host.caches_changed([gc_code], False)
+        return found
+
+    def _insert(self, values=None) -> str:
+        parsed = self._field_values("opensak.insert", values, insert=True)
+        self._require_write("opensak.insert")
+        try:
+            with get_session() as session:
+                code = insert_cache(session, parsed)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+        self._host.caches_changed([code], True)
+        return code
+
+    def _sql_write(self, query=None, params=None) -> int:
+        query, params = _sql_args("opensak.sql_write", query, params)
+        self._require_write("opensak.sql_write")
+        if self._sql_write_db is None:
+            self._sql_write_db = WritableDatabase(Path(get_engine().url.database or ""))
+        try:
+            result = self._sql_write_db.execute(query, params)
+        except SqlError as exc:
+            raise MacroError(str(exc)) from None
+        if result.codes:
+            self._host.caches_changed(result.codes, result.added)
+        return result.rows
+
+    def _close_sql_write(self) -> None:
+        if self._sql_write_db is not None:
+            self._sql_write_db.close()
+            self._sql_write_db = None
 
     # Raw SQL: a separate read-only connection (sql.py), opened on first use.
 
@@ -1512,8 +1616,9 @@ class MacroRuntime:
 
     def _switch_database(self, name=None) -> None:
         db = self._require_database(name, "opensak.switch_database")
-        # The read-only SQL connection belongs to the old database.
+        # The SQL connections belong to the old database.
         self._close_sql()
+        self._close_sql_write()
         try:
             self._host.switch_database(db.name)
         except Exception as exc:
@@ -2348,6 +2453,7 @@ class MacroRuntime:
             else load_permissions()
         )
         self._denied = set()
+        self._write_denied = set()
         self._picked = set()
         self._cancelled.clear()
         self._exit_code = None
@@ -2417,6 +2523,7 @@ class MacroRuntime:
                 self._boundaries[0].close()
                 self._boundaries = None
             self._close_sql()
+            self._close_sql_write()
             self._close_other_databases()
             self._load_macro = None
             self._close_progress_windows()
@@ -2940,7 +3047,9 @@ API: tuple[ApiFunction, ...] = (
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
         params=(Param("table", "string", "Table or view name."), _READ_OPTIONS),
-        returns=("{name: string, type: string}[]", "Column names and SQL types, in table order."),
+        returns=("{name: string, type: string, required: boolean}[]",
+                 "Column names and SQL types, in table order; `required`: NOT "
+                 "NULL without a default, so an INSERT must give it."),
     ),
     ApiFunction(
         name="databases",
@@ -3055,6 +3164,62 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._clear_corrected,
         params=(_CODE,),
         returns=("boolean", "false if the cache is not in the database."),
+    ),
+    ApiFunction(
+        name="update",
+        description="Change fields of a cache in the active database. The "
+                    "keys are cache field names (see Changing caches); only "
+                    "the given fields change. `false` clears a field that is "
+                    "not a boolean. Fields OpenSAK maintains itself, such as "
+                    "`code`, `distance` or `log_count`, cannot be written. "
+                    "Before the first change to a database, OpenSAK asks the "
+                    "user to allow it (see Changing caches).",
+        example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
+                'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
+                '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',
+        since=2,
+        bind=lambda rt, lua: rt._update,
+        params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
+        returns=("boolean", "false if the cache is not in the database."),
+    ),
+    ApiFunction(
+        name="insert",
+        description="Add a new cache to the active database. `code`, `name`, "
+                    "`type`, `lat` and `lon` are required; any other writable "
+                    "field may be given too (see Changing caches). Fails if "
+                    "the code is already in the database. Needs the user's "
+                    "permission like opensak.update().",
+        example='opensak.insert{ code = "GC12345", name = "My bonus", type = "Unknown",\n'
+                '                lat = 47.36872, lon = 8.54093, user_flag = true }',
+        since=2,
+        bind=lambda rt, lua: rt._insert,
+        params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
+        returns=("string", "The cache code as stored (upper case)."),
+    ),
+    ApiFunction(
+        name="sql_write",
+        description="Run one INSERT or UPDATE statement (SQLite) against the "
+                    "active database. Only the cache tables can be changed ("
+                    + ", ".join(f"`{t}`" for t in sorted(WRITABLE_TABLES)) +
+                    "); nothing can be deleted, and an UPDATE may not set the "
+                    "keys or the columns OpenSAK maintains itself (see "
+                    "Changing caches). OpenSAK recalculates distances, counts "
+                    "and log dates of the caches the statement touched. An "
+                    "INSERT must give every column opensak.columns() marks as "
+                    "`required`; opensak.insert{} is simpler for new caches. Each "
+                    "statement is committed on its own, or not at all on an "
+                    "error. Needs the user's permission like opensak.update().",
+        example='local n = opensak.sql_write(\n'
+                '  "UPDATE caches SET user_data_1 = ? WHERE country = ? AND found = 0",\n'
+                '  { "todo", "Switzerland" })\n'
+                'print(n .. " caches marked")',
+        since=2,
+        bind=lambda rt, lua: rt._sql_write,
+        params=(
+            Param("query", "string", "One INSERT or UPDATE statement."),
+            Param("params", "table", "As for opensak.sql().", optional=True),
+        ),
+        returns=("integer", "Number of rows inserted or updated."),
     ),
     ApiFunction(
         name="read_csv",

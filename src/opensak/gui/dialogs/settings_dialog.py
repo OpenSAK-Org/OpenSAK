@@ -944,6 +944,9 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
+        layout.addSpacing(12)
+        layout.addWidget(self._build_db_write_section())
+
         scroll = QScrollArea()
         scroll.setWidget(tab)
         scroll.setWidgetResizable(True)
@@ -1092,6 +1095,50 @@ class SettingsDialog(QDialog):
         rows = {index.row() for index in table.selectedIndexes()}
         for row in sorted(rows, reverse=True):
             table.removeRow(row)
+
+    def _build_db_write_section(self) -> QWidget:
+        """The databases macros may always change (answered "Always" when a
+        macro first wrote to them). They can only be removed here; adding
+        happens through that question."""
+        from PySide6.QtWidgets import QListWidget
+        from opensak.macro.db_access import always_approved
+
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        intro = QLabel(tr("settings_db_write_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        self._db_write_loaded = always_approved()
+        self._db_write_list = QListWidget()
+        self._db_write_list.addItems(self._db_write_loaded)
+        self._db_write_list.setMaximumHeight(120)
+        self._db_write_list.itemSelectionChanged.connect(
+            lambda: self._btn_db_write_remove.setEnabled(
+                bool(self._db_write_list.selectedItems())
+            )
+        )
+        layout.addWidget(self._db_write_list)
+
+        btn_row = QHBoxLayout()
+        self._btn_db_write_remove = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_db_write_remove.setEnabled(False)
+        self._btn_db_write_remove.clicked.connect(self._on_remove_db_write)
+        btn_row.addWidget(self._btn_db_write_remove)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return box
+
+    def _on_remove_db_write(self) -> None:
+        for item in self._db_write_list.selectedItems():
+            self._db_write_list.takeItem(self._db_write_list.row(item))
+
+    def _collect_db_write(self) -> list[str]:
+        return [self._db_write_list.item(i).text() for i in range(self._db_write_list.count())]
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
@@ -1824,6 +1871,10 @@ class SettingsDialog(QDialog):
             permissions = self._collect_permissions()
             if permissions != self._perm_loaded:
                 save_permissions(permissions)
+            from opensak.macro.db_access import save_always_approved
+            databases = self._collect_db_write()
+            if databases != self._db_write_loaded:
+                save_always_approved(databases)
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store

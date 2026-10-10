@@ -15,12 +15,25 @@ is enforced by the connection, never by inspecting the SQL text:
 A progress handler aborts statements that run longer than
 QUERY_TIMEOUT_S, since the Lua instruction limit does not count time spent
 inside SQLite.
+
+opensak.sql_write() uses a separate WritableDatabase on the active
+database only. Its authorizer allows INSERT and UPDATE on the cache tables
+(WRITABLE_TABLES) and nothing else that changes data: no DELETE, no schema
+changes, no ATTACH, no PRAGMA that writes, no transaction control. An
+UPDATE of a PROTECTED_COLUMNS column is refused by the same authorizer,
+which SQLite consults per column. An INSERT cannot be checked per column;
+instead temporary triggers record which caches a statement touched, and
+cache_write.refresh_derived() then recalculates their derived columns
+(overwriting whatever the INSERT put there) before the statement's
+transaction is committed. With recursive_triggers on, a BEFORE DELETE
+trigger also catches the rows INSERT OR REPLACE would delete.
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -177,7 +190,11 @@ class ReadOnlyDatabase:
         quoted = table.replace('"', '""')
         cursor = self._execute(f'PRAGMA table_info("{quoted}")', None)
         try:
-            return [{"name": r[1], "type": r[2]} for r in cursor.fetchall()]
+            # required: NOT NULL without a default — an INSERT must give it
+            return [
+                {"name": r[1], "type": r[2], "required": bool(r[3] and r[4] is None and not r[5])}
+                for r in cursor.fetchall()
+            ]
         finally:
             cursor.close()
 
@@ -189,3 +206,190 @@ class ReadOnlyDatabase:
 
 def _row(names: list[str], values: tuple) -> dict:
     return {n: v for n, v in zip(names, values) if v is not None}
+
+
+# ── Writing: opensak.sql_write() ─────────────────────────────────────────────
+
+# Tables a macro may INSERT into and UPDATE.
+WRITABLE_TABLES = frozenset({
+    "caches", "user_notes", "waypoints", "logs", "attributes", "trackables",
+})
+# Columns an UPDATE may never set: keys and identities, and the columns
+# OpenSAK maintains itself (counts, log dates, distance, import metadata).
+PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
+    "caches": frozenset({
+        "id", "gc_code", "gc_cache_id", "guid",
+        "distance", "bearing",
+        "log_count", "found_log_count", "waypoint_count", "trackable_count",
+        "last_log_date", "last_found_date", "last_four_logs",
+        "imported_at", "last_gpx_update", "source_file",
+        "location_source", "location_basis", "location_updated", "location_dataset",
+    }),
+    "user_notes": frozenset({"id", "cache_id"}),
+    "waypoints": frozenset({"id", "cache_id", "parent_gc_code"}),
+    "logs": frozenset({"id", "cache_id", "log_id"}),
+    "attributes": frozenset({"id", "cache_id"}),
+    "trackables": frozenset({"id", "cache_id"}),
+}
+
+_TRIGGER_PREFIX = "opensak_macro_"
+_TOUCHED = f"{_TRIGGER_PREFIX}touched"
+
+# (table, what a change there means for refresh_derived(), cache id column)
+_TRACKED = (
+    ("caches", "cache", "id"),
+    ("user_notes", "cache", "cache_id"),
+    ("attributes", "cache", "cache_id"),
+    ("logs", "logs", "cache_id"),
+    ("waypoints", "waypoints", "cache_id"),
+    ("trackables", "trackables", "cache_id"),
+)
+
+
+def _write_authorizer(action, arg1, arg2, db_name, trigger) -> int:
+    # Our own temporary triggers (the user cannot create triggers).
+    if trigger and str(trigger).startswith(_TRIGGER_PREFIX):
+        return sqlite3.SQLITE_OK
+    if _authorizer(action, arg1, arg2, db_name, trigger) == sqlite3.SQLITE_OK:
+        return sqlite3.SQLITE_OK
+    if db_name not in (None, "main"):
+        return sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_INSERT and arg1 in WRITABLE_TABLES:
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_UPDATE and arg1 in WRITABLE_TABLES:
+        return sqlite3.SQLITE_DENY if arg2 in PROTECTED_COLUMNS[arg1] else sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_DENY
+
+
+@dataclass
+class WriteResult:
+    """What one opensak.sql_write() statement changed."""
+
+    rows: int                       # rows inserted or updated (not by triggers)
+    codes: list[str]                # GC codes of the caches touched
+    added: bool                     # a cache row was inserted
+
+
+class WritableDatabase:
+    """A read-write connection to the active database for opensak.sql_write(),
+    opened on first use. Every statement runs in its own transaction."""
+
+    def __init__(self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S):
+        self._db_path = Path(db_path)
+        self._timeout_s = timeout_s
+        self._conn: Optional[sqlite3.Connection] = None
+        self._deadline = 0.0
+
+    def _connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            try:
+                conn = sqlite3.connect(
+                    self._db_path, timeout=30, isolation_level=None,
+                    check_same_thread=False,
+                    # No statement cache: a statement prepared without the
+                    # authorizer must never be reused for macro SQL.
+                    cached_statements=0,
+                )
+                conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("PRAGMA recursive_triggers = ON")
+                self._create_triggers(conn)
+            except sqlite3.Error as exc:
+                raise SqlError(f"cannot open the database for writing: {exc}") from None
+            conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
+            self._conn = conn
+        return self._conn
+
+    @staticmethod
+    def _create_triggers(conn: sqlite3.Connection) -> None:
+        """TEMP triggers (this connection only) that record the caches a
+        statement touches, and refuse deletes."""
+        conn.execute(
+            f"CREATE TEMP TABLE {_TOUCHED} "
+            "(cache_id INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (cache_id, kind))"
+        )
+        for table, kind, id_col in _TRACKED:
+            for event in ("INSERT", "UPDATE"):
+                record = f"INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.{id_col}, '{kind}');"
+                if table == "caches" and event == "INSERT":
+                    record += f" INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'insert');"
+                conn.execute(
+                    f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}{table}_{event.lower()} "
+                    f"AFTER {event} ON main.{table} BEGIN {record} END"
+                )
+            conn.execute(
+                f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}{table}_delete "
+                f"BEFORE DELETE ON main.{table} "
+                "BEGIN SELECT RAISE(ABORT, 'macros may not delete rows'); END"
+            )
+        conn.execute(
+            f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}caches_coords "
+            "AFTER UPDATE OF latitude, longitude ON main.caches "
+            f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'coords'); END"
+        )
+
+    def _check_deadline(self) -> int:
+        return 1 if time.monotonic() > self._deadline else 0
+
+    def _error(self, exc: sqlite3.Error) -> SqlError:
+        if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
+            return SqlError(f"SQL statement aborted: took longer than {self._timeout_s:g} s")
+        if "not authorized" in str(exc) or "prohibited" in str(exc):
+            return SqlError(
+                "opensak.sql_write may only INSERT into and UPDATE the cache tables "
+                f"({', '.join(sorted(WRITABLE_TABLES))}), and not the keys or the "
+                f"columns OpenSAK maintains itself: {exc}"
+            )
+        return SqlError(f"SQL error: {exc}")
+
+    def execute(self, query: str, params: Any = None) -> WriteResult:
+        """Run one INSERT or UPDATE statement and commit it together with
+        the recalculated derived columns. Rolls everything back on error."""
+        from opensak.macro.cache_write import refresh_derived
+
+        params = _params(params)
+        conn = self._connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.Error as exc:
+            raise self._error(exc) from None
+        try:
+            self._deadline = time.monotonic() + self._timeout_s
+            conn.set_authorizer(_write_authorizer)
+            try:
+                cursor = conn.execute(query, params)
+                cursor.fetchall()          # runs a RETURNING clause to the end
+                cursor.close()
+            finally:
+                conn.set_authorizer(None)
+            rows = conn.execute("SELECT changes()").fetchone()[0]
+
+            kinds_by_id: dict[int, set[str]] = {}
+            for cache_id, kind in conn.execute(f"SELECT cache_id, kind FROM temp.{_TOUCHED}"):
+                kinds_by_id.setdefault(cache_id, set()).add(kind)
+            refresh_derived(lambda sql, p: conn.execute(sql, p).fetchall(), kinds_by_id)
+            codes = [
+                code for (code,) in conn.execute(
+                    "SELECT gc_code FROM caches WHERE id IN "
+                    f"(SELECT cache_id FROM temp.{_TOUCHED}) ORDER BY gc_code"
+                )
+            ]
+            added = any("insert" in kinds for kinds in kinds_by_id.values())
+            conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+            conn.execute("COMMIT")
+        except BaseException as exc:
+            try:
+                conn.execute("ROLLBACK")
+                conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+            except sqlite3.Error:
+                pass
+            if isinstance(exc, sqlite3.Error):
+                raise self._error(exc) from None
+            if isinstance(exc, (ValueError, OverflowError)):
+                raise SqlError(f"SQL error: {exc}") from None
+            raise
+        return WriteResult(rows, codes, added)
+
+    def close(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
