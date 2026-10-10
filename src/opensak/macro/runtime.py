@@ -524,6 +524,27 @@ end
 return stop, where, make_loader
 """
 
+# opensak.transaction(fn), written in Lua: an error raised by fn passes
+# through a Python function only as a message with a traceback appended
+# (and an error table as ""), so pcall stays on the Lua side. begin/finish
+# are MacroRuntime._tx_begin/_tx_end. If the instruction limit is hit inside
+# fn, finish() never runs; _close_sql_write() rolls back at the macro's end.
+_TRANSACTION_LUA = """
+local begin, finish = ...
+local pack, unpack, pcall, error, type = table.pack, table.unpack, pcall, error, type
+return function(fn)
+  if type(fn) ~= "function" then
+    error("opensak.transaction expects a function, e.g. "
+          .. "opensak.transaction(function() ... end)", 2)
+  end
+  begin()
+  local r = pack(pcall(fn))
+  finish(r[1])
+  if not r[1] then error(r[2], 0) end
+  return unpack(r, 2, r.n)
+end
+"""
+
 
 class FolderApproval(Enum):
     """The user's answer when a macro needs a folder that is not permitted."""
@@ -1315,11 +1336,15 @@ class MacroRuntime:
         gc_code = _gc_code(code, "opensak.set_corrected")
         la, lo = resolve_coords(lat, lon)
         self._require_write("opensak.set_corrected")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, {"corrected": (la, lo)})
         return bool(self._host.set_corrected_coords(gc_code, la, lo))
 
     def _clear_corrected(self, code=None) -> bool:
         gc_code = _gc_code(code, "opensak.clear_corrected")
         self._require_write("opensak.clear_corrected")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, {"corrected": None})
         return bool(self._host.set_corrected_coords(gc_code, None, None))
 
     # Changing caches (cache_write.py): only the active database, and only
@@ -1353,7 +1378,16 @@ class MacroRuntime:
         gc_code = _gc_code(code, "opensak.update")
         parsed = self._field_values("opensak.update", values, insert=False)
         self._require_write("opensak.update")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, parsed)
         with get_session() as session:
+            found = update_cache(session, gc_code, parsed)
+        if found:
+            self._host.caches_changed([gc_code], False)
+        return found
+
+    def _update_in_transaction(self, gc_code: str, parsed: dict[str, Any]) -> bool:
+        with self._active_session() as session:
             found = update_cache(session, gc_code, parsed)
         if found:
             self._host.caches_changed([gc_code], False)
@@ -1363,20 +1397,23 @@ class MacroRuntime:
         parsed = self._field_values("opensak.insert", values, insert=True)
         self._require_write("opensak.insert")
         try:
-            with get_session() as session:
+            with self._active_session() as session:
                 code = insert_cache(session, parsed)
         except CacheWriteError as exc:
             raise MacroError(str(exc)) from None
         self._host.caches_changed([code], True)
         return code
 
+    def _writable_db(self) -> WritableDatabase:
+        if self._sql_write_db is None:
+            self._sql_write_db = WritableDatabase(Path(get_engine().url.database or ""))
+        return self._sql_write_db
+
     def _sql_write(self, query=None, params=None) -> int:
         query, params = _sql_args("opensak.sql_write", query, params)
         self._require_write("opensak.sql_write")
-        if self._sql_write_db is None:
-            self._sql_write_db = WritableDatabase(Path(get_engine().url.database or ""))
         try:
-            result = self._sql_write_db.execute(query, params)
+            result = self._writable_db().execute(query, params)
         except SqlError as exc:
             raise MacroError(str(exc)) from None
         if result.codes:
@@ -1384,9 +1421,46 @@ class MacroRuntime:
         return result.rows
 
     def _close_sql_write(self) -> None:
+        """Close the write connection; rolls back a transaction still open
+        (a macro that ended or failed inside opensak.transaction())."""
         if self._sql_write_db is not None:
             self._sql_write_db.close()
             self._sql_write_db = None
+
+    # opensak.transaction(): the Lua wrapper (_TRANSACTION_LUA) calls these
+    # around the macro's function. While it runs, all writes and reads of
+    # the active database go through the WritableDatabase connection.
+
+    def _in_transaction(self) -> bool:
+        return self._sql_write_db is not None and self._sql_write_db.in_transaction
+
+    def _tx_begin(self) -> None:
+        self._require_write("opensak.transaction")
+        try:
+            self._writable_db().begin()
+        except SqlError as exc:
+            raise MacroError(f"opensak.transaction: {exc}") from None
+
+    def _tx_end(self, commit=None) -> None:
+        try:
+            self._writable_db().end(bool(commit))
+        except SqlError as exc:
+            raise MacroError(f"opensak.transaction: {exc}") from None
+
+    def _no_transaction(self, func: str) -> None:
+        if self._in_transaction():
+            raise MacroError(f"{func} cannot be used inside opensak.transaction()")
+
+    @contextmanager
+    def _active_session(self) -> Iterator[Any]:
+        """get_session(), or a session in the open transaction — decided
+        per use, so a loop may run on past the transaction's end."""
+        if self._in_transaction():
+            with self._sql_write_db.session() as session:
+                yield session
+        else:
+            with get_session() as session:
+                yield session
 
     # Raw SQL: a separate read-only connection (sql.py), opened on first use.
 
@@ -1400,6 +1474,8 @@ class MacroRuntime:
             if db.path not in self._other_sql:
                 self._other_sql[db.path] = ReadOnlyDatabase(db.path)
             return self._other_sql[db.path]
+        if self._in_transaction():
+            return self._sql_write_db.reader()
         if self._sql_db is None:
             self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
         return self._sql_db
@@ -1526,9 +1602,10 @@ class MacroRuntime:
         return db
 
     def _session_factory(self, db: Optional[DatabaseInfo], func: str) -> Callable[[], Any]:
-        """get_session for the active database, else read-only sessions on *db*."""
+        """Sessions on the active database (in the open transaction, if
+        any), else read-only sessions on *db*."""
         if db is None:
-            return get_session
+            return self._active_session
         engine = self._other_engines.get(db.path)
         if engine is None:
             engine = self._open_other_engine(db, func)
@@ -1615,6 +1692,7 @@ class MacroRuntime:
         return db.name
 
     def _switch_database(self, name=None) -> None:
+        self._no_transaction("opensak.switch_database")
         db = self._require_database(name, "opensak.switch_database")
         # The SQL connections belong to the old database.
         self._close_sql()
@@ -1625,6 +1703,10 @@ class MacroRuntime:
             raise MacroError(f"opensak.switch_database: cannot open {db.name!r}: {exc}") from None
 
     def _transfer(self, func: str, copy_only: bool, target=None, options=None) -> int:
+        # It reads (and for a move, deletes) through its own connections,
+        # which would not see the transaction's changes, or would wait for
+        # its write lock.
+        self._no_transaction(func)
         db = self._require_database(target, func)
         active = get_db_manager().active
         if active is None or db.path == active.path:
@@ -2461,7 +2543,7 @@ class MacroRuntime:
         self._polygons = {}
         self._macro_depth = 0
         try:
-            from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
+            from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime, lua_type
         except ImportError as exc:
             raise MacroError(
                 'Lua support is not installed — run: pip install "lupa>=2.0,<3"'
@@ -2489,7 +2571,10 @@ class MacroRuntime:
             table = api
             for ns in namespaces:
                 table = table.setdefault(ns, {})
-            table[name] = self._api_function(func.bind(self, lua))
+            bound = func.bind(self, lua)
+            # A Lua function (opensak.transaction) must not be called through
+            # Python: errors passing through lose their value.
+            table[name] = bound if lua_type(bound) == "function" else self._api_function(bound)
         g.opensak = lua.table_from(api, recursive=True)
         self._load_macro = make_loader()
 
@@ -3207,8 +3292,11 @@ API: tuple[ApiFunction, ...] = (
                     "and log dates of the caches the statement touched. An "
                     "INSERT must give every column opensak.columns() marks as "
                     "`required`; opensak.insert{} is simpler for new caches. Each "
-                    "statement is committed on its own, or not at all on an "
-                    "error. Needs the user's permission like opensak.update().",
+                    "statement is committed on its own (or with the "
+                    "surrounding opensak.transaction()), or not at all on an "
+                    "error. BEGIN, COMMIT and the like are refused; use "
+                    "opensak.transaction(). Needs the user's permission like "
+                    "opensak.update().",
         example='local n = opensak.sql_write(\n'
                 '  "UPDATE caches SET user_data_1 = ? WHERE country = ? AND found = 0",\n'
                 '  { "todo", "Switzerland" })\n'
@@ -3220,6 +3308,52 @@ API: tuple[ApiFunction, ...] = (
             Param("params", "table", "As for opensak.sql().", optional=True),
         ),
         returns=("integer", "Number of rows inserted or updated."),
+    ),
+    ApiFunction(
+        name="transaction",
+        description="Run *fn* as one transaction: every change it makes to the "
+                    "active database (opensak.update, insert, sql_write, "
+                    "set_corrected, clear_corrected) is kept when *fn* returns, "
+                    "and all of it is undone if *fn* raises an error, which "
+                    "opensak.transaction() then raises again. Many changes in "
+                    "one transaction are also faster than the same changes "
+                    "committed one by one. Inside *fn*, opensak.cache, "
+                    "caches, sql and the like see the changes already made; "
+                    "everything else in OpenSAK, exports included, sees them "
+                    "only afterwards. A transaction inside another one is "
+                    "undone on its own on an error, and kept with the outer "
+                    "one otherwise. opensak.switch_database, move_caches and "
+                    "copy_caches cannot be used inside. Needs the user's "
+                    "permission like opensak.update(). A macro that ends "
+                    "inside a transaction (e.g. cancelled) keeps none of it.",
+        example='local n = opensak.transaction(function()\n'
+                '    local n = 0\n'
+                '    for c in opensak.caches{ found = true, fields = {"code"} } do\n'
+                '        opensak.update(c.code, { user_flag = true })\n'
+                '        n = n + 1\n'
+                '    end\n'
+                '    return n\n'
+                'end)\n'
+                'print(n .. " caches flagged")\n'
+                '-- error() inside the function undoes everything it changed:\n'
+                'local ok, err = pcall(opensak.transaction, function()\n'
+                '    opensak.update("GC12345", { user_flag = true })\n'
+                '    error("changed my mind")\n'
+                'end)',
+        since=3,
+        bind=lambda rt, lua: lua.execute(
+            _TRANSACTION_LUA, rt._wrap(rt._tx_begin), rt._wrap(rt._tx_end)
+        ),
+        params=(Param("fn", "fun()", "The function to run."),),
+        returns=("any...", "What *fn* returns."),
+    ),
+    ApiFunction(
+        name="in_transaction",
+        description="Whether the macro is inside opensak.transaction().",
+        example='if not opensak.in_transaction() then print("each change is committed on its own") end',
+        since=3,
+        bind=lambda rt, lua: rt._in_transaction,
+        returns=("boolean", "true inside opensak.transaction()."),
     ),
     ApiFunction(
         name="read_csv",

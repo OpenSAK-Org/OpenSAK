@@ -333,6 +333,11 @@ def _changing_section() -> list[str]:
     lines += [f"- `{name}` — {why}" for name, why in PROTECTED_FIELDS.items()]
     lines += [
         "",
+        "Each change is committed on its own. To keep several changes "
+        "together, or undo them all on an error, run them inside "
+        "`opensak.transaction(function() ... end)`, which is also faster for "
+        "many changes. SQL `BEGIN`/`COMMIT` is refused.",
+        "",
         "`opensak.sql_write()` may INSERT into and UPDATE these tables; an "
         "UPDATE may not set the columns listed. Whatever an INSERT puts into "
         "the columns OpenSAK maintains is recalculated right away.",
