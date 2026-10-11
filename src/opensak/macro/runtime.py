@@ -28,6 +28,7 @@ limit does not help either (matching allocates nothing). Consequences:
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import locale
 import threading
@@ -105,6 +106,7 @@ from opensak.export.file_export_settings import (
 from opensak.filters.line_polygon import LineShape, parse_point, read_points_file
 from opensak.hint_detect import rot13
 from opensak.macro import helpers
+from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
 from opensak.db.database import get_session
 from opensak.macro.cache_data import (
@@ -974,11 +976,14 @@ class MacroRuntime:
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
+        settings_dir: Optional[Path] = None,
     ):
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
         changes apply without reopening the macro window. Folders the user
-        approves during a run are added to a copy of the list for that run."""
+        approves during a run are added to a copy of the list for that run.
+        *settings_dir* holds the macros' saved settings (opensak.settings);
+        None means the settings/ folder of the macros folder."""
         self._host = host
         self._output = output or print
         self._profiles_dir = profiles_dir
@@ -986,7 +991,10 @@ class MacroRuntime:
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
+        self._settings_dir = settings_dir
         self._base_dir: Optional[Path] = None
+        # The running macro's file, for opensak.settings; None if unsaved.
+        self._macro_path: Optional[Path] = None
         self._run_permissions: list[FolderPermission] = []
         # (folder, write) the user denied during this run — not asked again
         self._denied: set[tuple[Path, bool]] = set()
@@ -1723,22 +1731,56 @@ class MacroRuntime:
             )
         return get_garmin_ggz_path(root) if fmt == "ggz" else get_garmin_gpx_path(root)
 
+    # -- Saved settings (#983) -------------------------------------------------
+
+    def _settings_file(self, func: str) -> Path:
+        if self._macro_path is None:
+            raise MacroError(f"{func}: save the macro first — settings are kept per macro file")
+        if self._settings_dir is not None:
+            folder, macros = self._settings_dir, None
+        else:
+            folder, macros = macro_settings.default_settings_dir(), macros_dir()
+        return macro_settings.settings_file(folder, self._macro_path, macros)
+
+    def _settings_load(self, lua):
+        func = "opensak.settings.load"
+        data = macro_settings.load_settings(self._settings_file(func), func)
+        return lua.table_from(data, recursive=True)
+
+    def _settings_save(self, describe, value=None) -> None:
+        func = "opensak.settings.save"
+        from lupa.lua54 import lua_type
+        if lua_type(value) != "table":
+            raise MacroError(f"{func} expects a table, got {helpers.lua_tostring(value)}")
+        data = macro_settings.to_json(value, describe, func)
+        macro_settings.save_settings(self._settings_file(func), data, func)
+
+    def _settings_clear(self) -> None:
+        func = "opensak.settings.clear"
+        macro_settings.clear_settings(self._settings_file(func), func)
+
     # -- Running ---------------------------------------------------------------
 
     def run(
-        self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None
+        self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None,
+        macro_path: Optional[Path] = None,
     ) -> None:
         """Execute *source*. Raises MacroError on any failure.
 
         *base_dir* (usually the macro file's folder) is where relative paths
         given to opensak.read_csv() are looked up; the macros folder
-        otherwise.
+        otherwise. *macro_path* is the macro's file, which opensak.settings
+        keys its saved settings by; without it the macro has none.
         """
         with _c_locale():
-            self._run(source, chunk_name, base_dir)
+            self._run(source, chunk_name, base_dir, macro_path)
 
-    def _run(self, source: str, chunk_name: str, base_dir: Optional[Path]) -> None:
+    def _run(
+        self, source: str, chunk_name: str, base_dir: Optional[Path],
+        macro_path: Optional[Path] = None,
+    ) -> None:
         self._base_dir = base_dir
+        self._macro_path = macro_path
         self._run_permissions = (
             list(self._folder_permissions)
             if self._folder_permissions is not None
@@ -1833,7 +1875,7 @@ class MacroRuntime:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 2
+API_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -2662,5 +2704,51 @@ API: tuple[ApiFunction, ...] = (
             Param("fmt", "string", 'strftime format, "%Y-%m-%d" if omitted.', optional=True),
         ),
         returns=("string", "The formatted date."),
+    ),
+
+    # -- opensak.settings -----------------------------------------------------
+    ApiFunction(
+        name="settings.load",
+        description="The settings this macro saved with opensak.settings.save(), "
+                    "or an empty table on the first run. Each macro has its own "
+                    "settings, kept per macro file in the `settings` folder of the "
+                    "macros folder; no other macro can read them. A renamed macro "
+                    "starts with empty settings, and an unsaved macro has none.",
+        example='local s = opensak.settings.load()\n'
+                's.maxdist = s.maxdist or 25',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._settings_load(lua),
+        returns=("table", "The saved settings; empty if there are none."),
+    ),
+    ApiFunction(
+        name="settings.save",
+        description="Save settings for the next run of this macro, replacing "
+                    "the saved ones. Strings, numbers, booleans and nested tables "
+                    "can be saved; a table needs string keys, or 1, 2, 3, … for a "
+                    "list. Functions and cyclic tables are refused, and the "
+                    f"settings may take up at most "
+                    f"{macro_settings.MAX_SETTINGS_BYTES // (1024 * 1024)} MB.",
+        example='local s = opensak.settings.load()\n'
+                's.maxdist = 30\n'
+                's.types = {"Traditional", "Multi"}\n'
+                'opensak.settings.save(s)',
+        since=3,
+        bind=lambda rt, lua: functools.partial(
+            rt._settings_save,
+            # type() and a table's address, captured before the macro could
+            # replace them: lupa gives no stable Python identity for tables.
+            lua.eval('(function(type, fmt) return function(v) local t = type(v) '
+                     'if t == "table" then return t, fmt("%p", v) end return t end '
+                     'end)(type, string.format)'),
+        ),
+        params=(Param("settings", "table", "The settings to save."),),
+    ),
+    ApiFunction(
+        name="settings.clear",
+        description="Remove this macro's saved settings, so the next "
+                    "opensak.settings.load() returns an empty table.",
+        example="opensak.settings.clear()",
+        since=3,
+        bind=lambda rt, lua: rt._settings_clear,
     ),
 )

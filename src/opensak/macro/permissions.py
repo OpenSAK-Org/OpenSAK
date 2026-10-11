@@ -258,6 +258,11 @@ def protected_reason(target: Path) -> Optional[str]:
         macros = macros_dir()
     except Exception:
         macros = None
+    # Each macro reads its own saved settings through opensak.settings only,
+    # never another macro's through the file functions (#983).
+    from opensak.macro.settings import SETTINGS_DIRNAME
+    if macros is not None and target.is_relative_to(macros / SETTINGS_DIRNAME):
+        return "it holds the saved settings of macros — use opensak.settings"
     for folder in folders:
         if not target.is_relative_to(folder):
             continue

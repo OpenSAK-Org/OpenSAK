@@ -511,6 +511,7 @@ class MacroDialog(QDialog):
                 self._editor.toPlainText(),
                 chunk_name=self._chunk_name(),
                 base_dir=self._path.parent if self._path else None,
+                macro_path=self._path,
             )
             self._append_output(tr("macro_done"))
         except MacroError as exc:
