@@ -158,6 +158,11 @@ MAX_CSV_BYTES = 10 * 1024 * 1024
 # instruction limit does not count time spent sleeping).
 MAX_SLEEP_MS = 10_000
 SLEEP_BUDGET_S = 60.0
+# opensak.run_macro(): how deep macros may call each other (a macro calling
+# itself by mistake would otherwise only stop at the C stack limit), and the
+# largest macro file it reads.
+MAX_MACRO_DEPTH = 10
+MAX_MACRO_BYTES = 1024 * 1024
 # opensak.export_gpx{}: the keys of its table, and what to do with an
 # existing file.
 EXPORT_KEYS = frozenset({
@@ -398,12 +403,16 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #   * The budget is shared by all threads, so spreading the work over many
 #     coroutines does not multiply it.
 #
-# The chunk returns two functions for the runtime:
+# The chunk returns three functions for the runtime:
 #   * stop(msg) makes the hook sticky with *msg* right away — opensak.exit()
 #     and a cancelled run end the macro this way, so pcall cannot catch it.
+#     This also ends macros started by opensak.run_macro(), since they run
+#     on the same Lua thread.
 #   * where() returns "macro.lua:12: " for the macro line that called the
 #     API function currently running, so API errors name it like Lua's own
 #     errors do (luaL_where; level 3 = where, the API function, its caller).
+#   * make_loader() returns the loader opensak.run_macro() compiles other
+#     macros with (see below).
 _SANDBOX_SETUP = """
 local limit = ...
 local sethook, getinfo = debug.sethook, debug.getinfo
@@ -458,6 +467,7 @@ setmetatable = function(t, mt)
 end
 local os_time, os_date, os_clock = os.time, os.date, os.clock
 os = { time = os_time, date = os_date, clock = os_clock }
+local raw_load, next = load, next
 io, debug, package, require, dofile, loadfile, load, collectgarbage, python = nil
 local function stop(msg)
   stopped = msg
@@ -471,7 +481,22 @@ local function where()
   end
   return ""
 end
-return stop, where
+-- For opensak.run_macro(): called once the opensak table is installed, it
+-- takes a snapshot of the globals and returns a loader that compiles another
+-- macro as text only (never bytecode) in a fresh copy of that snapshot, so
+-- macros share nothing but what they pass as arguments and return values.
+local function make_loader()
+  local base = {}
+  for k, v in next, _G do base[k] = v end
+  return function(source, name)
+    local env = {}
+    for k, v in next, base do env[k] = v end
+    env._G = env
+    local fn, err = raw_load(source, name, "t", env)
+    return fn, err
+  end
+end
+return stop, where, make_loader
 """
 
 
@@ -1069,6 +1094,10 @@ class MacroRuntime:
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
         self._other_engines: dict[Path, Engine] = {}
+        # opensak.run_macro(): compiles a macro in fresh globals (set by
+        # _run) and the number of macros currently running inside this one
+        self._load_macro: Optional[Callable] = None
+        self._macro_depth = 0
 
     def cancel(self) -> None:
         """Ask the running macro to stop. Safe to call from another thread;
@@ -1478,6 +1507,41 @@ class MacroRuntime:
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
 
+    def _run_macro(self, path=None, *args):
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError("opensak.run_macro expects a macro file")
+        if self._macro_depth >= MAX_MACRO_DEPTH:
+            raise MacroError(
+                f"opensak.run_macro: macros may call each other at most "
+                f"{MAX_MACRO_DEPTH} levels deep"
+            )
+        file = Path(path.strip()).expanduser()
+        if not file.suffix:
+            file = file.with_suffix(".lua")
+        file = self._readable_file(str(file))
+        try:
+            if file.stat().st_size > MAX_MACRO_BYTES:
+                raise MacroError(
+                    f"{file.name} is larger than {MAX_MACRO_BYTES // (1024 * 1024)} MB"
+                )
+            source = file.read_text(encoding="utf-8-sig")
+        except FileNotFoundError:
+            raise MacroError(f"macro not found: {file}") from None
+        except (OSError, UnicodeDecodeError) as exc:
+            raise MacroError(f"cannot read {file}: {exc}") from None
+        fn, error = self._load_macro(source, f"={file.name}")
+        if fn is None:
+            raise MacroError(str(error))
+        # Relative paths in the called macro are its own folder's.
+        previous_dir = self._base_dir
+        self._base_dir = file.parent
+        self._macro_depth += 1
+        try:
+            return fn(*args)
+        finally:
+            self._macro_depth -= 1
+            self._base_dir = previous_dir
+
     def _exit(self, code=None) -> None:
         value = 0 if code is None else _number(code)
         if value is None or value != int(value) or not 0 <= value <= MAX_EXIT_CODE:
@@ -1880,6 +1944,7 @@ class MacroRuntime:
         self._exit_code = None
         self._slept = 0.0
         self._polygons = {}
+        self._macro_depth = 0
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
         except ImportError as exc:
@@ -1896,7 +1961,9 @@ class MacroRuntime:
             # script only gets the plain functions in the opensak table.
             attribute_filter=self._deny_attribute,
         )
-        self._stop, self._where = lua.execute(_SANDBOX_SETUP, self._instruction_limit)
+        self._stop, self._where, make_loader = lua.execute(
+            _SANDBOX_SETUP, self._instruction_limit
+        )
 
         g = lua.globals()
         g.print = self._wrap(self._lua_print)
@@ -1909,6 +1976,7 @@ class MacroRuntime:
                 table = table.setdefault(ns, {})
             table[name] = self._wrap(func.bind(self, lua))
         g.opensak = lua.table_from(api, recursive=True)
+        self._load_macro = make_loader()
 
         try:
             fn = lua.compile(source, name=f"={chunk_name}")
@@ -1941,6 +2009,7 @@ class MacroRuntime:
                 self._boundaries = None
             self._close_sql()
             self._close_other_databases()
+            self._load_macro = None
             self._host.end_macro()
 
     @staticmethod
@@ -2546,6 +2615,32 @@ API: tuple[ApiFunction, ...] = (
         since=2,
         bind=lambda rt, lua: lambda: __version__,
         returns=("string", 'Version, e.g. "1.21.0-beta.3".'),
+    ),
+    ApiFunction(
+        name="run_macro",
+        description="Run another macro and wait until it has finished, e.g. to "
+                    "chain several macros from one control macro. A relative "
+                    "path is looked up in the folder of the calling macro, and "
+                    "`.lua` is added when the name has no extension. The "
+                    "called macro gets its own global variables; values are "
+                    "passed as extra arguments (read them with `...`) and "
+                    "come back as its return values. An error in it stops "
+                    "the calling macro too, unless caught with `pcall`. "
+                    "Macros run this way share the run's limits, sleep time "
+                    "and folder approvals; they may call each other at most "
+                    f"{MAX_MACRO_DEPTH} levels deep.",
+        example='opensak.run_macro("refresh_corrected")\n'
+                'local count = opensak.run_macro("lib/count_unfound.lua", "Zürich")\n'
+                '-- lib/count_unfound.lua:\n'
+                '--   local area = ...\n'
+                '--   return opensak.filter{ found = false, state = area }',
+        since=3,
+        bind=lambda rt, lua: rt._run_macro,
+        params=(
+            Param("file", "string", "The macro file."),
+            Param("...", "any", "Passed to the macro as `...`."),
+        ),
+        returns=("any...", "What the macro returns."),
     ),
     ApiFunction(
         name="sleep",
