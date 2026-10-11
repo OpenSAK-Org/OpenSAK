@@ -149,3 +149,77 @@ def test_quitting_asks_about_unsaved_macro_edits(seeded_window, monkeypatch):
     ask.return_value = md.QMessageBox.StandardButton.Discard
     dlg.close()
     assert not dlg.isVisible()
+
+
+# ── User-interface functions (#982) ──────────────────────────────────────────
+
+
+def test_macro_select_jumps_to_a_cache_even_while_the_list_reloads(seeded_window):
+    from tests.data import wait_for_refresh
+
+    window = seeded_window
+    out = _run_macro(window, """
+        opensak.filter{ code = "GCAAA0" }
+        local codes = opensak.codes()
+        print(opensak.select(codes[2]), opensak.select("GCNOPE"), codes[2])
+    """)
+    wait_for_refresh(window)
+    selected, missing, code = out.splitlines()[0].split("\t")
+    assert (selected, missing) == ("true", "false")
+    assert window._cache_table.selected_cache().gc_code == code
+    assert window._detail_panel._current_gc_code == code
+
+
+def test_macro_refresh_shows_the_new_list_while_running(seeded_window):
+    out = _run_macro(seeded_window, """
+        opensak.filter{ code = "GCAAA0" }
+        opensak.refresh()
+        print("rows")
+    """)
+    assert out.splitlines()[0] == "rows"
+    assert seeded_window._cache_table.row_count() == 2
+
+
+def test_macro_form_runs_callbacks_in_the_real_dialog(seeded_window, qtbot):
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QComboBox, QPushButton
+    from opensak.gui.dialogs.macro_form import FormDialog
+
+    def user():
+        dialog = QApplication.activeModalWidget()
+        if not isinstance(dialog, FormDialog):
+            QTimer.singleShot(20, user)
+            return
+        combo = dialog.findChild(QComboBox)
+        combo.setCurrentIndex(1)
+        combo.activated.emit(1)
+        ok = next(b for b in dialog.findChildren(QPushButton) if b.text() == "OK")
+        ok.click()
+
+    QTimer.singleShot(20, user)
+    out = _run_macro(seeded_window, """
+        local v, button = opensak.form{
+          title = "E2E",
+          fields = {
+            { type = "choice", id = "fmt", options = {"GPX", "GGZ"},
+              on_change = function(f, value) f:set("note", "picked " .. value) end },
+            { type = "text", id = "note" },
+          },
+        }
+        print(button, v.fmt, v.note)
+    """)
+    assert out.splitlines()[0] == "ok\tGGZ\tpicked GGZ"
+
+
+def test_macro_progress_window_closes_when_the_macro_ends(seeded_window):
+    from PySide6.QtWidgets import QApplication, QProgressDialog
+
+    out = _run_macro(seeded_window, """
+        local p = opensak.progress("Working", 3)
+        for i = 1, 3 do assert(p:update(i, "step " .. i)) end
+        print("done")
+    """)
+    QApplication.processEvents()
+    assert out.splitlines()[0] == "done"
+    assert not any(w.isVisible() for w in QApplication.topLevelWidgets()
+                   if isinstance(w, QProgressDialog))
