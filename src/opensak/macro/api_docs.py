@@ -30,6 +30,7 @@ from xml.sax.saxutils import escape
 
 from opensak.macro.cache_data import CACHE_FIELDS
 from opensak.macro.cache_write import INSERT_REQUIRED, PROTECTED_FIELDS, WRITABLE_FIELDS
+from opensak.macro.child_write import CHILD_TABLES, ChildField
 from opensak.macro.editor_support import (
     LUARC,
     NPP_NAME,
@@ -348,6 +349,39 @@ def _changing_section() -> list[str]:
     for table in sorted(WRITABLE_TABLES):
         cols = ", ".join(f"`{c}`" for c in sorted(PROTECTED_COLUMNS[table]))
         lines.append(f"| `{table}` | {cols} |")
+    return lines + _children_section()
+
+
+def _update_type(field: ChildField) -> str:
+    """The type opensak.update_<x>() accepts: `false` clears a nil-able field."""
+    return f"{field.type[:-1]}|false" if field.type.endswith("?") else field.type
+
+
+def _children_section() -> list[str]:
+    lines = [
+        "",
+        "## Logs, waypoints, attributes and trackables",
+        "",
+        "The rows belonging to a cache are read with "
+        + ", ".join(f"`opensak.{t.plural}()`" for t in CHILD_TABLES)
+        + ", added with `opensak.insert_<x>(code, fields)` and changed with "
+        "`opensak.update_<x>(id, fields)`, without SQL. Each row has an `id`, "
+        "which identifies it and cannot be changed, as cannot the cache it "
+        "belongs to. The changes need the user's permission and can be kept "
+        "together with `opensak.transaction()`, like those of caches; OpenSAK "
+        "updates the cache's counts and log dates itself.",
+    ]
+    for t in CHILD_TABLES:
+        lines += [
+            "",
+            f"### {t.plural.capitalize()}",
+            "",
+            "| Field | Type | Meaning |",
+            "|---|---|---|",
+        ]
+        for f in t.fields:
+            required = " Required for `opensak.insert_" + t.singular + "`." if f.name in t.required else ""
+            lines.append(f"| `{f.name}` | `{f.type.replace('|', chr(92) + '|')}` | {f.description}{required} |")
     return lines
 
 
@@ -606,6 +640,28 @@ def render_lua_stub() -> str:
     for field in WRITABLE_FIELDS:
         if field.name in INSERT_REQUIRED:
             lines.append(f"---@field {field.name} {field.type} {descriptions[field.name]}")
+
+    for t in CHILD_TABLES:
+        lines += [
+            "",
+            f"---A {t.singular} as returned by `opensak.{t.plural}()` (a snapshot).",
+            f"---@class {t.class_name}",
+            f"---@field id integer Identifies the {t.singular}, for `opensak.update_{t.singular}()`.",
+        ]
+        lines += [f"---@field {f.name} {f.type} {f.description}" for f in t.fields]
+        lines += [
+            "",
+            f"---The fields `opensak.update_{t.singular}()` may change; `false` clears a field that may be nil.",
+            f"---@class {t.class_name}Update",
+        ]
+        lines += [f"---@field {f.name}? {_update_type(f)} {f.description}" for f in t.fields]
+        lines += [
+            "",
+            f"---A new {t.singular} for `opensak.insert_{t.singular}()`.",
+            f"---@class {t.class_name}Insert: {t.class_name}Update",
+        ]
+        lines += [f"---@field {f.name} {f.type} {f.description}"
+                  for f in t.fields if f.name in t.required]
 
     lines += [
         "",

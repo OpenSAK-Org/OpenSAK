@@ -46,7 +46,7 @@ from typing import Any, Callable, Iterator, Optional, Protocol
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.filters.engine import (
@@ -132,6 +132,17 @@ from opensak.macro.cache_write import (
     insert_cache,
     parse_values,
     update_cache,
+)
+from opensak.macro.child_write import (
+    ATTRIBUTE,
+    LOG,
+    TRACKABLE,
+    WAYPOINT,
+    ChildTable,
+    insert_child,
+    list_children,
+    parse_child_values,
+    update_child,
 )
 from opensak.macro.db_access import WriteApproval
 from opensak.macro.permissions import (
@@ -1403,6 +1414,60 @@ class MacroRuntime:
             raise MacroError(str(exc)) from None
         self._host.caches_changed([code], True)
         return code
+
+    # The rows of a cache (child_write.py): logs, waypoints, attributes and
+    # trackables, read and written like the cache itself.
+
+    def _children(self, lua, table: ChildTable, code=None, options=None):
+        func = f"opensak.{table.plural}"
+        gc_code = _gc_code(code, func)
+        db = self._read_options(func, options)
+        with self._session_factory(db, func)() as session:
+            rows = list_children(session, table, gc_code)
+        return None if rows is None else lua.table_from([lua.table_from(r) for r in rows])
+
+    def _child_values(self, func: str, table: ChildTable, values: Any, insert: bool) -> dict[str, Any]:
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ {table.fields[0].name} = .. }}")
+        try:
+            return parse_child_values(func, table, _lua_to_python(values), insert=insert)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+
+    def _write_child(self, func: str, write: Callable[[Any], Any]) -> Any:
+        """*write(session)* in the active database (in the open transaction,
+        if any); a broken constraint, e.g. a duplicate, is a MacroError."""
+        try:
+            with self._active_session() as session:
+                return write(session)
+        except IntegrityError as exc:
+            raise MacroError(f"{func}: {exc.orig}") from None
+
+    def _insert_child(self, table: ChildTable, code=None, values=None) -> Optional[int]:
+        func = f"opensak.insert_{table.singular}"
+        gc_code = _gc_code(code, func)
+        parsed = self._child_values(func, table, values, insert=True)
+        self._require_write(func)
+        row_id = self._write_child(func, lambda s: insert_child(s, table, gc_code, parsed))
+        if row_id is not None:
+            self._host.caches_changed([gc_code], False)
+        return row_id
+
+    def _update_child(self, table: ChildTable, row_id=None, values=None) -> bool:
+        func = f"opensak.update_{table.singular}"
+        if isinstance(row_id, float) and row_id.is_integer():
+            row_id = int(row_id)
+        if isinstance(row_id, bool) or not isinstance(row_id, int):
+            raise MacroError(
+                f"{func} expects the {table.singular}'s id from opensak.{table.plural}(), got {row_id!r}"
+            )
+        parsed = self._child_values(func, table, values, insert=False)
+        self._require_write(func)
+        code = self._write_child(func, lambda s: update_child(s, table, row_id, parsed))
+        if code is None:
+            return False
+        self._host.caches_changed([code], False)
+        return True
 
     def _writable_db(self) -> WritableDatabase:
         if self._sql_write_db is None:
@@ -2892,6 +2957,92 @@ _PATTERN = Param("pattern", "string", "Regular expression (Python syntax); a "
                                       "doubling backslashes.")
 
 
+# (list, insert, update) examples of the functions _child_api() makes
+_CHILD_EXAMPLES: dict[str, tuple[str, str, str]] = {
+    "log": (
+        'for _, l in ipairs(opensak.logs("GC12345") or {}) do\n'
+        '    print(l.date, l.type, l.finder)\nend',
+        'local id = opensak.insert_log("GC12345", { type = "Write note", date = "2026-10-11",\n'
+        '                                          finder = "me", text = "Final solved" })',
+        'for _, l in ipairs(opensak.logs("GC12345")) do\n'
+        '    if l.type == "Write note" then opensak.update_log(l.id, { text = "checked" }) end\nend',
+    ),
+    "waypoint": (
+        'for _, w in ipairs(opensak.waypoints("GC12345") or {}) do\n'
+        '    print(w.prefix, w.type, w.lat, w.lon)\nend',
+        'opensak.insert_waypoint("GC12345", { prefix = "FN", type = "Final Location",\n'
+        '                                     name = "Final", lat = 47.36872, lon = 8.54093 })',
+        'for _, w in ipairs(opensak.waypoints("GC12345")) do\n'
+        '    if w.prefix == "PK" then opensak.update_waypoint(w.id, { comment = "free parking" }) end\nend',
+    ),
+    "attribute": (
+        'for _, a in ipairs(opensak.attributes("GC12345") or {}) do\n'
+        '    print(a.attribute_id, a.name, a.on)\nend',
+        'opensak.insert_attribute("GC12345", { attribute_id = 1, name = "Dogs", on = false })',
+        'for _, a in ipairs(opensak.attributes("GC12345")) do\n'
+        '    if a.attribute_id == 1 then opensak.update_attribute(a.id, { on = true }) end\nend',
+    ),
+    "trackable": (
+        'for _, t in ipairs(opensak.trackables("GC12345") or {}) do print(t.ref, t.name) end',
+        'opensak.insert_trackable("GC12345", { ref = "TB1234", name = "My travel bug" })',
+        'for _, t in ipairs(opensak.trackables("GC12345")) do\n'
+        '    if t.ref == "TB1234" then opensak.update_trackable(t.id, { name = "Renamed" }) end\nend',
+    ),
+}
+
+
+def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
+    """opensak.<plural>(), insert_<singular>() and update_<singular>()."""
+    list_ex, insert_ex, update_ex = _CHILD_EXAMPLES[t.singular]
+    required = ", ".join(f"`{n}`" for n in t.required)
+    derived = {
+        "logs": " OpenSAK updates the cache's log counts and dates.",
+        "waypoints": " OpenSAK updates the cache's waypoint count.",
+        "trackables": " OpenSAK updates the cache's trackable count.",
+    }.get(t.kind or "", "")
+    return (
+        ApiFunction(
+            name=t.plural,
+            description=f"The {t.plural} of a cache, each with its `id` for "
+                        f"opensak.update_{t.singular}() and the fields listed "
+                        "under Logs, waypoints, attributes and trackables. "
+                        "Missing data is nil.",
+            example=list_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._children(lua, t, *a),
+            params=(_CODE, _READ_OPTIONS),
+            returns=(f"{t.class_name}[]?", "nil if the cache is not in the database."),
+        ),
+        ApiFunction(
+            name=f"insert_{t.singular}",
+            description=f"Add a {t.singular} to a cache in the active database"
+                        + (f"; {required} required" if required else "")
+                        + "." + derived
+                        + " Needs the user's permission like opensak.update().",
+            example=insert_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._insert_child(t, *a),
+            params=(_CODE, Param("fields", f"{t.class_name}Insert", f"The new {t.singular}'s fields.")),
+            returns=("integer?", f"The new {t.singular}'s id; nil if the cache is not in the database."),
+        ),
+        ApiFunction(
+            name=f"update_{t.singular}",
+            description=f"Change fields of a {t.singular} in the active "
+                        "database; only the given fields change, and `false` "
+                        "clears a field that is not required or a boolean. Needs "
+                        "the user's permission like opensak.update().",
+            example=update_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._update_child(t, *a),
+            params=(
+                Param("id", "integer", f"The {t.singular}'s id from opensak.{t.plural}()."),
+                Param("fields", f"{t.class_name}Update", "The fields to change."),
+            ),
+            returns=("boolean", f"false if there is no {t.singular} with this id."),
+        ),
+    )
+
+
 def _rot13(text=None) -> str:
     if not isinstance(text, str):
         raise MacroError(f"opensak.text.rot13 expects a string, got {text!r}")
@@ -3279,6 +3430,10 @@ API: tuple[ApiFunction, ...] = (
         params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
         returns=("string", "The cache code as stored (upper case)."),
     ),
+    *_child_api(LOG),
+    *_child_api(WAYPOINT),
+    *_child_api(ATTRIBUTE),
+    *_child_api(TRACKABLE),
     ApiFunction(
         name="sql_write",
         description="Run one INSERT or UPDATE statement (SQLite) against the "
