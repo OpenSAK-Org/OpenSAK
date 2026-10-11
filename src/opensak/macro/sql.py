@@ -12,6 +12,21 @@ is enforced by the connection, never by inspecting the SQL text:
     which would otherwise let a macro read any database file on disk past
     the folder permissions, and every PRAGMA except the schema-info ones.
 
+TEMP tables, views and indexes are the exception: the authorizer lets a
+macro create, fill, change and drop them (db_name "temp"). SQLite keeps
+them in memory or a temp file of the connection, never in the database
+file, and drops them when the connection closes — at the end of the macro
+run. `mode=ro` does not cover the temp database, but `query_only` does, so
+the read-only connections turn it off again. A TEMP object may not take
+the name of an object of the main database, which it would shadow for
+OpenSAK's own unqualified statements on the same connection, and names
+starting with _RESERVED_PREFIX belong to OpenSAK. TEMP triggers stay
+refused: they could be put on main tables.
+
+For the active database, opensak.sql() and friends read through the
+WritableDatabase connection (reader()), so that the macro's TEMP tables are
+the same for opensak.sql_write() and inside opensak.transaction().
+
 A progress handler aborts statements that run longer than
 QUERY_TIMEOUT_S, since the Lua instruction limit does not count time spent
 inside SQLite.
@@ -59,18 +74,56 @@ _ALLOWED_ACTIONS = frozenset({
     sqlite3.SQLITE_FUNCTION,
     sqlite3.SQLITE_RECURSIVE,
 })
+# Actions allowed on the temp database.
+_CREATE_TEMP_ACTIONS = frozenset({
+    sqlite3.SQLITE_CREATE_TEMP_TABLE,
+    sqlite3.SQLITE_CREATE_TEMP_VIEW,
+    sqlite3.SQLITE_CREATE_TEMP_INDEX,
+})
+_TEMP_ACTIONS = _CREATE_TEMP_ACTIONS | {
+    sqlite3.SQLITE_DROP_TEMP_TABLE,
+    sqlite3.SQLITE_DROP_TEMP_VIEW,
+    sqlite3.SQLITE_DROP_TEMP_INDEX,
+    sqlite3.SQLITE_INSERT,
+    sqlite3.SQLITE_UPDATE,
+    sqlite3.SQLITE_DELETE,
+    sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_REINDEX,         # also part of CREATE INDEX
+}
+# Names of OpenSAK's own TEMP tables and triggers, which macros cannot touch.
+_RESERVED_PREFIX = "opensak_macro_"
 
 
 class SqlError(Exception):
     """A query failed or tried to write."""
 
 
-def _authorizer(action, arg1, arg2, _db_name, _trigger) -> int:
-    if action in _ALLOWED_ACTIONS:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _READ_PRAGMAS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
+def _reserved(name: Any) -> bool:
+    return isinstance(name, str) and name.lower().startswith(_RESERVED_PREFIX)
+
+
+def _main_names(conn: sqlite3.Connection) -> frozenset[str]:
+    """Names of the main database's objects, which TEMP objects may not take."""
+    return frozenset(n.lower() for (n,) in conn.execute("SELECT name FROM main.sqlite_master"))
+
+
+def _read_authorizer(main_names: frozenset[str]):
+    """The authorizer of opensak.sql(): reading, and the temp database."""
+
+    def authorize(action, arg1, arg2, db_name, _trigger) -> int:
+        if _reserved(arg1) or _reserved(arg2):
+            return sqlite3.SQLITE_DENY
+        if action in _ALLOWED_ACTIONS:
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _READ_PRAGMAS:
+            return sqlite3.SQLITE_OK
+        if db_name == "temp" and action in _TEMP_ACTIONS:
+            if action in _CREATE_TEMP_ACTIONS and str(arg1).lower() in main_names:
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
+
+    return authorize
 
 
 def _params(params: Any) -> Any:
@@ -115,17 +168,29 @@ class ReadOnlyDatabase:
         self._timeout_s = timeout_s
         self._conn: Optional[sqlite3.Connection] = connection
         self._borrowed = connection
+        self._authorizer: Any = None
         self._deadline = 0.0
 
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             try:
                 conn = connect_read_only(self._db_path)
+                # mode=ro still protects the file; this only lets the macro
+                # write TEMP tables, each statement on its own (no implicit
+                # BEGIN, which the authorizer refuses).
+                conn.execute("PRAGMA query_only = OFF")
+                conn.isolation_level = None
+                self._authorizer = _read_authorizer(_main_names(conn))
             except sqlite3.Error as exc:
                 raise SqlError(f"cannot open the database read-only: {exc}") from None
-            conn.set_authorizer(_authorizer)
+            conn.set_authorizer(self._authorizer)
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
             self._conn = conn
+        elif self._authorizer is None:
+            try:
+                self._authorizer = _read_authorizer(_main_names(self._conn))
+            except sqlite3.Error as exc:
+                raise SqlError(f"SQL error: {exc}") from None
         return self._conn
 
     def _check_deadline(self) -> int:
@@ -146,7 +211,10 @@ class ReadOnlyDatabase:
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
             return SqlError(f"SQL query aborted: took longer than {self._timeout_s:g} s")
         if "not authorized" in str(exc) or "readonly" in str(exc):
-            return SqlError(f"SQL in macros is read-only (SELECT only): {exc}")
+            return SqlError(
+                "SQL in opensak.sql is read-only, except for TEMP tables not "
+                f"named like a table of the database: {exc}"
+            )
         return SqlError(f"SQL error: {exc}")
 
     def _execute(self, query: str, params: Any) -> sqlite3.Cursor:
@@ -155,7 +223,7 @@ class ReadOnlyDatabase:
         self._start_clock()
         if self._borrowed is not None:
             # Consulted while the statement is prepared, i.e. in execute().
-            conn.set_authorizer(_authorizer)
+            conn.set_authorizer(self._authorizer)
         try:
             return conn.execute(query, params)
         except sqlite3.Error as exc:
@@ -211,9 +279,13 @@ class ReadOnlyDatabase:
             cursor.close()
 
     def tables(self) -> list[str]:
+        """Tables and views, the macro's TEMP ones included."""
         rows = self.query(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            "SELECT name FROM (SELECT name, type FROM main.sqlite_master "
+            "UNION ALL SELECT name, type FROM temp.sqlite_master) "
+            "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
+            "AND lower(substr(name, 1, :n)) <> :prefix ORDER BY name",
+            {"n": len(_RESERVED_PREFIX), "prefix": _RESERVED_PREFIX},
         )
         return [r["name"] for r in rows]
 
@@ -266,8 +338,7 @@ PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
     "trackables": frozenset({"id", "cache_id"}),
 }
 
-_TRIGGER_PREFIX = "opensak_macro_"
-_TOUCHED = f"{_TRIGGER_PREFIX}touched"
+_TOUCHED = f"{_RESERVED_PREFIX}touched"
 
 # (table, what a change there means for refresh_derived(), cache id column)
 _TRACKED = (
@@ -280,19 +351,26 @@ _TRACKED = (
 )
 
 
-def _write_authorizer(action, arg1, arg2, db_name, trigger) -> int:
-    # Our own temporary triggers (the user cannot create triggers).
-    if trigger and str(trigger).startswith(_TRIGGER_PREFIX):
-        return sqlite3.SQLITE_OK
-    if _authorizer(action, arg1, arg2, db_name, trigger) == sqlite3.SQLITE_OK:
-        return sqlite3.SQLITE_OK
-    if db_name not in (None, "main"):
+def _write_authorizer(main_names: frozenset[str]):
+    """The authorizer of opensak.sql_write(): that of opensak.sql(), plus
+    INSERT and UPDATE on the cache tables."""
+    read = _read_authorizer(main_names)
+
+    def authorize(action, arg1, arg2, db_name, trigger) -> int:
+        # Our own temporary triggers (the user cannot create triggers).
+        if trigger and str(trigger).startswith(_RESERVED_PREFIX):
+            return sqlite3.SQLITE_OK
+        if read(action, arg1, arg2, db_name, trigger) == sqlite3.SQLITE_OK:
+            return sqlite3.SQLITE_OK
+        if db_name not in (None, "main"):
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_INSERT and arg1 in WRITABLE_TABLES:
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_UPDATE and arg1 in WRITABLE_TABLES:
+            return sqlite3.SQLITE_DENY if arg2 in PROTECTED_COLUMNS[arg1] else sqlite3.SQLITE_OK
         return sqlite3.SQLITE_DENY
-    if action == sqlite3.SQLITE_INSERT and arg1 in WRITABLE_TABLES:
-        return sqlite3.SQLITE_OK
-    if action == sqlite3.SQLITE_UPDATE and arg1 in WRITABLE_TABLES:
-        return sqlite3.SQLITE_DENY if arg2 in PROTECTED_COLUMNS[arg1] else sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
+
+    return authorize
 
 
 @dataclass
@@ -312,13 +390,15 @@ class WritableDatabase:
     Inside such a transaction every write and read of the active database
     goes through this connection (session(), reader()): a second
     connection could neither write while this one holds the write lock nor
-    see the uncommitted changes.
+    see the uncommitted changes. opensak.sql() reads through it outside a
+    transaction as well, so the macro's TEMP tables are the same everywhere.
     """
 
     def __init__(self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S):
         self._db_path = Path(db_path)
         self._timeout_s = timeout_s
         self._conn: Optional[sqlite3.Connection] = None
+        self._authorizer: Any = None
         self._deadline = 0.0
         # opensak.transaction(): SQLAlchemy's view of this connection and
         # its transaction, and the nesting depth (> 1: SAVEPOINTs).
@@ -340,6 +420,7 @@ class WritableDatabase:
                 )
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA recursive_triggers = ON")
+                self._authorizer = _write_authorizer(_main_names(conn))
                 self._create_triggers(conn)
             except sqlite3.Error as exc:
                 raise SqlError(f"cannot open the database for writing: {exc}") from None
@@ -360,16 +441,16 @@ class WritableDatabase:
                 if table == "caches" and event == "INSERT":
                     record += f" INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'insert');"
                 conn.execute(
-                    f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}{table}_{event.lower()} "
+                    f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{table}_{event.lower()} "
                     f"AFTER {event} ON main.{table} BEGIN {record} END"
                 )
             conn.execute(
-                f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}{table}_delete "
+                f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{table}_delete "
                 f"BEFORE DELETE ON main.{table} "
                 "BEGIN SELECT RAISE(ABORT, 'macros may not delete rows'); END"
             )
         conn.execute(
-            f"CREATE TEMP TRIGGER {_TRIGGER_PREFIX}caches_coords "
+            f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_coords "
             "AFTER UPDATE OF latitude, longitude ON main.caches "
             f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'coords'); END"
         )
@@ -384,7 +465,7 @@ class WritableDatabase:
             return SqlError(
                 "opensak.sql_write may only INSERT into and UPDATE the cache tables "
                 f"({', '.join(sorted(WRITABLE_TABLES))}), and not the keys or the "
-                f"columns OpenSAK maintains itself: {exc}"
+                f"columns OpenSAK maintains itself (besides TEMP tables): {exc}"
             )
         return SqlError(f"SQL error: {exc}")
 
@@ -474,9 +555,8 @@ class WritableDatabase:
             session.close()
 
     def reader(self) -> ReadOnlyDatabase:
-        """opensak.sql() and friends inside the open transaction."""
-        if not self._depth:
-            raise SqlError("no transaction is open")
+        """opensak.sql() and friends on the active database: they see the
+        open transaction's changes and the macro's TEMP tables."""
         if self._reader is None:
             self._reader = ReadOnlyDatabase(
                 self._db_path, self._timeout_s, connection=self._connection()
@@ -504,7 +584,7 @@ class WritableDatabase:
             conn.execute(f"DELETE FROM temp.{_TOUCHED}")
             self._deadline = time.monotonic() + self._timeout_s
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
-            conn.set_authorizer(_write_authorizer)
+            conn.set_authorizer(self._authorizer)
             try:
                 cursor = conn.execute(query, params)
                 cursor.fetchall()          # runs a RETURNING clause to the end

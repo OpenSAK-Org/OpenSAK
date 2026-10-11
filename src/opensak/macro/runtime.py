@@ -1260,9 +1260,9 @@ class MacroRuntime:
         self._slept = 0.0
         self._polygons: dict[Path, LineShape] = {}
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
-        # Opened by the first opensak.sql*() call of a run, closed after it.
-        self._sql_db: Optional[ReadOnlyDatabase] = None
-        # Opened by the first opensak.sql_write() of a run, closed after it.
+        # The active database's connection for opensak.sql*() and
+        # transaction(), opened on first use and closed after the run (or on
+        # switch_database), which drops the macro's TEMP tables.
         self._sql_write_db: Optional[WritableDatabase] = None
         # Database paths the user refused to let this run change
         self._write_denied: set[Path] = set()
@@ -1462,23 +1462,15 @@ class MacroRuntime:
             with get_session() as session:
                 yield session
 
-    # Raw SQL: a separate read-only connection (sql.py), opened on first use.
-
-    def _close_sql(self) -> None:
-        if self._sql_db is not None:
-            self._sql_db.close()
-            self._sql_db = None
+    # Raw SQL on the active database reads through the write connection
+    # (sql.py), so its TEMP tables serve opensak.sql_write() as well.
 
     def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
         if db is not None:
             if db.path not in self._other_sql:
                 self._other_sql[db.path] = ReadOnlyDatabase(db.path)
             return self._other_sql[db.path]
-        if self._in_transaction():
-            return self._sql_write_db.reader()
-        if self._sql_db is None:
-            self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
-        return self._sql_db
+        return self._writable_db().reader()
 
     def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
@@ -1694,8 +1686,7 @@ class MacroRuntime:
     def _switch_database(self, name=None) -> None:
         self._no_transaction("opensak.switch_database")
         db = self._require_database(name, "opensak.switch_database")
-        # The SQL connections belong to the old database.
-        self._close_sql()
+        # The SQL connection, TEMP tables included, belongs to the old database.
         self._close_sql_write()
         try:
             self._host.switch_database(db.name)
@@ -2607,7 +2598,6 @@ class MacroRuntime:
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
-            self._close_sql()
             self._close_sql_write()
             self._close_other_databases()
             self._load_macro = None
@@ -3075,7 +3065,14 @@ API: tuple[ApiFunction, ...] = (
         description="Run a read-only SQL query (SQLite) against the active "
                     "database (or the one named by the `database` option) "
                     "and return all rows. Only reading statements "
-                    "are allowed; the connection itself is read-only. "
+                    "are allowed, except on TEMP tables: since API 3 a macro "
+                    "may create, fill, change and drop its own TEMP tables, "
+                    "views and indexes (`CREATE TEMP TABLE ...`) and use them "
+                    "in any query, opensak.sql_write() included. They are "
+                    "never stored in the database and are gone when the macro "
+                    "ends or calls opensak.switch_database(); changes to them "
+                    "inside opensak.transaction() are undone with it. A TEMP "
+                    "table may not take the name of a table of the database. "
                     "Column names follow the database schema, which may "
                     "change between versions (see opensak.tables() and "
                     "opensak.columns()). Use `AS` to name computed columns. "
@@ -3117,7 +3114,8 @@ API: tuple[ApiFunction, ...] = (
         name="tables",
         description="The tables and views of the active database (or the "
                     "one named by the `database` option), for use with "
-                    "opensak.sql().",
+                    "opensak.sql(). The macro's TEMP tables and views are "
+                    "included.",
         example='print(table.concat(opensak.tables(), ", "))',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),

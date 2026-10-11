@@ -861,7 +861,7 @@ def test_sql_connection_is_read_only_even_without_authorizer(monkeypatch):
 
     from opensak.db.database import get_engine
     from opensak.macro import sql
-    monkeypatch.setattr(sql, "_authorizer", lambda *a: sqlite3.SQLITE_OK)
+    monkeypatch.setattr(sql, "_read_authorizer", lambda names: lambda *a: sqlite3.SQLITE_OK)
     db = sql.ReadOnlyDatabase(get_engine().url.database)
     try:
         db.query("PRAGMA query_only = OFF")
@@ -1039,7 +1039,7 @@ def test_sql_connection_is_closed_after_run():
     host = FakeHost()
     runtime = MacroRuntime(host, output=lambda _: None)
     runtime.run('opensak.sql("SELECT 1")')
-    assert runtime._sql_db is None
+    assert runtime._sql_write_db is None
 
 
 def test_current_and_selected_follow_host():
