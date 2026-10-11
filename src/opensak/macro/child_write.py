@@ -12,7 +12,8 @@ fields of one.
 The keys (`id`, the cache a row belongs to) and the columns OpenSAK
 maintains (a waypoint's parent_gc_code, a log's gc.com log_id) cannot be
 written, as for opensak.sql_write() (sql.PROTECTED_COLUMNS). After a write,
-cache_write.refresh_derived() recalculates the cache's counts and log dates.
+cache_write.refresh_derived() recalculates the cache's counts and log dates
+(inside opensak.transaction(): before the commit, or on opensak.resync()).
 """
 
 from __future__ import annotations
@@ -210,10 +211,12 @@ def _refresh(session, table: ChildTable, cache_id: int) -> None:
         refresh_derived(_session_executor(session), {cache_id: {table.kind}})
 
 
-def insert_child(session, table: ChildTable, code: str, values: dict[str, Any]) -> Optional[int]:
+def insert_child(
+    session, table: ChildTable, code: str, values: dict[str, Any], refresh: bool = True
+) -> Optional[int]:
     """Add a row from the parse_child_values(insert=True) result *values*
     to the cache *code*; returns its id, None if the cache is not in the
-    database."""
+    database. *refresh* as for cache_write.update_cache()."""
     cache_id = session.query(Cache.id).filter_by(gc_code=code).scalar()
     if cache_id is None:
         return None
@@ -222,18 +225,23 @@ def insert_child(session, table: ChildTable, code: str, values: dict[str, Any]) 
         setattr(row, attribute, value)
     session.add(row)
     session.flush()
-    _refresh(session, table, cache_id)
+    if refresh:
+        _refresh(session, table, cache_id)
     return row.id
 
 
-def update_child(session, table: ChildTable, row_id: int, values: dict[str, Any]) -> Optional[str]:
+def update_child(
+    session, table: ChildTable, row_id: int, values: dict[str, Any], refresh: bool = True
+) -> Optional[str]:
     """Write the parse_child_values() result *values* to the row *row_id*;
-    returns the GC code of its cache, None if there is no such row."""
+    returns the GC code of its cache, None if there is no such row.
+    *refresh* as for cache_write.update_cache()."""
     row = session.get(table.model, row_id)
     if row is None:
         return None
     for attribute, value in values.items():
         setattr(row, attribute, value)
     session.flush()
-    _refresh(session, table, row.cache_id)
+    if refresh:
+        _refresh(session, table, row.cache_id)
     return session.query(Cache.gc_code).filter_by(id=row.cache_id).scalar()

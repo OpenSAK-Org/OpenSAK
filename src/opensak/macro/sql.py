@@ -45,7 +45,9 @@ which SQLite consults per column. An INSERT cannot be checked per column;
 instead temporary triggers record which caches a statement touched, and
 cache_write.refresh_derived() then recalculates their derived columns
 (overwriting whatever the INSERT put there) before the statement's
-transaction is committed. With recursive_triggers on, a BEFORE DELETE
+transaction is committed. Inside opensak.transaction() the recorded caches
+are collected instead (_PENDING), also those of the ORM writes sharing the
+connection, and recalculated once before the commit or by resync(). With recursive_triggers on, a BEFORE DELETE
 trigger also catches the rows INSERT OR REPLACE would delete.
 """
 
@@ -384,6 +386,11 @@ PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
 }
 
 _TOUCHED = f"{_RESERVED_PREFIX}touched"
+# Inside opensak.transaction(): the caches whose derived columns are still to
+# be recalculated, at the commit or by resync(). The triggers record into
+# _TOUCHED, from where _stash() moves the rows here; as TEMP tables both
+# follow the transaction's savepoints, so undone writes leave nothing behind.
+_PENDING = f"{_RESERVED_PREFIX}pending"
 
 # (table, what a change there means for refresh_derived(), cache id column)
 _TRACKED = (
@@ -493,10 +500,11 @@ class WritableDatabase:
     def _create_triggers(conn: sqlite3.Connection) -> None:
         """TEMP triggers (this connection only) that record the caches a
         statement touches, and refuse deletes."""
-        conn.execute(
-            f"CREATE TEMP TABLE {_TOUCHED} "
-            "(cache_id INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (cache_id, kind))"
-        )
+        for name in (_TOUCHED, _PENDING):
+            conn.execute(
+                f"CREATE TEMP TABLE {name} "
+                "(cache_id INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (cache_id, kind))"
+            )
         for table, kind, id_col in _TRACKED:
             for event in ("INSERT", "UPDATE"):
                 record = f"INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.{id_col}, '{kind}');"
@@ -586,13 +594,70 @@ class WritableDatabase:
             trans, self._sa_trans = self._sa_trans, None
             self._reader = None
             if commit:
+                try:
+                    self._refresh_pending(conn)
+                except BaseException:
+                    trans.rollback()
+                    raise
                 trans.commit()
             else:
                 trans.rollback()
+                self._clear_pending(conn)
         except sqlite3.Error as exc:
             raise self._error(exc) from None
         except Exception as exc:
             raise SqlError(f"cannot end the transaction: {exc}") from None
+
+    # The derived columns inside a transaction: recalculated once, before
+    # the commit, for every cache changed since the last resync().
+
+    @staticmethod
+    def _stash(conn: sqlite3.Connection) -> None:
+        """Move what the triggers recorded to the pending caches."""
+        conn.execute(
+            f"INSERT OR IGNORE INTO temp.{_PENDING} SELECT cache_id, kind FROM temp.{_TOUCHED}"
+        )
+        conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+
+    @staticmethod
+    def _clear_pending(conn: sqlite3.Connection) -> None:
+        conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+        conn.execute(f"DELETE FROM temp.{_PENDING}")
+
+    def _refresh_pending(self, conn: sqlite3.Connection) -> int:
+        """Recalculate the pending caches; returns how many needed it."""
+        from opensak.macro.cache_write import refresh_derived
+
+        self._stash(conn)
+        kinds_by_id: dict[int, set[str]] = {}
+        for cache_id, kind in conn.execute(f"SELECT cache_id, kind FROM temp.{_PENDING}"):
+            if kind != "cache":                # a plain field: nothing derived
+                kinds_by_id.setdefault(cache_id, set()).add(kind)
+        refresh_derived(lambda sql, p: conn.execute(sql, p).fetchall(), kinds_by_id)
+        # The refresh's own UPDATEs fired the triggers too.
+        self._clear_pending(conn)
+        return len(kinds_by_id)
+
+    def resync(self) -> int:
+        """opensak.resync(): recalculate the derived columns of the caches
+        the open transaction changed so far. Returns how many caches were
+        recalculated; 0 outside a transaction, where every write is
+        recalculated before its commit."""
+        if not self._depth:
+            return 0
+        conn = self._connection()
+        try:
+            conn.execute("SAVEPOINT opensak_resync")
+            try:
+                count = self._refresh_pending(conn)
+            except BaseException:
+                conn.execute("ROLLBACK TO opensak_resync")
+                conn.execute("RELEASE opensak_resync")
+                raise
+            conn.execute("RELEASE opensak_resync")
+        except sqlite3.Error as exc:
+            raise self._error(exc) from None
+        return count
 
     @contextmanager
     def session(self) -> Iterator[Any]:
@@ -631,8 +696,9 @@ class WritableDatabase:
         """Run one INSERT or UPDATE statement and commit it together with
         the recalculated derived columns. Rolls everything back on error.
         Inside a transaction, "commit" means releasing the statement's
-        SAVEPOINT; the transaction decides what is kept."""
-        from opensak.macro.cache_write import refresh_derived
+        SAVEPOINT; the transaction decides what is kept, and the derived
+        columns are recalculated at its commit or by resync()."""
+        from opensak.macro.cache_write import normalize_inserted, refresh_derived
 
         params = _params(params)
         conn = self._connection()
@@ -642,8 +708,12 @@ class WritableDatabase:
         except sqlite3.Error as exc:
             raise self._error(exc) from None
         try:
-            # ORM writes of the same transaction fire the triggers as well.
-            conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+            # ORM writes of the same transaction fire the triggers as well:
+            # keep what they recorded, but apart from this statement's caches.
+            if nested:
+                self._stash(conn)
+            else:
+                conn.execute(f"DELETE FROM temp.{_TOUCHED}")
             self._deadline = time.monotonic() + self._timeout_s
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
             conn.set_authorizer(self._authorizer)
@@ -658,24 +728,33 @@ class WritableDatabase:
             kinds_by_id: dict[int, set[str]] = {}
             for cache_id, kind in conn.execute(f"SELECT cache_id, kind FROM temp.{_TOUCHED}"):
                 kinds_by_id.setdefault(cache_id, set()).add(kind)
-            refresh_derived(lambda sql, p: conn.execute(sql, p).fetchall(), kinds_by_id)
+            run = lambda sql, p: conn.execute(sql, p).fetchall()  # noqa: E731
+            inserted = {i for i, kinds in kinds_by_id.items() if "insert" in kinds}
+            if nested:
+                normalize_inserted(run, inserted)
+            else:
+                refresh_derived(run, kinds_by_id)
             codes = [
                 code for (code,) in conn.execute(
                     "SELECT gc_code FROM caches WHERE id IN "
                     f"(SELECT cache_id FROM temp.{_TOUCHED}) ORDER BY gc_code"
                 )
             ]
-            added = any("insert" in kinds for kinds in kinds_by_id.values())
-            conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+            added = bool(inserted)
+            if nested:
+                self._stash(conn)
+            else:
+                conn.execute(f"DELETE FROM temp.{_TOUCHED}")
             conn.execute("RELEASE opensak_stmt" if nested else "COMMIT")
         except BaseException as exc:
             try:
+                # ROLLBACK TO also restores the TEMP tables as they were.
                 if nested:
                     conn.execute("ROLLBACK TO opensak_stmt")
                     conn.execute("RELEASE opensak_stmt")
                 else:
                     conn.execute("ROLLBACK")
-                conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+                    conn.execute(f"DELETE FROM temp.{_TOUCHED}")
             except sqlite3.Error:
                 pass
             if isinstance(exc, sqlite3.Error):

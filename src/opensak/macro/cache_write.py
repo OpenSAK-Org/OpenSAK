@@ -15,7 +15,8 @@ opensak.sql_write() (sql.py, WritableDatabase) enforces the same rules on
 the database columns: PROTECTED_COLUMNS can never be set by an UPDATE, and
 after each statement refresh_derived() recalculates the derived columns of
 every cache the statement touched, which also overwrites whatever an
-INSERT put into them.
+INSERT put into them. Inside opensak.transaction() this happens once, before
+the commit (or on opensak.resync()), for the writes here as well.
 
 A Lua table cannot hold nil, so `false` clears a field that is not a
 boolean (e.g. `{ container = false }`); for text fields "" does too.
@@ -306,22 +307,25 @@ def _apply(session, cache: Cache, values: dict[str, Any]) -> None:
                 note.is_corrected = value is not None
 
 
-def update_cache(session, code: str, values: dict[str, Any]) -> bool:
+def update_cache(session, code: str, values: dict[str, Any], refresh: bool = True) -> bool:
     """Write the parse_values() result *values* to the cache *code*.
-    Returns False if the cache is not in the database."""
+    Returns False if the cache is not in the database. *refresh*: recalculate
+    the derived columns now (False inside opensak.transaction(), where
+    WritableDatabase does it before the commit)."""
     cache = session.query(Cache).filter_by(gc_code=code).first()
     if cache is None:
         return False
     _apply(session, cache, values)
     session.flush()
-    if "lat" in values or "lon" in values:
+    if refresh and ("lat" in values or "lon" in values):
         refresh_derived(_session_executor(session), {cache.id: {"coords"}})
     return True
 
 
-def insert_cache(session, values: dict[str, Any]) -> str:
+def insert_cache(session, values: dict[str, Any], refresh: bool = True) -> str:
     """Add a new cache from the parse_values(insert=True) result *values*;
-    returns its code. Raises CacheWriteError if the code exists."""
+    returns its code. Raises CacheWriteError if the code exists. *refresh*
+    as for update_cache()."""
     code = values["code"]
     if session.query(Cache.id).filter_by(gc_code=code).first() is not None:
         raise CacheWriteError(f"opensak.insert: {code} is already in the database")
@@ -340,7 +344,8 @@ def insert_cache(session, values: dict[str, Any]) -> str:
     cache.last_gpx_update = None
     _apply(session, cache, values)
     session.flush()
-    refresh_derived(_session_executor(session), {cache.id: {"coords"}})
+    if refresh:
+        refresh_derived(_session_executor(session), {cache.id: {"coords"}})
     return code
 
 
@@ -391,15 +396,7 @@ def refresh_derived(execute: Executor, kinds_by_id: dict[int, set[str]]) -> None
     def ids(kind: str) -> set[int]:
         return {i for i, kinds in kinds_by_id.items() if kind in kinds or "insert" in kinds}
 
-    inserted = {i for i, kinds in kinds_by_id.items() if "insert" in kinds}
-    for marks, params in _chunks(inserted):
-        execute(
-            "UPDATE caches SET gc_code = upper(trim(gc_code)), imported_at = :now, "
-            "last_gpx_update = NULL, source_file = NULL, location_source = NULL, "
-            "location_basis = NULL, location_updated = NULL, location_dataset = NULL "
-            f"WHERE id IN ({marks})",
-            {**params, "now": _db_datetime(_now())},
-        )
+    normalize_inserted(execute, {i for i, kinds in kinds_by_id.items() if "insert" in kinds})
     _refresh_distances(execute, ids("coords"))
     _refresh_logs(execute, ids("logs"))
     for marks, params in _chunks(ids("waypoints")):
@@ -419,6 +416,20 @@ def refresh_derived(execute: Executor, kinds_by_id: dict[int, set[str]]) -> None
             "UPDATE caches SET trackable_count = (SELECT COUNT(*) FROM trackables "
             f"WHERE trackables.cache_id = caches.id) WHERE id IN ({marks})",
             params,
+        )
+
+
+def normalize_inserted(execute: Executor, ids: set[int]) -> None:
+    """The code and import columns of caches a macro INSERTed by SQL. Run
+    at once even inside opensak.transaction(), so the cache can be found by
+    its code right away."""
+    for marks, params in _chunks(ids):
+        execute(
+            "UPDATE caches SET gc_code = upper(trim(gc_code)), imported_at = :now, "
+            "last_gpx_update = NULL, source_file = NULL, location_source = NULL, "
+            "location_basis = NULL, location_updated = NULL, location_dataset = NULL "
+            f"WHERE id IN ({marks})",
+            {**params, "now": _db_datetime(_now())},
         )
 
 

@@ -343,6 +343,13 @@ def _changing_section() -> list[str]:
         "UPDATE may not set the columns listed. Whatever an INSERT puts into "
         "the columns OpenSAK maintains is recalculated right away.",
         "",
+        "OpenSAK recalculates the columns it maintains (distance, bearing, "
+        "counts, log dates) after every write. Inside "
+        "`opensak.transaction()` it does so only once, just before the "
+        "commit, for all caches the transaction changed — much faster for "
+        "many writes. Until then reads inside the transaction see the old "
+        "values; `opensak.resync()` recalculates them on demand.",
+        "",
         "| Table | Protected columns |",
         "|---|---|",
     ]

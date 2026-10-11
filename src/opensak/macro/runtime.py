@@ -1402,7 +1402,7 @@ class MacroRuntime:
 
     def _update_in_transaction(self, gc_code: str, parsed: dict[str, Any]) -> bool:
         with self._active_session() as session:
-            found = update_cache(session, gc_code, parsed)
+            found = update_cache(session, gc_code, parsed, refresh=False)
         if found:
             self._host.caches_changed([gc_code], False)
         return found
@@ -1412,7 +1412,7 @@ class MacroRuntime:
         self._require_write("opensak.insert")
         try:
             with self._active_session() as session:
-                code = insert_cache(session, parsed)
+                code = insert_cache(session, parsed, refresh=not self._in_transaction())
         except CacheWriteError as exc:
             raise MacroError(str(exc)) from None
         self._host.caches_changed([code], True)
@@ -1451,7 +1451,9 @@ class MacroRuntime:
         gc_code = _gc_code(code, func)
         parsed = self._child_values(func, table, values, insert=True)
         self._require_write(func)
-        row_id = self._write_child(func, lambda s: insert_child(s, table, gc_code, parsed))
+        refresh = not self._in_transaction()
+        row_id = self._write_child(
+            func, lambda s: insert_child(s, table, gc_code, parsed, refresh=refresh))
         if row_id is not None:
             self._host.caches_changed([gc_code], False)
         return row_id
@@ -1466,7 +1468,9 @@ class MacroRuntime:
             )
         parsed = self._child_values(func, table, values, insert=False)
         self._require_write(func)
-        code = self._write_child(func, lambda s: update_child(s, table, row_id, parsed))
+        refresh = not self._in_transaction()
+        code = self._write_child(
+            func, lambda s: update_child(s, table, row_id, parsed, refresh=refresh))
         if code is None:
             return False
         self._host.caches_changed([code], False)
@@ -1543,6 +1547,14 @@ class MacroRuntime:
             self._writable_db().end(bool(commit))
         except SqlError as exc:
             raise MacroError(f"opensak.transaction: {exc}") from None
+
+    def _resync(self) -> int:
+        if not self._in_transaction():
+            return 0
+        try:
+            return self._writable_db().resync()
+        except SqlError as exc:
+            raise MacroError(f"opensak.resync: {exc}") from None
 
     def _no_transaction(self, func: str) -> None:
         if self._in_transaction():
@@ -3508,7 +3520,8 @@ API: tuple[ApiFunction, ...] = (
                     "); nothing can be deleted, and an UPDATE may not set the "
                     "keys or the columns OpenSAK maintains itself (see "
                     "Changing caches). OpenSAK recalculates distances, counts "
-                    "and log dates of the caches the statement touched. An "
+                    "and log dates of the caches the statement touched — inside "
+                    "opensak.transaction() once at its end (see opensak.resync()). An "
                     "INSERT must give every column opensak.columns() marks as "
                     "`required`; opensak.insert{} is simpler for new caches. Each "
                     "statement is committed on its own (or with the "
@@ -3537,7 +3550,10 @@ API: tuple[ApiFunction, ...] = (
                     "opensak.transaction() then raises again. Many changes in "
                     "one transaction are also faster than the same changes "
                     "committed one by one. Inside *fn*, opensak.cache, "
-                    "caches, sql and the like see the changes already made; "
+                    "caches, sql and the like see the changes already made, "
+                    "except the columns OpenSAK maintains (counts, log dates, "
+                    "distance), which are recalculated once before the commit "
+                    "or when opensak.resync() is called; "
                     "everything else in OpenSAK, exports included, sees them "
                     "only afterwards. A transaction inside another one is "
                     "undone on its own on an error, and kept with the outer "
@@ -3573,6 +3589,27 @@ API: tuple[ApiFunction, ...] = (
         since=3,
         bind=lambda rt, lua: rt._in_transaction,
         returns=("boolean", "true inside opensak.transaction()."),
+    ),
+    ApiFunction(
+        name="resync",
+        description="Recalculate now the columns OpenSAK maintains itself "
+                    "(distance and bearing, log, waypoint and trackable counts, "
+                    "log dates) for the caches changed so far in the open "
+                    "opensak.transaction(). Inside a transaction they are "
+                    "recalculated only once, just before the commit, which "
+                    "makes many writes much faster; until then opensak.cache, "
+                    "sql and the like still see the old values. Call resync() "
+                    "when a later read inside the transaction depends on "
+                    "them. Outside a transaction it does nothing, as every "
+                    "write is recalculated before its own commit.",
+        example='opensak.transaction(function()\n'
+                '    for i = 1, 3 do opensak.insert_log("GC12345", { type = "Write note" }) end\n'
+                '    opensak.resync()\n'
+                '    print(opensak.cache("GC12345").log_count)\n'
+                'end)',
+        since=3,
+        bind=lambda rt, lua: rt._resync,
+        returns=("integer", "Number of caches recalculated (0 outside a transaction)."),
     ),
     ApiFunction(
         name="read_csv",
