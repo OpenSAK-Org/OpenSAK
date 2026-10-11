@@ -23,6 +23,10 @@ OpenSAK's own unqualified statements on the same connection, and names
 starting with _RESERVED_PREFIX belong to OpenSAK. TEMP triggers stay
 refused: they could be put on main tables.
 
+The macro's own database file (opensak.macro_db()) is attached to that
+connection as MACRO_SCHEMA; there the authorizer allows everything that
+stays inside the file (see _MACRO_ACTIONS). Macros themselves cannot ATTACH.
+
 For the active database, opensak.sql() and friends read through the
 WritableDatabase connection (reader()), so that the macro's TEMP tables are
 the same for opensak.sql_write() and inside opensak.transaction().
@@ -66,7 +70,7 @@ _PROGRESS_STEPS = 10_000
 # PRAGMAs that only read, whatever their argument (a table or index name).
 _READ_PRAGMAS = frozenset({
     "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
-    "foreign_key_list",
+    "foreign_key_list", "database_list",
 })
 _ALLOWED_ACTIONS = frozenset({
     sqlite3.SQLITE_SELECT,
@@ -93,6 +97,32 @@ _TEMP_ACTIONS = _CREATE_TEMP_ACTIONS | {
 # Names of OpenSAK's own TEMP tables and triggers, which macros cannot touch.
 _RESERVED_PREFIX = "opensak_macro_"
 
+# The macro's own database (opensak.macro_db()), attached to the active
+# database's connection under this schema name. Only OpenSAK attaches it
+# (macros cannot ATTACH), so the name always means that file, in which a
+# macro may do anything that cannot reach past it. Its (non-TEMP) triggers
+# and views can only use its own tables — SQLite's rule.
+MACRO_SCHEMA = "macro"
+_MACRO_ACTIONS = frozenset({
+    sqlite3.SQLITE_CREATE_TABLE,
+    sqlite3.SQLITE_CREATE_INDEX,
+    sqlite3.SQLITE_CREATE_VIEW,
+    sqlite3.SQLITE_CREATE_TRIGGER,
+    sqlite3.SQLITE_DROP_TABLE,
+    sqlite3.SQLITE_DROP_INDEX,
+    sqlite3.SQLITE_DROP_VIEW,
+    sqlite3.SQLITE_DROP_TRIGGER,
+    sqlite3.SQLITE_INSERT,
+    sqlite3.SQLITE_UPDATE,
+    sqlite3.SQLITE_DELETE,
+    sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_REINDEX,
+    sqlite3.SQLITE_ANALYZE,
+})
+# PRAGMAs that act on the named database only (`PRAGMA macro.user_version = 2`);
+# most others, e.g. foreign_keys, would change the whole connection.
+_MACRO_PRAGMAS = frozenset({"user_version", "application_id", "integrity_check", "quick_check"})
+
 
 class SqlError(Exception):
     """A query failed or tried to write."""
@@ -116,6 +146,11 @@ def _read_authorizer(main_names: frozenset[str]):
         if action in _ALLOWED_ACTIONS:
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _READ_PRAGMAS:
+            return sqlite3.SQLITE_OK
+        if db_name == MACRO_SCHEMA and (
+            action in _MACRO_ACTIONS
+            or (action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _MACRO_PRAGMAS)
+        ):
             return sqlite3.SQLITE_OK
         if db_name == "temp" and action in _TEMP_ACTIONS:
             if action in _CREATE_TEMP_ACTIONS and str(arg1).lower() in main_names:
@@ -279,11 +314,16 @@ class ReadOnlyDatabase:
             cursor.close()
 
     def tables(self) -> list[str]:
-        """Tables and views, the macro's TEMP ones included."""
+        """Tables and views, the macro's TEMP ones included, and those of
+        the macro database as "macro.<name>" when it is attached."""
+        macro = any(r["name"] == MACRO_SCHEMA for r in self.query("PRAGMA database_list"))
         rows = self.query(
             "SELECT name FROM (SELECT name, type FROM main.sqlite_master "
-            "UNION ALL SELECT name, type FROM temp.sqlite_master) "
-            "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
+            "UNION ALL SELECT name, type FROM temp.sqlite_master"
+            + (f" UNION ALL SELECT '{MACRO_SCHEMA}.' || name, type "
+               f"FROM {MACRO_SCHEMA}.sqlite_master" if macro else "")
+            + ") WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
+            f"AND name NOT LIKE '{MACRO_SCHEMA}.sqlite_%' "
             "AND lower(substr(name, 1, :n)) <> :prefix ORDER BY name",
             {"n": len(_RESERVED_PREFIX), "prefix": _RESERVED_PREFIX},
         )
@@ -292,8 +332,13 @@ class ReadOnlyDatabase:
     def columns(self, table: str) -> list[dict[str, str]]:
         if table not in self.tables():
             raise SqlError(f"no table named {table!r}")
-        quoted = table.replace('"', '""')
-        cursor = self._execute(f'PRAGMA table_info("{quoted}")', None)
+        schema, dot, name = table.partition(".")
+        if dot and schema == MACRO_SCHEMA:
+            pragma = f"{MACRO_SCHEMA}.table_info"
+        else:
+            pragma, name = "table_info", table
+        quoted = name.replace('"', '""')
+        cursor = self._execute(f'PRAGMA {pragma}("{quoted}")', None)
         try:
             # required: NOT NULL without a default — an INSERT must give it
             return [
@@ -407,6 +452,23 @@ class WritableDatabase:
         self._sa_trans: Any = None
         self._depth = 0
         self._reader: Optional[ReadOnlyDatabase] = None
+        self._macro_db: Optional[Path] = None
+
+    def attach_macro_db(self, path: Path) -> None:
+        """ATTACH the macro's own database file (created if missing) as
+        MACRO_SCHEMA; nothing if it is attached already."""
+        if self._macro_db is not None:
+            if self._macro_db != path:
+                raise SqlError(f"another database is attached as {MACRO_SCHEMA!r}")
+            return
+        if self._depth:
+            raise SqlError("cannot attach a database inside opensak.transaction()")
+        try:
+            # Our own statement: no authorizer is set outside the macro's.
+            self._connection().execute(f"ATTACH DATABASE ? AS {MACRO_SCHEMA}", (str(path),))
+        except sqlite3.Error as exc:
+            raise SqlError(f"cannot open the macro database {path}: {exc}") from None
+        self._macro_db = path
 
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -644,3 +706,4 @@ class WritableDatabase:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        self._macro_db = None

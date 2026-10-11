@@ -1253,6 +1253,9 @@ class MacroRuntime:
         # per-macro state (saved settings, #983) belongs to the called macro,
         # not its caller. None for an unsaved macro.
         self._macro_path: Optional[Path] = None
+        self._chunk_name = "macro"
+        # opensak.macro_db(): the file attached during this run
+        self._macro_db_path: Optional[Path] = None
         self._run_permissions: list[FolderPermission] = []
         # (folder, write) the user denied during this run — not asked again
         self._denied: set[tuple[Path, bool]] = set()
@@ -1471,8 +1474,37 @@ class MacroRuntime:
 
     def _writable_db(self) -> WritableDatabase:
         if self._sql_write_db is None:
-            self._sql_write_db = WritableDatabase(Path(get_engine().url.database or ""))
+            db = WritableDatabase(Path(get_engine().url.database or ""))
+            if self._macro_db_path is not None:
+                # Attached again after opensak.switch_database().
+                try:
+                    db.attach_macro_db(self._macro_db_path)
+                except SqlError as exc:
+                    raise MacroError(str(exc)) from None
+            self._sql_write_db = db
         return self._sql_write_db
+
+    # The macro's own database: <macro file name>.db3 next to the macro file,
+    # attached to the active database's SQL connection as `macro`.
+
+    def _macro_db(self) -> str:
+        func = "opensak.macro_db"
+        if self._base_dir is None:
+            raise MacroError(f"{func}: save the macro first — its database is named after the file")
+        path = (self._base_dir / f"{Path(self._chunk_name).stem}.db3").resolve()
+        manager = get_db_manager()
+        opensak_dbs = {Path(db.path).resolve() for db in manager.databases}
+        opensak_dbs.add(Path(get_engine().url.database or "").resolve())
+        if path in opensak_dbs:
+            raise MacroError(f"{func}: {path} is an OpenSAK database; rename the macro")
+        if self._in_transaction():
+            raise MacroError(f"{func} cannot be used inside opensak.transaction()")
+        try:
+            self._writable_db().attach_macro_db(path)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        self._macro_db_path = path
+        return str(path)
 
     def _sql_write(self, query=None, params=None) -> int:
         query, params = _sql_args("opensak.sql_write", query, params)
@@ -2585,6 +2617,8 @@ class MacroRuntime:
     ) -> int:
         self._base_dir = base_dir
         self._macro_path = macro_path
+        self._chunk_name = chunk_name
+        self._macro_db_path = None
         self._run_permissions = (
             list(self._folder_permissions)
             if self._folder_permissions is not None
@@ -3284,6 +3318,38 @@ API: tuple[ApiFunction, ...] = (
         returns=("{name: string, type: string, required: boolean}[]",
                  "Column names and SQL types, in table order; `required`: NOT "
                  "NULL without a default, so an INSERT must give it."),
+    ),
+    ApiFunction(
+        name="macro_db",
+        description="Attach the macro's own SQLite database — a file named "
+                    "after the macro file with the extension .db3, in the "
+                    "macro's folder, created if missing — to the SQL "
+                    "functions as schema `macro`. In it the macro has full "
+                    "access through opensak.sql(), sql_each() and sql_write(): "
+                    "CREATE, DROP, ALTER, INSERT, UPDATE and DELETE on "
+                    "`macro.<name>` tables, indexes, views and triggers, and "
+                    "`PRAGMA macro.user_version`. Its data stays between runs. "
+                    "One statement can read and write the active database and "
+                    "the macro database together, e.g. `INSERT INTO macro.seen "
+                    "SELECT gc_code FROM caches`; the rules for the active "
+                    "database stay the same. Unqualified names mean the active "
+                    "database first, so create with `macro.` in front. "
+                    "opensak.tables() lists its tables as `macro.<name>`. "
+                    "Needs no permission. Changes inside opensak.transaction() "
+                    "are kept or undone together with those of the active "
+                    "database. The SQL statement ATTACH itself stays refused. "
+                    "Cannot be called inside opensak.transaction(); stays "
+                    "attached after opensak.switch_database(). The macro must "
+                    "be saved, as the file is named after it.",
+        example='opensak.macro_db()\n'
+                'opensak.sql("CREATE TABLE IF NOT EXISTS macro.seen (code TEXT PRIMARY KEY, at TEXT)")\n'
+                'opensak.sql("INSERT OR IGNORE INTO macro.seen SELECT gc_code, date(\'now\') FROM caches WHERE found = 1")\n'
+                'for _, r in ipairs(opensak.sql("SELECT c.gc_code, s.at FROM caches c "\n'
+                '        .. "JOIN macro.seen s ON s.code = c.gc_code LIMIT 5")) do\n'
+                '    print(r.gc_code, r.at)\nend',
+        since=3,
+        bind=lambda rt, lua: rt._macro_db,
+        returns=("string", "The path of the macro database file."),
     ),
     ApiFunction(
         name="databases",
