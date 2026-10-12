@@ -944,8 +944,13 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        layout.addSpacing(12)
-        layout.addWidget(self._build_db_write_section())
+        # The databases macros may change: only with the macro write API,
+        # which has its own beta flag.
+        from opensak.utils import flags
+        self._db_write_list = None
+        if flags.lua_macro_write:
+            layout.addSpacing(12)
+            layout.addWidget(self._build_db_write_section())
 
         scroll = QScrollArea()
         scroll.setWidget(tab)
@@ -1871,6 +1876,7 @@ class SettingsDialog(QDialog):
             permissions = self._collect_permissions()
             if permissions != self._perm_loaded:
                 save_permissions(permissions)
+        if self._perm_table is not None and self._db_write_list is not None:
             from opensak.macro.db_access import save_always_approved
             databases = self._collect_db_write()
             if databases != self._db_write_loaded:

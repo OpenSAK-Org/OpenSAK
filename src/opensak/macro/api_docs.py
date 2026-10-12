@@ -306,12 +306,24 @@ def _forms_section() -> list[str]:
     return lines
 
 
+# Appended to the functions that need the lua-macro-write feature flag
+_WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
+               "is on, as it is in beta builds; check with `if opensak.update then`.")
+
+
 def _changing_section() -> list[str]:
     writable = ", ".join(f"`{f.name}`" for f in WRITABLE_FIELDS)
     required = ", ".join(f"`{k}`" for k in INSERT_REQUIRED)
     lines = [
         "",
         "## Changing caches",
+        "",
+        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.insert_<x>()`, "
+        "`opensak.update_<x>()`, `opensak.sql_write()`, `opensak.transaction()`, "
+        "`opensak.in_transaction()` and `opensak.resync()` are only available "
+        "while the `lua-macro-write` feature flag is on, as it is in beta "
+        "builds. Without it they are nil, and `opensak.set_corrected()` and "
+        "`opensak.clear_corrected()` change the database without asking.",
         "",
         "`opensak.update()`, `opensak.insert{}`, `opensak.sql_write()`, "
         "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
@@ -451,7 +463,10 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
             lines.append("")
         if func.returns:
             lines += [f"Returns `{func.returns[0]}` — {func.returns[1]}", ""]
-        lines += [_since(func), "", "Example:", ""]
+        lines += [_since(func), ""]
+        if func.write:
+            lines += [_WRITE_BETA, ""]
+        lines += ["Example:", ""]
         lines += _code(func.example)
 
     lines += [
@@ -684,6 +699,8 @@ def render_lua_stub() -> str:
             lines += [f"opensak.{namespace} = {{}}", ""]
         lines += _comment(func.description)
         lines += ["---", f"---{_since(func)}", "---"]
+        if func.write:
+            lines += _comment(_WRITE_BETA) + ["---"]
         lines += _comment(f"```lua\n{func.example}\n```")
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")

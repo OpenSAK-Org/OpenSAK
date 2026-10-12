@@ -607,6 +607,18 @@ def test_tab_hidden_without_lua_macros_flag(qtbot, monkeypatch):
     assert d._perm_table is None
 
 
+def test_db_write_list_hidden_without_lua_macro_write_flag(qtbot, monkeypatch):
+    from opensak.gui.dialogs import settings_dialog as sd
+    from opensak.utils import flags
+    monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
+    monkeypatch.setattr(flags, "lua_macros", True)
+    monkeypatch.setattr(flags, "lua_macro_write", False)
+    d = sd.SettingsDialog()
+    qtbot.addWidget(d)
+    assert d._perm_table is not None and d._db_write_list is None
+    d._save()  # no list to store
+
+
 def test_toggle_write_and_save(dlg):
     from PySide6.QtCore import Qt
     dlg._perm_table.item(1, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)

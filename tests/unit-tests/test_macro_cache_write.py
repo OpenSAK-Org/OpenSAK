@@ -215,6 +215,35 @@ def test_set_corrected_needs_approval():
     assert len(host.asked) == 1 and len(host.corrected) == 2
 
 
+# ── lua-macro-write feature flag ─────────────────────────────────────────────
+
+_WRITE_FUNCTIONS = ("update", "insert", "sql_write", "transaction", "in_transaction",
+                    "resync", "insert_log", "update_log", "insert_waypoint",
+                    "update_waypoint", "insert_attribute", "update_attribute",
+                    "insert_trackable", "update_trackable")
+
+
+def test_write_functions_need_the_flag(monkeypatch):
+    from opensak.utils import flags
+    source = "".join(f'print(opensak.{f} == nil) ' for f in _WRITE_FUNCTIONS)
+    monkeypatch.setattr(flags, "lua_macro_write", False)
+    _, out = _run(source)
+    assert out == ["true"] * len(_WRITE_FUNCTIONS)
+    monkeypatch.setattr(flags, "lua_macro_write", True)
+    _, out = _run(source)
+    assert out == ["false"] * len(_WRITE_FUNCTIONS)
+
+
+def test_without_the_flag_reading_stays_and_set_corrected_does_not_ask(monkeypatch):
+    from opensak.utils import flags
+    monkeypatch.setattr(flags, "lua_macro_write", False)
+    host = Host(WriteApproval.DENY)
+    _, out = _run('print(#opensak.logs("GCW4")) '
+                  'opensak.set_corrected("GCW4", 47, 8) opensak.clear_corrected("GCW4")', host)
+    assert out == ["0"]
+    assert host.asked == [] and len(host.corrected) == 2
+
+
 # ── opensak.sql_write() ──────────────────────────────────────────────────────
 
 # The NOT NULL columns of `caches` without a database default (the model's

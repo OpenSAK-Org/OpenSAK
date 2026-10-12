@@ -168,6 +168,7 @@ from opensak.macro.sql import (
     WritableDatabase,
     connect_read_only,
 )
+from opensak.utils import flags
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -1367,7 +1368,13 @@ class MacroRuntime:
     def _require_write(self, func: str) -> None:
         """Raise unless the user lets macros change the active database —
         asking (host.approve_database_write) if that was not decided yet.
-        A refusal holds for the rest of the run."""
+        A refusal holds for the rest of the run.
+
+        Without the lua-macro-write flag only set_corrected/clear_corrected
+        get here (the other writing functions are not registered); they
+        change the database without asking, as before the write API."""
+        if not flags.lua_macro_write:
+            return
         path = Path(get_engine().url.database or "")
         if db_access.is_approved(path):
             return
@@ -2671,6 +2678,8 @@ class MacroRuntime:
         for func in API:
             *namespaces, name = func.name.split(".")
             table = api
+            if func.write and not flags.lua_macro_write:
+                continue
             for ns in namespaces:
                 table = table.setdefault(ns, {})
             bound = func.bind(self, lua)
@@ -2963,6 +2972,9 @@ class ApiFunction:
     overloads: tuple[tuple[Param, ...], ...] = ()
     # (API version, what changed) for changes after `since`
     changed: tuple[tuple[int, str], ...] = ()
+    # Changes the active database: only registered with the lua-macro-write
+    # feature flag (beta builds), see utils/flags.py.
+    write: bool = False
 
     @property
     def signatures(self) -> list[str]:
@@ -3070,6 +3082,7 @@ def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
             bind=lambda rt, lua: lambda *a: rt._insert_child(t, *a),
             params=(_CODE, Param("fields", f"{t.class_name}Insert", f"The new {t.singular}'s fields.")),
             returns=("integer?", f"The new {t.singular}'s id; nil if the cache is not in the database."),
+            write=True,
         ),
         ApiFunction(
             name=f"update_{t.singular}",
@@ -3085,6 +3098,7 @@ def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
                 Param("fields", f"{t.class_name}Update", "The fields to change."),
             ),
             returns=("boolean", f"false if there is no {t.singular} with this id."),
+            write=True,
         ),
     )
 
@@ -3493,6 +3507,7 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._update,
         params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
         returns=("boolean", "false if the cache is not in the database."),
+        write=True,
     ),
     ApiFunction(
         name="insert",
@@ -3507,6 +3522,7 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._insert,
         params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
         returns=("string", "The cache code as stored (upper case)."),
+        write=True,
     ),
     *_child_api(LOG),
     *_child_api(WAYPOINT),
@@ -3540,6 +3556,7 @@ API: tuple[ApiFunction, ...] = (
             Param("params", "table", "As for opensak.sql().", optional=True),
         ),
         returns=("integer", "Number of rows inserted or updated."),
+        write=True,
     ),
     ApiFunction(
         name="transaction",
@@ -3581,6 +3598,7 @@ API: tuple[ApiFunction, ...] = (
         ),
         params=(Param("fn", "fun()", "The function to run."),),
         returns=("any...", "What *fn* returns."),
+        write=True,
     ),
     ApiFunction(
         name="in_transaction",
@@ -3589,6 +3607,7 @@ API: tuple[ApiFunction, ...] = (
         since=3,
         bind=lambda rt, lua: rt._in_transaction,
         returns=("boolean", "true inside opensak.transaction()."),
+        write=True,
     ),
     ApiFunction(
         name="resync",
@@ -3610,6 +3629,7 @@ API: tuple[ApiFunction, ...] = (
         since=3,
         bind=lambda rt, lua: rt._resync,
         returns=("integer", "Number of caches recalculated (0 outside a transaction)."),
+        write=True,
     ),
     ApiFunction(
         name="read_csv",
