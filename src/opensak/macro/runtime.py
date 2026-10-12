@@ -1532,15 +1532,16 @@ class MacroRuntime:
         fn, error = self._load_macro(source, f"={file.name}")
         if fn is None:
             raise MacroError(str(error))
-        # Relative paths in the called macro are its own folder's.
-        previous_dir = self._base_dir
-        self._base_dir = file.parent
+        # Relative paths in the called macro are its own folder's, and its
+        # per-macro state is its own file's.
+        previous = self._base_dir, self._macro_path
+        self._base_dir, self._macro_path = file.parent, file
         self._macro_depth += 1
         try:
             return fn(*args)
         finally:
             self._macro_depth -= 1
-            self._base_dir = previous_dir
+            self._base_dir, self._macro_path = previous
 
     def _exit(self, code=None) -> None:
         value = 0 if code is None else _number(code)

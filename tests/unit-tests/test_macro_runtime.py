@@ -550,6 +550,25 @@ def test_run_macro_passes_arguments_and_returns_results(tmp_path):
     assert out == ["5\t4", "2\t2", "GC1"]
 
 
+def test_run_macro_switches_the_macro_file(tmp_path):
+    # Per-macro state (saved settings, #983) must be the called macro's own,
+    # not shared with its caller.
+    (tmp_path / "child.lua").write_text("opensak.run_macro('leaf')", encoding="utf-8")
+    (tmp_path / "leaf.lua").write_text("return 1", encoding="utf-8")
+    (tmp_path / "rows.csv").write_text("code\nGC1\n", encoding="utf-8")
+    seen: list = []
+
+    class Runtime(MacroRuntime):
+        def _readable_file(self, path):
+            seen.append(self._macro_path)
+            return super()._readable_file(path)
+
+    Runtime(FakeHost(), output=lambda _: None, folder_permissions=_rw(tmp_path)).run(
+        'opensak.run_macro("child") opensak.read_csv("rows.csv")',
+        chunk_name="main.lua", base_dir=tmp_path)
+    assert seen == [None, tmp_path / "child.lua", None]
+
+
 def test_run_macro_has_its_own_globals(tmp_path):
     (tmp_path / "child.lua").write_text(
         "print(secret, type(opensak), type(string.format), _G.secret)\n"
