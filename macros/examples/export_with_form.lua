@@ -8,8 +8,7 @@
 --
 -- Exports the caches of the active filter to the chosen folder. A folder
 -- picked with the "…" button may be written for this run without a
--- folder permission. Open this macro, put the cursor inside the form and
--- use Tools → Form designer to move the controls around.
+-- folder permission.
 
 local function count_text()
   return opensak.count() .. " caches in the list (" ..

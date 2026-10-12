@@ -6,8 +6,7 @@ and progress.
 build_form() turns a validated Form (macro/forms.py) into widgets, in the
 auto layout (a QFormLayout per level) or the absolute one (fixed
 geometry, like GSAK). FormDialog shows them and is the FormController the
-runtime drives while callbacks run; the form designer reuses
-build_form() for its canvas and preview.
+runtime drives while callbacks run.
 """
 
 from __future__ import annotations
