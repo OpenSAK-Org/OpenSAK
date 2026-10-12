@@ -354,16 +354,24 @@ class UpdateLocationDialog(QDialog):
                 query = query.options(joinedload(Cache.user_note))
 
             if self._rb_this.isChecked() and self._gc_codes is not None:
-                query = query.filter(Cache.gc_code.in_(self._gc_codes))
+                # #1041: chunked to stay under SQLite's bound-parameter limit
+                # when the current filter holds a large database.
+                codes = list(self._gc_codes)
+                caches = []
+                for i in range(0, len(codes), 500):
+                    caches.extend(
+                        query.filter(Cache.gc_code.in_(codes[i:i + 500])).all()
+                    )
             elif self._rb_missing.isChecked():
-                query = query.filter(
+                caches = query.filter(
                     (Cache.country == None) | (Cache.country == "") |
                     (Cache.state   == None) | (Cache.state   == "") |
                     (Cache.county  == None) | (Cache.county  == "")
-                )
-            # _rb_all: no filter
+                ).all()
+            else:
+                caches = query.all()  # _rb_all: no filter
 
-            for cache in query.all():
+            for cache in caches:
                 lat, lon = cache.latitude, cache.longitude
                 basis = "posted"
                 if use_corrected and cache.user_note and cache.user_note.is_corrected:

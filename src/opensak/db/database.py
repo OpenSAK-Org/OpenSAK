@@ -1164,6 +1164,10 @@ def make_session(engine: Engine | Connection | None = None):
     return _SessionLocal()
 
 
+# Cache ids per reload query in reload_caches_full().
+RELOAD_CHUNK_SIZE = 500
+
+
 def reload_caches_full(caches: list) -> list:
     """Reload *caches* with everything an export needs eagerly loaded.
 
@@ -1193,23 +1197,29 @@ def reload_caches_full(caches: list) -> list:
     if not ids:
         return list(caches)
 
+    # #1041: the IN query is chunked to stay under SQLite's bound-parameter
+    # limit — exporting a whole large database failed with "too many SQL
+    # variables".
+    by_id = {}
     with get_session() as session:
-        rows = (
-            session.query(Cache)
-            .options(
-                selectinload(Cache.logs),
-                selectinload(Cache.waypoints),
-                selectinload(Cache.attributes),
-                joinedload(Cache.user_note),
-                undefer(Cache.short_description),
-                undefer(Cache.long_description),
-                undefer(Cache.encoded_hints),
+        for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
+            chunk = ids[start:start + RELOAD_CHUNK_SIZE]
+            rows = (
+                session.query(Cache)
+                .options(
+                    selectinload(Cache.logs),
+                    selectinload(Cache.waypoints),
+                    selectinload(Cache.attributes),
+                    joinedload(Cache.user_note),
+                    undefer(Cache.short_description),
+                    undefer(Cache.long_description),
+                    undefer(Cache.encoded_hints),
+                )
+                .filter(Cache.id.in_(chunk))
+                .all()
             )
-            .filter(Cache.id.in_(ids))
-            .all()
-        )
+            by_id.update((c.id, c) for c in rows)
 
-    by_id = {c.id: c for c in rows}
     return [by_id.get(c.id, c) if isinstance(c, reloadable) else c for c in caches]
 
 

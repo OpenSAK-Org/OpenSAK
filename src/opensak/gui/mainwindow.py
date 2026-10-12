@@ -2599,20 +2599,24 @@ class MainWindow(QMainWindow):
         from opensak.db.models import (
             Cache as CacheModel, Log, Attribute, Trackable, Waypoint, UserNote,
         )
+        # #1041: chunked to stay under SQLite's bound-parameter limit when
+        # deleting a large filter.
         with get_session() as session:
-            cache_ids = [
-                row[0] for row in
-                session.query(CacheModel.id).filter(
-                    CacheModel.gc_code.in_(gc_codes)
-                ).all()
-            ]
-            if cache_ids:
-                session.query(Log).filter(Log.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Attribute).filter(Attribute.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Trackable).filter(Trackable.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Waypoint).filter(Waypoint.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
+            for i in range(0, len(gc_codes), 500):
+                chunk = gc_codes[i:i + 500]
+                cache_ids = [
+                    row[0] for row in
+                    session.query(CacheModel.id).filter(
+                        CacheModel.gc_code.in_(chunk)
+                    ).all()
+                ]
+                if cache_ids:
+                    session.query(Log).filter(Log.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Attribute).filter(Attribute.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Trackable).filter(Trackable.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Waypoint).filter(Waypoint.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
 
     def _set_flag_for_filtered(self, flagged: bool) -> None:
         """Issue #293: set or clear the user flag on every cache in the
