@@ -8,15 +8,17 @@ import pytest
 
 from opensak.db.database import get_engine, get_session
 from opensak.db.models import Cache
-from opensak.macro import MacroError, MacroRuntime, WriteApproval
+from opensak.macro import FolderApproval, FolderPermission, MacroError, MacroRuntime, WriteApproval
 
 
 class Host:
     """A MacroHost with what the SQL functions use."""
 
-    def __init__(self, answer=WriteApproval.SESSION):
+    def __init__(self, answer=WriteApproval.SESSION, folder_answer=FolderApproval.DENY):
         self.answer = answer
         self.asked = 0
+        self.folder_answer = folder_answer
+        self.folders_asked: list = []
 
     def database_name(self):
         return "TestDB"
@@ -34,14 +36,22 @@ class Host:
     def caches_changed(self, codes, added):
         pass
 
+    def approve_folder(self, target, folder, write):
+        self.folders_asked.append((target, folder, write))
+        return self.folder_answer
+
     def end_macro(self):
         pass
 
 
-def _run(source, folder, name="my_macro.lua", host=None):
+def _run(source, folder, name="my_macro.lua", host=None, permitted=True):
+    """Run *source* as the macro *name* in *folder* — a folder macros may
+    write to, unless *permitted* is False."""
     out: list[str] = []
     host = host or Host()
-    MacroRuntime(host, output=out.append).run(source, chunk_name=name, base_dir=folder)
+    permissions = [FolderPermission(str(folder), read=True, write=True)] if permitted else []
+    MacroRuntime(host, output=out.append, folder_permissions=permissions).run(
+        source, chunk_name=name, base_dir=folder)
     return host, out
 
 
@@ -70,7 +80,8 @@ def test_full_access_persists_between_runs_and_joins_the_active_db(tmp_path):
         print(#opensak.columns("macro.seen"))
     """, tmp_path)
     db_file = tmp_path / "my_macro.db3"
-    assert out == [str(db_file.resolve()), "2", "true\ttrue\ttrue", "2"]
+    created = f"opensak.macro_db: created {db_file.resolve()}"
+    assert out == [created, str(db_file.resolve()), "2", "true\ttrue\ttrue", "2"]
     assert host.asked == 0
 
     _, out = _run("""
@@ -81,7 +92,7 @@ def test_full_access_persists_between_runs_and_joins_the_active_db(tmp_path):
             .. "JOIN macro.seen s ON s.code = c.gc_code")) do print(r.gc_code, r.note) end
         opensak.sql("DROP VIEW macro.v")
     """, tmp_path)
-    assert out == ["7", "GCOWN3\ty"]
+    assert out == ["7", "GCOWN3\ty"]       # no "created" line: the file exists
 
     conn = sqlite3.connect(db_file)
     assert conn.execute("SELECT code FROM seen").fetchall() == [("GCOWN3",)]
@@ -164,3 +175,53 @@ def test_unsaved_macro_and_opensak_database_are_refused(tmp_path):
 def test_macro_db_is_refused_inside_a_transaction(tmp_path):
     with pytest.raises(MacroError, match="inside opensak.transaction"):
         _run("opensak.transaction(function() opensak.macro_db() end)", tmp_path, name="tx.lua")
+
+
+# ── folder permissions (#978) and read-only files ────────────────────────────
+
+def test_unlisted_folder_is_asked_and_a_denial_creates_nothing(tmp_path):
+    host = Host(folder_answer=FolderApproval.DENY)
+    with pytest.raises(MacroError, match="opensak.macro_db: .*denied by the user"):
+        _run("opensak.macro_db()", tmp_path, name="ask.lua", host=host, permitted=False)
+    assert host.folders_asked == [((tmp_path / "ask.db3").resolve(), tmp_path.resolve(), True)]
+    assert not (tmp_path / "ask.db3").exists()
+
+
+def test_unlisted_folder_approved_once_works(tmp_path):
+    host = Host(folder_answer=FolderApproval.ONCE)
+    _, out = _run("opensak.macro_db() opensak.macro_db() "
+                  "opensak.sql('CREATE TABLE macro.t (x)')",
+                  tmp_path, name="once.lua", host=host, permitted=False)
+    assert len(host.folders_asked) == 1      # a second call does not ask again
+    assert out == [f"opensak.macro_db: created {(tmp_path / 'once.db3').resolve()}"]
+
+
+def test_read_only_macro_db_can_be_read_but_not_written(tmp_path):
+    import os
+    import stat
+    db_file = tmp_path / "ro.db3"
+    conn = sqlite3.connect(db_file)
+    conn.execute("CREATE TABLE t (x)")
+    conn.execute("INSERT INTO t VALUES (1)")
+    conn.commit()
+    conn.close()
+    os.chmod(db_file, stat.S_IREAD)
+    try:
+        _, out = _run("opensak.macro_db() print(#opensak.sql('SELECT * FROM macro.t'))",
+                      tmp_path, name="ro.lua")
+        assert out == ["1"]
+        for write in ("opensak.sql('INSERT INTO macro.t VALUES (2)')",
+                      "opensak.sql_write('INSERT INTO macro.t VALUES (2)')"):
+            with pytest.raises(MacroError, match="macro database .*ro.db3 is read-only"):
+                _run(f"opensak.macro_db() {write}", tmp_path, name="ro.lua")
+    finally:
+        os.chmod(db_file, stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_database_exemption_is_only_for_the_macro_db(tmp_path):
+    from opensak.macro.permissions import FolderAccessDenied, check_access
+    perms = [FolderPermission(str(tmp_path), read=True, write=True)]
+    target = tmp_path / "x.db3"
+    with pytest.raises(FolderAccessDenied, match="database file"):
+        check_access(target, write=True, permissions=perms)
+    assert check_access(target, write=True, permissions=perms, allow_database=True) == target.resolve()

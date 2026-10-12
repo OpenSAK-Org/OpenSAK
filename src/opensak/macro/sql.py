@@ -53,6 +53,7 @@ trigger also catches the rows INSERT OR REPLACE would delete.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -187,6 +188,25 @@ def connect_read_only(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _read_only_macro_db(conn: Optional[sqlite3.Connection], exc: sqlite3.Error) -> Optional[SqlError]:
+    """A write refused because the macro database (opensak.macro_db()) is
+    read-only — the file or its folder — explained as such; None for any
+    other error."""
+    if conn is None or "readonly database" not in str(exc):
+        return None
+    try:
+        files = {row[1]: row[2] for row in conn.execute("PRAGMA database_list")}
+    except sqlite3.Error:
+        return None
+    path = files.get(MACRO_SCHEMA)
+    if not path or (os.access(path, os.W_OK) and os.access(Path(path).parent, os.W_OK)):
+        return None
+    return SqlError(
+        f"the macro database {path} is read-only (the file or its folder "
+        "cannot be written): it can be read, but not changed"
+    )
+
+
 class ReadOnlyDatabase:
     """A read-only connection to one SQLite file, opened on first use.
 
@@ -247,6 +267,9 @@ class ReadOnlyDatabase:
     def _error(self, exc: sqlite3.Error) -> SqlError:
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
             return SqlError(f"SQL query aborted: took longer than {self._timeout_s:g} s")
+        read_only = _read_only_macro_db(self._conn, exc)
+        if read_only is not None:
+            return read_only
         if "not authorized" in str(exc) or "readonly" in str(exc):
             return SqlError(
                 "SQL in opensak.sql is read-only, except for TEMP tables not "
@@ -531,6 +554,9 @@ class WritableDatabase:
     def _error(self, exc: sqlite3.Error) -> SqlError:
         if isinstance(exc, sqlite3.OperationalError) and "interrupted" in str(exc):
             return SqlError(f"SQL statement aborted: took longer than {self._timeout_s:g} s")
+        read_only = _read_only_macro_db(self._conn, exc)
+        if read_only is not None:
+            return read_only
         if "not authorized" in str(exc) or "prohibited" in str(exc):
             return SqlError(
                 "opensak.sql_write may only INSERT into and UPDATE the cache tables "

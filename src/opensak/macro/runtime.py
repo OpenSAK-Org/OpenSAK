@@ -1510,10 +1510,22 @@ class MacroRuntime:
             raise MacroError(f"{func}: {path} is an OpenSAK database; rename the macro")
         if self._in_transaction():
             raise MacroError(f"{func} cannot be used inside opensak.transaction()")
+        if path != self._macro_db_path:
+            # Creates (and writes) a file, so the macro's folder must be
+            # writable for macros like any other file a macro writes; the
+            # user is asked as usual if it is not listed.
+            try:
+                self._check_access(path, write=True, allow_database=True)
+            except MacroError as exc:
+                raise MacroError(f"{func}: {exc}") from None
+        created = not path.exists()
         try:
             self._writable_db().attach_macro_db(path)
         except SqlError as exc:
             raise MacroError(f"{func}: {exc}") from None
+        if created:
+            # Shown in the macro output, so a new file never appears silently.
+            self._output(f"{func}: created {path}")
         self._macro_db_path = path
         return str(path)
 
@@ -1913,13 +1925,15 @@ class MacroRuntime:
             self._run_permissions = with_grant(self._run_permissions, target, write)
         return target
 
-    def _check_access(self, path: Path, write: bool) -> Path:
+    def _check_access(self, path: Path, write: bool, allow_database: bool = False) -> Path:
         """check_access() against this run's list. A folder that is merely
         not listed is put to the user (host.approve_folder) instead of
         failing; protected data and roots fail without asking. A file the
-        user picked in opensak.choose_file() needs no folder permission."""
+        user picked in opensak.choose_file() needs no folder permission.
+        *allow_database* only for the macro's own database (macro_db())."""
         try:
-            return check_access(path, write=write, permissions=self._run_permissions)
+            return check_access(path, write=write, permissions=self._run_permissions,
+                                allow_database=allow_database)
         except FolderNotApproved as exc:
             if (exc.target, write) in self._picked:
                 return exc.target
@@ -1938,7 +1952,8 @@ class MacroRuntime:
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         try:
-            return check_access(path, write=write, permissions=self._run_permissions)
+            return check_access(path, write=write, permissions=self._run_permissions,
+                                allow_database=allow_database)
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
 
@@ -3361,7 +3376,15 @@ API: tuple[ApiFunction, ...] = (
                     "database stay the same. Unqualified names mean the active "
                     "database first, so create with `macro.` in front. "
                     "opensak.tables() lists its tables as `macro.<name>`. "
-                    "Needs no permission. Changes inside opensak.transaction() "
+                    "The macro's folder must be writable for macros, like any "
+                    "file a macro writes (Settings → Folder permissions; the "
+                    "macros folder is by default); otherwise OpenSAK asks the "
+                    "user to allow it, and a denial makes the call fail. The "
+                    "first call creates the file, even if nothing is written "
+                    "to it, and prints its path in the macro output. If the "
+                    "folder cannot be written the call fails; a read-only "
+                    "file can be read but not changed. Unlike opensak.update() "
+                    "it does not ask about the active database. Changes inside opensak.transaction() "
                     "are kept or undone together with those of the active "
                     "database. The SQL statement ATTACH itself stays refused. "
                     "Cannot be called inside opensak.transaction(); stays "
@@ -3533,8 +3556,8 @@ API: tuple[ApiFunction, ...] = (
         description="Run one INSERT or UPDATE statement (SQLite) against the "
                     "active database — the power tool for bulk work, changing "
                     "many rows with one statement. For a single cache or row, "
-                    "prefer opensak.update(), insert{}, insert_<x>() and "
-                    "update_<x>(), which check each field and need no "
+                    "prefer `opensak.update()`, `insert{}`, `insert_<x>()` and "
+                    "`update_<x>()`, which check each field and need no "
                     "knowledge of the schema (see Changing caches). Only the cache tables can be changed ("
                     + ", ".join(f"`{t}`" for t in sorted(WRITABLE_TABLES)) +
                     "); nothing can be deleted, and an UPDATE may not set the "

@@ -38,7 +38,9 @@ OpenSAK's own data can never be read or written by a macro, whatever the
 list says (see protected_reason()): opensak.json, bootstrap.json, the
 Geocaching.com token, the data and database folders (except the macros
 folder inside the data folder) and SQLite files (.db, .db3, .sqlite,
-.sqlite3 and their -wal/-shm/-journal files) anywhere.
+.sqlite3 and their -wal/-shm/-journal files) anywhere — except the macro's
+own database (opensak.macro_db()), which still needs write access to its
+folder like any other file.
 """
 
 from __future__ import annotations
@@ -241,13 +243,16 @@ def _protected_locations() -> tuple[list[Path], list[Path]]:
     return folders, files
 
 
-def protected_reason(target: Path) -> Optional[str]:
+def protected_reason(target: Path, allow_database: bool = False) -> Optional[str]:
     """Why the resolved *target* is off limits to macros, or None.
 
     Checked before the folder list, so no Settings entry can open
     OpenSAK's settings, credentials or databases to a macro.
+    *allow_database*: *target* is the macro's own database
+    (opensak.macro_db()), which may be an SQLite file; everything else
+    still applies, OpenSAK's data folders included.
     """
-    if _is_sqlite_file(target):
+    if _is_sqlite_file(target) and not allow_database:
         return "it is a database file"
     if target.name.lower().startswith("opensak.json"):
         return "it is OpenSAK's settings file"
@@ -333,11 +338,13 @@ def check_access(
     path: str | Path,
     write: bool = False,
     permissions: Optional[Iterable[FolderPermission]] = None,
+    allow_database: bool = False,
 ) -> Path:
     """Return the resolved *path* if a permitted folder grants the access.
 
     Raises FolderAccessDenied otherwise. *permissions* defaults to the
-    saved list (load_permissions()).
+    saved list (load_permissions()); *allow_database* as for
+    protected_reason().
     """
     if permissions is None:
         permissions = load_permissions()
@@ -346,7 +353,7 @@ def check_access(
     except (OSError, RuntimeError) as exc:   # RuntimeError: symlink loop
         raise FolderAccessDenied(f"cannot resolve {path}: {exc}") from None
     kind = "write" if write else "read"
-    reason = protected_reason(target)
+    reason = protected_reason(target, allow_database)
     if reason is not None:
         raise FolderAccessDenied(f"macros may not {kind} {target} — {reason}")
     entry = _matching_entry(target, permissions)
