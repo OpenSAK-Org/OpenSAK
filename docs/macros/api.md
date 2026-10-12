@@ -51,8 +51,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
 | [`opensak.exit`](#opensakexit) | 3 |
-| [`opensak.coords.parse`](#opensakcoordsparse) | 2 |
-| [`opensak.coords.format`](#opensakcoordsformat) | 2 |
+| [`opensak.coords.parse`](#opensakcoordsparse) | 2, changed in 3 |
+| [`opensak.coords.format`](#opensakcoordsformat) | 2, changed in 3 |
 | [`opensak.coords.distance`](#opensakcoordsdistance) | 2 |
 | [`opensak.coords.bearing`](#opensakcoordsbearing) | 2 |
 | [`opensak.coords.project`](#opensakcoordsproject) | 2 |
@@ -949,7 +949,7 @@ Parameters:
 
 Returns `number?, number?, string?` — Latitude, longitude and the format that was read, or nil if the text cannot be parsed.
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added `fmt`, the third return value and the grid, code and locator formats.
 
 Example:
 
@@ -979,7 +979,7 @@ Parameters:
 
 Returns `string` — E.g. "N47 22.123  E008 32.456" or "32T E 465123 N 5247123".
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added `"mgrs"`, `"rd"`, `"osgb"`, `"sweref99"`, `"gk"`, `"olc"`, `"geohash"`, `"maidenhead"` and the aliases.
 
 Example:
 

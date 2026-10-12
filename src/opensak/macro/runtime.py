@@ -2055,7 +2055,8 @@ class MacroRuntime:
 #
 # Single source of truth for the `opensak` table. To add a function: add an
 # ApiFunction here (bump API_VERSION and use it as `since` if the release
-# already shipped the current version), then regenerate the docs and the
+# already shipped the current version; for a changed function add the new
+# version to `changed` instead), then regenerate the docs and the
 # Lua Language Server stub with
 #   python scripts/generate_macro_api_docs.py
 
@@ -2094,6 +2095,8 @@ class ApiFunction:
     returns: Optional[tuple[str, str]] = None
     # Further accepted parameter lists (same return value)
     overloads: tuple[tuple[Param, ...], ...] = ()
+    # (API version, what changed) for changes after `since`
+    changed: tuple[tuple[int, str], ...] = ()
 
     @property
     def signatures(self) -> list[str]:
@@ -2713,6 +2716,8 @@ API: tuple[ApiFunction, ...] = (
         ),
         returns=("number?, number?, string?", "Latitude, longitude and the "
                  "format that was read, or nil if the text cannot be parsed."),
+        changed=((3, "added `fmt`, the third return value and the grid, "
+                     "code and locator formats"),),
     ),
     ApiFunction(
         name="coords.format",
@@ -2737,6 +2742,10 @@ API: tuple[ApiFunction, ...] = (
         ),
         overloads=((_COORDS, Param("fmt", "string", "Output format.", optional=True)),),
         returns=("string", 'E.g. "N47 22.123  E008 32.456" or "32T E 465123 N 5247123".'),
+
+        changed=((3, "added `\"mgrs\"`, `\"rd\"`, `\"osgb\"`, `\"sweref99\"`, "
+                     "`\"gk\"`, `\"olc\"`, `\"geohash\"`, `\"maidenhead\"` "
+                     "and the aliases"),),
     ),
     ApiFunction(
         name="coords.distance",

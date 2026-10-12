@@ -107,6 +107,14 @@ def _param_line(p: Param) -> str:
     return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
 
 
+def _since(func) -> str:
+    """E.g. "Since API version 2. Changed in API version 3: added `fmt`." """
+    text = f"Since API version {func.since}."
+    for version, what in func.changed:
+        text += f" Changed in API version {version}: {what}."
+    return text
+
+
 def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     """The API reference as Markdown. *examples_dir* is where the example
     macros listed at the end are looked up (the in-app help passes the
@@ -136,7 +144,8 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     ]
     for func in API:
         anchor = func.name.replace("_", "").replace(".", "")
-        lines.append(f"| [`opensak.{func.name}`](#opensak{anchor}) | {func.since} |")
+        changed = "".join(f", changed in {v}" for v, _ in func.changed)
+        lines.append(f"| [`opensak.{func.name}`](#opensak{anchor}) | {func.since}{changed} |")
 
     for func in API:
         lines += ["", f"### opensak.{func.name}", ""]
@@ -151,7 +160,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
             lines.append("")
         if func.returns:
             lines += [f"Returns `{func.returns[0]}` — {func.returns[1]}", ""]
-        lines += [f"Since API version {func.since}.", "", "Example:", ""]
+        lines += [_since(func), "", "Example:", ""]
         lines += _code(func.example)
 
     lines += [
@@ -315,7 +324,7 @@ def render_lua_stub() -> str:
             namespaces.add(namespace)
             lines += [f"opensak.{namespace} = {{}}", ""]
         lines += _comment(func.description)
-        lines += ["---", f"---Since API version {func.since}.", "---"]
+        lines += ["---", f"---{_since(func)}", "---"]
         lines += _comment(f"```lua\n{func.example}\n```")
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")
