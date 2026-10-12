@@ -993,7 +993,9 @@ class MacroRuntime:
         self._folder_permissions = folder_permissions
         self._settings_dir = settings_dir
         self._base_dir: Optional[Path] = None
-        # The running macro's file, for opensak.settings; None if unsaved.
+        # The running macro's file — switched by opensak.run_macro() so that
+        # per-macro state (saved settings, #983) belongs to the called macro,
+        # not its caller. None for an unsaved macro.
         self._macro_path: Optional[Path] = None
         self._run_permissions: list[FolderPermission] = []
         # (folder, write) the user denied during this run — not asked again
