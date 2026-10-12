@@ -3531,7 +3531,11 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="sql_write",
         description="Run one INSERT or UPDATE statement (SQLite) against the "
-                    "active database. Only the cache tables can be changed ("
+                    "active database — the power tool for bulk work, changing "
+                    "many rows with one statement. For a single cache or row, "
+                    "prefer opensak.update(), insert{}, insert_<x>() and "
+                    "update_<x>(), which check each field and need no "
+                    "knowledge of the schema (see Changing caches). Only the cache tables can be changed ("
                     + ", ".join(f"`{t}`" for t in sorted(WRITABLE_TABLES)) +
                     "); nothing can be deleted, and an UPDATE may not set the "
                     "keys or the columns OpenSAK maintains itself (see "
@@ -3539,7 +3543,7 @@ API: tuple[ApiFunction, ...] = (
                     "and log dates of the caches the statement touched — inside "
                     "opensak.transaction() once at its end (see opensak.resync()). An "
                     "INSERT must give every column opensak.columns() marks as "
-                    "`required`; opensak.insert{} is simpler for new caches. Each "
+                    "`required`. Each "
                     "statement is committed on its own (or with the "
                     "surrounding opensak.transaction()), or not at all on an "
                     "error. BEGIN, COMMIT and the like are refused; use "

@@ -325,7 +325,8 @@ def _changing_section() -> list[str]:
         "builds. Without it they are nil, and `opensak.set_corrected()` and "
         "`opensak.clear_corrected()` change the database without asking.",
         "",
-        "`opensak.update()`, `opensak.insert{}`, `opensak.sql_write()`, "
+        "`opensak.update()`, `opensak.insert{}`, `opensak.insert_<x>()`, "
+        "`opensak.update_<x>()`, `opensak.sql_write()`, "
         "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
         "active database. Before a macro changes a database for the first "
         "time, OpenSAK asks whether macros may change it: **Deny** (the "
@@ -333,6 +334,27 @@ def _changing_section() -> list[str]:
         "**Until OpenSAK closes**, or **Always**. Databases allowed always are "
         "listed in Settings → Folder permissions, where they can be removed "
         "again.",
+        "",
+        "Which function to use:",
+        "",
+        "- A cache: `opensak.update(code, fields)` changes it, "
+        "`opensak.insert{}` adds a new one.",
+        "- Its logs, waypoints, attributes and trackables: "
+        "`opensak.insert_<x>(code, fields)` and `opensak.update_<x>(id, fields)` "
+        "(see Logs, waypoints, attributes and trackables).",
+        "- Corrected coordinates: `opensak.set_corrected()` and "
+        "`opensak.clear_corrected()`.",
+        "- `opensak.sql_write()` is the power tool for bulk work: one "
+        "INSERT or UPDATE statement that changes many rows at once, e.g. "
+        "marking every unfound cache of a country, or copying rows from the "
+        "macro's own database. Use it when a loop over the functions above "
+        "would be too slow or too long-winded.",
+        "",
+        "Start with the dedicated functions: they take Lua values, check each "
+        "field (type, range, date format) with a clear error message, and need "
+        "no knowledge of the database schema. `opensak.sql_write()` only "
+        "refuses protected columns and what SQLite itself rejects, and its "
+        "column names follow the schema, which may change between versions.",
         "",
         f"Writable cache fields: {writable}. `false` clears a field that is "
         'not a boolean, and "" clears a text field. `user_data` takes the '
@@ -384,7 +406,9 @@ def _children_section() -> list[str]:
         "The rows belonging to a cache are read with "
         + ", ".join(f"`opensak.{t.plural}()`" for t in CHILD_TABLES)
         + ", added with `opensak.insert_<x>(code, fields)` and changed with "
-        "`opensak.update_<x>(id, fields)`, without SQL. Each row has an `id`, "
+        "`opensak.update_<x>(id, fields)`, without SQL. These are the way to "
+        "add or change a single row; keep `opensak.sql_write()` for bulk "
+        "changes across many caches. Each row has an `id`, "
         "which identifies it and cannot be changed, as cannot the cache it "
         "belongs to. The changes need the user's permission and can be kept "
         "together with `opensak.transaction()`, like those of caches; OpenSAK "
