@@ -1200,7 +1200,7 @@ def reload_caches_full(caches: list) -> list:
     # #1041: the IN query is chunked to stay under SQLite's bound-parameter
     # limit — exporting a whole large database failed with "too many SQL
     # variables".
-    by_id = {}
+    by_id: dict[int, Cache] = {}
     with get_session() as session:
         for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
             chunk = ids[start:start + RELOAD_CHUNK_SIZE]
