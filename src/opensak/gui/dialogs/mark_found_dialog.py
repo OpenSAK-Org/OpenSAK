@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
+from opensak.gui.date_format import apply_date_format
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
@@ -62,6 +63,7 @@ class MarkFoundDialog(QDialog):
         form = QFormLayout()
         self._date_edit = QDateEdit()
         self._date_edit.setCalendarPopup(True)
+        apply_date_format(self._date_edit)  # issue #1043
         initial = (
             QDate(self._initial_date.year, self._initial_date.month, self._initial_date.day)
             if self._initial_date is not None else QDate.currentDate()

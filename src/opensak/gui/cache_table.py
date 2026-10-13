@@ -9,7 +9,7 @@ from typing import Optional
 from datetime import datetime
 
 from PySide6.QtCore import (
-    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
+    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint
 )
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
 from opensak.db.models import Cache
 from opensak.filters.engine import _haversine_km
 from opensak.gui.settings import get_settings
+from opensak.gui.date_format import format_date
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
 from opensak.lang import tr
-from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
+from opensak.utils.types import GcCode, TEXT_SIZE_MAP, TextSize
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.gui.icon_provider import (
@@ -166,17 +167,8 @@ def _get_active_columns() -> list[str]:
 
 
 def _format_date(d: datetime) -> str:
-    fmt = get_settings().date_format
-    if fmt == DateFormat.DMY:
-        return d.strftime("%d.%m.%Y")
-    if fmt == DateFormat.MDY:
-        return d.strftime("%m/%d/%Y")
-    if fmt == DateFormat.YMD:
-        return d.strftime("%Y-%m-%d")
-    # LOCALE: ask Qt for the OS short-date pattern, normalised to zero-padded fields
-    qd = QDate(d.year, d.month, d.day)
-    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
-    return QLocale.system().toString(qd, locale_fmt)
+    # Issue #1043: same pattern as the date pickers (opensak.gui.date_format).
+    return format_date(d, get_settings().date_format)
 
 
 def _gc_sort_key(gc_code: GcCode) -> str:

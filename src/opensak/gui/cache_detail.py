@@ -10,7 +10,7 @@ import re
 import webbrowser
 from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
-from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale, QEvent, QSize
+from PySide6.QtCore import Qt, QUrl, Signal, QEvent, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
@@ -24,23 +24,16 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
+from opensak.gui.date_format import format_date
 from opensak.gui.theme import hint_style, hint_text_color
 from opensak.gui.icon_provider import get_cache_type_pixmap_composite, get_corrected_coords_icon
-from opensak.utils.types import DateFormat, TEXT_SIZE_MAP, norm_locale_date_fmt
+from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.hint_detect import split_hint, render_hint_breaks
 
 
 def _format_date(d: datetime) -> str:
-    fmt = get_settings().date_format
-    if fmt == DateFormat.DMY:
-        return d.strftime("%d.%m.%Y")
-    if fmt == DateFormat.MDY:
-        return d.strftime("%m/%d/%Y")
-    if fmt == DateFormat.YMD:
-        return d.strftime("%Y-%m-%d")
-    qd = QDate(d.year, d.month, d.day)
-    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
-    return QLocale.system().toString(qd, locale_fmt)
+    # Issue #1043: same pattern as the date pickers (opensak.gui.date_format).
+    return format_date(d, get_settings().date_format)
 
 
 # issue #219 — geocaching.com logge bruger markdown-links: [linktekst](https://url)
