@@ -1,0 +1,49 @@
+{
+  "_migrated_from_qsettings": true,
+  "databases.dir": "{ROOT}/databases",
+  "_wizard_completed": true,
+  "display.date_format": "dmy",
+  "display.coord_format": "dd",
+  "user.gc_username": "FixtureCacher",
+  "user.gc_finder_id": "PRFIXTURE",
+  "display.use_miles": true,
+  "display.theme": "dark",
+  "databases.list": [
+    {
+      "name": "Default",
+      "path": "{ROOT}/databases/Default.db"
+    },
+    {
+      "name": "Denmark",
+      "path": "{ROOT}/databases/Denmark.db"
+    },
+    {
+      "name": "Malta Trip",
+      "path": "{ROOT}/databases/Malta Trip.db"
+    }
+  ],
+  "databases.active": "{ROOT}/databases/Denmark.db",
+  "db.{ROOT_SAFE}_databases_Denmark.db.home_lat": 55.1111,
+  "location.home_lat": 35.8989,
+  "db.{ROOT_SAFE}_databases_Denmark.db.home_lon": 11.2222,
+  "location.home_lon": 14.5146,
+  "sort.{ROOT}/databases/Denmark.db.field": "difficulty",
+  "sort.{ROOT}/databases/Denmark.db.ascending": false,
+  "sort.{ROOT}/databases/Denmark.db.filter_profile": "Easy traditionals",
+  "columns.Denmark.visible": [
+    "gc_code",
+    "name",
+    "difficulty",
+    "terrain"
+  ],
+  "db.{ROOT_SAFE}_databases_Malta Trip.db.home_lat": 35.8989,
+  "db.{ROOT_SAFE}_databases_Malta Trip.db.home_lon": 14.5146,
+  "sort.{ROOT}/databases/Malta Trip.db.field": "name",
+  "sort.{ROOT}/databases/Malta Trip.db.ascending": true,
+  "sort.{ROOT}/databases/Malta Trip.db.filter_profile": "",
+  "columns.Malta_Trip.visible": [
+    "gc_code",
+    "name",
+    "country"
+  ]
+}
