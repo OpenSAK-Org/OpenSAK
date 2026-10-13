@@ -348,10 +348,7 @@ class DatabaseManager:
     def default_path_for(name: str) -> Path:
         """Stien new_database() giver en database med dette navn."""
         from opensak.settings_store import get_db_dir
-        safe_name = "".join(
-            c if c.isalnum() or c in "-_ " else "_" for c in name
-        ).strip()
-        return get_db_dir() / f"{safe_name}.db"
+        return get_db_dir() / DatabaseManager.file_name_for(name)
 
     @staticmethod
     def is_valid_database_file(path: Path) -> bool:
@@ -585,10 +582,18 @@ class DatabaseManager:
 
         if new_path is None:
             from opensak.settings_store import get_db_dir
-            safe_name = "".join(
-                c if c.isalnum() or c in "-_ " else "_" for c in new_name
-            ).strip()
-            new_path = get_db_dir() / f"{safe_name}.db"
+            new_path = get_db_dir() / self.file_name_for(new_name)
+        new_path = Path(new_path)
+
+        # Issue #1047: the destination can now be any folder. Never replace
+        # a file that is already there (snapshot_database() would), and
+        # never copy a database whose file is missing.
+        if not db_info.exists:
+            raise FileNotFoundError(tr("db_err_file_not_found", path=db_info.path))
+        if self._find_by_path(new_path) or new_path.exists():
+            raise ValueError(
+                tr("db_err_target_path_exists", name=new_name, path=str(new_path))
+            )
 
         # Issue #659: make sure the source's settings are inside the file
         # (imported from opensak.json if it hasn't been opened since), so
@@ -622,6 +627,141 @@ class DatabaseManager:
         self._save_to_settings()
         return info
 
+    @staticmethod
+    def file_name_for(name: str) -> str:
+        """The .db file name new_database()/copy_database() use for *name*."""
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_ " else "_" for c in name
+        ).strip()
+        return f"{safe_name}.db"
+
+    def move_database(self, db_info: "DatabaseInfo", new_dir: Path) -> Optional[str]:
+        """
+        Issue #1047: move one database (with its -wal/-shm sidecars) to the
+        folder *new_dir*, keeping its name and database id.
+
+        The original is deleted only after the copy is verified. Returns a
+        warning message if the copy is in place and in use but the original
+        could not be deleted (e.g. read-only media), else None.
+
+        Raises FileNotFoundError if the database file is missing, and
+        ValueError if the move is refused or fails — in that case nothing
+        has changed: the database stays where it was, at its old path.
+        """
+        new_dir = Path(new_dir)
+        old_path = db_info.path
+        if not db_info.exists:
+            raise FileNotFoundError(tr("db_err_file_not_found", path=old_path))
+        new_path = new_dir / old_path.name
+        if new_path == old_path:
+            raise ValueError(tr("db_err_move_same_folder", name=db_info.name))
+        try:
+            new_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ValueError(tr("db_err_mkdir_failed", path=new_dir) + f"\n{exc}")
+
+        was_active = db_info == self._active
+        try:
+            original_removed = self._relocate(db_info, new_path, delete_original=True)
+        finally:
+            if was_active:
+                # The active engine was disposed to release the file. Reopen
+                # it at whichever path is current now — the new one after a
+                # move, the old one if the move was refused or failed — so
+                # the app keeps working without a restart.
+                try:
+                    self.ensure_active_initialised()
+                except Exception:
+                    logger.warning(
+                        "Could not reopen the active database after moving "
+                        "it — a restart will be required.", exc_info=True,
+                    )
+        self._save_to_settings()
+
+        if not original_removed:
+            logger.warning(
+                "Moved %r to %s, but could not delete the original %s",
+                db_info.name, new_path, old_path,
+            )
+            return tr("db_move_original_left", name=db_info.name, path=str(old_path))
+        return None
+
+    def _relocate(self, db_info: "DatabaseInfo", new_path: Path,
+                  delete_original: bool) -> bool:
+        """
+        Copy *db_info*'s file and its -wal/-shm sidecars to *new_path*,
+        verify the copy, optionally delete the original, and point *db_info*
+        at *new_path*. Shared by move_database() and move_databases_to().
+
+        Returns False if *delete_original* was asked for but the original
+        file is still there afterwards, else True. Does not save the list or
+        reopen the active engine — the callers do that once.
+
+        Raises ValueError if the move is refused or the copy fails; any
+        partial copy is removed again and *db_info* is unchanged.
+        """
+        from opensak.db.database import dispose_engine
+
+        old_path = db_info.path
+        if self._find_by_path(new_path) or new_path.exists():
+            raise ValueError(
+                tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))
+            )
+
+        # Issue #828: validate BEFORE touching the engine — a corrupt
+        # source must never be copied on, and there is no reason to close
+        # the active engine for a file that is skipped anyway.
+        if not _is_valid_sqlite_file(old_path):
+            raise ValueError(tr("db_err_corrupt_source", name=db_info.name))
+
+        # Issue #961: the path-keyed legacy settings in opensak.json
+        # (#659) no longer match once the file has a new path — import
+        # them into the database file before it is copied, so home
+        # location, sort order and filter profile travel with it. Same
+        # pattern as rename() and copy_database().
+        self._seed_db_settings(db_info)
+
+        # Close the engine before file operations — avoids locked files on
+        # Windows.
+        dispose_engine(old_path)
+        gc.collect()
+        time.sleep(0.05)
+
+        copied: list[Path] = []
+        try:
+            for suffix in ("", "-shm", "-wal"):
+                src = Path(str(old_path) + suffix)
+                if suffix and not src.exists():
+                    continue  # SQLite WAL sidecars only exist while in use
+                dst = Path(str(new_path) + suffix)
+                copied.append(dst)  # before copying: a failed copy can leave a partial file
+                shutil.copy2(src, dst)
+                if dst.stat().st_size != src.stat().st_size:
+                    raise OSError(f"size mismatch after copying {src.name}")
+            if not _is_valid_sqlite_file(new_path):
+                raise OSError("the copy is not a valid SQLite database")
+        except OSError as exc:
+            for f in copied:
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            raise ValueError(
+                tr("db_err_move_failed", name=db_info.name, error=str(exc))
+            ) from exc
+
+        if delete_original:
+            for suffix in ("", "-shm", "-wal"):
+                f = Path(str(old_path) + suffix)
+                try:
+                    if f.exists():
+                        f.unlink()
+                except OSError:
+                    pass  # reported below via old_path.exists()
+
+        db_info.path = new_path
+        return not (delete_original and old_path.exists())
+
     def move_databases_to(
         self, new_dir: Path, delete_originals: bool
     ) -> list[str]:
@@ -653,8 +793,6 @@ class DatabaseManager:
         updated_any = False
         active_engine_disposed = False
 
-        from opensak.db.database import dispose_engine
-
         for db_info in list(self._databases):
             old_path = db_info.path
             if old_path.parent == new_dir:
@@ -674,59 +812,17 @@ class DatabaseManager:
                 db_info.path = new_path
                 updated_any = True
                 continue
-            if new_path.exists() and new_path != old_path:
-                errors.append(
-                    tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))
-                )
-                continue
 
-            # Issue #828: valider FØR vi rører engine/dispose'r noget —
-            # en korrupt kilde skal aldrig kopieres videre, og der er
-            # ingen grund til at lukke den aktive engine for en fil der
-            # alligevel bliver sprunget over.
-            if not _is_valid_sqlite_file(old_path):
-                errors.append(
-                    tr("db_err_corrupt_source", name=db_info.name)
-                )
-                continue
-
-            # Issue #961: the path-keyed legacy settings in opensak.json
-            # (#659) no longer match once the file has a new path — import
-            # them into the database file before it is copied, so home
-            # location, sort order and filter profile travel with it. Same
-            # pattern as rename() and copy_database().
-            self._seed_db_settings(db_info)
-
-            # Luk engine FØR filoperationer — undgår låste filer på Windows
+            # Issue #1047: the copy/verify/delete steps are shared with
+            # move_database(). A failure leaves this database untouched at
+            # its old path; the remaining databases are still moved.
             if db_info == self._active:
                 active_engine_disposed = True
-            dispose_engine(old_path)
-            gc.collect()
-            time.sleep(0.05)
-
             try:
-                shutil.copy2(old_path, new_path)
-                # Sidecar-filer (SQLite WAL-mode) — kopiér hvis de findes
-                for suffix in ("-shm", "-wal"):
-                    side = Path(str(old_path) + suffix)
-                    if side.exists():
-                        shutil.copy2(side, Path(str(new_path) + suffix))
-            except OSError as exc:
-                errors.append(
-                    tr("db_err_move_failed", name=db_info.name, error=str(exc))
-                )
+                self._relocate(db_info, new_path, delete_original=delete_originals)
+            except ValueError as exc:
+                errors.append(str(exc))
                 continue
-
-            if delete_originals:
-                for suffix in ("", "-shm", "-wal"):
-                    f = Path(str(old_path) + suffix)
-                    try:
-                        if f.exists():
-                            f.unlink()
-                    except OSError:
-                        pass  # ikke kritisk — kopien findes allerede
-
-            db_info.path = new_path
             updated_any = True
 
         if updated_any:

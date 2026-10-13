@@ -133,6 +133,131 @@ class NewDatabaseDialog(QDialog):
         return self._custom_path / f"{safe_name}.db"
 
 
+# Issue #1047: the folder last chosen in the Copy/Move dialog, remembered for
+# the rest of the session so repeated copies to a USB stick don't need
+# browsing every time.
+_last_destination: Path | None = None
+
+
+class DatabaseLocationDialog(QDialog):
+    """
+    Issue #1047: choose where Copy… or Move… puts a database — a name
+    (Copy only), a destination folder and a preview of the resulting file.
+    """
+
+    def __init__(self, db: DatabaseInfo, copy: bool, parent=None):
+        super().__init__(parent)
+        self._db = db
+        self._copy = copy
+        self.setWindowTitle(tr("db_copy_title") if copy else tr("db_move_title"))
+        self.setMinimumWidth(460)
+
+        from opensak.settings_store import get_db_dir
+        self._folder: Path = _last_destination or get_db_dir()
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self._name_edit: QLineEdit | None = None
+        if copy:
+            self._name_edit = QLineEdit(f"{db.name} ({tr('db_copy_suffix')})")
+            self._name_edit.textChanged.connect(self._update_preview)
+            form.addRow(tr("db_copy_name_label"), self._name_edit)
+        else:
+            form.addRow(tr("db_name_label"), QLabel(db.name))
+
+        folder_row = QHBoxLayout()
+        self._folder_edit = QLineEdit()
+        self._folder_edit.setReadOnly(True)
+        folder_row.addWidget(self._folder_edit)
+        browse_btn = QPushButton(tr("gps_browse"))
+        browse_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        browse_btn.clicked.connect(self._browse)
+        folder_row.addWidget(browse_btn)
+        form.addRow(tr("file_export_folder"), folder_row)
+
+        self._preview = QLabel()
+        self._preview.setWordWrap(True)
+        self._preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow(tr("db_target_file_label"), self._preview)
+        layout.addLayout(form)
+
+        if not copy:
+            info = QLabel(
+                f"<small style='color:{hint_text_color()}'>{tr('db_move_info')}</small>"
+            )
+            info.setWordWrap(True)
+            layout.addWidget(info)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._update_preview()
+
+    @property
+    def name(self) -> str:
+        """The name of the copy, or the database's own name for a move."""
+        if self._name_edit is not None:
+            return self._name_edit.text().strip()
+        return self._db.name
+
+    @property
+    def folder(self) -> Path:
+        return self._folder
+
+    @property
+    def target_path(self) -> Path:
+        if self._copy:
+            return self._folder / DatabaseManager.file_name_for(self.name)
+        return self._folder / self._db.path.name
+
+    def set_folder(self, folder: Path) -> None:
+        self._folder = Path(folder)
+        self._update_preview()
+
+    def _browse(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, tr("db_browse_title"), str(self._folder),
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if folder:
+            self.set_folder(Path(folder))
+
+    def _update_preview(self) -> None:
+        from opensak.msix import resolve_physical_appdata_path
+        # Issue #820: show the physical path on the MSIX build.
+        self._folder_edit.setText(str(resolve_physical_appdata_path(self._folder)))
+        if self._copy and not self.name:
+            self._preview.setText("—")
+        else:
+            self._preview.setText(str(resolve_physical_appdata_path(self.target_path)))
+
+    def _validate(self) -> None:
+        global _last_destination
+        if self._copy and not self.name:
+            QMessageBox.warning(self, tr("warning"), tr("db_name_required"))
+            return
+        target = self.target_path
+        if not self._copy and target == self._db.path:
+            QMessageBox.warning(
+                self, tr("warning"), tr("db_err_move_same_folder", name=self._db.name)
+            )
+            return
+        if target.exists():
+            QMessageBox.warning(
+                self, tr("warning"),
+                tr("db_err_target_path_exists", name=self.name, path=str(target)),
+            )
+            return
+        _last_destination = self._folder
+        self.accept()
+
+
 class DatabaseManagerDialog(QDialog):
     """
     Fuld database manager dialog.
@@ -216,6 +341,12 @@ class DatabaseManagerDialog(QDialog):
         self._btn_copy.setEnabled(False)
         self._btn_copy.clicked.connect(self._copy_database)
         btn_layout.addWidget(self._btn_copy)
+
+        # Issue #1047: move a single database to another folder.
+        self._btn_move = QPushButton(tr("db_move_btn"))
+        self._btn_move.setEnabled(False)
+        self._btn_move.clicked.connect(self._move_database)
+        btn_layout.addWidget(self._btn_move)
 
         self._btn_rename = QPushButton(tr("db_rename_btn"))
         self._btn_rename.setEnabled(False)
@@ -303,6 +434,7 @@ class DatabaseManagerDialog(QDialog):
 
         self._btn_switch.setEnabled(db is not None and not is_active and db.exists)
         self._btn_copy.setEnabled(db is not None and db.exists)
+        self._btn_move.setEnabled(db is not None and db.exists)
         self._btn_rename.setEnabled(db is not None)
         self._btn_remove.setEnabled(db is not None and not is_active)
         # Delete requires: something selected, not active, and file exists on disk
@@ -423,21 +555,45 @@ class DatabaseManagerDialog(QDialog):
         db = self._selected_db()
         if not db:
             return
-        name, ok = self._simple_input(
-            tr("db_copy_title"),
-            tr("db_copy_name_label"),
-            f"{db.name} ({tr('db_copy_suffix')})"
-        )
-        if ok and name:
-            try:
-                new_db = self._manager.copy_database(db, name)
-                self._refresh_list()
-                QMessageBox.information(
-                    self, tr("db_copied_title"),
-                    tr("db_copied_msg", new_name=new_db.name, orig_name=db.name)
-                )
-            except Exception as e:
-                QMessageBox.warning(self, tr("warning"), str(e))
+        # Issue #1047: name and destination folder in one dialog.
+        dlg = DatabaseLocationDialog(db, copy=True, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            new_db = self._manager.copy_database(db, dlg.name, dlg.target_path)
+            self._refresh_list()
+            QMessageBox.information(
+                self, tr("db_copied_title"),
+                tr("db_copied_msg", new_name=new_db.name, orig_name=db.name)
+            )
+        except Exception as e:
+            QMessageBox.warning(self, tr("warning"), str(e))
+
+    def _move_database(self) -> None:
+        """Issue #1047: move the selected database to another folder."""
+        db = self._selected_db()
+        if not db:
+            return
+        dlg = DatabaseLocationDialog(db, copy=False, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            warning = self._manager.move_database(db, dlg.folder)
+        except Exception as e:
+            self._refresh_list(select_db=db)
+            QMessageBox.warning(self, tr("warning"), str(e))
+            return
+        self._refresh_list(select_db=db)
+        if db == self._manager.active:
+            # Same database, new path: refresh the toolbar and title.
+            self.database_renamed.emit(db)
+        if warning:
+            QMessageBox.warning(self, tr("db_moved_title"), warning)
+        else:
+            QMessageBox.information(
+                self, tr("db_moved_title"),
+                tr("db_moved_msg", name=db.name, path=str(db.path)),
+            )
 
     def _rename_database(self) -> None:
         db = self._selected_db()

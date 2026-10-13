@@ -382,22 +382,107 @@ class TestManagerDialog:
         assert seen["directory"] == str(db_dir)
         manager.open_database.assert_not_called()
 
+    @staticmethod
+    def _fake_location_dialog(monkeypatch, accepted=True, name="Copy",
+                              folder=Path("/usb")):
+        """Issue #1047: stand-in for DatabaseLocationDialog."""
+        seen: dict = {}
+
+        class FakeLocation:
+            def __init__(self, db, copy, parent=None):
+                seen["db"], seen["copy"] = db, copy
+                self.name = name
+                self.folder = folder
+                self.target_path = folder / f"{name}.db"
+
+            def exec(self):
+                return QDialog.DialogCode.Accepted if accepted else QDialog.DialogCode.Rejected
+
+        monkeypatch.setattr(dd, "DatabaseLocationDialog", FakeLocation)
+        return seen
+
     def test_copy_database(self, dlg, manager, monkeypatch):
-        manager.copy_database.return_value = _DB("Copy", "/data/copy.db")
-        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Copy", True))
+        manager.copy_database.return_value = _DB("Copy", "/usb/Copy.db")
+        seen = self._fake_location_dialog(monkeypatch)
         monkeypatch.setattr(dd.QMessageBox, "information", MagicMock())
         _select(dlg, "Other")
         dlg._copy_database()
-        manager.copy_database.assert_called_once()
+        assert seen["copy"] is True
+        manager.copy_database.assert_called_once_with(
+            manager._dbs["other"], "Copy", Path("/usb/Copy.db")
+        )
+
+    def test_copy_database_cancelled(self, dlg, manager, monkeypatch):
+        self._fake_location_dialog(monkeypatch, accepted=False)
+        _select(dlg, "Other")
+        dlg._copy_database()
+        manager.copy_database.assert_not_called()
 
     def test_copy_database_error(self, dlg, manager, monkeypatch):
         manager.copy_database.side_effect = Exception("no space")
-        monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Copy", True))
+        self._fake_location_dialog(monkeypatch)
         warn = MagicMock()
         monkeypatch.setattr(dd.QMessageBox, "warning", warn)
         _select(dlg, "Other")
         dlg._copy_database()
         warn.assert_called_once()
+
+    # ── Issue #1047: Move… ──────────────────────────────────────────────────
+
+    def test_move_button_enabled_only_for_existing_file(self, dlg):
+        _select(dlg, "Other")
+        assert dlg._btn_move.isEnabled()
+        _select(dlg, "Active")
+        assert dlg._btn_move.isEnabled()
+        _select(dlg, "Gone")
+        assert not dlg._btn_move.isEnabled()
+        assert not dlg._btn_copy.isEnabled()
+
+    def test_move_database(self, dlg, manager, monkeypatch):
+        manager.move_database.return_value = None
+        seen = self._fake_location_dialog(monkeypatch)
+        info = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "information", info)
+        _select(dlg, "Other")
+        dlg._move_database()
+        assert seen["copy"] is False
+        manager.move_database.assert_called_once_with(manager._dbs["other"], Path("/usb"))
+        info.assert_called_once()
+
+    def test_move_active_database_refreshes_title(self, dlg, manager, monkeypatch):
+        manager.move_database.return_value = None
+        self._fake_location_dialog(monkeypatch)
+        monkeypatch.setattr(dd.QMessageBox, "information", MagicMock())
+        emitted = []
+        dlg.database_renamed.connect(lambda db: emitted.append(db.name))
+        _select(dlg, "Active")
+        dlg._move_database()
+        assert emitted == ["Active"]
+
+    def test_move_database_original_left_shows_warning(self, dlg, manager, monkeypatch):
+        manager.move_database.return_value = "original left behind"
+        self._fake_location_dialog(monkeypatch)
+        warn = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "warning", warn)
+        _select(dlg, "Other")
+        dlg._move_database()
+        warn.assert_called_once()
+        assert "original left behind" in warn.call_args.args
+
+    def test_move_database_error(self, dlg, manager, monkeypatch):
+        manager.move_database.side_effect = ValueError("target exists")
+        self._fake_location_dialog(monkeypatch)
+        warn = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "warning", warn)
+        _select(dlg, "Other")
+        dlg._move_database()
+        warn.assert_called_once()
+
+    def test_move_database_cancelled(self, dlg, manager, monkeypatch):
+        self._fake_location_dialog(monkeypatch, accepted=False)
+        _select(dlg, "Other")
+        dlg._move_database()
+        manager.move_database.assert_not_called()
 
     def test_rename_database(self, dlg, manager, monkeypatch):
         monkeypatch.setattr(dlg, "_simple_input", lambda *a, **k: ("Renamed", True))
@@ -571,3 +656,72 @@ class TestManagerDialogRealManager:
         real_dlg._delete_database()
 
         assert "Other" in captured["text"]
+
+
+# ── DatabaseLocationDialog (issue #1047) ─────────────────────────────────────
+
+class TestDatabaseLocationDialog:
+    @pytest.fixture(autouse=True)
+    def _reset_last_destination(self, monkeypatch):
+        monkeypatch.setattr(dd, "_last_destination", None)
+
+    def test_copy_defaults_to_db_dir_with_copy_name(self, qtbot, tmp_path):
+        db = _DB("Trip", tmp_path / "Trip.db")
+        dlg = dd.DatabaseLocationDialog(db, copy=True)
+        qtbot.addWidget(dlg)
+        assert dlg.folder == tmp_path
+        assert dlg.name.startswith("Trip (")
+        assert dlg.target_path.parent == tmp_path
+
+    def test_copy_target_follows_name_and_folder(self, qtbot, tmp_path):
+        usb = tmp_path / "usb"
+        usb.mkdir()
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=True)
+        qtbot.addWidget(dlg)
+        dlg._name_edit.setText("Trip 2027")
+        dlg.set_folder(usb)
+        assert dlg.target_path == usb / "Trip 2027.db"
+        assert dlg._preview.text() == str(usb / "Trip 2027.db")
+
+    def test_move_keeps_file_name(self, qtbot, tmp_path):
+        usb = tmp_path / "usb"
+        usb.mkdir()
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "old" / "trip_x.db"), copy=False)
+        qtbot.addWidget(dlg)
+        dlg.set_folder(usb)
+        assert dlg.name == "Trip"
+        assert dlg.target_path == usb / "trip_x.db"
+
+    def test_refuses_existing_target(self, qtbot, tmp_path, monkeypatch):
+        usb = tmp_path / "usb"
+        usb.mkdir()
+        (usb / "Trip.db").write_bytes(b"x")
+        warn = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "warning", warn)
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=False)
+        qtbot.addWidget(dlg)
+        dlg.set_folder(usb)
+        dlg._validate()
+        warn.assert_called_once()
+        assert dlg.result() != QDialog.DialogCode.Accepted
+
+    def test_refuses_move_to_same_folder(self, qtbot, tmp_path, monkeypatch):
+        warn = MagicMock()
+        monkeypatch.setattr(dd.QMessageBox, "warning", warn)
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=False)
+        qtbot.addWidget(dlg)
+        dlg._validate()
+        warn.assert_called_once()
+
+    def test_remembers_last_folder_for_the_session(self, qtbot, tmp_path, monkeypatch):
+        usb = tmp_path / "usb"
+        usb.mkdir()
+        dlg = dd.DatabaseLocationDialog(_DB("Trip", tmp_path / "Trip.db"), copy=True)
+        qtbot.addWidget(dlg)
+        dlg.set_folder(usb)
+        dlg._validate()
+        assert dlg.result() == QDialog.DialogCode.Accepted
+
+        again = dd.DatabaseLocationDialog(_DB("Other", tmp_path / "Other.db"), copy=False)
+        qtbot.addWidget(again)
+        assert again.folder == usb
