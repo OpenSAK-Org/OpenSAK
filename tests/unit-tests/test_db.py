@@ -481,6 +481,42 @@ class TestReloadCachesFull:
         assert all(isinstance(c, Cache) for c in reloaded)
         assert {c.encoded_hints for c in reloaded} == {"Hint one.", "Hint two."}
 
+    def test_large_input_stays_under_sqlite_variable_limit(self, tmp_path):
+        # #1041: exporting a whole large database put every cache id into a
+        # single IN (...) and failed with "too many SQL variables". Every
+        # statement must stay under SQLite's historical 999-parameter limit.
+        from sqlalchemy import event
+        from opensak.db.database import get_engine
+
+        init_db(db_path=tmp_path / "reload_large.db")
+        count = 1200
+        with get_session() as s:
+            s.add_all(
+                Cache(gc_code=f"GCBIG{i}", name=f"Big {i}", cache_type="Traditional Cache",
+                      latitude=55.0, longitude=12.0, encoded_hints=f"Hint {i}")
+                for i in range(count)
+            )
+        with get_session() as s:
+            caches = s.query(Cache).order_by(Cache.id.desc()).all()
+
+        max_params = 0
+
+        def _count(conn, cursor, statement, parameters, context, executemany):
+            nonlocal max_params
+            if not executemany and parameters:
+                max_params = max(max_params, len(parameters))
+
+        engine = get_engine()
+        event.listen(engine, "before_cursor_execute", _count)
+        try:
+            reloaded = reload_caches_full(caches)
+        finally:
+            event.remove(engine, "before_cursor_execute", _count)
+
+        assert max_params < 999
+        assert [c.gc_code for c in reloaded] == [c.gc_code for c in caches]
+        assert reloaded[0].encoded_hints == f"Hint {count - 1}"
+
 
 # ── Location provenance columns (issue #60 phase 3) ──────────────────────────
 
