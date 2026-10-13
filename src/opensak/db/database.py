@@ -12,6 +12,7 @@ Usage
 
 from __future__ import annotations
 
+import errno
 import logging
 import sqlite3
 import time
@@ -32,9 +33,19 @@ logger = logging.getLogger(__name__)
 # ── Engine factory ────────────────────────────────────────────────────────────
 
 def _make_engine(db_path: Path) -> Engine:
-    """Create a SQLAlchemy engine for a SQLite file at *db_path*."""
-    # Ensure parent directory exists (pathlib — cross-platform safe)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    """Create a SQLAlchemy engine for a SQLite file at *db_path*.
+
+    The folder must already exist. Issue #1045: this used to create it with
+    mkdir(parents=True), so opening a database on a removed USB drive walked
+    up the missing path and failed on the mount point with PermissionError
+    (or, on a writable path, silently created an empty database in a phantom
+    folder). Creating folders belongs to the "new database" flows, which do
+    it themselves before calling init_db().
+    """
+    if not db_path.parent.is_dir():
+        raise FileNotFoundError(
+            errno.ENOENT, "Database folder not found", str(db_path.parent)
+        )
 
     url = f"sqlite:///{db_path}"
     engine = create_engine(

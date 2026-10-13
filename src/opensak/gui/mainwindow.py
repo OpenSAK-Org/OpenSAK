@@ -1125,6 +1125,23 @@ class MainWindow(QMainWindow):
         )
         QMessageBox.information(self, tr("premigration_backup_title"), text)
 
+    def show_database_fallback_notice(self) -> None:
+        """
+        Issue #1045: tell the user, once the window is up, that the last
+        active database was unavailable at startup and which database was
+        opened instead. A no-op when startup didn't have to fall back.
+        """
+        from opensak.db.manager import get_db_manager
+        fallback = get_db_manager().take_startup_fallback()
+        if fallback is None:
+            return
+        missing, used = fallback
+        QMessageBox.warning(
+            self, tr("db_unavailable_title"),
+            tr("db_unavailable_fallback_msg", name=missing.name,
+               path=str(missing.path), fallback=used.name),
+        )
+
     def show_settings_restore_notice(self, result: str) -> None:
         """
         #987: tell the user, once the window is up, that the settings chosen

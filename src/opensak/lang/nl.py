@@ -779,6 +779,8 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Kan niet van database wisselen",
     "db_err_switch_failed":         "Kan niet wisselen naar '{name}':\n{error}\n\nEr is een gedetailleerd logbestand opgeslagen — zie Help > Logbestand openen.",
     "db_err_file_not_found":        "Databasebestand niet gevonden:\n{path}",
+    "db_unavailable_title":         "Database niet beschikbaar",
+    "db_unavailable_fallback_msg":  "De database \"{name}\" is niet gevonden:\n{path}\n\nHet station waarop deze staat is mogelijk niet aangesloten. OpenSAK heeft in plaats daarvan \"{fallback}\" geopend.\n\n\"{name}\" blijft in de databaselijst staan en kan weer worden geopend zodra het station terug is.",
     "db_err_remove_active":         "Kan de actieve database niet uit de lijst verwijderen.",
     "db_err_delete_active":         "Kan de actieve database niet verwijderen — schakel eerst over naar een andere.",
     "db_err_delete_partial":        "De database is uit de lijst verwijderd, maar sommige bestanden konden niet worden verwijderd:",

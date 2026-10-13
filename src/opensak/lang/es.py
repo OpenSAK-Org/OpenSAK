@@ -777,6 +777,8 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "No se pudo cambiar de base de datos",
     "db_err_switch_failed":         "No se pudo cambiar a «{name}»:\n{error}\n\nSe ha guardado un registro detallado — consulta Ayuda > Abrir archivo de registro.",
     "db_err_file_not_found":        "Archivo de base de datos no encontrado:\n{path}",
+    "db_unavailable_title":         "Base de datos no disponible",
+    "db_unavailable_fallback_msg":  "No se encontró la base de datos \"{name}\":\n{path}\n\nEs posible que la unidad donde se encuentra esté desconectada. OpenSAK ha abierto \"{fallback}\" en su lugar.\n\n\"{name}\" sigue en la lista de bases de datos y podrá abrirse de nuevo cuando la unidad vuelva a estar conectada.",
     "db_err_remove_active":         "No se puede quitar de la lista la base de datos activa.",
     "db_err_delete_active":         "No se puede eliminar la base de datos activa — cambia primero a otra.",
     "db_err_delete_partial":        "La base de datos se quitó de la lista, pero algunos archivos no se pudieron eliminar:",

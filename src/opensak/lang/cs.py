@@ -776,6 +776,8 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Nepodařilo se přepnout databázi",
     "db_err_switch_failed":         "Nepodařilo se přepnout na '{name}':\n{error}\n\nByl uložen podrobný protokol — viz Nápověda > Otevřít soubor protokolu.",
     "db_err_file_not_found":        "Soubor databáze nebyl nalezen:\n{path}",
+    "db_unavailable_title":         "Databáze není dostupná",
+    "db_unavailable_fallback_msg":  "Databáze \"{name}\" nebyla nalezena:\n{path}\n\nJednotka, na které je uložena, možná není připojena. OpenSAK místo ní otevřel \"{fallback}\".\n\n\"{name}\" zůstává v seznamu databází a lze ji znovu otevřít, jakmile bude jednotka zpět.",
     "db_err_remove_active":         "Aktivní databázi nelze odebrat ze seznamu.",
     "db_err_delete_active":         "Aktivní databázi nelze smazat — nejprve přepněte na jinou.",
     "db_err_delete_partial":        "Databáze byla odebrána ze seznamu, ale některé soubory se nepodařilo smazat:",

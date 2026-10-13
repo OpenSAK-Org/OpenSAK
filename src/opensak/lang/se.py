@@ -776,6 +776,8 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Kunde inte byta databas",
     "db_err_switch_failed":         "Kunde inte byta till '{name}':\n{error}\n\nEn detaljerad logg har sparats — se Hjälp > Öppna loggfil.",
     "db_err_file_not_found":        "Databasfilen hittades inte:\n{path}",
+    "db_unavailable_title":         "Databasen är inte tillgänglig",
+    "db_unavailable_fallback_msg":  "Databasen \"{name}\" hittades inte:\n{path}\n\nEnheten den ligger på kan vara frånkopplad. OpenSAK har öppnat \"{fallback}\" i stället.\n\n\"{name}\" finns kvar i databaslistan och kan öppnas igen när enheten är tillbaka.",
     "db_err_remove_active":         "Den aktiva databasen kan inte tas bort från listan.",
     "db_err_delete_active":         "Den aktiva databasen kan inte raderas — byt till en annan först.",
     "db_err_delete_partial":        "Databasen har tagits bort från listan, men vissa filer kunde inte raderas:",

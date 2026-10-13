@@ -438,6 +438,9 @@ def main() -> None:
     # Issue #549: after the splash has gone, tell the user if the active
     # database was backed up before being migrated during startup.
     QTimer.singleShot(500, window.show_premigration_backup_notices)
+    # Issue #1045: the last active database was unavailable (e.g. a removed
+    # USB drive) and startup fell back to another one.
+    QTimer.singleShot(550, window.show_database_fallback_notice)
     if settings_restore_result is not None:
         QTimer.singleShot(
             600, lambda: window.show_settings_restore_notice(settings_restore_result)

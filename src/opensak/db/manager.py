@@ -103,6 +103,9 @@ class DatabaseManager:
     def __init__(self):
         self._databases: list[DatabaseInfo] = []
         self._active: Optional[DatabaseInfo] = None
+        # Issue #1045: (unavailable database, database used instead) when
+        # ensure_active_initialised() had to fall back at startup.
+        self._startup_fallback: Optional[tuple[DatabaseInfo, DatabaseInfo]] = None
         self._load_from_settings()
 
     # ── Interne helpers ───────────────────────────────────────────────────────
@@ -263,10 +266,81 @@ class DatabaseManager:
         """
         Sørg for at den aktive database er initialiseret.
         Kaldes ved opstart — åbner den samme DB som sidst.
+
+        Issue #1045: if the last active database file is gone (typically a
+        removed USB drive), fall back to another database instead of failing
+        startup. The missing entry stays in the list — the drive usually comes
+        back. take_startup_fallback() tells the GUI what happened.
         """
-        if self._active:
-            from opensak.db.database import init_db
-            init_db(db_path=self._active.path)
+        if not self._active:
+            return
+        if not self._active.exists:
+            self._fall_back_from_missing_active()
+        from opensak.db.database import init_db
+        init_db(db_path=self._active.path)
+
+    def _fall_back_from_missing_active(self) -> None:
+        """
+        Issue #1045: replace a missing active database with the first known
+        database that exists on disk, or else with Default.db in the database
+        folder (created if needed).
+        """
+        missing = self._active
+        assert missing is not None
+        fallback = next(
+            (db for db in self.databases if db is not missing and db.exists),
+            None,
+        )
+        if fallback is None:
+            default_path = self._writable_default_path()
+            fallback = self._find_by_path(default_path)
+            if fallback is None:
+                name = "Default"
+                counter = 2
+                while self._find_by_name(name):
+                    name = f"Default ({counter})"
+                    counter += 1
+                fallback = DatabaseInfo(name, default_path)
+                self._databases.append(fallback)
+
+        if fallback is not missing:
+            logger.warning(
+                "Active database %r is unavailable (%s not found) — "
+                "using %r (%s) instead",
+                missing.name, missing.path, fallback.name, fallback.path,
+            )
+            self._startup_fallback = (missing, fallback)
+        self._active = fallback
+        self._save_to_settings()
+
+    def _writable_default_path(self) -> Path:
+        """
+        Default.db in the database folder, creating the folder if needed.
+        If that folder can't be created either (it may itself live on the
+        removed drive), use the install folder instead.
+        """
+        try:
+            path = self._default_db_path()  # get_db_dir() creates the folder
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+        except OSError:
+            from opensak.settings_store import get_install_dir
+            logger.warning(
+                "Database folder is unavailable — using the install folder "
+                "for Default.db", exc_info=True,
+            )
+            install_dir = get_install_dir()
+            install_dir.mkdir(parents=True, exist_ok=True)
+            return install_dir / "Default.db"
+
+    def take_startup_fallback(self) -> Optional[tuple[DatabaseInfo, DatabaseInfo]]:
+        """
+        Issue #1045: (unavailable database, database used instead) if startup
+        had to fall back, else None. Cleared once read, so the notice is
+        shown once.
+        """
+        result, self._startup_fallback = self._startup_fallback, None
+        return result
 
     @staticmethod
     def default_path_for(name: str) -> Path:
@@ -382,6 +456,10 @@ class DatabaseManager:
     def switch_to(self, db_info: "DatabaseInfo") -> None:
         """Skift aktiv database og initialiser den."""
         from opensak.db.database import init_db
+        # Issue #1045: never let switching create an empty database in place
+        # of a missing one (e.g. on a removed USB drive).
+        if not db_info.exists:
+            raise FileNotFoundError(tr("db_err_file_not_found", path=db_info.path))
         try:
             init_db(db_path=db_info.path)  # raises if the file is not a valid DB
         except Exception:

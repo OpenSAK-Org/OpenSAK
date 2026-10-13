@@ -777,6 +777,8 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Datenbank konnte nicht gewechselt werden",
     "db_err_switch_failed":         "Wechsel zu '{name}' fehlgeschlagen:\n{error}\n\nEin detailliertes Protokoll wurde gespeichert — siehe Hilfe > Protokolldatei öffnen.",
     "db_err_file_not_found":        "Datenbankdatei nicht gefunden:\n{path}",
+    "db_unavailable_title":         "Datenbank nicht verfügbar",
+    "db_unavailable_fallback_msg":  "Die Datenbank \"{name}\" wurde nicht gefunden:\n{path}\n\nDas Laufwerk ist möglicherweise nicht verbunden. OpenSAK hat stattdessen \"{fallback}\" geöffnet.\n\n\"{name}\" bleibt in der Datenbankliste und kann wieder geöffnet werden, sobald das Laufwerk zurück ist.",
     "db_err_remove_active":         "Die aktive Datenbank kann nicht aus der Liste entfernt werden.",
     "db_err_delete_active":         "Die aktive Datenbank kann nicht gelöscht werden — wechseln Sie zuerst zu einer anderen.",
     "db_err_delete_partial":        "Die Datenbank wurde aus der Liste entfernt, aber einige Dateien konnten nicht gelöscht werden:",

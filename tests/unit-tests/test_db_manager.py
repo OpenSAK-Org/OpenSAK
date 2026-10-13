@@ -437,6 +437,7 @@ class TestSwitchTo:
     def test_switch_sets_active(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("Switch", tmp_path / "Switch.db")
+        (tmp_path / "Switch.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
         with patch("opensak.db.database.init_db"):
             manager.switch_to(extra)
         assert manager.active is extra
@@ -452,6 +453,7 @@ class TestSwitchTo:
     def test_failed_switch_logs_exception_and_reraises(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("BadDB", tmp_path / "BadDB.db")
+        (tmp_path / "BadDB.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
 
         boom = RuntimeError("simulated migration failure")
         with patch("opensak.db.database.init_db", side_effect=boom):
@@ -464,6 +466,7 @@ class TestSwitchTo:
         with patch("opensak.db.database.init_db"):
             original = manager.active
             extra = manager.new_database("BadDB2", tmp_path / "BadDB2.db")
+        (tmp_path / "BadDB2.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
 
         with patch("opensak.db.database.init_db", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):

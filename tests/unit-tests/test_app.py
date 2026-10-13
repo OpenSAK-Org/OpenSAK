@@ -150,6 +150,9 @@ def test_main_smoke(qapp, monkeypatch):
 
         def show_premigration_backup_notices(self):  # issue #549
             pass
+
+        def show_database_fallback_notice(self):  # issue #1045
+            pass
     monkeypatch.setattr("opensak.gui.mainwindow.MainWindow", FakeWindow)
 
     # Reuse the existing QApplication; restore the class *before* the test
