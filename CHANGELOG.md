@@ -4,6 +4,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0-beta.9] — 2026-10-13
+
+> Headline: **OpenSAK now starts even when your last database is on a USB
+> stick that isn't plugged in**, and **Manage Databases can move a
+> database or copy it to any folder**. Also in this beta: exporting a very
+> large database no longer fails, **all databases from an older version
+> can be updated in one go**, and dates look the same everywhere.
+>
+> This is the release candidate for 1.21.0 stable. The new texts are
+> machine-translated in all languages except Danish and English —
+> corrections from native speakers are very welcome.
+
+### Added
+
+- **Manage Databases: Move… and Copy to any folder (#1047)** — **Move…**
+  moves a database to a folder you choose, for example from a USB stick to
+  your internal disk. It keeps its name, and the original is only deleted
+  once the copy has been checked. If the original can't be deleted (for
+  example on read-only media), OpenSAK uses the new copy and tells you
+  where the old file is. **Copy…** now also asks where to put the copy,
+  instead of always using the database folder. Both remember the folder
+  you chose until you close OpenSAK, and never overwrite an existing file.
+  You can move the database you're working in without restarting.
+- **Update all older databases at once (#1027)** — when OpenSAK has backed
+  up and updated a database from an older version, it now offers **Apply
+  to all databases** for the others in your list, instead of one message
+  each time you switch to one. Each database is backed up first, and the
+  one you're working in stays open. Contributed by nagisml.
+
+### Fixed
+
+- **OpenSAK didn't start when the last database was unavailable (#1045)**
+  — if the database you used last was on a USB stick or network drive that
+  isn't connected, OpenSAK stopped with "could not open your database".
+  It now opens another database from your list (or a new Default database)
+  and tells you which one was missing. The missing database stays in your
+  list, so you can open it again when the drive is back. Switching to a
+  database whose file is missing now shows a clear message instead of
+  creating an empty database in its place.
+- **Exporting a very large database failed (#1041)** — exporting more
+  than about 32,000 caches at once (GPX, GGZ, LOC, KML, Send to GPS, trip
+  planner) failed with "too many SQL variables". Reported by GarenKreiz,
+  contributed by nagisml.
+- **Dates looked different in different places (#1043)** — the date format
+  chosen in **Settings** is now also used by the date fields in the filter
+  dialog, **Mark as Found** and the waypoint dialog, not only by the cache
+  list and the details panel. Reported by GarenKreiz, analysed by nagisml.
+- **The log file no longer contains your personal settings (#1046)** —
+  each start wrote all your settings to `opensak.log`, including your PQ
+  e-mail account, home location and Geocaching.com username. That log is
+  the one we ask you to attach when reporting a problem, so it now only
+  records the database settings needed to diagnose startup problems.
+
+---
+
 ## [1.21.0-beta.8] — 2026-10-09
 
 > Headline: **autocompletion for macros in VS Code now works in installed
