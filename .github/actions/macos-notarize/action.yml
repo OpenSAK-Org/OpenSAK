@@ -44,7 +44,21 @@ runs:
 
     - name: Staple notarization ticket
       shell: bash
-      run: xcrun stapler staple "${{ inputs.target-path }}"
+      run: |
+        set -uo pipefail
+        # Stapling fetches the ticket from Apple's CloudKit service, which
+        # now and then drops the connection ("The network connection was
+        # lost", error 68) even though notarization itself succeeded — seen
+        # on v1.21.0-beta.9. Retry a few times before failing the build.
+        for attempt in 1 2 3 4 5; do
+          if xcrun stapler staple "${{ inputs.target-path }}"; then
+            exit 0
+          fi
+          echo "::warning::Stapling failed (attempt $attempt of 5), retrying in $((attempt * 20)) s"
+          sleep $((attempt * 20))
+        done
+        echo "::error::Stapling failed after 5 attempts"
+        exit 1
 
     - name: Verify Gatekeeper acceptance
       shell: bash
