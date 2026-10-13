@@ -31,6 +31,31 @@ from opensak.logger import get_logger
 
 _log = get_logger("settings_migration")
 
+# Issue #1046: the only settings written to the startup log. The full store
+# holds personal data (PQ e-mail account, home coordinates, Geocaching.com
+# username and finder ID, ...), and users are asked to attach opensak.log to
+# public GitHub issues when startup fails — so it is never logged whole.
+_LOG_SAFE_KEYS = (
+    "databases.active",
+    "databases.dir",
+    "databases.list",
+    "_wizard_completed",
+    "_migrated_from_qsettings",
+)
+
+
+def settings_summary_for_log(store: "SettingsStore") -> dict[str, Any]:
+    """
+    Issue #1046: the database and first-run settings from *store*, plus the
+    total number of keys — enough to diagnose startup and database-loading
+    problems (#878, #1045) without writing personal data to the log.
+    Reads the in-memory data as is; never triggers a load from disk.
+    """
+    data = store._data if isinstance(store._data, dict) else {}
+    summary: dict[str, Any] = {k: data[k] for k in _LOG_SAFE_KEYS if k in data}
+    summary["key_count"] = len(data)
+    return summary
+
 
 # ── Bootstrap-sti ─────────────────────────────────────────────────────────────
 
@@ -293,7 +318,7 @@ class SettingsStore:
     def _flush(self) -> None:
         """Skriv data til disk atomisk."""
         if self._writes_disabled:
-            _log.debug("Skrivning til opensak.json undertrykt efter data-sletning")
+            _log.debug("Write to opensak.json suppressed after data was deleted")
             return
         import base64
 
@@ -389,16 +414,17 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
     # _load() rent faktisk fandt/læste den forventede fil, eller startede
     # fra en tom dict.
     _log.debug(
-        "migrate_from_qsettings: FØR store.get() — id(store)=%s, "
-        "store._data (pre-load)=%r, store._path (cached)=%r",
-        id(store), store._data, store._path,
+        "migrate_from_qsettings: before store.get() — id(store)=%s, "
+        "loaded=%s, settings (pre-load)=%r, store._path (cached)=%r",
+        id(store), bool(store._data), settings_summary_for_log(store),
+        store._path,
     )
     already_migrated = store.get("_migrated_from_qsettings", False)
     _log.debug(
-        "migrate_from_qsettings: EFTER _load() — settings_path=%s "
-        "(findes=%s), already_migrated=%r, fuld store._data=%r",
+        "migrate_from_qsettings: after _load() — settings_path=%s "
+        "(exists=%s), already_migrated=%r, settings=%r",
         store._settings_path(), store._settings_path().exists(),
-        already_migrated, store._data,
+        already_migrated, settings_summary_for_log(store),
     )
     if already_migrated:
         return False
@@ -541,13 +567,13 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
         store.set_many(updates)
 
         if found_real_data:
-            print(f"[settings] Migrerede {len(updates)-1} nøgler fra QSettings → opensak.json")
+            print(f"[settings] Migrated {len(updates)-1} keys from QSettings → opensak.json")
         else:
-            print("[settings] Ingen OpenSAK-data fundet i QSettings — ingen migration nødvendig")
+            print("[settings] No OpenSAK data found in QSettings — no migration needed")
         return found_real_data
 
     except Exception as e:
-        print(f"[settings] Migration fra QSettings fejlede: {e}")
+        print(f"[settings] Migration from QSettings failed: {e}")
         store.set("_migrated_from_qsettings", True)
         return False
 
@@ -575,18 +601,18 @@ def _rewrite_stale_install_dir_paths(
     have fuldført korrekt.
     """
     if not json_path.exists():
-        _log.debug("_rewrite_stale_install_dir_paths: %s findes ikke — intet at rette",
+        _log.debug("_rewrite_stale_install_dir_paths: %s does not exist — nothing to fix",
                     json_path)
         return
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        _log.debug("_rewrite_stale_install_dir_paths: kunne ikke læse/parse "
-                    "%s (%s) — springer over", json_path, exc)
+        _log.debug("_rewrite_stale_install_dir_paths: could not read/parse "
+                    "%s (%s) — skipping", json_path, exc)
         return
     if not isinstance(data, dict):
-        _log.debug("_rewrite_stale_install_dir_paths: %s indeholder ikke et "
-                    "JSON-objekt — springer over", json_path)
+        _log.debug("_rewrite_stale_install_dir_paths: %s does not contain a "
+                    "JSON object — skipping", json_path)
         return
 
     old_str = str(old_prefix)
@@ -616,17 +642,17 @@ def _rewrite_stale_install_dir_paths(
         data["databases.dir"] = _rewrite(data["databases.dir"], "databases.dir")
 
     if changed:
-        _log.debug("_rewrite_stale_install_dir_paths: retter %d felt(er) i %s: %s",
+        _log.debug("_rewrite_stale_install_dir_paths: fixing %d field(s) in %s: %s",
                     len(rewritten), json_path, "; ".join(rewritten))
         try:
             _atomic_write(json_path, data)
         except OSError as exc:
-            print(f"[settings] macOS-migration: kunne ikke genskrive "
-                  f"stale stier i {json_path}: {exc}")
-            _log.debug("_rewrite_stale_install_dir_paths: _atomic_write af %s "
-                        "fejlede: %s", json_path, exc)
+            print(f"[settings] macOS migration: could not rewrite "
+                  f"stale paths in {json_path}: {exc}")
+            _log.debug("_rewrite_stale_install_dir_paths: _atomic_write of %s "
+                        "failed: %s", json_path, exc)
     else:
-        _log.debug("_rewrite_stale_install_dir_paths: ingen stale stier fundet i %s "
+        _log.debug("_rewrite_stale_install_dir_paths: no stale paths found in %s "
                     "(prefix %s)", json_path, old_str)
 
 
@@ -663,22 +689,22 @@ def _backup_opensak_json_in_place(source_dir: Path) -> None:
     """
     source = source_dir / "opensak.json"
     if not source.exists():
-        _log.debug("_backup_opensak_json_in_place: %s findes ikke — intet at "
-                    "sikkerhedskopiere", source)
+        _log.debug("_backup_opensak_json_in_place: %s does not exist — nothing "
+                    "to back up", source)
         return
     backup = source_dir / _PRE_MIGRATION_BACKUP_NAME
     if backup.exists():
-        _log.debug("_backup_opensak_json_in_place: backup findes allerede "
-                    "(%s) — springer over", backup)
+        _log.debug("_backup_opensak_json_in_place: backup already exists "
+                    "(%s) — skipping", backup)
         return  # allerede sikkerhedskopieret (fx ved en tidligere, afbrudt kørsel)
     try:
         shutil.copy2(str(source), str(backup))
-        _log.debug("_backup_opensak_json_in_place: backup taget: %s -> %s "
+        _log.debug("_backup_opensak_json_in_place: backup taken: %s -> %s "
                     "(%d bytes)", source, backup, backup.stat().st_size)
     except OSError as exc:
-        print(f"[settings] macOS-migration: kunne ikke tage backup af "
+        print(f"[settings] macOS migration: could not back up "
               f"{source}: {exc}")
-        _log.debug("_backup_opensak_json_in_place: kopiering af %s fejlede: %s",
+        _log.debug("_backup_opensak_json_in_place: copying %s failed: %s",
                     source, exc)
 
 
@@ -716,30 +742,30 @@ def _move_verified(entry: Path, target: Path) -> bool:
             shutil.move(str(entry), str(target))
             return True
         except OSError as exc:
-            _log.warning("migrate_macos_default_paths: flytning af mappen "
-                          "%s -> %s fejlede: %s", entry, target, exc)
+            _log.warning("migrate_macos_default_paths: moving the folder "
+                          "%s -> %s failed: %s", entry, target, exc)
             return False
 
     try:
         shutil.copy2(str(entry), str(target))
     except OSError as exc:
-        _log.warning("migrate_macos_default_paths: kopiering af %s -> %s "
-                      "fejlede: %s", entry, target, exc)
+        _log.warning("migrate_macos_default_paths: copying %s -> %s "
+                      "failed: %s", entry, target, exc)
         return False
 
     try:
         source_size = entry.stat().st_size
         target_size = target.stat().st_size
     except OSError as exc:
-        _log.warning("migrate_macos_default_paths: kunne ikke verificere "
-                      "%s efter kopiering fra %s: %s", target, entry, exc)
+        _log.warning("migrate_macos_default_paths: could not verify "
+                      "%s after copying from %s: %s", target, entry, exc)
         return False
 
     if source_size != target_size:
         _log.warning(
-            "migrate_macos_default_paths: verifikation fejlede for %s -> "
-            "%s (kilde=%d bytes, kopi=%d bytes) — kildefilen BEVARES "
-            "urørt, kopien slettes igen", entry, target, source_size,
+            "migrate_macos_default_paths: verification failed for %s -> "
+            "%s (source=%d bytes, copy=%d bytes) — the source file is KEPT "
+            "untouched, the copy is deleted again", entry, target, source_size,
             target_size,
         )
         try:
@@ -755,9 +781,9 @@ def _move_verified(entry: Path, target: Path) -> bool:
         # (fx en fil der er låst). Ufarligt at have begge liggende —
         # betragt selve migreringen af DENNE fil som lykkedes.
         _log.warning(
-            "migrate_macos_default_paths: kunne ikke slette kildefilen %s "
-            "efter bekræftet kopiering til %s: %s (begge steder har nu "
-            "identisk indhold — ufarligt, men ryd op manuelt om ønsket)",
+            "migrate_macos_default_paths: could not delete the source file %s "
+            "after a verified copy to %s: %s (both places now have "
+            "identical content — harmless, clean up manually if wanted)",
             entry, target, exc,
         )
     return True
@@ -794,8 +820,8 @@ def migrate_macos_default_paths() -> bool:
 
     new_bootstrap = _bootstrap_path()
     if new_bootstrap.exists():
-        _log.debug("migrate_macos_default_paths: %s findes allerede — "
-                    "intet at migrere", new_bootstrap)
+        _log.debug("migrate_macos_default_paths: %s already exists — "
+                    "nothing to migrate", new_bootstrap)
         return False  # allerede migreret, eller frisk install på korrekt sti
 
     old_bootstrap = _legacy_macos_bootstrap_path()
@@ -809,8 +835,8 @@ def migrate_macos_default_paths() -> bool:
     )
 
     if not old_bootstrap.exists() and not old_default_install.exists():
-        _log.debug("migrate_macos_default_paths: hverken gammel bootstrap "
-                    "eller gammel install-mappe findes — helt frisk install")
+        _log.debug("migrate_macos_default_paths: neither the old bootstrap "
+                    "nor the old install folder exists — fresh install")
         return False  # intet at migrere — helt frisk installation
 
     migrated_something = False
@@ -826,11 +852,11 @@ def migrate_macos_default_paths() -> bool:
             if candidate:
                 actual_install_dir = Path(candidate)
         except (json.JSONDecodeError, OSError) as exc:
-            _log.debug("migrate_macos_default_paths: kunne ikke læse gammel "
-                        "bootstrap %s (%s) — bruger standard-sti", old_bootstrap, exc)
+            _log.debug("migrate_macos_default_paths: could not read old "
+                        "bootstrap %s (%s) — using the default path", old_bootstrap, exc)
 
     if actual_install_dir == old_default_install:
-        _log.debug("migrate_macos_default_paths: standard-sti-gren "
+        _log.debug("migrate_macos_default_paths: default-path branch "
                     "(actual_install_dir == old_default_install = %s)",
                     old_default_install)
         # Standard-sti — flyt selve indholdet (opensak.json, databaser osv.)
@@ -844,35 +870,35 @@ def migrate_macos_default_paths() -> bool:
             try:
                 entries = list(old_default_install.iterdir())
             except OSError as exc:
-                _log.debug("migrate_macos_default_paths: kunne ikke liste "
+                _log.debug("migrate_macos_default_paths: could not list "
                             "%s: %s", old_default_install, exc)
                 entries = []
-            _log.debug("migrate_macos_default_paths: indhold fundet i %s: %s "
-                        "(backup-filen '%s' flyttes ikke, bliver liggende i "
-                        "den gamle mappe)", old_default_install,
+            _log.debug("migrate_macos_default_paths: contents found in %s: %s "
+                        "(the backup file '%s' is not moved, it stays in "
+                        "the old folder)", old_default_install,
                         [e.name for e in entries], _PRE_MIGRATION_BACKUP_NAME)
             for entry in entries:
                 if entry.name == _PRE_MIGRATION_BACKUP_NAME:
                     continue  # skal blive liggende urørt i den GAMLE mappe
                 target = new_install_dir / entry.name
                 if target.exists():
-                    _log.debug("migrate_macos_default_paths: kollision på %s "
-                                "— springer over, rører intet", target)
+                    _log.debug("migrate_macos_default_paths: collision on %s "
+                                "— skipping, touching nothing", target)
                     continue  # kollision — rør det ikke, behold begge som de er
                 if _move_verified(entry, target):
                     migrated_something = True
-                    _log.debug("migrate_macos_default_paths: flyttede %s -> %s "
-                                "(verificeret)", entry, target)
+                    _log.debug("migrate_macos_default_paths: moved %s -> %s "
+                                "(verified)", entry, target)
                 else:
-                    _log.debug("migrate_macos_default_paths: flytning af %s "
-                                "-> %s fejlede eller kunne ikke verificeres "
-                                "(se warning ovenfor) — kildefil bevaret",
+                    _log.debug("migrate_macos_default_paths: moving %s "
+                                "-> %s failed or could not be verified "
+                                "(see warning above) — source file kept",
                                 entry, target)
             try:
                 if not any(old_default_install.iterdir()):
                     old_default_install.rmdir()
-                    _log.debug("migrate_macos_default_paths: %s var tom og "
-                                "blev fjernet", old_default_install)
+                    _log.debug("migrate_macos_default_paths: %s was empty and "
+                                "was removed", old_default_install)
             except OSError:
                 pass
 
@@ -889,8 +915,8 @@ def migrate_macos_default_paths() -> bool:
     else:
         # Brugervalgt mappe — indholdet er ikke ramt af bug'en, kun
         # bootstrap.json's egen (forkerte) placering skal rettes.
-        _log.debug("migrate_macos_default_paths: brugervalgt install-mappe-gren "
-                    "— actual_install_dir=%s (rører ikke indholdet)",
+        _log.debug("migrate_macos_default_paths: user-chosen install folder branch "
+                    "— actual_install_dir=%s (contents not touched)",
                     actual_install_dir)
         new_install_dir = actual_install_dir
         _backup_opensak_json_in_place(actual_install_dir)
@@ -913,12 +939,12 @@ def migrate_macos_default_paths() -> bool:
         pass
 
     if migrated_something:
-        print(f"[settings] macOS-sti migreret: {old_default_install} → "
+        print(f"[settings] macOS path migrated: {old_default_install} → "
               f"{new_install_dir}")
 
     _log.debug(
-        "migrate_macos_default_paths: færdig — migrated_something=%s, "
-        "new_install_dir=%s, new_bootstrap=%s (findes=%s), indhold i "
+        "migrate_macos_default_paths: done — migrated_something=%s, "
+        "new_install_dir=%s, new_bootstrap=%s (exists=%s), contents of "
         "new_install_dir=%s",
         migrated_something, new_install_dir, new_bootstrap, new_bootstrap.exists(),
         sorted(p.name for p in new_install_dir.iterdir()) if new_install_dir.exists() else None,
@@ -954,8 +980,8 @@ def is_first_run() -> bool:
     val = store.get("_wizard_completed", False)
     _log.debug(
         "is_first_run: id(store)=%s, _wizard_completed=%r, settings_path=%s, "
-        "fuld store._data=%r", id(store), val, store._settings_path(),
-        store._data,
+        "settings=%r", id(store), val, store._settings_path(),
+        settings_summary_for_log(store),
     )
     return not val
 

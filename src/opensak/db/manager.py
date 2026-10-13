@@ -23,6 +23,7 @@ from opensak.settings_store import get_store
 logger = logging.getLogger(__name__)
 
 # Issue #870: detaljeret sporing af hvad der reelt indlæses fra settings.
+# Issue #1046: logger kun databases.*-nøglerne, aldrig hele settings-store.
 # Tavs medmindre "db_manager"-flaget er aktivt i debug_flags.py. De
 # ovenstående logger.warning()-kald forbliver altid synlige uanset flag.
 from opensak.logger import get_logger
@@ -137,7 +138,7 @@ class DatabaseManager:
         if path.exists() and not new_path.exists():
             import shutil
             shutil.move(str(path), str(new_path))
-            print(f"Migration: flyttede database {path.name} → opensak/")
+            print(f"Migration: moved database {path.name} → opensak/")
         elif path.exists() and new_path.exists():
             # Begge eksisterer — brug den nye, ignorer den gamle
             pass
@@ -149,12 +150,13 @@ class DatabaseManager:
         store = get_store()
         db_list = store.get("databases.list", [])
         raw_active_path = store.get("databases.active")
-        # Issue #878: id(store) + hele store._data logges her for at afgøre
-        # om det er samme SettingsStore-singleton der ses tom (reel
-        # læsnings-fejl) eller en anden instans (singleton/cache-fejl).
+        # Issue #878: id(store) logges for at afgøre om det er samme
+        # SettingsStore-singleton der ses tom (reel læsnings-fejl) eller en
+        # anden instans (singleton/cache-fejl). Issue #1046: kun antallet af
+        # nøgler, ikke hele store'et — det indeholder personlige data.
         _debug_log.debug(
-            "_load_from_settings: id(store)=%s, store._data=%r",
-            id(store), getattr(store, "_data", None),
+            "_load_from_settings: id(store)=%s, key_count=%d",
+            id(store), len(getattr(store, "_data", None) or {}),
         )
         _debug_log.debug(
             "_load_from_settings: databases.list=%r, databases.active=%r, "
@@ -170,7 +172,7 @@ class DatabaseManager:
                         migrated = self._migrate_path(Path(path))
                         _debug_log.debug(
                             "_load_from_settings: database %r -> %s "
-                            "(oprindelig sti %r, findes på disk: %s)",
+                            "(original path %r, exists on disk: %s)",
                             name, migrated, path, migrated.exists(),
                         )
                         info = DatabaseInfo(name, migrated)
@@ -182,7 +184,7 @@ class DatabaseManager:
             migrated_active = self._migrate_path(Path(active_path))
             found = self._find_by_path(migrated_active)
             _debug_log.debug(
-                "_load_from_settings: aktiv sti %r -> %s, matchede en kendt "
+                "_load_from_settings: active path %r -> %s, matched a known "
                 "database: %s", active_path, migrated_active, found is not None,
             )
             if found:
@@ -192,11 +194,11 @@ class DatabaseManager:
         if not self._databases:
             default_path = self._default_db_path()
             logger.warning(
-                "Ingen kendte databaser fundet i settings (databases.list var "
-                "%r, databases.active var %r) — opretter en frisk, tom "
-                "'Default'-database på %s. Hvis brugeren forventede en "
-                "eksisterende database, ligger den sandsynligvis stadig "
-                "urørt et andet sted på disken (se issue #870).",
+                "No known databases found in settings (databases.list was "
+                "%r, databases.active was %r) — creating a fresh, empty "
+                "'Default' database at %s. If the user expected an "
+                "existing database, it is most likely still untouched "
+                "somewhere else on disk (see issue #870).",
                 db_list, raw_active_path, default_path,
             )
             default = DatabaseInfo("Default", default_path)
@@ -205,8 +207,8 @@ class DatabaseManager:
         elif self._active is None:
             # Databaser kendes men ingen aktiv — brug den første
             _debug_log.debug(
-                "_load_from_settings: %d database(r) kendt, men ingen aktiv "
-                "— bruger den første: %r", len(self._databases),
+                "_load_from_settings: %d database(s) known, but none active "
+                "— using the first: %r", len(self._databases),
                 self._databases[0].name,
             )
             self._active = self._databases[0]
@@ -553,7 +555,7 @@ class DatabaseManager:
             migrate_column_settings_for_rename(old_name, new_name)
         except Exception:
             logger.warning(
-                "Kunne ikke migrere kolonneindstillinger ved rename %r -> %r",
+                "Could not migrate column settings on rename %r -> %r",
                 old_name, new_name, exc_info=True,
             )
 

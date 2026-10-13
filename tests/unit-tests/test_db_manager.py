@@ -337,7 +337,7 @@ class TestRename:
 
         assert db.name == "StillRenamed"  # rename itself must still succeed
         assert any(
-            "kunne ikke migrere" in rec.message.lower() for rec in caplog.records
+            "could not migrate" in rec.message.lower() for rec in caplog.records
         )
 
 
