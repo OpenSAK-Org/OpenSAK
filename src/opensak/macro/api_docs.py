@@ -44,6 +44,7 @@ from opensak.macro.forms import (
     FORM_KEY_DOCS,
     FORM_METHOD_DOCS,
 )
+from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 from opensak.macro.sql import PROTECTED_COLUMNS, WRITABLE_TABLES
@@ -552,6 +553,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "(to stdout when run with `opensak --run-macro`, see "
         "[Running macros from an editor](run-from-editor.md)).",
         "",
+        *GSAK_COMPARE.splitlines(),
     ]
     return "\n".join(lines)
 
