@@ -12,7 +12,7 @@ means the betas leading up to it.
 
 ## 0. Preconditions — don't start until these are true
 
-- [ ] No open release-blocking issues on the milestone for `X.Y.0`
+- [ ] No open issues labelled `area: release-blocker`
 - [ ] Latest beta tested and confirmed on **macOS** (e.g. Mike Wood, Bob Long,
       or our own Mac Mini), including in-app update ("Download & Install")
       from the previous beta and Settings → Advanced → Uninstall
@@ -197,9 +197,7 @@ merge in §3, so they ship with the release.
 ## 7. Close out and start the next cycle
 
 - [ ] Close the issues that shipped in this release (only once they're in the
-      tagged build with green CI); re-triage anything deliberately deferred to
-      the next milestone instead of leaving it dangling
-- [ ] Close the `X.Y.0` milestone and open one for the next version
+      tagged build with green CI)
 - [ ] Generate and commit the upgrade fixture for the version just released,
       so the next stable is tested against it (#997):
       `python scripts/make_upgrade_fixture.py vX.Y.0` → commit
