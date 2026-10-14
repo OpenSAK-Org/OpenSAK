@@ -19,8 +19,9 @@
 --   * only lat or only lon        → error for that row; the rest carries on
 --   * coords cell reads "clear"   → corrected coordinates are removed
 --
--- Nothing is written until you confirm the summary ("12 will be set,
--- 2 cleared — continue?").
+-- Every row is checked first (GC code in the database, coordinates
+-- readable), and nothing is written until you confirm the summary
+-- ("12 will be set, 2 cleared — continue?").
 --
 -- Open it via Macros → Open example: that copies this macro and the sample
 -- CSV into your macros folder, where the relative CSV path is resolved.
@@ -29,41 +30,41 @@ local CSV_FILE = "corrected_coords.csv"
 
 local function has(v) return v ~= nil and v ~= "" end
 
--- What a row asks for: "set", "clear" or "skip". Raises an error for a
--- row without GC code or with half-filled coordinates.
+-- What a row asks for: "clear", "skip" or "set" plus lat, lon. Raises an
+-- error for a row that cannot be applied.
 local function plan(row)
     if not has(row.code) then
         error("no GC code", 0)
-    elseif has(row.coords) then
-        return row.coords:lower() == "clear" and "clear" or "set"
+    elseif not opensak.cache(row.code) then
+        error("not in the database", 0)
+    end
+    local coords
+    if has(row.coords) then
+        if row.coords:lower() == "clear" then return "clear" end
+        coords = row.coords
     elseif has(row.lat) and has(row.lon) then
-        return "set"
+        coords = row.lat .. ", " .. row.lon
     elseif has(row.lat) then
         error("lon missing", 0)
     elseif has(row.lon) then
         error("lat missing", 0)
+    else
+        return "skip"
     end
-    return "skip"
-end
-
-local function apply(row, action)
-    if action == "clear" then
-        return opensak.clear_corrected(row.code)
-    elseif has(row.coords) then
-        return opensak.set_corrected(row.code, row.coords)
-    end
-    return opensak.set_corrected(row.code, row.lat, row.lon)
+    local lat, lon = opensak.coords.parse(coords)
+    if not lat then error(("cannot read coordinates %q"):format(coords), 0) end
+    return "set", lat, lon
 end
 
 local rows = opensak.read_csv(CSV_FILE)
 print(("Read %d row(s) from %s"):format(#rows, CSV_FILE))
 
 -- Pass 1: check every row, write nothing
-local todo = {}             -- {row, action} for the rows to apply
+local todo = {}             -- {code, action, lat, lon} for the rows to apply
 local to_set, to_clear, skipped, failed = 0, 0, 0, 0
 
 for i, row in ipairs(rows) do
-    local ok, action = pcall(plan, row)
+    local ok, action, lat, lon = pcall(plan, row)
     if not ok then
         print(("%s: %s"):format(has(row.code) and row.code or ("Row " .. i), action))
         failed = failed + 1
@@ -71,7 +72,8 @@ for i, row in ipairs(rows) do
         print(("%s: no coordinates — skipped"):format(row.code))
         skipped = skipped + 1
     else
-        todo[#todo + 1] = { row = row, action = action }
+        todo[#todo + 1] = { code = row.code, action = action, lat = lat, lon = lon,
+                            note = row.note }
         if action == "set" then to_set = to_set + 1 else to_clear = to_clear + 1 end
     end
 end
@@ -88,38 +90,25 @@ if not opensak.confirm(question) then
     return
 end
 
--- Pass 2: write
-local changed = {}          -- GC codes that were updated, for the filter below
-local set, cleared, missing = 0, 0, 0
+-- Pass 2: write — every row was checked above, so nothing can fail here
+local changed = {}          -- GC codes that got corrected coordinates
 
 for _, t in ipairs(todo) do
-    local row = t.row
-    -- pcall so one bad coordinate does not stop the whole run
-    local ok, found = pcall(apply, row, t.action)
-    if not ok then
-        print(("%s: %s"):format(row.code, found))   -- found = error message
-        failed = failed + 1
-    elseif not found then
-        print(("%s: not in the database — skipped"):format(row.code))
-        missing = missing + 1
-    elseif t.action == "clear" then
-        print(("%s: corrected coordinates removed"):format(row.code))
-        cleared = cleared + 1
+    if t.action == "clear" then
+        opensak.clear_corrected(t.code)
+        print(("%s: corrected coordinates removed"):format(t.code))
     else
-        local coords = has(row.coords) and row.coords or (row.lat .. ", " .. row.lon)
-        print(("%s: corrected → %s  %s"):format(row.code, coords, row.note or ""))
-        set = set + 1
-        changed[#changed + 1] = "'" .. row.code:upper():gsub("'", "''") .. "'"
+        opensak.set_corrected(t.code, t.lat, t.lon)
+        print(("%s: corrected → %s  %s"):format(
+            t.code, opensak.coords.format(t.lat, t.lon), t.note or ""))
+        changed[#changed + 1] = t.code
     end
 end
 
-print(("Done: %d set, %d cleared, %d skipped, %d not found, %d failed"):format(
-    set, cleared, skipped, missing, failed))
+print(("Done: %d set, %d cleared, %d skipped, %d failed"):format(
+    to_set, to_clear, skipped, failed))
 
 -- Show the caches that just got corrected coordinates
 if #changed > 0 then
-    opensak.filter{
-        where = "gc_code IN (" .. table.concat(changed, ", ") .. ")",
-        label = "Corrected via CSV",
-    }
+    opensak.filter{ codes = changed, label = "Corrected via CSV" }
 end
