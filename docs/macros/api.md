@@ -47,6 +47,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
 | [`opensak.version`](#opensakversion) | 2 |
+| [`opensak.run_macro`](#opensakrunmacro) | 3 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
 | [`opensak.exit`](#opensakexit) | 3 |
@@ -841,6 +842,33 @@ Example:
 
 ```lua
 print("Running in OpenSAK " .. opensak.version())
+```
+
+### opensak.run_macro
+
+```lua
+opensak.run_macro(file, ...)
+```
+
+Run another macro and wait until it has finished, e.g. to chain several macros from one control macro. A relative path is looked up in the folder of the calling macro, and `.lua` is added when the name has no extension. The called macro gets its own global variables; values are passed as extra arguments (read them with `...`) and come back as its return values. An error in it stops the calling macro too, unless caught with `pcall`. Macros run this way share the run's limits, sleep time and folder approvals; they may call each other at most 10 levels deep.
+
+Parameters:
+
+- `file` (`string`) — The macro file.
+- `...` (`any`) — Passed to the macro as `...`.
+
+Returns `any...` — What the macro returns.
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.run_macro("refresh_corrected")
+local count = opensak.run_macro("lib/count_unfound.lua", "Zürich")
+-- lib/count_unfound.lua:
+--   local area = ...
+--   return opensak.filter{ found = false, state = area }
 ```
 
 ### opensak.sleep

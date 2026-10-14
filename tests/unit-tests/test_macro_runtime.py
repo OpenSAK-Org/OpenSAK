@@ -526,6 +526,135 @@ def test_confirm_returns_host_answer():
         _run("opensak.confirm()")
 
 
+def _run_in(folder, source, **kwargs):
+    out: list[str] = []
+    host = FakeHost()
+    MacroRuntime(host, output=out.append, folder_permissions=_rw(folder), **kwargs).run(
+        source, chunk_name="main.lua", base_dir=folder)
+    return host, out
+
+
+def test_run_macro_passes_arguments_and_returns_results(tmp_path):
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "add.lua").write_text(
+        "﻿local a, b = ...\nreturn a + b, opensak.run_macro('twice', a)\n",
+        encoding="utf-8")
+    # relative to the called macro's folder, not the caller's
+    (tmp_path / "lib" / "twice.lua").write_text("return (...) * 2", encoding="utf-8")
+    (tmp_path / "rows.csv").write_text("code\nGC1\n", encoding="utf-8")
+    _, out = _run_in(tmp_path, """
+        print(opensak.run_macro("lib/add.lua", 2, 3))
+        print(opensak.run_macro("lib/add", 1, 1))
+        print(opensak.read_csv("rows.csv")[1].code)  -- folder restored
+    """)
+    assert out == ["5\t4", "2\t2", "GC1"]
+
+
+def test_run_macro_switches_the_macro_file(tmp_path):
+    # Per-macro state (saved settings, #983) must be the called macro's own,
+    # not shared with its caller.
+    (tmp_path / "child.lua").write_text("opensak.run_macro('leaf')", encoding="utf-8")
+    (tmp_path / "leaf.lua").write_text("return 1", encoding="utf-8")
+    (tmp_path / "rows.csv").write_text("code\nGC1\n", encoding="utf-8")
+    seen: list = []
+
+    class Runtime(MacroRuntime):
+        def _readable_file(self, path):
+            seen.append(self._macro_path)
+            return super()._readable_file(path)
+
+    Runtime(FakeHost(), output=lambda _: None, folder_permissions=_rw(tmp_path)).run(
+        'opensak.run_macro("child") opensak.read_csv("rows.csv")',
+        chunk_name="main.lua", base_dir=tmp_path)
+    assert seen == [None, tmp_path / "child.lua", None]
+
+
+def test_run_macro_has_its_own_globals(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        "print(secret, type(opensak), type(string.format), _G.secret)\n"
+        "leaked = true\nprint = nil\nreturn opensak.filter{ found = false }",
+        encoding="utf-8")
+    host, out = _run_in(tmp_path, """
+        secret = 42
+        local count = opensak.run_macro("child")
+        print(count, leaked, secret)
+        opensak.run_macro("child")
+    """)
+    assert out == ["nil\ttable\tfunction\tnil", "3\tnil\t42",
+                   "nil\ttable\tfunction\tnil"]
+    assert len(host.applied) == 2 and host.ended == 1
+
+
+def test_run_macro_errors(tmp_path):
+    (tmp_path / "boom.lua").write_text("\nerror('boom')", encoding="utf-8")
+    (tmp_path / "bad.lua").write_text("this is not lua", encoding="utf-8")
+    (tmp_path / "self.lua").write_text("opensak.run_macro('self')", encoding="utf-8")
+    (tmp_path / "bytecode.lua").write_bytes(b"\x1bLua")
+    with pytest.raises(MacroError, match="boom.lua:2: boom"):
+        _run_in(tmp_path, 'opensak.run_macro("boom")')
+    _, out = _run_in(tmp_path, 'print(pcall(opensak.run_macro, "boom"))')
+    assert out == ["false\tboom.lua:2: boom"]
+    with pytest.raises(MacroError, match="bad.lua:1"):
+        _run_in(tmp_path, 'opensak.run_macro("bad")')
+    with pytest.raises(MacroError, match="binary chunk"):
+        _run_in(tmp_path, 'opensak.run_macro("bytecode")')
+    with pytest.raises(MacroError, match="macro not found"):
+        _run_in(tmp_path, 'opensak.run_macro("nope")')
+    with pytest.raises(MacroError, match="expects a macro file"):
+        _run_in(tmp_path, "opensak.run_macro()")
+    with pytest.raises(MacroError, match="10 levels deep"):
+        _run_in(tmp_path, 'opensak.run_macro("self")')
+
+
+def test_run_macro_shares_the_instruction_limit(tmp_path):
+    (tmp_path / "loop.lua").write_text("while true do end", encoding="utf-8")
+    with pytest.raises(MacroError, match="instruction limit"):
+        _run_in(tmp_path, 'while true do pcall(opensak.run_macro, "loop") end',
+                instruction_limit=100_000)
+
+
+def test_run_macro_needs_folder_permission(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "child.lua").write_text("return 1", encoding="utf-8")
+    with pytest.raises(MacroError, match="denied by the user"):
+        MacroRuntime(FakeHost(), output=lambda _: None, folder_permissions=[]).run(
+            f'opensak.run_macro([[{other / "child.lua"}]])')
+
+
+def test_exit_in_a_called_macro_ends_the_caller_too(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        'print("child")\nopensak.exit(6)\nprint("not reached")', encoding="utf-8")
+    out: list[str] = []
+    runtime = MacroRuntime(FakeHost(), output=out.append,
+                           folder_permissions=_rw(tmp_path))
+    code = runtime.run(
+        'pcall(opensak.run_macro, "child") print("not reached") while true do end',
+        chunk_name="main.lua", base_dir=tmp_path)
+    assert code == 6
+    assert out == ["child"]
+
+
+def test_cancel_in_a_called_macro_ends_the_caller_too(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        'print("child")\npcall(opensak.confirm, "go?")\nprint("not reached")',
+        encoding="utf-8")
+    out: list[str] = []
+    host = FakeHost()
+    runtime = MacroRuntime(host, output=out.append, folder_permissions=_rw(tmp_path))
+
+    def confirm(message):
+        runtime.cancel()        # the user cancels while the child's dialog is open
+        return False
+
+    host.confirm = confirm
+    with pytest.raises(MacroError, match="macro cancelled"):
+        runtime.run('pcall(opensak.run_macro, "child") print("not reached")',
+                    chunk_name="main.lua", base_dir=tmp_path)
+    assert out == ["child"]
+    assert host.ended == 1
+
+
 def test_end_macro_called_once_after_run_even_on_error():
     host, _ = _run('opensak.set_corrected("GC1", 47, 8) opensak.clear_corrected("GC2")')
     assert host.ended == 1

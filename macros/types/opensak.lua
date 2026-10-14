@@ -551,6 +551,22 @@ function opensak.macros_dir() end
 ---@return string # Version, e.g. "1.21.0-beta.3".
 function opensak.version() end
 
+---Run another macro and wait until it has finished, e.g. to chain several macros from one control macro. A relative path is looked up in the folder of the calling macro, and `.lua` is added when the name has no extension. The called macro gets its own global variables; values are passed as extra arguments (read them with `...`) and come back as its return values. An error in it stops the calling macro too, unless caught with `pcall`. Macros run this way share the run's limits, sleep time and folder approvals; they may call each other at most 10 levels deep.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.run_macro("refresh_corrected")
+---local count = opensak.run_macro("lib/count_unfound.lua", "Zürich")
+----- lib/count_unfound.lua:
+-----   local area = ...
+-----   return opensak.filter{ found = false, state = area }
+---```
+---@param file string The macro file.
+---@param ... any Passed to the macro as `...`.
+---@return any ... # What the macro returns.
+function opensak.run_macro(file, ...) end
+
 ---Pause the macro. One pause lasts at most 10 s and all pauses of a run together at most 60 s; a cancelled macro stops at its next pause.
 ---
 ---Since API version 2.
