@@ -158,6 +158,89 @@ class TestDbCombo:
             fake_dialog(signals=("database_switched", "database_renamed")))
         seeded_window._open_db_manager()
 
+    def test_backup_now_is_in_the_file_menu_after_db_manager(self, seeded_window):
+        # Issue #953: File → Back up now…, right under Manage databases.
+        # Ask the action which menu it sits in, rather than walking every
+        # menu in the menu bar: an earlier test may have rebuilt one of
+        # them, leaving a stale wrapper that raises "already deleted".
+        from PySide6.QtWidgets import QMenu
+        file_menu = next(o for o in seeded_window._act_db_manager.associatedObjects()
+                         if isinstance(o, QMenu))
+        actions = [a for a in file_menu.actions() if not a.isSeparator()]
+        i = actions.index(seeded_window._act_db_manager)
+        assert actions[i + 1] is seeded_window._act_backup_now
+
+    def test_backup_now_opens_the_backup_dialog(self, seeded_window, monkeypatch):
+        opened = []
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.backup_dialog.BackupDialog",
+            lambda parent: SimpleNamespace(exec=lambda: opened.append(parent)))
+        seeded_window._act_backup_now.trigger()
+        assert opened == [seeded_window]
+
+    def test_restore_is_in_the_file_menu_after_backup(self, seeded_window):
+        # Issue #954: File → Restore from backup…, right under Back up now…
+        from PySide6.QtWidgets import QMenu
+        file_menu = next(o for o in seeded_window._act_db_manager.associatedObjects()
+                         if isinstance(o, QMenu))
+        actions = [a for a in file_menu.actions() if not a.isSeparator()]
+        i = actions.index(seeded_window._act_backup_now)
+        assert actions[i + 1] is seeded_window._act_restore_backup
+
+    def test_restore_opens_the_dialog_and_wires_switching(self, seeded_window, monkeypatch):
+        made = []
+
+        class _FakeDialog:
+            def __init__(self, parent):
+                self.database_switched = SimpleNamespace(connect=lambda f: made.append(("switched", f)))
+                self.databases_added = SimpleNamespace(connect=lambda f: made.append(("added", f)))
+                self.close_app_requested = SimpleNamespace(connect=lambda f: made.append(("close", f)))
+
+            def exec(self):
+                made.append(("exec", None))
+
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog", _FakeDialog)
+        seeded_window._act_restore_backup.trigger()
+        assert ("switched", seeded_window._on_database_switched) in made
+        assert ("added", seeded_window._reload_db_combo) in made
+        assert any(kind == "close" for kind, _f in made)
+        assert made[-1] == ("exec", None)
+
+    def test_restore_asking_to_close_closes_after_the_dialog(
+        self, seeded_window, monkeypatch, qtbot
+    ):
+        # #987: "Close OpenSAK now?" after a settings restore closes the main
+        # window once the dialog is gone — not while it is still open.
+        events = []
+
+        class _FakeDialog:
+            def __init__(self, parent):
+                self.database_switched = SimpleNamespace(connect=lambda f: None)
+                self.databases_added = SimpleNamespace(connect=lambda f: None)
+                self.close_app_requested = SimpleNamespace(
+                    connect=lambda f: setattr(self, "_request_close", f))
+
+            def exec(self):
+                self._request_close()
+                events.append("dialog closed")
+
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog", _FakeDialog)
+        monkeypatch.setattr(seeded_window, "close", lambda: events.append("window closed"))
+        seeded_window._act_restore_backup.trigger()
+        assert events == ["dialog closed"]
+        qtbot.waitUntil(lambda: "window closed" in events, timeout=2000)
+        assert events == ["dialog closed", "window closed"]
+
+    def test_restore_blocked_by_trip(self, seeded_window, monkeypatch):
+        monkeypatch.setattr(seeded_window, "_trip_planner_active", lambda: True)
+        warned = []
+        monkeypatch.setattr(seeded_window, "_warn_trip_planner_active",
+                            lambda: warned.append(True))
+        monkeypatch.setattr("opensak.gui.dialogs.restore_dialog.RestoreDialog",
+                            lambda parent: pytest.fail("dialog must not open"))
+        seeded_window._open_restore_dialog()
+        assert warned == [True]
+
     def test_open_db_manager_blocked_by_trip(self, seeded_window, monkeypatch):
         seeded_window._trip_planner_win = SimpleNamespace(
             isVisible=lambda: True, raise_=lambda: None, activateWindow=lambda: None)
@@ -1024,6 +1107,40 @@ class TestWaypoints:
         seeded_window._delete_waypoint()
         assert seeded_window._load_full_cache("GC12345") is not None
 
+    def _right_click_delete(self, window, monkeypatch, gc_code):
+        """Right-click *gc_code*'s row and choose "Delete cache…" (#693)."""
+        from opensak.gui import cache_table as ct
+        from opensak.lang import tr
+        table = window._cache_table
+        menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        row = next(r for r in range(table._model.rowCount())
+                   if table._model.cache_at(r).gc_code == gc_code)
+        table._show_context_menu(table.visualRect(table._model.index(row, 0)).center())
+        next(a for a in menus[-1].actions()
+             if a.text() == tr("ctx_delete_cache")).trigger()
+
+    def test_context_menu_deletes_the_right_clicked_cache(
+        self, seeded_window, monkeypatch, mbox_yes,
+    ):
+        # Issue #693: with GC12345 selected, right-clicking GC99999 and
+        # choosing Delete removes GC99999 — not the selected cache.
+        seeded_window._cache_table.select_by_gc_code("GC12345")
+        self._right_click_delete(seeded_window, monkeypatch, "GC99999")
+        assert seeded_window._load_full_cache("GC99999") is None
+        assert seeded_window._load_full_cache("GC12345") is not None
+
+    def test_context_menu_delete_declined(self, seeded_window, monkeypatch, mbox_no):
+        self._right_click_delete(seeded_window, monkeypatch, "GC99999")
+        assert seeded_window._load_full_cache("GC99999") is not None
+
 
 # ── bulk delete / flags ───────────────────────────────────────────────────────
 
@@ -1066,8 +1183,78 @@ class TestBulkAndFlags:
         self._flag(seeded_window, "GC12345")
         seeded_window._on_flags_changed()
 
+    # Issue #293: set/clear the flag on every cache in the active filter.
+
+    def _flagged_codes(self):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+        with get_session() as s:
+            return {c.gc_code for c in s.query(Cache).filter(Cache.user_flag == True)}  # noqa: E712
+
+    def _all_codes(self):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache
+        with get_session() as s:
+            return {c.gc_code for c in s.query(Cache)}
+
+    def test_flag_all_in_filter_confirmed(self, seeded_window, mbox_yes):
+        seeded_window._set_flag_for_filtered(True)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == self._all_codes()
+        table = seeded_window._cache_table
+        assert len(table.get_flagged_caches()) == table.row_count() > 0
+
+    def test_flag_all_in_filter_declined(self, seeded_window, mbox_no):
+        seeded_window._set_flag_for_filtered(True)
+        assert self._flagged_codes() == set()
+
+    def test_flag_only_touches_caches_in_filter(self, seeded_window, mbox_yes):
+        # Narrow the grid to one cache: only that one gets the flag.
+        from opensak.filters.engine import FilterSet, GcCodeFilter
+        seeded_window._current_filterset = FilterSet().add(GcCodeFilter("GC12345", "equals"))
+        seeded_window._refresh_cache_list()
+        wait_for_refresh(seeded_window)
+        assert seeded_window._cache_table.row_count() == 1
+        seeded_window._set_flag_for_filtered(True)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == {"GC12345"}
+
+    def test_unflag_all_in_filter_confirmed(self, seeded_window, mbox_yes):
+        self._flag(seeded_window, "GC12345")
+        seeded_window._set_flag_for_filtered(False)
+        wait_for_refresh(seeded_window)
+        assert self._flagged_codes() == set()
+
+    def test_flag_all_in_filter_empty(self, empty_window, mbox_ok):
+        empty_window._set_flag_for_filtered(True)  # info, returns
+
+    def test_user_flags_submenu_actions(self, seeded_window):
+        # Uses the window's own reference: QAction.menu() hands back a
+        # wrapper that can delete the C++ menu when it is garbage-collected.
+        from opensak.lang import tr
+        menu = seeded_window._user_flags_menu
+        assert menu.title() == tr("menu_user_flags")
+        texts = [a.text() for a in menu.actions() if not a.isSeparator()]
+        assert texts == [tr("action_flag_filtered"), tr("action_unflag_filtered"),
+                         tr("action_clear_flags")]
+
 
 # ── sort save/load ────────────────────────────────────────────────────────────
+
+def _sort_set(suffix, value):
+    """Store a per-database sort setting the way the app does (#659: in the db file)."""
+    from opensak.db import db_settings
+    from opensak.db.manager import get_db_manager
+    path = get_db_manager().active.path
+    db_settings.set_value(f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), value)
+
+
+def _sort_get(suffix):
+    from opensak.db import db_settings
+    from opensak.db.manager import get_db_manager
+    path = get_db_manager().active.path
+    return db_settings.get_value(f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix))
+
 
 class TestSort:
     def test_on_sort_changed(self, seeded_window):
@@ -1085,11 +1272,8 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
 
     def test_load_sort_with_saved_profile(self, seeded_window, monkeypatch, iso_settings):
-        from opensak.db.manager import get_db_manager
         from opensak.filters.engine import FilterSet, SortSpec
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.filter_profile", "MyProfile")
+        _sort_set("filter_profile", "MyProfile")
         prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
                                sort=SortSpec("name"))
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
@@ -1104,13 +1288,10 @@ class TestSort:
         # Regression: the profile's embedded sort (always "name") used to
         # replace the per-DB column sort on reopen and was then saved back,
         # so e.g. a Distance sort was lost after restarting.
-        from opensak.db.manager import get_db_manager
         from opensak.filters.engine import FilterSet, SortSpec
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set_many({f"{key}.field": "distance",
-                              f"{key}.ascending": True,
-                              f"{key}.filter_profile": "MyProfile"})
+        _sort_set("field", "distance")
+        _sort_set("ascending", True)
+        _sort_set("filter_profile", "MyProfile")
         prof = SimpleNamespace(name="MyProfile", filterset=FilterSet(),
                                sort=SortSpec("name"))
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
@@ -1120,26 +1301,20 @@ class TestSort:
         seeded_window._load_sort_for_active_db()
         assert seeded_window._current_sort.field == "distance"
         seeded_window._on_filter_applied(FilterSet(), SortSpec("name"), "MyProfile")
-        assert get_store().get(f"{key}.field") == "distance"
+        assert _sort_get("field") == "distance"
 
     def test_load_sort_unknown_field_falls_back(self, seeded_window, iso_settings):
         # Regression for #498: opensak.json deles på tværs af alle installerede
         # versioner. Hvis en nyere version har gemt et sort-felt denne version
         # ikke kender (fx "some_future_field"), må opstart IKKE crashe — den skal
         # falde tilbage til "name" og rette den gemte værdi.
-        from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.field", "some_future_field")
+        _sort_set("field", "some_future_field")
         seeded_window._load_sort_for_active_db()
         assert seeded_window._current_sort.field == "name"
-        assert get_store().get(f"{key}.field") == "name"
+        assert _sort_get("field") == "name"
 
     def test_load_sort_profile_load_error(self, seeded_window, monkeypatch, iso_settings):
-        from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
-        key = f"sort.{get_db_manager().active.path}"
-        get_store().set(f"{key}.filter_profile", "Ghost")
+        _sort_set("filter_profile", "Ghost")
         monkeypatch.setattr("opensak.filters.engine.FilterProfile.list_profiles",
                             staticmethod(lambda: [Path("/x/p.json")]))
         monkeypatch.setattr(
@@ -1402,6 +1577,60 @@ class TestHomeAndCwExtra:
         seeded_window._reload_home_combo()
         assert s.home_lat == pytest.approx(43.5, abs=0.01)
         assert s.home_lon == pytest.approx(-116.2, abs=0.01)
+
+    def test_reload_home_combo_activates_shown_point_when_none_active(
+        self, seeded_window
+    ):
+        # Issue #962: with no active home point the drop-down showed
+        # "★ Home" as selected while distances used the Copenhagen default.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_home_location = "N43 30.000 W116 12.000"
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert seeded_window._home_combo.currentData() == "★ Home"
+        assert s.active_home_name == "★ Home"
+        assert s.home_lat == pytest.approx(43.5, abs=0.01)
+        assert s.home_lon == pytest.approx(-116.2, abs=0.01)
+
+    def test_reload_home_combo_activates_user_point_when_none_active(
+        self, seeded_window
+    ):
+        # Issue #962: same, without a ★ Home — the first user point is shown,
+        # so it must also be the one in use.
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = ""
+        s.home_points = [HomePoint("Work", 56.0, 10.0)]
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert seeded_window._home_combo.currentData() == "Work"
+        assert s.active_home_name == "Work"
+        assert s.home_lat == pytest.approx(56.0)
+        assert s.home_lon == pytest.approx(10.0)
+
+    def test_reload_home_combo_without_points_changes_nothing(self, seeded_window):
+        # Issue #962: the placeholder item has no data — never activate it.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_home_location = ""
+        s.home_points = []
+        s.active_home_name = ""
+        seeded_window._reload_home_combo()
+        assert s.active_home_name == ""
+
+    def test_reload_home_combo_keeps_cache_center(self, seeded_window):
+        # Issue #962 must not touch a temporary cache center (#511): its name
+        # isn't a saved home point, but it IS the active one.
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = "N43 30.000 W116 12.000"
+        s.set_active_home(HomePoint("📍 GC12345 — Test", 50.0, 8.0))
+        seeded_window._reload_home_combo()
+        assert s.active_home_name == "📍 GC12345 — Test"
+        assert seeded_window._home_combo.currentData() == "📍 GC12345 — Test"
+        assert s.home_lat == pytest.approx(50.0)
+        assert s.home_lon == pytest.approx(8.0)
 
     def test_on_home_changed_user_and_gc_home(self, seeded_window, iso_settings):
         from opensak.gui.settings import HomePoint, get_settings

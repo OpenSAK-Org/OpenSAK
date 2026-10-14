@@ -1528,10 +1528,11 @@ class TestInvertFilter:
 class TestDistanceUnitPref:
     @pytest.fixture
     def dlg_mi(self, qtbot, monkeypatch):
-        from opensak.utils.types import CoordFormat
+        from opensak.utils.types import CoordFormat, DateFormat
         monkeypatch.setattr(
             "opensak.gui.settings.get_settings",
             lambda: SimpleNamespace(home_lat=55.0, home_lon=12.0, use_miles=True,
+                                     date_format=DateFormat.YMD,  # #1043
                                      coord_format=CoordFormat.DD, home_points=[],
                                      theme="light"),
         )

@@ -1,0 +1,23 @@
+{
+  "name": "Easy traditionals",
+  "filterset": {
+    "mode": "AND",
+    "filters": [
+      {
+        "filter_type": "cache_type",
+        "types": [
+          "Traditional Cache"
+        ]
+      },
+      {
+        "filter_type": "difficulty",
+        "min_difficulty": 1.0,
+        "max_difficulty": 2.0
+      }
+    ]
+  },
+  "sort": {
+    "field": "name",
+    "ascending": true
+  }
+}

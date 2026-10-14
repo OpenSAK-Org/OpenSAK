@@ -39,6 +39,10 @@ dependencies = [
     "shapely>=2.0,<3",
     "pywin32>=306; platform_system == 'Windows'",
     "keyring>=25.0,<26",
+    # Lua macros (proof of concept, roadmap item 2)
+    "lupa>=2.0,<3",
+    # Regex for macros (opensak.re): timeout= stops catastrophic backtracking
+    "regex>=2024.4",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +50,7 @@ dev = [
     "pytest>=8.0,<10",
     "pytest-cov>=5.0,<8",
     "pytest-qt>=4.0,<5",
-    "mypy>=1.8,<2.4",
+    "mypy>=1.8,<2.5",
     "pillow>=10.0,<13",
 ]
 # Release builds only (build.yml, build-msix.yml): `pip install -e ".[build]"`

@@ -6,6 +6,8 @@ all not-found and available.
 
 import pytest
 
+from tests.data import wait_for_refresh
+
 pytest.importorskip("pytestqt")
 
 
@@ -21,7 +23,7 @@ def test_quick_filter_found_returns_zero(seeded_window, qtbot):
     assert window._cache_table.row_count() == TOTAL
 
     window._quick_filter.setCurrentIndex(2)  # index 2 = Found
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 0
 
@@ -31,11 +33,11 @@ def test_quick_filter_not_found_returns_all(seeded_window, qtbot):
     window = seeded_window
 
     window._quick_filter.setCurrentIndex(2)  # Found → 0 rows
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 0
 
     window._quick_filter.setCurrentIndex(1)  # Not Found → all rows
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL
 
@@ -45,9 +47,9 @@ def test_quick_filter_reset_to_all_restores_count(seeded_window, qtbot):
     window = seeded_window
 
     window._quick_filter.setCurrentIndex(2)  # Found → 0
-    qtbot.wait(50)
+    wait_for_refresh(window)
     window._quick_filter.setCurrentIndex(0)  # All
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL
 
@@ -161,7 +163,7 @@ def test_dropdown_shows_active_for_quick_filter(seeded_window, qtbot):
     window = seeded_window
 
     window._quick_filter.setCurrentIndex(2)  # Found → not the "All" default
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
 
@@ -190,7 +192,7 @@ def test_dropdown_shows_active_for_unsaved_advanced_filter(seeded_window, qtbot)
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
 
@@ -212,7 +214,7 @@ def test_dropdown_shows_profile_name_for_saved_filter(seeded_window, qtbot, tmp_
 
     window = seeded_window
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._filter_profile_combo.currentText() == "Traditional only"
 
@@ -225,11 +227,11 @@ def test_dropdown_shows_none_after_clear_filter(seeded_window, qtbot):
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
 
     window._clear_filter()
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
 
@@ -253,7 +255,7 @@ def test_filter_applied_signal_updates_table(seeded_window, qtbot):
     sort = SortSpec("name", ascending=True)
 
     window._on_filter_applied(fs, sort, "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
     assert window._filter_lbl.text() != ""  # label shows active filter name
@@ -268,11 +270,11 @@ def test_clear_filter_removes_advanced_filter(seeded_window, qtbot):
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 2
 
     window._clear_filter()
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL
     assert window._filter_lbl.text() == ""
@@ -291,12 +293,12 @@ def test_profile_deleted_clears_active_filter(seeded_window, qtbot):
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 2
     assert window._active_filter_name == "Traditional only"
 
     window._on_profile_deleted("Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL
     assert window._active_filter_name == ""
@@ -312,11 +314,11 @@ def test_profile_deleted_of_inactive_profile_leaves_active_filter(seeded_window,
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 2
 
     window._on_profile_deleted("Some other profile")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
     assert window._active_filter_name == "Traditional only"
@@ -334,10 +336,10 @@ def test_profile_deleted_preserves_quick_search_text(seeded_window, qtbot):
     fs = FilterSet(mode="AND")
     fs.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     window._on_profile_deleted("Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._search_gc.text() == "GC"
     assert window._active_filter_name == ""
@@ -360,7 +362,7 @@ def test_where_clause_filter_reduces_row_count(seeded_window, qtbot):
     fs = FilterSet()
     fs.add(WhereClauseFilter("difficulty >= 4.0"))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "High D")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
 
@@ -380,7 +382,7 @@ def test_where_clause_invalid_sql_hides_all_rows(seeded_window, qtbot, monkeypat
     fs = FilterSet()
     fs.add(WhereClauseFilter("NOT VALID SQL @@@"))
     window._on_filter_applied(fs, SortSpec("name"), "Bad SQL")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL  # unchanged, not emptied
     assert window._active_filter_name != "Bad SQL"
@@ -395,11 +397,11 @@ def test_where_clause_clear_restores_full_count(seeded_window, qtbot):
     fs = FilterSet()
     fs.add(WhereClauseFilter("difficulty >= 4.0"))
     window._on_filter_applied(fs, SortSpec("name"), "High D")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 2
 
     window._clear_filter()
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == TOTAL
 
@@ -508,7 +510,7 @@ def test_text_search_description_narrows_rows(seeded_window, qtbot):
     fs.add(TextSearchFilter("puzzle", search_description=True,
                             search_logs=False, search_notes=False, search_hint=False))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Puzzle")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
 
@@ -524,7 +526,7 @@ def test_text_search_hint_narrows_rows(seeded_window, qtbot):
     fs.add(TextSearchFilter("rock", search_description=False,
                             search_logs=False, search_notes=False, search_hint=True))
     window._on_filter_applied(fs, SortSpec("name", ascending=True), "Rock hint")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
 
@@ -549,7 +551,7 @@ def test_text_search_no_match_returns_zero(seeded_window, qtbot, monkeypatch):
     fs = FilterSet()
     fs.add(TextSearchFilter("zzznomatch"))
     window._on_filter_applied(fs, SortSpec("name"), "No match")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert warned  # the "no results" warning was shown
     assert window._cache_table.row_count() == TOTAL  # previous view untouched
@@ -571,14 +573,14 @@ def test_filter_zero_results_leaves_existing_filter_active(seeded_window, qtbot,
     fs1 = FilterSet(mode="AND")
     fs1.add(CacheTypeFilter(["Traditional Cache"]))
     window._on_filter_applied(fs1, SortSpec("name", ascending=True), "Traditional only")
-    qtbot.wait(50)
+    wait_for_refresh(window)
     assert window._cache_table.row_count() == 2
     assert window._active_filter_name == "Traditional only"
 
     fs2 = FilterSet()
     fs2.add(TextSearchFilter("zzznomatch"))
     window._on_filter_applied(fs2, SortSpec("name"), "No match")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2  # unchanged — still "Traditional only"
     assert window._active_filter_name == "Traditional only"
@@ -596,6 +598,6 @@ def test_where_exists_logs_narrows_rows(seeded_window, qtbot):
         "EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')"
     ))
     window._on_filter_applied(fs, SortSpec("name"), "TFTC logs")
-    qtbot.wait(50)
+    wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2

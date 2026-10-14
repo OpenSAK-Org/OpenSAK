@@ -40,70 +40,66 @@ class ImportWorker(QThread):
         self.target_db_path = target_db_path  # None → use currently active DB
 
     def run(self) -> None:
-        from opensak.db.database import get_session, init_db
+        from opensak.db.database import get_session, session_for
         from opensak.db.manager import get_db_manager
         from opensak.importer import import_gpx, import_zip, _count_wpts, _is_companion_gpx
         from opensak.utils.utils import get_import_type, ImportType
 
-        # Switch to target DB if different from active
-        manager = get_db_manager()
-        original_path = manager.active_path
-        switched = (
+        # Another database than the active one gets a private session —
+        # never swap the app-wide engine from this thread (see session_for).
+        active_path = get_db_manager().active_path
+        other_db = (
             self.target_db_path is not None
-            and self.target_db_path != original_path
+            and self.target_db_path != active_path
         )
-        if switched:
-            init_db(db_path=self.target_db_path)
 
-        try:
-            for i, path in enumerate(self.paths):
-                self.file_started.emit(i, path.name)
-                try:
-                    import_type: ImportType = get_import_type(path)
+        def _session():
+            return session_for(self.target_db_path) if other_db else get_session()
 
-                    if import_type == ImportType.GPX:
-                        try:
-                            self.total.emit(_count_wpts(path))
-                        except Exception:
-                            self.total.emit(-1)
-                        # Find a companion file by inspecting GPX content,
-                        # not by assuming a specific filename convention.
-                        wpts_path = None
-                        try:
-                            wpts_path = next(
-                                (
-                                    f for f in sorted(path.parent.glob("*.gpx"))
-                                    if f != path and _is_companion_gpx(f)
-                                ),
-                                None,
-                            )
-                        except Exception:
-                            pass
-                        with get_session() as session:
-                            result = import_gpx(
-                                path, session,
-                                wpts_path=wpts_path,
-                                progress_cb=self.progress.emit,
-                            )
-                    else:
+        for i, path in enumerate(self.paths):
+            self.file_started.emit(i, path.name)
+            try:
+                import_type: ImportType = get_import_type(path)
+
+                if import_type == ImportType.GPX:
+                    try:
+                        self.total.emit(_count_wpts(path))
+                    except Exception:
                         self.total.emit(-1)
-                        with get_session() as session:
-                            result = import_zip(
-                                path, session,
-                                progress_cb=self.progress.emit,
-                            )
+                    # Find a companion file by inspecting GPX content,
+                    # not by assuming a specific filename convention.
+                    wpts_path = None
+                    try:
+                        wpts_path = next(
+                            (
+                                f for f in sorted(path.parent.glob("*.gpx"))
+                                if f != path and _is_companion_gpx(f)
+                            ),
+                            None,
+                        )
+                    except Exception:
+                        pass
+                    with _session() as session:
+                        result = import_gpx(
+                            path, session,
+                            wpts_path=wpts_path,
+                            progress_cb=self.progress.emit,
+                        )
+                else:
+                    self.total.emit(-1)
+                    with _session() as session:
+                        result = import_zip(
+                            path, session,
+                            progress_cb=self.progress.emit,
+                        )
 
-                    self.file_finished.emit(i, result)
+                self.file_finished.emit(i, result)
 
-                except ValueError as e:
-                    self.file_error.emit(i, str(e))
-                except Exception:
-                    import traceback
-                    self.file_error.emit(i, traceback.format_exc())
-        finally:
-            # Always restore the original active DB
-            if switched and original_path is not None:
-                init_db(db_path=original_path)
+            except ValueError as e:
+                self.file_error.emit(i, str(e))
+            except Exception:
+                import traceback
+                self.file_error.emit(i, traceback.format_exc())
         # No explicit completion signal — QThread.finished fires automatically
         # once this method returns, and the dialog reacts to that instead.
 

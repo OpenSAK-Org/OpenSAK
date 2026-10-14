@@ -15,13 +15,16 @@ import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from lxml import etree
 from sqlalchemy.orm import Session
 import tempfile
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection, Engine
 
 
 # ── XML namespace map used by Groundspeak Pocket Queries ─────────────────────
@@ -978,6 +981,12 @@ def _parse_loc_waypoint(wpt_el) -> Optional[dict]:
 
 # ── DB upsert ─────────────────────────────────────────────────────────────────
 
+def _bind_of(session) -> "Engine | Connection | None":
+    """Engine of *session* so an internal session opens on the same database;
+    None (= the active database) when no real Session was passed."""
+    return session.get_bind() if isinstance(session, Session) else None
+
+
 def _load_existing_gc_map(session: Session) -> dict[str, int]:
     """Return ``{gc_code: cache.id}`` for every cache already in the database.
 
@@ -1725,13 +1734,14 @@ def import_gpx(
     Import a single GPX file into the database using streaming for high performance.
 
     Uses etree.iterparse to handle files of any size without RAM exhaustion.
-    The session parameter is kept for compatibility but a new session is managed internally.
+    A new session is managed internally; when *session* is given it is opened
+    on the same database (its bind), otherwise on the active database.
     """
     from opensak.db.database import make_session
 
     result = ImportResult()
     source = gpx_path.name
-    db_session = make_session()
+    db_session = make_session(_bind_of(session))
 
     extra_wpts: list = []
     processed_count = 0
@@ -1873,7 +1883,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     overall_result.errors.append(f"Parse error: {str(e)}")
 
         # Step 2: Write all parsed cache data sequentially (single session).
-        db_session = make_session()
+        db_session = make_session(_bind_of(session))
         existing_ids = _load_existing_gc_map(db_session)
         _enter_bulk_import_pragmas(db_session)
         try:

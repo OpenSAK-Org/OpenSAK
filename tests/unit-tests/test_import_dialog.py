@@ -78,15 +78,21 @@ class TestImportWorker:
         w.run()
         assert errs and "boom" in errs[0]
 
-    def test_run_switches_and_restores_db(self, monkeypatch):
+    def test_run_other_db_uses_private_session(self, monkeypatch):
+        # Another target DB gets its own session; the active (global) engine
+        # is never swapped from the worker thread.
         ImportType = self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.utils.utils.get_import_type", lambda p: ImportType.GPX)
-        inits = []
+        inits, opened = [], []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
-        w = ImportWorker([Path("/a.gpx")], target_db_path=Path("/other.db"))
+        monkeypatch.setattr("opensak.db.database.get_session",
+                            lambda: pytest.fail("active DB session used for another DB"))
+        monkeypatch.setattr("opensak.db.database.session_for",
+                            lambda p: opened.append(p) or _fake_session())
+        w = ImportWorker([Path("/a.gpx"), Path("/b.gpx")], target_db_path=Path("/other.db"))
         w.run()
-        # switched to target, then restored original
-        assert inits == [Path("/other.db"), Path("/active.db")]
+        assert opened == [Path("/other.db"), Path("/other.db")]
+        assert inits == []
 
     def test_run_gpx_passes_companion_wpts_path(self, monkeypatch, tmp_path):
         # Companion detected by content inspection, not filename.

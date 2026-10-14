@@ -9,7 +9,7 @@ from typing import Optional
 from datetime import datetime
 
 from PySide6.QtCore import (
-    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint, QLocale, QDate
+    Qt, QAbstractTableModel, QModelIndex, QPersistentModelIndex, Signal, QPoint
 )
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
 from opensak.db.models import Cache
 from opensak.filters.engine import _haversine_km
 from opensak.gui.settings import get_settings
+from opensak.gui.date_format import format_date
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
 from opensak.lang import tr
-from opensak.utils.types import DateFormat, GcCode, TEXT_SIZE_MAP, TextSize, norm_locale_date_fmt
+from opensak.utils.types import GcCode, TEXT_SIZE_MAP, TextSize
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.gui.icon_provider import (
@@ -142,6 +143,17 @@ def get_column_defs() -> dict:
     }
 
 
+# Issue #1000: columns with a short header, shown instead of the full title
+# when the column is too narrow for it (GSAK calls "Last four logs" "L4").
+SHORT_HEADER_KEYS: dict[str, str] = {
+    "last_four_logs": "col_last_four_logs_short",
+    "last_gpx_update": "col_last_gpx_update_short",   # #1004, GSAK's "Last GPX"
+}
+
+# Room for the sort indicator next to a header's text, in pixels.
+_SORT_INDICATOR_ROOM = 16
+
+
 def _get_active_columns() -> list[str]:
     from opensak.gui.dialogs.column_dialog import get_visible_columns
     # Issue #488: persisted per-database column visibility (opensak.json,
@@ -155,17 +167,8 @@ def _get_active_columns() -> list[str]:
 
 
 def _format_date(d: datetime) -> str:
-    fmt = get_settings().date_format
-    if fmt == DateFormat.DMY:
-        return d.strftime("%d.%m.%Y")
-    if fmt == DateFormat.MDY:
-        return d.strftime("%m/%d/%Y")
-    if fmt == DateFormat.YMD:
-        return d.strftime("%Y-%m-%d")
-    # LOCALE: ask Qt for the OS short-date pattern, normalised to zero-padded fields
-    qd = QDate(d.year, d.month, d.day)
-    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
-    return QLocale.system().toString(qd, locale_fmt)
+    # Issue #1043: same pattern as the date pickers (opensak.gui.date_format).
+    return format_date(d, get_settings().date_format)
 
 
 def _gc_sort_key(gc_code: GcCode) -> str:
@@ -512,10 +515,17 @@ class LastFourLogsDelegate(QStyledItemDelegate):
 
     Same segmented-square structure as SizeBarDelegate above, just 4
     fixed-color squares instead of a size-proportional fill.
+
+    Issue #1000: in a column narrower than _GRID_BELOW the squares are drawn
+    as GSAK's "L4" 2×2 stack instead — 1st log top left, 2nd top right, 3rd
+    bottom left, 4th bottom right — so the column can be made narrow without
+    the squares turning into thin stripes.
     """
 
     _SQUARE_COUNT = 4
     _SQUARE_GAP = 2
+    _GRID_BELOW = 54   # column width (px) below which the 2×2 stack is used
+    _GRID_GAP = 1
     _COLOR_FOUND = QColor("#7dcea0")   # green
     _COLOR_DNF   = QColor("#f1948a")   # red
     _COLOR_OTHER = QColor("#f9e79f")   # yellow
@@ -542,25 +552,39 @@ class LastFourLogsDelegate(QStyledItemDelegate):
         else:
             super().paint(painter, option, index)
 
-        rect = option.rect
-        margin_x, margin_y = 4, 4
-        total_w = rect.width() - 2 * margin_x
-        total_h = rect.height() - 2 * margin_y
-        x0 = rect.x() + margin_x
-        y0 = rect.y() + margin_y
-
-        sq_w = max(4, (total_w - self._SQUARE_GAP * (self._SQUARE_COUNT - 1)) // self._SQUARE_COUNT)
-        sq_h = max(4, total_h)
-
-        for i in range(self._SQUARE_COUNT):
-            sx = x0 + i * (sq_w + self._SQUARE_GAP)
-            sq_rect = QRect(sx, y0, sq_w, sq_h)
+        for i, sq_rect in enumerate(self.square_rects(option.rect)):
             color = self._color_for(logs[i][1]) if i < len(logs) else self._COLOR_EMPTY
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
             painter.drawRoundedRect(sq_rect, 1, 1)
 
         painter.restore()
+
+    def square_rects(self, rect: QRect) -> list[QRect]:
+        """The four squares for a cell, in log order (most recent first): a
+        row of four, or the 2×2 stack in a narrow column (#1000)."""
+        margin_x, margin_y = 4, 4
+        total_w = rect.width() - 2 * margin_x
+        total_h = rect.height() - 2 * margin_y
+
+        if rect.width() < self._GRID_BELOW:
+            gap = self._GRID_GAP
+            sq = max(3, min((total_h - gap) // 2, (total_w - gap) // 2))
+            x0 = rect.x() + (rect.width() - (2 * sq + gap)) // 2
+            y0 = rect.y() + (rect.height() - (2 * sq + gap)) // 2
+            return [
+                QRect(x0 + (i % 2) * (sq + gap), y0 + (i // 2) * (sq + gap), sq, sq)
+                for i in range(self._SQUARE_COUNT)
+            ]
+
+        x0 = rect.x() + margin_x
+        y0 = rect.y() + margin_y
+        sq_w = max(4, (total_w - self._SQUARE_GAP * (self._SQUARE_COUNT - 1)) // self._SQUARE_COUNT)
+        sq_h = max(4, total_h)
+        return [
+            QRect(x0 + i * (sq_w + self._SQUARE_GAP), y0, sq_w, sq_h)
+            for i in range(self._SQUARE_COUNT)
+        ]
 
     def sizeHint(self, option, index):
         sh = super().sizeHint(option, index)
@@ -684,6 +708,9 @@ class CacheTableModel(QAbstractTableModel):
         self._distances: dict[int, float] = {}
         self._bearings: dict[int, float] = {}
         self._columns: list[str] = _get_active_columns()
+        # Issue #1000: columns currently showing their short header ("L4")
+        # because the full title doesn't fit — set by CacheTableView.
+        self._short_headers: set[str] = set()
 
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
@@ -770,6 +797,18 @@ class CacheTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._columns)
 
+    def set_short_header(self, col_id: str, short: bool) -> None:
+        """Show *col_id*'s short header (True) or its full title (#1000)."""
+        if (col_id in self._short_headers) == short:
+            return
+        if short:
+            self._short_headers.add(col_id)
+        else:
+            self._short_headers.discard(col_id)
+        if col_id in self._columns:
+            section = self._columns.index(col_id)
+            self.headerDataChanged.emit(Qt.Orientation.Horizontal, section, section)
+
     def headerData(self, section: int, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
@@ -789,9 +828,14 @@ class CacheTableModel(QAbstractTableModel):
                     # stadig som tooltip (ToolTipRole nedenfor) og i Column
                     # Chooser (via get_column_defs(), uændret).
                     return ""
+                if col_id in self._short_headers and col_id in SHORT_HEADER_KEYS:
+                    return tr(SHORT_HEADER_KEYS[col_id])
                 return get_column_defs().get(col_id, (col_id, 80))[0]
             if role == Qt.ItemDataRole.ToolTipRole:
                 col_id = self._columns[section]
+                if col_id in SHORT_HEADER_KEYS:
+                    # Issue #1000: the full title, also when "L4" is shown.
+                    return get_column_defs().get(col_id, (col_id, 80))[0]
                 if col_id == "corrected":
                     return tr("col_corrected_header_tooltip")
                 if col_id == "user_flag":
@@ -1432,6 +1476,7 @@ class CacheTableView(QTableView):
     sort_changed = Signal(str, bool)  # (col_id, ascending) videresendes fra model
     location_updated = Signal()       # emitted after right-click location update
     edit_requested = Signal(object)   # emitted when user requests edit of a cache
+    delete_requested = Signal(object)  # Cache — "Delete cache…" in the context menu (#693)
     center_point_requested = Signal(object)  # emitted with a Cache — "Sæt som centerpunkt" (#511)
     corrected_coords_changed = Signal(str)  # gc_code — emitted after Add/Edit/Clear
     found_status_changed = Signal(str)  # gc_code — emitted after Mark as Found (#649)
@@ -1577,6 +1622,9 @@ class CacheTableView(QTableView):
                 default_width = get_column_defs().get(col_id, (col_id, 80))[1]
                 width = saved.get(col_id, default_width)
                 self.setColumnWidth(i, width)
+                # setColumnWidth() emits no sectionResized when the width
+                # doesn't change, so set the short header here too (#1000).
+                self._update_short_header(col_id, width)
                 header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
                 if col_id == "container":
                     if get_container_display() == "text":
@@ -1621,15 +1669,30 @@ class CacheTableView(QTableView):
             self._applying_widths = False
 
     def _on_column_resized(self, logical_index: int, _old: int, new_size: int) -> None:
-        if self._applying_widths:
-            return
         columns = self._model._columns
         if logical_index >= len(columns):
             return
         col_id = columns[logical_index]
+        # Before the _applying_widths check, so the header also follows the
+        # widths applied from a column view or at start-up (#1000).
+        self._update_short_header(col_id, new_size)
+        if self._applying_widths:
+            return
         widths = get_column_widths()
         widths[col_id] = new_size
         set_column_widths(widths)
+
+    def _update_short_header(self, col_id: str, width: int) -> None:
+        """Show the short header ("L4") when the full title wouldn't fit in a
+        column *width* pixels wide, instead of a cut-off title (#1000)."""
+        if col_id not in SHORT_HEADER_KEYS:
+            return
+        header = self.horizontalHeader()
+        title = get_column_defs().get(col_id, (col_id, 80))[0]
+        margin = header.style().pixelMetric(QStyle.PixelMetric.PM_HeaderMargin, None, header)
+        needed = (header.fontMetrics().horizontalAdvance(title)
+                  + 2 * margin + _SORT_INDICATOR_ROOM)
+        self._model.set_short_header(col_id, width < needed)
 
     def _on_column_moved(self, _logical_index: int, old_visual: int, new_visual: int) -> None:
         """Gem ny kolonne-rækkefølge når brugeren trækker en kolonne (issue #199)."""
@@ -1731,18 +1794,27 @@ class CacheTableView(QTableView):
             lambda: webbrowser.open(f"https://coord.info/{cache.gc_code}")
         )
 
-        # Åbn i kortapp
+        # Åbn i kortapp — issue #951: brug de effektive koordinater
+        # (corrected hvis sat, ellers original), samme regel som lat/lon-
+        # kolonnerne, kortet og GPS-eksport. Har cachen korrigerede
+        # koordinater, tilbydes de originale som et ekstra menupunkt.
         if cache.latitude and cache.longitude:
-            from opensak.gui.settings import get_settings
             s = get_settings()
             map_name = "OpenStreetMap" if s.map_provider == "osm" else "Google Maps"
+            lat, lon = CacheTableModel._effective_coords(cache)
             act_maps = menu.addAction(tr("ctx_open_maps", map_name=map_name))
-            lat, lon = cache.latitude, cache.longitude
             act_maps.triggered.connect(
-                lambda checked=False, la=lat, lo=lon: webbrowser.open(
-                    get_settings().get_maps_url(la, lo)
-                )
+                lambda checked=False, la=lat, lo=lon: self._open_in_maps(la, lo)
             )
+            if (lat, lon) != (cache.latitude, cache.longitude):
+                act_maps_orig = menu.addAction(
+                    tr("ctx_open_maps_original", map_name=map_name)
+                )
+                orig_lat, orig_lon = cache.latitude, cache.longitude
+                act_maps_orig.triggered.connect(
+                    lambda checked=False, la=orig_lat, lo=orig_lon:
+                        self._open_in_maps(la, lo)
+                )
 
             # Sæt som centerpunkt (issue #511 — GSAK's CenterPoint > Current
             # Cache). Genberegner Distance-kolonnen for alle caches ud fra
@@ -1758,20 +1830,32 @@ class CacheTableView(QTableView):
         act_copy_gc = menu.addAction(tr("ctx_copy_gc"))
         act_copy_gc.triggered.connect(lambda: self._copy_to_clipboard(cache.gc_code))
 
-        # Kopiér koordinater — i det valgte format
+        # Kopiér koordinater — i det valgte format. Issue #1003: som "Åbn i
+        # kortapp" (#951) bruges de effektive koordinater (corrected hvis
+        # sat), og de originale får et ekstra punkt når cachen er korrigeret.
         if cache.latitude and cache.longitude:
             fmt = get_settings().coord_format
-            coords = format_coords(cache.latitude, cache.longitude, fmt)
+            eff_lat, eff_lon = CacheTableModel._effective_coords(cache)
+            if eff_lat is None or eff_lon is None:   # not reached: originals are set
+                eff_lat, eff_lon = cache.latitude, cache.longitude
+            coords = format_coords(eff_lat, eff_lon, fmt)
             act_copy_coords = menu.addAction(tr("ctx_copy_coords"))
             act_copy_coords.triggered.connect(
-                lambda: self._copy_to_clipboard(coords)
+                lambda checked=False, text=coords: self._copy_to_clipboard(text)
             )
+            if (eff_lat, eff_lon) != (cache.latitude, cache.longitude):
+                orig_coords = format_coords(cache.latitude, cache.longitude, fmt)
+                act_copy_orig = menu.addAction(tr("ctx_copy_coords_original"))
+                act_copy_orig.triggered.connect(
+                    lambda checked=False, text=orig_coords:
+                        self._copy_to_clipboard(text)
+                )
 
-            # Åbn koordinatkonverter
+            # Åbn koordinatkonverter — med de effektive koordinater (#1003)
             act_converter = menu.addAction(tr("ctx_coord_converter"))
-            lat, lon = cache.latitude, cache.longitude
             act_converter.triggered.connect(
-                lambda checked=False, la=lat, lo=lon: self._open_converter(la, lo)
+                lambda checked=False, la=eff_lat, lo=eff_lon:
+                    self._open_converter(la, lo)
             )
 
         menu.addSeparator()
@@ -1800,6 +1884,12 @@ class CacheTableView(QTableView):
         act_edit.triggered.connect(
             lambda checked=False, c=cache: self.edit_requested.emit(c)
         )
+        # Issue #693: the cache under the mouse, which is not necessarily
+        # the selected one — a right-click doesn't change the selection.
+        act_delete = menu.addAction(tr("ctx_delete_cache"))
+        act_delete.triggered.connect(
+            lambda checked=False, c=cache: self.delete_requested.emit(c)
+        )
 
         menu.addSeparator()
 
@@ -1825,6 +1915,11 @@ class CacheTableView(QTableView):
 
         menu.exec(self.viewport().mapToGlobal(pos))
 
+    @staticmethod
+    def _open_in_maps(lat: float, lon: float) -> None:
+        """Åbn koordinaterne i den valgte kortudbyder (Settings → Map)."""
+        webbrowser.open(get_settings().get_maps_url(lat, lon))
+
     def _edit_corrected(self, cache: Cache) -> None:
         """Åbn dialog til at sætte/redigere korrigerede koordinater."""
         from opensak.gui.dialogs.corrected_coords_dialog import CorrectedCoordsDialog
@@ -1848,49 +1943,12 @@ class CacheTableView(QTableView):
         self._save_corrected(cache, None, None)
 
     def _save_corrected(self, cache: Cache, lat, lon) -> None:
-        from opensak.db.database import get_session
-        from opensak.db.models import UserNote, Cache as CacheModel
-        from sqlalchemy.orm import joinedload, selectinload
-        with get_session() as session:
-            cache_row = session.query(CacheModel).options(
-                joinedload(CacheModel.user_note)
-            ).filter_by(gc_code=cache.gc_code).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-                session.flush()
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
-
-        # Reload det fulde cache-objekt fra DB med user_note eager-loaded,
-        # og erstat det detachede objekt i modellen direkte.
-        # Det undgår alle problemer med at skrive til detached ORM-relationer.
-        with get_session() as session:
-            fresh = session.query(CacheModel).options(
-                joinedload(CacheModel.user_note),
-                selectinload(CacheModel.waypoints),
-                selectinload(CacheModel.attributes),
-                selectinload(CacheModel.trackables),
-            ).filter_by(gc_code=cache.gc_code).first()
-            if fresh is None:
-                return
-
-        # Erstat objektet i listen — find det via gc_code
-        caches = self._model._caches
-        for i, c in enumerate(caches):
-            if c.gc_code == cache.gc_code:
-                caches[i] = fresh
-                break
-
-        self._reset_model_preserving_selection()
-        # Issue #474: map wasn't refreshed when corrected coords were set/cleared
-        # via this (context menu) path — only the "Add corrected coordinates..."
-        # button in the cache detail panel emitted a change signal. Emit here too
-        # so mainwindow can update the map pin the same way for both entry points.
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(cache.gc_code, lat, lon):
+            return
+        # Issue #474: mainwindow refreshes the table row (refresh_cache_row),
+        # map pin and detail panel from this signal — the same handler for
+        # every entry point, so no row reload here.
         self.corrected_coords_changed.emit(cache.gc_code)
 
     def _open_converter(self, lat: float, lon: float) -> None:

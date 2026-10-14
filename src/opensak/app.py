@@ -2,6 +2,7 @@
 app.py — Application entry point for OpenSAK.
 """
 
+import locale
 import logging
 import sys
 import time
@@ -252,12 +253,22 @@ def main() -> None:
     )
 
     app = QApplication(sys.argv)
+    # #1015: QApplication sets the C locale from the system; keep numbers in
+    # C library formatting (e.g. Lua macros) with a decimal point.
+    locale.setlocale(locale.LC_NUMERIC, "C")
     app.setWindowIcon(get_app_icon())
     app.setApplicationName("OpenSAK")
     from opensak import __version__ as _ver
     app.setApplicationVersion(_ver)
     app.setOrganizationName("OpenSAK Project")
     app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+
+    # #959: when the OS session ends (logout/shutdown) there is no time for
+    # a backup, so the window closes without the back-up-on-exit prompt.
+    # Windows and Linux/X11 report this; macOS can't tell a logout from Quit.
+    # If the user cancels the logout, the prompt stays off for this run.
+    from opensak.backup.exit_state import suppress_exit_backup
+    app.commitDataRequest.connect(lambda _manager: suppress_exit_backup())
 
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
@@ -292,6 +303,12 @@ def main() -> None:
         is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
     )
     migrate_macos_default_paths()
+
+    # #987: a settings restore chosen in the last run is applied now, after
+    # the path migration and before anything reads the settings (the theme
+    # below is the first) — the running app could otherwise overwrite it.
+    from opensak.backup.settings_restore import apply_pending_settings_restore
+    settings_restore_result = apply_pending_settings_restore()
 
     # Anvend Fusion stil + platform-tilpasset font + brugertema
     # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
@@ -371,12 +388,29 @@ def main() -> None:
         from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
         from opensak.config import get_log_path
         from opensak.lang import tr
-        QMessageBox.critical(
-            None, tr("startup_db_error_title"),
-            tr("startup_db_error_msg", error=str(e), path=str(get_log_path())),
-        )
+        message = tr("startup_db_error_msg", error=str(e), path=str(get_log_path()))
+        # Issue #549: if the database was backed up before a migration that
+        # then failed, this is exactly when the user needs to know where.
+        from opensak.backup.premigration import take_notices
+        for notice in take_notices():
+            message += "\n\n" + tr(
+                "premigration_backup_msg",
+                file=notice.db_path.name, path=str(notice.backup_path),
+            )
+        QMessageBox.critical(None, tr("startup_db_error_title"), message)
         sys.exit(1)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
+
+    # #1012: keep the LuaLS stub and .luarc.json in the macros folder
+    # current, so an external editor completes opensak.* after an update.
+    import opensak.utils.flags as flags
+    if flags.lua_macros:
+        from opensak.macro.editor_support import install_editor_support
+        try:
+            install_editor_support()
+        except OSError:
+            logger.warning("startup: could not install macro editor support",
+                           exc_info=True)
 
     # Opret hovedvindue
     splash_msg("Starter OpenSAK...")
@@ -401,9 +435,25 @@ def main() -> None:
 
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, _close_splash)
+    # Issue #549: after the splash has gone, tell the user if the active
+    # database was backed up before being migrated during startup.
+    QTimer.singleShot(500, window.show_premigration_backup_notices)
+    # Issue #1045: the last active database was unavailable (e.g. a removed
+    # USB drive) and startup fell back to another one.
+    QTimer.singleShot(550, window.show_database_fallback_notice)
+    if settings_restore_result is not None:
+        QTimer.singleShot(
+            600, lambda: window.show_settings_restore_notice(settings_restore_result)
+        )
 
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    # #959: if the window closed with everything backed up, record the backup
+    # state again now that the database has been checkpointed on dispose —
+    # otherwise the checkpoint itself would count as a change at the next exit.
+    from opensak.backup.exit_state import finalize_after_close
+    finalize_after_close()
+    sys.exit(exit_code)
 
 
 def _report_app_control_block(exc: BaseException) -> bool:

@@ -10,7 +10,7 @@ import re
 import webbrowser
 from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
-from PySide6.QtCore import Qt, QUrl, Signal, QDate, QLocale, QEvent, QSize
+from PySide6.QtCore import Qt, QUrl, Signal, QEvent, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
@@ -24,23 +24,16 @@ from opensak.db.models import Cache
 from opensak.lang import tr
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
+from opensak.gui.date_format import format_date
 from opensak.gui.theme import hint_style, hint_text_color
 from opensak.gui.icon_provider import get_cache_type_pixmap_composite, get_corrected_coords_icon
-from opensak.utils.types import DateFormat, TEXT_SIZE_MAP, norm_locale_date_fmt
+from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.hint_detect import split_hint, render_hint_breaks
 
 
 def _format_date(d: datetime) -> str:
-    fmt = get_settings().date_format
-    if fmt == DateFormat.DMY:
-        return d.strftime("%d.%m.%Y")
-    if fmt == DateFormat.MDY:
-        return d.strftime("%m/%d/%Y")
-    if fmt == DateFormat.YMD:
-        return d.strftime("%Y-%m-%d")
-    qd = QDate(d.year, d.month, d.day)
-    locale_fmt = norm_locale_date_fmt(QLocale.system().dateFormat(QLocale.FormatType.ShortFormat))
-    return QLocale.system().toString(qd, locale_fmt)
+    # Issue #1043: same pattern as the date pickers (opensak.gui.date_format).
+    return format_date(d, get_settings().date_format)
 
 
 # issue #219 — geocaching.com logge bruger markdown-links: [linktekst](https://url)
@@ -49,8 +42,23 @@ _MD_LINK_RE = re.compile(r'\[([^\[\]]+)\]\((https?://[^\s)]+)\)')
 
 
 def _convert_markdown_links(text: str) -> str:
-    """Konverter markdown-links [tekst](url) i logtekst til klikbare HTML-links."""
+    """Konverter markdown-links [tekst](url) i logtekst til klikbare HTML-links.
+
+    Teksten skal allerede være HTML-escaped, så kun de links regex'en selv
+    genkender (http/https) bliver til <a> tags.
+    """
     return _MD_LINK_RE.sub(r'<a href="\2">\1</a>', text)
+
+
+def _open_http_link(url: QUrl) -> None:
+    """Åbn et link fra log/trackable-panelerne i systemets browser.
+
+    Log- og trackable-tekst er skrevet af tredjepart, så kun http/https må
+    åbnes — samme regel som _DescWebPage bruger for beskrivelsen. Andre
+    skemaer (file:, smb:, ms-…: osv.) ignoreres.
+    """
+    if url.scheme() in ("http", "https"):
+        webbrowser.open(url.toString())
 
 
 class _DescWebPage(QWebEnginePage):
@@ -348,7 +356,9 @@ class CacheDetailPanel(QWidget):
         log_layout.setSpacing(4)
 
         self._log_browser = QTextBrowser()
-        self._log_browser.setOpenExternalLinks(True)  # issue #219 — links åbnes i systemets browser
+        # issue #219 — links åbnes i systemets browser, men kun http/https
+        self._log_browser.setOpenLinks(False)
+        self._log_browser.anchorClicked.connect(_open_http_link)
         log_layout.addWidget(self._log_browser)
         self._tabs.addTab(log_widget, tr("detail_tab_logs"))
 
@@ -371,7 +381,8 @@ class CacheDetailPanel(QWidget):
         tb_layout = QVBoxLayout(tb_widget)
         tb_layout.setContentsMargins(0, 4, 0, 0)
         self._tb_browser = QTextBrowser()
-        self._tb_browser.setOpenExternalLinks(True)
+        self._tb_browser.setOpenLinks(False)
+        self._tb_browser.anchorClicked.connect(_open_http_link)
         tb_layout.addWidget(self._tb_browser)
         self._tabs.addTab(tb_widget, tr("col_trackables"))
 
@@ -415,27 +426,16 @@ class CacheDetailPanel(QWidget):
         if self._current_gc_code:
             webbrowser.open(f"https://www.geocaching.com/geocache/{self._current_gc_code}")
 
+    # Issue #951: map URLs are built in one place, Settings.get_maps_url().
     def _open_in_maps(self, event) -> None:
-        if self._current_lat is None:
+        if self._current_lat is None or self._current_lon is None:
             return
-        settings = get_settings()
-        app = settings.map_provider
-        lat, lon = self._current_lat, self._current_lon
-        if app == "google":
-            webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
-        else:
-            webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
+        webbrowser.open(get_settings().get_maps_url(self._current_lat, self._current_lon))
 
     def _open_corrected_in_maps(self, event) -> None:
-        if self._corrected_lat is None:
+        if self._corrected_lat is None or self._corrected_lon is None:
             return
-        settings = get_settings()
-        app = settings.map_provider
-        lat, lon = self._corrected_lat, self._corrected_lon
-        if app == "google":
-            webbrowser.open(f"https://www.google.com/maps?q={lat},{lon}")
-        else:
-            webbrowser.open(f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15")
+        webbrowser.open(get_settings().get_maps_url(self._corrected_lat, self._corrected_lon))
 
     def _open_coord_converter(self) -> None:
         if self._current_lat is None:
@@ -450,6 +450,8 @@ class CacheDetailPanel(QWidget):
         from opensak.gui.dialogs.corrected_coords_dialog import CorrectedCoordsDialog
         dlg = CorrectedCoordsDialog(
             gc_code=self._current_gc_code,
+            orig_lat=self._current_lat,
+            orig_lon=self._current_lon,
             corrected_lat=self._corrected_lat,
             corrected_lon=self._corrected_lon,
             parent=self,
@@ -462,27 +464,17 @@ class CacheDetailPanel(QWidget):
         self._save_corrected_coords(None, None)
 
     def _save_corrected_coords(self, lat, lon) -> None:
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache as CacheModel, UserNote
-        with get_session() as session:
-            cache_row = session.query(CacheModel).filter_by(
-                gc_code=self._current_gc_code
-            ).first()
-            if not cache_row:
-                return
-            note = cache_row.user_note
-            if note is None:
-                note = UserNote(cache_id=cache_row.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = (lat is not None and lon is not None)
+        gc_code = self._current_gc_code
+        if not gc_code:
+            return
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(gc_code, lat, lon):
+            return
 
         self._corrected_lat = lat
         self._corrected_lon = lon
         self._update_corrected_ui()
-        if self._current_gc_code:
-            self.corrected_coords_changed.emit(self._current_gc_code)
+        self.corrected_coords_changed.emit(gc_code)
 
     def eventFilter(self, obj, event) -> bool:
         note_editor = getattr(self, "_note_editor", None)
@@ -751,22 +743,24 @@ class CacheDetailPanel(QWidget):
             return
 
         colours = LOG_COLOURS
-        html = []
+        parts = []
         for log in logs:
             colour = colours.get(log.log_type, "#555555")
             date_str = _format_date(log.log_date) if log.log_date else "?"
             # issue #218 — ingen trunkering: hele logteksten vises (QTextBrowser scroller selv)
-            text = log.text or ""
+            # Logtekst er tredjeparts-indhold: escape først, så kun de
+            # markdown-links vi selv genkender bliver til <a> tags
+            text = html.escape(log.text or "")
             # issue #219 — markdown-links [tekst](url) gøres til klikbare <a> tags
             text = _convert_markdown_links(text)
-            html.append(
-                f'<p><b style="color:{colour}">{log.log_type}</b> '
-                f'— {log.finder or "?"} '
+            parts.append(
+                f'<p><b style="color:{colour}">{html.escape(log.log_type or "")}</b> '
+                f'— {html.escape(log.finder or "?")} '
                 f'<span style="color:{hint_text_color()}">({date_str})</span><br>'
                 f'{text}</p><hr>'
             )
 
-        self._log_browser.setHtml("".join(html))
+        self._log_browser.setHtml("".join(parts))
 
     def _render_waypoints(self, cache: Cache) -> None:
         wps = cache.waypoints
@@ -831,15 +825,16 @@ class CacheDetailPanel(QWidget):
         self._tabs.setTabText(
             tab_idx, tr("detail_tab_trackables_count", count=len(trackables))
         )
-        html = []
+        parts = []
         for t in trackables:
-            name = t.name or "?"
+            name = html.escape(t.name or "?")
             if t.ref:
-                link = f'<a href="https://coord.info/{t.ref}">{t.ref}</a>'
-                html.append(f'<p>🐛 {name} ({link})</p>')
+                ref = html.escape(t.ref)
+                link = f'<a href="https://coord.info/{ref}">{ref}</a>'
+                parts.append(f'<p>🐛 {name} ({link})</p>')
             else:
-                html.append(f'<p>🐛 {name}</p>')
-        self._tb_browser.setHtml("".join(html))
+                parts.append(f'<p>🐛 {name}</p>')
+        self._tb_browser.setHtml("".join(parts))
 
     def _on_tab_changed(self, idx: int) -> None:
         if idx == 3:

@@ -5,7 +5,7 @@ src/opensak/gui/mainwindow.py — Main application window.
 from __future__ import annotations
 import logging
 import time
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
@@ -197,7 +197,17 @@ class InfoBar(QFrame):
         self._owned_lbl.setText(str(owned))
 
 
+# Up to this many caches changed by one macro run are refreshed row by row;
+# more trigger a single full reload of the cache list (see end_macro()).
+_MACRO_ROW_REFRESH_LIMIT = 50
+
+
 class MainWindow(QMainWindow):
+    # #959: the back-up-on-exit flow. While a backup runs the controller is
+    # kept here; once it says "close", the second close skips the prompt.
+    _exit_backup: Any = None
+    _close_after_exit_backup = False
+
     def __init__(self):
         super().__init__()
         self.setMinimumSize(800, 500)
@@ -225,6 +235,15 @@ class MainWindow(QMainWindow):
         # RefreshWorker's docstring and _on_refresh_result() below.
         self._refresh_generation: int = 0
         self._active_refresh_workers: list[RefreshWorker] = []
+        # Start time per refresh generation, for the timing log lines in
+        # _on_refresh_result(). Popped when the result (or error) comes back.
+        self._refresh_started_at: dict[int, float] = {}
+        # GC codes whose corrected coordinates a running Lua macro changed;
+        # refreshed in one go by end_macro() instead of once per call.
+        self._macro_changed_codes: set[GcCode] = set()
+        # A running macro moved caches out of the active database; the view
+        # is reloaded once by end_macro().
+        self._macro_caches_removed = False
         # Issue #558: the toolbar Where box's expression currently in
         # effect — only set once validated on Enter, so a half-typed
         # expression never leaks into refreshes triggered elsewhere.
@@ -276,6 +295,7 @@ class MainWindow(QMainWindow):
         self._cache_table.sort_changed.connect(self._on_sort_changed)
         self._cache_table.location_updated.connect(self._refresh_cache_list)
         self._cache_table.edit_requested.connect(self._edit_waypoint_from_cache)
+        self._cache_table.delete_requested.connect(self._delete_cache)
         self._cache_table.center_point_requested.connect(self._set_cache_as_center)
         self._cache_table.corrected_coords_changed.connect(self._on_corrected_coords_changed)
         self._cache_table.found_status_changed.connect(self._on_found_status_changed)
@@ -354,6 +374,16 @@ class MainWindow(QMainWindow):
         self._act_db_manager.triggered.connect(self._open_db_manager)
         file_menu.addAction(self._act_db_manager)
 
+        # Issue #953: back up all (or some) databases plus the settings.
+        self._act_backup_now = QAction(tr("action_backup_now"), self)
+        self._act_backup_now.triggered.connect(self._open_backup_dialog)
+        file_menu.addAction(self._act_backup_now)
+
+        # Issue #954: restore databases from a backup (always as new ones).
+        self._act_restore_backup = QAction(tr("action_restore_backup"), self)
+        self._act_restore_backup.triggered.connect(self._open_restore_dialog)
+        file_menu.addAction(self._act_restore_backup)
+
         file_menu.addSeparator()
 
         self._act_import = QAction(tr("action_import"), self)
@@ -364,6 +394,10 @@ class MainWindow(QMainWindow):
         self._act_gsak_import = QAction(tr("action_gsak_import"), self)
         self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
         file_menu.addAction(self._act_gsak_import)
+
+        self._act_gsak_filter_import = QAction(tr("action_gsak_filter_import"), self)
+        self._act_gsak_filter_import.triggered.connect(self._open_gsak_filter_import_dialog)
+        file_menu.addAction(self._act_gsak_filter_import)
 
         self._act_pq_email_check = QAction(tr("action_pq_email_check"), self)
         self._act_pq_email_check.triggered.connect(self._open_pq_email_check_dialog)
@@ -419,9 +453,23 @@ class MainWindow(QMainWindow):
 
         wp_menu.addSeparator()
 
+        # Issue #293: bulk user-flag actions — the caches in the active
+        # filter, or (the original action) every cache in the database.
+        self._user_flags_menu = wp_menu.addMenu(tr("menu_user_flags"))
+
+        act_flag_filtered = QAction(tr("action_flag_filtered"), self)
+        act_flag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(True))
+        self._user_flags_menu.addAction(act_flag_filtered)
+
+        act_unflag_filtered = QAction(tr("action_unflag_filtered"), self)
+        act_unflag_filtered.triggered.connect(lambda: self._set_flag_for_filtered(False))
+        self._user_flags_menu.addAction(act_unflag_filtered)
+
+        self._user_flags_menu.addSeparator()
+
         act_clear_flags = QAction(tr("action_clear_flags"), self)
         act_clear_flags.triggered.connect(self._clear_all_flags)
-        wp_menu.addAction(act_clear_flags)
+        self._user_flags_menu.addAction(act_clear_flags)
 
         wp_menu.addSeparator()
 
@@ -547,6 +595,23 @@ class MainWindow(QMainWindow):
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
 
+        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        macros_menu = menubar.addMenu(tr("menu_macros"))
+        # Beta-only until the macro API is settled (#938 step 4).
+        macros_menu.menuAction().setVisible(flags.lua_macros)
+
+        act_run_macro = QAction(tr("action_run_macro"), self)
+        act_run_macro.triggered.connect(self._open_macro_dialog)
+        macros_menu.addAction(act_run_macro)
+
+        from opensak.macro.examples import list_examples
+        examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
+        for name in list_examples():
+            act = QAction(name, self)
+            act.triggered.connect(lambda _=False, n=name: self._open_macro_example(n))
+            examples_menu.addAction(act)
+        examples_menu.setEnabled(not examples_menu.isEmpty())
+
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
 
@@ -557,6 +622,13 @@ class MainWindow(QMainWindow):
         act_user_guide = QAction(tr("action_user_guide"), self)
         act_user_guide.triggered.connect(self._open_user_guide)
         help_menu.addAction(act_user_guide)
+
+        # Issue #944: lets users see what changed without relying on the
+        # Facebook announcement or on catching the update popup's link
+        # (Store/MSIX installs never get that popup — see #874).
+        act_changelog = QAction(tr("action_changelog"), self)
+        act_changelog.triggered.connect(self._open_changelog)
+        help_menu.addAction(act_changelog)
 
         act_check_update = QAction(tr("action_check_update"), self)
         act_check_update.triggered.connect(self._check_update_manual)
@@ -962,6 +1034,31 @@ class MainWindow(QMainWindow):
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
 
+    def _open_backup_dialog(self) -> None:
+        """File → Back up now… (issue #953)."""
+        from opensak.gui.dialogs.backup_dialog import BackupDialog
+        BackupDialog(self).exec()
+
+    def _open_restore_dialog(self) -> None:
+        """File → Restore from backup… (issue #954)."""
+        # Restoring may switch the active database, so it's blocked while the
+        # trip planner is active, exactly like the database manager.
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.gui.dialogs.restore_dialog import RestoreDialog
+        dlg = RestoreDialog(self)
+        dlg.database_switched.connect(self._on_database_switched)
+        dlg.databases_added.connect(self._reload_db_combo)
+        # #987: after a settings restore the user may choose to close now;
+        # the restore is applied at the next start. Closed once the dialog
+        # is gone, through the normal close path (back-up-on-exit included).
+        close_requested = []
+        dlg.close_app_requested.connect(lambda: close_requested.append(True))
+        dlg.exec()
+        if close_requested:
+            QTimer.singleShot(0, self.close)
+
     def _on_database_renamed(self, db_info) -> None:
         """
         Kaldes når en database omdøbes i Manage Databases-dialogen (#539).
@@ -981,6 +1078,17 @@ class MainWindow(QMainWindow):
         self._detail_panel.clear()
         self._load_sort_for_active_db()
         self._reload_home_combo()
+        # Den nye database kan have manglende/forældede distancer — fx et
+        # andet hjemmepunkt gemt per database, eller en database som
+        # GSAK-backup-importen fyldte, hvis GsakImportWorker ikke nåede at
+        # genberegne den i baggrunden (det gør den normalt — dette er kun
+        # et sikkerhedsnet). Samme billige tjek som ved opstart (issue
+        # #579), så et skift normalt ikke koster en fuld genberegning.
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not distances_up_to_date(s.home_lat, s.home_lon):
+                recalculate_distances(s.home_lat, s.home_lon)
         # Genindlæs kolonner for den nye database (issue #199)
         self._cache_table.reload_columns()
         # Issue #607 (opfølgning): genindlæs comboen for den nye database —
@@ -996,6 +1104,137 @@ class MainWindow(QMainWindow):
         self._statusbar.showMessage(
             tr("status_db_name", db_name=db_info.name), 4000
         )
+        # Issue #549: opening the database may just have migrated it.
+        self.show_premigration_backup_notices()
+
+    def show_premigration_backup_notices(self) -> None:
+        """
+        Tell the user about databases that were backed up before a schema
+        migration (issue #549), so the backup isn't a silent background
+        action they never find out about. Called after startup and after
+        switching databases; a no-op when no backup was made.
+        """
+        from opensak.backup.premigration import take_notices
+        notices = take_notices()
+        if not notices:
+            return
+        text = "\n\n".join(
+            tr("premigration_backup_msg",
+               file=n.db_path.name, path=str(n.backup_path))
+            for n in notices
+        )
+        # The other databases in the list are most likely just as old —
+        # offer to back up and update them all now, instead of one dialog
+        # each time the user switches to one of them.
+        from opensak.db.database import needs_migration
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        active = manager.active_path
+        pending = [
+            db for db in manager.databases
+            if db.path != active and db.exists and needs_migration(db.path)
+        ]
+        if not pending:
+            QMessageBox.information(self, tr("premigration_backup_title"), text)
+            return
+        text += "\n\n" + tr("premigration_apply_all_question", count=len(pending))
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle(tr("premigration_backup_title"))
+        msg.setText(text)
+        btn_all = msg.addButton(
+            tr("premigration_apply_all_btn", count=len(pending)),
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        btn_ok = msg.addButton(QMessageBox.StandardButton.Ok)
+        msg.setDefaultButton(btn_ok)
+        msg.exec()
+        if msg.clickedButton() is btn_all:
+            self._migrate_other_databases(pending)
+
+    def _migrate_other_databases(self, pending: list) -> None:
+        """
+        Back up and update the *pending* databases to the current schema
+        ("Apply to all databases"). Each one is opened on a private engine,
+        so the active database stays selected throughout.
+        """
+        from opensak.backup.premigration import take_notices
+        from opensak.db.database import migrate_databases
+        progress = QProgressDialog(
+            tr("premigration_apply_all_progress"), "", 0, len(pending), self
+        )
+        progress.setWindowTitle(tr("premigration_backup_title"))
+        progress.setCancelButton(None)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        failed = []
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            for i, db in enumerate(pending):
+                progress.setLabelText(
+                    tr("premigration_apply_all_progress_db", name=db.name)
+                )
+                progress.setValue(i)
+                QApplication.processEvents()
+                failed += migrate_databases([db.path])
+            progress.setValue(len(pending))
+        finally:
+            QApplication.restoreOverrideCursor()
+            progress.close()
+
+        names = {db.path: db.name for db in pending}
+        parts = [
+            tr("premigration_apply_all_done", count=len(pending) - len(failed))
+        ]
+        backups = take_notices()
+        if backups:
+            parts.append(tr("premigration_apply_all_backups") + "\n" + "\n".join(
+                f"{names.get(n.db_path, n.db_path.name)}: {n.backup_path}"
+                for n in backups
+            ))
+        if failed:
+            parts.append(tr("premigration_apply_all_failed") + "\n" + "\n".join(
+                f"{names.get(path, path.name)}: {err}" for path, err in failed
+            ))
+            QMessageBox.warning(
+                self, tr("premigration_backup_title"), "\n\n".join(parts)
+            )
+        else:
+            QMessageBox.information(
+                self, tr("premigration_backup_title"), "\n\n".join(parts)
+            )
+
+    def show_database_fallback_notice(self) -> None:
+        """
+        Issue #1045: tell the user, once the window is up, that the last
+        active database was unavailable at startup and which database was
+        opened instead. A no-op when startup didn't have to fall back.
+        """
+        from opensak.db.manager import get_db_manager
+        fallback = get_db_manager().take_startup_fallback()
+        if fallback is None:
+            return
+        missing, used = fallback
+        QMessageBox.warning(
+            self, tr("db_unavailable_title"),
+            tr("db_unavailable_fallback_msg", name=missing.name,
+               path=str(missing.path), fallback=used.name),
+        )
+
+    def show_settings_restore_notice(self, result: str) -> None:
+        """
+        #987: tell the user, once the window is up, that the settings chosen
+        for restore in the last run were applied at this start — or not.
+        """
+        from opensak.backup.settings_restore import APPLIED
+        if result == APPLIED:
+            QMessageBox.information(
+                self, tr("restore_settings_title"), tr("restore_settings_applied")
+            )
+        else:
+            QMessageBox.warning(
+                self, tr("restore_settings_title"), tr("restore_settings_apply_failed")
+            )
 
     def _reload_db_combo(self) -> None:
         """Genindlæs database-dropdown fra manager."""
@@ -1205,6 +1444,30 @@ class MainWindow(QMainWindow):
         self._dock_map_back()
 
     def closeEvent(self, event) -> None:
+        # Unsaved macro edits: the editor asks Save / Discard / Cancel, and
+        # Cancel keeps OpenSAK open.
+        macro_dialog = getattr(self, "_macro_dialog", None)
+        if macro_dialog is not None and macro_dialog.isVisible() and not macro_dialog.close():
+            event.ignore()
+            return
+        # #959: offer a backup first — before any layout is torn down, so
+        # Cancel leaves the window exactly as it was. Closing writes nothing
+        # to the database, so deciding here sees the final state.
+        if not self._close_after_exit_backup:
+            if self._exit_backup is not None:
+                event.ignore()   # a backup is running; its progress dialog cancels it
+                return
+            from opensak.gui.dialogs.exit_backup_dialog import ExitBackupController
+            controller = ExitBackupController(self)
+            controller.done.connect(self._on_exit_backup_done)
+            decision = controller.start()
+            if decision is None:
+                self._exit_backup = controller
+                event.ignore()
+                return
+            if not decision:
+                event.ignore()
+                return
         # Restore normal layout before saving so ratios reflect the user's
         # intended panel sizes, not the maximized state.
         if self._map_popped_out:
@@ -1243,6 +1506,13 @@ class MainWindow(QMainWindow):
         if map_widget is not None:
             map_widget._cleanup_webengine()
         super().closeEvent(event)
+
+    def _on_exit_backup_done(self, close: bool) -> None:
+        """#959: the on-exit backup finished, failed or was cancelled."""
+        self._exit_backup = None
+        if close:
+            self._close_after_exit_backup = True
+            QTimer.singleShot(0, self.close)
 
     # ── Cache list ────────────────────────────────────────────────────────────
 
@@ -1309,20 +1579,24 @@ class MainWindow(QMainWindow):
             fetch_map=map_enabled,
             map_max_caches=get_settings().map_max_caches,
         )
-        worker.result.connect(
-            lambda gen, table_caches, map_caches, _t0=_t0:
-                self._on_refresh_result(gen, table_caches, map_caches, _t0)
-        )
+        # Connected to bound methods, not lambdas: with the window as the
+        # receiver, Qt drops a result that arrives after the window has been
+        # deleted (closed while a slow query was still running) instead of
+        # running the slot on a dead window. A lambda has no receiver, so
+        # it was still called — "CacheTableView already deleted".
+        self._refresh_started_at[generation] = _t0
+        worker.result.connect(self._on_refresh_result)
         worker.error.connect(self._on_refresh_error)
         worker.finished.connect(lambda w=worker: self._cleanup_refresh_worker(w))
         self._active_refresh_workers.append(worker)
         worker.start()
 
     def _on_refresh_result(
-        self, generation: int, table_caches: list, map_caches: list, _t0: float,
+        self, generation: int, table_caches: list, map_caches: list,
     ) -> None:
         """GUI-thread continuation of _refresh_cache_list() — see RefreshWorker."""
         QApplication.restoreOverrideCursor()
+        _t0 = self._refresh_started_at.pop(generation, time.monotonic())
         if generation != self._refresh_generation:
             # Superseded by a newer refresh request — discard silently.
             return
@@ -1359,6 +1633,7 @@ class MainWindow(QMainWindow):
         setOverrideCursor() in _refresh_cache_list()) even for a stale
         generation, so the cursor stack never gets left unbalanced."""
         QApplication.restoreOverrideCursor()
+        self._refresh_started_at.pop(generation, None)
         logger.error("mainwindow: RefreshWorker failed (generation=%s): %s", generation, message)
         if generation == self._refresh_generation:
             self._statusbar.showMessage(tr("status_refresh_failed"), 6000)
@@ -1627,26 +1902,12 @@ class MainWindow(QMainWindow):
 
     def _on_set_corrected_from_map(self, gc_code: GcCode, lat: float, lon: float) -> None:
         """Sæt korrigerede koordinater på en cache via højreklik på kortet."""
-        from opensak.db.database import get_session
-        from opensak.db.models import UserNote
+        from opensak.db.corrected_coords import set_corrected_coords
         from opensak.coords import format_coords
         from opensak.gui.settings import get_settings
-        from sqlalchemy.orm import joinedload
 
-        with get_session() as session:
-            cache = session.query(Cache).options(
-                joinedload(Cache.user_note)
-            ).filter_by(gc_code=gc_code).first()
-            if not cache:
-                return
-            note = cache.user_note
-            if note is None:
-                note = UserNote(cache_id=cache.id)
-                session.add(note)
-            note.corrected_lat = lat
-            note.corrected_lon = lon
-            note.is_corrected = True
-            session.commit()
+        if not set_corrected_coords(gc_code, lat, lon):
+            return
 
         coords = format_coords(lat, lon, get_settings().coord_format)
         self._statusbar.showMessage(
@@ -1655,11 +1916,15 @@ class MainWindow(QMainWindow):
         self._on_corrected_coords_changed(gc_code)
 
     def _on_corrected_coords_changed(self, gc_code: GcCode) -> None:
-        """Update the map pin and table row after corrected coordinates change."""
+        """Update the map pin, table row and detail panel (if this cache is
+        currently shown) after corrected coordinates change — whichever entry
+        point (detail panel, table context menu, map context menu) made it."""
         self._cache_table.refresh_cache_row(gc_code)
         full = self._load_full_cache(gc_code)
         if full:
             self._map_widget.update_cache(full)
+            if getattr(self._detail_panel, "_current_gc_code", None) == gc_code:
+                self._detail_panel.show_cache(full)
 
     def _on_found_status_changed(self, gc_code: GcCode) -> None:
         """Issue #649: refresh table row, map pin, detail panel (if this
@@ -1843,8 +2108,29 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.gsak_import_dialog import GsakImportDialog
         dlg = GsakImportDialog(self)
-        dlg.import_completed.connect(self._refresh_after_import)
+        # GsakImportWorker already brought the distances up to date in the
+        # background — only recalculate here if that didn't happen.
+        dlg.import_completed.connect(
+            lambda: self._refresh_after_import(distances_precomputed=True)
+        )
+        dlg.databases_changed.connect(self._reload_db_combo)
+        dlg.filters_imported.connect(self._on_filter_profiles_imported)
         dlg.exec()
+
+    def _open_gsak_filter_import_dialog(self) -> None:
+        """Import GSAK's saved filters as OpenSAK filter profiles.
+
+        Unlike the cache import next to it this touches no cache data, so the
+        cache list and map are left alone — only the toolbar's profile
+        dropdown has to pick up the new profiles.
+        """
+        from opensak.gui.dialogs.gsak_filter_import_dialog import GsakFilterImportDialog
+        dlg = GsakFilterImportDialog(self)
+        dlg.import_completed.connect(self._on_filter_profiles_imported)
+        dlg.exec()
+
+    def _on_filter_profiles_imported(self) -> None:
+        self._populate_filter_profile_combo(select_name=self._active_filter_name or None)
 
     def _open_pq_email_check_dialog(self) -> None:
         if self._trip_planner_active():
@@ -1855,13 +2141,21 @@ class MainWindow(QMainWindow):
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
-    def _refresh_after_import(self) -> None:
-        """Reload both cache table and map after a successful import."""
+    def _refresh_after_import(self, distances_precomputed: bool = False) -> None:
+        """Reload both cache table and map after a successful import.
+
+        *distances_precomputed*: the import already recalculated distances
+        (GsakImportWorker), so only do it if distances_up_to_date() can't
+        confirm them. Other imports always recalculate — the cheap check
+        can't see changed coordinates of existing caches.
+        """
         from opensak.gui.settings import get_settings
         s = get_settings()
         if s.home_lat and s.home_lon:
-            from opensak.db.database import recalculate_distances
-            recalculate_distances(s.home_lat, s.home_lon)
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not (distances_precomputed
+                    and distances_up_to_date(s.home_lat, s.home_lon)):
+                recalculate_distances(s.home_lat, s.home_lon)
         self._refresh_cache_list()
         count = self._cache_table.row_count()
         self._statusbar.showMessage(
@@ -2056,6 +2350,20 @@ class MainWindow(QMainWindow):
         # active home point before _update_distances reads them.
         s = get_settings()
         name = s.active_home_name
+        if not name:
+            # Issue #962: with no active home point (e.g. after the settings
+            # were reset, or a database whose per-database settings were
+            # lost), nothing matched in _reload_home_combo(), so Qt simply
+            # showed the first point, usually "★ Home", as if it were
+            # selected. home_lat/home_lon then fell back to the built-in
+            # default and distances were calculated from there, while
+            # re-selecting the shown point fired no signal. Make the point
+            # the drop-down shows the active one, so what the user sees is
+            # what OpenSAK uses. Every caller recalculates distances
+            # afterwards (startup, database switch, Settings closed).
+            name = self._home_combo.currentData() or ""
+            if not name:
+                return  # no points at all — nothing to activate
         for p in s.home_points:
             if p.name == name:
                 if p.name == "★ Home":
@@ -2293,9 +2601,15 @@ class MainWindow(QMainWindow):
             )
 
     def _delete_waypoint(self) -> None:
+        """Waypoint → Delete cache… / the Delete key: the selected cache."""
         cache = self._cache_table.selected_cache()
         if not cache:
             return
+        self._delete_cache(cache)
+
+    def _delete_cache(self, cache: Cache) -> None:
+        """Ask, then delete *cache*. Also used by the cache list's context
+        menu (#693), which passes the cache that was right-clicked."""
         from opensak.db.database import get_session
         from opensak.db.models import Cache
         reply = QMessageBox.question(
@@ -2381,26 +2695,55 @@ class MainWindow(QMainWindow):
         from opensak.db.models import (
             Cache as CacheModel, Log, Attribute, Trackable, Waypoint, UserNote,
         )
+        # #1041: chunked to stay under SQLite's bound-parameter limit when
+        # deleting a large filter.
         with get_session() as session:
-            cache_ids = [
-                row[0] for row in
-                session.query(CacheModel.id).filter(
-                    CacheModel.gc_code.in_(gc_codes)
-                ).all()
-            ]
-            if cache_ids:
-                session.query(Log).filter(Log.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Attribute).filter(Attribute.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Trackable).filter(Trackable.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(Waypoint).filter(Waypoint.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
+            for i in range(0, len(gc_codes), 500):
+                chunk = gc_codes[i:i + 500]
+                cache_ids = [
+                    row[0] for row in
+                    session.query(CacheModel.id).filter(
+                        CacheModel.gc_code.in_(chunk)
+                    ).all()
+                ]
+                if cache_ids:
+                    session.query(Log).filter(Log.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Attribute).filter(Attribute.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Trackable).filter(Trackable.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(Waypoint).filter(Waypoint.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
+                    session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
+
+    def _set_flag_for_filtered(self, flagged: bool) -> None:
+        """Issue #293: set or clear the user flag on every cache in the
+        active filter (as shown in the grid), after a confirmation."""
+        from opensak.db.user_flags import set_user_flag
+
+        title = tr("action_flag_filtered" if flagged else "action_unflag_filtered").rstrip("…")
+        caches = self._cache_table.get_all_caches()
+        if not caches:
+            QMessageBox.information(self, title, tr("delete_filtered_none"))
+            return
+        reply = QMessageBox.question(
+            self,
+            title,
+            tr("flag_filtered_msg" if flagged else "unflag_filtered_msg", count=len(caches)),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        changed = set_user_flag((c.gc_code for c in caches), flagged)
+        self._refresh_cache_list()
+        self._statusbar.showMessage(
+            tr("status_flags_set" if flagged else "status_flags_unset", count=changed), 3000
+        )
 
     def _clear_all_flags(self) -> None:
         """Fjern alle flag (user_flag=False) på alle caches i aktiv database."""
         reply = QMessageBox.question(
             self,
-            tr("action_clear_flags"),
+            tr("action_clear_flags").rstrip("…"),
             tr("clear_flags_msg"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -2464,33 +2807,45 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
 
     def _save_sort_for_active_db(self) -> None:
-        """Gem aktuel sortering og aktivt filter-profil per database i opensak.json."""
+        """Gem aktuel sortering og aktivt filter-profil for den aktive database.
+
+        Since #659 stored inside the database file (db_settings), so it
+        travels with the database when it's copied, moved or restored.
+        """
+        from opensak.db import db_settings
         from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG save: ingen aktiv database")
             return
-        key = f"sort.{str(manager.active.path)}"
-        get_store().set_many({
-            f"{key}.field":          self._current_sort.field,
-            f"{key}.ascending":      self._current_sort.ascending,
-            f"{key}.filter_profile": self._active_filter_name,
-        })
+        path = manager.active.path
+        for suffix, value in (
+            ("field",          self._current_sort.field),
+            ("ascending",      self._current_sort.ascending),
+            ("filter_profile", self._active_filter_name),
+        ):
+            db_settings.set_value(
+                f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), value
+            )
 
     def _load_sort_for_active_db(self) -> None:
-        """Indlaes gemt sortering og filter-profil for den aktive database fra opensak.json."""
+        """Indlaes gemt sortering og filter-profil for den aktive database (#659: fra databasefilen)."""
+        from opensak.db import db_settings
         from opensak.db.manager import get_db_manager
-        from opensak.settings_store import get_store
         from opensak.filters.engine import FilterProfile
         manager = get_db_manager()
         if not manager.active:
             print("DEBUG load: ingen aktiv database")
             return
-        s = get_store()
-        key = f"sort.{str(manager.active.path)}"
-        field = str(s.get(f"{key}.field", "name"))
-        asc_raw = s.get(f"{key}.ascending", True)
+        path = manager.active.path
+
+        def _get(suffix: str, default: object) -> object:
+            return db_settings.get_value(
+                f"sort.{suffix}", db_settings.legacy_sort_key(path, suffix), default
+            )
+
+        field = str(_get("field", "name"))
+        asc_raw = _get("ascending", True)
         ascending = asc_raw if isinstance(asc_raw, bool) else str(asc_raw).lower() in ("true", "1", "yes")
         try:
             self._current_sort = SortSpec(field, ascending=ascending)
@@ -2503,12 +2858,14 @@ class MainWindow(QMainWindow):
             print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
             field = "name"
             self._current_sort = SortSpec(field, ascending=ascending)
-            get_store().set(f"{key}.field", field)
+            db_settings.set_value(
+                "sort.field", db_settings.legacy_sort_key(path, "field"), field
+            )
         # Genanvend sort-indikatoren i tabellen hvis den allerede er loaded
         if hasattr(self, "_cache_table"):
             self._cache_table.apply_sort(field, ascending)
         # Genindlæs gemt filter-profil for denne database
-        profile_name = str(s.get(f"{key}.filter_profile", ""))
+        profile_name = str(_get("filter_profile", ""))
         if profile_name:
             paths = FilterProfile.list_profiles()
             for path in paths:
@@ -2600,6 +2957,13 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: self._show_filter_dialog(filterset, profile_name))
             return
 
+        self._show_filter_result(filterset, profile_name, caches)
+
+    def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
+        """Make *filterset* the active filter and show its (non-empty) *caches*.
+
+        Shared by the "Set filter" dialog and Lua macros (opensak.filter).
+        """
         self._current_filterset = filterset
         self._active_filter_name = profile_name
         self._save_sort_for_active_db()
@@ -2845,12 +3209,14 @@ class MainWindow(QMainWindow):
         fravalgt tidligere), så det ændrer intet ved hvordan OK/anvend
         opfører sig — det gør blot comboen til en korrekt visning af den
         aktuelle tilstand i stedet for altid at stå tomt."""
-        from opensak.gui.dialogs.column_dialog import ColumnView, get_default_view_name
+        from opensak.gui.dialogs.column_dialog import (
+            ColumnView, current_column_view_match, get_default_view_name,
+        )
         self._column_view_combo.blockSignals(True)
         self._column_view_combo.clear()
         self._column_view_combo.addItem(tr("column_view_none"), None)
         default_name = get_default_view_name()
-        match_name = self._current_column_view_match()
+        match_name = current_column_view_match()
         match_index = 0
         for path in ColumnView.list_views():
             try:
@@ -2863,29 +3229,6 @@ class MainWindow(QMainWindow):
                 match_index = self._column_view_combo.count() - 1
         self._column_view_combo.setCurrentIndex(match_index)
         self._column_view_combo.blockSignals(False)
-
-    def _current_column_view_match(self) -> Optional[str]:
-        """Returner navnet på et gemt Column View, hvis den aktive databases
-        nuværende kolonneopsætning matcher det byte-for-byte — ellers None."""
-        from opensak.gui.dialogs.column_dialog import (
-            ColumnView, get_visible_columns, get_column_widths,
-            get_container_display, get_type_display,
-        )
-        current = (
-            list(get_visible_columns()),
-            dict(get_column_widths()),
-            get_container_display(),
-            get_type_display(),
-        )
-        for path in ColumnView.list_views():
-            try:
-                view = ColumnView.load(path)
-            except Exception:
-                continue
-            if (list(view.visible_columns), dict(view.widths),
-                    view.container_display, view.type_display) == current:
-                return view.name
-        return None
 
     def _on_column_view_combo_changed(self, index: int) -> None:
         """Bruger har valgt et gemt Column View i toolbar-dropdown.
@@ -2962,7 +3305,10 @@ class MainWindow(QMainWindow):
             )
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
-        dlg = FileExportDialog(caches, parent=self)
+        dlg = FileExportDialog(
+            caches, parent=self, filter_name=self._active_filter_name,
+            center_name=get_settings().active_home_name or "",
+        )
         dlg.exec()
 
     def _open_kml_export(self) -> None:
@@ -3022,6 +3368,176 @@ class MainWindow(QMainWindow):
 
     def _on_trip_planner_destroyed(self) -> None:
         self._trip_planner_win = None
+
+    # ── Lua macros (proof of concept) — MacroHost for opensak.macro ─────────
+
+    def _open_macro_dialog(self) -> None:
+        from opensak.gui.dialogs.macro_dialog import MacroDialog
+        if getattr(self, "_macro_dialog", None) is None:
+            self._macro_dialog = MacroDialog(host=self, parent=self)
+        self._macro_dialog.show()
+        self._macro_dialog.raise_()
+        self._macro_dialog.activateWindow()
+
+    def _open_macro_example(self, name: str) -> None:
+        """Copy a shipped example into the macros folder and open the copy."""
+        self._open_macro_dialog()
+        self._macro_dialog.open_example(name)
+
+    def apply_filter(self, filterset, label: str) -> int:
+        """MacroHost: apply *filterset*; like GSAK's MFILTER, an empty result
+        leaves the current view untouched and returns 0."""
+        with get_session() as session:
+            caches = apply_filters_auto(
+                session, filterset, self._current_sort,
+                columns=self._visible_table_columns(),
+            )
+        if caches:
+            self._show_filter_result(filterset, label, caches)
+        return len(caches)
+
+    def clear_filter(self) -> None:
+        """MacroHost: remove the active filter (the list reloads asynchronously)."""
+        self._clear_filter()
+
+    def cache_count(self) -> int:
+        """MacroHost: number of caches matching the active filter.
+
+        Asks the database rather than the table: clear_filter() (and any
+        other _refresh_cache_list()) reloads the table asynchronously, so its
+        row count would still be stale right after the call."""
+        with get_session() as session:
+            return len(apply_filters_auto(session, self._build_active_filterset()))
+
+    def filtered_caches(self) -> list:
+        """MacroHost: caches matching the active filter, in table order —
+        from the database for the same reason as cache_count()."""
+        with get_session() as session:
+            return apply_filters_auto(
+                session, self._build_active_filterset(), self._current_sort,
+                columns=self._visible_table_columns(),
+            )
+
+    def filter_name(self) -> str:
+        """MacroHost: name of the active filter ("" = none)."""
+        return self._active_filter_name
+
+    def set_sort(self, sort) -> None:
+        """MacroHost: sort the list like a column-header click. filtered_caches()
+        reads _current_sort, so the new order applies to it at once."""
+        self._current_sort = sort
+        self._save_sort_for_active_db()
+        self._cache_table.apply_sort(sort.field, sort.ascending)
+
+    def database_name(self) -> str:
+        """MacroHost: name of the active database."""
+        from opensak.export.file_export import active_database_name
+        return active_database_name()
+
+    def center_name(self) -> str:
+        """MacroHost: name of the active centre point ("" = none)."""
+        return get_settings().active_home_name or ""
+
+    def set_corrected_coords(self, gc_code, lat, lon) -> bool:
+        """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.
+
+        The view is not refreshed here but once in end_macro(): a macro
+        importing a large CSV would otherwise reload the table row, map pin
+        and detail panel for every single row."""
+        from opensak.db.corrected_coords import set_corrected_coords
+        if not set_corrected_coords(gc_code, lat, lon):
+            return False
+        self._macro_changed_codes.add(gc_code)
+        return True
+
+    def switch_database(self, name: str) -> None:
+        """MacroHost: switch like the toolbar dropdown does, then clear the
+        filter the new database may have restored. Raises if the database
+        cannot be opened (the previous one stays active)."""
+        from opensak.db.manager import get_db_manager
+        manager = get_db_manager()
+        db = next((d for d in manager.databases if d.name == name), None)
+        if db is None:
+            raise ValueError(f"no database named {name!r}")
+        if db != manager.active:
+            try:
+                manager.switch_to(db)
+            except Exception:
+                self._reload_db_combo()
+                raise
+            # Pending refreshes belong to the previous database.
+            self._macro_changed_codes.clear()
+            self._macro_caches_removed = False
+            self._on_database_switched(db)
+        self._clear_filter()
+
+    def database_list_changed(self) -> None:
+        """MacroHost: a database was created — reload the toolbar dropdown."""
+        self._reload_db_combo()
+
+    def caches_removed(self) -> None:
+        """MacroHost: caches were moved out of the active database; the view
+        is reloaded once in end_macro()."""
+        self._macro_caches_removed = True
+
+    def current_code(self) -> Optional[str]:
+        """MacroHost: GC code of the cache selected in the grid."""
+        cache = self._cache_table.selected_cache()
+        return cache.gc_code if cache is not None else None
+
+    def selected_codes(self) -> list[str]:
+        """MacroHost: GC codes of the selected grid rows, in grid order."""
+        model = self._cache_table._model
+        rows = sorted(i.row() for i in self._cache_table.selectionModel().selectedRows())
+        return [c.gc_code for c in map(model.cache_at, rows) if c is not None]
+
+    def confirm(self, message: str) -> bool:
+        """MacroHost: Yes/No question, on top of the macro dialog."""
+        parent = getattr(self, "_macro_dialog", None) or self
+        reply = QMessageBox.question(
+            parent,
+            tr("macro_title"),
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def approve_folder(self, target, folder, write: bool):
+        """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
+        dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_folder_approval
+        parent = getattr(self, "_macro_dialog", None) or self
+        return ask_folder_approval(parent, target, folder, write)
+
+    def choose_file(self, title: str, file_filter: str, save: bool, start_dir):
+        """MacroHost: file dialog for opensak.choose_file(), on top of the
+        macro dialog."""
+        from opensak.gui.dialogs.macro_dialog import choose_file_for_macro
+        parent = getattr(self, "_macro_dialog", None) or self
+        return choose_file_for_macro(parent, title, file_filter, save, start_dir)
+
+    def end_macro(self) -> None:
+        """MacroHost: refresh what the macro's corrected-coordinate changes
+        affect. A handful of caches get the same per-cache refresh as the
+        other entry points; beyond that, one full reload of table and map is
+        cheaper than updating each row (refresh_cache_row() scans the whole
+        model and _load_full_cache() loads logs etc. per call)."""
+        changed, self._macro_changed_codes = self._macro_changed_codes, set()
+        if self._macro_caches_removed:
+            self._macro_caches_removed = False
+            self._on_caches_moved()
+            return
+        if len(changed) <= _MACRO_ROW_REFRESH_LIMIT:
+            for gc_code in sorted(changed):
+                self._on_corrected_coords_changed(gc_code)
+            return
+        self._refresh_cache_list()
+        current = getattr(self._detail_panel, "_current_gc_code", None)
+        if current in changed:
+            full = self._load_full_cache(current)
+            if full:
+                self._detail_panel.show_cache(full)
 
     def _open_found_updater(self) -> None:
         if self._trip_planner_active():
@@ -3127,6 +3643,14 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
         QDesktopServices.openUrl(QUrl("https://opensak.com/user-guide.html"))
+
+    def _open_changelog(self) -> None:
+        """Open CHANGELOG.md on GitHub for the installed channel (issue #944)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from opensak import __version__
+        from opensak.updater import changelog_url_for_version
+        QDesktopServices.openUrl(QUrl(changelog_url_for_version(__version__)))
 
     def _open_support_page(self) -> None:
         """Open the Open Collective support/sponsor page in the default browser."""
@@ -3456,6 +3980,9 @@ class MainWindow(QMainWindow):
             # nye versions filer. Luk derfor pænt via den normale closeEvent
             # (gemmer layout osv.) — ingen automatisk genstart (uden for
             # scope i #893); brugeren åbner selv den nye version.
+            # #959: ingen backup-prompt — bundlen er allerede udskiftet.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             self.close()
 
         _ERROR_MESSAGES = {

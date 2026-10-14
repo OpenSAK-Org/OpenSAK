@@ -36,6 +36,7 @@ _SSL_CONTEXT = SSL_CONTEXT
 GITHUB_API_URL          = "https://api.github.com/repos/OpenSAK-Org/opensak/releases/latest"
 GITHUB_API_ALL_URL      = "https://api.github.com/repos/OpenSAK-Org/opensak/releases"
 RELEASES_PAGE   = "https://github.com/OpenSAK-Org/opensak/releases/latest"
+CHANGELOG_URL_TEMPLATE = "https://github.com/OpenSAK-Org/opensak/blob/{ref}/CHANGELOG.md"
 REQUEST_TIMEOUT = 10  # sekunder
 MAX_RELEASES_TO_SCAN = 20  # antal releases vi henter for at finde nyeste beta
 
@@ -44,6 +45,18 @@ def _is_prerelease_tag(tag: str) -> bool:
     """Returner True hvis tag'et har et semver pre-release suffiks (-beta, -alpha, -rc)."""
     cleaned = tag.lstrip("v").strip()
     return "-" in cleaned
+
+
+def changelog_url_for_version(version: str) -> str:
+    """Return the CHANGELOG.md URL matching the installed release channel (issue #944).
+
+    Stable installs point at ``main``, which always carries the newest stable
+    entry. Beta installs point at ``beta`` instead: beta entries aren't merged
+    to ``main`` until the release goes stable, so a ``main`` link would hide
+    everything a beta tester is actually running and anything newer.
+    """
+    ref = "beta" if _is_prerelease_tag(version) else "main"
+    return CHANGELOG_URL_TEMPLATE.format(ref=ref)
 
 
 def _parse_version(tag: str) -> tuple[int, int, int, int]:

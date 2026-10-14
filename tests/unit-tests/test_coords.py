@@ -445,3 +445,130 @@ class TestParseCoordsHemisphereDecimalDegrees:
 
     def test_dmm_degree_sign_format_still_takes_precedence(self):
         assert parse_coords("N 34° 58.088' E 034° 03.281'") == pytest.approx((34.968133333333334, 34.05468333333334))
+
+
+# ── Issue #765: tighter separators, more minute/seconds marks ────────────────
+
+DMS_EXPECTED = (55.7875, 12.0 + 25 / 60)
+
+
+class TestParseCoords765:
+    @pytest.mark.parametrize("text", [
+        "55.78750, 12.41667",
+        "55.78750,12.41667",
+        "55.78750 , 12.41667",
+        "55.78750 12.41667",
+    ])
+    def test_dd_one_comma_or_whitespace(self, text):
+        assert parse_coords(text) == pytest.approx((55.7875, 12.41667))
+
+    @pytest.mark.parametrize("text", [
+        "56.789 ,, ,  ,,,  12.345",
+        "56.789,,12.345",
+        "56.789, ,12.345",
+    ])
+    def test_dd_more_than_one_comma_is_rejected(self, text):
+        assert parse_coords(text) is None
+
+    @pytest.mark.parametrize("minute, second", [
+        ("'", '"'),          # apostrophe, quotation mark
+        ("′", "″"),          # prime, double prime
+        ("’", "”"),          # what Word turns ' and " into
+        ("'", "''"),         # two apostrophes for seconds
+    ])
+    def test_dms_minute_and_seconds_marks(self, minute, second):
+        text = f"N55° 47{minute} 15.00{second} E012° 25{minute} 00.00{second}"
+        assert parse_coords(text) == pytest.approx(DMS_EXPECTED)
+
+    def test_dms_without_marks(self):
+        assert parse_coords("N55 47 15 E012 25 00") == pytest.approx(DMS_EXPECTED)
+
+    def test_dms_no_space_after_seconds_mark(self):
+        assert parse_coords("N55° 47' 15.00\"E012° 25' 00.00\"") == pytest.approx(
+            DMS_EXPECTED)
+
+    @pytest.mark.parametrize("text", [
+        # several quotes and spaces after the seconds (the case in #765)
+        "N 56° 12' 34.567 \" \"\" E 12° 34' 56.789 \"\" \"",
+        "N55° 47' 15.00\"\" E012° 25' 00.00\"",
+        # the seconds mark must follow the number
+        "N55° 47' 15.00 \" E012° 25' 00.00\"",
+        "N55° 47' 15.00\" E012° 25' 00.00 \"",
+    ])
+    def test_dms_stray_seconds_marks_are_rejected(self, text):
+        assert parse_coords(text) is None
+
+    def test_dmm_degree_format_takes_word_apostrophe(self):
+        assert parse_coords("N 34° 58.088’ E 034° 03.281’") == pytest.approx(
+            parse_coords("N 34° 58.088' E 034° 03.281'"))
+
+
+# ── Issue #767: hemisphere letter before or after the value ──────────────────
+
+PERTH = (-32.371267, 115.827467)
+
+
+class TestParseCoords767:
+    @pytest.mark.parametrize("text", [
+        "32.371267S 115.827467E",
+        "32.371267 S 115.827467 E",
+        "32.371267s 115.827467e",
+        "32° 22.276 S 115° 49.648 E",
+        "32°22.276'S 115°49.648'E",
+        "32 22 16.56S 115 49 38.88E",
+        "32° 22' 16.56\" S 115° 49' 38.88\" E",
+    ])
+    def test_trailing_hemisphere(self, text):
+        # The three examples from GSAK's help page, plus variants.
+        assert parse_coords(text) == pytest.approx(PERTH, abs=1e-5)
+
+    @pytest.mark.parametrize("text", [
+        "S 35.123° W 86.543°",
+        "35.123° S 86.543° W",
+        "S 35.123° 86.543° W",
+        "35.123° S W 86.543°",
+        "35.123° S, 86.543° W",
+    ])
+    def test_letter_before_or_after_each_coordinate(self, text):
+        assert parse_coords(text) == pytest.approx((-35.123, -86.543))
+
+    def test_mixed_placement_in_dmm(self):
+        assert parse_coords("N55 47.250 012 25.000E") == pytest.approx(
+            (55.7875, 12.0 + 25 / 60))
+
+    @pytest.mark.parametrize("text", [
+        # a hemisphere letter both before and after
+        "N 35° 46.560 S E 86° 24.808",
+        "N 35° 46.560 S E W 86° 24.808 E",
+        "N 35.123 S E 86.543",
+        # a minus sign together with a hemisphere letter
+        "S 35.123° W -86.543°",
+        "S 35.123° -86.543° W",
+        "S -35.123° W -86.543°",
+        "N -55 47.250 E012 25.000",
+        # latitude letter for longitude and vice versa
+        "N 35° 46.560 E 86° 24.808 W",
+        "E 35.123 N 86.543",
+        # no hemisphere letter at all
+        "55 47.250 12 25.000",
+    ])
+    def test_ambiguous_hemispheres_are_rejected(self, text):
+        assert parse_coords(text) is None
+
+    def test_numbers_must_be_separated(self):
+        # Without a letter, comma or space between them, the two numbers
+        # can't be told apart.
+        assert parse_coords("N 32.5115.8 E") is None
+
+    def test_trailing_hemisphere_dd_is_not_misread_as_dmm(self):
+        # The #751 trap, with the letter after the value.
+        assert parse_coords("59.99999N 12.99999E") == pytest.approx(
+            (59.99999, 12.99999))
+
+    @pytest.mark.parametrize("text", [
+        "91.0S 10.0E",
+        "45° 60.000 N 10° 00.000 E",
+        "45 00 60.0N 10 00 00.0E",
+    ])
+    def test_trailing_hemisphere_range_checks(self, text):
+        assert parse_coords(text) is None

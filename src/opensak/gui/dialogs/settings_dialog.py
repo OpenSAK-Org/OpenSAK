@@ -121,6 +121,14 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
+        # Lua macros are beta-only (same flag as the Macros menu), and so is
+        # the list of folders they may access.
+        from opensak.utils import flags
+        self._perm_table: QTableWidget | None = None
+        self._perm_loaded: list = []
+        if flags.lua_macros:
+            self._tabs.addTab(self._build_folder_permissions_tab(),
+                              tr("settings_tab_folder_permissions"))
 
         layout.addWidget(self._tabs)
 
@@ -525,6 +533,21 @@ class SettingsDialog(QDialog):
         folders_hint.setStyleSheet(hint_style())
         folders_layout.addWidget(folders_hint)
 
+        # Issue #986: the backup folder (#942), next to the other folders.
+        # Takes effect at once — no restart needed.
+        from opensak.backup.backupset import get_backup_dir
+
+        folders_layout.addSpacing(8)
+        folders_layout.addWidget(QLabel(tr("backup_folder_label")))
+        self._backup_dir_row = DirRow(get_backup_dir())
+        folders_layout.addWidget(self._backup_dir_row)
+        backup_dir_note = QLabel(
+            tr("backup_folder_tip") + " " + tr("settings_backup_dir_note")
+        )
+        backup_dir_note.setWordWrap(True)
+        backup_dir_note.setStyleSheet(hint_style())
+        folders_layout.addWidget(backup_dir_note)
+
         # Issue #519: custom icons folder — read-only path (not user-browsable,
         # it's always <install_dir>/icons) plus an "Open folder" button so
         # users can drop in replacement SVGs without knowing the path.
@@ -680,6 +703,39 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(update_group)
 
+        # ── Backup (#959) ─────────────────────────────────────────────────────
+        backup_group = QGroupBox(tr("settings_group_backup"))
+        backup_form = QFormLayout(backup_group)
+
+        from opensak.backup import exit_state
+        self._backup_on_exit_combo: QComboBox = QComboBox()
+        for value, key in (
+            (exit_state.ON_EXIT_ASK,    "settings_backup_on_exit_ask"),
+            (exit_state.ON_EXIT_ALWAYS, "settings_backup_on_exit_always"),
+            (exit_state.ON_EXIT_NEVER,  "settings_backup_on_exit_never"),
+        ):
+            self._backup_on_exit_combo.addItem(tr(key), value)
+        backup_form.addRow(tr("settings_backup_on_exit_label"), self._backup_on_exit_combo)
+
+        self._backup_keep_auto: QSpinBox = QSpinBox()
+        self._backup_keep_auto.setRange(1, 99)
+        backup_form.addRow(tr("settings_backup_keep_auto_label"), self._backup_keep_auto)
+
+        # Issue #989: off by default — the user has to turn it on.
+        self._backup_compress_cb = QCheckBox(tr("settings_backup_compress_label"))
+        backup_form.addRow(self._backup_compress_cb)
+        compress_hint = QLabel(tr("settings_backup_compress_hint"))
+        compress_hint.setWordWrap(True)
+        compress_hint.setStyleSheet(hint_style())
+        backup_form.addRow(compress_hint)
+
+        backup_hint = QLabel(tr("settings_backup_hint"))
+        backup_hint.setWordWrap(True)
+        backup_hint.setStyleSheet(hint_style())
+        backup_form.addRow(backup_hint)
+
+        layout.addWidget(backup_group)
+
         # ── Distance calculation ───────────────────────────────────────────────
         dist_group = QGroupBox(tr("settings_group_distance"))
         dist_layout = QVBoxLayout(dist_group)
@@ -703,7 +759,7 @@ class SettingsDialog(QDialog):
         layout.addStretch()
 
         # Issue #805: Advanced has the most stacked group boxes of any tab
-        # (Folders, Search, Location refinement, Updates, Distance), and was
+        # (Folders, Search, Location refinement, Updates, Backup, Distance), and was
         # the only tab besides General not wrapped in a QScrollArea — on
         # small/high-DPI screens the dialog can't grow to fit everything, and
         # Qt squashes the controls instead of letting the user scroll.
@@ -752,6 +808,8 @@ class SettingsDialog(QDialog):
         new_db_dir = get_db_dir()
         self._install_dir_row.set_path(new_install_dir)
         self._db_dir_row.set_path(new_db_dir)
+        from opensak.backup.backupset import get_backup_dir
+        self._backup_dir_row.set_path(get_backup_dir())
 
         if new_install_dir != old_install_dir:
             QMessageBox.information(
@@ -810,6 +868,9 @@ class SettingsDialog(QDialog):
 
         if confirm_and_uninstall(self):
             self.accept()
+            # #959: OpenSAK (and maybe its data) is gone — no backup prompt.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
 
@@ -823,8 +884,214 @@ class SettingsDialog(QDialog):
 
         if confirm_and_uninstall(self):
             self.accept()
+            # #959: OpenSAK (and maybe its data) is gone — no backup prompt.
+            from opensak.backup.exit_state import suppress_exit_backup
+            suppress_exit_backup()
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
+
+    # ── Fane: Mappe-rettigheder (Lua-makroer) ────────────────────────────────
+
+    _PERM_COL_FOLDER, _PERM_COL_READ, _PERM_COL_WRITE = range(3)
+
+    def _build_folder_permissions_tab(self) -> QWidget:
+        from opensak.macro.permissions import load_permissions
+
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        intro = QLabel(tr("settings_folder_perm_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        table = QTableWidget(0, 3)
+        table.setHorizontalHeaderLabels([
+            tr("settings_folder_perm_col_folder"),
+            tr("settings_folder_perm_col_read"),
+            tr("settings_folder_perm_col_write"),
+        ])
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(self._PERM_COL_FOLDER, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self._PERM_COL_READ, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(self._PERM_COL_WRITE, QHeaderView.ResizeMode.ResizeToContents)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.setShowGrid(False)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setDefaultSectionSize(24)
+        self._perm_table = table
+
+        self._perm_loaded = load_permissions()
+        for perm in self._perm_loaded:
+            self._append_perm_row(perm.path, perm.read, perm.write)
+        table.itemChanged.connect(self._on_perm_item_changed)
+        table.itemSelectionChanged.connect(self._update_perm_buttons)
+        layout.addWidget(table)
+
+        btn_row = QHBoxLayout()
+        btn_add = QPushButton(tr("settings_folder_perm_add"))
+        btn_add.clicked.connect(self._on_add_perm_folder)
+        btn_row.addWidget(btn_add)
+        self._btn_perm_remove = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_perm_remove.setEnabled(False)
+        self._btn_perm_remove.clicked.connect(self._on_remove_perm_folder)
+        btn_row.addWidget(self._btn_perm_remove)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        scroll = QScrollArea()
+        scroll.setWidget(tab)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        return scroll
+
+    def _perms(self) -> QTableWidget:
+        """The folder table; only called once the tab has been built."""
+        assert self._perm_table is not None
+        return self._perm_table
+
+    def _perm_path(self, row: int) -> str:
+        item = self._perms().item(row, self._PERM_COL_FOLDER)
+        return item.text() if item is not None else ""
+
+    def _append_perm_row(self, path: str, read: bool, write: bool) -> int:
+        table = self._perms()
+        row = table.rowCount()
+        table.blockSignals(True)
+        table.insertRow(row)
+        folder_item = QTableWidgetItem(path)
+        folder_item.setToolTip(path)
+        table.setItem(row, self._PERM_COL_FOLDER, folder_item)
+        for col, checked in ((self._PERM_COL_READ, read), (self._PERM_COL_WRITE, write)):
+            item = QTableWidgetItem()
+            item.setFlags(
+                Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            table.setItem(row, col, item)
+        table.blockSignals(False)
+        return row
+
+    def _perm_row_checked(self, row: int, col: int) -> bool:
+        item = self._perms().item(row, col)
+        return item is not None and item.checkState() == Qt.CheckState.Checked
+
+    def _collect_permissions(self) -> list:
+        from opensak.macro.permissions import FolderPermission
+
+        return [
+            FolderPermission(
+                path=self._perm_path(row),
+                read=self._perm_row_checked(row, self._PERM_COL_READ),
+                write=self._perm_row_checked(row, self._PERM_COL_WRITE),
+            )
+            for row in range(self._perms().rowCount())
+        ]
+
+    def _update_perm_buttons(self) -> None:
+        self._btn_perm_remove.setEnabled(bool(self._perms().selectedItems()))
+
+    def _on_perm_item_changed(self, item: QTableWidgetItem) -> None:
+        """Both boxes cleared → offer to drop the folder from the list.
+
+        Answering No keeps it without rights, which blocks the folder even
+        when a parent folder in the list is permitted.
+        """
+        if item.column() not in (self._PERM_COL_READ, self._PERM_COL_WRITE):
+            return
+        row = item.row()
+        if item.column() == self._PERM_COL_WRITE and \
+                item.checkState() == Qt.CheckState.Checked:
+            self._confirm_write_near_own_data(item)
+            return
+        if self._perm_row_checked(row, self._PERM_COL_READ) or \
+                self._perm_row_checked(row, self._PERM_COL_WRITE):
+            return
+        path = self._perm_path(row)
+        answer = QMessageBox.question(
+            self,
+            tr("settings_folder_perm_no_rights_title"),
+            tr("settings_folder_perm_no_rights_msg", path=path),
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._perms().removeRow(row)
+
+    def _confirm_write_near_own_data(self, item: QTableWidgetItem) -> None:
+        """Write just ticked for a folder holding OpenSAK's own data → warn.
+
+        Macros can never change that data, but write access to e.g. the
+        home folder opens everything else in it. Answering No clears the
+        box again (which may in turn offer to drop the folder).
+        """
+        from opensak.macro.permissions import protected_inside
+
+        path = self._perm_path(item.row())
+        inside = protected_inside(path)
+        if not inside:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("settings_folder_perm_protected_title"),
+            tr(
+                "settings_folder_perm_protected_msg",
+                path=path,
+                items="\n".join(f"• {p}" for p in inside),
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            item.setCheckState(Qt.CheckState.Unchecked)
+
+    def _on_add_perm_folder(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+        from opensak.config import get_macros_dir
+
+        chosen = QFileDialog.getExistingDirectory(
+            self, tr("settings_folder_perm_add_title"), str(get_macros_dir()),
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if chosen:
+            self._add_perm_folder(chosen)
+
+    def _add_perm_folder(self, chosen: str) -> None:
+        """Add *chosen* with read permission. It is stored resolved, so the
+        list shows the folder the access check really compares against.
+        A filesystem root is refused — it would open the whole drive."""
+        from opensak.macro.permissions import is_root_folder, resolve_path
+
+        folder = resolve_path(chosen)
+        if is_root_folder(folder):
+            QMessageBox.warning(
+                self,
+                tr("settings_tab_folder_permissions"),
+                tr("settings_folder_perm_root", path=str(folder)),
+            )
+            return
+        table = self._perms()
+        for row in range(table.rowCount()):
+            if resolve_path(self._perm_path(row)) == folder:
+                table.selectRow(row)
+                QMessageBox.information(
+                    self,
+                    tr("settings_tab_folder_permissions"),
+                    tr("settings_folder_perm_duplicate"),
+                )
+                return
+        table.selectRow(self._append_perm_row(str(folder), read=True, write=False))
+
+    def _on_remove_perm_folder(self) -> None:
+        table = self._perms()
+        rows = {index.row() for index in table.selectedIndexes()}
+        for row in sorted(rows, reverse=True):
+            table.removeRow(row)
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
@@ -1384,6 +1651,8 @@ class SettingsDialog(QDialog):
         from opensak.settings_store import get_install_dir, get_db_dir
         self._install_dir_row.set_path(get_install_dir())
         self._db_dir_row.set_path(get_db_dir())
+        from opensak.backup.backupset import get_backup_dir
+        self._backup_dir_row.set_path(get_backup_dir())
         idx = self._unit_combo.findData(s.use_miles)
         self._unit_combo.setCurrentIndex(idx if idx >= 0 else 0)
         idx = self._map_provider.findData(s.map_provider)
@@ -1431,10 +1700,35 @@ class SettingsDialog(QDialog):
             self._nominatim_cb.setChecked(s.nominatim_enabled)
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
+        from opensak.backup import exit_state
+        from opensak.backup.backupset import get_compress, get_keep_auto
+        idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
+        self._backup_on_exit_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._backup_keep_auto.setValue(get_keep_auto())
+        self._backup_compress_cb.setChecked(get_compress())
         idx = self._distance_method_combo.findData(s.distance_method)
         self._distance_method_combo.setCurrentIndex(idx if idx >= 0 else 0)
         # Opdater GC-status
         self._refresh_gc_status_on_open()
+
+    def _backup_dir_is_valid(self) -> bool:
+        """Issue #986: warn and return False if the backup folder is unsuitable."""
+        from opensak.backup.backupset import (
+            BackupError, get_backup_dir, validate_backup_dir,
+        )
+        from opensak.settings_store import get_db_dir
+        new_backup_dir = self._backup_dir_row.path
+        new_db_dir = self._db_dir_row.path
+        if new_backup_dir == get_backup_dir() and new_db_dir == get_db_dir():
+            return True
+        try:
+            validate_backup_dir(new_backup_dir, db_dir=new_db_dir)
+        except BackupError:
+            QMessageBox.warning(
+                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
+            )
+            return False
+        return True
 
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK
@@ -1442,6 +1736,12 @@ class SettingsDialog(QDialog):
             self._add_point()
             if self._editing_original_name is not None:
                 return  # validation failed — keep dialog open
+
+        # Issue #986: refuse an unsuitable backup folder before anything is
+        # saved, so the dialog stays open with nothing half-applied. Checked
+        # against the database folder as entered here, which may be new too.
+        if not self._backup_dir_is_valid():
+            return
 
         s = get_settings()
         s.gc_username       = self._gc_username.text()
@@ -1486,6 +1786,23 @@ class SettingsDialog(QDialog):
         s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()
 
+        # Backup (#959) — stored in opensak.json via the settings store.
+        from opensak.backup import exit_state
+        from opensak.backup.backupset import KEEP_AUTO_KEY
+        from opensak.settings_store import get_store as _get_store
+        exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
+        _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
+        from opensak.backup.backupset import COMPRESS_KEY, get_compress
+        if self._backup_compress_cb.isChecked() != get_compress():
+            _get_store().set(COMPRESS_KEY, self._backup_compress_cb.isChecked())
+        # Issue #986: only a changed folder is stored, so the default isn't
+        # frozen into opensak.json just because some other setting was saved.
+        # Existing backups stay where they are.
+        from opensak.backup.backupset import BACKUP_DIR_KEY, get_backup_dir
+        new_backup_dir = self._backup_dir_row.path
+        if new_backup_dir != get_backup_dir():
+            _get_store().set(BACKUP_DIR_KEY, str(new_backup_dir))
+
         # PQ Email (issue #443) — kodeordet gemmes kun i OS keyring
         # (opensak.email.credentials), aldrig i opensak.json. Et tomt
         # kodeord-felt betyder "behold det eksisterende kodeord".
@@ -1499,6 +1816,14 @@ class SettingsDialog(QDialog):
             credentials.set_password(s.pq_email_username, new_pq_password)
 
         s.sync()
+
+        # Only a changed list is stored, so the defaults are not frozen into
+        # opensak.json just because some other setting was saved.
+        if self._perm_table is not None:
+            from opensak.macro.permissions import save_permissions
+            permissions = self._collect_permissions()
+            if permissions != self._perm_loaded:
+                save_permissions(permissions)
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store

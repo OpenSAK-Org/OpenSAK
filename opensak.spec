@@ -83,6 +83,12 @@ a = Analysis(
         ("src/opensak/assets/icons/cache_types", "opensak/assets/icons/cache_types"),
         ("src/opensak/assets/icons/cache_found", "opensak/assets/icons/cache_found"),
         ("src/opensak/assets/icon_guide.html",   "opensak/assets/icon_guide.html"),
+        # Example Lua macros (+ their CSV), copied into the user's macros
+        # folder by Macros → Open example (opensak.macro.examples).
+        ("macros/examples",                       "macros/examples"),
+        # LuaLS stub, copied into <macros>/types on every start (#1012,
+        # opensak.macro.editor_support).
+        ("macros/types",                          "macros/types"),
     ] + certifi_datas + boundary_datas + qt_translation_datas,
     hiddenimports=[
         "PySide6.QtWebEngineWidgets",
@@ -91,6 +97,7 @@ a = Analysis(
         "certifi",
         "shapely",
         "shapely.geometry",
+        "lupa.lua54",
     ] + (["win32com.client", "pythoncom"] if sys.platform == "win32" else []),
     hookspath=[],
     hooksconfig={},

@@ -156,7 +156,11 @@ OpenSAK checks for new versions at startup (turn this off under **Settings → S
 | **Linux AppImage** | **Upgrade now** downloads, verifies and replaces the AppImage in place. |
 | **From source** | `cd ~/opensak && git pull origin main && source .venv/bin/activate && pip install -e .` (use `.venv\Scripts\activate` on Windows) |
 
-Updating never touches your databases or settings.
+Updating never deletes your databases or settings. When a new version needs to update a database to a new format, it does so the first time you open that database, and saves an untouched copy of it first — in the *pre-migration* folder of your backup folder, or next to the database if you haven't chosen a backup folder. OpenSAK tells you where the copy is.
+
+### Going back to an older version
+
+Download the older version from the [Releases page](https://github.com/OpenSAK-Org/OpenSAK/releases) and install it as described above. The Microsoft Store always installs the latest version, so to go back from a Store install, use the direct download. An older version can usually still open databases a newer one has updated, but settings that newer versions keep inside the database may show older values. To get a database back exactly as it was before the upgrade, use its pre-migration copy (`<name>.pre-migration-schema<N>.db`): add it with **File → Manage databases… → Open existing…**, or rename it to the database's original file name.
 
 ---
 
@@ -171,5 +175,7 @@ Uninstalling removes the program only. Your databases and settings are **never**
 | **macOS** | **Settings → Settings… → Advanced → Uninstall → Uninstall OpenSAK** — choose *Remove program only* or *Remove program and all data*. OpenSAK moves itself to the Trash. |
 | **Linux AppImage** | **Settings → Settings… → Advanced → AppImage → Uninstall OpenSAK**, with the same two choices |
 | **From source** | Delete the `~/opensak` folder (and the menu entry the installer script created, if any) |
+
+Backups in your backup folder (by default *Documents/OpenSAK Backups*) are never deleted by an uninstall, not even with *Remove program and all data* — delete that folder yourself if you no longer want them.
 
 To remove your data on Windows as well, or to back it up first, use **Help → OpenSAK File Locations…** before uninstalling — it lists every place OpenSAK keeps files, with an **Open folder** button for each. See [Uninstalling OpenSAK](Uninstalling-OpenSAK.md) for details and manual clean-up steps.

@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+from opensak.export.cache_text import NO_TEXT, ExportText
 from opensak.lang import tr
 from opensak.utils.constants import CUSTOM_WP_TYPES
 
@@ -261,6 +262,8 @@ def _gio_remove(path: Path) -> bool:
             ["gio", "remove", str(path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=15,
             env=_gio_subprocess_env(),
         )
@@ -363,6 +366,8 @@ def _linux_mounts() -> list[Path]:
             ["lsblk", "--output", "MOUNTPOINT", "--raw", "--noheadings"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
         for line in result.stdout.splitlines():
@@ -377,7 +382,7 @@ def _linux_mounts() -> list[Path]:
 
     # ── Metode 2: /proc/mounts (fallback) ─────────────────────────────────────
     try:
-        with open("/proc/mounts") as f:
+        with open("/proc/mounts", encoding="utf-8", errors="replace") as f:
             for line in f:
                 parts = line.split()
                 if len(parts) < 3:
@@ -433,7 +438,8 @@ def _is_removable_path(path: Path) -> bool:
     try:
         result = subprocess.run(
             ["lsblk", "--output", "MOUNTPOINT,RM", "--raw", "--noheadings"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=3,
         )
         for line in result.stdout.splitlines():
             parts = line.strip().split()
@@ -548,15 +554,16 @@ def debug_scan() -> str:
 
 # ── GPX generator ─────────────────────────────────────────────────────────────
 
-def _effective_coords(cache) -> tuple[float, float]:
+def _effective_coords(cache, use_corrected: bool = True) -> tuple[float, float]:
     """
     Returner de koordinater der skal bruges til GPX export.
 
     Hvis cachen har korrigerede koordinater (user_note.is_corrected),
     bruges disse. Ellers bruges de originale koordinater.
+    use_corrected=False returnerer altid de originale koordinater.
     """
     note = getattr(cache, "user_note", None)
-    if note and getattr(note, "is_corrected", False):
+    if use_corrected and note and getattr(note, "is_corrected", False):
         lat = note.corrected_lat
         lon = note.corrected_lon
         if lat is not None and lon is not None:
@@ -564,7 +571,13 @@ def _effective_coords(cache) -> tuple[float, float]:
     return cache.latitude, cache.longitude
 
 
-def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=None) -> str:
+def generate_gpx(
+    caches: list, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+    text: ExportText = NO_TEXT,
+    attributes: bool = True,
+    child_waypoints: bool = True,
+) -> str:
     """
     Generer GPX indhold fra en liste af Cache objekter.
     Returnerer GPX som en streng klar til at skrive til fil.
@@ -583,6 +596,9 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
     i en cmt (comment) feltom muligt.
 
     progress_cb(done, total): valgfrit kald per cache, så GUI kan vise fremgang.
+    use_corrected=False eksporterer altid de originale koordinater.
+    *text* replaces cache names and waypoint descriptions (Lua macros);
+    attributes / child_waypoints=False leave those out.
     """
     from xml.etree.ElementTree import Element, SubElement
     import xml.etree.ElementTree as ET
@@ -614,7 +630,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
             continue
 
         # Brug korrigerede koordinater hvis de findes
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
         has_corrected = (export_lat != cache.latitude or export_lon != cache.longitude)
 
         wpt = SubElement(gpx, "wpt")
@@ -629,7 +645,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
         name_wpt.text = cache.gc_code or ""
 
         desc_wpt = SubElement(wpt, "desc")
-        desc_wpt.text = cache.name or ""
+        desc_wpt.text = text.description(cache) or text.name(cache)
 
         # Gem originale koordinater i comment-feltet hvis vi bruger korrigerede
         if has_corrected:
@@ -684,7 +700,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
             gs_cache.set("xmlns:groundspeak", "http://www.groundspeak.com/cache/1/0/1")
 
             gs_name = SubElement(gs_cache, "groundspeak:name")
-            gs_name.text = cache.name or ""
+            gs_name.text = text.name(cache)
 
             gs_placed = SubElement(gs_cache, "groundspeak:placed_by")
             gs_placed.text = cache.placed_by or ""
@@ -712,7 +728,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
             # placed_by, type, container, attributes, difficulty, terrain,
             # country, state, short_description, long_description,
             # encoded_hints, logs).
-            if cache.attributes:
+            if attributes and cache.attributes:
                 gs_attrs = SubElement(gs_cache, "groundspeak:attributes")
                 for attr in cache.attributes:
                     gs_attr = SubElement(gs_attrs, "groundspeak:attribute")
@@ -817,7 +833,7 @@ def generate_gpx(caches: list, filename: str = "opensak_export", progress_cb=Non
         # GPX/GSAK/Garmin-compatible code, which is all a re-import or
         # device needs; it need not be byte-identical to the original.
         gc_suffix = cache.gc_code[2:] if cache.gc_code and len(cache.gc_code) > 2 else ""
-        for child_wp in getattr(cache, "waypoints", None) or []:
+        for child_wp in (getattr(cache, "waypoints", None) or []) if child_waypoints else []:
             if child_wp.latitude is None or child_wp.longitude is None:
                 continue
 
@@ -939,14 +955,16 @@ def _indent(elem, level: int = 0) -> None:
 
 # ── LOC generator ─────────────────────────────────────────────────────────────
 
-def generate_loc(caches: list, progress_cb=None) -> str:
+def generate_loc(
+    caches: list, progress_cb=None, use_corrected: bool = True, text: ExportText = NO_TEXT,
+) -> str:
     """
     Generate LOC 1.0 XML content from a list of Cache objects.
     Returns the LOC content as a string ready to write to file.
 
     LOC is a simple waypoint format supported by many GPS apps and devices.
     It includes GC code, name, coordinates, difficulty, terrain and container.
-    Corrected coordinates are used when available.
+    Corrected coordinates are used when available, unless use_corrected=False.
 
     progress_cb(done, total): optional per-cache callback for GUI progress.
     """
@@ -964,7 +982,7 @@ def generate_loc(caches: list, progress_cb=None) -> str:
         if cache.latitude is None or cache.longitude is None:
             continue
 
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
 
         wp = SubElement(root, "waypoint")
 
@@ -975,7 +993,9 @@ def generate_loc(caches: list, progress_cb=None) -> str:
         terr = cache.terrain or 1.0
         diff_str = f"{diff:g}"
         terr_str = f"{terr:g}"
-        label = f"{cache.name or ''} by {cache.placed_by or ''} ({diff_str}/{terr_str})"
+        label = text.description(cache) or (
+            f"{text.name(cache)} by {cache.placed_by or ''} ({diff_str}/{terr_str})"
+        )
         name_el.text = f"<![CDATA[{label}]]>"
 
         coord_el = SubElement(wp, "coord")
@@ -1025,7 +1045,13 @@ def generate_loc(caches: list, progress_cb=None) -> str:
 
 # ── GGZ generator ─────────────────────────────────────────────────────────────
 
-def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=None) -> bytes:
+def generate_ggz(
+    caches: list, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+    text: ExportText = NO_TEXT,
+    attributes: bool = True,
+    child_waypoints: bool = True,
+) -> bytes:
     """
     Generate a GGZ file (ZIP archive) from a list of Cache objects.
     Returns the GGZ content as bytes ready to write to file.
@@ -1036,7 +1062,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
 
     The format allows Garmin devices to load more than the usual 10,000
     cache limit by using the GGZ container instead of plain GPX files.
-    Corrected coordinates are used when available.
+    Corrected coordinates are used when available, unless use_corrected=False.
 
     progress_cb(done, total): optional per-cache callback for GUI progress;
     reported over the index-building pass (the slow part of GGZ).
@@ -1048,7 +1074,10 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
     from datetime import datetime, timezone
 
     gpx_filename = f"{filename}.gpx"
-    gpx_content  = generate_gpx(caches, filename).encode("utf-8")
+    gpx_content  = generate_gpx(
+        caches, filename, use_corrected=use_corrected, text=text,
+        attributes=attributes, child_waypoints=child_waypoints,
+    ).encode("utf-8")
 
     # ── CRC32 of the GPX content (hex, uppercase, 8 chars) ────────────────────
     import binascii
@@ -1112,7 +1141,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
         if cache.latitude is None or cache.longitude is None:
             continue
 
-        export_lat, export_lon = _effective_coords(cache)
+        export_lat, export_lon = _effective_coords(cache, use_corrected)
         gc_code = cache.gc_code or ""
 
         file_pos, file_len = offsets_by_gc_code.get(gc_code, (0, 0))
@@ -1123,7 +1152,7 @@ def generate_ggz(caches: list, filename: str = "opensak_export", progress_cb=Non
         code_el.text = gc_code
 
         cname_el = SubElement(gch_el, "name")
-        cname_el.text = cache.name or ""
+        cname_el.text = text.name(cache)
 
         ctype_el = SubElement(gch_el, "type")
         ctype_el.text = cache.cache_type or "Traditional Cache"

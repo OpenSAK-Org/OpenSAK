@@ -28,6 +28,14 @@ means the betas leading up to it.
       the latest commit
 - [ ] Screenshot suite (`tests/screenshots/`) run explicitly and reviewed —
       it's excluded from normal runs, so it's easy to forget before a stable cut
+- [ ] **Upgrade from the previous stable** tested on every platform and
+      install channel as a *direct jump* (previous stable → latest beta,
+      skipping the betas in between) — that is the path stable users take,
+      and most upgrade bugs only show up there (#997). Record the results in
+      the tracking issue
+- [ ] An upgrade fixture for the previous stable exists in
+      `tests/fixtures/upgrade/` and `tests/unit-tests/test_upgrade_path.py`
+      passes (it runs in the normal CI)
 
 ## 1. Version & changelog housekeeping (still on `beta`)
 
@@ -192,6 +200,11 @@ merge in §3, so they ship with the release.
       tagged build with green CI); re-triage anything deliberately deferred to
       the next milestone instead of leaving it dangling
 - [ ] Close the `X.Y.0` milestone and open one for the next version
+- [ ] Generate and commit the upgrade fixture for the version just released,
+      so the next stable is tested against it (#997):
+      `python scripts/make_upgrade_fixture.py vX.Y.0` → commit
+      `tests/fixtures/upgrade/vX.Y.0/` to `beta`. Older fixtures stay, so
+      upgrades from every earlier stable keep being tested
 - [ ] Bump `beta` forward with `python scripts/bump_version.py X.(Y+1).0-beta.1`
       so beta testers immediately see they're on a new cycle, rather than the
       app still reporting the stable version number

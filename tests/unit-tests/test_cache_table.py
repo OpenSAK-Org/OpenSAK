@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import Qt, QModelIndex
+from PySide6.QtCore import Qt, QModelIndex, QRect
 from PySide6.QtGui import QPixmap, QPainter, QFont
 
 from opensak.gui import cache_table as ct
@@ -1493,6 +1493,8 @@ class TestView:
         db_session.commit()
         cache = _cache(gc_code="GCCC", latitude=55.0, longitude=12.0)
         view.load_caches([cache])
+        # mainwindow refreshes the row from this signal (see _on_corrected_coords_changed)
+        view.corrected_coords_changed.connect(view.refresh_cache_row)
         view._save_corrected(cache, 56.0, 13.0)
         refreshed = view._model.cache_at(0)
         assert refreshed.user_note is not None
@@ -1545,6 +1547,7 @@ class TestView:
         cache_a = _cache(gc_code="GCA", latitude=55.0, longitude=12.0)
         cache_b = _cache(gc_code="GCB", latitude=56.0, longitude=13.0)
         view.load_caches([cache_a, cache_b])
+        view.corrected_coords_changed.connect(view.refresh_cache_row)
 
         # Simulate the user having GCA selected (shown in the detail panel).
         # Use select_by_gc_code rather than assuming insertion order == row
@@ -1682,6 +1685,183 @@ class TestView:
             action.trigger()
         assert blocker.args[0].gc_code == "GCCENTER"
 
+    def _maps_actions(self, view, qtbot, monkeypatch, cache):
+        """Build the context menu for *cache* and return {text: url opened}
+        for its "Open in <map>" actions. Real English strings are loaded so
+        the provider name in the menu text is actually checked."""
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        map_texts = {
+            tr(key, map_name=name)
+            for key in ("ctx_open_maps", "ctx_open_maps_original")
+            for name in ("Google Maps", "OpenStreetMap")
+        }
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        opened: list[str] = []
+        monkeypatch.setattr(ct.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+
+        view.load_caches([cache])
+        view.show()
+        qtbot.addWidget(view)
+        pos = view.visualRect(view._model.index(0, 0)).center()
+        view._show_context_menu(pos)
+
+        result = {}
+        for action in built_menus[-1].actions():
+            if action.text() in map_texts:
+                opened.clear()
+                action.trigger()
+                result[action.text()] = opened[0]
+        return result
+
+    def test_context_menu_maps_uses_corrected_coords(self, view, qtbot, monkeypatch):
+        # Issue #951: "Open in <map>" must open the corrected coordinates when
+        # set — like the lat/lon columns, the map and GPS export — and the
+        # original coordinates get their own entry.
+        from opensak.lang import tr
+        c = _cache(gc_code="GCCORR", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert actions == {
+            tr("ctx_open_maps", map_name="Google Maps"): "https://maps?56.0,13.0",
+            tr("ctx_open_maps_original", map_name="Google Maps"): "https://maps?55.0,12.0",
+        }
+
+    @pytest.mark.parametrize("note", [None, "not_corrected"])
+    def test_context_menu_maps_uses_original_coords_without_correction(
+        self, view, qtbot, monkeypatch, note,
+    ):
+        # Issue #951: without (active) corrected coordinates there is a single
+        # map entry, opening the original coordinates.
+        from opensak.lang import tr
+        c = _cache(gc_code="GCORIG", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0, corrected=False) if note else None
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert actions == {
+            tr("ctx_open_maps", map_name="Google Maps"): "https://maps?55.0,12.0",
+        }
+
+    def test_context_menu_maps_names_osm_provider(
+        self, view, qtbot, monkeypatch, fake_settings,
+    ):
+        from opensak.lang import tr
+        fake_settings.map_provider = "osm"
+        c = _cache(gc_code="GCOSM", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        actions = self._maps_actions(view, qtbot, monkeypatch, c)
+        assert set(actions) == {
+            tr("ctx_open_maps", map_name="OpenStreetMap"),
+            tr("ctx_open_maps_original", map_name="OpenStreetMap"),
+        }
+
+    def _coord_actions(self, view, qtbot, monkeypatch, cache):
+        """Build the context menu for *cache*, trigger its copy-coordinates
+        and coordinate-converter actions, and return {key: what it did}."""
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        keys = {tr(k): k for k in (
+            "ctx_copy_coords", "ctx_copy_coords_original", "ctx_coord_converter")}
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+        monkeypatch.setattr(ct, "format_coords", lambda lat, lon, fmt: f"{lat},{lon}")
+        done: list = []
+        monkeypatch.setattr(view, "_copy_to_clipboard", lambda text: done.append(text))
+        monkeypatch.setattr(view, "_open_converter",
+                            lambda lat, lon: done.append((lat, lon)))
+
+        view.load_caches([cache])
+        view.show()
+        qtbot.addWidget(view)
+        pos = view.visualRect(view._model.index(0, 0)).center()
+        view._show_context_menu(pos)
+
+        result = {}
+        for action in built_menus[-1].actions():
+            if action.text() in keys:
+                done.clear()
+                action.trigger()
+                result[keys[action.text()]] = done[0]
+        return result
+
+    def test_copy_and_converter_use_corrected_coords(self, view, qtbot, monkeypatch):
+        # Issue #1003: like "Open in <map>" (#951), copying and the converter
+        # use the corrected coordinates, and the original ones can be copied
+        # from their own entry.
+        c = _cache(gc_code="GCCORR", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0)
+        assert self._coord_actions(view, qtbot, monkeypatch, c) == {
+            "ctx_copy_coords": "56.0,13.0",
+            "ctx_copy_coords_original": "55.0,12.0",
+            "ctx_coord_converter": (56.0, 13.0),
+        }
+
+    @pytest.mark.parametrize("note", [None, "not_corrected"])
+    def test_copy_and_converter_use_original_coords_without_correction(
+        self, view, qtbot, monkeypatch, note,
+    ):
+        c = _cache(gc_code="GCORIG", latitude=55.0, longitude=12.0)
+        c.user_note = _note(56.0, 13.0, corrected=False) if note else None
+        assert self._coord_actions(view, qtbot, monkeypatch, c) == {
+            "ctx_copy_coords": "55.0,12.0",
+            "ctx_coord_converter": (55.0, 12.0),
+        }
+
+    def test_context_menu_delete_emits_right_clicked_cache(
+        self, view, qtbot, monkeypatch,
+    ):
+        # Issue #693: "Delete cache…" deletes the cache under the mouse. A
+        # right-click doesn't change the selection, so with A selected and B
+        # right-clicked, B must be the one sent.
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        from opensak.lang import tr
+        built_menus = []
+
+        class _Menu(ct.QMenu):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                built_menus.append(self)
+            def exec(self, *a, **k):
+                return None
+        monkeypatch.setattr(ct, "QMenu", _Menu)
+
+        a = _cache(gc_code="GCAAAAA", name="A")
+        b = _cache(gc_code="GCBBBBB", name="B")
+        view.load_caches([a, b])
+        view.show()
+        qtbot.addWidget(view)
+        row_of = {view._model.cache_at(r).gc_code: r for r in range(2)}
+        view.selectRow(row_of["GCAAAAA"])
+
+        pos = view.visualRect(view._model.index(row_of["GCBBBBB"], 0)).center()
+        view._show_context_menu(pos)
+        act = next(x for x in built_menus[-1].actions()
+                   if x.text() == tr("ctx_delete_cache"))
+        with qtbot.waitSignal(view.delete_requested, timeout=1000) as blocker:
+            act.trigger()
+        assert blocker.args[0].gc_code == "GCBBBBB"
+        assert view.selected_cache().gc_code == "GCAAAAA"
+
     def test_context_menu_no_cache_noop(self, view):
         view.load_caches([])
         from PySide6.QtCore import QPoint
@@ -1772,3 +1952,117 @@ class TestView:
                 )
                 assert header_icon.availableSizes()[0].width() == cell_icon.availableSizes()[0].width()
 
+
+
+# ── Issue #1000: compact "L4" display of the last four logs ──────────────────
+
+class TestLastFourLogsCompact:
+    def test_wide_column_draws_a_row_of_four(self, qapp):
+        rects = ct.LastFourLogsDelegate().square_rects(QRect(0, 0, 70, 22))
+        assert len(rects) == 4
+        assert len({r.y() for r in rects}) == 1
+        assert [r.x() for r in rects] == sorted(r.x() for r in rects)
+
+    def test_narrow_column_draws_a_2x2_stack_in_gsak_order(self, qapp):
+        cell = QRect(10, 100, 30, 22)
+        tl, tr_, bl, br = ct.LastFourLogsDelegate().square_rects(cell)
+        # 1st top left, 2nd top right, 3rd bottom left, 4th bottom right.
+        assert tl.y() == tr_.y() < bl.y() == br.y()
+        assert tl.x() == bl.x() < tr_.x() == br.x()
+        for r in (tl, tr_, bl, br):
+            assert r.width() == r.height() >= 3
+            assert cell.contains(r)
+
+    def test_grid_threshold(self, qapp):
+        d = ct.LastFourLogsDelegate()
+        below = d.square_rects(QRect(0, 0, d._GRID_BELOW - 1, 22))
+        at = d.square_rects(QRect(0, 0, d._GRID_BELOW, 22))
+        assert below[0].y() != below[2].y()     # stacked
+        assert len({r.y() for r in at}) == 1    # in a row
+
+    def _with_last_four_logs(self, monkeypatch, qtbot):
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "name", "last_four_logs"])
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {})
+        monkeypatch.setattr(ct, "set_column_widths", lambda w: None)
+        v = CacheTableView()
+        qtbot.addWidget(v)
+        return v
+
+    def _header(self, view, role=Qt.ItemDataRole.DisplayRole):
+        return view._model.headerData(2, Qt.Orientation.Horizontal, role)
+
+    def test_header_is_short_when_the_title_does_not_fit(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        view.setColumnWidth(2, 40)
+        assert self._header(view) == "L4"
+        view.setColumnWidth(2, 400)
+        assert self._header(view) == "Last four logs"
+
+    def test_header_at_the_default_width(self, monkeypatch, qtbot, fake_settings):
+        # The default width (70 px) is too narrow for "Last four logs", and
+        # no resize signal comes when a width doesn't change.
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        assert view.columnWidth(2) == ct.get_column_defs()["last_four_logs"][1]
+        assert self._header(view) == "L4"
+
+    def test_header_tooltip_is_always_the_full_title(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        view.setColumnWidth(2, 40)
+        assert self._header(view, Qt.ItemDataRole.ToolTipRole) == "Last four logs"
+
+    def test_header_follows_widths_applied_from_a_view(
+        self, monkeypatch, qtbot, fake_settings,
+    ):
+        # Widths applied while _applying_widths is set (column views,
+        # start-up) must switch the header too.
+        view = self._with_last_four_logs(monkeypatch, qtbot)
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {"last_four_logs": 30})
+        view._apply_column_widths()
+        assert self._header(view) == "L4"
+
+    def test_set_short_header_signals_only_on_change(self, monkeypatch, qtbot):
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "last_four_logs"])
+        model = CacheTableModel()
+        with qtbot.waitSignal(model.headerDataChanged, timeout=500):
+            model.set_short_header("last_four_logs", True)
+        with qtbot.assertNotEmitted(model.headerDataChanged):
+            model.set_short_header("last_four_logs", True)
+
+
+# ── Issue #1004: short "Last GPX" header ─────────────────────────────────────
+
+class TestLastGpxShortHeader:
+    @pytest.fixture
+    def gpx_view(self, monkeypatch, qtbot, fake_settings):
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "last_gpx_update"])
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {})
+        monkeypatch.setattr(ct, "set_column_widths", lambda w: None)
+        v = CacheTableView()
+        qtbot.addWidget(v)
+        return v
+
+    def _header(self, view, role=Qt.ItemDataRole.DisplayRole):
+        return view._model.headerData(1, Qt.Orientation.Horizontal, role)
+
+    def test_short_when_narrow_full_when_wide(self, gpx_view):
+        gpx_view.setColumnWidth(1, 60)
+        assert self._header(gpx_view) == "Last GPX"
+        gpx_view.setColumnWidth(1, 400)
+        assert self._header(gpx_view) == "Last GPX update"
+
+    def test_tooltip_is_always_the_full_title(self, gpx_view):
+        gpx_view.setColumnWidth(1, 60)
+        assert self._header(gpx_view, Qt.ItemDataRole.ToolTipRole) == "Last GPX update"

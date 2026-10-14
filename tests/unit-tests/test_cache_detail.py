@@ -591,6 +591,17 @@ def test_trackables_tab_renders_without_ref(monkeypatch, qapp):
     assert "coord.info" not in html
 
 
+def test_trackables_tab_escapes_html_in_name(monkeypatch, qapp):
+    # Trackable names are user-written — raw HTML must not become a link.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    panel = CacheDetailPanel()
+    name = '<a href="file:///C:/evil.exe">Bug</a>'
+    panel._render_trackables(SimpleNamespace(trackables=[_fake_trackable(name, ref="TB1")]))
+    assert 'href="file:' not in panel._tb_browser.toHtml()
+    assert name in panel._tb_browser.toPlainText()
+    assert panel._tb_browser.openLinks() is False
+
+
 def test_trackables_tab_cleared_on_clear(monkeypatch, qapp):
     # clear() resets the trackables browser and tab title.
     monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
@@ -877,3 +888,65 @@ class TestDescriptionEscaping:
         )
         assert "Real" in panel._desc_view.toPlainText()
         assert "HTML" in panel._desc_view.toPlainText()
+
+
+# ── Corrected coordinates dialog ──────────────────────────────────────────────
+
+def test_edit_corrected_passes_original_coords(monkeypatch, tmp_path, qapp):
+    # The detail panel must pass the cache's original coordinates so the
+    # dialog shows the same "Original coordinates" panel as the table and
+    # Edit Cache entry points.
+    monkeypatch.setattr(cd, "get_settings", lambda: _fake_settings())
+    captured = {}
+
+    class FakeDlg:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def exec(self):
+            return False
+
+    monkeypatch.setattr(
+        "opensak.gui.dialogs.corrected_coords_dialog.CorrectedCoordsDialog", FakeDlg
+    )
+    panel = CacheDetailPanel()
+    panel.show_cache(_load_cache(tmp_path, db_suffix="corr"))
+    panel._edit_corrected_coords()
+
+    assert captured["gc_code"] == "GCNOTES1"
+    assert captured["orig_lat"] == pytest.approx(55.0)
+    assert captured["orig_lon"] == pytest.approx(10.0)
+
+
+# ── Issue #951: map links use Settings.get_maps_url() ──────────────────────────
+
+def _maps_settings() -> SimpleNamespace:
+    s = _fake_settings()
+    s.get_maps_url = lambda lat, lon: f"https://maps?{lat},{lon}"
+    return s
+
+
+def test_open_in_maps_uses_settings_url(monkeypatch, qapp):
+    monkeypatch.setattr(cd, "get_settings", _maps_settings)
+    opened: list[str] = []
+    monkeypatch.setattr(cd.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    panel = CacheDetailPanel()
+    panel._current_lat, panel._current_lon = 55.0, 12.0
+    panel._corrected_lat, panel._corrected_lon = 56.0, 13.0
+
+    panel._open_in_maps(None)
+    panel._open_corrected_in_maps(None)
+    assert opened == ["https://maps?55.0,12.0", "https://maps?56.0,13.0"]
+
+
+def test_open_in_maps_without_coords_does_nothing(monkeypatch, qapp):
+    monkeypatch.setattr(cd, "get_settings", _maps_settings)
+    opened: list[str] = []
+    monkeypatch.setattr(cd.webbrowser, "open", lambda url, *a, **k: opened.append(url))
+    panel = CacheDetailPanel()
+    panel._current_lat = panel._current_lon = None
+    panel._corrected_lat = panel._corrected_lon = None
+
+    panel._open_in_maps(None)
+    panel._open_corrected_in_maps(None)
+    assert opened == []

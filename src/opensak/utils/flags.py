@@ -24,12 +24,23 @@ import json
 import sys
 from pathlib import Path
 
+from opensak import __version__
+
 # src/opensak/utils/ → src/opensak/ → src/ → project root
 _FEATURES_FILE: Path = Path(__file__).parent.parent.parent.parent / "features.json"
+
+
+def _is_prerelease(version: str) -> bool:
+    """True for semver pre-release versions such as "1.21.0-beta.1"."""
+    return "-" in version
+
 
 _RELEASE_DEFAULTS: dict[str, bool] = {
     "reverse-geocoding": True,
     "map-popout": True,
+    # Lua macros (#938): on in beta builds only, so the POC cannot reach a
+    # stable release before the API (#938 step 4) is settled.
+    "lua-macros": _is_prerelease(__version__),
 }
 
 
@@ -72,3 +83,4 @@ _flags = _load()
 
 reverse_geocoding: bool    = _flags["reverse-geocoding"]
 map_popout: bool           = _flags["map-popout"]
+lua_macros: bool           = _flags["lua-macros"]

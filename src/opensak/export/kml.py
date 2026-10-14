@@ -14,6 +14,7 @@ from typing import Iterable
 from xml.dom import minidom
 
 from ..db.models import Cache, Waypoint
+from .cache_text import NO_TEXT, ExportText
 
 # ---------------------------------------------------------------------------
 # Icon URLs (Google Maps built-in paddle icons)
@@ -148,6 +149,8 @@ def export_kml(
     include_waypoints: bool = True,
     include_found: bool = True,
     progress_cb=None,
+    use_corrected: bool = True,
+    text: ExportText = NO_TEXT,
 ) -> int:
     """
     Write a KML file to *output_path*.
@@ -155,6 +158,8 @@ def export_kml(
     Returns the number of caches written.
 
     progress_cb(done, total): optional per-cache callback for GUI progress.
+    use_corrected=False always places caches at their original coordinates.
+    *text* replaces cache names and pop-up descriptions (Lua macros).
     """
     cache_list = list(caches)
     if not include_found:
@@ -200,7 +205,7 @@ def export_kml(
             progress_cb(i, total)
         # Use corrected coordinates if available, fall back to originals
         note = cache.user_note
-        if note and note.is_corrected and note.corrected_lat is not None:
+        if use_corrected and note and note.is_corrected and note.corrected_lat is not None:
             lat = note.corrected_lat
             lon = note.corrected_lon
         else:
@@ -212,9 +217,11 @@ def export_kml(
 
         pm = ET.SubElement(folder_caches, "Placemark")
         ET.SubElement(pm, "name").text = (
-            f"{'✓ ' if cache.found else ''}{_esc(cache.gc_code)} {_esc(cache.name)}"
+            f"{'✓ ' if cache.found else ''}{_esc(cache.gc_code)} {text.name(cache)}"
         )
-        ET.SubElement(pm, "description").text = _cache_description(cache)
+        ET.SubElement(pm, "description").text = (
+            text.description(cache) or _cache_description(cache)
+        )
         ET.SubElement(pm, "styleUrl").text = f"#{_style_id_for_cache(cache)}"
 
         pt = ET.SubElement(pm, "Point")

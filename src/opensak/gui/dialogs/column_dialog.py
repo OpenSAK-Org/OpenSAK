@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -106,10 +106,26 @@ def _safe_db_key(name: str) -> str:
     return name.replace(".", "_").replace(" ", "_")
 
 
+def _get_db_columns(suffix: str) -> Any:
+    """Per-database column setting — stored inside the database file (#659)."""
+    from opensak.db import db_settings
+    return db_settings.get_value(f"columns.{suffix}", _col_key(suffix))
+
+
+def _set_db_columns(suffix: str, value: Any) -> None:
+    from opensak.db import db_settings
+    db_settings.set_value(f"columns.{suffix}", _col_key(suffix), value)
+
+
 def migrate_column_settings_for_rename(old_name: str, new_name: str) -> None:
     """
     Flyt gemte kolonneindstillinger (#199) fra den gamle til den nye
     database-navne-nøgle, når en database omdøbes (#539).
+
+    Since #659 the column layout lives inside the database file, so this
+    only matters for the legacy opensak.json keys of a database that hasn't
+    been opened since the upgrade (its settings are imported on first open,
+    by its then-current name).
 
     Uden dette ville et rename få kolonneopsætningen til at "nulstille"
     (fordi den nu peger på en tom nøgle for det nye navn), mens de gamle
@@ -139,14 +155,17 @@ def _col_key(suffix: str) -> str:
     Format: "columns.<db_name>.<suffix>"
     Falder tilbage til "columns.default.<suffix>" hvis ingen aktiv database.
     Issue #199: column views gemmes per database-navn.
+
+    Since #659 this is only the legacy opensak.json key: the fallback when
+    no database is bound, and where the value is imported from on first open.
     """
     try:
         from opensak.db.manager import get_db_manager
         manager = get_db_manager()
         if manager.active:
             # Brug database-navn (ikke sti) — mere læsbart og portabelt
-            safe = manager.active.name.replace(".", "_").replace(" ", "_")
-            return f"columns.{safe}.{suffix}"
+            from opensak.db.db_settings import legacy_columns_key
+            return legacy_columns_key(manager.active.name, suffix)
     except Exception:
         pass
     return f"columns.default.{suffix}"
@@ -202,12 +221,20 @@ class ColumnView:
     def _safe_filename(name: str) -> str:
         return "".join(c if c.isalnum() or c in "-_ " else "_" for c in name)
 
+    @classmethod
+    def path_for(cls, name: str, views_dir: Optional[Path] = None) -> Path:
+        """The file a view called *name* is saved to. Different names can map
+        to the same file, e.g. "My/View" and "My_View" (#995)."""
+        if views_dir is None:
+            views_dir = cls._views_dir()
+        return views_dir / f"{cls._safe_filename(name)}.json"
+
     def save(self, views_dir: Optional[Path] = None) -> Path:
         """Gem dette view til disk som JSON. Returnerer den gemte filsti."""
         if views_dir is None:
             views_dir = self._views_dir()
         views_dir.mkdir(parents=True, exist_ok=True)
-        path = views_dir / f"{self._safe_filename(self.name)}.json"
+        path = self.path_for(self.name, views_dir)
 
         data = {
             "name": self.name,
@@ -277,7 +304,7 @@ def get_default_view() -> Optional[ColumnView]:
 
 def get_visible_columns() -> list[str]:
     """Returner liste over synlige kolonne-id'er for den aktive database."""
-    saved = get_store().get(_col_key("visible"))
+    saved = _get_db_columns("visible")
     if saved:
         return list(saved)
     # Issue #607: ingen egen opsætning for denne database — brug det
@@ -291,12 +318,12 @@ def get_visible_columns() -> list[str]:
 
 def set_visible_columns(col_ids: list[str]) -> None:
     """Gem liste over synlige kolonne-id'er for den aktive database."""
-    get_store().set(_col_key("visible"), col_ids)
+    _set_db_columns("visible", col_ids)
 
 
 def get_column_widths() -> dict[str, int]:
     """Return saved column widths (col_id -> px) for the active database."""
-    raw = get_store().get(_col_key("widths"))
+    raw = _get_db_columns("widths")
     if not raw:
         # Issue #607: samme fallback til standard-viewet som ovenfor.
         default_view = get_default_view()
@@ -315,7 +342,7 @@ def get_column_widths() -> dict[str, int]:
 
 def set_column_widths(widths: dict[str, int]) -> None:
     """Persist column widths (col_id -> px) for the active database."""
-    get_store().set(_col_key("widths"), widths)
+    _set_db_columns("widths", widths)
 
 
 _CONTAINER_DISPLAY_KEY = "columns.container_display"
@@ -355,6 +382,32 @@ def set_type_display(mode: str) -> None:
     get_store().set(_TYPE_DISPLAY_KEY, mode)
 
 
+def current_column_view_match() -> Optional[str]:
+    """Return the name of a saved Column View that matches the active
+    database's current column setup (visible columns in order, widths,
+    container/type display) exactly — otherwise None.
+
+    A fresh comparison every time, not a stored "this database follows that
+    view" link. Shared by the toolbar dropdown (mainwindow) and the
+    Choose Columns dialog, so both always show the same view (#996).
+    """
+    current = (
+        list(get_visible_columns()),
+        dict(get_column_widths()),
+        get_container_display(),
+        get_type_display(),
+    )
+    for path in ColumnView.list_views():
+        try:
+            view = ColumnView.load(path)
+        except Exception:
+            continue
+        if (list(view.visible_columns), dict(view.widths),
+                view.container_display, view.type_display) == current:
+            return view.name
+    return None
+
+
 class ColumnChooserDialog(QDialog):
     """Dialog til at vælge hvilke kolonner der vises i cachelisten."""
 
@@ -385,6 +438,13 @@ class ColumnChooserDialog(QDialog):
         self._view_combo.setMinimumWidth(160)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
+        # Issue #996: preselect the saved view the active database is
+        # currently using (same match as the toolbar dropdown), instead of
+        # always showing "(None)". Signals are blocked, so nothing is
+        # re-applied — the view already matches what the dialog shows.
+        match_name = current_column_view_match()
+        if match_name:
+            self._select_view_by_name(match_name)
         self._view_combo.blockSignals(False)
         self._view_combo.currentIndexChanged.connect(self._on_view_selected)
         view_row.addWidget(self._view_combo)
@@ -518,6 +578,13 @@ class ColumnChooserDialog(QDialog):
                 label = f"{self._DEFAULT_MARK}{label}"
             self._view_combo.addItem(label, path)
 
+    def _select_view_by_name(self, name: str) -> None:
+        """Select the combo entry for the saved view *name* (★ mark ignored)."""
+        for i in range(self._view_combo.count()):
+            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
+                self._view_combo.setCurrentIndex(i)
+                break
+
     def _update_view_buttons(self) -> None:
         path = self._view_combo.currentData()
         self._del_view_btn.setEnabled(path is not None)
@@ -570,6 +637,30 @@ class ColumnChooserDialog(QDialog):
         if not ok or not name.strip():
             return
         name = name.strip()
+        # Issue #995: never overwrite an existing view silently. The check is
+        # on the target file, so a different name that maps to the same file
+        # name (e.g. "My/View" vs "My_View") is caught too.
+        target = ColumnView.path_for(name)
+        rename_default = False
+        if target.exists():
+            try:
+                existing_name = ColumnView.load(target).name
+            except Exception:
+                existing_name = name
+            reply = QMessageBox.question(
+                self, tr("column_view_overwrite_title"),
+                tr("column_view_overwrite_msg", name=existing_name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            # The overwritten view was the default under its old name: keep
+            # the default pointing at the same view under its new name (done
+            # after save(), since get_default_view() drops a default whose
+            # name no saved view carries).
+            rename_default = (existing_name != name
+                              and get_default_view_name() == existing_name)
         view = ColumnView(
             name=name,
             visible_columns=self._current_checked_columns(),
@@ -578,13 +669,12 @@ class ColumnChooserDialog(QDialog):
             type_display=self._type_display_combo.currentData(),
         )
         view.save()
+        if rename_default:
+            set_default_view_name(name)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
         self._view_combo.blockSignals(False)
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        self._select_view_by_name(name)
         self._update_view_buttons()
         QMessageBox.information(
             self, tr("filter_saved_title"), tr("column_view_saved_msg", name=name)
@@ -622,10 +712,7 @@ class ColumnChooserDialog(QDialog):
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
         self._view_combo.blockSignals(False)
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == view_name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        self._select_view_by_name(view_name)
         self._update_view_buttons()
         QMessageBox.information(
             self, tr("column_view_default_set_title"),

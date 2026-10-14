@@ -43,6 +43,8 @@ Thumbs.db
 # App data (local databases and logs — not committed)
 *.db
 *.log
+# …except the upgrade fixtures, generated from old releases (#997)
+!tests/fixtures/upgrade/**/*.db
 
 # Local export output (GPX/LOC/GGZ/KML written during manual testing)
 *.gpx

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 
+from opensak.gui.date_format import apply_date_format
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.db.models import Cache, UserNote, Waypoint
 from opensak.lang import tr
@@ -70,7 +71,7 @@ class OptionalDateEdit(QWidget):
         self._check = QCheckBox()
         self._date = QDateEdit()
         self._date.setCalendarPopup(True)
-        self._date.setDisplayFormat("yyyy-MM-dd")
+        apply_date_format(self._date)  # issue #1043: was hardcoded yyyy-MM-dd
         self._date.setDate(QDate.currentDate())
         self._date.setEnabled(False)
         self._check.toggled.connect(self._date.setEnabled)

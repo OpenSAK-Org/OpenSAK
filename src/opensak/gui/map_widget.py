@@ -41,6 +41,17 @@ def _cache_pin_html(cache_type: str, found: bool, dnf: bool = False) -> str:
     return _get_pin_html(cache_type, found=found, dnf=dnf)
 
 
+def _js_arg(value) -> str:
+    """Serialise *value* as a JavaScript literal for a runJavaScript() call.
+
+    JSON is valid JS, so the payload is passed straight as a function
+    argument — no template-literal/quote splicing that imported data (cache
+    names, GC codes from a crafted GPX) could break out of with ``${...}``,
+    backslashes or quotes.
+    """
+    return json.dumps(value, ensure_ascii=False)
+
+
 # ── Python ↔ JavaScript bro ───────────────────────────────────────────────────
 
 class MapBridge(QObject):
@@ -278,16 +289,38 @@ function makeHomeIcon() {
     });
 }
 
+// Cache/waypoint names, types and prefixes come from imported GPX/GSAK data
+// written by cache owners — they must never reach the DOM as raw HTML.
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function cachePopupHtml(c) {
+    var coordNote = c.corrected
+        ? '<br><span style="color:#e65100;font-size:11px">📍 ' + escapeHtml(c.corrected_label) + '</span>'
+        : '';
+    return '<b>' + escapeHtml(c.gc_code) + '</b><br>' +
+        escapeHtml(c.name) + '<br>' +
+        '<span style="color:HINT_TEXT_COLOR">' + escapeHtml(c.cache_type) +
+        ' D' + escapeHtml(c.difficulty) + '/T' + escapeHtml(c.terrain) + '</span>' +
+        coordNote;
+}
+
 // ── Public API kaldt fra Python ───────────────────────────────────────────────
 
-function loadCaches(cachesJson) {
+// Data arguments arrive as plain JS literals (json.dumps() on the Python
+// side), never as strings spliced into template literals — see _js_arg().
+function loadCaches(caches) {
     // Issue #718: any call to the general load path (filter change, table
     // refresh, etc.) means we're back in overview mode — clear any
     // leftover nearby-selection circle/label from loadNearbyCaches() below,
     // so it never lingers over an unrelated marker set.
     clearNearbyOverlay();
-
-    var caches = JSON.parse(cachesJson);
 
     // Recreate the cluster group to avoid stale internal state from clearLayers()
     map.removeLayer(clusterGroup);
@@ -324,15 +357,7 @@ function loadCaches(cachesJson) {
             title: c.name + (c.corrected ? ' 📍' : '')
         });
 
-        var coordNote = c.corrected
-            ? '<br><span style="color:#e65100;font-size:11px">📍 ' + c.corrected_label + '</span>'
-            : '';
-        marker.bindPopup(
-            '<b>' + c.gc_code + '</b><br>' +
-            c.name + '<br>' +
-            '<span style="color:HINT_TEXT_COLOR">' + c.cache_type + ' D' + c.difficulty + '/T' + c.terrain + '</span>' +
-            coordNote
-        );
+        marker.bindPopup(cachePopupHtml(c));
 
         marker.on('click', function() {
             if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -379,7 +404,7 @@ function setHomeLocation(lat, lon, label) {
         zIndexOffset: 1000,
         title: label
     }).addTo(map);
-    homeMarker.bindPopup('<b>' + label + '</b>');
+    homeMarker.bindPopup('<b>' + escapeHtml(label) + '</b>');
 }
 
 function panToCache(gcCode) {
@@ -443,8 +468,8 @@ function selectMarker(gcCode) {
 // of Y" label when max_caches actually capped the result. Any subsequent
 // call to loadCaches() (a normal overview refresh) clears this overlay —
 // see the clearNearbyOverlay() call at the top of loadCaches() above.
-function loadNearbyCaches(cachesJson, centerLat, centerLon, radiusKm, gcCode, labelText) {
-    loadCaches(cachesJson);
+function loadNearbyCaches(caches, centerLat, centerLon, radiusKm, gcCode, labelText) {
+    loadCaches(caches);
     drawNearbyCircle(centerLat, centerLon, radiusKm);
     updateNearbyLabel(labelText);
     panToCache(gcCode);
@@ -521,9 +546,8 @@ function clearWaypointMarkers() {
     waypointMarkers = [];
 }
 
-function showWaypointMarkers(waypointsJson) {
+function showWaypointMarkers(wps) {
     clearWaypointMarkers();
-    var wps = JSON.parse(waypointsJson);
     wps.forEach(function(wp) {
         // Issue #546: hidden/unset coordinates come through as 0/0 (e.g.
         // finale waypoints with hidden coords after a GSAK import) — a
@@ -531,15 +555,16 @@ function showWaypointMarkers(waypointsJson) {
         // the bounds below made the map zoom out to show the whole world
         // instead of the cache's actual waypoints.
         if (!wp.lat || !wp.lon) return;
+        var prefix = escapeHtml(wp.prefix);
         var icon = L.divIcon({
             className: '',
-            html: '<div class="waypoint-marker">' + wp.prefix + '</div>',
+            html: '<div class="waypoint-marker">' + prefix + '</div>',
             iconSize: [22, 22],
             iconAnchor: [11, 11],
             popupAnchor: [0, -13]
         });
         var label = '[' + wp.prefix + '] ' + (wp.wp_type || '');
-        var popup = '<b>[' + wp.prefix + ']</b> ' + (wp.wp_type || '') + (wp.name ? '<br>' + wp.name : '');
+        var popup = '<b>[' + prefix + ']</b> ' + escapeHtml(wp.wp_type) + (wp.name ? '<br>' + escapeHtml(wp.name) : '');
         var m = L.marker([wp.lat, wp.lon], {icon: icon, title: label});
         m.bindPopup(popup);
         m.addTo(map);
@@ -553,8 +578,7 @@ function showWaypointMarkers(waypointsJson) {
     }
 }
 
-function updateCacheMarker(cacheJson) {
-    var c = JSON.parse(cacheJson);
+function updateCacheMarker(c) {
     if (markers[c.gc_code]) {
         clusterGroup.removeLayer(markers[c.gc_code]);
         delete markers[c.gc_code];
@@ -568,15 +592,7 @@ function updateCacheMarker(cacheJson) {
         title: c.name + (c.corrected ? ' 📍' : '')
     });
 
-    var coordNote = c.corrected
-        ? '<br><span style="color:#e65100;font-size:11px">📍 ' + c.corrected_label + '</span>'
-        : '';
-    marker.bindPopup(
-        '<b>' + c.gc_code + '</b><br>' +
-        c.name + '<br>' +
-        '<span style="color:HINT_TEXT_COLOR">' + c.cache_type + ' D' + c.difficulty + '/T' + c.terrain + '</span>' +
-        coordNote
-    );
+    marker.bindPopup(cachePopupHtml(c));
 
     marker.on('click', function() {
         if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -706,7 +722,7 @@ class MapWidget(QWidget):
         from opensak.gui.settings import get_settings
         s = get_settings()
         home_label = s.active_home_name or tr("map_home_label")
-        self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {json.dumps(home_label)})")
+        self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {_js_arg(home_label)})")
 
         # Indlæs ventende caches
         if self._pending_caches is not None:
@@ -783,10 +799,7 @@ class MapWidget(QWidget):
 
     def _do_load_caches(self, caches: list[Cache]) -> None:
         data = self._build_marker_data(caches)
-        json_str = json.dumps(data, ensure_ascii=False)
-        # Escape backticks for JS template literal
-        json_str = json_str.replace("\\", "\\\\").replace("`", "\\`")
-        self._run_js(f"loadCaches(`{json_str}`)")
+        self._run_js(f"loadCaches({_js_arg(data)})")
 
     def show_nearby_for_selection(
         self,
@@ -829,20 +842,15 @@ class MapWidget(QWidget):
         if center_lat is None or center_lon is None:
             return
         data = self._build_marker_data(nearby_caches)
-        json_str = json.dumps(data, ensure_ascii=False)
-        json_str = json_str.replace("\\", "\\\\").replace("`", "\\`")
-        safe_gc = cache.gc_code.replace("'", "\\'")
-        safe_label = json.dumps(label_text, ensure_ascii=False)
         self._run_js(
-            f"loadNearbyCaches(`{json_str}`, {center_lat}, {center_lon}, "
-            f"{radius_km}, '{safe_gc}', {safe_label})"
+            f"loadNearbyCaches({_js_arg(data)}, {center_lat}, {center_lon}, "
+            f"{radius_km}, {_js_arg(cache.gc_code)}, {_js_arg(label_text)})"
         )
 
     def pan_to_cache(self, gc_code: GcCode) -> None:
         """Centrér kortet på en bestemt cache."""
         if self._ready:
-            safe = gc_code.replace("'", "\\'")
-            self._run_js(f"panToCache('{safe}')")
+            self._run_js(f"panToCache({_js_arg(gc_code)})")
 
 
 
@@ -850,8 +858,8 @@ class MapWidget(QWidget):
         """Render child waypoint markers on the map (called when Waypoints tab is activated)."""
         if not self._ready:
             return
-        safe = waypoints_json.replace("\\", "\\\\").replace("`", "\\`")
-        self._run_js(f"showWaypointMarkers(`{safe}`)")
+        # Round-trip through json so only well-formed JSON reaches the page.
+        self._run_js(f"showWaypointMarkers({_js_arg(json.loads(waypoints_json))})")
 
     def clear_waypoint_markers(self) -> None:
         """Remove all waypoint markers (called when Waypoints tab is left)."""
@@ -885,9 +893,7 @@ class MapWidget(QWidget):
             "pin_html":        _cache_pin_html(cache.cache_type or "", bool(cache.found), bool(cache.dnf)),
             "found":           cache.found,
         }
-        json_str = json.dumps(data, ensure_ascii=False)
-        json_str = json_str.replace("\\", "\\\\").replace("`", "\\`")
-        self._run_js(f"updateCacheMarker(`{json_str}`)")
+        self._run_js(f"updateCacheMarker({_js_arg(data)})")
 
     def is_ready(self) -> bool:
         return self._ready
@@ -901,12 +907,12 @@ class MapWidget(QWidget):
         s = get_settings()
         if self._ready:
             home_label = s.active_home_name or tr("map_home_label")
-            self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {json.dumps(home_label)})")
+            self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {_js_arg(home_label)})")
 
     def pan_to_location(self, lat: float, lon: float, label: str) -> None:
         """Pan kortet til en specifik koordinat."""
         if self._ready:
-            self._run_js(f"setHomeLocation({lat}, {lon}, {json.dumps(label)})")
+            self._run_js(f"setHomeLocation({lat}, {lon}, {_js_arg(label)})")
             self._run_js("panToHome()")
 
     def reload_map(self, refresh_callback=None) -> None:

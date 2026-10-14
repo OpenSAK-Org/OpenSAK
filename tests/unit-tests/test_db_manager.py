@@ -238,7 +238,13 @@ class TestRename:
         shm.write_text("shm")
         wal.write_text("wal")
 
-        with patch("opensak.db.database.dispose_engine"), patch("opensak.db.database.init_db"):
+        # The sidecars here are fake text files. Opening the database (as the
+        # #659 settings import in rename() does) makes SQLite discard invalid
+        # sidecars — so keep that out of this test, which is only about the
+        # files being moved along.
+        with patch("opensak.db.database.dispose_engine"), \
+                patch("opensak.db.database.init_db"), \
+                patch.object(DatabaseManager, "_seed_db_settings"):
             manager.rename(db, "WithSidecars")
 
         new_shm = Path(str(db.path) + "-shm")
@@ -331,7 +337,7 @@ class TestRename:
 
         assert db.name == "StillRenamed"  # rename itself must still succeed
         assert any(
-            "kunne ikke migrere" in rec.message.lower() for rec in caplog.records
+            "could not migrate" in rec.message.lower() for rec in caplog.records
         )
 
 
@@ -431,6 +437,7 @@ class TestSwitchTo:
     def test_switch_sets_active(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("Switch", tmp_path / "Switch.db")
+        (tmp_path / "Switch.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
         with patch("opensak.db.database.init_db"):
             manager.switch_to(extra)
         assert manager.active is extra
@@ -446,6 +453,7 @@ class TestSwitchTo:
     def test_failed_switch_logs_exception_and_reraises(self, manager, tmp_path):
         with patch("opensak.db.database.init_db"):
             extra = manager.new_database("BadDB", tmp_path / "BadDB.db")
+        (tmp_path / "BadDB.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
 
         boom = RuntimeError("simulated migration failure")
         with patch("opensak.db.database.init_db", side_effect=boom):
@@ -458,6 +466,7 @@ class TestSwitchTo:
         with patch("opensak.db.database.init_db"):
             original = manager.active
             extra = manager.new_database("BadDB2", tmp_path / "BadDB2.db")
+        (tmp_path / "BadDB2.db").touch()  # init_db() is mocked; #1045 switch_to() needs the file
 
         with patch("opensak.db.database.init_db", side_effect=RuntimeError("boom")):
             with pytest.raises(RuntimeError):
@@ -502,6 +511,68 @@ class TestCopyDatabase:
         with pytest.raises(ValueError):
             manager.copy_database(src_info, "CopySrc")
 
+    # Issue #943: copy_database() used shutil.copy2() on the main .db file
+    # only. With the source open in WAL mode, committed rows still in the
+    # -wal sidecar were silently left out of the copy.
+    def test_copy_of_open_wal_database_includes_wal_content(self, manager, tmp_path):
+        import sqlite3
+
+        src = tmp_path / "WalSrc.db"
+        with patch("opensak.db.database.init_db"):
+            manager.new_database("WalSrc", src)
+        writer = sqlite3.connect(str(src))
+        try:
+            writer.execute("PRAGMA journal_mode = WAL")
+            writer.execute("PRAGMA wal_autocheckpoint = 0")
+            writer.execute("CREATE TABLE caches (code TEXT PRIMARY KEY)")
+            writer.executemany(
+                "INSERT INTO caches VALUES (?)",
+                [(f"GC{i:04d}",) for i in range(500)],
+            )
+            writer.commit()
+            assert Path(str(src) + "-wal").stat().st_size > 0  # still in the WAL
+
+            src_info = next(db for db in manager.databases if db.name == "WalSrc")
+            dst = tmp_path / "WalDst.db"
+            copy = manager.copy_database(src_info, "WalDst", dst)
+        finally:
+            writer.close()
+
+        check = sqlite3.connect(str(dst))
+        try:
+            assert check.execute("SELECT count(*) FROM caches").fetchone() == (500,)
+        finally:
+            check.close()
+        assert copy.path == dst
+        assert not Path(str(dst) + "-wal").exists()
+
+    def test_failed_copy_raises_translated_error_and_adds_no_entry(
+        self, manager, tmp_path
+    ):
+        from opensak.backup import SnapshotError
+        from opensak.lang import tr
+
+        src = tmp_path / "Junk.db"
+        with patch("opensak.db.database.init_db"):
+            manager.new_database("Junk", src)
+        src.write_bytes(b"not a database" * 100)
+        src_info = next(db for db in manager.databases if db.name == "Junk")
+        before = len(manager.databases)
+        dst = tmp_path / "JunkCopy.db"
+
+        with pytest.raises(SnapshotError) as excinfo:
+            manager.copy_database(src_info, "JunkCopy", dst)
+        # The user-facing message is the translated one; the technical
+        # detail from the snapshot core is kept as the chained cause.
+        cause = excinfo.value.__cause__
+        assert isinstance(cause, SnapshotError)
+        assert "not a valid SQLite database" in str(cause)
+        assert str(excinfo.value) == tr(
+            "db_err_copy_failed", name="Junk", error=str(cause)
+        )
+        assert len(manager.databases) == before
+        assert not dst.exists()
+
 
 # ── move_databases_to ──────────────────────────────────────────────────────────
 
@@ -540,7 +611,14 @@ class TestMoveDatabasesTo:
         wal.write_text("wal")
         shm.write_text("shm")
 
-        with patch("opensak.db.database.dispose_engine"):
+        # Issue #961: move_databases_to() imports the legacy settings into
+        # the database first, which opens it with sqlite3 — and SQLite
+        # discards these fake (non-WAL) sidecar files when it does. This
+        # test is only about copying the sidecars, so leave seeding out.
+        with (
+            patch("opensak.db.database.dispose_engine"),
+            patch.object(DatabaseManager, "_seed_db_settings"),
+        ):
             errors = manager.move_databases_to(new_dir, delete_originals=True)
 
         assert errors == []

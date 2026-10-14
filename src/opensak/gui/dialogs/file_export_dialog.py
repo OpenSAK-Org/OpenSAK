@@ -1,8 +1,14 @@
 """
 src/opensak/gui/dialogs/file_export_dialog.py — Export caches to GPX, LOC or GGZ file.
 
-Simple dialog that lets the user choose a file format and destination path,
-then writes the selected format using the generators in opensak.gps.garmin.
+Simple dialog that lets the user choose a file format, a destination folder
+and a file name (fixed or with variables, see
+opensak.export.file_export_settings.expand_file_name), then writes the
+selected format using the generators in opensak.gps.garmin.
+
+The dialog options can be saved under a name and loaded again (see
+opensak.export.file_export_settings); the options of the most recent export
+are restored when the dialog opens.
 """
 
 from __future__ import annotations
@@ -14,12 +20,51 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QRadioButton,
     QButtonGroup, QGroupBox, QProgressBar,
-    QTextEdit,
+    QTextEdit, QComboBox, QInputDialog, QSizePolicy,
+    QCheckBox, QSpinBox, QFormLayout, QLineEdit,
+    QToolButton, QStyle,
 )
 
 from opensak.lang import tr
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.dialogs import make_progress_cb
+from opensak.export.file_export_settings import (
+    DEFAULT_FILE_NAME, FileExportProfile, FileExportSettings,
+    expand_file_name,
+)
+from opensak.export.file_export import (
+    active_database_name, select_for_export, write_export_file,
+)
+
+
+class _ElidedLabel(QLabel):
+    """Label that shortens its text in the middle ("…") to fit its width.
+
+    A long export path would otherwise widen the whole dialog. The full text
+    is available as the tooltip.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full_text = ""
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def full_text(self) -> str:
+        return self._full_text
+
+    def set_full_text(self, text: str) -> None:
+        self._full_text = text
+        self.setToolTip(text)
+        self._elide()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        self.setText(self.fontMetrics().elidedText(
+            self._full_text, Qt.TextElideMode.ElideMiddle, max(self.width(), 1)
+        ))
 
 
 # ── Background worker ─────────────────────────────────────────────────────────
@@ -29,32 +74,21 @@ class _ExportWorker(QThread):
     error    = Signal(str)        # error message
     progress = Signal(int, int)   # (done, total)
 
-    def __init__(self, caches: list, output_path: Path, fmt: str):
+    def __init__(self, caches: list, output_path: Path, fmt: str,
+                 use_corrected: bool = True):
         super().__init__()
-        self._caches      = caches
-        self._output_path = output_path
-        self._fmt         = fmt          # "gpx" | "loc" | "ggz"
+        self._caches        = caches
+        self._output_path   = output_path
+        self._fmt           = fmt          # "gpx" | "loc" | "ggz"
+        self._use_corrected = use_corrected
 
     def run(self) -> None:
         try:
-            from opensak.gps.garmin import generate_gpx, generate_loc, generate_ggz
-            from opensak.db.database import reload_caches_full
-
-            self._output_path.parent.mkdir(parents=True, exist_ok=True)
-            caches = reload_caches_full(self._caches)
-            cb = make_progress_cb(self.progress.emit)
-
-            if self._fmt == "gpx":
-                content = generate_gpx(caches, self._output_path.stem, progress_cb=cb)
-                self._output_path.write_text(content, encoding="utf-8")
-            elif self._fmt == "loc":
-                content = generate_loc(caches, progress_cb=cb)
-                self._output_path.write_text(content, encoding="utf-8")
-            elif self._fmt == "ggz":
-                data = generate_ggz(caches, self._output_path.stem, progress_cb=cb)
-                self._output_path.write_bytes(data)
-
-            count = len([c for c in caches if c.latitude is not None])
+            count = write_export_file(
+                self._caches, self._output_path, self._fmt,
+                use_corrected=self._use_corrected,
+                progress_cb=make_progress_cb(self.progress.emit),
+            )
             self.finished.emit(
                 tr("file_export_done_msg").format(
                     count=count, path=str(self._output_path)
@@ -70,13 +104,18 @@ class _ExportWorker(QThread):
 class FileExportDialog(QDialog):
     """Dialog for exporting filtered caches to GPX, LOC or GGZ format."""
 
-    def __init__(self, caches: list, parent=None):
+    def __init__(self, caches: list, parent=None, filter_name: str = "",
+                 center_name: str = ""):
         super().__init__(parent)
         self.setWindowTitle(tr("file_export_dialog_title"))
         self.setMinimumWidth(480)
         self._caches = caches
+        self._filter_name = filter_name   # active saved filter ("" = none)
+        self._center_name = center_name   # active centre point ("" = none)
         self._worker: _ExportWorker | None = None
+        self._output_path = ""
         self._setup_ui()
+        self._apply_settings(FileExportProfile.load_last_used())
 
     # ── UI ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +148,81 @@ class FileExportDialog(QDialog):
         fmt_layout.addWidget(self._btn_ggz)
         layout.addWidget(fmt_group)
 
+        # Export options
+        opt_group = QGroupBox(tr("gps_opt_group"))
+        opt_layout = QFormLayout(opt_group)
+        folder_row = QHBoxLayout()
+        self._edit_folder = QLineEdit()
+        self._edit_folder.setPlaceholderText(tr("file_export_folder_placeholder"))
+        folder_row.addWidget(self._edit_folder, 1)
+        btn_browse = QPushButton(tr("kml_dialog_browse"))
+        btn_browse.setAutoDefault(False)
+        btn_browse.clicked.connect(self._browse_folder)
+        folder_row.addWidget(btn_browse)
+        opt_layout.addRow(tr("file_export_folder"), folder_row)
+        name_row = QHBoxLayout()
+        self._edit_file_name = QLineEdit()
+        self._edit_file_name.setPlaceholderText(DEFAULT_FILE_NAME)
+        self._edit_file_name.setToolTip(tr("file_export_file_name_help"))
+        name_row.addWidget(self._edit_file_name, 1)
+        self._btn_name_help = QToolButton()
+        self._btn_name_help.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation)
+        )
+        self._btn_name_help.setAutoRaise(True)
+        self._btn_name_help.setToolTip(tr("file_export_file_name_help"))
+        self._btn_name_help.clicked.connect(self._show_file_name_help)
+        name_row.addWidget(self._btn_name_help)
+        opt_layout.addRow(tr("file_export_file_name"), name_row)
+        self._lbl_file_name_preview = _ElidedLabel()
+        opt_layout.addRow("", self._lbl_file_name_preview)
+        self._combo_if_exists = QComboBox()
+        for value, key in (
+            ("ask", "file_export_if_exists_ask"),
+            ("overwrite", "gsak_import_existing_overwrite"),
+            ("skip", "gsak_import_existing_skip"),
+        ):
+            self._combo_if_exists.addItem(tr(key), value)
+        opt_layout.addRow(tr("file_export_if_exists"), self._combo_if_exists)
+        self._chk_corrected = QCheckBox(tr("file_export_use_corrected"))
+        self._chk_corrected.setChecked(True)
+        opt_layout.addRow(self._chk_corrected)
+        self._spin_max = QSpinBox()
+        self._spin_max.setRange(0, 1_000_000)
+        self._spin_max.setSpecialValueText(tr("file_export_max_records_all"))
+        self._spin_max.setToolTip(tr("file_export_max_records_tip"))
+        opt_layout.addRow(tr("file_export_max_records"), self._spin_max)
+        self._edit_folder.textChanged.connect(self._update_file_name_preview)
+        self._edit_file_name.textChanged.connect(self._update_file_name_preview)
+        self._fmt_grp.buttonToggled.connect(self._update_file_name_preview)
+        self._spin_max.valueChanged.connect(self._update_file_name_preview)
+        layout.addWidget(opt_group)
+
+        # Saved settings
+        settings_group = QGroupBox(tr("file_export_settings_label"))
+        settings_row = QHBoxLayout(settings_group)
+        self._settings_combo = QComboBox()
+        self._settings_combo.setMinimumWidth(200)
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._settings_combo.blockSignals(False)
+        self._settings_combo.currentIndexChanged.connect(self._on_profile_selected)
+        settings_row.addWidget(self._settings_combo, 1)
+
+        save_btn = QPushButton(tr("save"))
+        save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        save_btn.setAutoDefault(False)
+        save_btn.clicked.connect(self._save_profile)
+        settings_row.addWidget(save_btn)
+
+        self._del_btn = QPushButton(tr("delete"))
+        self._del_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._del_btn.setAutoDefault(False)
+        self._del_btn.setEnabled(False)
+        self._del_btn.clicked.connect(self._delete_profile)
+        settings_row.addWidget(self._del_btn)
+        layout.addWidget(settings_group)
+
         # Progress / log area
         self._log = QTextEdit()
         self._log.setReadOnly(True)
@@ -135,6 +249,170 @@ class FileExportDialog(QDialog):
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
 
+    # ── Settings ──────────────────────────────────────────────────────────────
+
+    def _collect_settings(self) -> FileExportSettings:
+        return FileExportSettings(
+            fmt=self._current_fmt(),
+            output_path=self._output_path,
+            use_corrected_coords=self._chk_corrected.isChecked(),
+            max_records=self._spin_max.value(),
+            file_name=self._edit_file_name.text().strip(),
+            folder=self._edit_folder.text().strip(),
+            if_exists=self._combo_if_exists.currentData(),
+        )
+
+    def _apply_settings(self, settings: FileExportSettings) -> None:
+        {
+            "gpx": self._btn_gpx,
+            "loc": self._btn_loc,
+            "ggz": self._btn_ggz,
+        }.get(settings.fmt, self._btn_gpx).setChecked(True)
+        self._output_path = settings.output_path
+        self._chk_corrected.setChecked(settings.use_corrected_coords)
+        self._spin_max.setValue(settings.max_records)
+        self._edit_folder.setText(settings.folder)
+        self._combo_if_exists.setCurrentIndex(
+            max(0, self._combo_if_exists.findData(settings.if_exists))
+        )
+        self._edit_file_name.setText(settings.file_name)
+        self._update_file_name_preview()
+
+    # ── File name ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _database_name() -> str:
+        """Name of the active database, or "" when there is none."""
+        return active_database_name()
+
+    def _export_count(self) -> int:
+        """Number of caches the export will write (with the record limit)."""
+        return len(select_for_export(self._caches, self._spin_max.value()))
+
+    def _expanded_file_name(self) -> str:
+        """File name (with extension) the template currently stands for."""
+        fmt = self._current_fmt()
+        name = expand_file_name(
+            self._edit_file_name.text(),
+            database=self._database_name(),
+            filter_name=self._filter_name,
+            center_name=self._center_name,
+            fmt=fmt,
+            count=self._export_count(),
+        )
+        return f"{name}.{fmt}"
+
+    def _output_preview(self) -> str:
+        """The file the export will write, as far as it is known yet."""
+        folder = self._edit_folder.text().strip()
+        name = self._expanded_file_name()
+        return str(Path(folder) / name) if folder else name
+
+    def _update_file_name_preview(self, *_args) -> None:
+        self._lbl_file_name_preview.set_full_text(
+            tr("file_export_file_name_preview", name=self._output_preview())
+        )
+
+    def _show_file_name_help(self) -> None:
+        QMessageBox.information(
+            self, tr("file_export_file_name_help_title"),
+            tr("file_export_file_name_help"),
+        )
+
+    def _browse_folder(self) -> bool:
+        """Let the user pick the export folder. Returns False when cancelled."""
+        start = self._edit_folder.text().strip()
+        if not start and self._output_path:
+            start = str(Path(self._output_path).parent)
+        folder = QFileDialog.getExistingDirectory(
+            self, tr("file_export_folder_dialog_title"), start,
+        )
+        if not folder:
+            return False
+        self._edit_folder.setText(str(Path(folder)))
+        return True
+
+    def _load_profiles_into_combo(self) -> None:
+        self._settings_combo.clear()
+        self._settings_combo.addItem(tr("file_export_settings_last_used"), None)
+        for path in FileExportProfile.list_profiles():
+            try:
+                self._settings_combo.addItem(FileExportProfile.load(path).name, path)
+            except Exception:
+                pass
+
+    def _select_profile(self, name: str) -> None:
+        for i in range(self._settings_combo.count()):
+            if (self._settings_combo.itemData(i) is not None
+                    and self._settings_combo.itemText(i) == name):
+                self._settings_combo.setCurrentIndex(i)
+                return
+
+    def _on_profile_selected(self, index: int) -> None:
+        path = self._settings_combo.currentData()
+        self._del_btn.setEnabled(path is not None)
+        try:
+            if path is None:
+                self._apply_settings(FileExportProfile.load_last_used())
+            else:
+                self._apply_settings(FileExportProfile.load(path).settings)
+        except Exception as e:
+            QMessageBox.warning(
+                self, tr("error"), tr("file_export_settings_load_error", error=e)
+            )
+
+    def _save_profile(self) -> None:
+        current = (
+            self._settings_combo.currentText()
+            if self._settings_combo.currentData() is not None
+            else ""
+        )
+        name, ok = QInputDialog.getText(
+            self, tr("file_export_settings_save_title"),
+            tr("file_export_settings_name_label"), text=current,
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if FileExportProfile.profile_path(name).exists():
+            reply = QMessageBox.question(
+                self, tr("file_export_settings_save_title"),
+                tr("file_export_settings_overwrite_msg", name=name),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        FileExportProfile(name, self._collect_settings()).save()
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._select_profile(name)
+        self._settings_combo.blockSignals(False)
+        self._del_btn.setEnabled(self._settings_combo.currentData() is not None)
+
+    def _delete_profile(self) -> None:
+        path = self._settings_combo.currentData()
+        if path is None:
+            return
+        name = self._settings_combo.currentText()
+        reply = QMessageBox.question(
+            self, tr("delete"),
+            tr("file_export_settings_delete_msg", name=name),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            Path(path).unlink()
+        except OSError:
+            pass
+        # Keep the options currently shown — only the stored copy is gone.
+        self._settings_combo.blockSignals(True)
+        self._load_profiles_into_combo()
+        self._settings_combo.blockSignals(False)
+        self._del_btn.setEnabled(False)
+
     # ── Logic ─────────────────────────────────────────────────────────────────
 
     def _current_fmt(self) -> str:
@@ -146,26 +424,34 @@ class FileExportDialog(QDialog):
 
     def _do_export(self) -> None:
         fmt = self._current_fmt()
-        ext = fmt  # gpx | loc | ggz
-
-        filters = {
-            "gpx": "GPX Files (*.gpx)",
-            "loc": "LOC Files (*.loc)",
-            "ggz": "GGZ Files (*.ggz)",
-        }
-
-        path_str, _ = QFileDialog.getSaveFileName(
-            self,
-            tr("file_export_save_dialog_title"),
-            f"opensak_export.{ext}",
-            filters[fmt],
-        )
-        if not path_str:
+        # No folder chosen yet — ask once; the choice is kept in the settings.
+        if not self._edit_folder.text().strip() and not self._browse_folder():
             return
 
-        output_path = Path(path_str)
-        if output_path.suffix.lower() != f".{ext}":
-            output_path = output_path.with_suffix(f".{ext}")
+        output_path = Path(self._edit_folder.text().strip()) / self._expanded_file_name()
+        if output_path.exists():
+            if_exists = self._combo_if_exists.currentData()
+            if if_exists == "skip":
+                self._log.setVisible(True)
+                self._log.setPlainText(
+                    "– " + tr("file_export_skipped_msg", path=str(output_path))
+                )
+                return
+            if if_exists == "ask":
+                reply = QMessageBox.question(
+                    self, tr("gps_file_exists_title"),
+                    tr("file_export_overwrite_msg", path=str(output_path)),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
+        self._output_path = str(output_path)
+        try:
+            FileExportProfile.save_last_used(self._collect_settings())
+        except OSError:
+            pass  # failing to remember the settings must not block the export
 
         self._log.clear()
         self._log.setVisible(True)
@@ -173,7 +459,13 @@ class FileExportDialog(QDialog):
         self._progress.setVisible(True)
         self._btn_export.setEnabled(False)
 
-        self._worker = _ExportWorker(self._caches, output_path, fmt)
+        # Only caches with coordinates are exported, so the limit counts those.
+        caches = select_for_export(self._caches, self._spin_max.value())
+
+        self._worker = _ExportWorker(
+            caches, output_path, fmt,
+            use_corrected=self._chk_corrected.isChecked(),
+        )
         self._worker.finished.connect(self._on_success)
         self._worker.error.connect(self._on_error)
         self._worker.progress.connect(self._on_progress)

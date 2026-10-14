@@ -451,3 +451,16 @@ def test_found_log_count_backfill_skipped_without_username_configured(tmp_path):
 
     assert "found_log_count" in cache_cols
     assert found_log_count == 0
+
+
+def test_missing_distance_lookup_uses_partial_index(tmp_path):
+    # Migration 25: distances_up_to_date()'s NULL check must not scan the table.
+    init_db(db_path=tmp_path / "idx.db")
+    with get_engine().connect() as c:
+        plan = " ".join(
+            str(row[-1]) for row in c.execute(text(
+                "EXPLAIN QUERY PLAN SELECT 1 FROM caches WHERE distance IS NULL "
+                "AND latitude IS NOT NULL AND longitude IS NOT NULL LIMIT 1"
+            ))
+        )
+    assert "ix_caches_distance_missing" in plan, plan

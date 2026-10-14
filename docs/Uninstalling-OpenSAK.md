@@ -14,6 +14,13 @@ On Linux and macOS you choose between *Remove program only* and *Remove program
 and all data*; the second asks you to confirm again, and databases you opened
 from other places (e.g. a USB drive) are never deleted.
 
+**Your backups are always kept.** Backups made with **File → Back up now…** or
+when closing OpenSAK live in your backup folder (by default
+*Documents/OpenSAK Backups*, see **Settings → Advanced → Folders**). No way of
+uninstalling removes them — not even *Remove program and all data* — so you
+can restore them after a reinstall with **File → Restore from backup…**.
+Delete the folder yourself if you no longer need them.
+
 The rest of this guide explains what OpenSAK actually creates on your computer
 and how to clean it up by hand — for Windows data, for older versions, or if
 you've already deleted the program.

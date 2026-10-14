@@ -60,7 +60,6 @@ KNOWN_UNPROTECTED: dict[str, str] = {
     "distance_bearing_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
     "file_export_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
     "found_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "gsak_import_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
     "kml_export_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
     "mark_found_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
     "midpoint_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
@@ -163,7 +162,7 @@ class TestDialogHeightPolicy:
         catches a *new* dialog silently added straight into the allowlist
         instead of being protected from the start).
         """
-        assert len(KNOWN_UNPROTECTED) == 14, (
+        assert len(KNOWN_UNPROTECTED) == 13, (
             f"KNOWN_UNPROTECTED has {len(KNOWN_UNPROTECTED)} entries, "
             "expected 14. If you just fixed one, remove its entry "
             "(caught above too) and update this count. If you just added "

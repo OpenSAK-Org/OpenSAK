@@ -4,6 +4,217 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.21.0] — 2026-10-14
+
+> First stable release of the 1.21.0 cycle. Replaces the `1.21.0-beta.1`
+> … `1.21.0-beta.9` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: **Backup Support** (back up
+> and restore your databases and settings, an automatic backup before a
+> new version changes a database, and an offer to back up when you close
+> OpenSAK); **database settings now travel with the database**; **choose
+> where exports go**, with saved export settings; **import every database
+> and your saved filters from a GSAK backup**; **Move and Copy databases to
+> any folder**; and OpenSAK now starts even when your last database is on
+> a drive that isn't connected.
+>
+> **Upgrading from 1.20.0:** the first time you open each database, OpenSAK
+> updates it to a new format and first saves an untouched copy of it (see
+> *Before you upgrade* below). Texts new in this release are
+> machine-translated in all languages except Danish and English —
+> corrections from native speakers are very welcome.
+
+### Added
+
+- **Back up your databases and settings (#953, #942)** — **File → Back up
+  now…** backs up your databases together with your settings, filter
+  profiles, column views and custom icons. Each backup is its own dated
+  folder in your backup folder (by default *Documents/OpenSAK Backups*);
+  ideally choose a folder on another disk, an external drive or a synced
+  folder. Backups you make this way are never deleted by OpenSAK.
+- **Restore from a backup (#954, #987)** — **File → Restore from backup…**
+  brings a database back exactly as it was when the backup was taken. A
+  restored database is always added as a new database, so nothing you
+  have now is overwritten. **Also restore settings** (off by default)
+  brings back your preferences, filter profiles, column views and icons;
+  your current settings are saved first, so you can go back.
+- **Back up when you close OpenSAK (#959)** — When something has changed
+  since your last backup, OpenSAK offers to back up before it closes:
+  **Back Up and Close**, **Not Now** or **Cancel**. If nothing has
+  changed, it closes without asking. Tick **Don't ask again** to always
+  back up or never ask. OpenSAK keeps the last five automatic backups (you
+  can change the number) and never deletes backups you made yourself.
+- **Backup folder in setup and Settings (#986)** — The Welcome Wizard has
+  a step for the backup folder, and **Settings → Advanced** has the same
+  row, together with the new **Backups** section.
+- **Compressed backups (#989)** — Turn on **Compress backups** under
+  **Settings → Advanced → Backups** (off by default) and each new backup
+  is one zip file, typically a third of the size or less, at the cost of
+  taking longer to write. Both kinds can be restored. Suggested by
+  GeePa67.
+- **Automatic backup before a database is updated (#549, #988)** — When a
+  new version of OpenSAK needs to update one of your databases, it first
+  saves an untouched copy — in the *pre-migration* folder of your backup
+  folder, or next to the database if you haven't chosen one. A short
+  message tells you where. This happens once per upgrade, never on a
+  normal start.
+- **Update all older databases at once (#1027)** — After that first
+  backup message, **Apply to all databases** backs up and updates the
+  other databases in your list too, instead of one message each time you
+  switch to one. Contributed by nagisml.
+- **Manage Databases: Move… and Copy to any folder (#1047)** — **Move…**
+  moves a database to a folder you choose, for example from a USB stick to
+  your internal disk; the original is only deleted once the copy has been
+  checked. **Copy…** now also asks where to put the copy. Both remember
+  the folder until you close OpenSAK and never overwrite an existing file.
+- **Add databases you already have (#985)** — When the database folder you
+  choose in the Welcome Wizard already holds OpenSAK databases (after a
+  reinstall or on a new computer), OpenSAK offers to add them. **Manage
+  databases → Scan database folder…** does the same at any time.
+- **Export: folder, file name and saved settings (#948, #965, #773, #977)**
+  — The export dialog has its own folder and file name and exports
+  straight there, without a save dialog. The file name can use variables
+  such as `{database}`, `{filter}`, `{center}`, `{date}` and `{count}`,
+  with a preview of the exact file. Export settings can be saved under a
+  name, and you choose what happens when the file already exists.
+- **Export: corrected or original coordinates, and a cache limit (#948,
+  #596, #774)** — Choose which coordinates caches with corrected
+  coordinates are exported with, and export only the first N caches of
+  the list.
+- **GSAK import: every database in a GSAK backup (#947, #946)** — **File →
+  Import from GSAK Database** lists every database in a GSAK backup `.zip`
+  and imports the ones you pick, each as its own OpenSAK database.
+  Contributed by nagisml.
+- **Import GSAK filters (#935)** — **File → Import GSAK Filters…** turns the
+  saved filters in your GSAK database or backup into OpenSAK filter
+  profiles. Anything OpenSAK can't express yet is kept as a comment on the
+  Where tab, so you can see what GSAK filtered on.
+- **Set or clear the flag on all caches in the filter (#293)** —
+  **Waypoint → 🚩 User flags** has **Set flag on all caches in filter…**
+  and **Clear flag on all caches in filter…**. Suggested by Mike Wood.
+- **Delete cache from the right-click menu (#693)** — The cache list's
+  right-click menu has **Delete cache…**, which asks first.
+- **Corrected coordinates dialog: distance, bearing and Clear (#940)** —
+  While you type, the dialog shows how far and in which direction the new
+  coordinates are from the posted ones, which catches typos such as a
+  wrong minute digit. Existing corrected coordinates can be removed from
+  the dialog.
+- **Compact "L4" column (#1000)** — A narrow **Last four logs** column
+  shows the four logs as a GSAK-style 2×2 square with the heading **L4**,
+  and a narrow **Last GPX update** column shows **Last GPX** (#1004).
+  Suggested by ChemeinerWill.
+- **More ways to write coordinates (#767, #765)** — N/S/E/W can now come
+  after the value as well as before it (e.g. `32.371267S 115.827467E`),
+  and minute and second marks copied from Word are understood. Ambiguous
+  input is rejected instead of guessed. Suggested by pjacklam.
+- **Help → What's New (#944)** — Opens the changelog for the version you're
+  running.
+
+### Changed
+
+- **Database settings travel with the database (#659)** — Each database's
+  home location, column layout, sort order, last-used filter profile and
+  nearby-map settings are now stored inside the database file instead of
+  OpenSAK's settings file, so copying, moving, renaming or restoring a
+  database keeps them. Your existing settings are moved over automatically
+  the first time you open each database.
+- **Faster start and database switch on large databases (#964)** —
+  Checking whether distances need recalculating takes a fraction of a
+  millisecond instead of about a second on a database with 180,000 caches.
+- **Corrected coordinates are used everywhere (#951, #1003)** — **Open in
+  Google Maps / OpenStreetMap**, **Copy coordinates** and the **Coordinate
+  converter** in the right-click menu now use the corrected coordinates
+  when a cache has them, with extra entries for the original ones.
+- **Dates look the same everywhere (#1043)** — The date format chosen in
+  **Settings** is now also used by the date fields in the filter dialog,
+  **Mark as Found** and the waypoint dialog. Reported by GarenKreiz.
+- **Imports into another database never touch the open one (#963, #957)**
+  — GSAK, GPX/ZIP and Pocket Query e-mail imports into another database,
+  and moving or copying caches between databases, now work on that
+  database directly instead of switching OpenSAK's active database in the
+  background. Large moves and copies work 200 caches at a time (#808).
+- **GSAK backup import recalculates distances in the background (#956,
+  #964)** — so OpenSAK no longer freezes after importing a large backup.
+
+### Fixed
+
+- **OpenSAK didn't start when the last database was unavailable (#1045)**
+  — If the database you used last was on a USB stick or network drive
+  that isn't connected, OpenSAK now opens another database from your list
+  and tells you which one was missing, instead of refusing to start. The
+  missing database stays in the list.
+- **Exporting a very large database failed (#1041)** — Exporting more than
+  about 32,000 caches at once failed with "too many SQL variables".
+  Reported by GarenKreiz, contributed by nagisml.
+- **Copying the open database could miss recent changes (#943)** —
+  **Copy** now takes a consistent snapshot and never leaves a half-written
+  file behind.
+- **Moving databases to a new folder lost their settings (#961)** —
+  Changing the database folder in Settings and moving your databases along
+  now keeps their home location, sort order and filter profile.
+- **New installs put the first database in the wrong folder (#973)** —
+  The Default database is now created in the database folder you chose in
+  the Welcome Wizard.
+- **Distances calculated from the wrong place with no active home point
+  (#962)** — The point the home drop-down shows is now the one used.
+- **Choose Columns always showed "(None)" (#996)**, and **saving a column
+  view overwrote an existing one without asking (#995)**. Reported by
+  ChemeinerWill.
+- **GSAK filter import found no filters in some backups (#967, #966)**.
+- **Open Existing started in the wrong folder (#984)** — it now opens in
+  your database folder.
+- **The log file contained your personal settings (#1046)** — `opensak.log`,
+  which we ask you to attach when reporting a problem, no longer records
+  your PQ e-mail account, home location or Geocaching.com username.
+
+### Security
+
+- **Cache data could run as code on the map (#972, #971)** — Cache names,
+  GC codes and waypoint names from an imported GPX or GSAK database are
+  now always shown as plain text on the map, so a crafted file can't run
+  script code inside OpenSAK.
+- **Log and trackable panels showed raw HTML and opened any link (#970,
+  #969)** — Log texts and trackable names are shown as plain text, and
+  only ordinary web links (http/https) in them can be opened.
+
+### Before you upgrade
+
+- **Your databases are backed up first.** The first time 1.21.0 opens each
+  database, it saves an untouched copy before updating it (see *Automatic
+  backup before a database is updated* above). The update is one-way.
+- **Going back to 1.20.0.** 1.20.0 can still open databases that 1.21.0
+  has updated, and your caches, logs and notes are all there. Settings that
+  now live inside each database — home location, column layout, sort order
+  and filter profile — show their values from before the upgrade, and
+  changes made to them in 1.21.0 only reappear when you return to 1.21.0.
+  To go back to exactly how a database was before the upgrade, use its
+  pre-migration copy (`<name>.pre-migration-schema24.db`).
+
+### In beta builds only
+
+- **Macros (#938)** — Beta builds have a **Macros** menu with a Lua macro
+  editor and a growing macro API: filtering, reading caches, read-only SQL,
+  exporting files, working across databases, and coordinate, regex, text
+  and date helpers, with folder permissions that keep macros away from
+  OpenSAK's own data. The menu is hidden in stable releases until the API
+  has settled. Contributed by nagisml.
+
+### For developers
+
+- **New dependencies:** [Lupa](https://github.com/scoder/lupa) (MIT, embeds
+  Lua for macros) and `regex`. Run `pip install -e ".[dev]"` after pulling.
+- **Upgrade-path test (#997)** — `tests/unit-tests/test_upgrade_path.py`
+  opens data written by v1.20.0's own code (`tests/fixtures/upgrade/`) on
+  every CI run; `scripts/make_upgrade_fixture.py` adds a fixture for each
+  new stable release.
+- **Test suite runs about twice as fast (#958).**
+
+Thanks to **nagisml** for the macro system, the GSAK backup and filter
+imports, the export work and many fixes; to **GeePa67**, **ChemeinerWill**,
+**pjacklam**, **GarenKreiz** and **Mike Wood** for reports and
+suggestions; and to everyone who tested the betas.
+
+---
+
 ## [1.20.0] — 2026-09-29
 
 > First stable release of the 1.20.0 cycle. Replaces the `1.20.0-beta.1`

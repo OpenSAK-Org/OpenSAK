@@ -12,17 +12,19 @@ Usage
 
 from __future__ import annotations
 
+import errno
 import logging
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Iterable
 
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from opensak.backup.premigration import backup_before_migration, pending_schema_version
 from opensak.db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -31,9 +33,19 @@ logger = logging.getLogger(__name__)
 # ── Engine factory ────────────────────────────────────────────────────────────
 
 def _make_engine(db_path: Path) -> Engine:
-    """Create a SQLAlchemy engine for a SQLite file at *db_path*."""
-    # Ensure parent directory exists (pathlib — cross-platform safe)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    """Create a SQLAlchemy engine for a SQLite file at *db_path*.
+
+    The folder must already exist. Issue #1045: this used to create it with
+    mkdir(parents=True), so opening a database on a removed USB drive walked
+    up the missing path and failed on the mount point with PermissionError
+    (or, on a writable path, silently created an empty database in a phantom
+    folder). Creating folders belongs to the "new database" flows, which do
+    it themselves before calling init_db().
+    """
+    if not db_path.parent.is_dir():
+        raise FileNotFoundError(
+            errno.ENOENT, "Database folder not found", str(db_path.parent)
+        )
 
     url = f"sqlite:///{db_path}"
     engine = create_engine(
@@ -67,7 +79,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -102,32 +114,67 @@ def init_db(db_path: Path | None = None) -> Engine:
             from opensak.config import get_db_path
             db_path = get_db_path()
 
-    new_engine = _make_engine(db_path)
-    new_session = sessionmaker(
-        bind=new_engine,
+    t0 = time.monotonic()
+    # Opening (create_all + migrations) happens before touching the globals —
+    # if the file is not a valid SQLite database _open_engine() raises and the
+    # current engine is unaffected.
+    new_engine = _open_engine(db_path)
+
+    # Only swap the global pointers after everything above succeeded. The
+    # replaced engine is disposed so repeated init_db() calls don't leave one
+    # connection pool per call behind. Sessions still holding a connection
+    # from it keep working; the connection is closed when they return it.
+    old_engine = _engine
+    _engine = new_engine
+    _SessionLocal = _session_factory(new_engine)
+    if old_engine is not None and old_engine is not new_engine:
+        old_engine.dispose()
+    logger.info("init_db: ready (+%.2fs total)", time.monotonic() - t0)
+    return _engine
+
+
+def _session_factory(engine: Engine | Connection) -> sessionmaker:
+    """Session factory with the settings every OpenSAK session uses."""
+    return sessionmaker(
+        bind=engine,
         autoflush=False,
         autocommit=False,
         expire_on_commit=False,  # keep objects usable after session closes
     )
 
-    # Create all tables that don't exist yet (safe to call multiple times).
-    # Do this before touching the globals — if the file is not a valid SQLite
-    # database create_all() raises here and the current engine is unaffected.
-    logger.info("init_db: opening %s", db_path)
-    t0 = time.monotonic()
-    Base.metadata.create_all(new_engine)
-    logger.info("init_db: create_all() done (+%.2fs)", time.monotonic() - t0)
 
-    # Kør schema-migrationer for eksisterende databaser (kun én gang per DB-sti)
-    if db_path not in _migrated_paths:
-        _run_migrations(new_engine)
-        _migrated_paths.add(db_path)
+def _open_engine(db_path: Path) -> Engine:
+    """
+    Create an engine for *db_path* and bring its schema up to date
+    (create_all + migrations), without touching the module globals.
 
-    # Only swap the global pointers after everything above succeeded.
-    _engine = new_engine
-    _SessionLocal = new_session
-    logger.info("init_db: ready (+%.2fs total)", time.monotonic() - t0)
-    return _engine
+    Shared by init_db() (the app's active database) and session_for()
+    (a private engine for a background job on another database).
+    """
+    new_engine = _make_engine(db_path)
+    try:
+        # Issue #549: if opening this database is about to migrate its schema,
+        # save a one-time copy of it first. This must happen before
+        # create_all(), which already adds any new tables to an old database.
+        # Best-effort: backup_before_migration() never raises and never
+        # blocks the migration.
+        if db_path not in _migrated_paths:
+            backup_before_migration(db_path, SCHEMA_VERSION)
+
+        # Create all tables that don't exist yet (safe to call multiple times).
+        logger.info("open_db: opening %s", db_path)
+        t0 = time.monotonic()
+        Base.metadata.create_all(new_engine)
+        logger.info("open_db: create_all() done (+%.2fs)", time.monotonic() - t0)
+
+        # Kør schema-migrationer for eksisterende databaser (kun én gang per DB-sti)
+        if db_path not in _migrated_paths:
+            _run_migrations(new_engine)
+            _migrated_paths.add(db_path)
+    except Exception:
+        new_engine.dispose()
+        raise
+    return new_engine
 
 
 # ── Schema migrationer ────────────────────────────────────────────────────────
@@ -977,6 +1024,19 @@ def _run_migrations(engine: Engine) -> None:
             conn.commit()
             print(f"Migration: tilføjede caches.{', caches.'.join(added_23)}")
 
+        # ── Migration 25: partial index on caches missing a distance ─────────
+        logger.debug("[migrations] entering migration 25 (+%.2fs)", time.monotonic() - _mig_t0)
+        # distances_up_to_date() looks for a cache without a distance on
+        # every startup and database switch. On an up-to-date database that
+        # is a full table scan (~1 s at 180k caches); this index holds only
+        # the rows still missing one, so the lookup is instant. Rows leave it
+        # as recalculate_distances() fills them, so its upkeep is negligible.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_caches_distance_missing "
+            "ON caches (id) WHERE distance IS NULL"
+        ))
+        conn.commit()
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1053,11 +1113,99 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def make_session():
-    """Return a bare Session — caller handles commit/rollback/close."""
+@contextmanager
+def session_for(db_path: Path) -> Generator[Session, None, None]:
+    """
+    Like get_session(), but on a private engine for *db_path* — the active
+    database (init_db()'s globals) is left untouched.
+
+    Use this for background jobs that work on a database other than the
+    active one (import into another DB, move/copy caches, PQ e-mail import).
+    Swapping the globals with init_db() from a worker thread instead would
+    let anything on the GUI thread that calls get_session() meanwhile
+    (timers, queued signals) read from or write to the wrong database.
+
+    The schema is brought up to date first, exactly as init_db() would, and
+    the engine is disposed when the block exits.
+
+    Example
+    -------
+        with session_for(other_db) as session:
+            session.add(some_object)
+    """
+    engine = _open_engine(db_path)
+    try:
+        session: Session = _session_factory(engine)()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+    finally:
+        engine.dispose()
+
+
+def needs_migration(db_path: Path) -> bool:
+    """True if opening *db_path* would migrate its schema (an existing
+    database from an older OpenSAK build)."""
+    return pending_schema_version(Path(db_path), SCHEMA_VERSION) is not None
+
+
+def migrate_databases(paths: Iterable[Path]) -> list[tuple[Path, Exception]]:
+    """
+    Bring each database in *paths* up to SCHEMA_VERSION — with the usual
+    pre-migration backup (#549) — on a private engine, so the active
+    database is left untouched ("Apply to all databases").
+
+    Databases already up to date are skipped. A failure on one database is
+    logged and does not stop the others; returns the (path, error) pairs
+    of those that failed.
+    """
+    failed: list[tuple[Path, Exception]] = []
+    for db_path in paths:
+        db_path = Path(db_path)
+        if not needs_migration(db_path):
+            continue
+        try:
+            _open_engine(db_path).dispose()
+        except Exception as e:
+            logger.exception("migrate_databases: %s failed", db_path)
+            failed.append((db_path, e))
+    return failed
+
+
+def _session_on(db_path: Path | None):
+    """get_session() when *db_path* is None or the database the active
+    engine already points at, otherwise session_for(db_path) — so a helper
+    given another database's path never reads or writes the active one."""
+    if db_path is None or (
+        _engine is not None and _engine.url.database
+        and Path(_engine.url.database).resolve() == Path(db_path).resolve()
+    ):
+        return get_session()
+    return session_for(db_path)
+
+
+def make_session(engine: Engine | Connection | None = None):
+    """
+    Return a bare Session — caller handles commit/rollback/close.
+
+    Bound to the active database, or to *engine* when given (e.g. the bind
+    of a session_for() session, so a helper opens its own session on the
+    same database as the session it was handed).
+    """
+    if engine is not None:
+        return _session_factory(engine)()
     if _SessionLocal is None:
         raise RuntimeError("Database not initialised — call init_db() first.")
     return _SessionLocal()
+
+
+# Cache ids per reload query in reload_caches_full().
+RELOAD_CHUNK_SIZE = 500
 
 
 def reload_caches_full(caches: list) -> list:
@@ -1089,34 +1237,47 @@ def reload_caches_full(caches: list) -> list:
     if not ids:
         return list(caches)
 
+    # #1041: the IN query is chunked to stay under SQLite's bound-parameter
+    # limit — exporting a whole large database failed with "too many SQL
+    # variables".
+    by_id: dict[int, Cache] = {}
     with get_session() as session:
-        rows = (
-            session.query(Cache)
-            .options(
-                selectinload(Cache.logs),
-                selectinload(Cache.waypoints),
-                selectinload(Cache.attributes),
-                joinedload(Cache.user_note),
-                undefer(Cache.short_description),
-                undefer(Cache.long_description),
-                undefer(Cache.encoded_hints),
+        for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
+            chunk = ids[start:start + RELOAD_CHUNK_SIZE]
+            rows = (
+                session.query(Cache)
+                .options(
+                    selectinload(Cache.logs),
+                    selectinload(Cache.waypoints),
+                    selectinload(Cache.attributes),
+                    joinedload(Cache.user_note),
+                    undefer(Cache.short_description),
+                    undefer(Cache.long_description),
+                    undefer(Cache.encoded_hints),
+                )
+                .filter(Cache.id.in_(chunk))
+                .all()
             )
-            .filter(Cache.id.in_(ids))
-            .all()
-        )
+            by_id.update((c.id, c) for c in rows)
 
-    by_id = {c.id: c for c in rows}
     return [by_id.get(c.id, c) if isinstance(c, reloadable) else c for c in caches]
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────
 
-def recalculate_distances(lat: float, lon: float) -> int:
+def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -> int:
     """Recompute distance and bearing for every cache and persist to the DB.
 
     Called once whenever the active centre point changes (not on every table
     refresh). Uses distance_km_batch() which dispatches to Haversine or
     Vincenty depending on the user's distance_method setting.
+
+    *db_path* is the database to work on when that may not be the active
+    one — e.g. GsakImportWorker, which imports into each target database in
+    turn. Its caches are then read and written through a private session
+    (see session_for()) and the centre used is stored in that file's own
+    settings (see distances_up_to_date()); without it both go to the active
+    database.
 
     Returns the number of caches updated.
     """
@@ -1148,7 +1309,7 @@ def recalculate_distances(lat: float, lon: float) -> int:
                 return (math.degrees(math.atan2(x2, y2)) + 360) % 360
             return [_scalar(la, lo) for la, lo in zip(lats, lons)]
 
-    with get_session() as session:
+    with _session_on(db_path) as session:
         rows = session.execute(
             text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
         ).fetchall()
@@ -1186,9 +1347,17 @@ def recalculate_distances(lat: float, lon: float) -> int:
     # startup if nothing has changed (issue #579).
     from opensak.gui.settings import get_settings
     s = get_settings()
-    s.dist_calc_lat = lat
-    s.dist_calc_lon = lon
-    s.dist_calc_method = s.distance_method
+    if db_path is not None:
+        from opensak.db import db_settings
+        db_settings.write_file(db_path, {
+            "dist_calc_lat": lat,
+            "dist_calc_lon": lon,
+            "dist_calc_method": s.distance_method,
+        })
+    else:
+        s.dist_calc_lat = lat
+        s.dist_calc_lon = lon
+        s.dist_calc_method = s.distance_method
 
     logger.info(
         "recalculate_distances: done, %s caches updated (+%.2fs total)",
@@ -1204,7 +1373,7 @@ _COORD_EPSILON = 1e-9
 _DISTANCE_EPSILON_KM = 0.01  # 10 m — generous enough to absorb float rounding
 
 
-def distances_up_to_date(lat: float, lon: float) -> bool:
+def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) -> bool:
     """Check whether the persisted Cache.distance/bearing values are still
     valid for the given centre point, so a full recalculate_distances() call
     can be skipped on startup (issue #579).
@@ -1217,6 +1386,11 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
        modified outside this OpenSAK install (e.g. synced from another
        machine with a different home point, or edited by another tool)
        without a matching recalculation ever having run here.
+    3. No cache with coordinates is missing its distance — e.g. caches a
+       merge import added after the last recalculation, which the single
+       spot-check row can't see.
+
+    *db_path*: as for recalculate_distances().
 
     Returns True if it's safe to skip the full recalculation.
     """
@@ -1227,7 +1401,7 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
     # whether it currently has a persisted distance. Checked first (and
     # unconditionally) so an empty/coordinate-less database is always
     # considered up to date — there is nothing to recalculate either way.
-    with get_session() as session:
+    with _session_on(db_path) as session:
         row = session.execute(
             text(
                 "SELECT latitude, longitude, distance FROM caches "
@@ -1240,9 +1414,25 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
         return True
 
     s = get_settings()
-    calc_lat = s.dist_calc_lat
-    calc_lon = s.dist_calc_lon
-    calc_method = s.dist_calc_method
+    calc_lat: float | None
+    calc_lon: float | None
+    calc_method: str | None
+    if db_path is not None:
+        from opensak.db import db_settings
+        values = {
+            k: db_settings.peek_value(db_path, k)
+            for k in ("dist_calc_lat", "dist_calc_lon", "dist_calc_method")
+        }
+        try:
+            calc_lat = float(values["dist_calc_lat"])
+            calc_lon = float(values["dist_calc_lon"])
+        except (TypeError, ValueError):
+            calc_lat = calc_lon = None
+        calc_method = values["dist_calc_method"]
+    else:
+        calc_lat = s.dist_calc_lat
+        calc_lon = s.dist_calc_lon
+        calc_method = s.dist_calc_method
 
     if calc_lat is None or calc_lon is None or calc_method is None:
         return False
@@ -1255,7 +1445,19 @@ def distances_up_to_date(lat: float, lon: float) -> bool:
     if stored_distance is None:
         return False
     fresh_distance = distance_km(lat, lon, row_lat, row_lon)
-    return abs(fresh_distance - stored_distance) <= _DISTANCE_EPSILON_KM
+    if abs(fresh_distance - stored_distance) > _DISTANCE_EPSILON_KM:
+        return False
+
+    # Served by the partial index ix_caches_distance_missing (migration 25),
+    # so this stays cheap on large databases.
+    with _session_on(db_path) as session:
+        missing = session.execute(
+            text(
+                "SELECT 1 FROM caches WHERE distance IS NULL "
+                "AND latitude IS NOT NULL AND longitude IS NOT NULL LIMIT 1"
+            )
+        ).fetchone()
+    return missing is None
 
 
 # ── Health-check helper ───────────────────────────────────────────────────────

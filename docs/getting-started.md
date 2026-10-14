@@ -39,8 +39,9 @@ See [Installation](installation.md) for all options, how updating works, and how
 The first time you start OpenSAK, the **Welcome Wizard** walks you through a few steps:
 
 1. **Installation folder** — where OpenSAK keeps its settings and log file. The default is fine for most people.
-2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up).
-3. **Your Geocaching profile** — optional; you can also set this later in Settings.
+2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up). If the folder already holds OpenSAK databases — after a reinstall or on a new computer — the wizard lists them and offers to add them; untick any you don't want.
+3. **Backup folder** — where OpenSAK keeps its backups, by default *Documents/OpenSAK Backups*. A folder on another disk, an external drive or a synced folder is safest, because it also protects your data if your computer's disk fails.
+4. **Your Geocaching profile** — optional; you can also set this later in Settings.
 
 After the wizard you'll see OpenSAK's three-panel layout: the cache list, the cache details and the map — all empty until you import some caches.
 
@@ -77,7 +78,7 @@ OpenSAK works with standard **GPX files** and **Pocket Query ZIP files** — the
 If your Pocket Queries arrive by e-mail, OpenSAK can fetch them straight from your mailbox. Set up the mailbox under **Settings → Settings… → PQ Email**, then use **File → Check for PQ Email…**. The password is kept in your operating system's keyring, never in plain text.
 
 ### Coming from GSAK
-You can import a GSAK database directly with **File → Import from GSAK Database…** — including personal notes, corrected coordinates, child waypoints, attributes and the full log history. OpenSAK also uses the same GPX/PQ format as GSAK, so your Pocket Queries import as usual.
+You can import a GSAK database directly with **File → Import from GSAK Database…** — including personal notes, corrected coordinates, child waypoints, attributes and the full log history. Point it at a GSAK backup `.zip` to see every database in the backup and import the ones you pick, each as its own OpenSAK database. **File → Import GSAK Filters…** turns your saved GSAK filters into OpenSAK filter profiles. OpenSAK also uses the same GPX/PQ format as GSAK, so your Pocket Queries import as usual.
 
 ---
 
@@ -98,7 +99,7 @@ OpenSAK uses a three-panel layout:
 ### Cache List
 - Click any column header to sort
 - Right-click a cache for quick actions: **Open on geocaching.com**, **Copy coordinates**, **Mark as found**
-- Choose which columns to show via **View → Columns**
+- Choose which columns to show via **View → Choose columns…**
 
 ### Cache Details
 Shows the full description, hint (click to decode ROT13), attributes, and logs for the selected cache.
@@ -208,14 +209,16 @@ OpenSAK will mark all matching caches as found, even caches that are not in the 
 
 OpenSAK can export your filtered cache list directly to a Garmin GPS device connected via USB.
 
-1. Connect your Garmin device
-2. Click **GPS → Send to GPS** (or press `Ctrl+G`)
-3. In the dialog, click **Scan** to detect your device
-4. Select the detected device from the list
-5. Choose whether to export all caches or only the currently filtered list
-6. Click **Send**
+1. Filter the cache list to the caches you want on the GPS — the export uses the caches currently in the list
+2. Connect your Garmin device
+3. Click **Settings → Send to GPS…** (or press `Ctrl+G`)
+4. Click **Scan** to detect your device, and make sure **Send directly to GPS device** is selected
+5. Optionally limit the number of caches (0 = all)
+6. Click **Send to GPS**
 
 The caches are written as a GPX or GGZ file to your Garmin's `Garmin/GPX/` folder. Newer Garmin models that connect over MTP instead of as a USB drive are supported on Windows and Linux. Bluetooth transfer is not currently available.
+
+To save a file instead — for another GPS app, a phone or a friend — use **File → Export (GPX/LOC/GGZ)**. Set a folder and a file name once (the file name can use variables such as `{database}_{date}`), and later exports go straight there; save the settings under a name if you export the same way often.
 
 ---
 
@@ -224,18 +227,40 @@ The caches are written as a GPX or GGZ file to your Garmin's `Garmin/GPX/` folde
 OpenSAK supports multiple separate databases — useful if you geocache in different regions or want to keep work and leisure caches separate.
 
 ### Creating a New Database
-1. Go to **File → Manage databases…**
-2. Click **New Database**
-3. Give it a name and set a centre point (home coordinates for that region)
-4. Click **Create**
+1. Go to **File → Manage databases…** (`Ctrl+D`)
+2. Click **New database…**
+3. Give it a name — and, if you like, choose a different folder for it
+4. Click **OK** — the new database becomes the active one
+5. Set the home location for that region (see [First Launch](#2-first-launch)); each database remembers its own
+
+### Adding Databases You Already Have
+Click **Open existing…** in **File → Manage databases…** to add one database file, or **Scan database folder…** to see every OpenSAK database in your database folder that isn't in the list yet and add the ones you tick. OpenSAK never adds databases by itself, so one you removed from the list stays removed until you add it again.
 
 ### Switching Between Databases
-Go to **File → Manage databases…** and double-click any database to switch to it.
+Use the database dropdown in the toolbar, or go to **File → Manage databases…** and double-click a database.
 
 Each database has its own:
 - Cache list and import history
-- Centre point for distance calculations
-- Filter profiles
+- Home location for distance calculations
+- Column layout and sort order
+- Last-used filter profile
+
+These are stored inside the database file, so they stay with the database when you copy, move, rename or restore it. Saved filter profiles themselves are shared by all databases.
+
+### Copying and Moving a Database
+In **File → Manage databases…**, **Copy…** makes a copy under a new name and **Move…** moves a database to another folder under the same name — for example from a USB stick to your internal disk. Both let you choose the folder and never overwrite an existing file. Move only deletes the original once the copy has been checked.
+
+If the database you used last is on a drive that isn't connected when you start OpenSAK, OpenSAK opens another database from your list and tells you which one was missing. The missing one stays in the list, so you can switch back when the drive is connected again.
+
+### Backing Up
+Go to **File → Back up now…** to back up your databases together with your settings, filter profiles, column views and custom icons. Backups go into the backup folder you chose in the Welcome Wizard (by default *Documents/OpenSAK Backups*); change it under **Settings → Advanced → Folders** or in the backup dialog itself. A folder on another disk or an external drive is safest. Existing backups stay where they are when you change the folder. Backups you make this way are never deleted by OpenSAK. To save space, turn on **Compress backups** under **Settings → Advanced → Backups**: new backups are then one zip file, usually a third or less of the size, but they take longer to make.
+
+When a new version of OpenSAK needs to update a database to a new format, it first saves an untouched copy of it (in the *pre-migration* folder of your backup folder) and tells you where. If other databases in your list are from the older version too, **Apply to all databases** updates them all in one go.
+
+When you close OpenSAK and something has changed since your last backup, OpenSAK asks whether to back up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in OpenSAK. Tick **Don't ask again** to always back up or never ask; change it later, together with how many automatic backups to keep (5 by default), under **Settings → Advanced → Backups**. Only the oldest automatic backups are deleted.
+
+### Restoring a Backup
+Go to **File → Restore from backup…**, pick a backup and the databases you want, and click **Restore**. A restored database is always added as a new database — nothing you have now is overwritten — and it opens exactly as it was when the backup was taken. Tick **Also restore settings** to bring back your preferences, filter profiles, column views and icons as well; they take effect the next time OpenSAK starts, and your current settings are saved first as a backup marked *Settings before restore*.
 
 ---
 
@@ -272,4 +297,4 @@ Want to add a new language? See [CONTRIBUTING.md](https://github.com/OpenSAK-Org
 
 *OpenSAK is free and open-source software, released under the MIT licence. Contributions are welcome — see [CONTRIBUTING.md](https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md) for details.*
 
-*Last updated for v1.20.0.*
+*Last updated for v1.21.0.*

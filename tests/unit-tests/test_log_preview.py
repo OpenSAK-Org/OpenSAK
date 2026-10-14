@@ -12,6 +12,9 @@ import pytest
 
 pytest.importorskip("pytestqt")
 
+from PySide6.QtCore import QUrl
+
+from opensak.gui import cache_detail as cd
 from opensak.gui.cache_detail import CacheDetailPanel, _convert_markdown_links
 
 
@@ -100,11 +103,61 @@ def test_markdown_link_in_log_becomes_clickable(qtbot):
     assert "[trip report]" not in html
 
 
-def test_log_browser_opens_external_links(qtbot):
-    # Links skal åbnes i systemets browser, ikke forsøges navigeret internt
+def test_log_browser_does_not_navigate_links_itself(qtbot):
+    # Links skal åbnes i systemets browser via _open_http_link, ikke af
+    # QTextBrowser selv (som ville åbne alle skemaer)
     panel = CacheDetailPanel()
     qtbot.addWidget(panel)
-    assert panel._log_browser.openExternalLinks() is True
+    assert panel._log_browser.openLinks() is False
+    assert panel._log_browser.openExternalLinks() is False
+
+
+def test_html_in_log_text_is_escaped(qtbot):
+    # Logtekst er tredjeparts-indhold — rå <a>-tags må ikke blive til links
+    panel = CacheDetailPanel()
+    qtbot.addWidget(panel)
+
+    text = 'Click <a href="file:///C:/evil.exe">here</a>'
+    panel._render_log_html([_log(text)])
+
+    assert 'href="file:' not in panel._log_browser.toHtml()
+    assert text in panel._log_browser.toPlainText()
+
+
+def test_html_in_log_finder_and_type_is_escaped(qtbot):
+    panel = CacheDetailPanel()
+    qtbot.addWidget(panel)
+
+    panel._render_log_html([_log("TFTC", log_type="<i>Found</i>", finder='<a href="smb://x/y">Bob</a>')])
+
+    html = panel._log_browser.toHtml()
+    assert 'href="smb:' not in html
+    assert '<a href="smb://x/y">Bob</a>' in panel._log_browser.toPlainText()
+    assert "<i>Found</i>" in panel._log_browser.toPlainText()
+
+
+def test_markdown_link_with_query_survives_escaping(qtbot):
+    panel = CacheDetailPanel()
+    qtbot.addWidget(panel)
+
+    panel._render_log_html([_log("See [map](https://example.com/?a=1&b=2)")])
+
+    assert "https://example.com/?a=1&amp;b=2" in panel._log_browser.toHtml()
+    assert "[map]" not in panel._log_browser.toPlainText()
+
+
+@pytest.mark.parametrize("url, opened", [
+    ("https://coord.info/GCAGGGG", True),
+    ("http://example.com", True),
+    ("file:///C:/evil.exe", False),
+    ("smb://host/share", False),
+    ("ms-settings:", False),
+])
+def test_open_http_link_only_opens_http(monkeypatch, url, opened):
+    calls = []
+    monkeypatch.setattr(cd.webbrowser, "open", calls.append)
+    cd._open_http_link(QUrl(url))
+    assert bool(calls) is opened
 
 
 def test_markdown_link_rendered_in_log_html(qtbot):

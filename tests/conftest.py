@@ -16,6 +16,20 @@ from opensak.db.models import Cache
 
 
 @pytest.fixture(autouse=True)
+def _clear_premigration_notices():
+    """
+    Issue #549: tests that rewind a database's user_version make init_db()
+    queue a "database backed up" notice. Clear the queue around every test,
+    so a notice can never leak into a later GUI test and pop up a modal
+    dialog there.
+    """
+    from opensak.backup.premigration import clear_notices
+    clear_notices()
+    yield
+    clear_notices()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_app_paths(tmp_path, monkeypatch):
     """
     Isolate the process-global singletons in settings_store, logger og
@@ -94,6 +108,48 @@ def _no_network_update_check(monkeypatch):
     blocks in getaddrinfo and aborts the process at teardown (SIGABRT / exit 134).
     """
     monkeypatch.setattr("opensak.updater.fetch_latest_release", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_exit_backup_prompt(monkeypatch):
+    """#959: closing a MainWindow must never open the modal back-up-on-exit
+    prompt in a test (it would block the run). Tests of the close flow set
+    exit_state._suppressed back to False themselves."""
+    from opensak.backup import exit_state
+    monkeypatch.setattr(exit_state, "_suppressed", True)
+    monkeypatch.setattr(exit_state, "_clean_on_close", False)
+
+
+@pytest.hookimpl(wrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    """
+    Issue #958: delete the widgets a test leaves behind before the next test.
+
+    pytest-qt closes every widget registered with ``qtbot.addWidget()`` and
+    calls ``deleteLater()`` on it, then runs ``processEvents()``. Outside a
+    running event loop, ``processEvents()`` never handles deferred deletes,
+    so the widgets survive. They are only destroyed the next time any test
+    spins an event loop (``qtbot.waitSignal()``, ``qtbot.wait()``, a
+    QThread worker) — and that first loop pass then has to tear down
+    everything earlier tests left behind.
+
+    After test_filter_dialog.py that was 208 FilterDialogs with about
+    346,000 child widgets, which took about a minute to delete. A later test
+    waiting for a worker's queued signals timed out while the event loop was
+    still busy deleting (the real-thread restore test in
+    test_restore_954.py).
+
+    This wrapper is the outermost one, so it runs after pytest-qt has closed
+    the widgets and after all fixtures are torn down.
+    """
+    result = yield
+    try:
+        from PySide6.QtCore import QCoreApplication, QEvent
+    except ImportError:  # pragma: no cover — PySide6 is always installed
+        return result
+    if QCoreApplication.instance() is not None:
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    return result
 
 
 @pytest.fixture(scope="module")
