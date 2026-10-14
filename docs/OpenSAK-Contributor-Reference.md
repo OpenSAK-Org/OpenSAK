@@ -98,7 +98,9 @@ real repository (see the guide's Step 1) rather than assuming from this document
    ```
 
 5. **The `beta` branch changes frequently**, mostly because of an automated CI
-   workflow that regenerates screenshots and opens a PR against `beta` — not just
+   workflow that regenerates screenshots and opens a PR against `beta` (the
+   *Macro API docs* workflow does the same for `docs/macros/api.md` and the
+   editor files in `macros/types/`, which feature branches don't commit) — not just
    from other contributors' work. Before pushing, always do:
    ```bash
    git fetch origin beta
