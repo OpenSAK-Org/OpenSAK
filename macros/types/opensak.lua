@@ -1,6 +1,6 @@
 ---@meta
 -- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand.
--- OpenSAK Lua macro API, version 2. Reference: docs/macros/api.md
+-- OpenSAK Lua macro API, version 3. Reference: docs/macros/api.md
 
 ---Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 ---@class opensak.FilterSpec
@@ -837,3 +837,38 @@ function opensak.date.parse(text, fmt) end
 ---@param fmt? string strftime format, "%Y-%m-%d" if omitted.
 ---@return string # The formatted date.
 function opensak.date.format(t, fmt) end
+
+opensak.settings = {}
+
+---The settings this macro saved with opensak.settings.save(), or an empty table on the first run. Each macro has its own settings, kept per macro file in the `settings` folder of the macros folder; no other macro can read them. A renamed macro starts with empty settings, and an unsaved macro has none.
+---
+---Since API version 3.
+---
+---```lua
+---local s = opensak.settings.load()
+---s.maxdist = s.maxdist or 25
+---```
+---@return table # The saved settings; empty if there are none.
+function opensak.settings.load() end
+
+---Save settings for the next run of this macro, replacing the saved ones. Strings, numbers, booleans and nested tables can be saved; a table needs string keys, or 1, 2, 3, … for a list. Functions and cyclic tables are refused, and the settings may take up at most 1 MB.
+---
+---Since API version 3.
+---
+---```lua
+---local s = opensak.settings.load()
+---s.maxdist = 30
+---s.types = {"Traditional", "Multi"}
+---opensak.settings.save(s)
+---```
+---@param settings table The settings to save.
+function opensak.settings.save(settings) end
+
+---Remove this macro's saved settings, so the next opensak.settings.load() returns an empty table.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.settings.clear()
+---```
+function opensak.settings.clear() end

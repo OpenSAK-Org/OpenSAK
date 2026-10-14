@@ -2,7 +2,7 @@
 
 # OpenSAK Lua macro API
 
-API version: **2** (`opensak.api_version()`).
+API version: **3** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. OpenSAK's own settings and database files are never accessible.
 
@@ -68,6 +68,9 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.text.normalize_name`](#opensaktextnormalizename) | 2 |
 | [`opensak.date.parse`](#opensakdateparse) | 2 |
 | [`opensak.date.format`](#opensakdateformat) | 2 |
+| [`opensak.settings.load`](#opensaksettingsload) | 3 |
+| [`opensak.settings.save`](#opensaksettingssave) | 3 |
+| [`opensak.settings.clear`](#opensaksettingsclear) | 3 |
 
 ### opensak.api_version
 
@@ -1352,6 +1355,64 @@ Example:
 print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))
 ```
 
+### opensak.settings.load
+
+```lua
+opensak.settings.load()
+```
+
+The settings this macro saved with opensak.settings.save(), or an empty table on the first run. Each macro has its own settings, kept per macro file in the `settings` folder of the macros folder; no other macro can read them. A renamed macro starts with empty settings, and an unsaved macro has none.
+
+Returns `table` — The saved settings; empty if there are none.
+
+Since API version 3.
+
+Example:
+
+```lua
+local s = opensak.settings.load()
+s.maxdist = s.maxdist or 25
+```
+
+### opensak.settings.save
+
+```lua
+opensak.settings.save(settings)
+```
+
+Save settings for the next run of this macro, replacing the saved ones. Strings, numbers, booleans and nested tables can be saved; a table needs string keys, or 1, 2, 3, … for a list. Functions and cyclic tables are refused, and the settings may take up at most 1 MB.
+
+Parameters:
+
+- `settings` (`table`) — The settings to save.
+
+Since API version 3.
+
+Example:
+
+```lua
+local s = opensak.settings.load()
+s.maxdist = 30
+s.types = {"Traditional", "Multi"}
+opensak.settings.save(s)
+```
+
+### opensak.settings.clear
+
+```lua
+opensak.settings.clear()
+```
+
+Remove this macro's saved settings, so the next opensak.settings.load() returns an empty table.
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.settings.clear()
+```
+
 ## Filter keys
 
 Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
@@ -1445,6 +1506,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
+- [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
 
 ## Editor support (VS Code)
 
