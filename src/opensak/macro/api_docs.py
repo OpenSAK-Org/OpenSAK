@@ -96,6 +96,9 @@ def _editor_section() -> list[str]:
         "and change `types` to the full path of the macros folder's `types` "
         "folder. Macros inside the OpenSAK repository pick up "
         f"[`{STUB_PATH.as_posix()}`]({_STUB_LINK}) automatically.",
+        "",
+        "To run a macro in OpenSAK straight from VS Code or another editor, "
+        "see [Running macros from an editor](run-from-editor.md).",
     ]
 
 
@@ -204,7 +207,9 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "",
         *_code("print(...)"),
         "",
-        "Write the arguments, separated by tabs, to the macro output pane.",
+        "Write the arguments, separated by tabs, to the macro output pane "
+        "(to stdout when run with `opensak --run-macro`, see "
+        "[Running macros from an editor](run-from-editor.md)).",
         "",
     ]
     return "\n".join(lines)

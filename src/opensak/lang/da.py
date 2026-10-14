@@ -103,6 +103,7 @@ STRINGS: dict[str, str] = {
     "macro_example_keep":           "Åbn min kopi",
     "macro_example_restore":        "Gendan original",
     "macro_done":                   "Makro færdig.",
+    "macro_done_code":              "Makro færdig (exitkode {code}).",
     "macro_error":                  "Makrofejl: {msg}",
     "macro_access_title":           "Makroens filadgang",
     "macro_access_read":            "Den kørende makro vil læse denne fil:\n\n{path}\n\nMå makroen læse filer i denne mappe?\n\n{folder}",
