@@ -1,7 +1,6 @@
 # OpenSAK Roadmap
 
-*Last updated: 9 October 2026 (Full GSAK Field Compatibility: design draft and
-epic #1028)*
+*Last updated: 14 October 2026 (1.21.0 released: Backup Support done)*
 
 *This reflects the current priority order for planned work. It's a living
 document and will be updated as things progress — not a fixed release schedule
@@ -66,8 +65,8 @@ The plan, in steps:
   same format as contributions, filling in regions the shared data doesn't
   cover (#777).
 
-*Status: planned (#968). The first fix (#781) is targeted for 1.21.0;
-contributions from the community are very welcome.*
+*Status: planned (#968). The first fix (#781) is targeted for an upcoming
+release; contributions from the community are very welcome.*
 
 ### 3. Full GSAK Field Compatibility
 Extend the database to support the complete set of fields historically supported by

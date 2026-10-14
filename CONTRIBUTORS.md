@@ -23,7 +23,7 @@ Listed alphabetically by first name.
 | Hans Blom | [@hansblom](https://github.com/hansblom) | Swedish translation (`lang/se.py`) |
 | Michal Gavlík | — | Czech translation (`lang/cs.py`) |
 | n3oklan | [@n3oklan](https://github.com/n3oklan) | Missing translation strings (cs, fr, da) |
-| nagisml | [@nagisml](https://github.com/nagisml) | GSAK filter parity (text and date operators, Logs, Child Waypoints and Trackables tabs, Invert filter, filter highlighting, Quick Where), expanded Edit Cache dialog, Swiss German translation (`lang/de_CH.py`), GPX import and GSAK import fixes |
+| nagisml | [@nagisml](https://github.com/nagisml) | Lua macro system (editor, API and examples), GSAK filter parity (text and date operators, Logs, Child Waypoints and Trackables tabs, Invert filter, filter highlighting, Quick Where), GSAK backup and filter import, export settings, "Apply to all databases", expanded Edit Cache dialog, Swiss German translation (`lang/de_CH.py`), GPX import and GSAK import fixes |
 | Pierre Lejeune | [@theyoungstone](https://github.com/theyoungstone) | French translation (`lang/fr.py`) |
 | Surfoo | [@Surfoo](https://github.com/Surfoo) | French translation fixes |
 | The0x4f | [@The0x4f](https://github.com/The0x4f) | SUSE-compatible installation |
@@ -39,9 +39,13 @@ Thank you to the testers whose reports shaped each release.
 | Name | GitHub | Contribution |
 |------|--------|--------------|
 | Bob Long | — | macOS beta testing |
+| ChemeinerWill | — | Column view and cache list reports and suggestions |
+| GarenKreiz | [@GarenKreiz](https://github.com/GarenKreiz) | Large-database export and date format reports |
+| GeePa67 | — | Backup and macro editor reports, compressed backups suggestion |
 | Hans Blom | [@hansblom](https://github.com/hansblom) | Windows beta testing |
 | Jimbo-DK | — | Pocket Queries by e-mail — real-world testing |
 | Mike Wood | [@lignumaqua](https://github.com/lignumaqua) | macOS beta testing (in-app updates), GSAK expertise and data |
+| pjacklam | — | Coordinate input suggestions |
 
 ---
 

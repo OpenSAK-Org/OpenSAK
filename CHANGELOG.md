@@ -4,704 +4,214 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.21.0-beta.9] — 2026-10-13
+## [1.21.0] — 2026-10-14
 
-> Headline: **OpenSAK now starts even when your last database is on a USB
-> stick that isn't plugged in**, and **Manage Databases can move a
-> database or copy it to any folder**. Also in this beta: exporting a very
-> large database no longer fails, **all databases from an older version
-> can be updated in one go**, and dates look the same everywhere.
+> First stable release of the 1.21.0 cycle. Replaces the `1.21.0-beta.1`
+> … `1.21.0-beta.9` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: **Backup Support** (back up
+> and restore your databases and settings, an automatic backup before a
+> new version changes a database, and an offer to back up when you close
+> OpenSAK); **database settings now travel with the database**; **choose
+> where exports go**, with saved export settings; **import every database
+> and your saved filters from a GSAK backup**; **Move and Copy databases to
+> any folder**; and OpenSAK now starts even when your last database is on
+> a drive that isn't connected.
 >
-> This is the release candidate for 1.21.0 stable. The new texts are
+> **Upgrading from 1.20.0:** the first time you open each database, OpenSAK
+> updates it to a new format and first saves an untouched copy of it (see
+> *Before you upgrade* below). Texts new in this release are
 > machine-translated in all languages except Danish and English —
 > corrections from native speakers are very welcome.
 
 ### Added
 
+- **Back up your databases and settings (#953, #942)** — **File → Back up
+  now…** backs up your databases together with your settings, filter
+  profiles, column views and custom icons. Each backup is its own dated
+  folder in your backup folder (by default *Documents/OpenSAK Backups*);
+  ideally choose a folder on another disk, an external drive or a synced
+  folder. Backups you make this way are never deleted by OpenSAK.
+- **Restore from a backup (#954, #987)** — **File → Restore from backup…**
+  brings a database back exactly as it was when the backup was taken. A
+  restored database is always added as a new database, so nothing you
+  have now is overwritten. **Also restore settings** (off by default)
+  brings back your preferences, filter profiles, column views and icons;
+  your current settings are saved first, so you can go back.
+- **Back up when you close OpenSAK (#959)** — When something has changed
+  since your last backup, OpenSAK offers to back up before it closes:
+  **Back Up and Close**, **Not Now** or **Cancel**. If nothing has
+  changed, it closes without asking. Tick **Don't ask again** to always
+  back up or never ask. OpenSAK keeps the last five automatic backups (you
+  can change the number) and never deletes backups you made yourself.
+- **Backup folder in setup and Settings (#986)** — The Welcome Wizard has
+  a step for the backup folder, and **Settings → Advanced** has the same
+  row, together with the new **Backups** section.
+- **Compressed backups (#989)** — Turn on **Compress backups** under
+  **Settings → Advanced → Backups** (off by default) and each new backup
+  is one zip file, typically a third of the size or less, at the cost of
+  taking longer to write. Both kinds can be restored. Suggested by
+  GeePa67.
+- **Automatic backup before a database is updated (#549, #988)** — When a
+  new version of OpenSAK needs to update one of your databases, it first
+  saves an untouched copy — in the *pre-migration* folder of your backup
+  folder, or next to the database if you haven't chosen one. A short
+  message tells you where. This happens once per upgrade, never on a
+  normal start.
+- **Update all older databases at once (#1027)** — After that first
+  backup message, **Apply to all databases** backs up and updates the
+  other databases in your list too, instead of one message each time you
+  switch to one. Contributed by nagisml.
 - **Manage Databases: Move… and Copy to any folder (#1047)** — **Move…**
   moves a database to a folder you choose, for example from a USB stick to
-  your internal disk. It keeps its name, and the original is only deleted
-  once the copy has been checked. If the original can't be deleted (for
-  example on read-only media), OpenSAK uses the new copy and tells you
-  where the old file is. **Copy…** now also asks where to put the copy,
-  instead of always using the database folder. Both remember the folder
-  you chose until you close OpenSAK, and never overwrite an existing file.
-  You can move the database you're working in without restarting.
-- **Update all older databases at once (#1027)** — when OpenSAK has backed
-  up and updated a database from an older version, it now offers **Apply
-  to all databases** for the others in your list, instead of one message
-  each time you switch to one. Each database is backed up first, and the
-  one you're working in stays open. Contributed by nagisml.
+  your internal disk; the original is only deleted once the copy has been
+  checked. **Copy…** now also asks where to put the copy. Both remember
+  the folder until you close OpenSAK and never overwrite an existing file.
+- **Add databases you already have (#985)** — When the database folder you
+  choose in the Welcome Wizard already holds OpenSAK databases (after a
+  reinstall or on a new computer), OpenSAK offers to add them. **Manage
+  databases → Scan database folder…** does the same at any time.
+- **Export: folder, file name and saved settings (#948, #965, #773, #977)**
+  — The export dialog has its own folder and file name and exports
+  straight there, without a save dialog. The file name can use variables
+  such as `{database}`, `{filter}`, `{center}`, `{date}` and `{count}`,
+  with a preview of the exact file. Export settings can be saved under a
+  name, and you choose what happens when the file already exists.
+- **Export: corrected or original coordinates, and a cache limit (#948,
+  #596, #774)** — Choose which coordinates caches with corrected
+  coordinates are exported with, and export only the first N caches of
+  the list.
+- **GSAK import: every database in a GSAK backup (#947, #946)** — **File →
+  Import from GSAK Database** lists every database in a GSAK backup `.zip`
+  and imports the ones you pick, each as its own OpenSAK database.
+  Contributed by nagisml.
+- **Import GSAK filters (#935)** — **File → Import GSAK Filters…** turns the
+  saved filters in your GSAK database or backup into OpenSAK filter
+  profiles. Anything OpenSAK can't express yet is kept as a comment on the
+  Where tab, so you can see what GSAK filtered on.
+- **Set or clear the flag on all caches in the filter (#293)** —
+  **Waypoint → 🚩 User flags** has **Set flag on all caches in filter…**
+  and **Clear flag on all caches in filter…**. Suggested by Mike Wood.
+- **Delete cache from the right-click menu (#693)** — The cache list's
+  right-click menu has **Delete cache…**, which asks first.
+- **Corrected coordinates dialog: distance, bearing and Clear (#940)** —
+  While you type, the dialog shows how far and in which direction the new
+  coordinates are from the posted ones, which catches typos such as a
+  wrong minute digit. Existing corrected coordinates can be removed from
+  the dialog.
+- **Compact "L4" column (#1000)** — A narrow **Last four logs** column
+  shows the four logs as a GSAK-style 2×2 square with the heading **L4**,
+  and a narrow **Last GPX update** column shows **Last GPX** (#1004).
+  Suggested by ChemeinerWill.
+- **More ways to write coordinates (#767, #765)** — N/S/E/W can now come
+  after the value as well as before it (e.g. `32.371267S 115.827467E`),
+  and minute and second marks copied from Word are understood. Ambiguous
+  input is rejected instead of guessed. Suggested by pjacklam.
+- **Help → What's New (#944)** — Opens the changelog for the version you're
+  running.
+
+### Changed
+
+- **Database settings travel with the database (#659)** — Each database's
+  home location, column layout, sort order, last-used filter profile and
+  nearby-map settings are now stored inside the database file instead of
+  OpenSAK's settings file, so copying, moving, renaming or restoring a
+  database keeps them. Your existing settings are moved over automatically
+  the first time you open each database.
+- **Faster start and database switch on large databases (#964)** —
+  Checking whether distances need recalculating takes a fraction of a
+  millisecond instead of about a second on a database with 180,000 caches.
+- **Corrected coordinates are used everywhere (#951, #1003)** — **Open in
+  Google Maps / OpenStreetMap**, **Copy coordinates** and the **Coordinate
+  converter** in the right-click menu now use the corrected coordinates
+  when a cache has them, with extra entries for the original ones.
+- **Dates look the same everywhere (#1043)** — The date format chosen in
+  **Settings** is now also used by the date fields in the filter dialog,
+  **Mark as Found** and the waypoint dialog. Reported by GarenKreiz.
+- **Imports into another database never touch the open one (#963, #957)**
+  — GSAK, GPX/ZIP and Pocket Query e-mail imports into another database,
+  and moving or copying caches between databases, now work on that
+  database directly instead of switching OpenSAK's active database in the
+  background. Large moves and copies work 200 caches at a time (#808).
+- **GSAK backup import recalculates distances in the background (#956,
+  #964)** — so OpenSAK no longer freezes after importing a large backup.
 
 ### Fixed
 
 - **OpenSAK didn't start when the last database was unavailable (#1045)**
-  — if the database you used last was on a USB stick or network drive that
-  isn't connected, OpenSAK stopped with "could not open your database".
-  It now opens another database from your list (or a new Default database)
-  and tells you which one was missing. The missing database stays in your
-  list, so you can open it again when the drive is back. Switching to a
-  database whose file is missing now shows a clear message instead of
-  creating an empty database in its place.
-- **Exporting a very large database failed (#1041)** — exporting more
-  than about 32,000 caches at once (GPX, GGZ, LOC, KML, Send to GPS, trip
-  planner) failed with "too many SQL variables". Reported by GarenKreiz,
-  contributed by nagisml.
-- **Dates looked different in different places (#1043)** — the date format
-  chosen in **Settings** is now also used by the date fields in the filter
-  dialog, **Mark as Found** and the waypoint dialog, not only by the cache
-  list and the details panel. Reported by GarenKreiz, analysed by nagisml.
-- **The log file no longer contains your personal settings (#1046)** —
-  each start wrote all your settings to `opensak.log`, including your PQ
-  e-mail account, home location and Geocaching.com username. That log is
-  the one we ask you to attach when reporting a problem, so it now only
-  records the database settings needed to diagnose startup problems.
-
----
-
-## [1.21.0-beta.8] — 2026-10-09
-
-> Headline: **autocompletion for macros in VS Code now works in installed
-> builds**, not only in a copy of the source code.
-
-### Fixed
-
-- **Macros: editor support in installed builds (#1012)** — *Beta builds
-  only.* The type definitions behind autocompletion and inline help
-  (`opensak.lua`) were only in the source repository, so the VS Code
-  instructions in the macro API reference didn't work for anyone who had
-  installed OpenSAK. They are now included in every build, and on each
-  start OpenSAK copies them to `types/opensak.lua` in its macros folder,
-  so they always match the installed version. It also puts a
-  `.luarc.json` next to your macros that points the Lua extension at
-  them — only if there is none yet, so your own settings are kept. To use
-  it, install the extension "Lua" by sumneko, open OpenSAK's macros
-  folder in VS Code (**Open macros folder** in the macro window) and type
-  `opensak.`. The macro API reference now describes these steps.
-  Reported by GeePa67, contributed by nagisml.
-
----
-
-## [1.21.0-beta.7] — 2026-10-09
-
-> Headline: **macros can work across databases** — create, switch between
-> and read other databases, move or copy caches into them, filter on many
-> more fields, sort the list, and export GPX, GGZ, LOC or KML files with
-> per-cache names and descriptions, straight to a Garmin if you like. Also
-> in this beta: **set or clear the user flag on every cache in the filter**
-> in one go, and a fix for macros writing `2,5` instead of `2.5` on
-> Danish, German, French and other systems that use a decimal comma.
->
-> Macros are still beta-only, and the API may change before it is
-> settled (#938). The new texts are machine-translated in all languages
-> except Danish and English — corrections from native speakers are very
-> welcome.
-
-### Added
-
-- **Set or clear the flag on all caches in the filter (#293)** —
-  **Waypoint → 🚩 User flags** has **Set flag on all caches in filter…**
-  and **Clear flag on all caches in filter…**, which work on exactly the
-  caches the list shows, after asking how many. The status bar says how
-  many caches actually changed. The existing action that clears every flag
-  in the database regardless of the filter is now in the same submenu as
-  **Clear all flags in database…**. Suggested by Mike Wood.
-- **Macros: work with databases (#808)** — *Beta builds only.*
-  `opensak.databases()`, `opensak.database()` and
-  `opensak.database_exists(name)` show what's there;
-  `opensak.create_database(name)` makes a new, empty one and
-  `opensak.switch_database(name)` makes another one active, like the
-  toolbar dropdown (the active filter is cleared). There is deliberately
-  no way to delete a database from a macro. Contributed by nagisml.
-- **Macros: move and copy caches (#808)** — *Beta builds only.*
-  `opensak.move_caches(target)` and `opensak.copy_caches(target)` move or
-  copy the caches of the active filter — or a list of GC codes — into
-  another database, with logs, waypoints, attributes, trackables and
-  notes, like **Database → Move caches**. When a cache is already in the
-  target, `if_exists` decides: `"newer"` (the default) replaces it only if
-  your copy was imported later, `"replace"` always, `"skip"` never. A
-  cache that isn't written to the target stays where it is. Contributed by
-  nagisml.
-- **Macros: read another database without switching (#809)** — *Beta
-  builds only.* `opensak.cache()`, `caches()`, `description()`, `sql()`,
-  `sql_each()`, `tables()` and `columns()` take `{ database = "Name" }`
-  to read another database while the active one — and its filter — stays
-  as it is. That database is opened read-only. Contributed by nagisml.
-- **Macros: export with your own names and descriptions (#809)** — *Beta
-  builds only.* `opensak.export_gpx{}` exports the caches of the active
-  filter without a saved export setting. It writes GPX, GGZ, LOC or KML,
-  uses the export dialog's file name variables, and can leave out
-  attributes or child waypoints. Two Lua functions, `rename` and
-  `description`, can give each cache its own name and description in the
-  file — for example a challenge's D/T in front of the name.
-  `target = "device"` writes straight into the GPX folder of a connected
-  Garmin (not yet for MTP devices). Like every macro function that writes
-  a file, it goes through the folder permissions. An existing file is
-  overwritten unless the macro says `if_exists = "skip"` or `"ask"`.
-  Contributed by nagisml.
-- **Macros: filter on many more fields, and sort (#809)** — *Beta builds
-  only.* `opensak.filter{}` now also takes corrected coordinates, user
-  flag, locked, DNF, FTF, premium, archived, trackables and owned by you;
-  distance and bearing from a point or a saved centre point; favourites
-  and elevation; hidden, found and last GPX update date ranges;
-  attributes (including the "no" form), free text, polygons, an exact
-  list of GC codes, user data 1–4, GC note, personal note and placed by.
-  `mode = "OR"` combines them with OR. `opensak.filter_name()` gives the
-  active filter's name, and `opensak.sort(field [, "desc"])` sorts the
-  list like a click on a column header — `opensak.caches()` then follows
-  that order. Contributed by nagisml.
-- **Macros: when a cache was last updated by an import (#813)** — *Beta
-  builds only.* Cache tables have a `last_gpx_update` field (date and
-  time), so a macro can find the caches your latest Pocket Query didn't
-  refresh. Contributed by nagisml.
-
-### Changed
-
-- **Move and copy caches work in steps (#808)** — **Database → Move
-  caches** and **Copy caches** now share their code with the macro
-  functions and work through large selections 200 caches at a time, which
-  keeps memory down and avoids a database limit on very large selections.
-  The dialog still replaces a cache that already exists in the target,
-  as before.
-- **Macros: an empty list of GC codes matches nothing** — *Beta builds
-  only.* `opensak.filter{ codes = {} }` used to match every cache; it now
-  matches none, which is what a macro building that list from an empty
-  result expects.
-
-### Fixed
-
-- **Macros wrote decimal commas on many systems (#1015)** — *Beta builds
-  only.* On Danish, German, French, Dutch and other systems that use a
-  decimal comma, numbers in macros came out as `2,5` instead of `2.5` —
-  in cache names, file names, coordinates and SQL. Numbers in macros now
-  always use a decimal point, whatever the system language. Found by the
-  test suite on a Danish machine, fixed by nagisml.
-- **Macros broke Chinese and Arabic text on some systems (#1015)** —
-  *Beta builds only.* `string.upper()`, `string.lower()` and letter
-  patterns in Lua could damage non-Latin text on Windows with a
-  single-byte code page. They now only change ASCII letters, and
-  `utf8.*` works on whole characters. Contributed by nagisml.
-- **Sending caches to a Garmin from a macro could fail (#1015)** — *Beta
-  builds only.* When a Garmin was mounted under a path with non-English
-  letters, such as `/media/søren/GARMIN`, the device detection stopped
-  the macro with an error. Contributed by nagisml.
-
----
-
-## [1.21.0-beta.6] — 2026-10-08
-
-> Headline: **macros grow up** — the beta-only macro window is now a real
-> editor, macros can read your caches and query the database, export
-> GPX/LOC/GGZ files, and use a new set of coordinate, regex, text and date
-> helpers (macro API version 2). Macros now ask before using a folder
-> instead of failing. Also in this beta: **Delete cache** and corrected
-> coordinates throughout the right-click menu, a GSAK-style compact
-> **L4** column, a coordinate parser that understands more ways of writing
-> coordinates, and a fix for compressed backups to OneDrive and other
-> synced folders.
->
-> Macros are still beta-only, and the API may change before it is
-> settled (#938). The new texts are machine-translated in all languages
-> except Danish and English — corrections from native speakers are very
-> welcome.
-
-### Added
-
-- **Macro editor (#998, fixes #994)** — *Beta builds only.* **Macros →
-  Run macro (Lua)…** opens a full editor: New, Open, Open recent, Save,
-  Save as, Run (F5) and Save & Run (Ctrl+F5), Find (Ctrl+F) and Replace
-  (Ctrl+H), Go to line, and comment/uncomment. It has Lua syntax
-  colouring, line numbers and auto-indent, and marks the line of a Lua
-  error. **F1** opens the macro API reference in its own window, with
-  contents and search. Unsaved changes are shown in the title, and you're
-  asked about them before they're lost — also when you close OpenSAK.
-  Contributed by nagisml.
-- **Macros ask before using a folder (#993)** — *Beta builds only.* When a
-  macro needs a file in a folder that isn't in **Settings → Folder
-  permissions**, OpenSAK now asks — **This time only**, **Always** or
-  **Deny** — instead of stopping the macro. Read and write are asked
-  about separately, **Always** adds the folder to the list, and a denied
-  folder isn't asked about again in the same run. `choose_file()` lets a
-  macro show a file dialog; the file you pick can be used for the rest of
-  that run without a folder permission. Contributed by nagisml.
-- **Macros: read your caches (#1006)** — *Beta builds only.*
-  `opensak.cache(code)`, `opensak.caches()`, `opensak.current()`,
-  `opensak.selected()`, `opensak.codes()` and `opensak.description(code)`
-  give macros the caches of the active filter, the selected rows or any
-  cache by GC code, as read-only snapshots with stable field names
-  (`code`, `lat`, `lon`, `owner`, `corrected`, …). Large databases are
-  read in chunks, and a macro can ask for just the fields it needs.
-  Contributed by nagisml.
-- **Macros: read-only SQL (#1007)** — *Beta builds only.* `opensak.sql()`
-  and `opensak.sql_each()` run `SELECT` queries against the active
-  database, with `?` or `:name` parameters; `opensak.tables()` and
-  `opensak.columns()` show what's in it. Read-only is enforced by the
-  database connection itself, not by inspecting the SQL: writes,
-  `ATTACH` and most `PRAGMA`s are refused, and a query is stopped after
-  60 seconds. Contributed by nagisml.
-- **Macros: export GPX, LOC and GGZ files (#1005)** — *Beta builds only.*
-  `opensak.export_file(setting [, folder])` exports the caches of the
-  active filter with one of your saved export settings from **File →
-  Export**, including its file name variables (`{filter}`, `{database}`,
-  `{count}`, `{center}`). It's the first macro function that writes a
-  file, and it always goes through the folder permissions. A new example
-  macro writes one GPX file per saved filter. Contributed by nagisml.
-- **Macros: coordinate, regex, text and date helpers (#999)** — *Beta
-  builds only.* `opensak.coords.*` parses, formats and converts
-  coordinates, and calculates distance, bearing, projections, midpoints
-  and whether a point is inside a polygon. `opensak.re.*` gives real
-  regular expressions (find, match, findall, replace, split) with a time
-  limit against runaway patterns. `opensak.text.*` has puzzle helpers such
-  as ROT13, digit sum and word value, plus HTML to text. `opensak.date.*`
-  parses and formats dates, and `opensak.sleep()` pauses a macro. The
-  macro API version is now 2. Contributed by nagisml.
-- **Macros: restore a changed example (#1005)** — *Beta builds only.*
-  **Macros → Open example** now notices when your copy differs from the
-  one shipped with OpenSAK and offers to restore the original. Your copy
-  is kept next to it as a `.bak` file, and data files used by the
-  examples are left alone. Contributed by nagisml.
-- **Delete cache from the right-click menu (#693)** — The cache list's
-  right-click menu has **Delete cache…**. It deletes the cache you
-  right-clicked, which isn't necessarily the selected one, and asks first,
-  like **Waypoint → Delete cache…** and the Delete key.
-- **Compact "L4" column (#1000)** — When the **Last four logs** column is
-  narrow, the four log squares are drawn as a GSAK-style 2×2 stack (1st
-  log top left, 2nd top right, 3rd bottom left, 4th bottom right) instead
-  of thin stripes, and the heading shows **L4** instead of a cut-off
-  title. Your column views keep the width you choose. Suggested by
+  — If the database you used last was on a USB stick or network drive
+  that isn't connected, OpenSAK now opens another database from your list
+  and tells you which one was missing, instead of refusing to start. The
+  missing database stays in the list.
+- **Exporting a very large database failed (#1041)** — Exporting more than
+  about 32,000 caches at once failed with "too many SQL variables".
+  Reported by GarenKreiz, contributed by nagisml.
+- **Copying the open database could miss recent changes (#943)** —
+  **Copy** now takes a consistent snapshot and never leaves a half-written
+  file behind.
+- **Moving databases to a new folder lost their settings (#961)** —
+  Changing the database folder in Settings and moving your databases along
+  now keeps their home location, sort order and filter profile.
+- **New installs put the first database in the wrong folder (#973)** —
+  The Default database is now created in the database folder you chose in
+  the Welcome Wizard.
+- **Distances calculated from the wrong place with no active home point
+  (#962)** — The point the home drop-down shows is now the one used.
+- **Choose Columns always showed "(None)" (#996)**, and **saving a column
+  view overwrote an existing one without asking (#995)**. Reported by
   ChemeinerWill.
-- **Hemisphere letter after the value (#767)** — Coordinates can now be
-  written with N/S/E/W after the value as well as before it, in decimal
-  degrees, DMM and DMS — for example `32.371267S 115.827467E`,
-  `32° 22.276 S 115° 49.648 E` or `S 35.123° 86.543° W`. Each coordinate
-  must have its letter exactly once, and never together with a minus sign,
-  so ambiguous input is rejected instead of guessed. A comma between the
-  two coordinates is now accepted in these formats too. Suggested by
-  pjacklam.
-
-### Changed
-
-- **Stricter, more forgiving coordinate input (#765)** — Decimal degrees
-  take one comma or a space between latitude and longitude, not any run of
-  commas, and DMS takes one seconds mark, right after the number. Minutes
-  can be marked ' ′ or ’ and seconds " ″ ” or '', so coordinates copied
-  from Word work. Suggested by pjacklam.
-- **Short "Last GPX" heading (#1004)** — The **Last GPX update** column
-  shows **Last GPX** when it's too narrow for the full title, like GSAK.
-  The full name stays in the tooltip, in **Choose Columns** and in the
-  filter dialog. Suggested by ChemeinerWill.
-- **File → Export shares its code with macros (#1005)** — The GPX, LOC and
-  GGZ export behind **File → Export** has moved into a module that the
-  export dialog and `opensak.export_file()` both use. Nothing should look
-  different — please report it if anything does.
-
-### Fixed
-
-- **Open in maps used the original coordinates (#951)** — **Open in
-  Google Maps / OpenStreetMap** in the cache list's right-click menu now
-  opens the corrected coordinates when a cache has them, like the
-  coordinate columns, the map and GPS export. Caches with corrected
-  coordinates get an extra **Open original coordinates in …** entry. The
-  map links in the cache details now open the same addresses as the menu
-  (OpenStreetMap at zoom 16).
-- **Copy coordinates and the converter used the original coordinates
-  (#1003)** — **Copy coordinates** and **Coordinate converter…** in the
-  right-click menu now use the corrected coordinates too, and **Copy
-  original coordinates** is there when a cache has corrected ones.
-- **Choose Columns always showed "(None)" (#996)** — **View → Choose
-  Columns** now shows the saved column view the database is using, the
-  same as the toolbar dropdown — including the default view. Reported by
-  ChemeinerWill.
-- **Saving a column view overwrote an existing one without asking
-  (#995)** — Saving under a name that's already taken now asks first.
-  That includes names that end up as the same file, such as "My/View" and
-  "My_View". Reported by ChemeinerWill.
-- **Compressed backups left an empty folder in the backup folder
-  (#1002)** — A compressed backup now prepares its files in OpenSAK's own
-  folder and only writes the finished zip to your backup folder. With a
-  backup folder in OneDrive or another synced folder, the sync client no
-  longer starts uploading copies of your databases that are deleted
-  seconds later, and no empty `.partial` folder is left behind. Reported
-  by GeePa67.
+- **GSAK filter import found no filters in some backups (#967, #966)**.
+- **Open Existing started in the wrong folder (#984)** — it now opens in
+  your database folder.
+- **The log file contained your personal settings (#1046)** — `opensak.log`,
+  which we ask you to attach when reporting a problem, no longer records
+  your PQ e-mail account, home location or Geocaching.com username.
 
 ### Security
 
-- **Warning before opening an OpenSAK folder to macros (#993)** —
-  *Beta builds only.* Ticking **Write** in **Settings → Folder
-  permissions** for a folder that contains OpenSAK's data, its databases
-  or its settings now asks first. Macros still can't change those files,
-  but the rest of the folder would be open to them.
+- **Cache data could run as code on the map (#972, #971)** — Cache names,
+  GC codes and waypoint names from an imported GPX or GSAK database are
+  now always shown as plain text on the map, so a crafted file can't run
+  script code inside OpenSAK.
+- **Log and trackable panels showed raw HTML and opened any link (#970,
+  #969)** — Log texts and trackable names are shown as plain text, and
+  only ordinary web links (http/https) in them can be opened.
+
+### Before you upgrade
+
+- **Your databases are backed up first.** The first time 1.21.0 opens each
+  database, it saves an untouched copy before updating it (see *Automatic
+  backup before a database is updated* above). The update is one-way.
+- **Going back to 1.20.0.** 1.20.0 can still open databases that 1.21.0
+  has updated, and your caches, logs and notes are all there. Settings that
+  now live inside each database — home location, column layout, sort order
+  and filter profile — show their values from before the upgrade, and
+  changes made to them in 1.21.0 only reappear when you return to 1.21.0.
+  To go back to exactly how a database was before the upgrade, use its
+  pre-migration copy (`<name>.pre-migration-schema24.db`).
+
+### In beta builds only
+
+- **Macros (#938)** — Beta builds have a **Macros** menu with a Lua macro
+  editor and a growing macro API: filtering, reading caches, read-only SQL,
+  exporting files, working across databases, and coordinate, regex, text
+  and date helpers, with folder permissions that keep macros away from
+  OpenSAK's own data. The menu is hidden in stable releases until the API
+  has settled. Contributed by nagisml.
 
 ### For developers
 
-- **New dependency: `regex` (#999)** — The macro regex helpers use the
-  `regex` package (added to `pyproject.toml`). After pulling, run
-  `pip install -e ".[dev]"` in your virtual environment, or the
-  `opensak.re` tests fail with *No module named 'regex'*.
+- **New dependencies:** [Lupa](https://github.com/scoder/lupa) (MIT, embeds
+  Lua for macros) and `regex`. Run `pip install -e ".[dev]"` after pulling.
+- **Upgrade-path test (#997)** — `tests/unit-tests/test_upgrade_path.py`
+  opens data written by v1.20.0's own code (`tests/fixtures/upgrade/`) on
+  every CI run; `scripts/make_upgrade_fixture.py` adds a fixture for each
+  new stable release.
+- **Test suite runs about twice as fast (#958).**
 
----
-
-## [1.21.0-beta.5] — 2026-10-06
-
-> Headline: **Backup Support is complete** (Roadmap #1, #942). Choose your
-> backup folder in the Welcome Wizard or in Settings, turn on compressed
-> backups if you want them smaller, and restore your settings — not just
-> your databases — from a backup. After a reinstall or on a new computer,
-> OpenSAK now offers to add the databases it finds in your database
-> folder.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Backup folder in setup (#986)** — The Welcome Wizard has a new step
-  for the backup folder (by default *Documents/OpenSAK Backups*), with the
-  advice to use another disk or a synced folder. **Settings → Advanced →
-  Folders** has the same row. A folder inside OpenSAK's own data or
-  database folder is refused. Changing the folder doesn't move the
-  backups you already have.
-- **Restore settings (#987)** — **File → Restore from backup…** has a new
-  **Also restore settings** option (off by default) that brings back your
-  preferences, filter profiles, column views and icons. You can restore
-  settings on their own, too. Your database list, folders, backup
-  settings and window layout are kept. Before anything changes, your
-  current settings are saved as a backup marked *Settings before restore*,
-  so you can go back. The restored settings take effect the next time
-  OpenSAK starts; OpenSAK offers to close right away.
-- **Compressed backups (#989)** — Turn on **Compress backups** under
-  **Settings → Advanced → Backups** (off by default) and each new backup
-  is one zip file instead of a folder, typically a third or less of the
-  size. It takes longer to write — in our tests about four times as long
-  as a normal backup. Both kinds can be restored, and the zip can be
-  opened with your system's own tools. Suggested by GeePa67.
-- **Add databases you already have (#985)** — When the database folder
-  you choose in the Welcome Wizard already holds OpenSAK databases (after
-  a reinstall or on a new computer), OpenSAK lists them and offers to add
-  them. **File → Manage databases… → Scan database folder…** does the
-  same at any time. OpenSAK still never adds databases by itself, so one
-  you removed from the list stays removed until you add it again.
-
-### Changed
-
-- **Pre-migration copies go into your backup folder (#988)** — When a new
-  OpenSAK version updates a database to a new format, the copy it saves
-  first now goes into the *pre-migration* subfolder of your backup folder,
-  once you have chosen one. Without one, or if the backup folder is on a
-  drive that isn't connected, the copy goes next to the database as
-  before.
-
-### Fixed
-
-- **Open Existing started in the wrong folder (#984)** — **Manage
-  databases → Open existing…** opened in OpenSAK's installation folder
-  instead of your database folder.
-- **A list refresh could run into a closed window** — If the main window
-  was closed while the cache list was still being refreshed, the late
-  result could reach the closed window. It is now dropped.
-
-### Development
-
-- **Test suite runs about twice as fast (#958)** — Widgets left by one test
-  are now deleted before the next. Previously they piled up (around
-  346,000 after the filter dialog tests), slowing everything down and
-  making one real-thread restore test time out.
-
----
-
-## [1.21.0-beta.4] — 2026-10-05
-
-> Headline: **back up when you close OpenSAK** — the next part of Backup
-> Support (Roadmap #1, #942). When something has changed since your last
-> backup, OpenSAK offers to back up before it closes, and keeps the last
-> five automatic backups. Also in this beta: the beta-only **macros** can
-> now set **corrected coordinates from a CSV file**, with folder
-> permissions that keep macros away from OpenSAK's own data.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Back up when you close OpenSAK (#959)** — When you close OpenSAK and
-  something has changed since your last backup, it asks whether to back
-  up first: **Back Up and Close**, **Not Now**, or **Cancel** to stay in
-  OpenSAK. If nothing has changed, it closes without asking. A progress
-  window shows how far a large backup has got, and Cancel stops it without
-  leaving a half-finished backup behind. If the backup folder is on a
-  drive that isn't connected, you can choose another folder right there.
-  Tick **Don't ask again** to always back up or never ask. The new
-  **Settings → Advanced → Backups** section holds this choice and how many
-  automatic backups to keep (5 by default); only the oldest automatic
-  backups are deleted, and backups made with **File → Back up now…** are
-  never deleted by OpenSAK. A backup made with Back up now also counts as
-  your last backup, so closing straight after it doesn't ask again.
-- **`{center}` in export file names (#977, fixes #976)** — The export file
-  name can now include the name of the active center point, for example
-  `{filter}_{center}`.
-- **Macros: corrected coordinates from a CSV file (#949, part of #938)** —
-  *Beta builds only.* Macros can now set and clear corrected coordinates
-  (`set_corrected`, `clear_corrected`), read CSV files (`read_csv`) and ask
-  the user to confirm (`confirm`). **Macros → Open example** copies a
-  ready-made example macro and a sample CSV into your macros folder and
-  opens it: it reads solved coordinates per GC code, shows a summary, and
-  changes nothing until you confirm. A blank cell never deletes a
-  solution.
-- **Macros: folder permissions (#949, #979)** — *Beta builds only.* A new
-  **Settings → Folder permissions** tab lists the folders macros may read
-  or write. By default that is an `opensak` folder inside the system temp
-  folder (read and write) and OpenSAK's macros folder (read only); macros
-  can find them with `temp_dir()` and `macros_dir()`.
-- **Macros: API reference and editor support (#949)** — The macro
-  functions are documented in
-  [docs/macros/api.md](docs/macros/api.md), generated from the code so it
-  is always current, and `macros/types/opensak.lua` gives autocompletion
-  and inline help in VS Code with the Lua extension. `api_version()`
-  tells a macro which version of the API it is running against.
-
-### Security
-
-- **Macros can never reach OpenSAK's own data (#979)** — Whatever the
-  folder permissions say, macros can't read or write OpenSAK's settings,
-  its Geocaching.com login, its data and database folders (except the
-  macros folder), or any database file. A whole drive can't be given to
-  macros, and a file with several hard links can't be written, since that
-  would also change another file.
-
-### Fixed
-
-- **New installs put the first database in the wrong folder (fixes
-  #973)** — When you chose your own database folder in the Welcome Wizard
-  on a fresh install, the Default database was still created in the
-  installation folder. It is now created in the folder you chose.
-- **Sort order saved again on every start (#959)** — Opening a database
-  wrote its sort order and filter profile back to the database each time,
-  even when nothing had changed. Settings are now only written when they
-  actually change; this also kept OpenSAK from recognizing that nothing
-  had changed since your last backup.
-
----
-
-## [1.21.0-beta.3] — 2026-10-05
-
-> Headline: **choose where exports go** — the export dialog now has its own
-> folder and file name, with variables like the database name and date, so
-> repeated exports land in the right place without a save dialog. This beta
-> also closes two security holes where text from imported cache data could
-> run as code or open unsafe links, and fixes imports into another database
-> that could reach the one you had open.
->
-> This version makes a small update to each database, so OpenSAK makes its
-> usual one-time backup of each database the first time you open it.
->
-> The new export texts are machine-translated in all languages except
-> Danish and English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Export folder and file name in the dialog (#965, #773)** — The export
-  dialog now has a folder and a file name, both saved with the export
-  settings, and exports straight there without a save dialog. The file
-  name can be fixed text or use variables such as `{database}`,
-  `{filter}`, `{date}`, `{time}`, `{format}` and `{count}`; an info
-  button lists them all and a preview shows the exact file that will be
-  written. A new option decides what happens when the file already
-  exists: ask, overwrite or skip.
-
-### Changed
-
-- **Faster start and database switch on large databases (#964)** —
-  Checking whether any distances need recalculating now takes a fraction
-  of a millisecond instead of around a second on a database with 180,000
-  caches. This needs a small update to each database, so OpenSAK makes its
-  usual one-time backup of each database the first time you open it in
-  this version.
-- **GSAK import of several databases into one (#964)** — When several GSAK
-  databases are imported into the same OpenSAK database, distances are
-  now recalculated once at the end instead of after each one, and the
-  progress bar shows that work is still going on.
-
-### Security
-
-- **Cache data could run as code on the map (#972, fixes #971)** — Cache
-  names, GC codes and waypoint names from an imported GPX or GSAK
-  database were inserted into the map without being escaped, so a crafted
-  file could run script code inside OpenSAK's map. All of this text is
-  now passed and shown as plain text.
-- **Log and trackable panels showed raw HTML and opened any link (#970,
-  fixes #969)** — Log texts, finder names and trackable names are now
-  shown as plain text, and links in them only open when they are ordinary
-  web links (http/https). Other kinds of links, such as to local files or
-  network shares, are ignored.
-
-### Fixed
-
-- **Importing into another database could touch the open one (#963,
-  fixes #957)** — GSAK, GPX/ZIP and Pocket Query e-mail imports into
-  another database, and moving or copying caches between databases, used
-  to switch OpenSAK's active database in the background while they ran.
-  Anything the main window read or saved meanwhile could end up in the
-  wrong database. These jobs now work on the other database directly, and
-  the database you have open is never switched.
-- **GSAK filter import found no filters in some backups (#967, fixes
-  #966)** — Saved GSAK filters are now read from GSAK's own `Settings`
-  table, with the `TranslateFilters` table some installations carry as a
-  fallback.
-- **Distances calculated from the wrong place with no active home point
-  (fixes #962)** — With no active home point, the home drop-down showed
-  one point as selected while distances were calculated from a built-in
-  default location. The point the drop-down shows is now the active one.
-- **Moving databases to a new folder lost their settings (fixes #961)** —
-  When you changed the database folder in Settings and chose to move your
-  existing databases along, their home location, sort order and filter
-  profile were lost. They are now carried over, as they already were when
-  renaming or copying a database.
-
----
-
-## [1.21.0-beta.2] — 2026-10-02
-
-> Headline: **backup and restore** — the first big part of Backup Support
-> (Roadmap #1, #942). Back up your databases and settings with one click,
-> bring a database back exactly as it was, and get an automatic backup
-> before a new version changes a database. Also in this beta: importing
-> **every database in a GSAK backup**, and saved **GPX export settings**.
->
-> The new backup and restore texts are machine-translated in all languages
-> except Danish and English — corrections from native speakers are very
-> welcome.
-
-### Added
-
-- **Back up your databases (#953)** — New **File → Back up now…** backs
-  up your databases together with your settings, filter profiles, column
-  views and custom icons. Backups go into *Documents/OpenSAK Backups*
-  unless you choose another folder, ideally on another disk or an
-  external drive. Each backup is its own dated folder, and backups you
-  make this way are never deleted by OpenSAK.
-- **Restore from a backup (#954)** — New **File → Restore from backup…**
-  brings a database back from one of your backups. A restored database is
-  always added as a new database, so nothing you have now is overwritten,
-  and it opens exactly as it was when the backup was taken. Filter
-  profiles you have deleted since are added back.
-- **Automatic backup before a database is upgraded (#549)** — When a new
-  version of OpenSAK needs to update the structure of one of your
-  databases, it first saves a copy of the database as it was, in a
-  `backups` folder next to it. A short message tells you where. If
-  something goes wrong, or you want to go back to an older version of
-  OpenSAK, you can restore that copy. The backup is only made once per
-  upgrade, never on a normal start.
-- **GSAK import: every database in a GSAK backup (#947, fixes #946)** —
-  **File → Import from GSAK Database** now lists every database in a GSAK
-  backup `.zip`, not just the first, and you pick which ones to import.
-  Each becomes an OpenSAK database named after its GSAK folder (you can
-  change the name). Existing OpenSAK databases are only touched after you
-  choose Overwrite, Merge or Skip, and name clashes are caught before the
-  import starts. Databases are unpacked and imported one at a time, and
-  the temporary copies are removed afterwards. If the backup contains
-  your saved GSAK filters, OpenSAK offers to import them too.
-- **Saved GPX export settings (#948)** — The export dialog can save its
-  settings under a name and load them again, and remembers the settings
-  you used last.
-- **GPX export: corrected or original coordinates (#948, #596)** — Choose
-  whether caches with corrected coordinates are exported with those or
-  with their original coordinates.
-- **GPX export: limit the number of caches (#948, #774)** — Export only the
-  first N caches of the current list.
-- **Help → What's New (#944)** — Opens the changelog for the version you're
-  running (stable or beta), so you can see what has changed without
-  relying on the announcements.
-
-### Changed
-
-- **Database settings now travel with the database (#659)** — Each
-  database's home location, column layout, sort order, last-used filter
-  profile and nearby-map settings are now stored inside the database file
-  itself, instead of in OpenSAK's settings file. Copying, moving,
-  renaming or restoring a database no longer loses them. Your existing
-  settings are moved over automatically the first time you open each
-  database.
-- **GSAK backup import recalculates distances in the background (#956,
-  fixes #955)** — After importing a GSAK backup, distances are no longer
-  recalculated on the main window, which could freeze OpenSAK for a while
-  on large databases.
-
-### Fixed
-
-- **Copying the active database could miss recent changes (#943)** —
-  Database → Copy now takes a consistent snapshot through SQLite itself,
-  so the copy always contains every saved change, also when the database
-  is open. The copy is checked for integrity before it is created, and a
-  failed copy never leaves a half-written file behind.
-- **Missing distances after an import** — Switching to a database that
-  was filled by an import in the background no longer shows caches
-  without a distance; it is recalculated when needed.
-
-Thanks to nagisml for the GSAK backup import and the GPX export work.
-
----
-
-## [1.21.0-beta.1] — 2026-09-29
-
-> First beta of the 1.21.0 cycle. Headlines: a first look at **macros**
-> (a small, beta-only Lua proof of concept — the start of the macro &
-> scripting work tracked in #938), **importing your saved GSAK filters**
-> as OpenSAK filter profiles, and a more helpful corrected-coordinates
-> dialog.
-
-### Added
-
-- **Macros: first proof of concept (#939, part of #938)** — A new
-  **Macros** menu with **Run macro (Lua)…**, where you can write or load a
-  small [Lua](https://www.lua.org/) script and run it against the active
-  database. This first version is about filtering:
-  `opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }`
-  applies a filter and returns the number of matching caches, and
-  `opensak.filter_profile("Name")` applies one of your saved filter
-  profiles. As with GSAK's MFILTER, a filter that matches nothing leaves
-  the list unchanged and returns 0. Macros run in a sandbox with no access
-  to files, other programs or OpenSAK's internals, and are stopped if they
-  loop endlessly or use too much memory. **Beta builds only** — the menu
-  is hidden in stable releases until the macro API has been settled (#938).
-  The commands will change as the macro system develops, so treat macros
-  written now as experiments.
-- **Import GSAK filters (#935)** — **File → Import GSAK Filters…** reads the
-  saved filters from your GSAK database (`gsak.db3`, or a GSAK backup
-  `.zip`) and turns them into OpenSAK filter profiles. Everything OpenSAK
-  can express becomes a normal filter in the Filter dialog; criteria that
-  OpenSAK stores but has no dialog control for become SQL on the Where tab;
-  and anything OpenSAK can't express yet is kept as a comment on the Where
-  tab, so you can see what GSAK filtered on and finish it by hand. The
-  dialog shows how much of each filter was migrated. The GSAK database is
-  only read, never changed, and existing profiles are only overwritten if
-  you tick **Overwrite filter profiles that already exist**.
-- **Corrected coordinates dialog: distance and bearing from the original
-  coordinates (#940)** — While you type, the dialog shows how far and in
-  which direction the new coordinates are from the posted ones. Useful for
-  catching typos, such as a wrong minute digit or the wrong hemisphere.
-- **Corrected coordinates dialog: Clear button (#940)** — When a cache
-  already has corrected coordinates, they can now be removed directly from
-  the dialog.
-
-### Changed
-
-- **Corrected coordinates are saved the same way everywhere (#940)** — The
-  details panel, the cache list's right-click menu and the map's
-  right-click menu now share one code path for saving corrected
-  coordinates, so they always behave identically.
-- **Roadmap revised** — Backup Support, Macro & Scripting Support and Full
-  GSAK Field Compatibility have moved to the top of `docs/ROADMAP.md`.
-  Macro support does not depend on Geocaching.com API access; the earlier
-  wording suggesting it did has been corrected.
-
-### Dependencies
-
-- **New: [Lupa](https://github.com/scoder/lupa) (MIT)** — embeds the Lua
-  runtime used by the macro proof of concept. Included in all builds; if
-  you run OpenSAK from source, update your environment with
-  `pip install -e .`.
-
-Thanks to nagisml for this work.
+Thanks to **nagisml** for the macro system, the GSAK backup and filter
+imports, the export work and many fixes; to **GeePa67**, **ChemeinerWill**,
+**pjacklam**, **GarenKreiz** and **Mike Wood** for reports and
+suggestions; and to everyone who tested the betas.
 
 ---
 

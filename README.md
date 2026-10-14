@@ -31,8 +31,9 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 ### Import & Database
 - 📥 **Import** GPX files and Pocket Query ZIP files from Geocaching.com
 - 📧 **Pocket Queries by e-mail** — fetch PQ ZIP attachments straight from your own IMAP mailbox; the password is kept in your OS keyring, never in plain text
-- 🔁 **Import GSAK databases** — read a GSAK database directly, including personal notes, corrected coordinates, child waypoints, attributes and the full log history
-- 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus), and move caches between them
+- 🔁 **Import GSAK databases** — read a GSAK database directly, including personal notes, corrected coordinates, child waypoints, attributes and the full log history — or every database in a GSAK backup `.zip` at once
+- 🧮 **Import GSAK filters** — turn your saved GSAK filters into OpenSAK filter profiles
+- 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus), move caches between them, and move or copy whole databases to any folder; each database keeps its own home location, columns and sort order
 - 📍 **Home points** — save multiple named home points (Home, Cottage, Hotel…) and switch instantly from the toolbar
 - ✅ **Update finds** from a reference database (e.g. your "My Finds" PQ)
 
@@ -58,6 +59,12 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 🖥️ **Full-screen / popout map** — enlarge the map to a bigger, dedicated view
 - 🌍 **Offline Country/State/County lookup** — automatic reverse-geocoding on import, no internet connection required; optional downloadable boundary packs for more detail
 
+### Backup & Restore
+- 💾 **Back up** your databases together with your settings, filter profiles, column views and custom icons — to any folder, ideally on another disk or a synced folder, optionally as a compressed zip
+- ⏱️ **Back up when you close OpenSAK** — offered only when something has changed, keeping the last few automatic backups
+- ♻️ **Restore** a database exactly as it was, added next to your current ones so nothing is overwritten — and your settings too, if you want
+- 🛟 **Automatic copy before an upgrade** — before a new version updates a database, OpenSAK saves an untouched copy of it first
+
 ### Cache Details
 - 📋 **Cache details** — description, hints, logs, attributes, personal notes, and child waypoints, each in their own tab
 - 🔓 **ROT13 hint decoding** — one click to decode / re-hide the hint
@@ -81,7 +88,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 📤 **Send to Garmin GPS** — auto-detects USB-mounted Garmin devices, and newer MTP-only devices on both Windows and Linux
 - 📦 **GGZ export** — Garmin's compressed format, lifting the 10,000-cache device limit
 - 🗑️ **Optional: delete existing GPX files** on device before upload
-- 💾 **Save as GPX, LOC, GGZ or KML** — export to any location
+- 💾 **Save as GPX, LOC, GGZ or KML** — to a folder and file name you set once, with variables such as `{database}`, `{filter}` and `{date}`, and saved export settings for repeat exports
 
 ### Geocaching Tools
 - **⇄ Coordinate Converter** — convert between DD, DMM and DMS formats with one click
