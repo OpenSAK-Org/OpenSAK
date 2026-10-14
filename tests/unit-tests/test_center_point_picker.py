@@ -143,6 +143,19 @@ class TestActiveHomeNotDuplicated:
     def _labels(self, p):
         return [p._combo.itemText(i) for i in range(p._combo.count())]
 
+    def test_points_sorted_home_first(self, qtbot, monkeypatch):
+        from opensak.gui.settings import HomePoint
+        s = _settings(home_points=[HomePoint("★ Home", 0.0, 0.0),
+                                   HomePoint("Zug", 47.2, 8.5),
+                                   HomePoint("bern", 46.9, 7.4),
+                                   HomePoint("Aarau", 47.4, 8.0)])
+        s.active_home_name = "★ Home"
+        s.get_gc_home_point = lambda: HomePoint("★ Home", 46.5, 7.5)
+        monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
+        p = CenterPointPicker()
+        qtbot.addWidget(p)
+        assert self._labels(p)[:4] == ["★ Home", "Aarau", "bern", "Zug"]
+
     def test_same_entries_as_toolbar(self, qtbot, monkeypatch):
         p = self._picker(qtbot, monkeypatch, "★ Home")
         assert self._labels(p)[:2] == ["★ Home", "TestSW"]
