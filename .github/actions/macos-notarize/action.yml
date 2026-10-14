@@ -70,4 +70,17 @@ runs:
         # quirk, not a real rejection. The --context flag below is Apple's
         # own recommended way to check a disk image correctly.
         spctl -a -t open -vvv --context context:primary-signature "${{ inputs.target-path }}"
-        xcrun stapler validate "${{ inputs.target-path }}"
+        # `stapler validate` also looks the ticket up on Apple's CloudKit
+        # service, which drops the connection now and then (error 68) —
+        # seen on the macOS x86_64 runner for v1.21.0, after spctl had
+        # already accepted the notarized image. Retry like the staple step.
+        set +e
+        for attempt in 1 2 3 4 5; do
+          if xcrun stapler validate "${{ inputs.target-path }}"; then
+            exit 0
+          fi
+          echo "::warning::Validating the stapled ticket failed (attempt $attempt of 5), retrying in $((attempt * 20)) s"
+          sleep $((attempt * 20))
+        done
+        echo "::error::Validating the stapled ticket failed after 5 attempts"
+        exit 1
