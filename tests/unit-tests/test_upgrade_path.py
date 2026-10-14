@@ -264,13 +264,19 @@ def test_global_settings_and_filter_profiles_survive(installed):
 
 
 def test_each_database_is_backed_up_once_before_migrating(installed):
-    """#549/#988: one untouched copy per migrated database."""
+    """#549/#988: one untouched copy per migrated database — and none when
+    the release had the current schema already, so nothing was migrated."""
     root, expected = installed
+    from opensak.db.database import SCHEMA_VERSION
+
     manager, _ = _start_app()
     for name in expected["databases"]:
         _open(manager, name)
 
     backups = _backups(root)
+    if expected["schema_version_before"] >= SCHEMA_VERSION:
+        assert backups == [], "nothing to migrate, so no backup expected"
+        return
     names = {b.name.split(".pre-migration-")[0] for b in backups}
     assert names >= {Path(s["file"]).stem for s in expected["databases"].values()}
     assert len(backups) == len(names), f"more than one backup per database: {backups}"

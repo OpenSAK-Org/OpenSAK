@@ -177,6 +177,11 @@ from opensak.filters.engine import (  # noqa: E402
     CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, HasCorrectedFilter,
 )
 from opensak.gui.settings import get_settings  # noqa: E402
+
+try:  # v1.21.0+: per-database settings live in the database file (#659)
+    from opensak.db import db_settings  # noqa: E402
+except ImportError:
+    db_settings = None  # type: ignore[assignment]
 from opensak.utils.types import CoordFormat, DateFormat  # noqa: E402
 
 settings = get_settings()
@@ -213,18 +218,26 @@ for name, spec in DATABASES.items():
             caches[code].user_flag = True
         session.commit()
 
-    # Per-database settings exactly as v1.20.0 keeps them in opensak.json
-    # (moved into the database file by #659).
+    # Per-database settings, stored the way this release stores them: in
+    # opensak.json up to v1.20.0, inside the database file from v1.21.0
+    # (#659, opensak.db.db_settings).
     settings.home_lat, settings.home_lon = spec["home"]
     field, ascending, profile = spec["sort"]
-    sort_key = f"sort.{info.path}"
-    store.set_many({
-        f"{sort_key}.field": field,
-        f"{sort_key}.ascending": ascending,
-        f"{sort_key}.filter_profile": profile,
-    })
-    from opensak.gui.dialogs.column_dialog import _col_key  # noqa: E402
-    store.set(_col_key("visible"), spec["columns"])
+    if db_settings is not None:
+        db_settings.set_value("sort.field", None, field)
+        db_settings.set_value("sort.ascending", None, ascending)
+        if profile:
+            db_settings.set_value("sort.filter_profile", None, profile)
+        db_settings.set_value("columns.visible", None, spec["columns"])
+    else:
+        sort_key = f"sort.{info.path}"
+        store.set_many({
+            f"{sort_key}.field": field,
+            f"{sort_key}.ascending": ascending,
+            f"{sort_key}.filter_profile": profile,
+        })
+        from opensak.gui.dialogs.column_dialog import _col_key  # noqa: E402
+        store.set(_col_key("visible"), spec["columns"])
 
     with get_session() as session:
         count = lambda sql: session.execute(__import__("sqlalchemy").text(sql)).scalar()  # noqa: E731

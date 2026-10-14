@@ -1,0 +1,96 @@
+{
+  "databases": {
+    "Denmark": {
+      "file": "Denmark.db",
+      "counts": {
+        "caches": 5,
+        "logs": 5,
+        "waypoints": 2,
+        "attributes": 2,
+        "trackables": 1,
+        "user_notes": 3
+      },
+      "notes": {
+        "GCFX001": "Bring a pen",
+        "GCFX002": "Final solved",
+        "GCFX003": "Kept as is"
+      },
+      "corrected": {
+        "GCFX002": [
+          55.7123,
+          12.5234
+        ]
+      },
+      "locked": [
+        "GCFX003"
+      ],
+      "flagged": [
+        "GCFX001"
+      ],
+      "db_settings": {
+        "home_lat": 55.1111,
+        "home_lon": 11.2222,
+        "sort.field": "difficulty",
+        "sort.ascending": false,
+        "sort.filter_profile": "Easy traditionals",
+        "columns.visible": [
+          "gc_code",
+          "name",
+          "difficulty",
+          "terrain"
+        ]
+      }
+    },
+    "Malta Trip": {
+      "file": "Malta Trip.db",
+      "counts": {
+        "caches": 2,
+        "logs": 1,
+        "waypoints": 1,
+        "attributes": 0,
+        "trackables": 0,
+        "user_notes": 1
+      },
+      "notes": {
+        "GCFX102": "Malta note"
+      },
+      "corrected": {
+        "GCFX102": [
+          36.0501,
+          14.2601
+        ]
+      },
+      "locked": [],
+      "flagged": [
+        "GCFX101",
+        "GCFX102"
+      ],
+      "db_settings": {
+        "home_lat": 35.8989,
+        "home_lon": 14.5146,
+        "sort.field": "name",
+        "sort.ascending": true,
+        "columns.visible": [
+          "gc_code",
+          "name",
+          "country"
+        ]
+      }
+    }
+  },
+  "profiles": [
+    "Easy traditionals",
+    "Solved mysteries"
+  ],
+  "global": {
+    "date_format": "dmy",
+    "coord_format": "dd",
+    "gc_username": "FixtureCacher",
+    "gc_finder_id": "PRFIXTURE",
+    "use_miles": true,
+    "theme": "dark"
+  },
+  "active": "Denmark",
+  "schema_version_before": 25,
+  "generated_by": "1.21.0"
+}

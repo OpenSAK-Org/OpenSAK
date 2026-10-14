@@ -1,0 +1,28 @@
+{
+  "_migrated_from_qsettings": true,
+  "databases.dir": "{ROOT}/databases",
+  "_wizard_completed": true,
+  "display.date_format": "dmy",
+  "display.coord_format": "dd",
+  "user.gc_username": "FixtureCacher",
+  "user.gc_finder_id": "PRFIXTURE",
+  "display.use_miles": true,
+  "display.theme": "dark",
+  "databases.list": [
+    {
+      "name": "Default",
+      "path": "{ROOT}/databases/Default.db"
+    },
+    {
+      "name": "Denmark",
+      "path": "{ROOT}/databases/Denmark.db"
+    },
+    {
+      "name": "Malta Trip",
+      "path": "{ROOT}/databases/Malta Trip.db"
+    }
+  ],
+  "databases.active": "{ROOT}/databases/Denmark.db",
+  "location.home_lat": 35.8989,
+  "location.home_lon": 14.5146
+}
