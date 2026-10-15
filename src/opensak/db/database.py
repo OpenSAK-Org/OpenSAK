@@ -19,13 +19,14 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterable
+from typing import Callable, Generator, Iterable, cast
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
+from opensak.db import maintenance
 from opensak.db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,32 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
 SCHEMA_VERSION = 26
+
+# Steps of opening a database that can take a while, for set_progress_callback().
+PROGRESS_MIGRATING = "migrating"
+PROGRESS_COMPACTING = "compacting"
+
+_progress_callback: Callable[[str], None] | None = None
+
+
+def set_progress_callback(callback: Callable[[str], None] | None) -> None:
+    """
+    Tell *callback* when opening a database starts a slow step:
+    PROGRESS_MIGRATING (the schema is being updated) or PROGRESS_COMPACTING
+    (VACUUM after a migration that rebuilt tables). The GUI shows it on the
+    splash screen or in a progress dialog. None removes the callback.
+    """
+    global _progress_callback
+    _progress_callback = callback
+
+
+def _report_progress(step: str) -> None:
+    if _progress_callback is None:
+        return
+    try:
+        _progress_callback(step)
+    except Exception:
+        logger.debug("progress callback failed", exc_info=True)
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -206,6 +233,7 @@ def _run_migrations(engine: Engine) -> None:
             "migrations: starting, current_version=%s target=%s",
             current_version, SCHEMA_VERSION,
         )
+        _report_progress(PROGRESS_MIGRATING)
         _mig_t0 = time.monotonic()
 
         # ── Migration 1: Tilføj is_corrected til user_notes ──────────────────
@@ -1070,6 +1098,19 @@ def _run_migrations(engine: Engine) -> None:
             SCHEMA_VERSION, time.monotonic() - _mig_t0,
         )
 
+        # ── Compact after migration 26 (#1033) ───────────────────────────────
+        # The rebuild left the old tables' pages on the free list, so the
+        # file grew by about the size of the rebuilt tables. VACUUM gives
+        # that back — after the commit, with foreign keys on again. It only
+        # runs when it pays off and the disk has room, and never raises: a
+        # database that could not be compacted is still valid, just larger.
+        if rebuilt:
+            maintenance.vacuum(
+                cast(sqlite3.Connection, conn.connection.driver_connection),
+                Path(engine.url.database or ""),
+                progress=lambda: _report_progress(PROGRESS_COMPACTING),
+            )
+
 
 # Migration 26 (#1033): the defaults models.py has as server_default, frozen
 # here so later model changes don't alter what this migration does.
@@ -1153,6 +1194,8 @@ def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]
     create_sql = conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"), {"t": table}
     ).scalar()
+    if create_sql is None:
+        raise RuntimeError(f"migration 26: no CREATE TABLE for {table}")
     for col, default in missing.items():
         # The column's definition right after "(" or ",": name (quoted or
         # not), type and an optional NOT NULL; the default goes after that,

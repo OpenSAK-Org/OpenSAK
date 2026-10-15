@@ -737,6 +737,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Použít na všechny databáze ({count})",
     "premigration_apply_all_progress": "Zálohování a aktualizace databází…",
     "premigration_apply_all_progress_db": "Zálohování a aktualizace '{name}'…",
+    "db_progress_migrating": "Aktualizace databáze…",
+    "db_progress_compacting": "Komprimace databáze, může to trvat minutu…",
     "premigration_apply_all_done": "Aktualizováno databází: {count}.",
     "premigration_apply_all_backups": "Kopie byly uloženy sem:",
     "premigration_apply_all_failed": "Tyto databáze se nepodařilo aktualizovat:",

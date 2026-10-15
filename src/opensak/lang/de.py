@@ -738,6 +738,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Auf alle Datenbanken anwenden ({count})",
     "premigration_apply_all_progress": "Datenbanken werden gesichert und aktualisiert…",
     "premigration_apply_all_progress_db": "'{name}' wird gesichert und aktualisiert…",
+    "db_progress_migrating": "Datenbank wird aktualisiert…",
+    "db_progress_compacting": "Datenbank wird komprimiert, das kann eine Minute dauern…",
     "premigration_apply_all_done": "{count} Datenbank(en) wurden aktualisiert.",
     "premigration_apply_all_backups": "Kopien wurden hier gespeichert:",
     "premigration_apply_all_failed": "Diese Datenbanken konnten nicht aktualisiert werden:",
