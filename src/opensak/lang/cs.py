@@ -288,6 +288,7 @@ STRINGS: dict[str, str] = {
     "action_gsak_import":           "&Importovat z databáze GSAK…",
     "gsak_import_dialog_title":     "Import z databáze GSAK",
     "gsak_import_select_file_label": "Vyberte zálohu GSAK (.zip) nebo soubor databáze (.db3):",
+    "gsak_import_intro": "Záloha GSAK (.zip) zobrazí všechny databáze, které obsahuje, a nabídne také import uložených filtrů a uživatelských míst z jejího gsak.db3. Jednotlivý soubor databáze (sqlite.db3) importuje pouze tuto databázi; filtry a místa se nabídnou také, pokud se v příslušné složce GSAK najde gsak.db3. Pokud zvolíte samotný gsak.db3, neimportují se žádné keše, pouze uložené filtry a uživatelská místa.",
     "gsak_import_browse_title":     "Vybrat zálohu nebo soubor GSAK",
     "gsak_import_file_filter":      "Záloha nebo databáze GSAK (*.zip *.db3);;Všechny soubory (*)",
     "gsak_import_extracting":       "Rozbaluji {name}…",
@@ -1703,7 +1704,6 @@ STRINGS: dict[str, str] = {
     "file_locations_kind_appimage_icon": "Ikona v nabídce aplikací",
 
     # ── GSAK filter import ────────────────────────────────────────────────────
-    "action_gsak_filter_import":             "Importovat &filtry z GSAK…",
     "gsak_filter_import_dialog_title":       "Import filtrů z GSAK",
     "gsak_filter_import_select_file_label":  "Vyberte databázi nastavení GSAK (gsak.db3) nebo zálohu (.zip):",
     "gsak_filter_import_browse_title":       "Vybrat gsak.db3",

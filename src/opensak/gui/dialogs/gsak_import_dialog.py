@@ -263,6 +263,12 @@ class GsakImportDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
+        # What each kind of file brings in: backup, single sqlite.db3, gsak.db3.
+        intro = QLabel(tr("gsak_import_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style(font_size=None))
+        layout.addWidget(intro)
+
         file_lbl = QLabel(tr("gsak_import_select_file_label"))
         layout.addWidget(file_lbl)
 

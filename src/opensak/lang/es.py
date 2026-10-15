@@ -290,6 +290,7 @@ STRINGS: dict[str, str] = {
     "action_gsak_import":           "&Importar desde base de datos GSAK…",
     "gsak_import_dialog_title":     "Importar desde base de datos GSAK",
     "gsak_import_select_file_label": "Selecciona una copia de seguridad de GSAK (.zip) o un archivo de base de datos (.db3):",
+    "gsak_import_intro": "Una copia de seguridad de GSAK (.zip) muestra todas las bases de datos que contiene y ofrece además importar los filtros guardados y las ubicaciones de usuario de su gsak.db3. Un único archivo de base de datos (sqlite.db3) importa solo esa base de datos; sus filtros y ubicaciones también se ofrecen si se encuentra gsak.db3 en la carpeta de GSAK a la que pertenece. Si eliges el propio gsak.db3, no se importa ningún caché, solo los filtros guardados y las ubicaciones de usuario.",
     "gsak_import_browse_title":     "Seleccionar copia de seguridad o base de datos de GSAK",
     "gsak_import_file_filter":      "Copia de seguridad o base de datos de GSAK (*.zip *.db3);;Todos los archivos (*)",
     "gsak_import_extracting":       "Extrayendo {name}…",
@@ -1708,7 +1709,6 @@ STRINGS: dict[str, str] = {
     "file_locations_kind_appimage_icon": "Icono del menú de aplicaciones",
 
     # ── GSAK filter import ────────────────────────────────────────────────────
-    "action_gsak_filter_import":             "Importar &filtros de GSAK…",
     "gsak_filter_import_dialog_title":       "Importar filtros de GSAK",
     "gsak_filter_import_select_file_label":  "Elige la base de configuración de GSAK (gsak.db3) o una copia (.zip):",
     "gsak_filter_import_browse_title":       "Elegir gsak.db3",
