@@ -4,6 +4,104 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.2] — 2026-10-15
+
+> Headline: **export Garmin POI files (GPI)** straight from OpenSAK, and
+> the **Coordinate Converter now reads and writes eleven more formats** —
+> UTM, MGRS, the Swiss, Dutch, British, Swedish and German grids, Plus
+> Codes, Geohash and Maidenhead. Beta testers also get a big step for
+> macros: run them from your own editor, chain them, and let them remember
+> their settings.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Export Garmin POI files (#455)** — **File → Export Garmin POI (GPI)…**
+  writes a `.gpi` file you copy to the `Garmin/POI` folder of your GPS,
+  modelled on GSAK's Garmin POI dialog. Export caches, child waypoints or
+  both (all, flagged or unflagged), with templates for name, description
+  and extra text using `{variables}`, a category, a proximity alert, your
+  own BMP/PNG icon, a maximum number of points, and optionally one file
+  per waypoint type. Settings can be saved under a name, like the file
+  export. Contributed by nagisml.
+- **Coordinate Converter: grid and code formats** — besides the latitude/
+  longitude formats, the converter now shows UTM, MGRS, Swiss CH1903 and
+  CH1903+/LV95, Dutch RD, British National Grid (OSGB), SWEREF 99 TM,
+  German Gauss-Krüger, Plus Code (Open Location Code), Geohash and
+  Maidenhead, and reads all of them as input too. The input format is
+  detected automatically and shown; a national grid stays blank for
+  positions outside its country. Contributed by nagisml.
+
+### In beta builds only
+
+- **Run a macro from your own editor (#1013)** — `opensak --run-macro
+  path/to/macro.lua` sends a macro to the OpenSAK that is already open and
+  waits for it, so you can write macros in VS Code, Notepad++, UltraEdit
+  or IntelliJ and run them with a key there. Output and errors (with file
+  and line) appear in the editor. See `docs/macros/run-from-editor.md`.
+  Only one macro runs at a time. Contributed by nagisml.
+- **Macros remember their settings (#983)** — `opensak.settings.load()`,
+  `save()` and `clear()` keep a macro's options until the next run, like
+  GSAK's MacSettings. Each macro has its own settings, which other macros
+  can't read. New example macro *new_since_last_run*. Contributed by
+  nagisml.
+- **Macros can start other macros (#1039)** — `opensak.run_macro()` runs
+  another macro and waits for it, like GSAK's MACRO command. Each macro
+  keeps its own variables and settings; values are passed as arguments
+  and return values. Contributed by nagisml.
+- **More macro functions** — `opensak.exit()` and `opensak.log()`;
+  `opensak.export_poi()` for the new POI export; and the coordinate
+  functions accept and produce every format of the Coordinate Converter.
+  Errors now name the macro line they came from. The macro API is now
+  **version 3** (`opensak.api_version()`). Contributed by nagisml.
+- **Simpler example macros** — the examples no longer check the API
+  version first. Contributed by nagisml.
+
+### For developers
+
+- **Macro API docs are generated in CI (#1057)** — feature branches no
+  longer commit `docs/macros/api.md` or `macros/types/`; after a merge to
+  `beta`, the *Macro API docs* workflow regenerates them and opens one
+  rolling PR. `python scripts/generate_macro_api_docs.py --check` tells you
+  whether they are current. Contributed by nagisml.
+
+---
+
+## [1.22.0-beta.1] — 2026-10-14
+
+> First beta of the 1.22.0 cycle. Headline: **bring your GSAK user
+> locations along** when you import from GSAK, and the **macro editor
+> notices when a macro is changed in another editor**.
+
+### Added
+
+- **GSAK import: user locations (#1001)** — when a GSAK backup contains
+  `gsak.db3`, the import offers **Also import the GSAK user locations**.
+  A preview lists every location with its status; invalid lines (missing
+  name, unreadable coordinates, duplicates) are shown with the reason and
+  skipped, and for names you already have you choose Overwrite or Skip.
+  Coordinates with decimal commas are understood. Any spelling of "Home"
+  is treated as OpenSAK's own ★ Home and not imported twice. Contributed by
+  nagisml.
+
+### Changed
+
+- **Centre-location lists are sorted** — the centre-location drop-downs in
+  the toolbar and the filter's centre-point picker list ★ Home first, then
+  your locations A–Z, ignoring case and accents.
+
+### In beta builds only
+
+- **Macro editor: changes made in another editor (#1014)** — when the open
+  macro is changed on disk, the editor reloads it if you have no unsaved
+  edits, or asks **Reload / Keep mine** if you do. A deleted or renamed file
+  can be saved again, and Save and Run never silently overwrite a newer
+  file on disk. Contributed by nagisml.
+
+---
+
 ## [1.21.0] — 2026-10-14
 
 > First stable release of the 1.21.0 cycle. Replaces the `1.21.0-beta.1`
