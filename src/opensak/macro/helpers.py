@@ -20,10 +20,8 @@ import unicodedata
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-from opensak.geodesy import format_ch1903, format_utm
-from opensak.coords import format_coords
+from opensak.coord_formats import SYSTEMS, format_as, normalize_key
 from opensak.macro.errors import MacroError
-from opensak.utils.types import CoordFormat
 
 # Upper bound for one regex call — enough for any sane pattern on a cache
 # description, short enough that a catastrophic pattern only stalls briefly.
@@ -271,28 +269,18 @@ def date_format(t: Any, fmt: Any = None) -> str:
 # ── Coordinate formats ───────────────────────────────────────────────────────
 
 
-COORD_FORMATS = ("dmm", "dms", "dd", "utm", "ch1903", "ch1903+")
+COORD_FORMATS = tuple(SYSTEMS)
 
 
 def format_coordinate(lat: float, lon: float, fmt: Any = None) -> str:
     func = "opensak.coords.format"
-    key = "dmm" if fmt is None else str(fmt).strip().lower()
+    key = "dmm" if fmt is None else str(fmt)
+    if normalize_key(key) in (None, "latlon"):
+        raise MacroError(f"{func}: unknown format {fmt!r}; valid: {', '.join(COORD_FORMATS)}")
     try:
-        if key == "dmm":
-            return format_coords(lat, lon, CoordFormat.DMM)
-        if key == "dms":
-            return format_coords(lat, lon, CoordFormat.DMS)
-        if key == "dd":
-            return format_coords(lat, lon, CoordFormat.DD)
-        if key == "utm":
-            return format_utm(lat, lon)
-        if key in ("ch1903", "lv03"):
-            return format_ch1903(lat, lon)
-        if key in ("ch1903+", "lv95"):
-            return format_ch1903(lat, lon, lv95=True)
+        return format_as(lat, lon, key)
     except ValueError as exc:
         raise MacroError(f"{func}: {exc}") from None
-    raise MacroError(f"{func}: unknown format {fmt!r}; valid: {', '.join(COORD_FORMATS)}")
 
 
 # ── Lua values ───────────────────────────────────────────────────────────────

@@ -56,6 +56,8 @@ def test_api_entry_is_complete(func):
     assert func.signatures and all(s.startswith(f"opensak.{func.name}") for s in func.signatures)
     assert func.description.strip() and func.example.strip()
     assert 1 <= func.since <= API_VERSION
+    for version, what in func.changed:
+        assert func.since < version <= API_VERSION and what.strip()
     for p in (*func.params, *(q for form in func.overloads for q in form)):
         assert p.name and p.type and p.description.strip(), p
     if func.returns:

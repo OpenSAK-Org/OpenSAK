@@ -51,8 +51,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.sleep`](#opensaksleep) | 2 |
 | [`opensak.log`](#opensaklog) | 3 |
 | [`opensak.exit`](#opensakexit) | 3 |
-| [`opensak.coords.parse`](#opensakcoordsparse) | 2 |
-| [`opensak.coords.format`](#opensakcoordsformat) | 2 |
+| [`opensak.coords.parse`](#opensakcoordsparse) | 2, changed in 3 |
+| [`opensak.coords.format`](#opensakcoordsformat) | 2, changed in 3 |
 | [`opensak.coords.distance`](#opensakcoordsdistance) | 2 |
 | [`opensak.coords.bearing`](#opensakcoordsbearing) | 2 |
 | [`opensak.coords.project`](#opensakcoordsproject) | 2 |
@@ -937,24 +937,28 @@ end
 ### opensak.coords.parse
 
 ```lua
-opensak.coords.parse(text)
+opensak.coords.parse(text [, fmt])
 ```
 
-Parse a coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+Parse a coordinate string. Without `fmt` the format is detected: latitude/longitude (DMM, DMS, decimal degrees), UTM, MGRS, British grid letters ("TQ 30268 79642"), Plus Codes, Maidenhead locators, geohashes (5+ characters mixing letters and digits) and the Swiss, Dutch, Swedish and German grids as number pairs, which are only accepted inside their country. Pass `fmt` to read one format only — needed for numeric British grid positions, short geohashes and to rule out a wrong guess. Formats: `"latlon"`, `"utm"`, `"mgrs"`, `"ch1903"`, `"rd"`, `"osgb"`, `"sweref99"`, `"gk"`, `"olc"`, `"geohash"`, `"maidenhead"` (`"latlon"` covers DD, DMM and DMS; every name `opensak.coords.format` takes works too).
 
 Parameters:
 
 - `text` (`string`) — The coordinates.
+- `fmt` (`string`, optional) — Read only this format; detect it if omitted.
 
-Returns `number?, number?` — Latitude and longitude, or nil if the text cannot be parsed.
+Returns `number?, number?, string?` — Latitude, longitude and the format that was read, or nil if the text cannot be parsed.
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added `fmt`, the third return value and the grid, code and locator formats.
 
 Example:
 
 ```lua
 local lat, lon = opensak.coords.parse("N47 22.123 E008 32.456")
 if not lat then error("not a coordinate") end
+local lat2, lon2, fmt = opensak.coords.parse("32T MT 65339 46242")
+print(fmt)  -- mgrs
+print(opensak.coords.parse("530268 179642", "osgb"))
 ```
 
 ### opensak.coords.format
@@ -964,7 +968,7 @@ opensak.coords.format(lat, lon [, fmt])
 opensak.coords.format(coords [, fmt])
 ```
 
-Format coordinates. Formats: `"dmm"` (default), `"dms"`, `"dd"`, `"utm"`, `"ch1903"` (Swiss LV03) and `"ch1903+"` (Swiss LV95). The Swiss formats are only meaningful in and around Switzerland.
+Format coordinates. Formats: `"dmm"` (default), `"dms"`, `"dd"`, `"utm"`, `"mgrs"`, `"ch1903"` (Swiss LV03), `"ch1903+"` (Swiss LV95), `"rd"` (Dutch RD), `"osgb"` (British National Grid), `"sweref99"` (SWEREF 99 TM), `"gk"` (German Gauss-Krüger), `"olc"` (Plus Code), `"geohash"` and `"maidenhead"`. Aliases: `"lv03"`, `"lv95"`, `"bng"`, `"sweref"`, `"gauss-krueger"`, `"pluscode"`, `"qth"`. The national grids are only meaningful in and around their country; `"osgb"` and `"utm"` raise an error where they are not defined.
 
 Parameters:
 
@@ -975,13 +979,14 @@ Parameters:
 
 Returns `string` — E.g. "N47 22.123  E008 32.456" or "32T E 465123 N 5247123".
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added `"mgrs"`, `"rd"`, `"osgb"`, `"sweref99"`, `"gk"`, `"olc"`, `"geohash"`, `"maidenhead"` and the aliases.
 
 Example:
 
 ```lua
 print(opensak.coords.format(47.36872, 8.54093, "utm"))
 print(opensak.coords.format("N47 22.123 E008 32.456", "ch1903"))
+print(opensak.coords.format(51.50072, -0.12462, "osgb"))
 ```
 
 ### opensak.coords.distance
