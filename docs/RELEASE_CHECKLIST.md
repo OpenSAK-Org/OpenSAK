@@ -71,6 +71,10 @@ merge in §3, so they ship with the release.
       `docs/` is linked), download/install wording
 - [ ] `site/user-guide.html` — all new/changed features covered, no leftover
       `beta.N` labels, screenshots refreshed (latest screenshots auto-PR merged)
+- [ ] Macro API docs current — no open `docs: regenerate macro API docs` PR
+      (branch `bot/macro-api-docs`, opened by `macro-api-docs.yml`); merge it
+      if there is one. `python scripts/generate_macro_api_docs.py --check`
+      exits 0 on `beta`
 - [ ] `site/index.html` — feature list, language count, download section
       (Microsoft Store first on Windows), `<meta name="description">`
 - [ ] `docs/ROADMAP.md` — status note per item and the "Last updated" date
