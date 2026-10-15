@@ -4,6 +4,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.3] — 2026-10-15
+
+> Headline: a **database update** — the first start after upgrading
+> updates each database to schema 26 and then compacts it. Beta testers
+> can also now write macros in **Notepad++ or UltraEdit** with
+> auto-completion for the OpenSAK functions.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Changed
+
+- **Database update to schema 26 (#1033)** — required columns now also
+  have their default value stored in the database itself, not only in
+  OpenSAK's code, so a plain SQL `INSERT` only needs the real data. The
+  update rebuilds the main tables in one transaction (a failure leaves
+  the old schema untouched) and then compacts the database to give the
+  space back. On a large database this takes up to a minute; the splash
+  screen and **Apply to all databases** show what is happening. While it
+  runs, the database temporarily needs about 2½ times its size in free
+  disk space. As always, a backup copy is taken before the update.
+  Contributed by nagisml.
+
+### In beta builds only
+
+- **Macro editor support for Notepad++ and UltraEdit** — next to the
+  VS Code / Lua Language Server stub, OpenSAK now writes a Notepad++
+  auto-completion file and an UltraEdit wordfile for the macro API and
+  the standard Lua functions into `<macros>/types/` on every start.
+  Contributed by nagisml.
+
+### For developers
+
+- **Stable e2e tests** — the macro-server tests now delete their Qt
+  objects on the GUI thread, which fixes a rare `Fatal Python error:
+  Aborted` crash in full e2e runs. Contributed by nagisml.
+- **Tip:** use `xvfb-run -a` when running the e2e suite several times in a
+  row; without `-a`, the next run can fail with "Xvfb failed to start"
+  because the previous server still holds display `:99`.
+
+---
+
 ## [1.22.0-beta.2] — 2026-10-15
 
 > Headline: **export Garmin POI files (GPI)** straight from OpenSAK, and
