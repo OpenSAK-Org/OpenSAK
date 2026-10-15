@@ -8,6 +8,11 @@ scripts/generate_macro_api_docs.py; never edit them by hand:
   * macros/types/opensak.lua  — a ---@meta stub for the Lua Language Server,
                                 giving autocompletion and inline docs in
                                 VS Code while writing macros
+
+Feature branches don't commit them: .github/workflows/macro-api-docs.yml
+regenerates both after every merge to beta and opens a PR. The output must
+therefore be deterministic — no timestamps, no ordering that depends on the
+OS, hash seed or working directory — or that workflow opens noise PRs.
 """
 
 from __future__ import annotations
@@ -58,7 +63,9 @@ def _examples_section(examples_dir: Path) -> list[str]:
         "does and which files it expects.",
         "",
     ]
-    for path in sorted(examples_dir.glob("*.lua")):
+    # By name, not by Path: Windows paths sort case-insensitively, and the
+    # output must be the same on every OS.
+    for path in sorted(examples_dir.glob("*.lua"), key=lambda p: p.name):
         summary = _example_summary(path)
         entry = f"- [`{path.name}`]({_EXAMPLES_LINK}/{path.name})"
         lines.append(f"{entry} — {summary}" if summary else entry)
@@ -336,3 +343,13 @@ def render_lua_stub() -> str:
         lines.append(f"function opensak.{func.name}({args}) end")
     lines.append("")
     return "\n".join(lines)
+
+
+# (file, renderer) for everything scripts/generate_macro_api_docs.py writes.
+# The Macro API docs workflow commits these paths (add-paths in
+# .github/workflows/macro-api-docs.yml); a new generated file must live under
+# one of them (docs/macros/api.md or macros/types/).
+GENERATED_FILES = (
+    (DOC_PATH, render_api_markdown),
+    (STUB_PATH, render_lua_stub),
+)

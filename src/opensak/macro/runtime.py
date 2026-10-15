@@ -10,7 +10,9 @@ The Lua API is defined once, in API and FILTER_KEY_DOCS below: run() builds
 the `opensak` table from API, and docs/macros/api.md plus the Lua Language
 Server stub macros/types/opensak.lua are generated from both
 (python scripts/generate_macro_api_docs.py). test_macro_api_docs fails when
-a function is exposed without documentation or a generated file is stale.
+a function is exposed without documentation. The generated files are not
+committed on feature branches; the Macro API docs workflow regenerates them
+after the merge to beta.
 
 Known limitation (#938 step 4): the instruction limit only counts Lua VM
 instructions, not work inside C functions. Lua pattern matching backtracks
@@ -2119,8 +2121,9 @@ class MacroRuntime:
 # Single source of truth for the `opensak` table. To add a function: add an
 # ApiFunction here (bump API_VERSION and use it as `since` if the release
 # already shipped the current version; for a changed function add the new
-# version to `changed` instead), then regenerate the docs and the
-# Lua Language Server stub with
+# version to `changed` instead). Don't commit the regenerated docs and
+# Lua Language Server stub — the Macro API docs workflow does that after the
+# merge to beta. Regenerate them locally for editor completion with
 #   python scripts/generate_macro_api_docs.py
 
 # Raised whenever functions are added or changed in a released build, so
