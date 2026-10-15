@@ -181,9 +181,9 @@ def _old_db_with_free_pages(path: Path):
     metadata = MetaData()
     for table in Base.metadata.sorted_tables:
         table.to_metadata(metadata)
-    for table, defaults in database._COLUMN_DEFAULTS_26.items():
+    for name, defaults in database._COLUMN_DEFAULTS_26.items():
         for col in defaults:
-            metadata.tables[table].c[col].server_default = None
+            metadata.tables[name].c[col].server_default = None
     engine = _make_engine(path)
     metadata.create_all(engine)
     with engine.connect() as c:
