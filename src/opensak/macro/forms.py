@@ -6,7 +6,7 @@ table into a Form (fields, buttons, callbacks) and converts values between
 Lua and the form. It knows nothing about Qt: the host builds the dialog
 (gui/dialogs/macro_form.py) and reports what the user does through a
 FormController and an event function, so the runtime can be tested with a
-fake host.
+fake host and the form designer can reuse the same validation.
 
 Two layouts:
   * "auto" (default): fields are stacked top to bottom, with their label in

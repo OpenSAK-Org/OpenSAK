@@ -3263,7 +3263,8 @@ API: tuple[ApiFunction, ...] = (
                     "table keyed by their `id`. Callbacks such as `on_change` "
                     "run while the form stays open and can change it through "
                     "the handle they get. Without `buttons` the form has OK "
-                    "and Cancel.",
+                    "and Cancel. Tools → Form designer in the macro window "
+                    "builds forms visually and imports GSAK forms.",
         example='local v, button = opensak.form{\n'
                 '  title = "Export settings",\n'
                 '  remember = true,\n'

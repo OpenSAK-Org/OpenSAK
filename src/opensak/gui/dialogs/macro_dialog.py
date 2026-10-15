@@ -6,7 +6,8 @@ A small editor for writing and maintaining macros: New / Open / Open recent
 Run and Save & Run, and the Lua API reference (F1). The window title shows
 the file name and a "*" for unsaved changes; closing, opening or starting a
 new macro asks before discarding them. When a run fails, the line named in
-the Lua error is highlighted.
+the Lua error is highlighted. Tools → Form designer edits the
+opensak.form{} table at the cursor, or inserts a new one.
 
 The open file is watched: a change made outside OpenSAK is reloaded when
 the editor has no unsaved changes, and otherwise the user chooses between
@@ -162,6 +163,8 @@ class MacroDialog(QDialog):
         self._act_save_run = self._action(tr("macro_act_save_run"), self._save_and_run, "Ctrl+F5")
         self._act_help = self._action(tr("macro_act_help"), self._show_help, "F1",
                                       sp.SP_DialogHelpButton)
+        self._act_designer = self._action(tr("macro_act_form_designer"),
+                                          self._open_form_designer, "Ctrl+Shift+D")
 
         self._recent_menu = QMenu(tr("macro_act_recent"), self)
         self._recent_menu.aboutToShow.connect(self._fill_recent_menu)
@@ -184,6 +187,8 @@ class MacroDialog(QDialog):
         edit_menu.addActions([act_goto, act_comment])
         run_menu = menubar.addMenu(tr("macro_menu_run"))
         run_menu.addActions([self._act_run, self._act_save_run])
+        tools_menu = menubar.addMenu(tr("macro_menu_tools"))
+        tools_menu.addAction(self._act_designer)
         help_menu = menubar.addMenu(tr("macro_menu_help"))
         help_menu.addAction(self._act_help)
 
@@ -532,6 +537,53 @@ class MacroDialog(QDialog):
         if self._save():
             self._run()
 
+    # -- Form designer ---------------------------------------------------------
+
+    def _open_form_designer(self) -> None:
+        """Edit the opensak.form{} table around the cursor in the designer,
+        or design a new form and insert it at the cursor."""
+        from opensak.gui.dialogs.form_designer import FormDesigner
+        from opensak.macro.form_code import LuaSyntaxError, find_form_table, parse_table
+
+        text = self._editor.toPlainText()
+        cursor = self._editor.textCursor()
+        span = find_form_table(text, _text_index(text, cursor.position()))
+        model = None
+        if span is not None:
+            try:
+                model = parse_table(text[span[0]:span[1]])
+            except LuaSyntaxError as exc:
+                QMessageBox.warning(self, tr("designer_title"),
+                                    tr("designer_parse_error", msg=str(exc)))
+                return
+        designer = FormDesigner(model, self, updating=span is not None)
+        if designer.exec() != QDialog.DialogCode.Accepted:
+            return
+        edit = QTextCursor(self._editor.document())
+        if span is not None:
+            line_start = text.rfind("\n", 0, span[0]) + 1
+            line = text[line_start:span[0]]
+            indent = line[:len(line) - len(line.lstrip())]
+            edit.setPosition(_qt_position(text, span[0]))
+            edit.setPosition(_qt_position(text, span[1]), QTextCursor.MoveMode.KeepAnchor)
+            edit.insertText(designer.lua(indent))
+        else:
+            block = cursor.block()
+            line = block.text()
+            indent = line[:len(line) - len(line.lstrip())]
+            code = (f"{indent}local values, button = opensak.form{designer.lua(indent)}\n"
+                    f"{indent}if not values then return end  -- cancelled")
+            end = block.position() + block.length() - 1
+            if line.strip():
+                edit.setPosition(end)  # on a new line after the current one
+                code = "\n" + code
+            else:
+                edit.setPosition(block.position())  # replaces the blank line
+                edit.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            edit.insertText(code)
+        self._editor.setTextCursor(edit)
+        self._editor.setFocus()
+
     # -- Help ------------------------------------------------------------------
 
     def _show_help(self) -> None:
@@ -602,6 +654,16 @@ class MacroDialog(QDialog):
             event.accept()
         else:
             event.ignore()
+
+
+def _qt_position(text: str, index: int) -> int:
+    """Qt document position (UTF-16 units) of the str index *index*."""
+    return len(text[:index].encode("utf-16-le")) // 2
+
+
+def _text_index(text: str, position: int) -> int:
+    """str index of the Qt document position *position*."""
+    return len(text.encode("utf-16-le")[:position * 2].decode("utf-16-le", errors="ignore"))
 
 
 def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> FolderApproval:
