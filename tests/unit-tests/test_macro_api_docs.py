@@ -1,5 +1,5 @@
 """The Lua API registry and the `opensak` table must agree, and the generated
-files (docs/macros/api.md, macros/types/opensak.lua) must render.
+files (docs/macros/api.md and the editor files in macros/types) must render.
 
 Whether the committed files are up to date is deliberately not tested:
 feature branches don't commit them, the Macro API docs workflow
@@ -7,6 +7,7 @@ feature branches don't commit them, the Macro API docs workflow
 beta. Check locally with: python scripts/generate_macro_api_docs.py --check
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -14,8 +15,12 @@ import pytest
 from opensak.macro.api_docs import (
     EXAMPLES_DIR,
     GENERATED_FILES,
+    LUA_GLOBALS,
+    LUA_LIBRARIES,
     render_api_markdown,
     render_lua_stub,
+    render_npp_autocomplete,
+    render_ultraedit_wordfile,
 )
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/macro-api-docs.yml"
@@ -90,7 +95,9 @@ def test_api_markdown_lists_every_example(tmp_path):
         (tmp_path / name).write_text(f"-- {name} — does {name[0]}\n", encoding="utf-8")
     md = render_api_markdown(tmp_path)
     assert md == render_api_markdown(tmp_path)
-    entries = [line for line in md.splitlines() if line.startswith("- [`") and ".lua`]" in line]
+    # Only the "Example macros" section: "Editor support" links .lua files too
+    section = md.split("\n## Example macros\n", 1)[1].split("\n## ", 1)[0]
+    entries = [line for line in section.splitlines() if line.startswith("- [`") and ".lua`]" in line]
     assert [e.split("`")[1] for e in entries] == ["C_third.lua", "a_first.lua", "b_second.lua"]
     assert all(EXAMPLES_DIR.as_posix() in e for e in entries)
 
@@ -121,3 +128,91 @@ def test_lua_stub_compiles():
     from lupa.lua54 import LuaRuntime
 
     LuaRuntime().compile(render_lua_stub())
+
+
+def test_lua_globals_match_the_sandbox():
+    """The Notepad++/UltraEdit word lists offer exactly what a macro can use."""
+    out: list[str] = []
+    MacroRuntime(_Host(), output=out.append).run(  # type: ignore[arg-type]
+        "for name, value in pairs(_G) do\n"
+        "  if name == 'opensak' then\n"
+        "  elseif type(value) == 'table' and name ~= '_G' then\n"
+        "    for sub in pairs(value) do print(name .. '.' .. sub) end\n"
+        "  else print(name) end\n"
+        "end")
+    libraries = {name.partition(".")[0] for name in out if "." in name}
+    assert sorted(out) == sorted(LUA_GLOBALS)
+    assert libraries == set(LUA_LIBRARIES)
+
+
+def test_npp_autocomplete_is_valid_and_sorted():
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(render_npp_autocomplete())
+    words = [kw.get("name") for kw in root.iter("KeyWord")]
+    # Notepad++ looks the words up by binary search
+    assert words == sorted(words) and len(words) == len(set(words))
+    assert {f"opensak.{f.name}" for f in API} <= set(words)
+    distance = root.find(".//KeyWord[@name='opensak.coords.distance']")
+    assert distance is not None and distance.get("func") == "yes"
+    forms = distance.findall("Overload")
+    assert [len(form.findall("Param")) for form in forms] == [4, 2]
+    assert forms[0].get("retVal") == "number"
+    assert "\n" in forms[0].get("descr")
+
+
+def test_ultraedit_wordfile_groups_are_sorted():
+    text = render_ultraedit_wordfile()
+    assert text.isascii()
+    assert text.startswith('/L20"Lua (OpenSAK)"')
+    groups: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        if re.match(r'/C\d"', line):
+            current = groups.setdefault(line, [])
+        elif not line.startswith("/") and line:
+            words = line.split()
+            # one line per first letter
+            assert {w[0] for w in words} == {words[0][0]}
+            current += words
+    assert list(groups) == ['/C1"Keywords"', '/C2"Lua functions"', '/C3"OpenSAK"']
+    for words in groups.values():
+        assert words == sorted(words)
+    assert {f"opensak.{f.name}" for f in API} <= set(groups['/C3"OpenSAK"'])
+    assert "string.format" in groups['/C2"Lua functions"']
+
+
+def test_every_standard_function_has_a_signature():
+    """Notepad++ shows calltips for the standard functions from lua_stdlib;
+    constants (math.pi, utf8.charpattern, ...) have none."""
+    from opensak.macro.lua_stdlib import LUA_FUNCTIONS
+
+    out: list[str] = []
+    MacroRuntime(_Host(), output=out.append).run(  # type: ignore[arg-type]
+        "for name, value in pairs(_G) do\n"
+        "  if name == 'opensak' or name == '_G' then\n"
+        "  elseif type(value) == 'table' then\n"
+        "    for sub, v in pairs(value) do\n"
+        "      if type(v) == 'function' then print(name .. '.' .. sub) end\n"
+        "    end\n"
+        "  elseif type(value) == 'function' then print(name) end\n"
+        "end")
+    names = [f.name for f in LUA_FUNCTIONS]
+    assert len(names) == len(set(names))
+    # print is OpenSAK's own (a Python callable, not a Lua function)
+    assert sorted(names) == sorted({*out, "print"})
+    for func in LUA_FUNCTIONS:
+        assert func.description.strip()
+        for p in (*func.params, *(q for form in func.overloads for q in form)):
+            assert p.name and p.type, (func.name, p)
+
+
+def test_npp_standard_function_calltip():
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(render_npp_autocomplete())
+    fmt = root.find(".//KeyWord[@name='string.format']")
+    assert fmt is not None and fmt.get("func") == "yes"
+    form = fmt.find("Overload")
+    assert form.get("retVal") == "string"
+    assert [p.get("name") for p in form.findall("Param")] == ["fmt: string", "...: any"]
+    assert root.find(".//KeyWord[@name='math.pi']").get("func") is None
