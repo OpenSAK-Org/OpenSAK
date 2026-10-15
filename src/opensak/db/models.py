@@ -30,8 +30,19 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# Database-side defaults (issue #1033). Every NOT NULL column with a Python
+# default= also gets a server_default with the same value, so a plain SQL
+# INSERT only has to list the real data. Migration 26 adds the same defaults
+# to existing databases; test_server_defaults.py enforces the rule.
+_SQL_FALSE = text("0")
+_SQL_TRUE = text("1")
+# Current UTC time in the format SQLAlchemy stores DateTime columns in
+# (YYYY-MM-DD HH:MM:SS.ffffff); SQLite's %f only has milliseconds.
+_SQL_NOW = text("(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000')")
 
 
 # ── Base ─────────────────────────────────────────────────────────────────────
@@ -75,15 +86,15 @@ class Cache(Base):
     last_updated: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     # Status flags
-    available: Mapped[bool] = mapped_column(Boolean, default=True)
-    archived: Mapped[bool] = mapped_column(Boolean, default=False)
-    premium_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    available: Mapped[bool] = mapped_column(Boolean, default=True, server_default=_SQL_TRUE)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
+    premium_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
 
     # Cache content
     short_description: Mapped[Optional[str]] = mapped_column(Text)
-    short_desc_html: Mapped[bool] = mapped_column(Boolean, default=False)
+    short_desc_html: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
     long_description: Mapped[Optional[str]] = mapped_column(Text)
-    long_desc_html: Mapped[bool] = mapped_column(Boolean, default=False)
+    long_desc_html: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
     encoded_hints: Mapped[Optional[str]] = mapped_column(Text)
 
     # Country / state / county
@@ -92,18 +103,18 @@ class Cache(Base):
     county: Mapped[Optional[str]] = mapped_column(String(64))
 
     # Personal data (per user)
-    found: Mapped[bool] = mapped_column(Boolean, default=False)
+    found: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
     found_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    dnf: Mapped[bool] = mapped_column(Boolean, default=False)   # Did Not Find
+    dnf: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)   # Did Not Find
 
     # ── Issue #33: GSAK-compatible user fields ────────────────────────────────
 
     # Derived from logs on import
     dnf_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    first_to_find: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_to_find: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
 
     # Personal flags / sorting
-    user_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_flag: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
     user_sort: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     # Four free-text user data fields (same as GSAK UserData1–4)
@@ -144,7 +155,9 @@ class Cache(Base):
     guid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Watchlist status.
-    watch: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    watch: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
 
     # GC.com's internal numeric cache ID (CacheId in GSAK).
     gc_cache_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -162,14 +175,18 @@ class Cache(Base):
     # Number of logs in this cache, cached as a column so the UI can display
     # the count without loading the logs relationship (which the grid
     # doesn't load, for performance). Updated automatically on import in _upsert_cache().
-    log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    log_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=_SQL_FALSE, nullable=False
+    )
 
     # ── Issue #489/#491: Cached trackable count ──────────────────────────────
     # Number of trackables (travel bugs / geocoins) in this cache, cached as
     # a column so the "Trackables" table column can display the count
     # without loading the trackables relationship for every row (mirrors
     # log_count above). Updated automatically on import in _upsert_cache().
-    trackable_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    trackable_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=_SQL_FALSE, nullable=False
+    )
 
     # ── Issue #552: Cached count of the CURRENT USER's own found-type logs ──
     # `found` above is a boolean ("have I found this cache at least once"),
@@ -181,7 +198,9 @@ class Cache(Base):
     # gc_username), so a cache found N times by the user contributes N here.
     # Cached as a column for the same not-loaded-for-performance reason as
     # log_count/trackable_count above.
-    found_log_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    found_log_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=_SQL_FALSE, nullable=False
+    )
 
     # ── Issue #186: Cached latest log date ───────────────────────────────────
     # Date of the most recent log entry, cached so the UI can display it
@@ -192,7 +211,9 @@ class Cache(Base):
     # Number of child waypoints (parking, stages, etc.), cached so the grid
     # can show a visual cue without loading the (unloaded) waypoints relation.
     # Updated on import in _insert_extra_wpts() and _link_extra_waypoints().
-    waypoint_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    waypoint_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=_SQL_FALSE, nullable=False
+    )
 
     # Custom waypoint link (issue #141)
     # For CW... entries: optionally links to a parent geocache's gc_code.
@@ -206,7 +227,7 @@ class Cache(Base):
     # preserve a cache's data as it was when found, even if the listing
     # changes later (e.g. a difficulty rerate). Logs/attributes/waypoints are
     # not affected — they're rebuilt fresh on every import regardless.
-    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
 
     # Location provenance (issue #60 — reverse-geocoding phase 3)
     # 'groundspeak' = taken from GPX import, 'computed' = offline boundary engine
@@ -218,7 +239,9 @@ class Cache(Base):
     location_dataset: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     # Metadata
-    imported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, server_default=_SQL_NOW
+    )
     source_file: Mapped[Optional[str]] = mapped_column(String(512))  # which GPX this came from
 
     # ── Issue #716: additional GSAK-compatible derived columns ──────────────
@@ -310,10 +333,14 @@ class Waypoint(Base):
 
     # True if the user created this waypoint locally rather than it coming
     # from a GPX/GSAK import.
-    created_by_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_by_user: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
 
     # Generic user flag on the waypoint (mirrors GSAK's per-waypoint flag).
-    wp_flag: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    wp_flag: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="waypoints")
@@ -337,7 +364,7 @@ class Log(Base):
     finder: Mapped[Optional[str]] = mapped_column(String(128))
     finder_id: Mapped[Optional[str]] = mapped_column(String(64))
     text: Mapped[Optional[str]] = mapped_column(Text)
-    text_encoded: Mapped[bool] = mapped_column(Boolean, default=False)
+    text_encoded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
 
     # ── Issue #469: GSAK database import — schema additions ─────────────────
     # Some logs (notably Earthcache logs) carry their own coordinates,
@@ -347,7 +374,9 @@ class Log(Base):
 
     # True if this log was made by the cache owner (e.g. maintenance notes,
     # "Enable Listing" logs) — mirrors GSAK's LogIsOwner-derived flag.
-    logged_by_owner: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    logged_by_owner: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="logs")
@@ -373,7 +402,7 @@ class Attribute(Base):
 
     attribute_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(128))
-    is_on: Mapped[bool] = mapped_column(Boolean, default=True)  # True = yes, False = no
+    is_on: Mapped[bool] = mapped_column(Boolean, default=True, server_default=_SQL_TRUE)  # True = yes, False = no
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="attributes")
@@ -423,9 +452,11 @@ class UserNote(Base):
     # Corrected coordinates (user-solved, e.g. mystery cache finals)
     corrected_lat: Mapped[Optional[float]] = mapped_column(Float)
     corrected_lon: Mapped[Optional[float]] = mapped_column(Float)
-    is_corrected: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_corrected: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_utcnow, server_default=_SQL_NOW, onupdate=_utcnow
+    )
 
     # Relationships
     cache: Mapped["Cache"] = relationship("Cache", back_populates="user_note")

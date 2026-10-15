@@ -373,7 +373,13 @@ def main() -> None:
     splash_msg("Indlæser database...")
     logger.info("startup: loading database (+%.2fs)", time.monotonic() - _startup_t0)
     from opensak.db.manager import get_db_manager
+    from opensak.db.database import set_progress_callback
+    from opensak.lang import tr as _tr
     manager = get_db_manager()
+    # #1033: a schema update (and the VACUUM after it) can take a while on a
+    # large database — say so on the splash screen.
+    _db_steps = {"migrating": "db_progress_migrating", "compacting": "db_progress_compacting"}
+    set_progress_callback(lambda step: splash_msg(_tr(_db_steps.get(step, step))))
     try:
         manager.ensure_active_initialised()
     except Exception as e:
@@ -406,6 +412,8 @@ def main() -> None:
             )
         QMessageBox.critical(None, tr("startup_db_error_title"), message)
         sys.exit(1)
+    finally:
+        set_progress_callback(None)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
 
     # #1012: keep the LuaLS stub and .luarc.json in the macros folder

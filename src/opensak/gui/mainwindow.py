@@ -1163,7 +1163,7 @@ class MainWindow(QMainWindow):
         so the active database stays selected throughout.
         """
         from opensak.backup.premigration import take_notices
-        from opensak.db.database import migrate_databases
+        from opensak.db.database import migrate_databases, set_progress_callback
         progress = QProgressDialog(
             tr("premigration_apply_all_progress"), "", 0, len(pending), self
         )
@@ -1172,17 +1172,26 @@ class MainWindow(QMainWindow):
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         failed = []
+        current = ""
+
+        def _step(step: str) -> None:
+            # #1033: the VACUUM after the update can take a while.
+            if step == "compacting":
+                progress.setLabelText(current + "\n" + tr("db_progress_compacting"))
+                QApplication.processEvents()
+
+        set_progress_callback(_step)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             for i, db in enumerate(pending):
-                progress.setLabelText(
-                    tr("premigration_apply_all_progress_db", name=db.name)
-                )
+                current = tr("premigration_apply_all_progress_db", name=db.name)
+                progress.setLabelText(current)
                 progress.setValue(i)
                 QApplication.processEvents()
                 failed += migrate_databases([db.path])
             progress.setValue(len(pending))
         finally:
+            set_progress_callback(None)
             QApplication.restoreOverrideCursor()
             progress.close()
 
