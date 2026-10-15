@@ -6,7 +6,7 @@ API version: **3** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. OpenSAK's own settings and database files are never accessible.
 
-See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support-vs-code) for autocompletion in VS Code.
+See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support) for autocompletion in VS Code, Notepad++ and UltraEdit.
 
 ## Functions
 
@@ -1611,11 +1611,17 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
 - [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
 
-## Editor support (VS Code)
+## Editor support
 
-[`macros/types/opensak.lua`](../../macros/types/opensak.lua) describes this API for the [Lua Language Server](https://luals.github.io/) (VS Code extension "Lua" by sumneko): autocompletion, parameter hints and these docs while you type.
+OpenSAK keeps editor files for this API in its macros folder (**Open macros folder** in the macro window), in `types`, refreshed on every start so they match the installed version:
 
-OpenSAK keeps a copy of the stub in its macros folder (**Open macros folder** in the macro window) as `types/opensak.lua`, refreshed on every start so it matches the installed version, and puts a `.luarc.json` next to your macros that points the language server at it:
+- [`macros/types/opensak.lua`](../../macros/types/opensak.lua) — for the [Lua Language Server](https://luals.github.io/): VS Code and other editors with LSP support (Neovim, Sublime Text, Zed, Kate, ...)
+- [`macros/types/notepad++/lua.xml`](../../macros/types/notepad++/lua.xml) — for Notepad++
+- [`macros/types/ultraedit/opensak-lua.uew`](../../macros/types/ultraedit/opensak-lua.uew) — for UltraEdit
+
+### VS Code
+
+The stub gives autocompletion, parameter hints and these docs while you type, through the extension "Lua" by sumneko. OpenSAK puts a `.luarc.json` next to your macros that points the language server at it:
 
 ```json
 {
@@ -1638,6 +1644,29 @@ To set it up in VS Code:
 OpenSAK writes `.luarc.json` only when there is none, so your own settings in it are kept; delete it to get the default back. Macros in another folder can use the stub too: copy `.luarc.json` there and change `types` to the full path of the macros folder's `types` folder. Macros inside the OpenSAK repository pick up [`macros/types/opensak.lua`](../../macros/types/opensak.lua) automatically.
 
 To run a macro in OpenSAK straight from VS Code or another editor, see [Running macros from an editor](run-from-editor.md).
+
+### Notepad++
+
+`types\notepad++\lua.xml` is an auto-completion file for Notepad++: typing `opensak.` lists the API functions, and after `(` a calltip shows the parameters, the return value and the description. When a function takes several parameter lists, the arrows in the calltip switch between them. Notepad++ reads it from its own program folder, so copy it there:
+
+1. Close Notepad++.
+2. In Notepad++'s program folder (usually `C:\Program Files\Notepad++`), open `autoCompletion` and rename `lua.xml` to `lua.xml.bak`.
+3. Copy `types\notepad++\lua.xml` from OpenSAK's macros folder into `autoCompletion`. Windows asks for administrator rights.
+4. Start Notepad++, open **Settings → Preferences… → Auto-Completion**, tick **Enable auto-completion on each input**, choose **Function and word completion** and tick **Function parameters hint on input**.
+5. Open a macro and type `opensak.` — the list appears. **Ctrl+Space** opens it by hand, **Ctrl+Shift+Space** the calltip.
+
+The file replaces Notepad++'s own one for Lua. It has calltips for the standard Lua functions too, but leaves out what macros cannot use (`io`, `debug`, `require`, `load`, most of `os`, ...) and functions of older Lua versions; rename `lua.xml.bak` back to undo. Copy the file again after an OpenSAK update to get new functions.
+
+### UltraEdit
+
+`types\ultraedit\opensak-lua.uew` is a wordfile for UltraEdit: Lua syntax highlighting with the `opensak.*` functions in their own colour, the macro's functions in the function list, and the API names in auto-complete. To set it up:
+
+1. Look up the wordfiles folder in **Advanced → Settings → Editor display → Syntax highlighting** (**Full directory path for wordfiles**).
+2. Copy `types\ultraedit\opensak-lua.uew` from OpenSAK's macros folder into it. UltraEdit's own `lua.uew` there claims `.lua` files too: move it out of the folder, so the OpenSAK one is used.
+3. Restart UltraEdit and open a macro. **View → View as (highlighting file type)** shows **Lua (OpenSAK)**.
+4. For completion, turn on auto-complete including the syntax highlighting keywords in **Advanced → Settings → Editor → Auto-complete**; **Ctrl+Space** opens the list by hand.
+
+Copy the wordfile again after an OpenSAK update to get new functions.
 
 ## Globals
 
