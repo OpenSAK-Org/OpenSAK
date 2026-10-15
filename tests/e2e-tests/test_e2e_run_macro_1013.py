@@ -37,6 +37,10 @@ def server(seeded_window, monkeypatch):
     assert srv.start()
     yield name
     srv.close()
+    # Delete the server on the GUI thread now. Left to the garbage collector,
+    # it can be collected in a later test's RefreshWorker thread, which Qt
+    # does not allow ("Fatal Python error: Aborted").
+    srv.deleteLater()
 
 
 def _run(qtbot, server, tmp_path, source):
