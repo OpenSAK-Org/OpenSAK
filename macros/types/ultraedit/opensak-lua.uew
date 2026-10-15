@@ -1,0 +1,42 @@
+/L20"Lua (OpenSAK)" Line Comment = -- Block Comment On = --[[ Block Comment Off = ]] Escape Char = \ String Chars = "' File Extensions = LUA
+/Delimiters = ~!@%^&*()-+=|\/{}[]:;"'<> ,	?#
+/Function String = "%[ ^t]++function[ ^t]+^([a-zA-Z0-9_.:]+^)"
+/Function String 1 = "%[ ^t]++local[ ^t]+function[ ^t]+^([a-zA-Z0-9_]+^)"
+/Indent Strings = "do" "then" "repeat" "function" "else"
+/Unindent Strings = "end" "until" "else" "elseif"
+/Open Brace Strings = "{" "(" "["
+/Close Brace Strings = "}" ")" "]"
+/C1"Keywords"
+and
+break
+do
+else elseif end
+false for function
+goto
+if in
+local
+nil not
+or
+repeat return
+then true
+until
+while
+/C2"Lua functions"
+_G _VERSION
+assert
+coroutine coroutine.close coroutine.create coroutine.isyieldable coroutine.resume coroutine.running coroutine.status coroutine.wrap coroutine.yield
+error
+getmetatable
+ipairs
+math math.abs math.acos math.asin math.atan math.ceil math.cos math.deg math.exp math.floor math.fmod math.huge math.log math.max math.maxinteger math.min math.mininteger math.modf math.pi math.rad math.random math.randomseed math.sin math.sqrt math.tan math.tointeger math.type math.ult
+next
+os os.clock os.date os.time
+pairs pcall print
+rawequal rawget rawlen rawset
+select setmetatable string string.byte string.char string.dump string.find string.format string.gmatch string.gsub string.len string.lower string.match string.pack string.packsize string.rep string.reverse string.sub string.unpack string.upper
+table table.concat table.insert table.move table.pack table.remove table.sort table.unpack tonumber tostring type
+utf8 utf8.char utf8.charpattern utf8.codepoint utf8.codes utf8.len utf8.offset
+warn
+xpcall
+/C3"OpenSAK"
+opensak opensak.api_version opensak.cache opensak.caches opensak.choose_file opensak.clear_corrected opensak.clear_filter opensak.codes opensak.columns opensak.confirm opensak.coords opensak.coords.bearing opensak.coords.distance opensak.coords.format opensak.coords.inside opensak.coords.location opensak.coords.midpoint opensak.coords.parse opensak.coords.project opensak.copy_caches opensak.count opensak.create_database opensak.current opensak.database opensak.database_exists opensak.databases opensak.date opensak.date.format opensak.date.parse opensak.description opensak.exit opensak.export_file opensak.export_gpx opensak.export_poi opensak.filter opensak.filter_name opensak.filter_profile opensak.log opensak.macros_dir opensak.move_caches opensak.profiles opensak.re opensak.re.find opensak.re.findall opensak.re.match opensak.re.replace opensak.re.split opensak.read_csv opensak.run_macro opensak.selected opensak.set_corrected opensak.settings opensak.settings.clear opensak.settings.load opensak.settings.save opensak.sleep opensak.sort opensak.sql opensak.sql_each opensak.switch_database opensak.tables opensak.temp_dir opensak.text opensak.text.digit_sum opensak.text.html_to_text opensak.text.normalize_name opensak.text.rot13 opensak.text.word_value opensak.version

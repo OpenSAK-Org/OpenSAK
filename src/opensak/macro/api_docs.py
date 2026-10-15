@@ -1,16 +1,22 @@
 """
 src/opensak/macro/api_docs.py — render the Lua API reference.
 
-Two files are generated from the registry in runtime.py by
+These files are generated from the registry in runtime.py by
 scripts/generate_macro_api_docs.py; never edit them by hand:
 
   * docs/macros/api.md        — the reference for people (Markdown)
   * macros/types/opensak.lua  — a ---@meta stub for the Lua Language Server,
                                 giving autocompletion and inline docs in
                                 VS Code while writing macros
+  * macros/types/notepad++/lua.xml
+                              — Notepad++ auto-completion file: completion
+                                and calltips for opensak.*
+  * macros/types/ultraedit/opensak-lua.uew
+                              — UltraEdit wordfile: highlighting, function
+                                list and auto-complete keywords
 
 Feature branches don't commit them: .github/workflows/macro-api-docs.yml
-regenerates both after every merge to beta and opens a PR. The output must
+regenerates them after every merge to beta and opens a PR. The output must
 therefore be deterministic — no timestamps, no ordering that depends on the
 OS, hash seed or working directory — or that workflow opens noise PRs.
 """
@@ -18,24 +24,75 @@ OS, hash seed or working directory — or that workflow opens noise PRs.
 from __future__ import annotations
 
 import json
+import textwrap
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from opensak.macro.cache_data import CACHE_FIELDS
-from opensak.macro.editor_support import LUARC
+from opensak.macro.editor_support import (
+    LUARC,
+    NPP_NAME,
+    STUB_NAME,
+    TYPES_DIR,
+    ULTRAEDIT_NAME,
+)
 from opensak.macro.forms import (
     FIELD_KEY_DOCS,
     FIELD_TYPES,
     FORM_KEY_DOCS,
     FORM_METHOD_DOCS,
 )
-from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, Param
+from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
+from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 
 DOC_PATH = Path("docs/macros/api.md")
-STUB_PATH = Path("macros/types/opensak.lua")
+STUB_PATH = Path("macros") / TYPES_DIR / STUB_NAME
+NPP_PATH = Path("macros") / TYPES_DIR / NPP_NAME
+ULTRAEDIT_PATH = Path("macros") / TYPES_DIR / ULTRAEDIT_NAME
 EXAMPLES_DIR = Path("macros/examples")
 # Links relative to DOC_PATH
 _EXAMPLES_LINK = "../../macros/examples"
-_STUB_LINK = "../../macros/types/opensak.lua"
+_STUB_LINK = f"../../{STUB_PATH.as_posix()}"
+_NPP_LINK = f"../../{NPP_PATH.as_posix()}"
+_ULTRAEDIT_LINK = f"../../{ULTRAEDIT_PATH.as_posix()}"
+# The copies in the user's macros folder, as Windows paths
+_NPP_COPY = f"{TYPES_DIR}\\{NPP_NAME}".replace("/", "\\")
+_ULTRAEDIT_COPY = f"{TYPES_DIR}\\{ULTRAEDIT_NAME}".replace("/", "\\")
+
+LUA_KEYWORDS = (
+    "and", "break", "do", "else", "elseif", "end", "false", "for",
+    "function", "goto", "if", "in", "local", "nil", "not", "or", "repeat",
+    "return", "then", "true", "until", "while",
+)
+LUA_LIBRARIES = ("coroutine", "math", "os", "string", "table", "utf8")
+# The standard Lua globals a macro can use (the sandbox removes io, debug,
+# package, require, load, ... and keeps only os.time/date/clock), for the
+# editors that do not read the LuaLS stub.
+LUA_GLOBALS = (
+    "_G", "_VERSION", "assert", "error", "getmetatable", "ipairs", "next",
+    "pairs", "pcall", "print", "rawequal", "rawget", "rawlen", "rawset",
+    "select", "setmetatable", "tonumber", "tostring", "type", "warn",
+    "xpcall",
+    "coroutine.close", "coroutine.create", "coroutine.isyieldable",
+    "coroutine.resume", "coroutine.running", "coroutine.status",
+    "coroutine.wrap", "coroutine.yield",
+    "math.abs", "math.acos", "math.asin", "math.atan", "math.ceil",
+    "math.cos", "math.deg", "math.exp", "math.floor", "math.fmod",
+    "math.huge", "math.log", "math.max", "math.maxinteger", "math.min",
+    "math.mininteger", "math.modf", "math.pi", "math.rad", "math.random",
+    "math.randomseed", "math.sin", "math.sqrt", "math.tan",
+    "math.tointeger", "math.type", "math.ult",
+    "os.clock", "os.date", "os.time",
+    "string.byte", "string.char", "string.dump", "string.find",
+    "string.format", "string.gmatch", "string.gsub", "string.len",
+    "string.lower", "string.match", "string.pack", "string.packsize",
+    "string.rep", "string.reverse", "string.sub", "string.unpack",
+    "string.upper",
+    "table.concat", "table.insert", "table.move", "table.pack",
+    "table.remove", "table.sort", "table.unpack",
+    "utf8.char", "utf8.charpattern", "utf8.codepoint", "utf8.codes",
+    "utf8.len", "utf8.offset",
+)
 
 _GENERATED = ("Generated from src/opensak/macro/runtime.py by "
               "scripts/generate_macro_api_docs.py — do not edit by hand.")
@@ -81,18 +138,24 @@ def _examples_section(examples_dir: Path) -> list[str]:
 def _editor_section() -> list[str]:
     return [
         "",
-        "## Editor support (VS Code)",
+        "## Editor support",
         "",
-        f"[`{STUB_PATH.as_posix()}`]({_STUB_LINK}) describes this API for the "
-        "[Lua Language Server](https://luals.github.io/) (VS Code extension "
-        '"Lua" by sumneko): autocompletion, parameter hints and these docs '
-        "while you type.",
+        "OpenSAK keeps editor files for this API in its macros folder "
+        f"(**Open macros folder** in the macro window), in `{TYPES_DIR}`, "
+        "refreshed on every start so they match the installed version:",
         "",
-        "OpenSAK keeps a copy of the stub in its macros folder "
-        "(**Open macros folder** in the macro window) as "
-        "`types/opensak.lua`, refreshed on every start so it matches the "
-        "installed version, and puts a `.luarc.json` next to your macros "
-        "that points the language server at it:",
+        f"- [`{STUB_PATH.as_posix()}`]({_STUB_LINK}) — for the "
+        "[Lua Language Server](https://luals.github.io/): VS Code and other "
+        "editors with LSP support (Neovim, Sublime Text, Zed, Kate, ...)",
+        f"- [`{NPP_PATH.as_posix()}`]({_NPP_LINK}) — for Notepad++",
+        f"- [`{ULTRAEDIT_PATH.as_posix()}`]({_ULTRAEDIT_LINK}) — for UltraEdit",
+        "",
+        "### VS Code",
+        "",
+        "The stub gives autocompletion, parameter hints and these docs while "
+        'you type, through the extension "Lua" by sumneko. OpenSAK puts a '
+        "`.luarc.json` next to your macros that points the language server "
+        "at it:",
         "",
         *_code(json.dumps(LUARC, indent=2), "json"),
         "",
@@ -112,6 +175,56 @@ def _editor_section() -> list[str]:
         "",
         "To run a macro in OpenSAK straight from VS Code or another editor, "
         "see [Running macros from an editor](run-from-editor.md).",
+        "",
+        "### Notepad++",
+        "",
+        f"`{_NPP_COPY}` is an auto-completion file for Notepad++: typing "
+        "`opensak.` lists the API functions, and after `(` a calltip shows "
+        "the parameters, the return value and the description. When a "
+        "function takes several parameter lists, the arrows in the calltip "
+        "switch between them. Notepad++ reads it from its own program "
+        "folder, so copy it there:",
+        "",
+        "1. Close Notepad++.",
+        "2. In Notepad++'s program folder (usually `C:\\Program Files\\Notepad++`), "
+        "open `autoCompletion` and rename `lua.xml` to `lua.xml.bak`.",
+        f"3. Copy `{_NPP_COPY}` from OpenSAK's macros folder into "
+        "`autoCompletion`. Windows asks for administrator rights.",
+        "4. Start Notepad++, open **Settings → Preferences… → "
+        "Auto-Completion**, tick **Enable auto-completion on each input**, "
+        "choose **Function and word completion** and tick **Function "
+        "parameters hint on input**.",
+        "5. Open a macro and type `opensak.` — the list appears. "
+        "**Ctrl+Space** opens it by hand, **Ctrl+Shift+Space** the calltip.",
+        "",
+        "The file replaces Notepad++'s own one for Lua. It has calltips for "
+        "the standard Lua functions too, but leaves out what macros cannot "
+        "use (`io`, `debug`, `require`, `load`, most of `os`, ...) and "
+        "functions of older Lua versions; rename `lua.xml.bak` back to "
+        "undo. Copy the file again after an OpenSAK update to get new "
+        "functions.",
+        "",
+        "### UltraEdit",
+        "",
+        f"`{_ULTRAEDIT_COPY}` is a wordfile for UltraEdit: Lua syntax "
+        "highlighting with the `opensak.*` functions in their own colour, "
+        "the macro's functions in the function list, and the API names in "
+        "auto-complete. To set it up:",
+        "",
+        "1. Look up the wordfiles folder in **Advanced → Settings → Editor "
+        "display → Syntax highlighting** (**Full directory path for "
+        "wordfiles**).",
+        f"2. Copy `{_ULTRAEDIT_COPY}` from OpenSAK's macros folder into it. "
+        "UltraEdit's own `lua.uew` there claims `.lua` files too: move it "
+        "out of the folder, so the OpenSAK one is used.",
+        "3. Restart UltraEdit and open a macro. **View → View as "
+        "(highlighting file type)** shows **Lua (OpenSAK)**.",
+        "4. For completion, turn on auto-complete including the syntax "
+        "highlighting keywords in **Advanced → Settings → Editor → "
+        "Auto-complete**; **Ctrl+Space** opens the list by hand.",
+        "",
+        "Copy the wordfile again after an OpenSAK update to get new "
+        "functions.",
     ]
 
 
@@ -218,7 +331,8 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "files are never accessible.",
         "",
         "See [Example macros](#example-macros) for complete scripts and "
-        "[Editor support](#editor-support-vs-code) for autocompletion in VS Code.",
+        "[Editor support](#editor-support) for autocompletion in VS Code, "
+        "Notepad++ and UltraEdit.",
         "",
         "## Functions",
         "",
@@ -448,6 +562,104 @@ def render_lua_stub() -> str:
     return "\n".join(lines)
 
 
+# ── Notepad++ and UltraEdit ──────────────────────────────────────────────────
+
+
+def _editor_words() -> dict[str, ApiFunction | LuaFunction | None]:
+    """Every name to complete, mapped to its function (None for Lua
+    keywords, constants and the tables)."""
+    words: dict[str, ApiFunction | LuaFunction | None] = dict.fromkeys(
+        (*LUA_KEYWORDS, *LUA_LIBRARIES, *LUA_GLOBALS, "opensak"))
+    for lua_func in LUA_FUNCTIONS:
+        words[lua_func.name] = lua_func
+    for func in API:
+        namespace = func.name.rpartition(".")[0]
+        if namespace:
+            words.setdefault(f"opensak.{namespace}", None)
+        words[f"opensak.{func.name}"] = func
+    return words
+
+
+def _calltip(func: ApiFunction | LuaFunction) -> str:
+    text = textwrap.fill(func.description, 80)
+    if func.returns:
+        text += "\n" + textwrap.fill(f"Returns {func.returns[0]} — {func.returns[1]}", 80)
+    return text
+
+
+def _xml_attr(text: str) -> str:
+    return escape(text, {'"': "&quot;", "\n": "&#x0a;"})
+
+
+def render_npp_autocomplete() -> str:
+    """Notepad++ autoCompletion/lua.xml. Notepad++ needs the keywords
+    sorted; `.` is a word character, so "opensak.cache" is one word."""
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8" ?>',
+        f"<!-- {_GENERATED} -->",
+        f"<!-- OpenSAK Lua macro API, version {API_VERSION}. Reference: {DOC_PATH.as_posix()} -->",
+        "<NotepadPlus>",
+        '\t<AutoComplete language="Lua">',
+        '\t\t<Environment ignoreCase="no" startFunc="(" stopFunc=")" '
+        'paramSeparator="," terminal=";" additionalWordChar="." />',
+    ]
+    words = _editor_words()
+    for word in sorted(words):
+        func = words[word]
+        if func is None:
+            lines.append(f'\t\t<KeyWord name="{word}" />')
+            continue
+        lines.append(f'\t\t<KeyWord name="{word}" func="yes">')
+        ret = f' retVal="{_xml_attr(func.returns[0])}"' if func.returns else ""
+        descr = _xml_attr(_calltip(func))
+        for params in (func.params, *func.overloads):
+            lines.append(f'\t\t\t<Overload{ret} descr="{descr}">')
+            for p in params:
+                name = f"{p.name}: {p.type}"
+                name = f"[{name}]" if p.optional else name
+                lines.append(f'\t\t\t\t<Param name="{_xml_attr(name)}" />')
+            lines.append("\t\t\t</Overload>")
+        lines.append("\t\t</KeyWord>")
+    lines += ["\t</AutoComplete>", "</NotepadPlus>", ""]
+    return "\n".join(lines)
+
+
+def _wordfile_group(words: list[str]) -> list[str]:
+    """One colour group of a wordfile: sorted, one line per first letter."""
+    lines: list[str] = []
+    for word in sorted(words):
+        if lines and lines[-1][0] == word[0]:
+            lines[-1] += f" {word}"
+        else:
+            lines.append(word)
+    return lines
+
+
+def render_ultraedit_wordfile() -> str:
+    """UltraEdit wordfile (ASCII only). `.` is not a delimiter, so
+    "opensak.cache" and "string.format" are highlighted as one word."""
+    words = [w for w in _editor_words() if w not in LUA_KEYWORDS]
+    return "\n".join([
+        '/L20"Lua (OpenSAK)" Line Comment = -- Block Comment On = --[[ '
+        'Block Comment Off = ]] Escape Char = \\ String Chars = "\' '
+        "File Extensions = LUA",
+        "/Delimiters = ~!@%^&*()-+=|\\/{}[]:;\"'<> ,\t?#",
+        '/Function String = "%[ ^t]++function[ ^t]+^([a-zA-Z0-9_.:]+^)"',
+        '/Function String 1 = "%[ ^t]++local[ ^t]+function[ ^t]+^([a-zA-Z0-9_]+^)"',
+        '/Indent Strings = "do" "then" "repeat" "function" "else"',
+        '/Unindent Strings = "end" "until" "else" "elseif"',
+        '/Open Brace Strings = "{" "(" "["',
+        '/Close Brace Strings = "}" ")" "]"',
+        '/C1"Keywords"',
+        *_wordfile_group(list(LUA_KEYWORDS)),
+        '/C2"Lua functions"',
+        *_wordfile_group([w for w in words if not w.startswith("opensak")]),
+        '/C3"OpenSAK"',
+        *_wordfile_group([w for w in words if w.startswith("opensak")]),
+        "",
+    ])
+
+
 # (file, renderer) for everything scripts/generate_macro_api_docs.py writes.
 # The Macro API docs workflow commits these paths (add-paths in
 # .github/workflows/macro-api-docs.yml); a new generated file must live under
@@ -455,4 +667,6 @@ def render_lua_stub() -> str:
 GENERATED_FILES = (
     (DOC_PATH, render_api_markdown),
     (STUB_PATH, render_lua_stub),
+    (NPP_PATH, render_npp_autocomplete),
+    (ULTRAEDIT_PATH, render_ultraedit_wordfile),
 )
