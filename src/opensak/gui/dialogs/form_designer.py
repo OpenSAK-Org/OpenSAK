@@ -45,6 +45,7 @@ from opensak.macro.form_code import (
 from opensak.macro.forms import (
     FIELD_TYPE_BY_NAME,
     FIELD_TYPES,
+    MAX_SIZE,
     VALUE_TYPES,
     Field,
     Form,
@@ -1309,7 +1310,9 @@ class FormDesigner(QDialog):
         where the auto layout put the fields (captions become label
         fields, as in GSAK); to auto in top-to-bottom order."""
         current = self._model.get("layout", "auto")
-        if layout not in ("auto", "absolute") or self._canvas.error:
+        # Only the switch to absolute needs the positions of a built form;
+        # the switch to auto just drops them.
+        if layout not in ("auto", "absolute") or (layout == "absolute" and self._canvas.error):
             def set_layout(model: dict) -> None:
                 if layout is None:
                     model.pop("layout", None)
@@ -1330,7 +1333,15 @@ class FormDesigner(QDialog):
             def to_absolute(model: dict) -> None:
                 model["layout"] = "absolute"
                 body = self._canvas.body_rect()
-                model["width"], model["height"] = body.width(), body.height()
+                # Big enough for every top-level field and caption, and within
+                # the 50..MAX_SIZE that parse_form() accepts for width/height.
+                right, bottom = body.width(), body.height()
+                for path, geo in [*positions.items(), *captions.items()]:
+                    if len(path) == 2:
+                        right = max(right, geo.x() + geo.width())
+                        bottom = max(bottom, geo.y() + geo.height())
+                model["width"] = min(max(right, 50), MAX_SIZE)
+                model["height"] = min(max(bottom, 50), MAX_SIZE)
                 # Captions become label fields, as in GSAK; deepest first.
                 for path in sorted(positions, key=lambda p: (len(p), p), reverse=True):
                     geo = positions[path]
