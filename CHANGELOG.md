@@ -4,6 +4,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.4] — 2026-10-16
+
+> Headline: **macros can talk to you** — beta testers get dialogs, forms
+> and progress bars for Lua macros, plus a **form designer** that can
+> also convert GSAK macro forms. For everyone: the GSAK import now has
+> **one menu entry** for databases, filters and user locations.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Changed
+
+- **GSAK import: one menu entry (#1067)** — *File → Import GSAK
+  Filters…* is gone; *File → Import from GSAK Database* already offers
+  your saved filters and user locations, and its dialog now explains what
+  a backup (.zip), a single database file (sqlite.db3) and `gsak.db3` on
+  its own each import. Contributed by nagisml.
+
+### Fixed
+
+- **Database update summary fits on the screen (#1071)** — after *Apply
+  to all databases*, the summary listed every backup file, so with many
+  databases the box grew taller than the screen and OK could not be
+  reached. It now names only the backup folder; the full list is under
+  *Show Details…*. Contributed by nagisml.
+
+### In beta builds only
+
+- **Macro dialogs and forms (#982)** — macros can now ask and tell the
+  user things: `opensak.message()`, `input()`, `choose()` and
+  `choose_folder()` for simple dialogs; `opensak.form{}` for a dialog
+  described as a Lua table, with 16 field types covering GSAK's form
+  controls, an automatic or GSAK-style absolute layout, and callbacks
+  (`on_change`, `on_click`, `validate`, …) that update the form while it
+  stays open; `opensak.progress()` for long loops with a Cancel button;
+  and `opensak.select()` / `opensak.refresh()` to show results in the
+  cache list while the macro runs. `remember = true` keeps a form's last
+  values (never passwords). New example macros *find_with_form*,
+  *export_with_form* and *corrected_coords_form*. Contributed by nagisml.
+- **Form designer (#982)** — **Tools → Form designer…** in the macro
+  window edits the `opensak.form{}` at the cursor, or inserts a new one,
+  on a GSAK-like canvas: add, drag and resize fields, align and size
+  tools, grid and snap, tab order, undo/redo and preview. It reads and
+  writes the Lua table without running the macro, and keeps callbacks as
+  written. GSAK forms can be pasted in or imported from a `.gsk` file,
+  with notes on what was changed. Contributed by nagisml.
+- **Clearer macro errors** — an error in any `opensak` function is now
+  reported at the macro line that called it (`macro.lua:12: …`).
+  Contributed by nagisml.
+
+---
+
 ## [1.22.0-beta.3] — 2026-10-15
 
 > Headline: a **database update** — the first start after upgrading
