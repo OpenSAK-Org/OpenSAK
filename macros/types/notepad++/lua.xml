@@ -236,11 +236,24 @@
 				<Param name="[spec: opensak.CachesSpec]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.choose" func="yes">
+			<Overload retVal="string|number?" descr="Let the user pick one item of a list.&#x0a;Returns string|number? — The item picked, or nil if cancelled.">
+				<Param name="prompt: string" />
+				<Param name="options: (string|number)[]" />
+				<Param name="[default: string|number]" />
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.choose_file" func="yes">
 			<Overload retVal="string?" descr="Let the user pick a file in a file dialog. The picked file may be used for the&#x0a;rest of this run without a folder permission: read with mode &quot;open&quot; (the&#x0a;default), written with mode &quot;save&quot;. OpenSAK's own settings and database files&#x0a;cannot be picked. The dialog starts in the macro file's folder.&#x0a;Returns string? — Full path of the picked file, or nil if cancelled.">
 				<Param name="[title: string]" />
 				<Param name="[filter: string]" />
 				<Param name="[mode: &quot;open&quot;|&quot;save&quot;]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.choose_folder" func="yes">
+			<Overload retVal="string?" descr="Let the user pick a folder in a folder dialog. The macro may then read and write&#x0a;files in it for the rest of this run, without a folder permission. OpenSAK's own&#x0a;folders and whole drives cannot be picked.&#x0a;Returns string? — Full path of the folder, or nil if cancelled.">
+				<Param name="[title: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.clear_corrected" func="yes">
@@ -441,6 +454,18 @@
 				<Param name="name: string" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.form" func="yes">
+			<Overload retVal="table&lt;string, any&gt;?, string?" descr="Show a dialog built from a table (see Forms) and wait until it is closed. Fields&#x0a;with a value come back in a table keyed by their `id`. Callbacks such as&#x0a;`on_change` run while the form stays open and can change it through the handle&#x0a;they get. Without `buttons` the form has OK and Cancel.&#x0a;Returns table&lt;string, any&gt;?, string? — The values by field id and the id of the&#x0a;button (or `exit_on_change` field, or &quot;timeout&quot;) that closed the form; nil if it&#x0a;was cancelled.">
+				<Param name="spec: opensak.FormSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.input" func="yes">
+			<Overload retVal="string?" descr="Ask for one line of text.&#x0a;Returns string? — The text entered, or nil if cancelled.">
+				<Param name="prompt: string" />
+				<Param name="[default: string]" />
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.log" func="yes">
 			<Overload descr="Write a message to OpenSAK's log file and the macro output. Run with `opensak&#x0a;--run-macro`, it goes to stderr while print() goes to stdout.">
 				<Param name="...: any" />
@@ -448,6 +473,12 @@
 		</KeyWord>
 		<KeyWord name="opensak.macros_dir" func="yes">
 			<Overload retVal="string" descr="OpenSAK's macros folder (read permission by default), without a trailing&#x0a;separator.&#x0a;Returns string — Folder path.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.message" func="yes">
+			<Overload descr="Show a message with an OK button and wait until the user closes it.">
+				<Param name="text: string" />
+				<Param name="[title: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.move_caches" func="yes">
@@ -458,6 +489,12 @@
 		</KeyWord>
 		<KeyWord name="opensak.profiles" func="yes">
 			<Overload retVal="string[]" descr="The names of all saved filter profiles.&#x0a;Returns string[] — Profile names.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.progress" func="yes">
+			<Overload retVal="opensak.Progress" descr="Open a progress window with a Cancel button, for long loops. `p:update(i [,&#x0a;text])` moves the bar to *i* of *total* and returns false once the user has&#x0a;pressed Cancel; `p:close()` closes the window (also done when the macro ends).&#x0a;Without *total* the bar just shows that work is going on.&#x0a;Returns opensak.Progress — The window.">
+				<Param name="title: string" />
+				<Param name="[total: integer]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.re" />
@@ -499,10 +536,19 @@
 				<Param name="[sep: string]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.refresh" func="yes">
+			<Overload descr="Redraw the cache list, detail panel and map now. Changes a macro makes are&#x0a;otherwise shown when it ends.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.run_macro" func="yes">
 			<Overload retVal="any..." descr="Run another macro and wait until it has finished, e.g. to chain several macros&#x0a;from one control macro. A relative path is looked up in the folder of the&#x0a;calling macro, and `.lua` is added when the name has no extension. The called&#x0a;macro gets its own global variables; values are passed as extra arguments (read&#x0a;them with `...`) and come back as its return values. An error in it stops the&#x0a;calling macro too, unless caught with `pcall`. Macros run this way share the&#x0a;run's limits, sleep time and folder approvals; they may call each other at most&#x0a;10 levels deep.&#x0a;Returns any... — What the macro returns.">
 				<Param name="file: string" />
 				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.select" func="yes">
+			<Overload retVal="boolean" descr="Select a cache in the cache list and show it in the detail panel and on the map,&#x0a;like a click on its row.&#x0a;Returns boolean — false if the cache is not among the caches of the active&#x0a;filter.">
+				<Param name="code: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.selected" func="yes">
