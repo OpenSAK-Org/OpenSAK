@@ -86,10 +86,13 @@ class ExportWorker(QThread):
 
     def run(self) -> None:
         try:
-            from opensak.db.database import reload_caches_full
+            from opensak.db.database import iter_caches_full
             from opensak.gps.garmin import is_mtp_device
-            caches = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
-            caches = reload_caches_full(caches)
+            selected = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
+            # #1075: reloaded and written a chunk at a time, so a large
+            # export never holds every fully loaded cache in memory.
+            caches = iter_caches_full(selected)
+            total = len(selected)
             cb = make_progress_cb(self.progress.emit)
 
             is_device = (
@@ -104,25 +107,25 @@ class ExportWorker(QThread):
                 from opensak.gps.garmin import export_ggz_to_device, export_ggz_to_file
                 if is_device:
                     result = export_ggz_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
                     )
                 else:
                     result = export_ggz_to_file(
                         caches,
                         self.device_path / f"{self.filename}.ggz",
-                        progress_cb=cb,
+                        progress_cb=cb, total=total,
                     )
             else:
                 from opensak.gps.garmin import export_to_device, export_to_file
                 if is_device:
                     result = export_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
                     )
                 else:
                     result = export_to_file(
                         caches,
                         self.device_path / f"{self.filename}.gpx",
-                        progress_cb=cb,
+                        progress_cb=cb, total=total,
                     )
 
             self.finished.emit(result)

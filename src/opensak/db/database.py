@@ -19,7 +19,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Generator, Iterable, cast
+from typing import Callable, Generator, Iterable, Iterator, cast
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
@@ -1410,6 +1410,20 @@ def reload_caches_full(caches: list) -> list:
 
     Objects without a matching DB row (e.g. test stand-ins) pass through
     unchanged.
+
+    This holds every fully loaded cache in memory at once; exports of a
+    whole large database use iter_caches_full() instead (#1075).
+    """
+    return list(iter_caches_full(caches))
+
+
+def iter_caches_full(caches: list) -> Iterator:
+    """Yield *caches* reloaded as by reload_caches_full(), in the original
+    order, reloading RELOAD_CHUNK_SIZE of them at a time.
+
+    #1075: an export of 100,000+ caches ran out of memory holding all of
+    them (with their logs and descriptions) at once. As long as the caller
+    does not keep the yielded caches, only one chunk is in memory at a time.
     """
     from opensak.db.models import Cache
     from opensak.filters.engine import LightweightCache
@@ -1419,34 +1433,33 @@ def reload_caches_full(caches: list) -> list:
     # real .id — anything else (e.g. SimpleNamespace stand-ins in tests)
     # passes through unchanged.
     reloadable = (Cache, LightweightCache)
-    ids = [c.id for c in caches if isinstance(c, reloadable) and c.id is not None]
-    if not ids:
-        return list(caches)
 
     # #1041: the IN query is chunked to stay under SQLite's bound-parameter
     # limit — exporting a whole large database failed with "too many SQL
     # variables".
-    by_id: dict[int, Cache] = {}
-    with get_session() as session:
-        for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
-            chunk = ids[start:start + RELOAD_CHUNK_SIZE]
-            rows = (
-                session.query(Cache)
-                .options(
-                    selectinload(Cache.logs),
-                    selectinload(Cache.waypoints),
-                    selectinload(Cache.attributes),
-                    joinedload(Cache.user_note),
-                    undefer(Cache.short_description),
-                    undefer(Cache.long_description),
-                    undefer(Cache.encoded_hints),
+    for start in range(0, len(caches), RELOAD_CHUNK_SIZE):
+        chunk = caches[start:start + RELOAD_CHUNK_SIZE]
+        ids = [c.id for c in chunk if isinstance(c, reloadable) and c.id is not None]
+        by_id: dict[int, Cache] = {}
+        if ids:
+            with get_session() as session:
+                rows = (
+                    session.query(Cache)
+                    .options(
+                        selectinload(Cache.logs),
+                        selectinload(Cache.waypoints),
+                        selectinload(Cache.attributes),
+                        joinedload(Cache.user_note),
+                        undefer(Cache.short_description),
+                        undefer(Cache.long_description),
+                        undefer(Cache.encoded_hints),
+                    )
+                    .filter(Cache.id.in_(ids))
+                    .all()
                 )
-                .filter(Cache.id.in_(chunk))
-                .all()
-            )
-            by_id.update((c.id, c) for c in rows)
-
-    return [by_id.get(c.id, c) if isinstance(c, reloadable) else c for c in caches]
+                by_id.update((c.id, c) for c in rows)
+        for c in chunk:
+            yield by_id.get(c.id, c) if isinstance(c, reloadable) else c
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────
