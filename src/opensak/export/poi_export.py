@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 from opensak.export.file_export_settings import expand_file_name
 from opensak.export.gpi import GpiPoint, load_gpi_icon, write_gpi
@@ -173,8 +173,9 @@ def _make_point(values: dict[str, str], lat: float, lon: float,
     )
 
 
-def build_poi_groups(caches: list, settings: PoiExportSettings) -> list[PoiGroup]:
-    """Turn *caches* (fully loaded, see reload_caches_full) into POIs.
+def build_poi_groups(caches: Iterable, settings: PoiExportSettings) -> list[PoiGroup]:
+    """Turn *caches* (fully loaded, see reload_caches_full; any iterable)
+    into POIs.
 
     Each cache is followed by its child waypoints. The max_points limit
     counts the POIs of all files together. Returns the groups that have
@@ -254,14 +255,15 @@ def plan_poi_export(
 ) -> list[PoiFile]:
     """The files exporting *caches* into *folder* writes, with their POIs.
 
-    The caches are reloaded with their waypoints first (see
-    reload_caches_full). The file name template is expanded with the file
+    The caches are reloaded with their waypoints first, a chunk at a time
+    (see iter_caches_full): #1075, only the POIs are kept, never every fully
+    loaded cache at once. The file name template is expanded with the file
     export variables, {format} being "gpi" and {count} the number of POIs.
     """
-    from opensak.db.database import reload_caches_full
+    from opensak.db.database import iter_caches_full
 
-    caches = reload_caches_full([c for c in caches if c.latitude is not None])
-    groups = build_poi_groups(caches, settings)
+    full = iter_caches_full([c for c in caches if c.latitude is not None])
+    groups = build_poi_groups(full, settings)
     if not groups:
         return []
     base_name = expand_file_name(
