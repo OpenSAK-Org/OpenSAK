@@ -169,6 +169,21 @@ def test_point_selection(settings, expected):
         assert g.category == (g.waypoint_type or "OpenSAK")
 
 
+def test_point_selection_streams_and_stops_at_max_points():
+    # #1075: plan_poi_export() hands over iter_caches_full(), so caches are
+    # only read (and reloaded) as far as max_points needs them.
+    read = []
+
+    def caches():
+        for i in range(1, 6):
+            read.append(i)
+            yield _cache(f"GC{i}", f"C{i}")
+
+    groups = build_poi_groups(caches(), PoiExportSettings(max_points=2))
+    assert _names(groups) == [["C1", "C2"]]
+    assert read == [1, 2]
+
+
 def test_proximity_and_extra_field():
     settings = PoiExportSettings(proximity=0.1, proximity_unit="km", extra_field="address",
                                  extra="line 1\nline 2")

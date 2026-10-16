@@ -14,6 +14,7 @@ kommentar, så de ikke mistes.
 
 from __future__ import annotations
 
+import io
 import os
 import platform
 import shutil
@@ -21,7 +22,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Iterator, Optional, Sized, cast
 
 from opensak.export.cache_text import NO_TEXT, ExportText
 from opensak.lang import tr
@@ -582,6 +583,65 @@ def generate_gpx(
     Generer GPX indhold fra en liste af Cache objekter.
     Returnerer GPX som en streng klar til at skrive til fil.
 
+    Large exports should use write_gpx() instead, which streams the GPX to
+    a file without ever holding the whole document in memory (#1075).
+    See _gpx_chunks() for the format.
+    """
+    buf = io.StringIO()
+    write_gpx(buf, caches, filename, progress_cb=progress_cb,
+              use_corrected=use_corrected, text=text,
+              attributes=attributes, child_waypoints=child_waypoints)
+    return buf.getvalue()
+
+
+def write_gpx(
+    out, caches: Iterable, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+    text: ExportText = NO_TEXT,
+    attributes: bool = True,
+    child_waypoints: bool = True,
+    total: Optional[int] = None,
+) -> int:
+    """Write the GPX for *caches* to the text stream *out*, one cache at a
+    time (#1075: building the whole document as one string ran out of memory
+    for exports of 100,000+ caches).
+
+    *caches* may be any iterable (e.g. iter_caches_full()); *total* is the
+    count passed to progress_cb and defaults to len(caches). Returns the
+    number of caches written.
+    """
+    count = 0
+    for chunk, cache in _gpx_chunks(
+        caches, filename, progress_cb, use_corrected, text,
+        attributes, child_waypoints, total,
+    ):
+        out.write(chunk)
+        if cache is not None:
+            count += 1
+    return count
+
+
+def _xml_chunk(elem, level: int) -> str:
+    """*elem* serialized exactly as it appears *level* deep in an _indent()ed
+    document, without its tail — the caller writes the whitespace between
+    elements, so a document can be streamed element by element."""
+    import xml.etree.ElementTree as ET
+
+    _indent(elem, level)
+    elem.tail = None
+    return ET.tostring(elem, encoding="unicode")
+
+
+def _gpx_chunks(
+    caches: Iterable, filename: str, progress_cb, use_corrected: bool,
+    text: ExportText, attributes: bool, child_waypoints: bool,
+    total: Optional[int],
+) -> Iterator[tuple[str, Any]]:
+    """
+    Yield the GPX document as (text, cache) pieces. *cache* is set only on
+    the piece holding that cache's own <wpt> element (GGZ needs its byte
+    offset); every other piece has None.
+
     Bruger GPX 1.0 med groundspeak:cache som DIREKTE child af <wpt> — ikke
     pakket ind i et <extensions>-element (GPX 1.1-stil). Dette matcher GSAK's
     og de facto-standarden for geocaching-GPX-filer, som Garmin-enheders
@@ -601,28 +661,30 @@ def generate_gpx(
     attributes / child_waypoints=False leave those out.
     """
     from xml.etree.ElementTree import Element, SubElement
-    import xml.etree.ElementTree as ET
     from datetime import datetime, timezone
 
     # Root element — GPX 1.0, matching GSAK's own export format. The
     # groundspeak namespace is deliberately NOT declared here; it's declared
     # locally on each <groundspeak:cache> element instead (see below),
     # mirroring GSAK's exact convention byte-for-byte.
-    gpx = Element("gpx")
-    gpx.set("version", "1.0")
-    gpx.set("creator", "OpenSAK")
-    gpx.set("xmlns", "http://www.topografix.com/GPX/1/0")
-    gpx.set("xmlns:gsak", "http://www.gsak.net/xmlv1/6")
-    gpx.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+    yield (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<gpx version="1.0" creator="OpenSAK"'
+        ' xmlns="http://www.topografix.com/GPX/1/0"'
+        ' xmlns:gsak="http://www.gsak.net/xmlv1/6"'
+        ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+    ), None
 
     # Metadata
-    metadata = SubElement(gpx, "metadata")
+    metadata = Element("metadata")
     name_el = SubElement(metadata, "name")
     name_el.text = filename
     time_el = SubElement(metadata, "time")
     time_el.text = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    yield "\n  " + _xml_chunk(metadata, 1), None
 
-    total = len(caches)
+    if total is None:
+        total = len(cast(Sized, caches))
     for i, cache in enumerate(caches, 1):
         if progress_cb:
             progress_cb(i, total)
@@ -633,7 +695,7 @@ def generate_gpx(
         export_lat, export_lon = _effective_coords(cache, use_corrected)
         has_corrected = (export_lat != cache.latitude or export_lon != cache.longitude)
 
-        wpt = SubElement(gpx, "wpt")
+        wpt = Element("wpt")
         wpt.set("lat", f"{export_lat:.6f}")
         wpt.set("lon", f"{export_lon:.6f}")
 
@@ -820,6 +882,9 @@ def generate_gpx(
             gsak_note = SubElement(gsak_ext, "gsak:UserNote")
             gsak_note.text = note_text
 
+        yield "\n  ", None
+        yield _xml_chunk(wpt, 1), cache
+
         # Issue #753: child waypoints (parking areas, trailheads, stages,
         # final locations, etc.) were never exported at all — the loop
         # above only ever emits the ONE <wpt> for the cache's own listing.
@@ -837,7 +902,7 @@ def generate_gpx(
             if child_wp.latitude is None or child_wp.longitude is None:
                 continue
 
-            cwpt = SubElement(gpx, "wpt")
+            cwpt = Element("wpt")
             cwpt.set("lat", f"{child_wp.latitude:.6f}")
             cwpt.set("lon", f"{child_wp.longitude:.6f}")
 
@@ -869,10 +934,9 @@ def generate_gpx(
             cwpt_type = SubElement(cwpt, "type")
             cwpt_type.text = f"Waypoint|{child_wp.wp_type or 'Waypoint'}"
 
-    _indent(gpx)
-    return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(
-        gpx, encoding="unicode"
-    )
+            yield "\n  " + _xml_chunk(cwpt, 1), None
+
+    yield "\n</gpx>\n", None
 
 
 def _cache_symbol(cache_type: str, found: bool = False) -> str:
@@ -967,15 +1031,42 @@ def generate_loc(
     Corrected coordinates are used when available, unless use_corrected=False.
 
     progress_cb(done, total): optional per-cache callback for GUI progress.
+    Large exports should use write_loc() instead (#1075).
     """
+    buf = io.StringIO()
+    write_loc(buf, caches, progress_cb=progress_cb, use_corrected=use_corrected, text=text)
+    return buf.getvalue()
+
+
+def write_loc(
+    out, caches: Iterable, progress_cb=None, use_corrected: bool = True,
+    text: ExportText = NO_TEXT, total: Optional[int] = None,
+) -> int:
+    """Write the LOC for *caches* to the text stream *out*, one waypoint at a
+    time (#1075). *caches*, *total* and the return value are as for
+    write_gpx()."""
     from xml.etree.ElementTree import Element, SubElement
-    import xml.etree.ElementTree as ET
+    import re
 
-    root = Element("loc")
-    root.set("version", "1.0")
-    root.set("src", "OpenSAK")
+    # ET escapes CDATA — replace back the name content with proper CDATA
+    # by re-building the name tags with raw CDATA sections
+    def _fix_cdata(m: re.Match) -> str:
+        gc_id = m.group(1)
+        inner = m.group(2)
+        # Unescape what ET escaped
+        inner = inner.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        # Strip the literal CDATA wrapper text that we embedded as plain text
+        inner = inner.replace("<![CDATA[", "").replace("]]>", "")
+        return f'<name id="{gc_id}"><![CDATA[{inner}]]></name>'
 
-    total = len(caches)
+    cdata_name = re.compile(r'<name id="([^"]*)">&lt;!\[CDATA\[([^\]]*)\]\]&gt;</name>')
+
+    out.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+    root_tag = '<loc version="1.0" src="OpenSAK"'
+    count = 0
+
+    if total is None:
+        total = len(cast(Sized, caches))
     for i, cache in enumerate(caches, 1):
         if progress_cb:
             progress_cb(i, total)
@@ -984,7 +1075,7 @@ def generate_loc(
 
         export_lat, export_lon = _effective_coords(cache, use_corrected)
 
-        wp = SubElement(root, "waypoint")
+        wp = Element("waypoint")
 
         name_el = SubElement(wp, "name")
         name_el.set("id", cache.gc_code or "")
@@ -1018,29 +1109,14 @@ def generate_loc(
         container_el = SubElement(wp, "container")
         container_el.text = cache.container or "Unknown"
 
-    _indent(root)
-    xml_str = ET.tostring(root, encoding="unicode")
+        if not count:
+            out.write(root_tag + ">")
+        out.write("\n  " + cdata_name.sub(_fix_cdata, _xml_chunk(wp, 1)))
+        count += 1
 
-    # ET escapes CDATA — replace back the name content with proper CDATA
-    # by re-building the name tags with raw CDATA sections
-    import re
-
-    def _fix_cdata(m: re.Match) -> str:
-        gc_id = m.group(1)
-        inner = m.group(2)
-        # Unescape what ET escaped
-        inner = inner.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
-        # Strip the literal CDATA wrapper text that we embedded as plain text
-        inner = inner.replace("<![CDATA[", "").replace("]]>", "")
-        return f'<name id="{gc_id}"><![CDATA[{inner}]]></name>'
-
-    xml_str = re.sub(
-        r'<name id="([^"]*)">&lt;!\[CDATA\[([^\]]*)\]\]&gt;</name>',
-        _fix_cdata,
-        xml_str,
-    )
-
-    return '<?xml version="1.0" encoding="UTF-8"?>\n' + xml_str
+    # An empty <loc> is self-closing, as ElementTree writes it.
+    out.write("\n</loc>\n" if count else root_tag + " />")
+    return count
 
 
 # ── GGZ generator ─────────────────────────────────────────────────────────────
@@ -1064,92 +1140,52 @@ def generate_ggz(
     cache limit by using the GGZ container instead of plain GPX files.
     Corrected coordinates are used when available, unless use_corrected=False.
 
-    progress_cb(done, total): optional per-cache callback for GUI progress;
-    reported over the index-building pass (the slow part of GGZ).
+    progress_cb(done, total): optional per-cache callback for GUI progress.
+    Large exports should use write_ggz() instead (#1075).
     """
-    import io
+    buf = io.BytesIO()
+    write_ggz(buf, caches, filename, progress_cb=progress_cb,
+              use_corrected=use_corrected, text=text,
+              attributes=attributes, child_waypoints=child_waypoints)
+    return buf.getvalue()
+
+
+def write_ggz(
+    out, caches: Iterable, filename: str = "opensak_export", progress_cb=None,
+    use_corrected: bool = True,
+    text: ExportText = NO_TEXT,
+    attributes: bool = True,
+    child_waypoints: bool = True,
+    total: Optional[int] = None,
+) -> int:
+    """Write a GGZ (see generate_ggz) to the seekable binary stream *out*,
+    one cache at a time (#1075). *caches*, *total* and the return value are
+    as for write_gpx().
+
+    The GPX and the index are streamed into temporary files first: the
+    index needs the GPX's CRC and each cache's byte offset in it, and
+    zipfile needs the GPX's size up front to decide on ZIP64, exactly as
+    writestr() did when the GPX was one big string.
+    """
+    import binascii
     import zipfile
     from xml.etree.ElementTree import Element, SubElement
-    import xml.etree.ElementTree as ET
     from datetime import datetime, timezone
 
     gpx_filename = f"{filename}.gpx"
-    gpx_content  = generate_gpx(
-        caches, filename, use_corrected=use_corrected, text=text,
-        attributes=attributes, child_waypoints=child_waypoints,
-    ).encode("utf-8")
-
-    # ── CRC32 of the GPX content (hex, uppercase, 8 chars) ────────────────────
-    import binascii
-    crc_val = binascii.crc32(gpx_content) & 0xFFFFFFFF
-    crc_hex = f"{crc_val:08X}"
-
     now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _CONTAINER_SIZE = {
+        "Micro": 2.0, "Small": 3.0, "Regular": 4.0,
+        "Large": 5.0, "Not chosen": 3.0, "Other": 3.0,
+    }
 
-    # ── Build index.xml ───────────────────────────────────────────────────────
-    ggz_root = Element("ggz")
-    ggz_root.set("xmlns", "http://www.opencaching.com/xmlschemas/ggz/1/0")
-
-    time_el = SubElement(ggz_root, "time")
-    time_el.text = now_str
-
-    file_el = SubElement(ggz_root, "file")
-
-    fname_el = SubElement(file_el, "name")
-    fname_el.text = gpx_filename
-
-    crc_el = SubElement(file_el, "crc")
-    crc_el.text = crc_hex
-
-    ftime_el = SubElement(file_el, "time")
-    ftime_el.text = now_str
-
-    # Track byte offset into the GPX for each cache entry
-    gpx_text = gpx_content.decode("utf-8")
-
-    # ── Precompute byte offsets for every waypoint in ONE linear pass ──────────
-    # Previously this ran a fresh `re.search()` over the ENTIRE gpx_text for
-    # EVERY cache, which is O(n²): with thousands of caches, each search had
-    # to scan further and further into the text, causing exports to start
-    # fast and then slow down dramatically (see #466). Instead, walk the text
-    # once with finditer() and build a gc_code -> (file_pos, file_len) map.
-    import re
-    _wpt_pattern  = re.compile(r'<wpt\b[^>]*>.*?</wpt>', re.DOTALL)
-    _name_pattern = re.compile(r'<name>([^<]*)</name>')
-
-    offsets_by_gc_code: dict = {}
-    _byte_pos  = 0
-    _prev_end  = 0
-    for _m in _wpt_pattern.finditer(gpx_text):
-        # Advance by the byte length of the gap since the previous match,
-        # so we never re-encode text we've already accounted for.
-        _byte_pos += len(gpx_text[_prev_end:_m.start()].encode("utf-8"))
-        _wpt_text  = _m.group(0)
-        _wpt_len   = len(_wpt_text.encode("utf-8"))
-        _name_m    = _name_pattern.search(_wpt_text)
-        if _name_m:
-            # First occurrence wins, matching the old re.search() behaviour
-            # for the (unlikely) case of a duplicate GC code in the export.
-            offsets_by_gc_code.setdefault(_name_m.group(1), (_byte_pos, _wpt_len))
-        _byte_pos += _wpt_len
-        _prev_end  = _m.end()
-
-    total = len(caches)
-    for i, cache in enumerate(caches, 1):
-        if progress_cb:
-            progress_cb(i, total)
-        if cache.latitude is None or cache.longitude is None:
-            continue
-
+    def _index_entry(cache, file_pos: int, file_len: int) -> str:
         export_lat, export_lon = _effective_coords(cache, use_corrected)
-        gc_code = cache.gc_code or ""
 
-        file_pos, file_len = offsets_by_gc_code.get(gc_code, (0, 0))
-
-        gch_el = SubElement(file_el, "gch")
+        gch_el = Element("gch")
 
         code_el = SubElement(gch_el, "code")
-        code_el.text = gc_code
+        code_el.text = cache.gc_code or ""
 
         cname_el = SubElement(gch_el, "name")
         cname_el.text = text.name(cache)
@@ -1178,10 +1214,6 @@ def generate_ggz(
         diff_el.text = str(cache.difficulty or 1.0)
 
         if cache.container:
-            _CONTAINER_SIZE = {
-                "Micro": 2.0, "Small": 3.0, "Regular": 4.0,
-                "Large": 5.0, "Not chosen": 3.0, "Other": 3.0,
-            }
             size_val = _CONTAINER_SIZE.get(cache.container)
             if size_val:
                 size_el = SubElement(ratings_el, "size")
@@ -1194,20 +1226,14 @@ def generate_ggz(
             found_el = SubElement(gch_el, "found")
             found_el.text = "true"
 
-    _indent(ggz_root)
-    index_xml = (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
-        + ET.tostring(ggz_root, encoding="unicode")
-    )
+        return "\n    " + _xml_chunk(gch_el, 2)
 
-    # ── Pack into ZIP ─────────────────────────────────────────────────────────
     # zipfile.ZipFile.mkdir() with a plain string defaults date_time to
     # (1980, 1, 1, 0, 0, 0) — the earliest date the ZIP format supports —
     # unlike writestr(), which defaults to the current time. That made every
     # directory entry in the .ggz show up as "1980-01-01" / "1979-12-31 23:00"
     # depending on timezone. Build explicit ZipInfo objects with the current
     # time so directories get a sensible date too.
-    buf = io.BytesIO()
     _zip_date_time = datetime.now().timetuple()[:6]
 
     def _dir_zipinfo(name: str) -> "zipfile.ZipInfo":
@@ -1225,38 +1251,119 @@ def generate_ggz(
         zi.compress_type = zipfile.ZIP_DEFLATED
         return zi
 
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.mkdir(_dir_zipinfo("data/"))
-        zf.writestr(_file_zipinfo(f"data/{gpx_filename}"), gpx_content)
-        zf.mkdir(_dir_zipinfo("index/"))
-        zf.mkdir(_dir_zipinfo("index/com/"))
-        zf.mkdir(_dir_zipinfo("index/com/garmin/"))
-        zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/"))
-        zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/v0/"))
-        zf.writestr(
-            _file_zipinfo("index/com/garmin/geocaches/v0/index.xml"),
-            index_xml.encode("utf-8"),
-        )
+    def _add_file(zf: "zipfile.ZipFile", name: str, src) -> None:
+        # Like writestr(): the size is known before the entry is opened.
+        zi = _file_zipinfo(name)
+        zi.file_size = src.seek(0, os.SEEK_END)
+        src.seek(0)
+        with zf.open(zi, "w") as dst:
+            shutil.copyfileobj(src, dst)
 
-    return buf.getvalue()
+    count = 0
+    with tempfile.TemporaryFile() as gpx_tmp, tempfile.TemporaryFile() as index_tmp:
+        # ── GPX, collecting the index entries as each <wpt> is written ────────
+        # Each cache's byte offset is counted as its <wpt> is written (#466:
+        # this used to be a regex pass over the finished GPX text). The first
+        # <wpt> of a GC code wins, as with the old lookup; a cache without a
+        # GC code gets 0/0.
+        crc = 0
+        pos = 0
+        offsets_by_gc_code: dict = {}
+        for chunk, cache in _gpx_chunks(
+            caches, filename, progress_cb, use_corrected, text,
+            attributes, child_waypoints, total,
+        ):
+            data = chunk.encode("utf-8")
+            if cache is not None:
+                gc_code = cache.gc_code or ""
+                if gc_code:
+                    offsets_by_gc_code.setdefault(gc_code, (pos, len(data)))
+                file_pos, file_len = offsets_by_gc_code.get(gc_code, (0, 0))
+                index_tmp.write(_index_entry(cache, file_pos, file_len).encode("utf-8"))
+                count += 1
+            crc = binascii.crc32(data, crc)
+            gpx_tmp.write(data)
+            pos += len(data)
+
+        # ── index.xml around the collected entries ────────────────────────────
+        time_el = Element("time")
+        time_el.text = now_str
+        fname_el = Element("name")
+        fname_el.text = gpx_filename
+        crc_el = Element("crc")
+        crc_el.text = f"{crc & 0xFFFFFFFF:08X}"
+        ftime_el = Element("time")
+        ftime_el.text = now_str
+
+        index_tmp.seek(0)
+        with tempfile.TemporaryFile() as index_xml:
+            index_xml.write((
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+                '<ggz xmlns="http://www.opencaching.com/xmlschemas/ggz/1/0">'
+                "\n  " + _xml_chunk(time_el, 1)
+                + "\n  <file>"
+                + "\n    " + _xml_chunk(fname_el, 2)
+                + "\n    " + _xml_chunk(crc_el, 2)
+                + "\n    " + _xml_chunk(ftime_el, 2)
+            ).encode("utf-8"))
+            shutil.copyfileobj(index_tmp, index_xml)
+            index_xml.write(b"\n  </file>\n</ggz>\n")
+
+            # ── Pack into ZIP ─────────────────────────────────────────────────
+            with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.mkdir(_dir_zipinfo("data/"))
+                _add_file(zf, f"data/{gpx_filename}", gpx_tmp)
+                zf.mkdir(_dir_zipinfo("index/"))
+                zf.mkdir(_dir_zipinfo("index/com/"))
+                zf.mkdir(_dir_zipinfo("index/com/garmin/"))
+                zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/"))
+                zf.mkdir(_dir_zipinfo("index/com/garmin/geocaches/v0/"))
+                _add_file(zf, "index/com/garmin/geocaches/v0/index.xml", index_xml)
+
+    return count
+
+
+def write_export(path: Path, write, binary: bool = False):
+    """Call *write(f)* with a file open on a temporary file next to *path*,
+    which replaces *path* only once *write* has finished; returns what it
+    returns.
+
+    #1075: exports stream into the file as they go, so a failure halfway
+    must neither truncate the previous file nor leave a partial one behind.
+    Text is written with the platform's newlines, as Path.write_text() did.
+    """
+    part = path.with_name(path.name + ".part")
+    try:
+        with (open(part, "wb") if binary else open(part, "w", encoding="utf-8")) as f:
+            result = write(f)
+        os.replace(part, path)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    return result
 
 
 def export_ggz_to_device(
-    caches: list,
+    caches: Iterable,
     device_root: Path,
     filename: str = "opensak",
     progress_cb=None,
+    total: Optional[int] = None,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil direkte til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
+
+    *caches* may be any iterable (e.g. iter_caches_full()), streamed to the
+    file one by one (#1075); *total* is as for write_gpx().
     """
     result = ExportResult()
     result.device = device_root
 
-    try:
-        ggz_content = generate_ggz(caches, filename, progress_cb=progress_cb)
+    def _write(f) -> int:
+        return write_ggz(f, caches, filename, progress_cb=progress_cb, total=total)
 
+    try:
         if is_mtp_device(device_root):
             ggz_dir = _find_mtp_ggz_dir(device_root)
             if ggz_dir is None:
@@ -1268,16 +1375,17 @@ def export_ggz_to_device(
             output_path = ggz_dir / f"{filename}.ggz"
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / output_path.name
-                tmp_path.write_bytes(ggz_content)
+                with open(tmp_path, "wb") as f:
+                    count = _write(f)
                 _gio_copy_with_replace(tmp_path, output_path)
         else:
             ggz_dir = get_garmin_ggz_path(device_root)
             ggz_dir.mkdir(parents=True, exist_ok=True)
             output_path = ggz_dir / f"{filename}.ggz"
-            output_path.write_bytes(ggz_content)
+            count = write_export(output_path, _write, binary=True)
 
         result.file_path   = output_path
-        result.cache_count = len([c for c in caches if c.latitude is not None])
+        result.cache_count = count
 
     except PermissionError:
         result.error = tr("gps_error_permission")
@@ -1290,22 +1398,26 @@ def export_ggz_to_device(
 
 
 def export_ggz_to_file(
-    caches: list,
+    caches: Iterable,
     output_path: Path,
     progress_cb=None,
+    total: Optional[int] = None,
 ) -> ExportResult:
     """
     Eksportér caches som GGZ fil til en valgfri placering.
     Bruges når GPS ikke er tilsluttet direkte.
+    *caches* and *total* are as for export_ggz_to_device().
     """
     result = ExportResult()
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        ggz_content = generate_ggz(caches, output_path.stem, progress_cb=progress_cb)
-        output_path.write_bytes(ggz_content)
+        result.cache_count = write_export(
+            output_path,
+            lambda f: write_ggz(f, caches, output_path.stem, progress_cb=progress_cb, total=total),
+            binary=True,
+        )
         result.file_path   = output_path
-        result.cache_count = len([c for c in caches if c.latitude is not None])
     except Exception as e:
         result.error = str(e)
 
@@ -1429,21 +1541,24 @@ class ExportResult:
 
 
 def export_to_device(
-    caches: list,
+    caches: Iterable,
     device_root: Path,
     filename: str = "opensak",
     progress_cb=None,
+    total: Optional[int] = None,
 ) -> ExportResult:
     """
     Eksportér caches til en Garmin GPS enhed.
     Understøtter både normale mount points og MTP-enheder (via gio copy).
+    *caches* and *total* are as for export_ggz_to_device().
     """
     result = ExportResult()
     result.device = device_root
 
-    try:
-        gpx_content = generate_gpx(caches, filename, progress_cb=progress_cb)
+    def _write(f) -> int:
+        return write_gpx(f, caches, filename, progress_cb=progress_cb, total=total)
 
+    try:
         if is_mtp_device(device_root):
             gpx_dir = _find_mtp_gpx_dir(device_root)
             if gpx_dir is None:
@@ -1452,16 +1567,17 @@ def export_to_device(
             output_path = gpx_dir / f"{filename}.gpx"
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_path = Path(tmpdir) / output_path.name
-                tmp_path.write_text(gpx_content, encoding="utf-8")
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    count = _write(f)
                 _gio_copy_with_replace(tmp_path, output_path)
         else:
             gpx_dir = get_garmin_gpx_path(device_root)
             gpx_dir.mkdir(parents=True, exist_ok=True)
             output_path = gpx_dir / f"{filename}.gpx"
-            output_path.write_text(gpx_content, encoding="utf-8")
+            count = write_export(output_path, _write)
 
         result.file_path   = output_path
-        result.cache_count = len([c for c in caches if c.latitude is not None])
+        result.cache_count = count
 
     except PermissionError:
         result.error = tr("gps_error_permission")
@@ -1474,22 +1590,25 @@ def export_to_device(
 
 
 def export_to_file(
-    caches: list,
+    caches: Iterable,
     output_path: Path,
     progress_cb=None,
+    total: Optional[int] = None,
 ) -> ExportResult:
     """
     Eksportér caches til en GPX fil (valgfri placering).
     Bruges når GPS ikke er tilsluttet.
+    *caches* and *total* are as for export_ggz_to_device().
     """
     result = ExportResult()
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        gpx_content = generate_gpx(caches, output_path.stem, progress_cb=progress_cb)
-        output_path.write_text(gpx_content, encoding="utf-8")
+        result.cache_count = write_export(
+            output_path,
+            lambda f: write_gpx(f, caches, output_path.stem, progress_cb=progress_cb, total=total),
+        )
         result.file_path   = output_path
-        result.cache_count = len([c for c in caches if c.latitude is not None])
     except Exception as e:
         result.error = str(e)
 
