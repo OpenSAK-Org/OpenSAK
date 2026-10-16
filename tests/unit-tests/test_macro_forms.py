@@ -441,7 +441,7 @@ class BaseHost:
     def database_name(self):
         return "Test"
 
-    def approve_database_write(self, name, path):
+    def approve_macro_write(self, macro):
         # set_corrected() in an example form asks before its first write
         return WriteApproval.SESSION
 

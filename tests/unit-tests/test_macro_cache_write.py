@@ -1,7 +1,7 @@
 """tests/unit-tests/test_macro_cache_write.py — changing caches from Lua
 macros: opensak.update(), opensak.insert{}, opensak.sql_write(), the
 protected fields and columns, the recalculated derived columns, and the
-per-database write approval (Deny / until OpenSAK closes / always)."""
+per-macro write approval (Deny / until OpenSAK closes / always)."""
 
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +12,7 @@ from opensak.db.database import get_engine, get_session
 from opensak.db.models import Cache, Log, UserNote, Waypoint
 from opensak.filters.engine import distance_km_batch
 from opensak.gui.settings import get_settings
-from opensak.macro import MacroError, MacroRuntime, WriteApproval
+from opensak.macro import FolderPermission, MacroError, MacroRuntime, WriteApproval
 from opensak.macro import db_access
 
 
@@ -21,7 +21,7 @@ class Host:
 
     def __init__(self, answer=WriteApproval.SESSION):
         self.answer = answer
-        self.asked: list[tuple[str, Path]] = []
+        self.asked: list[Path | None] = []
         self.changed: list[tuple[list[str], bool]] = []
         self.corrected: list[tuple] = []
 
@@ -35,8 +35,8 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_database_write(self, name, path):
-        self.asked.append((name, path))
+    def approve_macro_write(self, macro):
+        self.asked.append(macro)
         return self.answer
 
     def caches_changed(self, codes, added):
@@ -50,10 +50,17 @@ class Host:
         pass
 
 
-def _run(source, host=None):
+def _run(source, host=None, macro_path=None, permissions=None):
+    """Run *source*, as the macro file *macro_path* if given (it need not
+    exist), else as an unsaved macro."""
     out: list[str] = []
     host = host or Host()
-    MacroRuntime(host, output=out.append).run(source)
+    MacroRuntime(host, output=out.append, folder_permissions=permissions).run(
+        source,
+        chunk_name=macro_path.name if macro_path else "macro",
+        base_dir=macro_path.parent if macro_path else None,
+        macro_path=macro_path,
+    )
     return host, out
 
 
@@ -175,7 +182,7 @@ def test_denied_write_fails_and_is_not_asked_again_in_the_run():
         print(pcall(opensak.update, "GCW4", { user_flag = true }))
         print(pcall(opensak.set_corrected, "GCW4", 47, 8))
     """, host)
-    assert len(host.asked) == 1 and host.asked[0] == ("TestDB", _db_path())
+    assert host.asked == [None]                      # an unsaved macro
     assert all(line.startswith("false") and "did not allow" in line for line in out)
     assert host.corrected == [] and _cache("GCW4").user_flag is False
     # A new run asks again.
@@ -194,19 +201,64 @@ def test_session_approval_lasts_until_reset():
     assert len(host.asked) == 2
 
 
-def test_always_approval_is_stored_and_removable():
+def test_approval_belongs_to_the_macro_file(tmp_path):
+    host = Host(WriteApproval.SESSION)
+    first, second = tmp_path / "first.lua", tmp_path / "second.lua"
+    _run('opensak.update("GCW4", { user_sort = 10 })', host, first)
+    _run('opensak.update("GCW4", { user_sort = 11 })', host, first)
+    assert host.asked == [first]
+    host.answer = WriteApproval.DENY
+    with pytest.raises(MacroError, match="did not allow macro 'second.lua'"):
+        _run('opensak.update("GCW4", { user_sort = 12 })', host, second)
+    with pytest.raises(MacroError, match=r"did not allow macro '\(unsaved\)'"):
+        _run('opensak.update("GCW4", { user_sort = 12 })', host)
+    assert host.asked == [first, second, None] and _cache("GCW4").user_sort == 11
+
+
+def test_always_approval_is_stored_by_macro_path_and_removable(tmp_path):
     host = Host(WriteApproval.ALWAYS)
-    _run('opensak.update("GCW4", { user_sort = 4 })', host)
-    assert db_access.always_approved() == [str(_db_path().resolve())]
+    macro = tmp_path / "always.lua"
+    _run('opensak.update("GCW4", { user_sort = 4 })', host, macro)
+    assert db_access.always_approved() == [str(macro.resolve())]
     db_access.reset_session()
-    _run('opensak.update("GCW4", { user_sort = 5 })', host)
+    _run('opensak.update("GCW4", { user_sort = 5 })', host, macro)
     assert len(host.asked) == 1
     # Removed in Settings: asked again, even before a restart.
     db_access.save_always_approved([])
     host.answer = WriteApproval.DENY
     with pytest.raises(MacroError, match="did not allow"):
-        _run('opensak.update("GCW4", { user_sort = 6 })', host)
+        _run('opensak.update("GCW4", { user_sort = 6 })', host, macro)
     assert len(host.asked) == 2
+
+
+def test_unsaved_macro_is_never_approved_always():
+    host = Host(WriteApproval.ALWAYS)                # the dialog does not offer it
+    _run('opensak.update("GCW4", { user_sort = 7 })', host)
+    assert db_access.always_approved() == []
+    _run('opensak.update("GCW4", { user_sort = 8 })', host)
+    assert len(host.asked) == 1                      # until OpenSAK closes
+    db_access.reset_session()
+    _run('opensak.update("GCW4", { user_sort = 9 })', host)
+    assert len(host.asked) == 2
+
+
+def test_called_macro_needs_its_own_approval(tmp_path):
+    (tmp_path / "helper.lua").write_text(
+        'opensak.update("GCW4", { user_sort = 20 })', encoding="utf-8")
+    host = Host(WriteApproval.SESSION)
+    caller = tmp_path / "caller.lua"
+    perms = [FolderPermission(str(tmp_path), read=True, write=False)]
+    _run('opensak.update("GCW4", { user_sort = 19 }) opensak.run_macro("helper.lua")',
+         host, caller, perms)
+    assert host.asked == [caller, tmp_path / "helper.lua"]
+    # An approved helper does not approve its caller.
+    db_access.reset_session()
+    db_access.approve(tmp_path / "helper.lua", WriteApproval.SESSION)
+    host.answer = WriteApproval.DENY
+    with pytest.raises(MacroError, match="did not allow macro 'caller.lua'"):
+        _run('opensak.run_macro("helper.lua") opensak.update("GCW4", { user_sort = 21 })',
+             host, caller, perms)
+    assert _cache("GCW4").user_sort == 20
 
 
 def test_set_corrected_needs_approval():

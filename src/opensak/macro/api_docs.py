@@ -309,7 +309,9 @@ def _forms_section() -> list[str]:
 
 # Appended to the functions that need the lua-macro-write feature flag
 _WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
-               "is on, as it is in beta builds; check with `if opensak.update then`.")
+               "is on, as it is in beta builds; check with `if opensak.update then`. "
+               "Changing caches needs the user's approval, given per macro "
+               "(see Changing caches).")
 
 
 def _changing_section() -> list[str]:
@@ -329,12 +331,17 @@ def _changing_section() -> list[str]:
         "`opensak.update()`, `opensak.insert{}`, `opensak.insert_<x>()`, "
         "`opensak.update_<x>()`, `opensak.sql_write()`, "
         "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
-        "active database. Before a macro changes a database for the first "
-        "time, OpenSAK asks whether macros may change it: **Deny** (the "
+        "active database. Before a macro's first change, OpenSAK asks "
+        "whether this macro may change your OpenSAK databases: **Deny** (the "
         "function fails, and OpenSAK does not ask again during this run), "
-        "**Until OpenSAK closes**, or **Always**. Databases allowed always are "
+        "**Until OpenSAK closes**, or **Always**. The answer belongs to the "
+        "macro file, not to a database: editing the macro keeps it, a moved "
+        "or renamed file is asked about again. Macros allowed always are "
         "listed in Settings → Folder permissions, where they can be removed "
-        "again.",
+        "again. An unsaved macro can only be allowed until OpenSAK closes. "
+        "A macro started with `opensak.run_macro()` is asked about on its "
+        "own. A run from an external editor (`opensak --run-macro`) asks in "
+        "the OpenSAK window, like any other run.",
         "",
         "Which function to use:",
         "",

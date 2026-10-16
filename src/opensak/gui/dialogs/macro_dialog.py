@@ -695,18 +695,25 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
 
 
 
-def ask_database_write_approval(parent, name: str, path: Path) -> WriteApproval:
-    """OpenSAK's question before a macro first changes the database *name*:
-    deny (the default, also on Escape), allow until OpenSAK closes, or
-    always. The name comes from the database list, shown as plain text."""
+def ask_macro_write_approval(parent, macro: Path | None) -> WriteApproval:
+    """OpenSAK's question before the macro file *macro* first changes a
+    database: deny (the default, also on Escape), allow until OpenSAK
+    closes, or always. An unsaved macro (None) cannot be allowed always."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle(tr("macro_db_write_title"))
+    box.setWindowTitle(tr("macro_write_title"))
     box.setTextFormat(Qt.TextFormat.PlainText)
-    box.setText(tr("macro_db_write_msg", name=name, path=str(path)))
-    box.setInformativeText(tr("macro_db_write_hint"))
-    btn_session = box.addButton(tr("macro_db_write_session"), QMessageBox.ButtonRole.AcceptRole)
-    btn_always = box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+    if macro is None:
+        box.setText(tr("macro_write_msg_unsaved"))
+        box.setInformativeText(tr("macro_write_hint_unsaved"))
+    else:
+        box.setText(tr("macro_write_msg", name=macro.name, path=str(macro)))
+        box.setInformativeText(tr("macro_write_hint"))
+    btn_session = box.addButton(tr("macro_write_session"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = (
+        box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+        if macro is not None else None
+    )
     btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(btn_deny)
     box.setEscapeButton(btn_deny)
@@ -714,7 +721,7 @@ def ask_database_write_approval(parent, name: str, path: Path) -> WriteApproval:
     clicked = box.clickedButton()
     if clicked is btn_session:
         return WriteApproval.SESSION
-    if clicked is btn_always:
+    if btn_always is not None and clicked is btn_always:
         return WriteApproval.ALWAYS
     return WriteApproval.DENY
 

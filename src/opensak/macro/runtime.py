@@ -644,13 +644,14 @@ class MacroHost(Protocol):
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
 
-    def approve_database_write(self, name: str, path: Path) -> WriteApproval:
-        """Ask the user whether macros may change the database *name* (file
-        *path*): never, until OpenSAK closes, or always.
+    def approve_macro_write(self, macro: Optional[Path]) -> WriteApproval:
+        """Ask the user whether the macro file *macro* may change the
+        OpenSAK databases: never, until OpenSAK closes, or always. *macro*
+        is None for an unsaved macro, which cannot be allowed always.
 
-        Asked before a macro's first write to a database that is not
-        approved yet. Must be OpenSAK's own dialog. Anything but SESSION or
-        ALWAYS counts as DENY.
+        Asked before the first write of a macro that is not approved yet.
+        Must be OpenSAK's own dialog. Anything but SESSION or ALWAYS counts
+        as DENY.
         """
 
     def caches_changed(self, codes: list[str], added: bool) -> None:
@@ -1279,8 +1280,9 @@ class MacroRuntime:
         # transaction(), opened on first use and closed after the run (or on
         # switch_database), which drops the macro's TEMP tables.
         self._sql_write_db: Optional[WritableDatabase] = None
-        # Database paths the user refused to let this run change
-        self._write_denied: set[Path] = set()
+        # Macro files (None: unsaved) the user refused to let change
+        # databases during this run
+        self._write_denied: set[Optional[Path]] = set()
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1363,29 +1365,31 @@ class MacroRuntime:
         return bool(self._host.set_corrected_coords(gc_code, None, None))
 
     # Changing caches (cache_write.py): only the active database, and only
-    # after the user approved writing to it (db_access.py).
+    # after the user allowed the running macro to write (db_access.py).
 
     def _require_write(self, func: str) -> None:
-        """Raise unless the user lets macros change the active database —
-        asking (host.approve_database_write) if that was not decided yet.
-        A refusal holds for the rest of the run.
+        """Raise unless the user lets the running macro change databases —
+        asking (host.approve_macro_write) if that was not decided yet. A
+        macro started with opensak.run_macro() is asked about on its own
+        (_macro_path is the called macro's). A refusal holds for the rest
+        of the run.
 
         Without the lua-macro-write flag only set_corrected/clear_corrected
         get here (the other writing functions are not registered); they
         change the database without asking, as before the write API."""
         if not flags.lua_macro_write:
             return
-        path = Path(get_engine().url.database or "")
-        if db_access.is_approved(path):
+        macro = self._macro_path
+        if db_access.is_approved(macro):
             return
-        name = self._host.database_name()
-        if path not in self._write_denied:
-            answer = self._host.approve_database_write(name, path)
+        if macro not in self._write_denied:
+            answer = self._host.approve_macro_write(macro)
             if answer in (WriteApproval.SESSION, WriteApproval.ALWAYS):
-                db_access.approve(path, answer)
+                db_access.approve(macro, answer)
                 return
-            self._write_denied.add(path)
-        raise MacroError(f"{func}: the user did not allow macros to change database {name!r}")
+            self._write_denied.add(macro)
+        name = macro.name if macro is not None else "(unsaved)"
+        raise MacroError(f"{func}: the user did not allow macro {name!r} to change databases")
 
     def _field_values(self, func: str, values: Any, insert: bool) -> dict[str, Any]:
         if values is None or not hasattr(values, "items"):
@@ -3419,7 +3423,8 @@ API: tuple[ApiFunction, ...] = (
                     "to it, and prints its path in the macro output. If the "
                     "folder cannot be written the call fails; a read-only "
                     "file can be read but not changed. Unlike opensak.update() "
-                    "it does not ask about the active database. Changes inside opensak.transaction() "
+                    "it needs no approval to change databases (see Changing "
+                    "caches). Changes inside opensak.transaction() "
                     "are kept or undone together with those of the active "
                     "database. The SQL statement ATTACH itself stays refused. "
                     "Cannot be called inside opensak.transaction(); stays "
@@ -3559,8 +3564,8 @@ API: tuple[ApiFunction, ...] = (
                     "the given fields change. `false` clears a field that is "
                     "not a boolean. Fields OpenSAK maintains itself, such as "
                     "`code`, `distance` or `log_count`, cannot be written. "
-                    "Before the first change to a database, OpenSAK asks the "
-                    "user to allow it (see Changing caches).",
+                    "Before a macro's first change, OpenSAK asks the user to "
+                    "allow that macro (see Changing caches).",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
                 'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
                 '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',

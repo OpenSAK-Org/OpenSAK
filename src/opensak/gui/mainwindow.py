@@ -3577,12 +3577,13 @@ class MainWindow(QMainWindow):
         if added:
             self._macro_caches_added = True
 
-    def approve_database_write(self, name: str, path):
-        """MacroHost: ask whether macros may change the database *name*
-        (OpenSAK's own dialog, on top of the macro dialog)."""
-        from opensak.gui.dialogs.macro_dialog import ask_database_write_approval
+    def approve_macro_write(self, macro):
+        """MacroHost: ask whether the macro file *macro* (None: unsaved) may
+        change the databases (OpenSAK's own dialog, on top of the macro
+        dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_macro_write_approval
         parent = getattr(self, "_macro_dialog", None) or self
-        return ask_database_write_approval(parent, name, path)
+        return ask_macro_write_approval(parent, macro)
 
     def approve_folder(self, target, folder, write: bool):
         """MacroHost: ask whether the macro may use *folder* (OpenSAK's own

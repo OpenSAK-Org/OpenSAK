@@ -1,21 +1,25 @@
 """
-src/opensak/macro/db_access.py — which databases Lua macros may change.
+src/opensak/macro/db_access.py — which Lua macros may change OpenSAK's
+databases (#1034).
 
-Reading a database needs no approval. Before a macro's first write to a
-database (opensak.update/insert/sql_write, set_corrected, clear_corrected)
-the runtime asks the user, through OpenSAK's own dialog, never through the
-macro:
+Reading a database needs no approval. Before a macro's first write
+(opensak.update/insert/sql_write, set_corrected, clear_corrected) the
+runtime asks the user, through OpenSAK's own dialog, never through the
+macro, whether *this macro* may change the OpenSAK databases:
 
   * Deny — the write fails; not asked again during this run;
-  * Until OpenSAK closes — every macro may change this database until the
+  * Until OpenSAK closes — the macro may change databases until the
     application quits (kept in memory only);
-  * Always — stored in opensak.json under "macros.db_write_always" as a
-    list of resolved database paths, and listed in Settings → Folder
+  * Always — stored in opensak.json under "macros.write_always" as a list
+    of resolved macro file paths, and listed in Settings → Folder
     permissions, where it can be removed again.
 
-Databases are identified by their resolved file path, so renaming a
-database in the list keeps its approval, while a different file under the
-same name needs a new one.
+Approval is keyed on the macro file's path: editing the macro keeps it,
+moving or renaming the file needs a new one. It covers every database, but
+a macro still only ever writes the active one. An unsaved macro (an editor
+buffer without a file) can only be approved until OpenSAK closes; that
+approval is shared by all unsaved macros. A macro started with
+opensak.run_macro() needs its own approval.
 """
 
 from __future__ import annotations
@@ -23,9 +27,12 @@ from __future__ import annotations
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
-STORE_KEY = "macros.db_write_always"
+STORE_KEY = "macros.write_always"
+
+# The key for macros without a file
+_UNSAVED = "<unsaved>"
 
 
 class WriteApproval(Enum):
@@ -36,22 +43,24 @@ class WriteApproval(Enum):
     DENY = "deny"
 
 
-# Databases approved "until OpenSAK closes" (keys from _key()).
+# Macros approved "until OpenSAK closes" (keys from _key()).
 _session: set[str] = set()
 
 
-def _key(path: str | Path) -> str:
-    """A comparable form of a database path: resolved, case-folded where
-    the filesystem ignores case."""
+def _key(macro: Optional[str | Path]) -> str:
+    """A comparable form of a macro path: resolved, case-folded where the
+    filesystem ignores case. None (an unsaved macro) has its own key."""
+    if macro is None:
+        return _UNSAVED
     try:
-        resolved = Path(path).expanduser().resolve()
+        resolved = Path(macro).expanduser().resolve()
     except (OSError, RuntimeError):
-        resolved = Path(path)
+        resolved = Path(macro)
     return os.path.normcase(str(resolved))
 
 
 def always_approved() -> list[str]:
-    """The database paths approved permanently, as stored."""
+    """The macro paths approved permanently, as stored."""
     from opensak.settings_store import get_store
 
     raw = get_store().get(STORE_KEY)
@@ -61,9 +70,9 @@ def always_approved() -> list[str]:
 
 
 def save_always_approved(paths: Iterable[str]) -> None:
-    """Store *paths* as the permanently approved databases (an empty list
-    removes the setting). A database dropped from the list loses its
-    approval at once, also the one until OpenSAK closes."""
+    """Store *paths* as the permanently approved macros (an empty list
+    removes the setting). A macro dropped from the list loses its approval
+    at once, also the one until OpenSAK closes."""
     from opensak.settings_store import get_store
 
     store = get_store()
@@ -80,21 +89,26 @@ def save_always_approved(paths: Iterable[str]) -> None:
         store.delete(STORE_KEY)
 
 
-def is_approved(path: str | Path) -> bool:
-    """True if macros may change the database at *path* without asking."""
-    key = _key(path)
-    return key in _session or any(_key(p) == key for p in always_approved())
+def is_approved(macro: Optional[str | Path]) -> bool:
+    """True if the macro at *macro* (None: an unsaved one) may change
+    databases without asking."""
+    key = _key(macro)
+    if key in _session:
+        return True
+    return macro is not None and any(_key(p) == key for p in always_approved())
 
 
-def approve(path: str | Path, answer: WriteApproval) -> None:
-    """Record the user's *answer* for the database at *path*. DENY records
-    nothing here — the runtime remembers it for the current run only."""
-    if answer is WriteApproval.SESSION:
-        _session.add(_key(path))
-    elif answer is WriteApproval.ALWAYS:
-        _session.add(_key(path))
-        if not any(_key(p) == _key(path) for p in always_approved()):
-            save_always_approved([*always_approved(), str(Path(path).resolve())])
+def approve(macro: Optional[str | Path], answer: WriteApproval) -> None:
+    """Record the user's *answer* for the macro at *macro*. DENY records
+    nothing here — the runtime remembers it for the current run only. An
+    unsaved macro (None) cannot be approved always; ALWAYS then counts as
+    SESSION."""
+    if answer not in (WriteApproval.SESSION, WriteApproval.ALWAYS):
+        return
+    _session.add(_key(macro))
+    if answer is WriteApproval.ALWAYS and macro is not None:
+        if not any(_key(p) == _key(macro) for p in always_approved()):
+            save_always_approved([*always_approved(), str(Path(macro).resolve())])
 
 
 def reset_session() -> None:

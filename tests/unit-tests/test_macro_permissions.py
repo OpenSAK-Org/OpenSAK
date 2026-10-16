@@ -619,6 +619,29 @@ def test_db_write_list_hidden_without_lua_macro_write_flag(qtbot, monkeypatch):
     d._save()  # no list to store
 
 
+def test_approved_macros_listed_by_name_and_removable(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import Qt
+    from opensak.gui.dialogs import settings_dialog as sd
+    from opensak.macro import db_access
+    from opensak.utils import flags
+    monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
+    monkeypatch.setattr(flags, "lua_macros", True)
+    monkeypatch.setattr(flags, "lua_macro_write", True)
+    first, second = str(tmp_path / "a" / "first.lua"), str(tmp_path / "second.lua")
+    db_access.save_always_approved([first, second])
+    d = sd.SettingsDialog()
+    qtbot.addWidget(d)
+    items = [d._db_write_list.item(i) for i in range(d._db_write_list.count())]
+    assert [i.text() for i in items] == ["first.lua", "second.lua"]
+    assert [i.toolTip() for i in items] == [first, second]
+    d._db_write_list.setCurrentItem(items[0])
+    assert d._btn_db_write_remove.isEnabled()
+    d._on_remove_db_write()
+    d._save()
+    assert db_access.always_approved() == [second]
+    assert d._db_write_list.item(0).data(Qt.ItemDataRole.UserRole) == second
+
+
 def test_toggle_write_and_save(dlg):
     from PySide6.QtCore import Qt
     dlg._perm_table.item(1, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)
@@ -710,6 +733,51 @@ def test_approval_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected)
     assert str(target) in seen["text"] and str(tmp_path) in seen["text"]
     assert seen["plain"] == md.Qt.TextFormat.PlainText
     assert seen["default"] == tr("macro_access_deny")
+
+
+@pytest.mark.parametrize("button, expected", [
+    ("macro_write_session", "SESSION"),
+    ("macro_access_always", "ALWAYS"),
+    ("macro_access_deny", "DENY"),
+    (None, "DENY"),                                   # closed / Escape
+])
+def test_macro_write_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected):
+    from opensak.gui.dialogs import macro_dialog as md
+    from opensak.macro import WriteApproval
+    monkeypatch.setattr(md, "tr", lambda key, **kw: " | ".join([key, *kw.values()]))
+    seen = {}
+
+    def fake_exec(box):
+        seen["text"] = box.text()
+        seen["plain"] = box.textFormat()
+        seen["default"] = box.defaultButton().text()
+        if button:
+            next(b for b in box.buttons() if b.text() == md.tr(button)).click()
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    macro = tmp_path / "<b>m</b>.lua"
+    assert md.ask_macro_write_approval(None, macro) is WriteApproval[expected]
+    assert str(macro) in seen["text"] and macro.name in seen["text"]
+    assert seen["plain"] == md.Qt.TextFormat.PlainText
+    assert seen["default"] == md.tr("macro_access_deny")
+
+
+def test_macro_write_dialog_offers_no_always_for_an_unsaved_macro(qtbot, monkeypatch):
+    from opensak.gui.dialogs import macro_dialog as md
+    from opensak.lang import tr
+    seen = {}
+
+    def fake_exec(box):
+        seen["text"] = box.text()
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    md.ask_macro_write_approval(None, None)
+    assert seen["text"] == tr("macro_write_msg_unsaved")
+    assert tr("macro_access_always") not in seen["buttons"]
+    assert tr("macro_write_session") in seen["buttons"]
 
 
 @pytest.mark.parametrize("answer, checked", [("Yes", True), ("No", False)])

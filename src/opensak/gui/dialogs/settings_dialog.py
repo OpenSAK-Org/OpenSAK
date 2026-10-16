@@ -3,6 +3,7 @@ src/opensak/gui/dialogs/settings_dialog.py — Settings dialog.
 """
 
 from __future__ import annotations
+from pathlib import Path
 from typing import cast
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -944,8 +945,8 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        # The databases macros may change: only with the macro write API,
-        # which has its own beta flag.
+        # The macros that may change databases: only with the macro write
+        # API, which has its own beta flag.
         from opensak.utils import flags
         self._db_write_list = None
         if flags.lua_macro_write:
@@ -1102,10 +1103,11 @@ class SettingsDialog(QDialog):
             table.removeRow(row)
 
     def _build_db_write_section(self) -> QWidget:
-        """The databases macros may always change (answered "Always" when a
-        macro first wrote to them). They can only be removed here; adding
-        happens through that question."""
-        from PySide6.QtWidgets import QListWidget
+        """The macros that may always change databases (answered "Always"
+        when they first wrote), listed by file name with the full path as
+        tooltip. They can only be removed here; adding happens through that
+        question."""
+        from PySide6.QtWidgets import QListWidget, QListWidgetItem
         from opensak.macro.db_access import always_approved
 
         box = QWidget()
@@ -1113,14 +1115,18 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        intro = QLabel(tr("settings_db_write_intro"))
+        intro = QLabel(tr("settings_macro_write_intro"))
         intro.setWordWrap(True)
         intro.setStyleSheet(hint_style())
         layout.addWidget(intro)
 
         self._db_write_loaded = always_approved()
         self._db_write_list = QListWidget()
-        self._db_write_list.addItems(self._db_write_loaded)
+        for path in self._db_write_loaded:
+            item = QListWidgetItem(Path(path).name)
+            item.setToolTip(path)
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            self._db_write_list.addItem(item)
         self._db_write_list.setMaximumHeight(120)
         self._db_write_list.itemSelectionChanged.connect(
             lambda: self._btn_db_write_remove.setEnabled(
@@ -1143,7 +1149,10 @@ class SettingsDialog(QDialog):
             self._db_write_list.takeItem(self._db_write_list.row(item))
 
     def _collect_db_write(self) -> list[str]:
-        return [self._db_write_list.item(i).text() for i in range(self._db_write_list.count())]
+        return [
+            self._db_write_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._db_write_list.count())
+        ]
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 

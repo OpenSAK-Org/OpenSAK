@@ -22,7 +22,7 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_database_write(self, name, path):
+    def approve_macro_write(self, macro):
         return WriteApproval.SESSION
 
     def caches_changed(self, codes, added):

@@ -88,9 +88,9 @@ class FakeHost:
 
     write_answer = WriteApproval.SESSION
 
-    def approve_database_write(self, name, path):
+    def approve_macro_write(self, macro):
         self.write_asked = getattr(self, "write_asked", [])
-        self.write_asked.append((name, path))
+        self.write_asked.append(macro)
         return self.write_answer
 
     def caches_changed(self, codes, added):
