@@ -801,6 +801,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Apply to all databases ({count})",
     "premigration_apply_all_progress": "Backing up and updating databases…",
     "premigration_apply_all_progress_db": "Backing up and updating '{name}'…",
+    "db_progress_migrating": "Updating database…",
+    "db_progress_compacting": "Compacting database, this can take a minute…",
     "premigration_apply_all_done": "{count} database(s) were updated.",
     "premigration_apply_all_backups": "Copies were saved here:",
     "premigration_apply_all_failed": "These databases could not be updated:",

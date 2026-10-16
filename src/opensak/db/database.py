@@ -14,17 +14,19 @@ from __future__ import annotations
 
 import errno
 import logging
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterable
+from typing import Callable, Generator, Iterable, cast
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
+from opensak.db import maintenance
 from opensak.db.models import Base
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,33 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
+
+# Steps of opening a database that can take a while, for set_progress_callback().
+PROGRESS_MIGRATING = "migrating"
+PROGRESS_COMPACTING = "compacting"
+
+_progress_callback: Callable[[str], None] | None = None
+
+
+def set_progress_callback(callback: Callable[[str], None] | None) -> None:
+    """
+    Tell *callback* when opening a database starts a slow step:
+    PROGRESS_MIGRATING (the schema is being updated) or PROGRESS_COMPACTING
+    (VACUUM after a migration that rebuilt tables). The GUI shows it on the
+    splash screen or in a progress dialog. None removes the callback.
+    """
+    global _progress_callback
+    _progress_callback = callback
+
+
+def _report_progress(step: str) -> None:
+    if _progress_callback is None:
+        return
+    try:
+        _progress_callback(step)
+    except Exception:
+        logger.debug("progress callback failed", exc_info=True)
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -205,6 +233,7 @@ def _run_migrations(engine: Engine) -> None:
             "migrations: starting, current_version=%s target=%s",
             current_version, SCHEMA_VERSION,
         )
+        _report_progress(PROGRESS_MIGRATING)
         _mig_t0 = time.monotonic()
 
         # ── Migration 1: Tilføj is_corrected til user_notes ──────────────────
@@ -253,6 +282,9 @@ def _run_migrations(engine: Engine) -> None:
             # Unik-constraint laves som et NAVNGIVET index (ikke inline UNIQUE,
             # der ville få et auto-genereret sqlite_autoindex-navn) så gaten
             # ovenfor faktisk genkender den og matcher modellens constraint-navn.
+            # NB: this PRAGMA is a no-op inside an open transaction, and none
+            # is committed first. It only works because waypoints is a child
+            # table — don't copy this for a parent table (see migration 26).
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text("""
                 CREATE TABLE waypoints_new (
@@ -824,6 +856,9 @@ def _run_migrations(engine: Engine) -> None:
                 if name != "uq_waypoint_cache_prefix_name" and sql
             ]
 
+            # NB: no-op inside the open transaction (see migration 2); only
+            # harmless because waypoints is a child table. Migration 26
+            # shows the pattern for a parent table.
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text("""
                 CREATE TABLE waypoints_new (
@@ -1037,6 +1072,22 @@ def _run_migrations(engine: Engine) -> None:
         ))
         conn.commit()
 
+        # ── Migration 26: database defaults for NOT NULL columns (#1033) ─────
+        logger.debug("[migrations] entering migration 26 (+%.2fs)", time.monotonic() - _mig_t0)
+        # Columns that had a default only in the model need one in the
+        # database too, so a plain SQL INSERT only has to list the real data.
+        # SQLite cannot change a column's default, so each affected table is
+        # rebuilt — only where a default is still missing, which also makes
+        # this a no-op on databases created by create_all() from now on.
+        _step_t0 = time.monotonic()
+        rebuilt = _add_column_defaults(conn, _COLUMN_DEFAULTS_26)
+        if rebuilt:
+            logger.info(
+                "[migrations] 26: rebuilt %s with column defaults (+%.2fs)",
+                ", ".join(rebuilt), time.monotonic() - _step_t0,
+            )
+            print(f"Migration: tilføjede database-defaults til {', '.join(rebuilt)}")
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1046,6 +1097,141 @@ def _run_migrations(engine: Engine) -> None:
             "migrations: done, now at schema %s (+%.2fs total)",
             SCHEMA_VERSION, time.monotonic() - _mig_t0,
         )
+
+        # ── Compact after migration 26 (#1033) ───────────────────────────────
+        # The rebuild left the old tables' pages on the free list, so the
+        # file grew by about the size of the rebuilt tables. VACUUM gives
+        # that back — after the commit, with foreign keys on again. It only
+        # runs when it pays off and the disk has room, and never raises: a
+        # database that could not be compacted is still valid, just larger.
+        if rebuilt:
+            maintenance.vacuum(
+                cast(sqlite3.Connection, conn.connection.driver_connection),
+                Path(engine.url.database or ""),
+                progress=lambda: _report_progress(PROGRESS_COMPACTING),
+            )
+
+
+# Migration 26 (#1033): the defaults models.py has as server_default, frozen
+# here so later model changes don't alter what this migration does.
+_SQL_NOW_26 = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000')"
+_COLUMN_DEFAULTS_26: dict[str, dict[str, str]] = {
+    "caches": {
+        "available": "1", "archived": "0", "premium_only": "0",
+        "short_desc_html": "0", "long_desc_html": "0", "found": "0", "dnf": "0",
+        "first_to_find": "0", "user_flag": "0", "watch": "0", "locked": "0",
+        "log_count": "0", "trackable_count": "0", "found_log_count": "0",
+        "waypoint_count": "0", "imported_at": _SQL_NOW_26,
+    },
+    "user_notes": {"is_corrected": "0", "updated_at": _SQL_NOW_26},
+    "logs": {"text_encoded": "0", "logged_by_owner": "0"},
+    "attributes": {"is_on": "1"},
+    # Migration 22 already rebuilt waypoints with DEFAULT 0 on every
+    # database; listed so the result does not depend on that.
+    "waypoints": {"created_by_user": "0", "wp_flag": "0"},
+}
+
+# A column type as SQLAlchemy writes it: BOOLEAN, VARCHAR(16), NUMERIC(10, 2).
+_SQL_TYPE = r"\w+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?"
+
+
+def _add_column_defaults(conn: Connection, defaults_by_table: dict[str, dict[str, str]]) -> list[str]:
+    """
+    Give existing columns a database default by rebuilding their tables.
+
+    Only columns that exist and have no default yet are changed, so this can
+    run again safely. Returns the names of the tables it rebuilt.
+    """
+    plans: dict[str, dict[str, str]] = {}
+    for table, defaults in defaults_by_table.items():
+        info = {r[1]: r for r in conn.execute(text(f'PRAGMA table_info("{table}")'))}
+        missing = {c: d for c, d in defaults.items() if c in info and info[c][4] is None}
+        if missing:
+            plans[table] = missing
+    if not plans:
+        return []
+
+    # caches is the parent of every other table, so DROP TABLE caches fails
+    # while foreign keys are on. PRAGMA foreign_keys does nothing inside an
+    # open transaction: commit first and check that it took effect.
+    conn.commit()
+    conn.execute(text("PRAGMA foreign_keys=OFF"))
+    if conn.execute(text("PRAGMA foreign_keys")).scalar() != 0:
+        raise RuntimeError("migration 26: could not switch off foreign keys")
+    try:
+        # Rows that already broke a foreign key are not this migration's
+        # business; it only must not add any.
+        fk_before = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+        # One transaction for all tables, so a failure leaves the old schema.
+        conn.exec_driver_sql("BEGIN")
+        for table, missing in plans.items():
+            _rebuild_with_defaults(conn, table, missing)
+        fk_new = set(conn.execute(text("PRAGMA foreign_key_check")).fetchall()) - set(fk_before)
+        if fk_new:
+            raise RuntimeError(f"migration 26: foreign key check failed: {sorted(fk_new)[:5]}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+    if fk_before:
+        logger.warning(
+            "[migrations] 26: database already had %s foreign key violations",
+            len(fk_before),
+        )
+    return list(plans)
+
+
+def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]) -> None:
+    """
+    Rebuild *table* with ` DEFAULT x` added to the columns in *missing*.
+
+    The new table is built from the table's own CREATE TABLE text, so its
+    constraints and any columns older migrations appended stay as they are.
+    Column order does not change, so SELECT * copies the data.
+    """
+    create_sql = conn.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"), {"t": table}
+    ).scalar()
+    if create_sql is None:
+        raise RuntimeError(f"migration 26: no CREATE TABLE for {table}")
+    for col, default in missing.items():
+        # The column's definition right after "(" or ",": name (quoted or
+        # not), type and an optional NOT NULL; the default goes after that,
+        # before the next column or constraint.
+        create_sql, n = re.subn(
+            rf'([(,]\s*"?{re.escape(col)}"?\s+{_SQL_TYPE})(\s+NOT\s+NULL)?'
+            r'(?=\s*[,)]|\s+(?:PRIMARY|UNIQUE|CHECK|REFERENCES|COLLATE|CONSTRAINT)\b)',
+            lambda m: f"{m.group(1)}{m.group(2) or ''} DEFAULT {default}",
+            create_sql, count=1, flags=re.IGNORECASE,
+        )
+        if n != 1:
+            raise RuntimeError(f"migration 26: cannot find {table}.{col} in its CREATE TABLE")
+    # A rebuilt table's name is stored quoted ("caches") after the RENAME.
+    create_sql, n = re.subn(
+        rf'^(\s*CREATE\s+TABLE\s+)"?{re.escape(table)}"?(?=\s*\()',
+        lambda m: f"{m.group(1)}{table}_new", create_sql, count=1, flags=re.IGNORECASE,
+    )
+    if n != 1:
+        raise RuntimeError(f"migration 26: unexpected CREATE TABLE for {table}")
+
+    # Indexes go with the dropped table; autoindexes of UNIQUE constraints
+    # (sql IS NULL) come back with the CREATE TABLE text.
+    indexes = conn.execute(text(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=:t "
+        "AND sql IS NOT NULL"
+    ), {"t": table}).scalars().all()
+
+    # Raw SQL from sqlite_master: exec_driver_sql, so nothing in it is taken
+    # for a bind parameter.
+    conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}_new")
+    conn.exec_driver_sql(create_sql)
+    conn.exec_driver_sql(f"INSERT INTO {table}_new SELECT * FROM {table}")
+    conn.exec_driver_sql(f"DROP TABLE {table}")
+    conn.exec_driver_sql(f"ALTER TABLE {table}_new RENAME TO {table}")
+    for index_sql in indexes:
+        conn.exec_driver_sql(index_sql)
 
 
 def dispose_engine(db_path: Path | None = None) -> None:

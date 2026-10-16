@@ -805,6 +805,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Op alle databases toepassen ({count})",
     "premigration_apply_all_progress": "Back-up maken en databases bijwerken…",
     "premigration_apply_all_progress_db": "Back-up maken en '{name}' bijwerken…",
+    "db_progress_migrating": "Database bijwerken…",
+    "db_progress_compacting": "Database comprimeren, dit kan een minuut duren…",
     "premigration_apply_all_done": "{count} database(s) bijgewerkt.",
     "premigration_apply_all_backups": "Kopieën zijn hier opgeslagen:",
     "premigration_apply_all_failed": "Deze databases konden niet worden bijgewerkt:",

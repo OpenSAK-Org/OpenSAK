@@ -802,6 +802,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Tillämpa på alla databaser ({count})",
     "premigration_apply_all_progress": "Säkerhetskopierar och uppdaterar databaser…",
     "premigration_apply_all_progress_db": "Säkerhetskopierar och uppdaterar '{name}'…",
+    "db_progress_migrating": "Uppdaterar databasen…",
+    "db_progress_compacting": "Komprimerar databasen, det kan ta en minut…",
     "premigration_apply_all_done": "{count} databas(er) uppdaterades.",
     "premigration_apply_all_backups": "Kopior sparades här:",
     "premigration_apply_all_failed": "Dessa databaser kunde inte uppdateras:",

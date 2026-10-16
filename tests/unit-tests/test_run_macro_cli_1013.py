@@ -110,6 +110,7 @@ def server(qtbot, monkeypatch):
     assert srv.start()
     yield srv, host
     srv.close()
+    srv.deleteLater()  # delete on the GUI thread, not in a later GC pass
 
 
 _CLIENT = """
@@ -239,6 +240,7 @@ def test_works_after_qapplication_was_stubbed_during_import(qtbot, server, tmp_p
         code, out, _ = _client(qtbot, _macro(tmp_path, 'print("ok")'))
     finally:
         srv.close()
+        srv.deleteLater()
     assert (code, out) == (0, "ok\n")
 
 

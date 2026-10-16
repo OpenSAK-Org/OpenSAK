@@ -803,6 +803,8 @@ STRINGS: dict[str, str] = {
     "premigration_apply_all_btn": "Zastosuj do wszystkich baz ({count})",
     "premigration_apply_all_progress": "Tworzenie kopii zapasowych i aktualizacja baz danych…",
     "premigration_apply_all_progress_db": "Tworzenie kopii zapasowej i aktualizacja „{name}”…",
+    "db_progress_migrating": "Aktualizowanie bazy danych…",
+    "db_progress_compacting": "Kompaktowanie bazy danych, może to potrwać minutę…",
     "premigration_apply_all_done": "Zaktualizowano bazy danych: {count}.",
     "premigration_apply_all_backups": "Kopie zapisano tutaj:",
     "premigration_apply_all_failed": "Nie udało się zaktualizować tych baz danych:",

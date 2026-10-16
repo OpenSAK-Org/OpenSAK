@@ -45,6 +45,14 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.export_poi`](#opensakexportpoi) | 3 |
 | [`opensak.confirm`](#opensakconfirm) | 1 |
 | [`opensak.choose_file`](#opensakchoosefile) | 2 |
+| [`opensak.choose_folder`](#opensakchoosefolder) | 3 |
+| [`opensak.message`](#opensakmessage) | 3 |
+| [`opensak.input`](#opensakinput) | 3 |
+| [`opensak.choose`](#opensakchoose) | 3 |
+| [`opensak.form`](#opensakform) | 3 |
+| [`opensak.progress`](#opensakprogress) | 3 |
+| [`opensak.select`](#opensakselect) | 3 |
+| [`opensak.refresh`](#opensakrefresh) | 3 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
 | [`opensak.version`](#opensakversion) | 2 |
@@ -815,6 +823,207 @@ for _, row in ipairs(opensak.read_csv(path)) do
 end
 ```
 
+### opensak.choose_folder
+
+```lua
+opensak.choose_folder([title])
+```
+
+Let the user pick a folder in a folder dialog. The macro may then read and write files in it for the rest of this run, without a folder permission. OpenSAK's own folders and whole drives cannot be picked.
+
+Parameters:
+
+- `title` (`string`, optional) — Dialog title.
+
+Returns `string?` — Full path of the folder, or nil if cancelled.
+
+Since API version 3.
+
+Example:
+
+```lua
+local folder = opensak.choose_folder("Export to")
+if not folder then return end      -- cancelled
+opensak.export_gpx{ path = folder .. "/{filter}.gpx" }
+```
+
+### opensak.message
+
+```lua
+opensak.message(text [, title])
+```
+
+Show a message with an OK button and wait until the user closes it.
+
+Parameters:
+
+- `text` (`string`) — The message.
+- `title` (`string`, optional) — Window title.
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.message("Done: 12 caches updated")
+```
+
+### opensak.input
+
+```lua
+opensak.input(prompt [, default] [, title])
+```
+
+Ask for one line of text.
+
+Parameters:
+
+- `prompt` (`string`) — The question.
+- `default` (`string`, optional) — Text the field starts with.
+- `title` (`string`, optional) — Window title.
+
+Returns `string?` — The text entered, or nil if cancelled.
+
+Since API version 3.
+
+Example:
+
+```lua
+local name = opensak.input("Name of the new database", "CH_Zurich")
+if not name then return end      -- cancelled
+```
+
+### opensak.choose
+
+```lua
+opensak.choose(prompt, options [, default] [, title])
+```
+
+Let the user pick one item of a list.
+
+Parameters:
+
+- `prompt` (`string`) — The question.
+- `options` (`(string|number)[]`) — The items.
+- `default` (`string|number`, optional) — The item selected at first.
+- `title` (`string`, optional) — Window title.
+
+Returns `string|number?` — The item picked, or nil if cancelled.
+
+Since API version 3.
+
+Example:
+
+```lua
+local fmt = opensak.choose("Export format", {"GPX", "GGZ", "KML"}, "GPX")
+if not fmt then return end      -- cancelled
+```
+
+### opensak.form
+
+```lua
+opensak.form(spec)
+```
+
+Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel.
+
+Parameters:
+
+- `spec` (`opensak.FormSpec`) — The form.
+
+Returns `table<string, any>?, string?` — The values by field id and the id of the button (or `exit_on_change` field, or "timeout") that closed the form; nil if it was cancelled.
+
+Since API version 3.
+
+Example:
+
+```lua
+local v, button = opensak.form{
+  title = "Export settings",
+  remember = true,
+  fields = {
+    { type = "folder",   id = "folder",  label = "Output folder", required = true },
+    { type = "number",   id = "maxdist", label = "Max distance", default = 25,
+      min = 0, suffix = " km" },
+    { type = "checkbox", id = "unfound", label = "Unfound only", default = true },
+    { type = "choice",   id = "fmt",     label = "Format", options = {"GPX", "GGZ"},
+      on_change = function(f, value)
+        f:set_enabled("unfound", value == "GPX")
+      end },
+  },
+}
+if not v then return end      -- cancelled
+print(v.folder, v.maxdist, v.unfound, v.fmt)
+```
+
+### opensak.progress
+
+```lua
+opensak.progress(title [, total])
+```
+
+Open a progress window with a Cancel button, for long loops. `p:update(i [, text])` moves the bar to *i* of *total* and returns false once the user has pressed Cancel; `p:close()` closes the window (also done when the macro ends). Without *total* the bar just shows that work is going on.
+
+Parameters:
+
+- `title` (`string`) — What is being done.
+- `total` (`integer`, optional) — Number of steps.
+
+Returns `opensak.Progress` — The window.
+
+Since API version 3.
+
+Example:
+
+```lua
+local codes = opensak.codes()
+local p = opensak.progress("Checking caches", #codes)
+for i, code in ipairs(codes) do
+    if not p:update(i, code) then break end      -- Cancel pressed
+    -- … work on the cache …
+end
+p:close()
+```
+
+### opensak.select
+
+```lua
+opensak.select(code)
+```
+
+Select a cache in the cache list and show it in the detail panel and on the map, like a click on its row.
+
+Parameters:
+
+- `code` (`string`) — GC code, e.g. "GC12345".
+
+Returns `boolean` — false if the cache is not among the caches of the active filter.
+
+Since API version 3.
+
+Example:
+
+```lua
+if not opensak.select("GC12345") then print("not in the current list") end
+```
+
+### opensak.refresh
+
+```lua
+opensak.refresh()
+```
+
+Redraw the cache list, detail panel and map now. Changes a macro makes are otherwise shown when it ends.
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.set_corrected("GC12345", 47.36872, 8.54093)
+opensak.refresh()
+```
+
 ### opensak.temp_dir
 
 ```lua
@@ -1553,6 +1762,118 @@ Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 
 `opensak.cache()`, `opensak.caches{}`, `opensak.description()`, `opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and `opensak.columns()` take a `database` option with the name of a database from `opensak.databases()`. It reads that database without switching to it, so the active filter stays. The database is opened read-only. A database last opened by an older OpenSAK version must be opened once first, so its schema is updated. Naming the active database is the same as leaving `database` out.
 
+## Forms
+
+`opensak.form{}` builds a dialog from a table. With the default `layout = "auto"` the fields are stacked top to bottom with their `label` on the left, and a `group` is a framed section with its own `fields`. With `layout = "absolute"` every field is placed at its `x`, `y` (and `w`, `h`) in pixels, like in GSAK's form designer.
+
+Callbacks run while the form stays open: `on_change` of a field, `on_click` of a button, `on_open` and `validate` of the form. Each gets a handle `f` to read and change the form (see Form handle). An error in a callback stops the macro. `exit_on_change = true` closes the form instead, as GSAK's ExitOnChange did.
+
+The form returns two values: a table with the value of every field that has an `id` and a value, and the id of the button that closed it (or of the `exit_on_change` field, or "timeout"). Cancel, Esc, the window's close button and a button with `cancel = true` return nil.
+
+### Form keys
+
+| Key | Type | Meaning |
+|---|---|---|
+| `title` | `string` | Window title. |
+| `fields` | `opensak.FormField[]` | The fields, top to bottom (see Form fields). |
+| `buttons` | `opensak.FormButton[]` | The buttons at the bottom; default OK and Cancel. `{}` for none, e.g. when the fields include buttons. |
+| `layout` | `"auto"\|"absolute"` | "auto" (default) stacks the fields with their labels on the left; "absolute" places each field at its `x`, `y` like GSAK. |
+| `width` | `integer` | Width of the field area in pixels (absolute layout: default fits the fields). |
+| `height` | `integer` | Height of the field area in pixels. |
+| `remember` | `boolean` | Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. |
+| `id` | `string` | Name the remembered values are kept under (default: the title), for macros with several forms. |
+| `timeout` | `number` | Close the form after this many seconds; it then returns the values and "timeout". |
+| `on_open` | `fun(f: opensak.Form)` | Called once when the form opens. |
+| `validate` | `fun(f: opensak.Form, button: string): string?` | Called before the form closes with a button other than a cancel button; return a message to show it and keep the form open. |
+
+### Form fields
+
+Every field takes `type`, `id`, `label`, `tooltip`, `enabled`, `visible`, `x`, `y`, `w`, `h`, `bold`, `italic`, `color` and `font_size`; fields with a value also take `default`, `on_change`, `exit_on_change` and `remember`.
+
+| Type | GSAK | Value | Own keys | Meaning |
+|---|---|---|---|---|
+| `label` | Label | — | `align` | Text such as a heading or a hint; `label` is the text. Simple HTML (`<b>`, `<i>`, `<br>`, `<font color>`) is shown formatted. |
+| `separator` | — | — | — | A horizontal line between fields. |
+| `text` | Edit | `string` | `placeholder`, `password`, `readonly`, `required` | Single-line text. |
+| `number` | Edit | `number` | `min`, `max`, `decimals`, `step`, `suffix` | Number with up/down arrows; whole numbers unless `decimals` is set. |
+| `memo` | Memo | `string` | `placeholder`, `readonly`, `required`, `wrap`, `monospace` | Multi-line text. |
+| `checkbox` | CheckBox | `boolean` | — | A yes/no box; `label` is shown next to the box. |
+| `choice` | ComboBox | `string\|number` | `options`, `editable`, `required` | Drop-down list; starts with the first option unless `default` says otherwise. With `editable = true` the user may also type a value (GSAK DirectInput). |
+| `radio` | RadioButton | `string\|number` | `options`, `columns`, `required` | One of the options, as radio buttons. |
+| `checklist` | CheckListBox, CheckGroup | `string[]` | `options`, `columns` | Several options to tick; the value is an array of the ticked ones. |
+| `date` | Date | `string` | `min`, `max` | A date with a pop-up calendar, as "YYYY-MM-DD" (default today). |
+| `file` | File | `string` | `filter`, `mode`, `placeholder`, `required` | A file path with a Browse button. A file picked with Browse may be used for the rest of the run like one from opensak.choose_file() (read with `mode = "open"`, the default, or written with "save"). |
+| `folder` | Folder | `string` | `placeholder`, `required` | A folder path with a Browse button. A folder picked with Browse may be read and written for the rest of the run, like one from opensak.choose_folder(). |
+| `group` | GroupBox | — | `fields` | A frame titled `label` around its own `fields`. In the absolute layout their positions are relative to the group. |
+| `button` | Button | — | `on_click`, `default`, `cancel` | A button. Without `on_click` it closes the form, which then returns the values and the button's id (nil with `cancel = true`). With `on_click` it calls the function and the form stays open. |
+| `image` | Image | — | `path`, `data`, `scale` | A picture (PNG, JPG, GIF, BMP, ICO) from a file (`path`; read permission needed, relative to the macro's folder) or from base64 `data`. `scale = true` stretches it to `w` × `h`. |
+| `html` | Browser | — | `html` | Read-only formatted text from simple HTML (headings, lists, tables). Nothing is loaded from the internet and links are not followed. |
+
+### Field keys
+
+| Key | Type | Meaning |
+|---|---|---|
+| `type` | `string` | The field type (see Form fields). |
+| `id` | `string` | Key of the value in the result; needed for fields with a value, buttons, and fields a callback changes. |
+| `label` | `string` | Caption: on the left in the auto layout, next to a checkbox, the title of a group, the text of a label or button. |
+| `default` | `any` | Initial value (for a button: the button Enter presses). |
+| `tooltip` | `string` | Shown when the mouse rests on the field. |
+| `enabled` | `boolean` | false greys the field out (default true). |
+| `visible` | `boolean` | false hides the field (default true). |
+| `x` | `integer` | Absolute layout: pixels from the left of the form or group. |
+| `y` | `integer` | Absolute layout: pixels from the top of the form or group. |
+| `w` | `integer` | Width in pixels (auto layout: minimum width). |
+| `h` | `integer` | Height in pixels (auto layout: minimum height). |
+| `bold` | `boolean` | Bold caption. |
+| `italic` | `boolean` | Italic caption. |
+| `color` | `string` | Caption colour, "#rrggbb" or a name such as "red". |
+| `font_size` | `integer` | Caption font size in points. |
+| `on_change` | `fun(f: opensak.Form, value: any, id: string)` | Called when the user changes the value — a text or number field when it loses focus or Enter is pressed. The form stays open. |
+| `exit_on_change` | `boolean` | Close the form when the value changes (after on_change); it returns the values and the field's id. Like GSAK's ExitOnChange. |
+| `remember` | `boolean` | false: never remember this field's value. |
+| `on_click` | `fun(f: opensak.Form, id: string)` | button: called on a click; the form stays open (f:close() closes it). |
+| `cancel` | `boolean` | button: closes the form, which returns nil (also Esc). |
+| `options` | `(string\|number)[]` | choice, radio, checklist: the options. |
+| `editable` | `boolean` | choice: also accept typed text. |
+| `columns` | `integer` | radio, checklist: number of columns (default 1). |
+| `placeholder` | `string` | Grey hint shown while the field is empty. |
+| `password` | `boolean` | text: hide the characters (never remembered). |
+| `readonly` | `boolean` | text, memo: can be selected and copied, not changed. |
+| `required` | `boolean` | The form cannot be confirmed while the field is empty. |
+| `min` | `number\|string` | number: smallest value; date: earliest date. |
+| `max` | `number\|string` | number: largest value; date: latest date. |
+| `decimals` | `integer` | number: digits after the decimal point (default 0). |
+| `step` | `number` | number: change per arrow click (default 1). |
+| `suffix` | `string` | number: unit shown after the value, e.g. " km". |
+| `wrap` | `boolean` | memo: wrap long lines (default true). |
+| `monospace` | `boolean` | memo: fixed-width font. |
+| `filter` | `string` | file: file types, e.g. "CSV files (*.csv)". |
+| `mode` | `"open"\|"save"` | file: pick a file to read (default) or to write. |
+| `align` | `"left"\|"center"\|"right"` | label: text alignment. |
+| `fields` | `opensak.FormField[]` | group: the fields inside it. |
+| `path` | `string` | image: the picture file. |
+| `data` | `string` | image: the picture as base64 text instead of a file. |
+| `scale` | `boolean` | image: stretch the picture to w × h. |
+| `html` | `string` | html: the HTML to show. |
+
+### Form handle
+
+Callbacks get the open form as their first argument; call its methods with a colon.
+
+| Method | Meaning |
+|---|---|
+| `f:get(id)` | The current value of a field. |
+| `f:set(id, value)` | Change a field's value (on_change is not called). |
+| `f:values()` | All values, as the form would return them. |
+| `f:set_options(id, options)` | Replace the options of a choice, radio or checklist field. The value is kept if it is still an option. |
+| `f:set_label(id, text)` | Change a caption: the label of a field, a label's text, a button's text, a group's title. |
+| `f:set_enabled(id, on)` | Enable or grey out a field. |
+| `f:set_visible(id, on)` | Show or hide a field. |
+| `f:set_title(text)` | Change the window title. |
+| `f:focus(id)` | Move the keyboard focus to a field. |
+| `f:close([id])` | Close the form: opensak.form() returns the values and *id* (default "ok"). `validate` is not called. |
+| `f:cancel()` | Close the form like Cancel: opensak.form() returns nil. |
+
 ## Cache fields
 
 Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensak.caches()`. The table is a snapshot; missing data is `nil`.
@@ -1609,6 +1930,8 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
+- [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — choose export options in a GSAK-style form, then export the list
+- [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — pick search options in a form, then step through the matches
 - [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
 
 ## Editor support
