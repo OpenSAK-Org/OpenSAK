@@ -455,7 +455,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.form" func="yes">
-			<Overload retVal="table&lt;string, any&gt;?, string?" descr="Show a dialog built from a table (see Forms) and wait until it is closed. Fields&#x0a;with a value come back in a table keyed by their `id`. Callbacks such as&#x0a;`on_change` run while the form stays open and can change it through the handle&#x0a;they get. Without `buttons` the form has OK and Cancel.&#x0a;Returns table&lt;string, any&gt;?, string? — The values by field id and the id of the&#x0a;button (or `exit_on_change` field, or &quot;timeout&quot;) that closed the form; nil if it&#x0a;was cancelled.">
+			<Overload retVal="table&lt;string, any&gt;?, string?" descr="Show a dialog built from a table (see Forms) and wait until it is closed. Fields&#x0a;with a value come back in a table keyed by their `id`. Callbacks such as&#x0a;`on_change` run while the form stays open and can change it through the handle&#x0a;they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in&#x0a;the macro window builds forms visually and imports GSAK forms.&#x0a;Returns table&lt;string, any&gt;?, string? — The values by field id and the id of the&#x0a;button (or `exit_on_change` field, or &quot;timeout&quot;) that closed the form; nil if it&#x0a;was cancelled.">
 				<Param name="spec: opensak.FormSpec" />
 			</Overload>
 		</KeyWord>

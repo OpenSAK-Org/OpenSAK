@@ -925,7 +925,7 @@ if not fmt then return end      -- cancelled
 opensak.form(spec)
 ```
 
-Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel.
+Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in the macro window builds forms visually and imports GSAK forms.
 
 Parameters:
 
@@ -1770,6 +1770,8 @@ Callbacks run while the form stays open: `on_change` of a field, `on_click` of a
 
 The form returns two values: a table with the value of every field that has an `id` and a value, and the id of the button that closed it (or of the `exit_on_change` field, or "timeout"). Cancel, Esc, the window's close button and a button with `cancel = true` return nil.
 
+**Tools → Form designer** in the macro window builds a form with the mouse: it inserts the `opensak.form{…}` table at the cursor or edits the one the cursor is in, and imports forms of GSAK macros (`<Data> VarName=$form …`).
+
 ### Form keys
 
 | Key | Type | Meaning |
@@ -1928,6 +1930,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
 
+- [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — enter or remove the corrected coordinates of the selected cache
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
 - [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — choose export options in a GSAK-style form, then export the list
