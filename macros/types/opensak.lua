@@ -75,6 +75,99 @@
 ---@field target? "file"|"device" "device": the GPX/GGZ folder of the connected Garmin (default "file").
 ---@field device? string The device's folder, when several Garmin devices are connected.
 
+---The table passed to `opensak.form{}`.
+---@class opensak.FormSpec
+---@field title? string Window title.
+---@field fields? opensak.FormField[] The fields, top to bottom (see Form fields).
+---@field buttons? opensak.FormButton[] The buttons at the bottom; default OK and Cancel. `{}` for none, e.g. when the fields include buttons.
+---@field layout? "auto"|"absolute" "auto" (default) stacks the fields with their labels on the left; "absolute" places each field at its `x`, `y` like GSAK.
+---@field width? integer Width of the field area in pixels (absolute layout: default fits the fields).
+---@field height? integer Height of the field area in pixels.
+---@field remember? boolean Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept.
+---@field id? string Name the remembered values are kept under (default: the title), for macros with several forms.
+---@field timeout? number Close the form after this many seconds; it then returns the values and "timeout".
+---@field on_open? fun(f: opensak.Form) Called once when the form opens.
+---@field validate? fun(f: opensak.Form, button: string): string? Called before the form closes with a button other than a cancel button; return a message to show it and keep the form open.
+
+---A field of `opensak.form{}` (see Forms in the API reference).
+---@class opensak.FormField
+---@field type "label"|"separator"|"text"|"number"|"memo"|"checkbox"|"choice"|"radio"|"checklist"|"date"|"file"|"folder"|"group"|"button"|"image"|"html" The field type.
+---@field id? string Key of the value in the result; needed for fields with a value, buttons, and fields a callback changes.
+---@field label? string Caption: on the left in the auto layout, next to a checkbox, the title of a group, the text of a label or button.
+---@field default? any Initial value (for a button: the button Enter presses).
+---@field tooltip? string Shown when the mouse rests on the field.
+---@field enabled? boolean false greys the field out (default true).
+---@field visible? boolean false hides the field (default true).
+---@field x? integer Absolute layout: pixels from the left of the form or group.
+---@field y? integer Absolute layout: pixels from the top of the form or group.
+---@field w? integer Width in pixels (auto layout: minimum width).
+---@field h? integer Height in pixels (auto layout: minimum height).
+---@field bold? boolean Bold caption.
+---@field italic? boolean Italic caption.
+---@field color? string Caption colour, "#rrggbb" or a name such as "red".
+---@field font_size? integer Caption font size in points.
+---@field on_change? fun(f: opensak.Form, value: any, id: string) Called when the user changes the value — a text or number field when it loses focus or Enter is pressed. The form stays open.
+---@field exit_on_change? boolean Close the form when the value changes (after on_change); it returns the values and the field's id. Like GSAK's ExitOnChange.
+---@field remember? boolean false: never remember this field's value.
+---@field on_click? fun(f: opensak.Form, id: string) button: called on a click; the form stays open (f:close() closes it).
+---@field cancel? boolean button: closes the form, which returns nil (also Esc).
+---@field options? (string|number)[] choice, radio, checklist: the options.
+---@field editable? boolean choice: also accept typed text.
+---@field columns? integer radio, checklist: number of columns (default 1).
+---@field placeholder? string Grey hint shown while the field is empty.
+---@field password? boolean text: hide the characters (never remembered).
+---@field readonly? boolean text, memo: can be selected and copied, not changed.
+---@field required? boolean The form cannot be confirmed while the field is empty.
+---@field min? number|string number: smallest value; date: earliest date.
+---@field max? number|string number: largest value; date: latest date.
+---@field decimals? integer number: digits after the decimal point (default 0).
+---@field step? number number: change per arrow click (default 1).
+---@field suffix? string number: unit shown after the value, e.g. " km".
+---@field wrap? boolean memo: wrap long lines (default true).
+---@field monospace? boolean memo: fixed-width font.
+---@field filter? string file: file types, e.g. "CSV files (*.csv)".
+---@field mode? "open"|"save" file: pick a file to read (default) or to write.
+---@field align? "left"|"center"|"right" label: text alignment.
+---@field fields? opensak.FormField[] group: the fields inside it.
+---@field path? string image: the picture file.
+---@field data? string image: the picture as base64 text instead of a file.
+---@field scale? boolean image: stretch the picture to w × h.
+---@field html? string html: the HTML to show.
+
+---A button at the bottom of a form.
+---@class opensak.FormButton
+---@field id? string Key of the value in the result; needed for fields with a value, buttons, and fields a callback changes.
+---@field label? string Caption: on the left in the auto layout, next to a checkbox, the title of a group, the text of a label or button.
+---@field default? any Initial value (for a button: the button Enter presses).
+---@field tooltip? string Shown when the mouse rests on the field.
+---@field enabled? boolean false greys the field out (default true).
+---@field visible? boolean false hides the field (default true).
+---@field bold? boolean Bold caption.
+---@field italic? boolean Italic caption.
+---@field color? string Caption colour, "#rrggbb" or a name such as "red".
+---@field font_size? integer Caption font size in points.
+---@field on_click? fun(f: opensak.Form, id: string) button: called on a click; the form stays open (f:close() closes it).
+---@field cancel? boolean button: closes the form, which returns nil (also Esc).
+
+---The open form, passed to form callbacks.
+---@class opensak.Form
+---@field get fun(self: opensak.Form, id: string): any The current value of a field.
+---@field set fun(self: opensak.Form, id: string, value: any) Change a field's value (on_change is not called).
+---@field values fun(self: opensak.Form): table<string, any> All values, as the form would return them.
+---@field set_options fun(self: opensak.Form, id: string, options: (string|number)[]) Replace the options of a choice, radio or checklist field. The value is kept if it is still an option.
+---@field set_label fun(self: opensak.Form, id: string, text: string) Change a caption: the label of a field, a label's text, a button's text, a group's title.
+---@field set_enabled fun(self: opensak.Form, id: string, on: boolean) Enable or grey out a field.
+---@field set_visible fun(self: opensak.Form, id: string, on: boolean) Show or hide a field.
+---@field set_title fun(self: opensak.Form, text: string) Change the window title.
+---@field focus fun(self: opensak.Form, id: string) Move the keyboard focus to a field.
+---@field close fun(self: opensak.Form, id?: string) Close the form: opensak.form() returns the values and *id* (default "ok"). `validate` is not called.
+---@field cancel fun(self: opensak.Form) Close the form like Cancel: opensak.form() returns nil.
+
+---The window returned by `opensak.progress()`.
+---@class opensak.Progress
+---@field update fun(self: opensak.Progress, i?: integer, text?: string): boolean Show step *i* and *text*; false once the user has pressed Cancel.
+---@field close fun(self: opensak.Progress) Close the window.
+
 ---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).
 ---@class opensak.Cache
 ---@field code string GC code, e.g. "GC12345".
@@ -534,6 +627,125 @@ function opensak.confirm(message) end
 ---@param mode? "open"|"save" "open" picks an existing file to read (default), "save" a file to write (the dialog asks before replacing an existing one).
 ---@return string? # Full path of the picked file, or nil if cancelled.
 function opensak.choose_file(title, filter, mode) end
+
+---Let the user pick a folder in a folder dialog. The macro may then read and write files in it for the rest of this run, without a folder permission. OpenSAK's own folders and whole drives cannot be picked.
+---
+---Since API version 3.
+---
+---```lua
+---local folder = opensak.choose_folder("Export to")
+---if not folder then return end      -- cancelled
+---opensak.export_gpx{ path = folder .. "/{filter}.gpx" }
+---```
+---@param title? string Dialog title.
+---@return string? # Full path of the folder, or nil if cancelled.
+function opensak.choose_folder(title) end
+
+---Show a message with an OK button and wait until the user closes it.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.message("Done: 12 caches updated")
+---```
+---@param text string The message.
+---@param title? string Window title.
+function opensak.message(text, title) end
+
+---Ask for one line of text.
+---
+---Since API version 3.
+---
+---```lua
+---local name = opensak.input("Name of the new database", "CH_Zurich")
+---if not name then return end      -- cancelled
+---```
+---@param prompt string The question.
+---@param default? string Text the field starts with.
+---@param title? string Window title.
+---@return string? # The text entered, or nil if cancelled.
+function opensak.input(prompt, default, title) end
+
+---Let the user pick one item of a list.
+---
+---Since API version 3.
+---
+---```lua
+---local fmt = opensak.choose("Export format", {"GPX", "GGZ", "KML"}, "GPX")
+---if not fmt then return end      -- cancelled
+---```
+---@param prompt string The question.
+---@param options (string|number)[] The items.
+---@param default? string|number The item selected at first.
+---@param title? string Window title.
+---@return string|number? # The item picked, or nil if cancelled.
+function opensak.choose(prompt, options, default, title) end
+
+---Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel.
+---
+---Since API version 3.
+---
+---```lua
+---local v, button = opensak.form{
+---  title = "Export settings",
+---  remember = true,
+---  fields = {
+---    { type = "folder",   id = "folder",  label = "Output folder", required = true },
+---    { type = "number",   id = "maxdist", label = "Max distance", default = 25,
+---      min = 0, suffix = " km" },
+---    { type = "checkbox", id = "unfound", label = "Unfound only", default = true },
+---    { type = "choice",   id = "fmt",     label = "Format", options = {"GPX", "GGZ"},
+---      on_change = function(f, value)
+---        f:set_enabled("unfound", value == "GPX")
+---      end },
+---  },
+---}
+---if not v then return end      -- cancelled
+---print(v.folder, v.maxdist, v.unfound, v.fmt)
+---```
+---@param spec opensak.FormSpec The form.
+---@return table<string, any>? # The values by field id and the id of the button (or `exit_on_change` field, or "timeout") that closed the form; nil if it was cancelled.
+---@return string?
+function opensak.form(spec) end
+
+---Open a progress window with a Cancel button, for long loops. `p:update(i [, text])` moves the bar to *i* of *total* and returns false once the user has pressed Cancel; `p:close()` closes the window (also done when the macro ends). Without *total* the bar just shows that work is going on.
+---
+---Since API version 3.
+---
+---```lua
+---local codes = opensak.codes()
+---local p = opensak.progress("Checking caches", #codes)
+---for i, code in ipairs(codes) do
+---    if not p:update(i, code) then break end      -- Cancel pressed
+---    -- … work on the cache …
+---end
+---p:close()
+---```
+---@param title string What is being done.
+---@param total? integer Number of steps.
+---@return opensak.Progress # The window.
+function opensak.progress(title, total) end
+
+---Select a cache in the cache list and show it in the detail panel and on the map, like a click on its row.
+---
+---Since API version 3.
+---
+---```lua
+---if not opensak.select("GC12345") then print("not in the current list") end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@return boolean # false if the cache is not among the caches of the active filter.
+function opensak.select(code) end
+
+---Redraw the cache list, detail panel and map now. Changes a macro makes are otherwise shown when it ends.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.set_corrected("GC12345", 47.36872, 8.54093)
+---opensak.refresh()
+---```
+function opensak.refresh() end
 
 ---OpenSAK's folder inside the system temp folder (read and write permission by default), without a trailing separator. "/" works as separator on every platform.
 ---
