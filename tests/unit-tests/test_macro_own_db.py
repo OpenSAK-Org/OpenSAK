@@ -225,3 +225,45 @@ def test_database_exemption_is_only_for_the_macro_db(tmp_path):
     with pytest.raises(FolderAccessDenied, match="database file"):
         check_access(target, write=True, permissions=perms)
     assert check_access(target, write=True, permissions=perms, allow_database=True) == target.resolve()
+
+
+# ── opensak.run_macro(): the called macro's own file (#1039) ─────────────────
+
+def test_called_macro_gets_its_own_db_and_the_callers_comes_back(tmp_path):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    (lib / "helper.lua").write_text("""
+        local t = {}
+        for _, name in ipairs(opensak.tables()) do t[name] = true end
+        print("before", t["macro.mine"])
+        print(opensak.macro_db())
+        opensak.sql("CREATE TABLE IF NOT EXISTS macro.theirs (x)")
+        t = {}
+        for _, name in ipairs(opensak.tables()) do t[name] = true end
+        print("after", t["macro.mine"], t["macro.theirs"])
+        if ... then error("helper failed") end
+    """, encoding="utf-8")
+    _, out = _run("""
+        opensak.macro_db()
+        opensak.sql("CREATE TABLE macro.mine (x)")
+        opensak.run_macro("lib/helper.lua")
+        print(#opensak.sql("SELECT * FROM macro.mine"))
+        print(pcall(opensak.run_macro, "lib/helper.lua", true) == false)
+        opensak.sql("INSERT INTO macro.mine VALUES (1)")
+        print(#opensak.sql("SELECT * FROM macro.mine"))
+    """, tmp_path, name="caller.lua")
+    helper_db = (lib / "helper.db3").resolve()
+    assert out == [
+        f"opensak.macro_db: created {(tmp_path / 'caller.db3').resolve()}",
+        "before\ttrue",                     # until it calls macro_db()
+        f"opensak.macro_db: created {helper_db}", str(helper_db),
+        "after\tnil\ttrue",
+        "0",
+        "before\ttrue", str(helper_db), "after\tnil\ttrue",
+        "true",
+        "1",
+    ]
+    assert not (lib / "caller.db3").exists()
+    conn = sqlite3.connect(helper_db)
+    assert conn.execute("SELECT name FROM sqlite_master").fetchall() == [("theirs",)]
+    conn.close()

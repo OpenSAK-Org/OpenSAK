@@ -1496,13 +1496,19 @@ class MacroRuntime:
         return self._sql_write_db
 
     # The macro's own database: <macro file name>.db3 next to the macro file,
-    # attached to the active database's SQL connection as `macro`.
+    # attached to the active database's SQL connection as `macro`. A macro
+    # started with opensak.run_macro() gets its own file there once it calls
+    # opensak.macro_db(); the caller's is attached again when it returns.
 
     def _macro_db(self) -> str:
         func = "opensak.macro_db"
-        if self._base_dir is None:
+        if self._macro_path is not None:
+            file = self._macro_path
+        elif self._base_dir is not None:
+            file = self._base_dir / self._chunk_name
+        else:
             raise MacroError(f"{func}: save the macro first — its database is named after the file")
-        path = (self._base_dir / f"{Path(self._chunk_name).stem}.db3").resolve()
+        path = (file.parent / f"{file.stem}.db3").resolve()
         manager = get_db_manager()
         opensak_dbs = {Path(db.path).resolve() for db in manager.databases}
         opensak_dbs.add(Path(get_engine().url.database or "").resolve())
@@ -1520,14 +1526,26 @@ class MacroRuntime:
                 raise MacroError(f"{func}: {exc}") from None
         created = not path.exists()
         try:
-            self._writable_db().attach_macro_db(path)
+            self._writable_db()
+            self._attach_macro_db(path)
         except SqlError as exc:
             raise MacroError(f"{func}: {exc}") from None
         if created:
             # Shown in the macro output, so a new file never appears silently.
             self._output(f"{func}: created {path}")
-        self._macro_db_path = path
         return str(path)
+
+    def _attach_macro_db(self, path: Optional[Path]) -> None:
+        """Make *path* (None: no file) the one attached as `macro`. Without
+        a write connection yet, _writable_db() attaches it when it opens."""
+        if path == self._macro_db_path:
+            return
+        if self._sql_write_db is not None:
+            self._sql_write_db.detach_macro_db()
+            self._macro_db_path = None
+            if path is not None:
+                self._sql_write_db.attach_macro_db(path)
+        self._macro_db_path = path
 
     def _sql_write(self, query=None, params=None) -> int:
         query, params = _sql_args("opensak.sql_write", query, params)
@@ -1985,13 +2003,26 @@ class MacroRuntime:
         # Relative paths in the called macro are its own folder's, and its
         # per-macro state is its own file's.
         previous = self._base_dir, self._macro_path
+        caller_db = self._macro_db_path
         self._base_dir, self._macro_path = file.parent, file
         self._macro_depth += 1
         try:
-            return fn(*args)
-        finally:
-            self._macro_depth -= 1
-            self._base_dir, self._macro_path = previous
+            result = fn(*args)
+        except BaseException:
+            self._end_called_macro(previous, caller_db, failed=True)
+            raise
+        self._end_called_macro(previous, caller_db, failed=False)
+        return result
+
+    def _end_called_macro(self, previous, caller_db: Optional[Path], failed: bool) -> None:
+        self._macro_depth -= 1
+        self._base_dir, self._macro_path = previous
+        # The called macro may have switched `macro` to its own file.
+        try:
+            self._attach_macro_db(caller_db)
+        except SqlError as exc:
+            if not failed:      # else the called macro's error is the one to show
+                raise MacroError(f"opensak.run_macro: {exc}") from None
 
     def _exit(self, code=None) -> None:
         value = 0 if code is None else _number(code)
@@ -3393,7 +3424,10 @@ API: tuple[ApiFunction, ...] = (
                     "database. The SQL statement ATTACH itself stays refused. "
                     "Cannot be called inside opensak.transaction(); stays "
                     "attached after opensak.switch_database(). The macro must "
-                    "be saved, as the file is named after it.",
+                    "be saved, as the file is named after it. In a macro "
+                    "started with opensak.run_macro() it attaches the called "
+                    "macro's own file instead; the caller's file is attached "
+                    "again when the called macro returns.",
         example='opensak.macro_db()\n'
                 'opensak.sql("CREATE TABLE IF NOT EXISTS macro.seen (code TEXT PRIMARY KEY, at TEXT)")\n'
                 'opensak.sql("INSERT OR IGNORE INTO macro.seen SELECT gc_code, date(\'now\') FROM caches WHERE found = 1")\n'

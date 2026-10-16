@@ -511,6 +511,18 @@ class WritableDatabase:
             raise SqlError(f"cannot open the macro database {path}: {exc}") from None
         self._macro_db = path
 
+    def detach_macro_db(self) -> None:
+        """DETACH the file attached as MACRO_SCHEMA; nothing if none is."""
+        if self._macro_db is None:
+            return
+        if self._depth:
+            raise SqlError("cannot detach a database inside opensak.transaction()")
+        try:
+            self._connection().execute(f"DETACH DATABASE {MACRO_SCHEMA}")
+        except sqlite3.Error as exc:
+            raise SqlError(f"cannot close the macro database {self._macro_db}: {exc}") from None
+        self._macro_db = None
+
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             try:
