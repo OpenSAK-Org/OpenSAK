@@ -7,7 +7,8 @@
 --
 -- The form filters the cache list, looks through the matching caches for
 -- the one with the most favourite points and selects it. Nothing in the
--- database is changed.
+-- database is changed. Tools → Form designer in the macro window opens
+-- this form in the designer when the cursor is inside it.
 
 local values = opensak.form{
   title = "Find caches",

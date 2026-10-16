@@ -253,6 +253,11 @@ def _forms_section() -> list[str]:
         "it (or of the `exit_on_change` field, or \"timeout\"). Cancel, Esc, "
         "the window's close button and a button with `cancel = true` return nil.",
         "",
+        "**Tools → Form designer** in the macro window builds a form with the "
+        "mouse: it inserts the `opensak.form{…}` table at the cursor or "
+        "edits the one the cursor is in, and imports forms of GSAK macros "
+        "(`<Data> VarName=$form …`).",
+        "",
         "### Form keys",
         "",
         "| Key | Type | Meaning |",
