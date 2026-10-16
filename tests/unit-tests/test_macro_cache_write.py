@@ -328,6 +328,30 @@ def test_sql_write_insert_gets_derived_columns_recalculated():
     assert host.changed == [(["GCSQLNEW"], True)]
 
 
+def test_insert_columns_match_the_database():
+    # The documented INSERT columns are what opensak.columns() marks required
+    # in a current database (schema 26, #1033).
+    from opensak.macro.sql import INSERT_COLUMNS, WRITABLE_TABLES
+    assert set(INSERT_COLUMNS) == WRITABLE_TABLES
+    for table, expected in INSERT_COLUMNS.items():
+        _, out = _run(f"""
+            for _, c in ipairs(opensak.columns("{table}")) do
+                if c.required then print(c.name) end
+            end""")
+        assert out == list(expected), table
+
+
+def test_sql_write_insert_with_only_the_required_columns():
+    _run("""
+        opensak.sql_write("INSERT INTO caches (gc_code, name, cache_type, latitude, longitude) "
+                          .. "VALUES ('GCMIN1', 'Minimal', 'Traditional Cache', 47.1, 8.1)")
+        opensak.sql_write("INSERT INTO logs (cache_id, log_type) "
+                          .. "SELECT id, 'Write note' FROM caches WHERE gc_code = 'GCMIN1'")
+    """)
+    c = _cache("GCMIN1")
+    assert c.name == "Minimal" and c.log_count == 1 and c.imported_at is not None
+
+
 def test_sql_write_logs_and_waypoints_update_counts():
     cache_id = _cache("GCSQL2").id
     _run(f"""

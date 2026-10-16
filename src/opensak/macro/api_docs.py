@@ -47,7 +47,7 @@ from opensak.macro.forms import (
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
-from opensak.macro.sql import PROTECTED_COLUMNS, WRITABLE_TABLES
+from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
 DOC_PATH = Path("docs/macros/api.md")
 STUB_PATH = Path("macros") / TYPES_DIR / STUB_NAME
@@ -374,9 +374,11 @@ def _changing_section() -> list[str]:
         "`opensak.transaction(function() ... end)`, which is also faster for "
         "many changes. SQL `BEGIN`/`COMMIT` is refused.",
         "",
-        "`opensak.sql_write()` may INSERT into and UPDATE these tables; an "
-        "UPDATE may not set the columns listed. Whatever an INSERT puts into "
-        "the columns OpenSAK maintains is recalculated right away.",
+        "`opensak.sql_write()` may INSERT into and UPDATE these tables. An "
+        "INSERT only has to give the required columns; every other column "
+        "gets its default (`opensak.columns()` marks them as `required`). "
+        "An UPDATE may not set the protected columns. Whatever an INSERT "
+        "puts into the columns OpenSAK maintains is recalculated right away.",
         "",
         "OpenSAK recalculates the columns it maintains (distance, bearing, "
         "counts, log dates) after every write. Inside "
@@ -385,12 +387,13 @@ def _changing_section() -> list[str]:
         "many writes. Until then reads inside the transaction see the old "
         "values; `opensak.resync()` recalculates them on demand.",
         "",
-        "| Table | Protected columns |",
-        "|---|---|",
+        "| Table | Required for INSERT | Protected columns |",
+        "|---|---|---|",
     ]
     for table in sorted(WRITABLE_TABLES):
+        required = ", ".join(f"`{c}`" for c in INSERT_COLUMNS[table])
         cols = ", ".join(f"`{c}`" for c in sorted(PROTECTED_COLUMNS[table]))
-        lines.append(f"| `{table}` | {cols} |")
+        lines.append(f"| `{table}` | {required} | {cols} |")
     return lines + _children_section()
 
 

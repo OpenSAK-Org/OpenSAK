@@ -3291,7 +3291,7 @@ API: tuple[ApiFunction, ...] = (
         description="Run a read-only SQL query (SQLite) against the active "
                     "database (or the one named by the `database` option) "
                     "and return all rows. Only reading statements "
-                    "are allowed, except on TEMP tables: since API 3 a macro "
+                    "are allowed, except on TEMP tables: a macro "
                     "may create, fill, change and drop its own TEMP tables, "
                     "views and indexes (`CREATE TEMP TABLE ...`) and use them "
                     "in any query, opensak.sql_write() included. They are "
@@ -3319,6 +3319,7 @@ API: tuple[ApiFunction, ...] = (
             _READ_OPTIONS,
         ),
         returns=("table<string, any>[]", "One table per row, keyed by column name."),
+        changed=((3, "TEMP tables, views and indexes"),),
     ),
     ApiFunction(
         name="sql_each",
@@ -3347,6 +3348,8 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),
         params=(_READ_OPTIONS,),
         returns=("string[]", "Table and view names, sorted."),
+        changed=((3, "lists the macro's TEMP tables and views, and the "
+                     "tables of opensak.macro_db() as `macro.<name>`"),),
     ),
     ApiFunction(
         name="columns",
@@ -3359,6 +3362,7 @@ API: tuple[ApiFunction, ...] = (
         returns=("{name: string, type: string, required: boolean}[]",
                  "Column names and SQL types, in table order; `required`: NOT "
                  "NULL without a default, so an INSERT must give it."),
+        changed=((3, "added `required`"),),
     ),
     ApiFunction(
         name="macro_db",
@@ -3565,8 +3569,11 @@ API: tuple[ApiFunction, ...] = (
                     "Changing caches). OpenSAK recalculates distances, counts "
                     "and log dates of the caches the statement touched — inside "
                     "opensak.transaction() once at its end (see opensak.resync()). An "
-                    "INSERT must give every column opensak.columns() marks as "
-                    "`required`. Each "
+                    "INSERT only needs the real data: the columns "
+                    "opensak.columns() marks as `required`, e.g. `gc_code`, "
+                    "`name`, `cache_type`, `latitude` and `longitude` for a "
+                    "cache (see Changing caches); every other column gets its "
+                    "default. Each "
                     "statement is committed on its own (or with the "
                     "surrounding opensak.transaction()), or not at all on an "
                     "error. BEGIN, COMMIT and the like are refused; use "
@@ -3575,7 +3582,12 @@ API: tuple[ApiFunction, ...] = (
         example='local n = opensak.sql_write(\n'
                 '  "UPDATE caches SET user_data_1 = ? WHERE country = ? AND found = 0",\n'
                 '  { "todo", "Switzerland" })\n'
-                'print(n .. " caches marked")',
+                'print(n .. " caches marked")\n'
+                '-- a found log: only cache_id and log_type are required\n'
+                'opensak.sql_write([[\n'
+                '  INSERT INTO logs (cache_id, log_type, log_date, finder, text)\n'
+                '  SELECT id, \'Found it\', ?, ?, ? FROM caches WHERE gc_code = ?]],\n'
+                '  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })',
         since=3,
         bind=lambda rt, lua: rt._sql_write,
         params=(

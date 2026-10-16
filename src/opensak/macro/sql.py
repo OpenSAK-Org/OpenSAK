@@ -390,6 +390,17 @@ def _row(names: list[str], values: tuple) -> dict:
 WRITABLE_TABLES = frozenset({
     "caches", "user_notes", "waypoints", "logs", "attributes", "trackables",
 })
+# The columns an INSERT has to give (NOT NULL without a default; schema 26,
+# #1033, gave every other NOT NULL column a database default). For the docs —
+# opensak.columns() reads the same from the database itself.
+INSERT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "caches": ("gc_code", "name", "cache_type", "latitude", "longitude"),
+    "user_notes": ("cache_id",),
+    "waypoints": ("cache_id",),
+    "logs": ("cache_id", "log_type"),
+    "attributes": ("cache_id", "attribute_id"),
+    "trackables": ("cache_id",),
+}
 # Columns an UPDATE may never set: keys and identities, and the columns
 # OpenSAK maintains itself (counts, log dates, distance, import metadata).
 PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
