@@ -29,6 +29,8 @@ limit does not help either (matching allocates nothing). Consequences:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import functools
 import io
@@ -110,6 +112,7 @@ from opensak.export.poi_export import write_poi_export
 from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.line_polygon import LineShape, read_points_file
 from opensak.hint_detect import rot13
+from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
 from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
@@ -155,6 +158,14 @@ DEFAULT_INSTRUCTION_LIMIT = 50_000_000
 DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 # opensak.choose_file(): longest accepted title / file type filter
 MAX_CHOOSE_FILE_TEXT = 200
+# opensak.message() / input() / choose() texts
+MAX_UI_TEXT = 100_000
+# A form image (file or base64 data)
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+# Where opensak.form{ remember = true } keeps the last values: a folder of
+# the macros' settings folder. normalize_name() strips leading dots, so no
+# macro subfolder can have this name.
+FORM_MEMORY_DIRNAME = ".forms"
 # opensak.read_csv() refuses larger files — it is meant for small lists
 # (solved puzzles, corrections), not for bulk imports.
 MAX_CSV_BYTES = 10 * 1024 * 1024
@@ -610,6 +621,55 @@ class MacroHost(Protocol):
         """Called once after every run, also when the macro failed — apply
         any refreshes deferred while it was running."""
 
+    # The user-interface functions below (#982) are optional: without them
+    # (e.g. in a headless run) the opensak functions using them fail with
+    # a clear error instead of waiting for input nobody can give.
+
+    def message(self, text: str, title: str) -> None:
+        """Show *text* with an OK button."""
+
+    def input(self, prompt: str, default: str, title: str) -> Optional[str]:
+        """Ask for one line of text; None if cancelled."""
+
+    def choose(
+        self, prompt: str, options: list[str], default: int, title: str
+    ) -> Optional[int]:
+        """Let the user pick one of *options* (*default*: index, -1 for
+        none); the index picked, or None if cancelled."""
+
+    def choose_folder(self, title: str, start_dir: Path) -> Optional[Path]:
+        """Let the user pick a folder in OpenSAK's folder dialog; None if
+        cancelled."""
+
+    def show_form(
+        self, form: macro_forms.Form, events: macro_forms.FormEvents
+    ) -> Optional[tuple[dict[str, Any], str]]:
+        """Show *form* modally. Returns (values by field id, id of the
+        button or field that closed it), or None when cancelled. User
+        actions are reported through *events* (see forms.FormEvents);
+        "browse" asks the runtime to fill a file or folder field."""
+
+    def progress(self, title: str, total: int) -> "ProgressHandle":
+        """Open a progress window with a Cancel button (*total* 0 = no
+        known end)."""
+
+    def select_cache(self, gc_code: str) -> bool:
+        """Select the cache in the grid and show it in the detail panel
+        and map; False if it is not among the caches of the active filter."""
+
+    def refresh(self) -> None:
+        """Apply the refreshes deferred so far and redraw the grid now."""
+
+
+class ProgressHandle(Protocol):
+    """The window opened by MacroHost.progress()."""
+
+    def update(self, value: Optional[int], text: str) -> bool:
+        """Show *value* (None = keep it) and *text*; False once the user
+        has pressed Cancel."""
+
+    def close(self) -> None: ...
+
 
 # ── Lua table → FilterSet ────────────────────────────────────────────────────
 
@@ -1028,6 +1088,60 @@ def polygon_points(value: Any) -> list[tuple[float, float]]:
     return points
 
 
+# ── Lua values for the UI functions ──────────────────────────────────────────
+
+
+def _lua_kind(value: Any) -> Optional[str]:
+    from lupa.lua54 import lua_type
+    return lua_type(value)
+
+
+def _is_lua_table(value: Any) -> bool:
+    return _lua_kind(value) == "table"
+
+
+def _is_lua_function(value: Any) -> bool:
+    return _lua_kind(value) == "function"
+
+
+def _from_lua(value: Any, depth: int = 0) -> Any:
+    """A Lua value → Python: an array table (keys 1..n) → list, another
+    table → dict, functions stay as they are. Read by index, since the
+    order of pairs() is undefined."""
+    if not _is_lua_table(value):
+        return value
+    if depth > macro_forms.MAX_DEPTH * 2:
+        raise MacroError("tables nested too deeply")
+    items = list(value.items())
+    keys = [k for k, _ in items]
+    if items and all(isinstance(k, int) and not isinstance(k, bool) for k in keys) \
+            and sorted(keys) == list(range(1, len(keys) + 1)):
+        by_index = dict(items)
+        return [_from_lua(by_index[i], depth + 1) for i in range(1, len(keys) + 1)]
+    return {k: _from_lua(v, depth + 1) for k, v in items}
+
+
+def _to_lua(lua, value: Any) -> Any:
+    """Python form values → Lua (lists become arrays)."""
+    if isinstance(value, (dict, list, tuple)):
+        return lua.table_from(value, recursive=True)
+    return value
+
+
+def _ui_text(func: str, name: str, value: Any, optional: bool = False) -> str:
+    """A text argument of a UI function; numbers are accepted, nil only
+    when *optional* (→ "")."""
+    if value is None and optional:
+        return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return macro_forms.format_number(value)
+    if not isinstance(value, str):
+        raise MacroError(f"{func}: {name} must be a string, got {helpers.lua_tostring(value)}")
+    if len(value) > MAX_UI_TEXT:
+        raise MacroError(f"{func}: {name} is longer than {MAX_UI_TEXT:,} characters")
+    return value
+
+
 # ── Runtime ──────────────────────────────────────────────────────────────────
 
 
@@ -1082,6 +1196,8 @@ class MacroRuntime:
         # for the rest of this run only, whatever the folder list says
         self._picked: set[tuple[Path, bool]] = set()
         self._cancelled = threading.Event()
+        # opensak.progress() windows still open; closed after the run.
+        self._progress_windows: list[ProgressHandle] = []
         # Per-run state, reset by run()
         self._exit_code: Optional[int] = None
         # The sandbox's stop(msg), set while a run is in progress
@@ -1470,6 +1586,11 @@ class MacroRuntime:
         )
         if not chosen:
             return None
+        return str(self._pick_file(chosen, save))
+
+    def _pick_file(self, chosen: Path, save: bool) -> Path:
+        """A file the user picked: usable for the rest of this run (read,
+        or written with *save*) unless it is protected."""
         try:
             target = resolve_path(chosen)
         except (OSError, RuntimeError) as exc:
@@ -1479,7 +1600,24 @@ class MacroRuntime:
             kind = "write" if save else "read"
             raise MacroError(f"macros may not {kind} {target} — {reason}")
         self._picked.add((target, save))
-        return str(target)
+        return target
+
+    def _pick_folder(self, chosen: Path, func: str) -> Path:
+        """A folder the user picked: read and write permission on it for
+        the rest of this run, unless it is protected or a filesystem root."""
+        try:
+            target = resolve_path(chosen)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"{func}: cannot resolve {chosen}: {exc}") from None
+        reason = protected_reason(target)
+        if reason is not None:
+            raise MacroError(f"{func}: macros may not use {target} — {reason}")
+        # approvable_folder() of a file in it is None exactly for a root.
+        if approvable_folder(target / "_") is None:
+            raise MacroError(f"{func}: macros may not use the whole drive {target}")
+        for write in (False, True):
+            self._run_permissions = with_grant(self._run_permissions, target, write)
+        return target
 
     def _check_access(self, path: Path, write: bool) -> Path:
         """check_access() against this run's list. A folder that is merely
@@ -1888,6 +2026,206 @@ class MacroRuntime:
             )
         return get_garmin_ggz_path(root) if fmt == "ggz" else get_garmin_gpx_path(root)
 
+    # -- User interface (#982) -------------------------------------------------
+
+    def _ui(self, name: str, func: str) -> Callable:
+        """The host's UI method *name*; a clear error when the host has no
+        user interface (e.g. a headless run)."""
+        method = getattr(self._host, name, None)
+        if method is None:
+            raise MacroError(f"{func}: not available — this run has no user interface")
+        return method
+
+    def _message(self, text=None, title=None) -> None:
+        func = "opensak.message"
+        text = _ui_text(func, "text", text)
+        self._ui("message", func)(text, _ui_text(func, "title", title, optional=True))
+
+    def _input(self, prompt=None, default=None, title=None) -> Optional[str]:
+        func = "opensak.input"
+        prompt = _ui_text(func, "prompt", prompt)
+        default = _ui_text(func, "default", default, optional=True)
+        title = _ui_text(func, "title", title, optional=True)
+        answer = self._ui("input", func)(prompt, default, title)
+        return None if answer is None else str(answer)
+
+    def _choose(self, prompt=None, options=None, default=None, title=None):
+        func = "opensak.choose"
+        prompt = _ui_text(func, "prompt", prompt)
+        items = macro_forms.parse_options(_from_lua(options), func) \
+            if options is not None else []
+        if not items:
+            raise MacroError(f'{func} expects options, e.g. {func}("Format", {{"GPX", "GGZ"}})')
+        index = -1
+        if default is not None:
+            index = macro_forms.find_option(items, default)
+            if index < 0:
+                raise MacroError(f"{func}: the default {helpers.lua_tostring(default)} "
+                                 "is not one of the options")
+        shown = [macro_forms.format_number(i) if isinstance(i, (int, float)) else i
+                 for i in items]
+        title = _ui_text(func, "title", title, optional=True)
+        picked = self._ui("choose", func)(prompt, shown, index, title)
+        if picked is None or not 0 <= picked < len(items):
+            return None
+        return items[picked]
+
+    def _choose_folder(self, title=None) -> Optional[str]:
+        func = "opensak.choose_folder"
+        if title is not None and (not isinstance(title, str) or len(title) > MAX_CHOOSE_FILE_TEXT):
+            raise MacroError(
+                f"{func}: title must be a string of at most {MAX_CHOOSE_FILE_TEXT} characters"
+            )
+        chosen = self._ui("choose_folder", func)(title or "", self._base_dir or macros_dir())
+        if not chosen:
+            return None
+        return str(self._pick_folder(chosen, func))
+
+    def _form(self, lua, spec=None):
+        func = "opensak.form"
+        show = self._ui("show_form", func)
+        if not _is_lua_table(spec):
+            raise MacroError(
+                f'{func} expects a table, e.g. {func}{{ title = "Export", fields = {{ … }} }}'
+            )
+        from opensak.lang import tr
+        form = macro_forms.parse_form(
+            _from_lua(spec), func, is_function=_is_lua_function,
+            ok_label=tr("macro_form_ok"), cancel_label=tr("cancel"),
+        )
+        self._load_form_images(form, func)
+        memory = self._form_memory_file() if form.remember else None
+        key = macro_forms.remember_key(form)
+        if memory is not None:
+            stored = self._load_form_memory(memory).get(key)
+            if isinstance(stored, dict):
+                macro_forms.apply_remembered(form, stored, func)
+
+        session = _FormSession(self, lua, form)
+        result = show(form, session.dispatch)
+        session.raise_error()
+        if result is None:
+            return None
+        values, closer = result
+        if memory is not None:
+            keep = macro_forms.remembered_ids(form)
+            data = self._load_form_memory(memory)
+            data[key] = {k: v for k, v in values.items() if k in keep and v is not None}
+            macro_settings.save_settings(memory, data, func)
+        return _to_lua(lua, values), closer
+
+    def _load_form_images(self, form: macro_forms.Form, func: str) -> None:
+        """Read the pictures of image fields (permission-checked) into
+        props["image"], so the host gets bytes, never a path."""
+        for f in form.walk():
+            if f.type != "image":
+                continue
+            if f.get("path"):
+                path = self._readable_file(f.get("path"))
+                try:
+                    if path.stat().st_size > MAX_IMAGE_BYTES:
+                        raise MacroError(f"{func}: {f.where}: {path.name} is larger than "
+                                         f"{MAX_IMAGE_BYTES // (1024 * 1024)} MB")
+                    f.props["image"] = path.read_bytes()
+                except OSError as exc:
+                    raise MacroError(f"{func}: {f.where}: cannot read {path}: {exc}") from None
+            elif f.get("data"):
+                try:
+                    data = base64.b64decode(f.get("data"))
+                except (binascii.Error, ValueError):
+                    raise MacroError(f"{func}: {f.where}: data is not valid base64") from None
+                if len(data) > MAX_IMAGE_BYTES:
+                    raise MacroError(f"{func}: {f.where}: the picture is too large")
+                f.props["image"] = data
+
+    def _form_memory_file(self) -> Optional[Path]:
+        """Where remember = true keeps this macro's form values; None for
+        an unsaved macro (it then simply remembers nothing)."""
+        if self._macro_path is None:
+            return None
+        if self._settings_dir is not None:
+            folder, macros = self._settings_dir, None
+        else:
+            folder, macros = macro_settings.default_settings_dir(), macros_dir()
+        return macro_settings.settings_file(folder / FORM_MEMORY_DIRNAME, self._macro_path, macros)
+
+    @staticmethod
+    def _load_form_memory(path: Path) -> dict:
+        try:
+            data = macro_settings.load_settings(path, "opensak.form")
+        except MacroError:
+            return {}  # damaged: start from the defaults; replaced on OK
+        return data if isinstance(data, dict) else {}
+
+    def _browse(self, controller: macro_forms.FormController, field: macro_forms.Field) -> None:
+        """The Browse button of a file or folder field: OpenSAK's dialog,
+        and the same access as opensak.choose_file() / choose_folder()."""
+        current = str(controller.value(field) or "").strip()
+        start = self._base_dir or macros_dir()
+        if current:
+            folder = Path(current).expanduser()
+            folder = folder if field.type == "folder" else folder.parent
+            if folder.is_dir():
+                start = folder
+        if field.type == "folder":
+            chosen = self._ui("choose_folder", "opensak.form")(field.label, start)
+            if chosen:
+                controller.set_value(field, str(self._pick_folder(chosen, "opensak.form")))
+            return
+        save = field.get("mode") == "save"
+        chosen = self._host.choose_file(field.label, field.get("filter", ""), save, start)
+        if chosen:
+            controller.set_value(field, str(self._pick_file(chosen, save)))
+
+    def _progress(self, lua, title=None, total=None):
+        func = "opensak.progress"
+        title = _ui_text(func, "title", title)
+        count = 0
+        if total is not None:
+            number = _number(total)
+            if number is None or number < 0 or number != int(number):
+                raise MacroError(f"{func}: total must be a whole number >= 0, got {total!r}")
+            count = int(number)
+        window = self._ui("progress", func)(title, count)
+        self._progress_windows.append(window)
+        closed = False
+
+        def update(this=None, value=None, text=None) -> bool:
+            if not _is_lua_table(this):
+                raise MacroError("p:update(i, text) must be called with a colon")
+            if closed:
+                raise MacroError("p:update: the progress window is closed")
+            step = None
+            if value is not None:
+                number = _number(value)
+                if number is None:
+                    raise MacroError(f"p:update: expects a number, got {value!r}")
+                step = int(number)
+            return bool(window.update(step, _ui_text("p:update", "text", text, optional=True)))
+
+        def close(this=None) -> None:
+            nonlocal closed
+            if not closed:
+                closed = True
+                window.close()
+                if window in self._progress_windows:
+                    self._progress_windows.remove(window)
+
+        return lua.table_from({"update": self._api_function(update),
+                               "close": self._api_function(close)})
+
+    def _close_progress_windows(self) -> None:
+        windows, self._progress_windows = self._progress_windows, []
+        for window in windows:
+            window.close()
+
+    def _select(self, code=None) -> bool:
+        func = "opensak.select"
+        return bool(self._ui("select_cache", func)(_gc_code(code, func)))
+
+    def _refresh(self) -> None:
+        self._ui("refresh", "opensak.refresh")()
+
     # -- Saved settings (#983) -------------------------------------------------
 
     def _settings_file(self, func: str) -> Path:
@@ -2045,7 +2383,7 @@ class MacroRuntime:
             table = api
             for ns in namespaces:
                 table = table.setdefault(ns, {})
-            table[name] = self._wrap(func.bind(self, lua))
+            table[name] = self._api_function(func.bind(self, lua))
         g.opensak = lua.table_from(api, recursive=True)
         self._load_macro = make_loader()
 
@@ -2081,7 +2419,13 @@ class MacroRuntime:
             self._close_sql()
             self._close_other_databases()
             self._load_macro = None
+            self._close_progress_windows()
             self._host.end_macro()
+
+    def _api_function(self, func: Callable) -> Any:
+        """*func* as a function for Lua: MacroError becomes a Lua error
+        reported at the line of the macro that called it."""
+        return self._wrap(func)
 
     @staticmethod
     def _deny_attribute(obj, attr_name, is_setting):
@@ -2114,6 +2458,169 @@ class MacroRuntime:
 
     def _lua_print(self, *args) -> None:
         self._output("\t".join(helpers.lua_tostring(a) for a in args))
+
+
+class _FormSession:
+    """One opensak.form{} call: turns the dialog's events into calls of the
+    macro's callbacks, which get a handle (a Lua table of methods) to read
+    and change the open form.
+
+    The callbacks run inside Qt's event loop, where an exception must not
+    escape. The first error therefore closes the form and is raised again
+    by raise_error() once the dialog has returned.
+    """
+
+    def __init__(self, runtime: MacroRuntime, lua, form: macro_forms.Form):
+        self._rt = runtime
+        self._lua = lua
+        self._form = form
+        self._by_id = form.by_id()
+        self._error: Optional[BaseException] = None
+        self._handle = None
+        self._controller: Optional[macro_forms.FormController] = None
+
+    def raise_error(self) -> None:
+        exc = self._error
+        if exc is None:
+            return
+        if isinstance(exc, MacroError):
+            raise exc
+        from lupa.lua54 import LuaError
+        if isinstance(exc, LuaError):
+            raise MacroError(str(exc)) from exc
+        raise MacroError(f"{type(exc).__name__}: {exc}") from exc
+
+    def dispatch(
+        self, controller: macro_forms.FormController, event: str,
+        field: Optional[macro_forms.Field],
+    ) -> Optional[str]:
+        if self._error is not None:
+            return None
+        try:
+            return self._dispatch(controller, event, field)
+        except Exception as exc:  # LuaError, MacroError, … — see the class docstring
+            self._error = exc
+            controller.close_form(None)
+            return None
+
+    def _dispatch(self, controller, event: str, field) -> Optional[str]:
+        form = self._form
+        if event == "browse":
+            self._rt._browse(controller, field)
+            return None
+        handle = self._handle_for(controller)
+        if event == "open":
+            if form.on_open is not None:
+                form.on_open(handle)
+        elif event == "change":
+            callback = field.get("on_change")
+            if callback is not None:
+                callback(handle, _to_lua(self._lua, controller.value(field)), field.id)
+        elif event == "click":
+            callback = field.get("on_click")
+            if callback is not None:
+                callback(handle, field.id)
+        elif event == "validate" and form.validate is not None:
+            answer = form.validate(handle, field.id if field is not None else None)
+            if answer is None or answer is True:
+                return None
+            if answer is False:
+                from opensak.lang import tr
+                return tr("macro_form_invalid")
+            if isinstance(answer, (str, int, float)):
+                return _ui_text("opensak.form: validate", "the message", answer)
+            raise MacroError("opensak.form: validate must return nil or a message")
+        return None
+
+    def values(self, controller) -> dict[str, Any]:
+        return {f.id: controller.value(f) for f in self._form.value_fields() if f.id}
+
+    def _handle_for(self, controller):
+        if self._handle is not None and self._controller is controller:
+            return self._handle
+        func = "opensak.form"
+
+        def field(this: Any, fid: Any, method: str) -> macro_forms.Field:
+            if not _is_lua_table(this):
+                raise MacroError(f"{func}: call f:{method}(…) with a colon")
+            found = self._by_id.get(fid) if isinstance(fid, str) else None
+            if found is None:
+                raise MacroError(f"{func}: f:{method}: no field with id {helpers.lua_tostring(fid)}")
+            return found
+
+        def value_field(this, fid, method) -> macro_forms.Field:
+            found = field(this, fid, method)
+            if not found.has_value:
+                raise MacroError(f"{func}: f:{method}: {fid!r} is a {found.type} without a value")
+            return found
+
+        def flag(method: str, value: Any) -> bool:
+            if not isinstance(value, bool):
+                raise MacroError(f"{func}: f:{method} expects true or false, got "
+                                 f"{helpers.lua_tostring(value)}")
+            return value
+
+        def get(this=None, fid=None):
+            return _to_lua(self._lua, controller.value(value_field(this, fid, "get")))
+
+        def set_(this=None, fid=None, value=None):
+            f = value_field(this, fid, "set")
+            controller.set_value(f, macro_forms.coerce_value(f, _from_lua(value), f"{func}: f:set"))
+
+        def values(this=None):
+            if not _is_lua_table(this):
+                raise MacroError(f"{func}: call f:values() with a colon")
+            return _to_lua(self._lua, self.values(controller))
+
+        def set_options(this=None, fid=None, options=None):
+            f = field(this, fid, "set_options")
+            if f.type not in macro_forms.OPTION_TYPES:
+                raise MacroError(f"{func}: f:set_options: {fid!r} is a {f.type} without options")
+            f.options = macro_forms.parse_options(_from_lua(options), f"{func}: f:set_options")
+            controller.set_options(f)
+
+        def set_label(this=None, fid=None, text=None):
+            f = field(this, fid, "set_label")
+            f.label = _ui_text(f"{func}: f:set_label", "text", text)
+            controller.set_label(f)
+
+        def set_enabled(this=None, fid=None, on=None):
+            controller.set_enabled(field(this, fid, "set_enabled"), flag("set_enabled", on))
+
+        def set_visible(this=None, fid=None, on=None):
+            controller.set_visible(field(this, fid, "set_visible"), flag("set_visible", on))
+
+        def set_title(this=None, text=None):
+            if not _is_lua_table(this):
+                raise MacroError(f"{func}: call f:set_title(…) with a colon")
+            controller.set_title(_ui_text(f"{func}: f:set_title", "text", text))
+
+        def focus(this=None, fid=None):
+            controller.focus(field(this, fid, "focus"))
+
+        def close(this=None, closer=None):
+            if not _is_lua_table(this):
+                raise MacroError(f"{func}: call f:close(…) with a colon")
+            if closer is not None and not isinstance(closer, str):
+                raise MacroError(f"{func}: f:close expects an id string, got "
+                                 f"{helpers.lua_tostring(closer)}")
+            controller.close_form(closer or "ok")
+
+        def cancel(this=None):
+            if not _is_lua_table(this):
+                raise MacroError(f"{func}: call f:cancel() with a colon")
+            controller.close_form(None)
+
+        methods = {
+            "get": get, "set": set_, "values": values, "set_options": set_options,
+            "set_label": set_label, "set_enabled": set_enabled, "set_visible": set_visible,
+            "set_title": set_title, "focus": focus, "close": close, "cancel": cancel,
+        }
+        self._handle = self._lua.table_from(
+            {name: self._rt._api_function(fn) for name, fn in methods.items()}
+        )
+        self._controller = controller
+        return self._handle
 
 
 # ── Lua API registry ─────────────────────────────────────────────────────────
@@ -2693,6 +3200,135 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("string?", "Full path of the picked file, or nil if cancelled."),
+    ),
+    ApiFunction(
+        name="choose_folder",
+        description="Let the user pick a folder in a folder dialog. The macro "
+                    "may then read and write files in it for the rest of this "
+                    "run, without a folder permission. OpenSAK's own folders "
+                    "and whole drives cannot be picked.",
+        example='local folder = opensak.choose_folder("Export to")\n'
+                'if not folder then return end      -- cancelled\n'
+                'opensak.export_gpx{ path = folder .. "/{filter}.gpx" }',
+        since=3,
+        bind=lambda rt, lua: rt._choose_folder,
+        params=(Param("title", "string", "Dialog title.", optional=True),),
+        returns=("string?", "Full path of the folder, or nil if cancelled."),
+    ),
+    ApiFunction(
+        name="message",
+        description="Show a message with an OK button and wait until the user "
+                    "closes it.",
+        example='opensak.message("Done: 12 caches updated")',
+        since=3,
+        bind=lambda rt, lua: rt._message,
+        params=(
+            Param("text", "string", "The message."),
+            Param("title", "string", "Window title.", optional=True),
+        ),
+    ),
+    ApiFunction(
+        name="input",
+        description="Ask for one line of text.",
+        example='local name = opensak.input("Name of the new database", "CH_Zurich")\n'
+                'if not name then return end      -- cancelled',
+        since=3,
+        bind=lambda rt, lua: rt._input,
+        params=(
+            Param("prompt", "string", "The question."),
+            Param("default", "string", "Text the field starts with.", optional=True),
+            Param("title", "string", "Window title.", optional=True),
+        ),
+        returns=("string?", "The text entered, or nil if cancelled."),
+    ),
+    ApiFunction(
+        name="choose",
+        description="Let the user pick one item of a list.",
+        example='local fmt = opensak.choose("Export format", {"GPX", "GGZ", "KML"}, "GPX")\n'
+                'if not fmt then return end      -- cancelled',
+        since=3,
+        bind=lambda rt, lua: rt._choose,
+        params=(
+            Param("prompt", "string", "The question."),
+            Param("options", "(string|number)[]", "The items."),
+            Param("default", "string|number", "The item selected at first.", optional=True),
+            Param("title", "string", "Window title.", optional=True),
+        ),
+        returns=("string|number?", "The item picked, or nil if cancelled."),
+    ),
+    ApiFunction(
+        name="form",
+        description="Show a dialog built from a table (see Forms) and wait "
+                    "until it is closed. Fields with a value come back in a "
+                    "table keyed by their `id`. Callbacks such as `on_change` "
+                    "run while the form stays open and can change it through "
+                    "the handle they get. Without `buttons` the form has OK "
+                    "and Cancel.",
+        example='local v, button = opensak.form{\n'
+                '  title = "Export settings",\n'
+                '  remember = true,\n'
+                '  fields = {\n'
+                '    { type = "folder",   id = "folder",  label = "Output folder", required = true },\n'
+                '    { type = "number",   id = "maxdist", label = "Max distance", default = 25,\n'
+                '      min = 0, suffix = " km" },\n'
+                '    { type = "checkbox", id = "unfound", label = "Unfound only", default = true },\n'
+                '    { type = "choice",   id = "fmt",     label = "Format", options = {"GPX", "GGZ"},\n'
+                '      on_change = function(f, value)\n'
+                '        f:set_enabled("unfound", value == "GPX")\n'
+                '      end },\n'
+                '  },\n'
+                '}\n'
+                'if not v then return end      -- cancelled\n'
+                'print(v.folder, v.maxdist, v.unfound, v.fmt)',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._form(lua, *a),
+        params=(Param("spec", "opensak.FormSpec", "The form."),),
+        returns=("table<string, any>?, string?",
+                 "The values by field id and the id of the button (or "
+                 "`exit_on_change` field, or \"timeout\") that closed the "
+                 "form; nil if it was cancelled."),
+    ),
+    ApiFunction(
+        name="progress",
+        description="Open a progress window with a Cancel button, for long "
+                    "loops. `p:update(i [, text])` moves the bar to *i* of "
+                    "*total* and returns false once the user has pressed "
+                    "Cancel; `p:close()` closes the window (also done when "
+                    "the macro ends). Without *total* the bar just shows "
+                    "that work is going on.",
+        example='local codes = opensak.codes()\n'
+                'local p = opensak.progress("Checking caches", #codes)\n'
+                'for i, code in ipairs(codes) do\n'
+                '    if not p:update(i, code) then break end      -- Cancel pressed\n'
+                '    -- … work on the cache …\n'
+                'end\n'
+                'p:close()',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._progress(lua, *a),
+        params=(
+            Param("title", "string", "What is being done."),
+            Param("total", "integer", "Number of steps.", optional=True),
+        ),
+        returns=("opensak.Progress", "The window."),
+    ),
+    ApiFunction(
+        name="select",
+        description="Select a cache in the cache list and show it in the "
+                    "detail panel and on the map, like a click on its row.",
+        example='if not opensak.select("GC12345") then print("not in the current list") end',
+        since=3,
+        bind=lambda rt, lua: rt._select,
+        params=(_CODE,),
+        returns=("boolean", "false if the cache is not among the caches of the active filter."),
+    ),
+    ApiFunction(
+        name="refresh",
+        description="Redraw the cache list, detail panel and map now. Changes "
+                    "a macro makes are otherwise shown when it ends.",
+        example="opensak.set_corrected(\"GC12345\", 47.36872, 8.54093)\n"
+                "opensak.refresh()",
+        since=3,
+        bind=lambda rt, lua: rt._refresh,
     ),
     ApiFunction(
         name="temp_dir",

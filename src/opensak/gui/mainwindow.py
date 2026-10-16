@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional, cast
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
@@ -200,6 +200,8 @@ class InfoBar(QFrame):
 # Up to this many caches changed by one macro run are refreshed row by row;
 # more trigger a single full reload of the cache list (see end_macro()).
 _MACRO_ROW_REFRESH_LIMIT = 50
+# opensak.refresh() waits at most this long for the reloaded list.
+_MACRO_REFRESH_WAIT_S = 10.0
 
 
 class MainWindow(QMainWindow):
@@ -244,6 +246,9 @@ class MainWindow(QMainWindow):
         # A running macro moved caches out of the active database; the view
         # is reloaded once by end_macro().
         self._macro_caches_removed = False
+        # opensak.select() of a cache the list is still being reloaded for:
+        # selected when that reload arrives (_on_refresh_result()).
+        self._macro_pending_select: Optional[str] = None
         # Issue #558: the toolbar Where box's expression currently in
         # effect — only set once validated on Enter, so a half-typed
         # expression never leaks into refreshes triggered elsewhere.
@@ -1619,6 +1624,9 @@ class MainWindow(QMainWindow):
         )
 
         self._cache_table.load_caches(table_caches)
+        if self._macro_pending_select:
+            code, self._macro_pending_select = self._macro_pending_select, None
+            self._cache_table.select_by_gc_code(code)
         logger.info(
             "mainwindow: cache_table.load_caches done (+%.2fs)",
             time.monotonic() - _t0,
@@ -3577,6 +3585,74 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.macro_dialog import choose_file_for_macro
         parent = self._macro_dialog_parent()
         return choose_file_for_macro(parent, title, file_filter, save, start_dir)
+
+    def _macro_parent(self) -> QWidget:
+        """Parent of the dialogs a macro opens: the macro window if open."""
+        return getattr(self, "_macro_dialog", None) or self
+
+    def message(self, text: str, title: str) -> None:
+        """MacroHost: opensak.message()."""
+        from opensak.gui.dialogs.macro_form import show_message
+        show_message(self._macro_parent(), text, title)
+
+    def input(self, prompt: str, default: str, title: str) -> Optional[str]:
+        """MacroHost: opensak.input()."""
+        from opensak.gui.dialogs.macro_form import ask_text
+        return ask_text(self._macro_parent(), prompt, default, title)
+
+    def choose(self, prompt: str, options: list[str], default: int, title: str) -> Optional[int]:
+        """MacroHost: opensak.choose()."""
+        from opensak.gui.dialogs.macro_form import ask_choice
+        return ask_choice(self._macro_parent(), prompt, options, default, title)
+
+    def choose_folder(self, title: str, start_dir):
+        """MacroHost: opensak.choose_folder() and the Browse button of a
+        form's folder field."""
+        from opensak.gui.dialogs.macro_form import choose_folder_for_macro
+        return choose_folder_for_macro(self._macro_parent(), title, start_dir)
+
+    def show_form(self, form, events):
+        """MacroHost: opensak.form{}."""
+        from opensak.gui.dialogs.macro_form import FormDialog
+        dialog = FormDialog(form, events, self._macro_parent())
+        try:
+            return dialog.run()
+        finally:
+            dialog.deleteLater()
+
+    def progress(self, title: str, total: int):
+        """MacroHost: opensak.progress()."""
+        from opensak.gui.dialogs.macro_form import MacroProgress
+        return MacroProgress(self._macro_parent(), title, total)
+
+    def select_cache(self, gc_code: str) -> bool:
+        """MacroHost: opensak.select() — like a click on the cache's row.
+        After a filter change the list may still be reloading; the cache is
+        then selected once the reload arrives."""
+        if self._cache_table.select_by_gc_code(gc_code):
+            return True
+        from opensak.filters.engine import GcCodeFilter
+        query = FilterSet(mode="AND")
+        active = self._build_active_filterset()
+        if active is not None and len(active):
+            query.add(active)
+        query.add(GcCodeFilter(gc_code, op="in_list"))
+        with get_session() as session:
+            found = bool(apply_filters_auto(session, query))
+        if found and self._refresh_started_at:
+            self._macro_pending_select = gc_code
+        return found
+
+    def refresh(self) -> None:
+        """MacroHost: opensak.refresh() — apply the deferred refreshes and
+        reload the list, waiting (up to _MACRO_REFRESH_WAIT_S) until the new
+        list is shown, since the macro keeps the GUI thread busy."""
+        self.end_macro()
+        self._refresh_cache_list()
+        generation = self._refresh_generation
+        deadline = time.monotonic() + _MACRO_REFRESH_WAIT_S
+        while generation in self._refresh_started_at and time.monotonic() < deadline:
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
 
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's corrected-coordinate changes

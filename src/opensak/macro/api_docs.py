@@ -36,6 +36,12 @@ from opensak.macro.editor_support import (
     TYPES_DIR,
     ULTRAEDIT_NAME,
 )
+from opensak.macro.forms import (
+    FIELD_KEY_DOCS,
+    FIELD_TYPES,
+    FORM_KEY_DOCS,
+    FORM_METHOD_DOCS,
+)
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 
@@ -222,6 +228,76 @@ def _editor_section() -> list[str]:
     ]
 
 
+def _cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
+def _forms_section() -> list[str]:
+    lines = [
+        "## Forms",
+        "",
+        "`opensak.form{}` builds a dialog from a table. With the default "
+        '`layout = "auto"` the fields are stacked top to bottom with their '
+        "`label` on the left, and a `group` is a framed section with its own "
+        '`fields`. With `layout = "absolute"` every field is placed at its '
+        "`x`, `y` (and `w`, `h`) in pixels, like in GSAK's form designer.",
+        "",
+        "Callbacks run while the form stays open: `on_change` of a field, "
+        "`on_click` of a button, `on_open` and `validate` of the form. Each "
+        "gets a handle `f` to read and change the form (see Form handle). An "
+        "error in a callback stops the macro. `exit_on_change = true` closes "
+        "the form instead, as GSAK's ExitOnChange did.",
+        "",
+        "The form returns two values: a table with the value of every field "
+        "that has an `id` and a value, and the id of the button that closed "
+        "it (or of the `exit_on_change` field, or \"timeout\"). Cancel, Esc, "
+        "the window's close button and a button with `cancel = true` return nil.",
+        "",
+        "### Form keys",
+        "",
+        "| Key | Type | Meaning |",
+        "|---|---|---|",
+    ]
+    lines += [f"| `{d.key}` | `{_cell(d.type)}` | {d.description} |" for d in FORM_KEY_DOCS]
+    lines += [
+        "",
+        "### Form fields",
+        "",
+        "Every field takes `type`, `id`, `label`, `tooltip`, `enabled`, "
+        "`visible`, `x`, `y`, `w`, `h`, `bold`, `italic`, `color` and "
+        "`font_size`; fields with a value also take `default`, `on_change`, "
+        "`exit_on_change` and `remember`.",
+        "",
+        "| Type | GSAK | Value | Own keys | Meaning |",
+        "|---|---|---|---|---|",
+    ]
+    for t in FIELD_TYPES:
+        value = f"`{_cell(t.value)}`" if t.value else "—"
+        keys = ", ".join(f"`{k}`" for k in t.keys) or "—"
+        lines.append(f"| `{t.name}` | {t.gsak or '—'} | {value} | {keys} | {t.description} |")
+    lines += [
+        "",
+        "### Field keys",
+        "",
+        "| Key | Type | Meaning |",
+        "|---|---|---|",
+    ]
+    lines += [f"| `{d.key}` | `{_cell(d.type)}` | {d.description} |" for d in FIELD_KEY_DOCS]
+    lines += [
+        "",
+        "### Form handle",
+        "",
+        "Callbacks get the open form as their first argument; call its "
+        "methods with a colon.",
+        "",
+        "| Method | Meaning |",
+        "|---|---|",
+    ]
+    lines += [f"| `{m.signature}` | {m.description} |" for m in FORM_METHOD_DOCS]
+    lines.append("")
+    return lines
+
+
 def _param_line(p: Param) -> str:
     optional = ", optional" if p.optional else ""
     return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
@@ -314,6 +390,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "opened once first, so its schema is updated. Naming the active "
         "database is the same as leaving `database` out.",
         "",
+        *_forms_section(),
         "## Cache fields",
         "",
         "Keys of the table returned by `opensak.cache()`, `opensak.current()` "
@@ -425,6 +502,32 @@ def render_lua_stub() -> str:
         '---@field if_exists? "overwrite"|"skip"|"ask" When the file exists (default "overwrite").',
         '---@field target? "file"|"device" "device": the GPX/GGZ folder of the connected Garmin (default "file").',
         "---@field device? string The device's folder, when several Garmin devices are connected.",
+        "",
+        "---The table passed to `opensak.form{}`.",
+        "---@class opensak.FormSpec",
+        *(f"---@field {d.key}? {d.type} {d.description}" for d in FORM_KEY_DOCS),
+        "",
+        "---A field of `opensak.form{}` (see Forms in the API reference).",
+        "---@class opensak.FormField",
+        "---@field type " + "|".join(f'"{t.name}"' for t in FIELD_TYPES) + " The field type.",
+        *(f"---@field {d.key}? {d.type} {d.description}" for d in FIELD_KEY_DOCS
+          if d.key != "type"),
+        "",
+        "---A button at the bottom of a form.",
+        "---@class opensak.FormButton",
+        *(f"---@field {d.key}? {d.type} {d.description}" for d in FIELD_KEY_DOCS
+          if d.key in ("id", "label", "tooltip", "enabled", "visible", "default",
+                       "cancel", "on_click", "bold", "italic", "color", "font_size")),
+        "",
+        "---The open form, passed to form callbacks.",
+        "---@class opensak.Form",
+        *(f"---@field {m.name} {m.type} {m.description}" for m in FORM_METHOD_DOCS),
+        "",
+        "---The window returned by `opensak.progress()`.",
+        "---@class opensak.Progress",
+        "---@field update fun(self: opensak.Progress, i?: integer, text?: string): boolean "
+        "Show step *i* and *text*; false once the user has pressed Cancel.",
+        "---@field close fun(self: opensak.Progress) Close the window.",
         "",
         "---A cache as returned by `opensak.cache()` and `opensak.caches()` (a snapshot).",
         "---@class opensak.Cache",
