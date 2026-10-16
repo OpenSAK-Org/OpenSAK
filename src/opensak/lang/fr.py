@@ -1807,4 +1807,16 @@ STRINGS: dict[str, str] = {
     "gsak_filter_import_where_hint":         "    Ouvrez un tel filtre via Définir le filtre → Where pour les voir et les finir.",
     "gsak_filter_import_skipped_header":     "{count} filtre(s) ignoré(s) — un profil de ce nom existe déjà :",
     "gsak_filter_import_failed_header":      "{count} filtre(s) n'ont pas pu être convertis :",
+
+    "crash_dialog_title": "OpenSAK a rencontré un problème",
+    "crash_dialog_msg": "OpenSAK a rencontré une erreur inattendue. Vous pouvez essayer de continuer, mais il est plus sûr d'enregistrer votre travail et de redémarrer.\n\nAidez-nous à la corriger : signalez-la sur GitHub ou envoyez-la à {email}, en joignant le fichier journal.",
+    "crash_dialog_previous_msg": "OpenSAK ne s'est pas fermé normalement lors de sa dernière exécution — il a peut-être planté.\n\nSi vous vous souvenez de ce que vous faisiez, signalez-le sur GitHub ou envoyez-le à {email}, en joignant le fichier journal.",
+    "crash_dialog_privacy": "C'est exactement ce qui sera partagé. Rien n'est envoyé automatiquement — les boutons ouvrent seulement un ticket GitHub ou un e-mail pré-rempli. Votre dossier personnel, votre nom d'utilisateur et vos jetons ont été supprimés.",
+    "crash_dialog_github": "Signaler sur GitHub",
+    "crash_dialog_email": "Envoyer par e-mail",
+    "crash_dialog_copy": "Copier le rapport",
+    "crash_dialog_copied": "✓ Copié",
+    "crash_dialog_show_log": "Afficher le fichier journal",
+    "crash_dialog_quit": "Quitter OpenSAK",
+    "crash_dialog_continue": "Continuer",
 }

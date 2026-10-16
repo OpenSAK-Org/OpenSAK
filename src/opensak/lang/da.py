@@ -1806,4 +1806,16 @@ STRINGS: dict[str, str] = {
     "gsak_filter_import_where_hint":         "    Åbn et sådant filter under Sæt filter → Where for at se og færdiggøre dem.",
     "gsak_filter_import_skipped_header":     "{count} filtre sprunget over — en profil med det navn findes allerede:",
     "gsak_filter_import_failed_header":      "{count} filtre kunne ikke konverteres:",
+
+    "crash_dialog_title": "OpenSAK stødte på et problem",
+    "crash_dialog_msg": "OpenSAK ramte en uventet fejl. Du kan prøve at fortsætte, men det er sikrest at gemme dit arbejde og genstarte.\n\nHjælp os med at rette den: rapportér den på GitHub eller send den til {email}, og vedhæft logfilen.",
+    "crash_dialog_previous_msg": "OpenSAK blev ikke lukket normalt sidst den kørte — den kan være gået ned.\n\nHvis du husker, hvad du lavede, så rapportér det venligst på GitHub eller send det til {email}, og vedhæft logfilen.",
+    "crash_dialog_privacy": "Præcis dette bliver delt. Intet sendes automatisk — knapperne åbner kun en udfyldt GitHub-sag eller e-mail. Din hjemmemappe, dit brugernavn og tokens er fjernet.",
+    "crash_dialog_github": "Rapportér på GitHub",
+    "crash_dialog_email": "Send via e-mail",
+    "crash_dialog_copy": "Kopiér rapport",
+    "crash_dialog_copied": "✓ Kopieret",
+    "crash_dialog_show_log": "Vis logfil",
+    "crash_dialog_quit": "Afslut OpenSAK",
+    "crash_dialog_continue": "Fortsæt",
 }
