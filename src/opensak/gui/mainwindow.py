@@ -1205,22 +1205,34 @@ class MainWindow(QMainWindow):
             tr("premigration_apply_all_done", count=len(pending) - len(failed))
         ]
         backups = take_notices()
+        details = ""
         if backups:
-            parts.append(tr("premigration_apply_all_backups") + "\n" + "\n".join(
+            # With many databases the full per-file list made the box taller
+            # than the screen, pushing the OK button out of reach. Show only
+            # the backup folder(s) here and the full list under
+            # "Show Details...", which scrolls.
+            folders = dict.fromkeys(str(n.backup_path.parent) for n in backups)
+            parts.append(
+                tr("premigration_apply_all_backups") + "\n" + "\n".join(folders)
+            )
+            details = "\n".join(
                 f"{names.get(n.db_path, n.db_path.name)}: {n.backup_path}"
                 for n in backups
-            ))
+            )
         if failed:
             parts.append(tr("premigration_apply_all_failed") + "\n" + "\n".join(
                 f"{names.get(path, path.name)}: {err}" for path, err in failed
             ))
-            QMessageBox.warning(
-                self, tr("premigration_backup_title"), "\n\n".join(parts)
-            )
-        else:
-            QMessageBox.information(
-                self, tr("premigration_backup_title"), "\n\n".join(parts)
-            )
+        msg = QMessageBox(self)
+        msg.setIcon(
+            QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information
+        )
+        msg.setWindowTitle(tr("premigration_backup_title"))
+        msg.setText("\n\n".join(parts))
+        if details:
+            msg.setDetailedText(details)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def show_database_fallback_notice(self) -> None:
         """
