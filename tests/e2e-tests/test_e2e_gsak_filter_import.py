@@ -1,5 +1,6 @@
 # tests/e2e-tests/test_e2e_gsak_filter_import.py — importing GSAK's saved
-# filters from the File menu, all the way to a usable filter profile.
+# filters through File → Import from GSAK Database, all the way to a usable
+# filter profile.
 
 import sqlite3
 from pathlib import Path
@@ -34,31 +35,45 @@ def gsak_db(tmp_path) -> Path:
 
 
 def _open_dialog(window, monkeypatch, gsak_db, profiles_dir):
-    """Open the File-menu dialog with the file already chosen."""
+    """Choose gsak.db3 in the GSAK import and run it (filters only) — the
+    filter dialog it hands over to comes back with the file already chosen."""
     from opensak.gui.dialogs import gsak_filter_import_dialog as fdlg
+    from opensak.gui.dialogs import gsak_import_dialog as idlg
 
     monkeypatch.setattr("opensak.config.get_app_data_dir", lambda: profiles_dir)
     opened = {}
+    monkeypatch.setattr(idlg.GsakImportDialog, "exec",
+                        lambda self: opened.setdefault("import", self))
     monkeypatch.setattr(fdlg.GsakFilterImportDialog, "exec",
                         lambda self: opened.setdefault("dlg", self))
-    monkeypatch.setattr(fdlg.QFileDialog, "getOpenFileName",
-                        lambda *a, **k: (str(gsak_db), "f"))
-    window._act_gsak_filter_import.trigger()
-    dlg = opened["dlg"]
-    dlg._browse()
-    return dlg
+    window._act_gsak_import.trigger()
+    imp = opened["import"]
+    imp.set_path(gsak_db)
+    imp._locations_cb.setChecked(False)
+    imp._start_import()
+    return opened["dlg"]
 
 
 class TestGsakFilterImportE2E:
-    def test_menu_action_sits_next_to_the_database_import(self, empty_window):
-        from PySide6.QtWidgets import QMenu
+    def test_no_separate_menu_action_any_more(self, empty_window):
+        # The GSAK import covers it: a backup or gsak.db3 offers the filters.
+        assert not hasattr(empty_window, "_act_gsak_filter_import")
 
-        action = empty_window._act_gsak_filter_import
-        assert action.text() != "action_gsak_filter_import"     # translated
-        menu = next(o for o in action.associatedObjects() if isinstance(o, QMenu))
-        actions = menu.actions()
-        assert actions.index(action) == \
-            actions.index(empty_window._act_gsak_import) + 1
+    def test_gsak_db3_alone_offers_only_filters_and_locations(
+        self, empty_window, monkeypatch, gsak_db
+    ):
+        from opensak.gui.dialogs import gsak_import_dialog as idlg
+
+        opened = {}
+        monkeypatch.setattr(idlg.GsakImportDialog, "exec",
+                            lambda self: opened.setdefault("import", self))
+        empty_window._act_gsak_import.trigger()
+        imp = opened["import"]
+        imp.set_path(gsak_db)
+        assert imp._table.rowCount() == 0
+        assert not imp._filters_cb.isHidden() and imp._filters_cb.isChecked()
+        assert not imp._locations_cb.isHidden()
+        assert imp._import_btn.isEnabled()
 
     def test_import_writes_profiles_the_filter_dialog_can_load(
         self, empty_window, tmp_path, monkeypatch, gsak_db, qtbot
@@ -129,8 +144,8 @@ class TestGsakFilterImportE2E:
         self, empty_window, tmp_path, monkeypatch, gsak_db, qtbot
     ):
         profiles_dir = tmp_path / "appdata"
+        # The GSAK import passes import_completed on to the main window.
         dlg = _open_dialog(empty_window, monkeypatch, gsak_db, profiles_dir)
-        dlg.import_completed.connect(empty_window._on_filter_profiles_imported)
         with qtbot.waitSignal(dlg.import_completed, timeout=10_000):
             dlg._start_import()
         qtbot.waitUntil(lambda: dlg._worker is None, timeout=10_000)

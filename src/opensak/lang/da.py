@@ -353,6 +353,7 @@ STRINGS: dict[str, str] = {
     "action_gsak_import":           "&Importer fra GSAK-database…",
     "gsak_import_dialog_title":     "Importer fra GSAK-database",
     "gsak_import_select_file_label": "Vælg en GSAK-backup (.zip) eller databasefil (.db3):",
+    "gsak_import_intro": "En GSAK-backup (.zip) viser alle de databaser, den indeholder, og tilbyder også at importere de gemte filtre og brugerplaceringer fra dens gsak.db3. En enkelt databasefil (sqlite.db3) importerer kun den database; filtre og placeringer tilbydes også, hvis der findes en gsak.db3 i den GSAK-mappe, den hører til. Vælger du selve gsak.db3, importeres ingen cacher, kun de gemte filtre og brugerplaceringer.",
     "gsak_import_browse_title":     "Vælg GSAK-backup eller databasefil",
     "gsak_import_file_filter":      "GSAK-backup eller database (*.zip *.db3);;Alle filer (*)",
     "gsak_import_extracting":       "Udpakker {name}…",
@@ -1774,7 +1775,6 @@ STRINGS: dict[str, str] = {
     "file_locations_kind_appimage_icon": "Ikon i programmenuen",
 
     # ── GSAK filter import ────────────────────────────────────────────────────
-    "action_gsak_filter_import":             "Importér GSAK-&filtre…",
     "gsak_filter_import_dialog_title":       "Importér GSAK-filtre",
     "gsak_filter_import_select_file_label":  "Vælg GSAK's indstillingsdatabase (gsak.db3) eller en backup (.zip):",
     "gsak_filter_import_browse_title":       "Vælg gsak.db3",

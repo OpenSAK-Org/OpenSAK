@@ -466,9 +466,13 @@ Once you have set up a useful combination, save it so you can reload it in one c
 
 ## Importing GSAK's saved filters
 
-**File → Import GSAK Filters…** turns the filters you saved in GSAK into OpenSAK filter profiles. It is the companion of *Import from GSAK Database*: that one imports caches out of a cache database (`sqlite.db3`), this one imports filters out of GSAK's settings database (`gsak.db3`, normally `%AppData%\GSAK\gsak.db3`). A GSAK backup `.zip` works too — the `gsak.db3` inside it is found automatically.
+**File → Import from GSAK Database…** also turns the filters you saved in GSAK into OpenSAK filter profiles. The filters live in GSAK's settings database (`gsak.db3`, normally `%AppData%\GSAK\gsak.db3`), and the import offers them — with the **Also import the saved GSAK filters** box ticked — whenever it finds that file:
 
-Pick the file, tick the filters you want (all of them are ticked to begin with; the search box narrows the list, and **Select all / Select none** apply to what the search currently shows), and press **Start import**. Existing profiles of the same name are kept and reported as skipped unless you tick **Overwrite filter profiles that already exist**.
+- **A GSAK backup `.zip`**: every database in the backup is listed, and the `gsak.db3` inside it supplies the filters and user locations.
+- **A single `sqlite.db3`**: that database is imported; the filters are offered too when a `gsak.db3` sits in the GSAK folder the database belongs to.
+- **`gsak.db3` itself**: no caches are imported, only the saved filters and user locations.
+
+After the caches (if any) are imported, the filter list opens with the file already chosen. Tick the filters you want (all of them are ticked to begin with; the search box narrows the list, and **Select all / Select none** apply to what the search currently shows), and press **Start import**. Existing profiles of the same name are kept and reported as skipped unless you tick **Overwrite filter profiles that already exist**.
 
 ### Where each GSAK condition ends up
 

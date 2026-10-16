@@ -356,6 +356,7 @@ STRINGS: dict[str, str] = {
     "action_gsak_import":           "&Importeren uit GSAK-database…",
     "gsak_import_dialog_title":     "Importeren uit GSAK-database",
     "gsak_import_select_file_label": "Selecteer een GSAK-back-up (.zip) of databasebestand (.db3):",
+    "gsak_import_intro": "Een GSAK-back-up (.zip) toont alle databases die erin zitten en biedt ook aan de opgeslagen filters en gebruikerslocaties uit de bijbehorende gsak.db3 te importeren. Eén databasebestand (sqlite.db3) importeert alleen die database; de filters en locaties worden ook aangeboden als er een gsak.db3 in de bijbehorende GSAK-map staat. Kies je gsak.db3 zelf, dan worden geen caches geïmporteerd, alleen de opgeslagen filters en gebruikerslocaties.",
     "gsak_import_browse_title":     "Selecteer GSAK-back-up of databasebestand",
     "gsak_import_file_filter":      "GSAK-back-up of database (*.zip *.db3);;Alle bestanden (*)",
     "gsak_import_extracting":       "Bezig met uitpakken van {name}…",
@@ -1772,7 +1773,6 @@ STRINGS: dict[str, str] = {
     "file_locations_kind_appimage_icon": "Pictogram in het programmamenu",
 
     # ── GSAK filter import ────────────────────────────────────────────────────
-    "action_gsak_filter_import":             "GSAK-&filters importeren…",
     "gsak_filter_import_dialog_title":       "GSAK-filters importeren",
     "gsak_filter_import_select_file_label":  "Kies GSAK's instellingendatabase (gsak.db3) of een back-up (.zip):",
     "gsak_filter_import_browse_title":       "gsak.db3 kiezen",
