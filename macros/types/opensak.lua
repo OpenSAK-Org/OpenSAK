@@ -681,7 +681,7 @@ function opensak.input(prompt, default, title) end
 ---@return string|number? # The item picked, or nil if cancelled.
 function opensak.choose(prompt, options, default, title) end
 
----Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel.
+---Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in the macro window builds forms visually and imports GSAK forms.
 ---
 ---Since API version 3.
 ---
