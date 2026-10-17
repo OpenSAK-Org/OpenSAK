@@ -69,6 +69,11 @@ def _bool(name: str, value: Any) -> bool:
 def _float(name: str, value: Any, lo: float, hi: float, required: bool = False) -> Optional[float]:
     if not required and _clear(value):
         return None
+    return _number(name, value, lo, hi, required)
+
+
+def _number(name: str, value: Any, lo: float, hi: float, required: bool = True) -> float:
+    """*value* as a float between *lo* and *hi*; _float() without clearing."""
     if isinstance(value, str):
         try:
             value = float(value.strip())
@@ -165,8 +170,8 @@ def _corrected(name: str, value: Any) -> Optional[tuple[float, float]]:
             f'{name} must be {{ lat = .., lon = .. }}, a coordinate string, or false to clear it'
         )
     return (
-        _float(f"{name}.lat", lat, -90.0, 90.0, required=True),
-        _float(f"{name}.lon", lon, -180.0, 180.0, required=True),
+        _number(f"{name}.lat", lat, -90.0, 90.0),
+        _number(f"{name}.lon", lon, -180.0, 180.0),
     )
 
 

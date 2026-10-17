@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QGroupBox, QComboBox,
     QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QTabWidget, QWidget,
-    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox
+    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox,
+    QListWidget, QListWidgetItem,
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
@@ -948,7 +949,7 @@ class SettingsDialog(QDialog):
         # The macros that may change databases: only with the macro write
         # API, which has its own beta flag.
         from opensak.utils import flags
-        self._db_write_list = None
+        self._db_write_list: QListWidget | None = None
         if flags.lua_macro_write:
             layout.addSpacing(12)
             layout.addWidget(self._build_db_write_section())
@@ -1107,7 +1108,6 @@ class SettingsDialog(QDialog):
         when they first wrote), listed by file name with the full path as
         tooltip. They can only be removed here; adding happens through that
         question."""
-        from PySide6.QtWidgets import QListWidget, QListWidgetItem
         from opensak.macro.db_access import always_approved
 
         box = QWidget()
@@ -1121,37 +1121,43 @@ class SettingsDialog(QDialog):
         layout.addWidget(intro)
 
         self._db_write_loaded = always_approved()
-        self._db_write_list = QListWidget()
+        db_write_list = QListWidget()
+        self._db_write_list = db_write_list
         for path in self._db_write_loaded:
             item = QListWidgetItem(Path(path).name)
             item.setToolTip(path)
             item.setData(Qt.ItemDataRole.UserRole, path)
-            self._db_write_list.addItem(item)
-        self._db_write_list.setMaximumHeight(120)
-        self._db_write_list.itemSelectionChanged.connect(
-            lambda: self._btn_db_write_remove.setEnabled(
-                bool(self._db_write_list.selectedItems())
-            )
-        )
-        layout.addWidget(self._db_write_list)
+            db_write_list.addItem(item)
+        db_write_list.setMaximumHeight(120)
+        layout.addWidget(db_write_list)
 
         btn_row = QHBoxLayout()
-        self._btn_db_write_remove = QPushButton(tr("settings_folder_perm_remove"))
-        self._btn_db_write_remove.setEnabled(False)
-        self._btn_db_write_remove.clicked.connect(self._on_remove_db_write)
-        btn_row.addWidget(self._btn_db_write_remove)
+        remove_btn = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_db_write_remove = remove_btn
+        remove_btn.setEnabled(False)
+        remove_btn.clicked.connect(self._on_remove_db_write)
+        db_write_list.itemSelectionChanged.connect(
+            lambda: remove_btn.setEnabled(bool(db_write_list.selectedItems()))
+        )
+        btn_row.addWidget(remove_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
         return box
 
     def _on_remove_db_write(self) -> None:
-        for item in self._db_write_list.selectedItems():
-            self._db_write_list.takeItem(self._db_write_list.row(item))
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return
+        for item in db_write_list.selectedItems():
+            db_write_list.takeItem(db_write_list.row(item))
 
     def _collect_db_write(self) -> list[str]:
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return []
         return [
-            self._db_write_list.item(i).data(Qt.ItemDataRole.UserRole)
-            for i in range(self._db_write_list.count())
+            db_write_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(db_write_list.count())
         ]
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────

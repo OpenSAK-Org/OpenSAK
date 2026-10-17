@@ -1612,7 +1612,7 @@ class MacroRuntime:
         """get_session(), or a session in the open transaction — decided
         per use, so a loop may run on past the transaction's end."""
         if self._in_transaction():
-            with self._sql_write_db.session() as session:
+            with self._writable_db().session() as session:
                 yield session
         else:
             with get_session() as session:

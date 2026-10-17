@@ -354,7 +354,7 @@ class ReadOnlyDatabase:
         )
         return [r["name"] for r in rows]
 
-    def columns(self, table: str) -> list[dict[str, str]]:
+    def columns(self, table: str) -> list[dict[str, Any]]:
         if table not in self.tables():
             raise SqlError(f"no table named {table!r}")
         schema, dot, name = table.partition(".")

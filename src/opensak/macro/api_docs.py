@@ -687,17 +687,17 @@ def render_lua_stub() -> str:
         "---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.",
         "---@class opensak.CacheUpdate",
     ]
-    for field in WRITABLE_FIELDS:
-        lines.append(f"---@field {field.name}? {field.type} {descriptions[field.name]}")
+    for writable in WRITABLE_FIELDS:
+        lines.append(f"---@field {writable.name}? {writable.type} {descriptions[writable.name]}")
     lines += [
         "",
         "---A new cache for `opensak.insert{}`.",
         "---@class opensak.CacheInsert: opensak.CacheUpdate",
         '---@field code string Cache code, e.g. "GC12345".',
     ]
-    for field in WRITABLE_FIELDS:
-        if field.name in INSERT_REQUIRED:
-            lines.append(f"---@field {field.name} {field.type} {descriptions[field.name]}")
+    for writable in WRITABLE_FIELDS:
+        if writable.name in INSERT_REQUIRED:
+            lines.append(f"---@field {writable.name} {writable.type} {descriptions[writable.name]}")
 
     for t in CHILD_TABLES:
         lines += [
