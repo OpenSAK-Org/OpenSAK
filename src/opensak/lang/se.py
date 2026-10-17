@@ -894,6 +894,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "Mappen '{path}' är nu tom.\n\nVill du också ta bort den?",
     "db_err_delete_folder":         "Det gick inte att ta bort mappen '{path}':",
     "db_delete_active_error":       "Kan inte radera '{name}' eftersom det är den aktiva databasen.\n\nByt till en annan databas först.",
+    "db_active_locked_tip":         "Detta är den aktiva databasen. Byt till en annan databas först.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Välj vilka kolumner som ska visas i cachelistan.\nGC Kod och Namn visas alltid.",

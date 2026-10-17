@@ -895,6 +895,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "Der Ordner '{path}' ist jetzt leer.\n\nSoll er ebenfalls gelöscht werden?",
     "db_err_delete_folder":         "Ordner '{path}' konnte nicht gelöscht werden:",
     "db_delete_active_error":       "'{name}' kann nicht gelöscht werden, da es die aktive Datenbank ist.\n\nWechseln Sie zuerst zu einer anderen Datenbank.",
+    "db_active_locked_tip":         "Dies ist die aktive Datenbank. Wechseln Sie zuerst zu einer anderen Datenbank.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Wähle, welche Spalten in der Cacheliste angezeigt werden sollen.\nGC-Code und Name können nicht ausgeblendet werden.",

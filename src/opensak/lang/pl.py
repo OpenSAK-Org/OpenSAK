@@ -895,6 +895,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "Folder „{path}” jest teraz pusty.\n\nCzy chcesz go również usunąć?",
     "db_err_delete_folder":         "Nie udało się usunąć folderu „{path}”:",
     "db_delete_active_error":       "Nie można usunąć „{name}”, ponieważ jest to aktywna baza danych.\n\nNajpierw przełącz się na inną bazę danych.",
+    "db_active_locked_tip":         "To jest aktywna baza danych. Najpierw przełącz się na inną bazę danych.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Wybierz, które kolumny mają być widoczne na liście skrytek.\nKodu GC i Nazwy nie można ukryć.",
