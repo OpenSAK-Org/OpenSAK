@@ -169,6 +169,7 @@ from opensak.macro.sql import (
     SqlError,
     WritableDatabase,
     connect_read_only,
+    default_schema_name,
 )
 from opensak.utils import flags
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
@@ -1271,6 +1272,9 @@ class MacroRuntime:
         self._chunk_name = "macro"
         # opensak.macro_db(): the file attached during this run
         self._macro_db_path: Optional[Path] = None
+        # opensak.attach(): schema → (database name, file), attached
+        # read-only; kept here so they survive a reopened connection
+        self._attachments: dict[str, tuple[str, Path]] = {}
         self._run_permissions: list[FolderPermission] = []
         # (folder, write) the user denied during this run — not asked again
         self._denied: set[tuple[Path, bool]] = set()
@@ -1553,14 +1557,87 @@ class MacroRuntime:
     def _writable_db(self) -> WritableDatabase:
         if self._sql_write_db is None:
             db = WritableDatabase(Path(get_engine().url.database or ""))
-            if self._macro_db_path is not None:
-                # Attached again after opensak.switch_database().
-                try:
+            # Attached again after opensak.switch_database().
+            active = self._active_db_path()
+            try:
+                if self._macro_db_path is not None:
                     db.attach_macro_db(self._macro_db_path)
-                except SqlError as exc:
-                    raise MacroError(str(exc)) from None
+                for schema, (name, path) in list(self._attachments.items()):
+                    if path == active:
+                        del self._attachments[schema]
+                        self._output(f"opensak.attach: detached {name!r} ({schema}): "
+                                     "it is the active database now")
+                    else:
+                        db.attach_read_only(path, schema)
+            except SqlError as exc:
+                db.close()
+                raise MacroError(str(exc)) from None
             self._sql_write_db = db
         return self._sql_write_db
+
+    @staticmethod
+    def _active_db_path() -> Path:
+        return Path(get_engine().url.database or "").resolve()
+
+    # opensak.attach(): other OpenSAK databases, attached read-only to the
+    # active database's SQL connection, so one statement can join them. A
+    # macro started with opensak.run_macro() sees its caller's; what it
+    # changes is undone when it returns.
+
+    def _attach(self, name=None, schema=None) -> str:
+        func = "opensak.attach"
+        db = self._require_database(name, func)
+        if schema is None:
+            schema = default_schema_name(db.name)
+        elif not isinstance(schema, str):
+            raise MacroError(f"{func}: the schema name must be a string, got {schema!r}")
+        path = Path(db.path).resolve()
+        if self._attachments.get(schema) == (db.name, path):
+            return schema                       # e.g. by a caller of run_macro()
+        self._no_transaction(func)
+        if path == self._active_db_path():
+            raise MacroError(f"{func}: {db.name!r} is the active database; its tables need no schema")
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        try:
+            self._writable_db().attach_read_only(path, schema)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        self._attachments[schema] = (db.name, path)
+        self._output(f"{func}: attached {db.name!r} read-only as {schema}")
+        return schema
+
+    def _detach(self, schema=None) -> None:
+        func = "opensak.detach"
+        if not isinstance(schema, str) or schema not in self._attachments:
+            raise MacroError(f"{func}: no database is attached as {schema!r} — see opensak.attached()")
+        self._no_transaction(func)
+        try:
+            self._writable_db().detach(schema)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        del self._attachments[schema]
+
+    def _attached(self, lua):
+        return lua.table_from([
+            lua.table_from({"schema": schema, "name": name, "path": str(path), "opensak": True})
+            for schema, (name, path) in self._attachments.items()
+        ])
+
+    def _restore_attachments(self, wanted: dict[str, tuple[str, Path]]) -> None:
+        """Make *wanted* the attached databases again (after run_macro())."""
+        if wanted == self._attachments:
+            return
+        db = self._sql_write_db
+        for schema in [s for s, a in self._attachments.items() if wanted.get(s) != a]:
+            if db is not None:
+                db.detach(schema)
+            del self._attachments[schema]
+        for schema, (name, path) in wanted.items():
+            if schema not in self._attachments:
+                if db is not None:
+                    db.attach_read_only(path, schema)
+                self._attachments[schema] = (name, path)
 
     # The macro's own database: <macro file name>.db3 next to the macro file,
     # attached to the active database's SQL connection as `macro`. A macro
@@ -2083,23 +2160,31 @@ class MacroRuntime:
         # Relative paths in the called macro are its own folder's, and its
         # per-macro state is its own file's.
         previous = self._base_dir, self._macro_path
-        caller_db = self._macro_db_path
+        caller_dbs = self._macro_db_path, dict(self._attachments)
         self._base_dir, self._macro_path = file.parent, file
         self._macro_depth += 1
         try:
             result = fn(*args)
         except BaseException:
-            self._end_called_macro(previous, caller_db, failed=True)
+            self._end_called_macro(previous, caller_dbs, failed=True)
             raise
-        self._end_called_macro(previous, caller_db, failed=False)
+        self._end_called_macro(previous, caller_dbs, failed=False)
         return result
 
-    def _end_called_macro(self, previous, caller_db: Optional[Path], failed: bool) -> None:
+    def _end_called_macro(self, previous, caller_dbs, failed: bool) -> None:
         self._macro_depth -= 1
         self._base_dir, self._macro_path = previous
-        # The called macro may have switched `macro` to its own file.
+        # The called macro may have switched `macro` to its own file, and
+        # attached or detached databases.
+        caller_db, caller_attachments = caller_dbs
         try:
+            # Detach first what the caller does not have, which keeps the
+            # count within SQLite's limit while the caller's come back.
+            self._restore_attachments({
+                s: a for s, a in caller_attachments.items() if self._attachments.get(s) == a
+            })
             self._attach_macro_db(caller_db)
+            self._restore_attachments(caller_attachments)
         except SqlError as exc:
             if not failed:      # else the called macro's error is the one to show
                 raise MacroError(f"opensak.run_macro: {exc}") from None
@@ -2764,6 +2849,7 @@ class MacroRuntime:
         self._macro_path = macro_path
         self._chunk_name = chunk_name
         self._macro_db_path = None
+        self._attachments = {}
         self._run_permissions = (
             list(self._folder_permissions)
             if self._folder_permissions is not None
@@ -2806,7 +2892,7 @@ class MacroRuntime:
         for func in API:
             *namespaces, name = func.name.split(".")
             table = api
-            if func.write and not flags.lua_macro_write:
+            if (func.write or func.beta) and not flags.lua_macro_write:
                 continue
             for ns in namespaces:
                 table = table.setdefault(ns, {})
@@ -2846,7 +2932,9 @@ class MacroRuntime:
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
+            # Closing the connection detaches every database.
             self._close_sql_write()
+            self._attachments = {}
             self._report_deleted()
             self._close_other_databases()
             self._load_macro = None
@@ -3104,6 +3192,8 @@ class ApiFunction:
     # Changes the active database: only registered with the lua-macro-write
     # feature flag (beta builds), see utils/flags.py.
     write: bool = False
+    # Only registered with that flag too, but changes nothing (opensak.attach)
+    beta: bool = False
 
     @property
     def signatures(self) -> list[str]:
@@ -3483,8 +3573,9 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),
         params=(_READ_OPTIONS,),
         returns=("string[]", "Table and view names, sorted."),
-        changed=((3, "lists the macro's TEMP tables and views, and the "
-                     "tables of opensak.macro_db() as `macro.<name>`"),),
+        changed=((3, "lists the macro's TEMP tables and views, the tables "
+                     "of opensak.macro_db() as `macro.<name>` and those of "
+                     "opensak.attach() as `<schema>.<name>`"),),
     ),
     ApiFunction(
         name="columns",
@@ -3544,6 +3635,74 @@ API: tuple[ApiFunction, ...] = (
         since=3,
         bind=lambda rt, lua: rt._macro_db,
         returns=("string", "The path of the macro database file."),
+    ),
+    ApiFunction(
+        name="attach",
+        description="Attach another OpenSAK database read-only to the SQL "
+                    "functions, under a schema name, so one opensak.sql() or "
+                    "sql_write() statement can read it together with the "
+                    "active database and opensak.macro_db(): "
+                    "`SELECT … FROM caches c JOIN found.caches f ON "
+                    "f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which "
+                    "stays refused. Nothing can write to an attached "
+                    "database: the file is opened read-only, and SQL that "
+                    "would change it is refused. Without `schema`, the name "
+                    "is made from the database name: lower case, `_` for "
+                    "anything but letters and digits (\"Found 2020\" → "
+                    "`found_2020`). The schema name must be letters, digits "
+                    "and `_`; `main`, `temp`, `macro`, `companion` and names "
+                    "starting with `opensak_` are reserved. The active "
+                    "database cannot be attached, and neither can a database "
+                    "twice. Attaching the same database under the same name "
+                    "again does nothing. SQLite allows 10 attached databases "
+                    "at once, opensak.macro_db() included. The database is "
+                    "not updated to the current schema, so one last opened "
+                    "by an older OpenSAK version may lack columns; "
+                    "`opensak.columns(\"<schema>.caches\")` shows what is "
+                    "there. Each attach prints a line in the macro output. "
+                    "Cannot be called inside opensak.transaction(). Stays "
+                    "attached after opensak.switch_database(), unless the "
+                    "database becomes the active one. Everything is "
+                    "detached when the macro ends. A macro started with "
+                    "opensak.run_macro() sees its caller's attached "
+                    "databases; what it attaches or detaches is undone when "
+                    "it returns. See Several databases in one query.",
+        example='local found = opensak.attach("Found 2020", "found")\n'
+                'for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name FROM caches c "\n'
+                '        .. "JOIN found.caches f ON f.gc_code = c.gc_code")) do\n'
+                '    print(r.gc_code, r.name)\nend',
+        since=3,
+        bind=lambda rt, lua: rt._attach,
+        params=(
+            Param("name", "string", "Database name, as in opensak.databases()."),
+            Param("schema", "string", "Schema name to use in SQL; default: "
+                  "made from the database name.", optional=True),
+        ),
+        returns=("string", "The schema name."),
+        beta=True,
+    ),
+    ApiFunction(
+        name="detach",
+        description="Detach a database attached with opensak.attach(). "
+                    "Optional: everything is detached when the macro ends. "
+                    "Cannot be called inside opensak.transaction().",
+        example='opensak.detach("found")',
+        since=3,
+        bind=lambda rt, lua: rt._detach,
+        params=(Param("schema", "string", "The schema name opensak.attach() returned."),),
+        beta=True,
+    ),
+    ApiFunction(
+        name="attached",
+        description="The databases attached with opensak.attach(), in the "
+                    "order they were attached. `opensak` is always true: "
+                    "only OpenSAK databases can be attached so far.",
+        example='for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._attached(lua),
+        returns=("{schema: string, name: string, path: string, opensak: boolean}[]",
+                 "One table per attached database."),
+        beta=True,
     ),
     ApiFunction(
         name="databases",

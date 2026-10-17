@@ -312,6 +312,67 @@ _WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
                "is on, as it is in beta builds; check with `if opensak.update then`. "
                "Changing caches needs the user's approval, given per macro "
                "(see Changing caches).")
+# Appended to those that need the flag but change nothing (opensak.attach)
+_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
+         "is on, as it is in beta builds; check with `if opensak.attach then`.")
+
+
+def _beta_note(func: ApiFunction) -> str | None:
+    return _WRITE_BETA if func.write else _BETA if func.beta else None
+
+
+def _attach_section() -> list[str]:
+    return [
+        "",
+        "## Several databases in one query",
+        "",
+        "Beta: `opensak.attach()`, `opensak.detach()` and `opensak.attached()` "
+        "are only available while the `lua-macro-write` feature flag is on.",
+        "",
+        "The `database` option reads one other database per call. To join "
+        "several databases in one statement, as GSAK macros do with SQL "
+        "`ATTACH`, attach them with `opensak.attach()`: each one becomes a "
+        "schema of the active database's SQL connection, next to "
+        "`opensak.macro_db()`'s `macro`. Attached databases are read-only; "
+        "`opensak.sql_write()` still only changes the active database (and "
+        "`macro`), but may read the attached ones, e.g. in a subquery. SQL "
+        "`ATTACH` and `DETACH` stay refused, so a macro cannot open files "
+        "past the folder permissions.",
+        "",
+        "For example, with found caches in one database and placed caches in "
+        "another, as FindStatGen keeps them:",
+        "",
+        *_code(
+            'opensak.attach("Found")                -- schema "found"\n'
+            'opensak.attach("Placed 2020", "placed")\n'
+            "\n"
+            "-- found caches that are also in the active database\n"
+            'for _, r in ipairs(opensak.sql([[\n'
+            "    SELECT c.gc_code, c.name, f.found_date FROM caches c\n"
+            "    JOIN found.caches f ON f.gc_code = c.gc_code\n"
+            "    ORDER BY f.found_date]])) do\n"
+            "    print(r.gc_code, r.name, r.found_date)\n"
+            "end\n"
+            "\n"
+            "-- flag the active database's caches placed by me\n"
+            'opensak.sql_write("UPDATE caches SET user_flag = 1 "\n'
+            '    .. "WHERE gc_code IN (SELECT gc_code FROM placed.caches)")'
+        ),
+        "",
+        "An attached database is not updated to the current schema: one last "
+        "opened by an older OpenSAK version may lack columns. Open it once "
+        "(Manage Databases) to update it, or check with "
+        '`opensak.columns("found.caches")`. A database in use by another '
+        "OpenSAK window can be attached; the statement sees what that "
+        "window has committed.",
+        "",
+        "| GSAK | OpenSAK |",
+        "|---|---|",
+        "| `ATTACH 'x\\sqlite.db3' AS x` (an OpenSAK database) | `opensak.attach(\"x\", \"x\")` |",
+        "| `ATTACH 'any.db3' AS y` (any other file) | not available yet |",
+        "| `DETACH x` | `opensak.detach(\"x\")`, or nothing: all are detached when the macro ends |",
+        "| own writable database | `opensak.macro_db()` |",
+    ]
 
 
 def _changing_section() -> list[str]:
@@ -513,8 +574,9 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         if func.returns:
             lines += [f"Returns `{func.returns[0]}` — {func.returns[1]}", ""]
         lines += [_since(func), ""]
-        if func.write:
-            lines += [_WRITE_BETA, ""]
+        beta = _beta_note(func)
+        if beta:
+            lines += [beta, ""]
         lines += ["Example:", ""]
         lines += _code(func.example)
 
@@ -546,7 +608,10 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "switching to it, so the active filter stays. The database is opened "
         "read-only. A database last opened by an older OpenSAK version must be "
         "opened once first, so its schema is updated. Naming the active "
-        "database is the same as leaving `database` out.",
+        "database is the same as leaving `database` out. To join another "
+        "database with the active one in one statement, see "
+        "[Several databases in one query](#several-databases-in-one-query).",
+        *_attach_section(),
         "",
         *_forms_section(),
         "## Cache fields",
@@ -749,8 +814,9 @@ def render_lua_stub() -> str:
             lines += [f"opensak.{namespace} = {{}}", ""]
         lines += _comment(func.description)
         lines += ["---", f"---{_since(func)}", "---"]
-        if func.write:
-            lines += _comment(_WRITE_BETA) + ["---"]
+        beta = _beta_note(func)
+        if beta:
+            lines += _comment(beta) + ["---"]
         lines += _comment(f"```lua\n{func.example}\n```")
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")
