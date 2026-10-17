@@ -8,6 +8,7 @@ A *backup set* is one plain folder in the user's backup folder:
     OpenSAK-backup-2026-10-01_1830-auto/
         manifest.json
         databases/      one snapshot (#943) per database
+        macro_databases/ one snapshot per macro_db() file of a Lua macro
         settings/       opensak.json, filters/, column_views/, icons/
 
 A set is built in ``<name>.partial`` and renamed into place only when it is
@@ -47,6 +48,9 @@ KEEP_AUTO_KEY = "backup.keep_auto"
 COMPRESS_KEY = "backup.compress"
 DEFAULT_KEEP_AUTO = 5
 DEFAULT_DIRNAME = "OpenSAK Backups"
+# The macro_db() files of Lua macros (#1034): a .db3 next to each macro
+# file, which can be anywhere, so the runtime records every one it opens.
+MACRO_DATABASES_KEY = "macros.databases"
 
 # ── Set layout ────────────────────────────────────────────────────────────────
 
@@ -63,6 +67,7 @@ ZIP_SUFFIX = ".zip"   # a compressed set: <set name>.zip (#989)
 MANIFEST_NAME = "manifest.json"
 MANIFEST_FORMAT = 1
 DATABASES_DIRNAME = "databases"
+MACRO_DATABASES_DIRNAME = "macro_databases"
 SETTINGS_DIRNAME = "settings"
 
 # What goes into settings/: opensak.json plus these folders from the install
@@ -134,6 +139,15 @@ class DatabaseEntry:
 
 
 @dataclass(frozen=True)
+class MacroDatabaseEntry:
+    """A macro's own database (opensak.macro_db()) inside a backup set."""
+
+    file: str                       # relative to the set folder
+    path: str                       # where it was backed up from
+    size_bytes: int
+
+
+@dataclass(frozen=True)
 class BackupSet:
     """A complete backup set on disk."""
 
@@ -145,6 +159,7 @@ class BackupSet:
     settings: bool
     format: int
     compressed: bool = False        # one .zip file instead of a folder (#989)
+    macro_databases: tuple[MacroDatabaseEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,6 +168,9 @@ class BackupResult:
 
     backup_set: BackupSet
     skipped: tuple[str, ...]        # names of databases whose file is missing
+    # Paths of macro databases that could not be copied (unreadable,
+    # damaged). Never a reason to fail the backup itself.
+    skipped_macro_databases: tuple[str, ...] = ()
 
 
 # ── Backup folder ─────────────────────────────────────────────────────────────
@@ -248,6 +266,25 @@ def get_keep_auto() -> int:
     return max(1, value)
 
 
+def known_macro_databases() -> list[Path]:
+    """The macro_db() files OpenSAK has opened, as recorded (they may be gone)."""
+    from opensak.settings_store import get_store
+    raw = get_store().get(MACRO_DATABASES_KEY)
+    if not isinstance(raw, list):
+        return []
+    return [Path(p) for p in raw if isinstance(p, str) and p]
+
+
+def remember_macro_database(path: Path) -> None:
+    """Record the macro_db() file *path*, so backups include it (#942)."""
+    from opensak.settings_store import get_store
+    path = _resolved(Path(path))
+    known = known_macro_databases()
+    if any(_same_path(path, p) for p in known):
+        return
+    get_store().set(MACRO_DATABASES_KEY, [*(str(p) for p in known), str(path)])
+
+
 # ── Writing a set ─────────────────────────────────────────────────────────────
 
 def write_backup_set(
@@ -258,17 +295,23 @@ def write_backup_set(
     folder: Optional[Path] = None,
     now: Optional[datetime] = None,
     compress: Optional[bool] = None,
+    macro_databases: Optional[Iterable[Path]] = None,
 ) -> BackupResult:
     """
-    Back up *databases* and the settings into a new set in *folder*
-    (default: the backup folder).
+    Back up *databases*, the macros' own databases and the settings into a
+    new set in *folder* (default: the backup folder).
 
     With *compress* (default: the ``backup.compress`` setting, #989) the set
     is one zip file with the same layout inside, instead of a folder.
 
+    *macro_databases* defaults to the recorded macro_db() files
+    (known_macro_databases()); a safety set (settings only) has none.
+
     Databases whose file doesn't exist are skipped and reported in the
-    result; the rest of the backup still completes. *progress* may raise to
-    cancel: the exception propagates unchanged and nothing is left behind.
+    result; the rest of the backup still completes. A macro database that is
+    missing is left out silently, one that can't be copied is left out and
+    reported. *progress* may raise to cancel: the exception propagates
+    unchanged and nothing is left behind.
 
     Raises BackupError if the set can't be written (unsuitable folder, not
     enough free space, a database that can't be snapshotted, …).
@@ -296,17 +339,22 @@ def write_backup_set(
             logger.warning("backup: database %r skipped — its file is missing", db.name)
     skipped_names = tuple(skipped)
 
+    if macro_databases is None:
+        macro_databases = [] if kind == KIND_SAFETY else known_macro_databases()
+    macro_present = _present_macro_databases(macro_databases)
+
     cleanup_partials(folder)
     cleanup_staging()
 
     if compress is None:
         compress = get_compress()
 
-    total = sum(size for _db, size in present)
+    sizes = [size for _db, size in present] + [size for _p, size in macro_present]
+    total = sum(sizes)
     staging_root = folder
     if compress:
         staging_root = _staging_root(folder)
-        largest = max((size for _db, size in present), default=0)
+        largest = max(sizes, default=0)
         staged = largest * _FREE_SPACE_FACTOR
         zipped = total * _ZIP_SPACE_FACTOR
         if _same_volume(staging_root, folder):
@@ -318,13 +366,15 @@ def write_backup_set(
         _check_free_space(folder, total * _FREE_SPACE_FACTOR)
 
     name = _unique_set_name(folder, now, kind)
+    macro_skipped: list[str] = []
     if compress:
         final = _write_compressed_set(
             present, total, folder, name, kind, now, progress,
             staging_root=staging_root,
+            macro_present=macro_present, macro_skipped=macro_skipped,
         )
         logger.info("backup: wrote %s (compressed, %d skipped)", final, len(skipped_names))
-        return BackupResult(read_backup_set(final), skipped_names)
+        return BackupResult(read_backup_set(final), skipped_names, tuple(macro_skipped))
 
     partial = folder / (name + PARTIAL_SUFFIX)
     final = folder / name
@@ -332,8 +382,12 @@ def write_backup_set(
     try:
         (partial / DATABASES_DIRNAME).mkdir(parents=True)
         entries = _write_databases(present, total, partial, progress)
+        macro_entries = _write_macro_databases(
+            macro_present, total, sum(size for _db, size in present),
+            partial, progress, macro_skipped,
+        )
         settings = _copy_settings(partial / SETTINGS_DIRNAME)
-        manifest = _manifest(kind, now, entries, settings)
+        manifest = _manifest(kind, now, entries, settings, macro_entries)
         _write_json(partial / MANIFEST_NAME, manifest)
         os.replace(partial, final)
     except BaseException as exc:
@@ -347,10 +401,10 @@ def write_backup_set(
         raise
 
     logger.info(
-        "backup: wrote %s (%d database(s), %d skipped)",
-        final, len(entries), len(skipped_names),
+        "backup: wrote %s (%d database(s), %d macro database(s), %d skipped)",
+        final, len(entries), len(macro_entries), len(skipped_names),
     )
-    return BackupResult(read_backup_set(final), skipped_names)
+    return BackupResult(read_backup_set(final), skipped_names, tuple(macro_skipped))
 
 
 def _write_compressed_set(
@@ -363,6 +417,8 @@ def _write_compressed_set(
     progress: Optional[ProgressCallback],
     *,
     staging_root: Optional[Path] = None,
+    macro_present: Optional[list[tuple[Path, int]]] = None,
+    macro_skipped: Optional[list[str]] = None,
 ) -> Path:
     """
     Write a compressed set (#989): ``<name>.zip`` with the same layout as a
@@ -393,12 +449,18 @@ def _write_compressed_set(
                 present, total, staging, progress,
                 snapshot_share=0.5, after_each=_add_database,
             )
+            macro_entries = _write_macro_databases(
+                macro_present or [], total, sum(size for _db, size in present),
+                staging, progress,
+                macro_skipped if macro_skipped is not None else [],
+                snapshot_share=0.5, after_each=_add_database,
+            )
             settings_dir = staging / SETTINGS_DIRNAME
             settings = _copy_settings(settings_dir)
             for path in sorted(p for p in settings_dir.rglob("*") if p.is_file()):
                 arcname = f"{SETTINGS_DIRNAME}/{path.relative_to(settings_dir).as_posix()}"
                 zf.write(path, arcname)
-            manifest = _manifest(kind, now, entries, settings)
+            manifest = _manifest(kind, now, entries, settings, macro_entries)
             zf.writestr(
                 MANIFEST_NAME,
                 json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -581,6 +643,76 @@ def _write_databases(
     return entries
 
 
+def _present_macro_databases(paths: Iterable[Path]) -> list[tuple[Path, int]]:
+    """The macro databases among *paths* that exist, once each, with their size."""
+    present: list[tuple[Path, int]] = []
+    for path in paths:
+        path = _resolved(Path(path))
+        if any(_same_path(path, p) for p, _size in present):
+            continue
+        try:
+            if path.is_file():
+                present.append((path, _database_size(path)))
+        except OSError:
+            pass   # e.g. on a drive that isn't connected: nothing to back up
+    return present
+
+
+def _write_macro_databases(
+    present: list[tuple[Path, int]],
+    total: int,
+    done_before: int,
+    partial: Path,
+    progress: Optional[ProgressCallback],
+    skipped: list[str],
+    *,
+    snapshot_share: float = 1.0,
+    after_each: Optional[Callable[[Path, str, Callable[[float], None]], None]] = None,
+) -> list[MacroDatabaseEntry]:
+    """
+    Snapshot each macro database into *partial*/macro_databases/, like
+    _write_databases(). A macro database belongs to one macro, not to the
+    whole backup: one that can't be copied is added to *skipped* and left
+    out instead of failing the backup.
+    """
+    entries: list[MacroDatabaseEntry] = []
+    used_names: set[str] = set()
+    if present:
+        (partial / MACRO_DATABASES_DIRNAME).mkdir(parents=True, exist_ok=True)
+    for src, size in present:
+        file_name = _unique_file_name(src.name, used_names)
+        target = partial / MACRO_DATABASES_DIRNAME / file_name
+        file = f"{MACRO_DATABASES_DIRNAME}/{file_name}"
+
+        def _report(fraction: float, *, _name: str = src.name,
+                    _before: int = done_before, _size: int = size) -> None:
+            if progress is None:
+                return
+            overall = (_before + fraction * _size) / total if total else 1.0
+            progress(_name, fraction, overall)
+
+        def _db_progress(done: int, pages: int, *, _report=_report) -> None:
+            _report((done / pages if pages else 1.0) * snapshot_share)
+
+        try:
+            snapshot_database(src, target, _db_progress)
+        except (SnapshotError, OSError, sqlite3.Error) as exc:
+            logger.warning("backup: macro database %s skipped — %s", src, exc)
+            skipped.append(str(src))
+            done_before += size
+            continue
+        entry = MacroDatabaseEntry(file=file, path=str(src), size_bytes=target.stat().st_size)
+        if after_each is not None:
+            def _after_report(f: float, *, _report=_report) -> None:
+                _report(snapshot_share + f * (1 - snapshot_share))
+
+            after_each(target, file, _after_report)
+        _report(1.0)
+        done_before += size
+        entries.append(entry)
+    return entries
+
+
 def _copy_settings(target: Path) -> bool:
     """Copy the allow-listed settings into *target*."""
     from opensak.settings_store import get_install_dir, get_store
@@ -601,6 +733,7 @@ def _copy_settings(target: Path) -> bool:
 
 def _manifest(
     kind: str, now: datetime, entries: list[DatabaseEntry], settings: bool,
+    macro_entries: Iterable[MacroDatabaseEntry] = (),
 ) -> dict[str, Any]:
     from opensak import __version__
     return {
@@ -617,6 +750,12 @@ def _manifest(
                 "size_bytes": e.size_bytes,
             }
             for e in entries
+        ],
+        # Added for macro_db() files (#1034). Older versions ignore the key,
+        # so the format stays 1.
+        "macro_databases": [
+            {"file": e.file, "path": e.path, "size_bytes": e.size_bytes}
+            for e in macro_entries
         ],
         "settings": settings,
     }
@@ -666,6 +805,14 @@ def read_backup_set(path: Path) -> BackupSet:
             )
             for d in data["databases"]
         )
+        macro_databases = tuple(
+            MacroDatabaseEntry(
+                file=str(d["file"]),
+                path=str(d.get("path", "")),
+                size_bytes=int(d.get("size_bytes", 0)),
+            )
+            for d in data.get("macro_databases") or ()
+        )
         return BackupSet(
             path=path,
             kind=kind,
@@ -675,6 +822,7 @@ def read_backup_set(path: Path) -> BackupSet:
             settings=bool(data.get("settings", False)),
             format=fmt,
             compressed=compressed,
+            macro_databases=macro_databases,
         )
     except BackupError:
         raise
@@ -867,6 +1015,11 @@ def _resolved(path: Path) -> Path:
         return path.expanduser().resolve()
     except OSError:
         return path.expanduser().absolute()
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    """Same file; case-insensitive on Windows, like the file system."""
+    return os.path.normcase(str(a)) == os.path.normcase(str(b))
 
 
 def _str_or_none(value: Any) -> Optional[str]:

@@ -16,8 +16,12 @@ def _reload_flags() -> None:
 
 @pytest.fixture(autouse=True)
 def reset_flags():
-    # Restore flags module state after every test.
+    # Restore flags module state after every test. The root conftest's
+    # monkeypatch is undone only after this teardown, so put back the real
+    # features.json first, or a patched file's values would leak on.
+    features_file = flags_module._FEATURES_FILE
     yield
+    flags_module._FEATURES_FILE = features_file
     _reload_flags()
 
 

@@ -3,6 +3,7 @@ src/opensak/gui/dialogs/settings_dialog.py — Settings dialog.
 """
 
 from __future__ import annotations
+from pathlib import Path
 from typing import cast
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -11,7 +12,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QGroupBox, QComboBox,
     QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QTabWidget, QWidget,
-    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox
+    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox,
+    QListWidget, QListWidgetItem,
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
@@ -944,6 +946,14 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
+        # The macros that may change databases: only with the macro write
+        # API, which has its own beta flag.
+        from opensak.utils import flags
+        self._db_write_list: QListWidget | None = None
+        if flags.lua_macro_write:
+            layout.addSpacing(12)
+            layout.addWidget(self._build_db_write_section())
+
         scroll = QScrollArea()
         scroll.setWidget(tab)
         scroll.setWidgetResizable(True)
@@ -1092,6 +1102,63 @@ class SettingsDialog(QDialog):
         rows = {index.row() for index in table.selectedIndexes()}
         for row in sorted(rows, reverse=True):
             table.removeRow(row)
+
+    def _build_db_write_section(self) -> QWidget:
+        """The macros that may always change databases (answered "Always"
+        when they first wrote), listed by file name with the full path as
+        tooltip. They can only be removed here; adding happens through that
+        question."""
+        from opensak.macro.db_access import always_approved
+
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        intro = QLabel(tr("settings_macro_write_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        self._db_write_loaded = always_approved()
+        db_write_list = QListWidget()
+        self._db_write_list = db_write_list
+        for path in self._db_write_loaded:
+            item = QListWidgetItem(Path(path).name)
+            item.setToolTip(path)
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            db_write_list.addItem(item)
+        db_write_list.setMaximumHeight(120)
+        layout.addWidget(db_write_list)
+
+        btn_row = QHBoxLayout()
+        remove_btn = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_db_write_remove = remove_btn
+        remove_btn.setEnabled(False)
+        remove_btn.clicked.connect(self._on_remove_db_write)
+        db_write_list.itemSelectionChanged.connect(
+            lambda: remove_btn.setEnabled(bool(db_write_list.selectedItems()))
+        )
+        btn_row.addWidget(remove_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return box
+
+    def _on_remove_db_write(self) -> None:
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return
+        for item in db_write_list.selectedItems():
+            db_write_list.takeItem(db_write_list.row(item))
+
+    def _collect_db_write(self) -> list[str]:
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return []
+        return [
+            db_write_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(db_write_list.count())
+        ]
 
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
@@ -1824,6 +1891,11 @@ class SettingsDialog(QDialog):
             permissions = self._collect_permissions()
             if permissions != self._perm_loaded:
                 save_permissions(permissions)
+        if self._perm_table is not None and self._db_write_list is not None:
+            from opensak.macro.db_access import save_always_approved
+            databases = self._collect_db_write()
+            if databases != self._db_write_loaded:
+                save_always_approved(databases)
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store
