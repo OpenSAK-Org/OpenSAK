@@ -1804,4 +1804,17 @@ STRINGS: dict[str, str] = {
     "gsak_filter_import_where_hint":         "    Open zo'n filter via Filter instellen → Where om ze te zien en af te maken.",
     "gsak_filter_import_skipped_header":     "{count} filter(s) overgeslagen — een profiel met die naam bestaat al:",
     "gsak_filter_import_failed_header":      "{count} filter(s) konden niet omgezet worden:",
+
+    "crash_dialog_title": "OpenSAK is tegen een probleem aangelopen",
+    "crash_dialog_msg": "Er is een onverwachte fout opgetreden in OpenSAK. U kunt proberen door te gaan, maar het is veiliger om uw werk op te slaan en opnieuw te starten.\n\nHelp ons de fout op te lossen: meld deze op GitHub of in onze Facebook-groep, of stuur deze naar {email}, en voeg het logbestand toe.",
+    "crash_dialog_previous_msg": "OpenSAK is de vorige keer niet normaal afgesloten — mogelijk is het gecrasht.\n\nAls u nog weet wat u aan het doen was, meld het dan op GitHub of in onze Facebook-groep, of stuur het naar {email}, en voeg het logbestand toe.",
+    "crash_dialog_privacy": "Precies dit wordt gedeeld. Er wordt niets automatisch verzonden — de knoppen openen alleen een vooraf ingevuld GitHub-issue of e-mail, of kopiëren het rapport en openen de Facebook-groep om het te plakken. Uw thuismap, gebruikersnaam en tokens zijn verwijderd.",
+    "crash_dialog_github": "Melden op GitHub",
+    "crash_dialog_facebook": "Plaatsen in Facebook-groep",
+    "crash_dialog_email": "Versturen per e-mail",
+    "crash_dialog_copy": "Rapport kopiëren",
+    "crash_dialog_copied": "✓ Gekopieerd",
+    "crash_dialog_show_log": "Logbestand tonen",
+    "crash_dialog_quit": "OpenSAK afsluiten",
+    "crash_dialog_continue": "Doorgaan",
 }

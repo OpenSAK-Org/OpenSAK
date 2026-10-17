@@ -280,8 +280,14 @@ def main() -> None:
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
     from opensak.logger import setup_logging
-    setup_logging()
+    log_path = setup_logging()
     logger.info("startup: main() begin, version=%s", _ver)
+
+    # Catch crashes from here on: uncaught exceptions get a report dialog
+    # instead of vanishing (no console in a windowed build), and a hard
+    # crash of the last session is detected so it can be reported below.
+    from opensak import crash_report
+    crash_report.install(log_path.parent)
     _startup_t0 = time.monotonic()
 
     # Kør macOS-sti-migreringen (issue #825) FØR NOGET ANDET rører
@@ -468,6 +474,7 @@ def main() -> None:
         QTimer.singleShot(
             600, lambda: window.show_settings_restore_notice(settings_restore_result)
         )
+    QTimer.singleShot(650, lambda: crash_report.show_previous_crash_notice(window))
 
     window.show()
     exit_code = app.exec()

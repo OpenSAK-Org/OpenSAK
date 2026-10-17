@@ -1807,4 +1807,17 @@ STRINGS: dict[str, str] = {
     "gsak_filter_import_where_hint":         "    Otwórz taki filtr w Ustaw filtr → Where, aby je zobaczyć i dokończyć.",
     "gsak_filter_import_skipped_header":     "{count} filtrów pominięto — profil o tej nazwie już istnieje:",
     "gsak_filter_import_failed_header":      "Nie udało się przekonwertować {count} filtrów:",
+
+    "crash_dialog_title": "OpenSAK napotkał problem",
+    "crash_dialog_msg": "W OpenSAK wystąpił nieoczekiwany błąd. Możesz spróbować kontynuować, ale bezpieczniej jest zapisać pracę i uruchomić program ponownie.\n\nPomóż nam go naprawić: zgłoś go na GitHubie lub w naszej grupie na Facebooku albo wyślij na {email} i dołącz plik dziennika.",
+    "crash_dialog_previous_msg": "OpenSAK nie został poprawnie zamknięty podczas ostatniego uruchomienia — mógł ulec awarii.\n\nJeśli pamiętasz, co robiłeś, zgłoś to na GitHubie lub w naszej grupie na Facebooku albo wyślij na {email} i dołącz plik dziennika.",
+    "crash_dialog_privacy": "Dokładnie to zostanie udostępnione. Nic nie jest wysyłane automatycznie — przyciski otwierają jedynie wstępnie wypełnione zgłoszenie na GitHubie lub e-mail albo kopiują raport i otwierają grupę na Facebooku, aby go wkleić. Twój folder domowy, nazwa użytkownika i tokeny zostały usunięte.",
+    "crash_dialog_github": "Zgłoś na GitHubie",
+    "crash_dialog_facebook": "Opublikuj w grupie na Facebooku",
+    "crash_dialog_email": "Wyślij e-mailem",
+    "crash_dialog_copy": "Kopiuj raport",
+    "crash_dialog_copied": "✓ Skopiowano",
+    "crash_dialog_show_log": "Pokaż plik dziennika",
+    "crash_dialog_quit": "Zamknij OpenSAK",
+    "crash_dialog_continue": "Kontynuuj",
 }
