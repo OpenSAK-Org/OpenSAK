@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
-from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime
+from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.macro_help import MacroHelpDialog
@@ -693,6 +693,37 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
         return FolderApproval.ALWAYS
     return FolderApproval.DENY
 
+
+
+def ask_macro_write_approval(parent, macro: Path | None) -> WriteApproval:
+    """OpenSAK's question before the macro file *macro* first changes a
+    database: deny (the default, also on Escape), allow until OpenSAK
+    closes, or always. An unsaved macro (None) cannot be allowed always."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("macro_write_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    if macro is None:
+        box.setText(tr("macro_write_msg_unsaved"))
+        box.setInformativeText(tr("macro_write_hint_unsaved"))
+    else:
+        box.setText(tr("macro_write_msg", name=macro.name, path=str(macro)))
+        box.setInformativeText(tr("macro_write_hint"))
+    btn_session = box.addButton(tr("macro_write_session"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = (
+        box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+        if macro is not None else None
+    )
+    btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_deny)
+    box.setEscapeButton(btn_deny)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is btn_session:
+        return WriteApproval.SESSION
+    if btn_always is not None and clicked is btn_always:
+        return WriteApproval.ALWAYS
+    return WriteApproval.DENY
 
 def choose_file_for_macro(
     parent, title: str, file_filter: str, save: bool, start_dir: Path

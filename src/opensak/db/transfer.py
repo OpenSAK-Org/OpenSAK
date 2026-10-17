@@ -156,10 +156,9 @@ def transfer_caches(
     written to the target are deleted from the source — a skipped cache
     stays where it is. Returns the number of caches written.
     """
+    from opensak.db.cache_delete import delete_caches
     from opensak.db.database import session_for
-    from opensak.db.models import (
-        Cache, Log, Attribute, Trackable, Waypoint, UserNote,
-    )
+    from opensak.db.models import Cache
     from sqlalchemy.orm import joinedload, selectinload
 
     if if_exists not in IF_EXISTS:
@@ -214,20 +213,7 @@ def transfer_caches(
         # ── 3. Delete from source DB (move only) ──────────────────────────
         if not copy_only and written:
             with session_for(source_db_path) as session:
-                cache_ids = [
-                    row[0]
-                    for row in session.query(Cache.id)
-                    .filter(Cache.gc_code.in_(written))
-                    .all()
-                ]
-                if cache_ids:
-                    for model in (Log, Attribute, Trackable, Waypoint, UserNote):
-                        session.query(model).filter(
-                            model.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                    session.query(Cache).filter(
-                        Cache.id.in_(cache_ids)
-                    ).delete(synchronize_session=False)
+                delete_caches(session, written)
 
         written_total += len(written)
     return written_total

@@ -46,7 +46,7 @@ from typing import Any, Callable, Iterator, Optional, Protocol
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.filters.engine import (
@@ -98,6 +98,7 @@ from opensak.filters.engine import (
 )
 from opensak import __version__, geodesy
 from opensak.coord_formats import INPUT_KEYS, parse_any
+from opensak.db.cache_delete import delete_caches
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
@@ -126,6 +127,26 @@ from opensak.macro.cache_data import (
     load_records,
     resolve_fields,
 )
+from opensak.macro import db_access
+from opensak.macro.cache_write import (
+    CacheWriteError,
+    insert_cache,
+    parse_values,
+    update_cache,
+)
+from opensak.macro.child_write import (
+    ATTRIBUTE,
+    LOG,
+    TRACKABLE,
+    WAYPOINT,
+    ChildTable,
+    delete_child,
+    insert_child,
+    list_children,
+    parse_child_values,
+    update_child,
+)
+from opensak.macro.db_access import WriteApproval
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -144,9 +165,13 @@ from opensak.macro.sql import (
     MAX_ROWS,
     QUERY_TIMEOUT_S,
     ReadOnlyDatabase,
+    WRITABLE_TABLES,
     SqlError,
+    WritableDatabase,
     connect_read_only,
+    default_schema_name,
 )
+from opensak.utils import flags
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -514,6 +539,27 @@ end
 return stop, where, make_loader
 """
 
+# opensak.transaction(fn), written in Lua: an error raised by fn passes
+# through a Python function only as a message with a traceback appended
+# (and an error table as ""), so pcall stays on the Lua side. begin/finish
+# are MacroRuntime._tx_begin/_tx_end. If the instruction limit is hit inside
+# fn, finish() never runs; _close_sql_write() rolls back at the macro's end.
+_TRANSACTION_LUA = """
+local begin, finish = ...
+local pack, unpack, pcall, error, type = table.pack, table.unpack, pcall, error, type
+return function(fn)
+  if type(fn) ~= "function" then
+    error("opensak.transaction expects a function, e.g. "
+          .. "opensak.transaction(function() ... end)", 2)
+  end
+  begin()
+  local r = pack(pcall(fn))
+  finish(r[1])
+  if not r[1] then error(r[2], 0) end
+  return unpack(r, 2, r.n)
+end
+"""
+
 
 class FolderApproval(Enum):
     """The user's answer when a macro needs a folder that is not permitted."""
@@ -600,6 +646,22 @@ class MacroHost(Protocol):
 
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
+
+    def approve_macro_write(self, macro: Optional[Path]) -> WriteApproval:
+        """Ask the user whether the macro file *macro* may change the
+        OpenSAK databases: never, until OpenSAK closes, or always. *macro*
+        is None for an unsaved macro, which cannot be allowed always.
+
+        Asked before the first write of a macro that is not approved yet.
+        Must be OpenSAK's own dialog. Anything but SESSION or ALWAYS counts
+        as DENY.
+        """
+
+    def caches_changed(self, codes: list[str], added: bool) -> None:
+        """A macro changed the caches *codes* (opensak.update, insert,
+        sql_write); *added* if new caches were inserted. Like
+        set_corrected_coords(), the host may defer the refresh to
+        end_macro()."""
 
     def approve_folder(self, target: Path, folder: Path, write: bool) -> FolderApproval:
         """Ask the user whether the macro may read (or write) *target*, by
@@ -936,6 +998,17 @@ def _gc_code(code: Any, func: str) -> str:
     return code.strip().upper()
 
 
+def _row_id(func: str, table: ChildTable, row_id: Any) -> int:
+    """The id of a log, waypoint, ... a macro passed."""
+    if isinstance(row_id, float) and row_id.is_integer():
+        row_id = int(row_id)
+    if isinstance(row_id, bool) or not isinstance(row_id, int):
+        raise MacroError(
+            f"{func} expects the {table.singular}'s id from opensak.{table.plural}(), got {row_id!r}"
+        )
+    return row_id
+
+
 def _db_name(name: Any, func: str) -> str:
     if not isinstance(name, str) or not name.strip():
         raise MacroError(f"{func} expects a database name")
@@ -959,6 +1032,13 @@ def _sql_args(func: str, query: Any, params: Any) -> tuple[str, Any]:
     raise MacroError(
         f"{func}: parameters must be an array {{ v1, v2 }} or a table {{ name = v }}, not both"
     )
+
+
+def _lua_to_python(value: Any) -> Any:
+    """A Lua table → dict (nested tables too); other values as they are."""
+    if hasattr(value, "items"):
+        return {k: _lua_to_python(v) for k, v in value.items()}
+    return value
 
 
 def _cache_fields(value: Any) -> tuple[CacheField, ...]:
@@ -1189,6 +1269,12 @@ class MacroRuntime:
         # per-macro state (saved settings, #983) belongs to the called macro,
         # not its caller. None for an unsaved macro.
         self._macro_path: Optional[Path] = None
+        self._chunk_name = "macro"
+        # opensak.macro_db(): the file attached during this run
+        self._macro_db_path: Optional[Path] = None
+        # opensak.attach(): schema → (database name, file), attached
+        # read-only; kept here so they survive a reopened connection
+        self._attachments: dict[str, tuple[str, Path]] = {}
         self._run_permissions: list[FolderPermission] = []
         # (folder, write) the user denied during this run — not asked again
         self._denied: set[tuple[Path, bool]] = set()
@@ -1207,8 +1293,18 @@ class MacroRuntime:
         self._slept = 0.0
         self._polygons: dict[Path, LineShape] = {}
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
-        # Opened by the first opensak.sql*() call of a run, closed after it.
-        self._sql_db: Optional[ReadOnlyDatabase] = None
+        # The active database's connection for opensak.sql*() and
+        # transaction(), opened on first use and closed after the run (or on
+        # switch_database), which drops the macro's TEMP tables.
+        self._sql_write_db: Optional[WritableDatabase] = None
+        # Macro files (None: unsaved) the user refused to let change
+        # databases during this run
+        self._write_denied: set[Optional[Path]] = set()
+        # Caches deleted during this run, by database name — reported at
+        # its end. Inside opensak.transaction() they are counted per level
+        # (_tx_deleted) and only kept when it commits.
+        self._deleted: dict[str, int] = {}
+        self._tx_deleted: list[dict[str, int]] = []
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1278,27 +1374,406 @@ class MacroRuntime:
     def _set_corrected(self, code=None, lat=None, lon=None) -> bool:
         gc_code = _gc_code(code, "opensak.set_corrected")
         la, lo = resolve_coords(lat, lon)
+        self._require_write("opensak.set_corrected")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, {"corrected": (la, lo)})
         return bool(self._host.set_corrected_coords(gc_code, la, lo))
 
     def _clear_corrected(self, code=None) -> bool:
         gc_code = _gc_code(code, "opensak.clear_corrected")
+        self._require_write("opensak.clear_corrected")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, {"corrected": None})
         return bool(self._host.set_corrected_coords(gc_code, None, None))
 
-    # Raw SQL: a separate read-only connection (sql.py), opened on first use.
+    # Changing caches (cache_write.py): only the active database, and only
+    # after the user allowed the running macro to write (db_access.py).
 
-    def _close_sql(self) -> None:
-        if self._sql_db is not None:
-            self._sql_db.close()
-            self._sql_db = None
+    def _require_write(self, func: str) -> None:
+        """Raise unless the user lets the running macro change databases —
+        asking (host.approve_macro_write) if that was not decided yet. A
+        macro started with opensak.run_macro() is asked about on its own
+        (_macro_path is the called macro's). A refusal holds for the rest
+        of the run.
+
+        Without the lua-macro-write flag only set_corrected/clear_corrected
+        get here (the other writing functions are not registered); they
+        change the database without asking, as before the write API."""
+        if not flags.lua_macro_write:
+            return
+        macro = self._macro_path
+        if db_access.is_approved(macro):
+            return
+        if macro not in self._write_denied:
+            answer = self._host.approve_macro_write(macro)
+            if answer in (WriteApproval.SESSION, WriteApproval.ALWAYS):
+                db_access.approve(macro, answer)
+                return
+            self._write_denied.add(macro)
+        name = macro.name if macro is not None else "(unsaved)"
+        raise MacroError(f"{func}: the user did not allow macro {name!r} to change databases")
+
+    def _field_values(self, func: str, values: Any, insert: bool) -> dict[str, Any]:
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ user_flag = true }}")
+        try:
+            return parse_values(func, _lua_to_python(values), insert=insert)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+
+    def _update(self, code=None, values=None) -> bool:
+        gc_code = _gc_code(code, "opensak.update")
+        parsed = self._field_values("opensak.update", values, insert=False)
+        self._require_write("opensak.update")
+        if self._in_transaction():
+            return self._update_in_transaction(gc_code, parsed)
+        with get_session() as session:
+            found = update_cache(session, gc_code, parsed)
+        if found:
+            self._host.caches_changed([gc_code], False)
+        return found
+
+    def _update_in_transaction(self, gc_code: str, parsed: dict[str, Any]) -> bool:
+        with self._active_session() as session:
+            found = update_cache(session, gc_code, parsed, refresh=False)
+        if found:
+            self._host.caches_changed([gc_code], False)
+        return found
+
+    def _insert(self, values=None) -> str:
+        parsed = self._field_values("opensak.insert", values, insert=True)
+        self._require_write("opensak.insert")
+        try:
+            with self._active_session() as session:
+                code = insert_cache(session, parsed, refresh=not self._in_transaction())
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+        self._host.caches_changed([code], True)
+        return code
+
+    # The rows of a cache (child_write.py): logs, waypoints, attributes and
+    # trackables, read and written like the cache itself.
+
+    def _children(self, lua, table: ChildTable, code=None, options=None):
+        func = f"opensak.{table.plural}"
+        gc_code = _gc_code(code, func)
+        db = self._read_options(func, options)
+        with self._session_factory(db, func)() as session:
+            rows = list_children(session, table, gc_code)
+        return None if rows is None else lua.table_from([lua.table_from(r) for r in rows])
+
+    def _child_values(self, func: str, table: ChildTable, values: Any, insert: bool) -> dict[str, Any]:
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ {table.fields[0].name} = .. }}")
+        try:
+            return parse_child_values(func, table, _lua_to_python(values), insert=insert)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+
+    def _write_child(self, func: str, write: Callable[[Any], Any]) -> Any:
+        """*write(session)* in the active database (in the open transaction,
+        if any); a broken constraint, e.g. a duplicate, is a MacroError."""
+        try:
+            with self._active_session() as session:
+                return write(session)
+        except IntegrityError as exc:
+            raise MacroError(f"{func}: {exc.orig}") from None
+
+    def _insert_child(self, table: ChildTable, code=None, values=None) -> Optional[int]:
+        func = f"opensak.insert_{table.singular}"
+        gc_code = _gc_code(code, func)
+        parsed = self._child_values(func, table, values, insert=True)
+        self._require_write(func)
+        refresh = not self._in_transaction()
+        row_id = self._write_child(
+            func, lambda s: insert_child(s, table, gc_code, parsed, refresh=refresh))
+        if row_id is not None:
+            self._host.caches_changed([gc_code], False)
+        return row_id
+
+    def _update_child(self, table: ChildTable, row_id=None, values=None) -> bool:
+        func = f"opensak.update_{table.singular}"
+        row_id = _row_id(func, table, row_id)
+        parsed = self._child_values(func, table, values, insert=False)
+        self._require_write(func)
+        refresh = not self._in_transaction()
+        code = self._write_child(
+            func, lambda s: update_child(s, table, row_id, parsed, refresh=refresh))
+        if code is None:
+            return False
+        self._host.caches_changed([code], False)
+        return True
+
+    # Deleting (#1035): needs the same write permission. A deleted cache
+    # takes its logs, waypoints, attributes, trackables and user note along.
+
+    def _delete(self, codes=None) -> Any:
+        func = "opensak.delete"
+        single = isinstance(codes, str)
+        if not single and not hasattr(codes, "values"):
+            raise MacroError(
+                f'{func} expects a GC code or a list of codes, e.g. opensak.delete("GC12345"), '
+                f"got {codes!r}"
+            )
+        gc_codes = [_gc_code(c, func) for c in _as_list(codes)]
+        if not gc_codes:
+            return 0
+        self._require_write(func)
+        with self._active_session() as session:
+            deleted = delete_caches(session, gc_codes)
+        self._caches_deleted(len(deleted))
+        return bool(deleted) if single else len(deleted)
+
+    def _delete_child(self, table: ChildTable, row_id=None) -> bool:
+        func = f"opensak.delete_{table.singular}"
+        row_id = _row_id(func, table, row_id)
+        self._require_write(func)
+        refresh = not self._in_transaction()
+        code = self._write_child(func, lambda s: delete_child(s, table, row_id, refresh=refresh))
+        if code is None:
+            return False
+        self._host.caches_changed([code], False)
+        return True
+
+    def _caches_deleted(self, count: int) -> None:
+        """Tell the host, and count *count* deleted caches for the report
+        at the end of the run."""
+        if not count:
+            return
+        self._host.caches_removed()
+        counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
+        name = self._host.database_name()
+        counts[name] = counts.get(name, 0) + count
+
+    def _report_deleted(self) -> None:
+        """One line per database in the macro output, so deletes never go
+        unnoticed. What a transaction left open (rolled back) is dropped."""
+        self._tx_deleted = []
+        for name, count in self._deleted.items():
+            caches = "1 cache" if count == 1 else f"{count} caches"
+            self._output(f"opensak: {caches} deleted from database {name!r}")
+        self._deleted = {}
+
+    def _writable_db(self) -> WritableDatabase:
+        if self._sql_write_db is None:
+            db = WritableDatabase(Path(get_engine().url.database or ""))
+            # Attached again after opensak.switch_database().
+            active = self._active_db_path()
+            try:
+                if self._macro_db_path is not None:
+                    db.attach_macro_db(self._macro_db_path)
+                for schema, (name, path) in list(self._attachments.items()):
+                    if path == active:
+                        del self._attachments[schema]
+                        self._output(f"opensak.attach: detached {name!r} ({schema}): "
+                                     "it is the active database now")
+                    else:
+                        db.attach_read_only(path, schema)
+            except SqlError as exc:
+                db.close()
+                raise MacroError(str(exc)) from None
+            self._sql_write_db = db
+        return self._sql_write_db
+
+    @staticmethod
+    def _active_db_path() -> Path:
+        return Path(get_engine().url.database or "").resolve()
+
+    # opensak.attach(): other OpenSAK databases, attached read-only to the
+    # active database's SQL connection, so one statement can join them. A
+    # macro started with opensak.run_macro() sees its caller's; what it
+    # changes is undone when it returns.
+
+    def _attach(self, name=None, schema=None) -> str:
+        func = "opensak.attach"
+        db = self._require_database(name, func)
+        if schema is None:
+            schema = default_schema_name(db.name)
+        elif not isinstance(schema, str):
+            raise MacroError(f"{func}: the schema name must be a string, got {schema!r}")
+        path = Path(db.path).resolve()
+        if self._attachments.get(schema) == (db.name, path):
+            return schema                       # e.g. by a caller of run_macro()
+        self._no_transaction(func)
+        if path == self._active_db_path():
+            raise MacroError(f"{func}: {db.name!r} is the active database; its tables need no schema")
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        try:
+            self._writable_db().attach_read_only(path, schema)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        self._attachments[schema] = (db.name, path)
+        self._output(f"{func}: attached {db.name!r} read-only as {schema}")
+        return schema
+
+    def _detach(self, schema=None) -> None:
+        func = "opensak.detach"
+        if not isinstance(schema, str) or schema not in self._attachments:
+            raise MacroError(f"{func}: no database is attached as {schema!r} — see opensak.attached()")
+        self._no_transaction(func)
+        try:
+            self._writable_db().detach(schema)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        del self._attachments[schema]
+
+    def _attached(self, lua):
+        return lua.table_from([
+            lua.table_from({"schema": schema, "name": name, "path": str(path), "opensak": True})
+            for schema, (name, path) in self._attachments.items()
+        ])
+
+    def _restore_attachments(self, wanted: dict[str, tuple[str, Path]]) -> None:
+        """Make *wanted* the attached databases again (after run_macro())."""
+        if wanted == self._attachments:
+            return
+        db = self._sql_write_db
+        for schema in [s for s, a in self._attachments.items() if wanted.get(s) != a]:
+            if db is not None:
+                db.detach(schema)
+            del self._attachments[schema]
+        for schema, (name, path) in wanted.items():
+            if schema not in self._attachments:
+                if db is not None:
+                    db.attach_read_only(path, schema)
+                self._attachments[schema] = (name, path)
+
+    # The macro's own database: <macro file name>.db3 next to the macro file,
+    # attached to the active database's SQL connection as `macro`. A macro
+    # started with opensak.run_macro() gets its own file there once it calls
+    # opensak.macro_db(); the caller's is attached again when it returns.
+
+    def _macro_db(self) -> str:
+        func = "opensak.macro_db"
+        if self._macro_path is not None:
+            file = self._macro_path
+        elif self._base_dir is not None:
+            file = self._base_dir / self._chunk_name
+        else:
+            raise MacroError(f"{func}: save the macro first — its database is named after the file")
+        path = (file.parent / f"{file.stem}.db3").resolve()
+        manager = get_db_manager()
+        opensak_dbs = {Path(db.path).resolve() for db in manager.databases}
+        opensak_dbs.add(Path(get_engine().url.database or "").resolve())
+        if path in opensak_dbs:
+            raise MacroError(f"{func}: {path} is an OpenSAK database; rename the macro")
+        if self._in_transaction():
+            raise MacroError(f"{func} cannot be used inside opensak.transaction()")
+        if path != self._macro_db_path:
+            # Creates (and writes) a file, so the macro's folder must be
+            # writable for macros like any other file a macro writes; the
+            # user is asked as usual if it is not listed.
+            try:
+                self._check_access(path, write=True, allow_database=True)
+            except MacroError as exc:
+                raise MacroError(f"{func}: {exc}") from None
+        created = not path.exists()
+        try:
+            self._writable_db()
+            self._attach_macro_db(path)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        # Recorded so OpenSAK's backups include it (#942); best-effort.
+        try:
+            from opensak.backup.backupset import remember_macro_database
+            remember_macro_database(path)
+        except Exception:
+            logger.warning("%s: could not record %s for backups", func, path, exc_info=True)
+        if created:
+            # Shown in the macro output, so a new file never appears silently.
+            self._output(f"{func}: created {path}")
+        return str(path)
+
+    def _attach_macro_db(self, path: Optional[Path]) -> None:
+        """Make *path* (None: no file) the one attached as `macro`. Without
+        a write connection yet, _writable_db() attaches it when it opens."""
+        if path == self._macro_db_path:
+            return
+        if self._sql_write_db is not None:
+            self._sql_write_db.detach_macro_db()
+            self._macro_db_path = None
+            if path is not None:
+                self._sql_write_db.attach_macro_db(path)
+        self._macro_db_path = path
+
+    def _sql_write(self, query=None, params=None) -> int:
+        query, params = _sql_args("opensak.sql_write", query, params)
+        self._require_write("opensak.sql_write")
+        try:
+            result = self._writable_db().execute(query, params)
+        except SqlError as exc:
+            raise MacroError(str(exc)) from None
+        if result.codes:
+            self._host.caches_changed(result.codes, result.added)
+        self._caches_deleted(len(result.removed))
+        return result.rows
+
+    def _close_sql_write(self) -> None:
+        """Close the write connection; rolls back a transaction still open
+        (a macro that ended or failed inside opensak.transaction())."""
+        if self._sql_write_db is not None:
+            self._sql_write_db.close()
+            self._sql_write_db = None
+
+    # opensak.transaction(): the Lua wrapper (_TRANSACTION_LUA) calls these
+    # around the macro's function. While it runs, all writes and reads of
+    # the active database go through the WritableDatabase connection.
+
+    def _in_transaction(self) -> bool:
+        return self._sql_write_db is not None and self._sql_write_db.in_transaction
+
+    def _tx_begin(self) -> None:
+        self._require_write("opensak.transaction")
+        try:
+            self._writable_db().begin()
+        except SqlError as exc:
+            raise MacroError(f"opensak.transaction: {exc}") from None
+        self._tx_deleted.append({})
+
+    def _tx_end(self, commit=None) -> None:
+        deleted = self._tx_deleted.pop() if self._tx_deleted else {}
+        try:
+            self._writable_db().end(bool(commit))
+        except SqlError as exc:
+            raise MacroError(f"opensak.transaction: {exc}") from None
+        if commit:
+            counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
+            for name, count in deleted.items():
+                counts[name] = counts.get(name, 0) + count
+
+    def _resync(self) -> int:
+        if not self._in_transaction():
+            return 0
+        try:
+            return self._writable_db().resync()
+        except SqlError as exc:
+            raise MacroError(f"opensak.resync: {exc}") from None
+
+    def _no_transaction(self, func: str) -> None:
+        if self._in_transaction():
+            raise MacroError(f"{func} cannot be used inside opensak.transaction()")
+
+    @contextmanager
+    def _active_session(self) -> Iterator[Any]:
+        """get_session(), or a session in the open transaction — decided
+        per use, so a loop may run on past the transaction's end."""
+        if self._in_transaction():
+            with self._writable_db().session() as session:
+                yield session
+        else:
+            with get_session() as session:
+                yield session
+
+    # Raw SQL on the active database reads through the write connection
+    # (sql.py), so its TEMP tables serve opensak.sql_write() as well.
 
     def _sql(self, db: Optional[DatabaseInfo] = None) -> ReadOnlyDatabase:
         if db is not None:
             if db.path not in self._other_sql:
                 self._other_sql[db.path] = ReadOnlyDatabase(db.path)
             return self._other_sql[db.path]
-        if self._sql_db is None:
-            self._sql_db = ReadOnlyDatabase(Path(get_engine().url.database or ""))
-        return self._sql_db
+        return self._writable_db().reader()
 
     def _query(self, lua, query=None, params=None, options=None):
         query, params = _sql_args("opensak.sql", query, params)
@@ -1422,9 +1897,10 @@ class MacroRuntime:
         return db
 
     def _session_factory(self, db: Optional[DatabaseInfo], func: str) -> Callable[[], Any]:
-        """get_session for the active database, else read-only sessions on *db*."""
+        """Sessions on the active database (in the open transaction, if
+        any), else read-only sessions on *db*."""
         if db is None:
-            return get_session
+            return self._active_session
         engine = self._other_engines.get(db.path)
         if engine is None:
             engine = self._open_other_engine(db, func)
@@ -1511,15 +1987,20 @@ class MacroRuntime:
         return db.name
 
     def _switch_database(self, name=None) -> None:
+        self._no_transaction("opensak.switch_database")
         db = self._require_database(name, "opensak.switch_database")
-        # The read-only SQL connection belongs to the old database.
-        self._close_sql()
+        # The SQL connection, TEMP tables included, belongs to the old database.
+        self._close_sql_write()
         try:
             self._host.switch_database(db.name)
         except Exception as exc:
             raise MacroError(f"opensak.switch_database: cannot open {db.name!r}: {exc}") from None
 
     def _transfer(self, func: str, copy_only: bool, target=None, options=None) -> int:
+        # It reads (and for a move, deletes) through its own connections,
+        # which would not see the transaction's changes, or would wait for
+        # its write lock.
+        self._no_transaction(func)
         db = self._require_database(target, func)
         active = get_db_manager().active
         if active is None or db.path == active.path:
@@ -1619,13 +2100,15 @@ class MacroRuntime:
             self._run_permissions = with_grant(self._run_permissions, target, write)
         return target
 
-    def _check_access(self, path: Path, write: bool) -> Path:
+    def _check_access(self, path: Path, write: bool, allow_database: bool = False) -> Path:
         """check_access() against this run's list. A folder that is merely
         not listed is put to the user (host.approve_folder) instead of
         failing; protected data and roots fail without asking. A file the
-        user picked in opensak.choose_file() needs no folder permission."""
+        user picked in opensak.choose_file() needs no folder permission.
+        *allow_database* only for the macro's own database (macro_db())."""
         try:
-            return check_access(path, write=write, permissions=self._run_permissions)
+            return check_access(path, write=write, permissions=self._run_permissions,
+                                allow_database=allow_database)
         except FolderNotApproved as exc:
             if (exc.target, write) in self._picked:
                 return exc.target
@@ -1644,7 +2127,8 @@ class MacroRuntime:
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         try:
-            return check_access(path, write=write, permissions=self._run_permissions)
+            return check_access(path, write=write, permissions=self._run_permissions,
+                                allow_database=allow_database)
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
 
@@ -1676,13 +2160,34 @@ class MacroRuntime:
         # Relative paths in the called macro are its own folder's, and its
         # per-macro state is its own file's.
         previous = self._base_dir, self._macro_path
+        caller_dbs = self._macro_db_path, dict(self._attachments)
         self._base_dir, self._macro_path = file.parent, file
         self._macro_depth += 1
         try:
-            return fn(*args)
-        finally:
-            self._macro_depth -= 1
-            self._base_dir, self._macro_path = previous
+            result = fn(*args)
+        except BaseException:
+            self._end_called_macro(previous, caller_dbs, failed=True)
+            raise
+        self._end_called_macro(previous, caller_dbs, failed=False)
+        return result
+
+    def _end_called_macro(self, previous, caller_dbs, failed: bool) -> None:
+        self._macro_depth -= 1
+        self._base_dir, self._macro_path = previous
+        # The called macro may have switched `macro` to its own file, and
+        # attached or detached databases.
+        caller_db, caller_attachments = caller_dbs
+        try:
+            # Detach first what the caller does not have, which keeps the
+            # count within SQLite's limit while the caller's come back.
+            self._restore_attachments({
+                s: a for s, a in caller_attachments.items() if self._attachments.get(s) == a
+            })
+            self._attach_macro_db(caller_db)
+            self._restore_attachments(caller_attachments)
+        except SqlError as exc:
+            if not failed:      # else the called macro's error is the one to show
+                raise MacroError(f"opensak.run_macro: {exc}") from None
 
     def _exit(self, code=None) -> None:
         value = 0 if code is None else _number(code)
@@ -2342,12 +2847,18 @@ class MacroRuntime:
     ) -> int:
         self._base_dir = base_dir
         self._macro_path = macro_path
+        self._chunk_name = chunk_name
+        self._macro_db_path = None
+        self._attachments = {}
         self._run_permissions = (
             list(self._folder_permissions)
             if self._folder_permissions is not None
             else load_permissions()
         )
         self._denied = set()
+        self._write_denied = set()
+        self._deleted = {}
+        self._tx_deleted = []
         self._picked = set()
         self._cancelled.clear()
         self._exit_code = None
@@ -2355,7 +2866,7 @@ class MacroRuntime:
         self._polygons = {}
         self._macro_depth = 0
         try:
-            from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime
+            from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime, lua_type
         except ImportError as exc:
             raise MacroError(
                 'Lua support is not installed — run: pip install "lupa>=2.0,<3"'
@@ -2381,9 +2892,14 @@ class MacroRuntime:
         for func in API:
             *namespaces, name = func.name.split(".")
             table = api
+            if (func.write or func.beta) and not flags.lua_macro_write:
+                continue
             for ns in namespaces:
                 table = table.setdefault(ns, {})
-            table[name] = self._api_function(func.bind(self, lua))
+            bound = func.bind(self, lua)
+            # A Lua function (opensak.transaction) must not be called through
+            # Python: errors passing through lose their value.
+            table[name] = bound if lua_type(bound) == "function" else self._api_function(bound)
         g.opensak = lua.table_from(api, recursive=True)
         self._load_macro = make_loader()
 
@@ -2416,7 +2932,10 @@ class MacroRuntime:
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
-            self._close_sql()
+            # Closing the connection detaches every database.
+            self._close_sql_write()
+            self._attachments = {}
+            self._report_deleted()
             self._close_other_databases()
             self._load_macro = None
             self._close_progress_windows()
@@ -2670,6 +3189,11 @@ class ApiFunction:
     overloads: tuple[tuple[Param, ...], ...] = ()
     # (API version, what changed) for changes after `since`
     changed: tuple[tuple[int, str], ...] = ()
+    # Changes the active database: only registered with the lua-macro-write
+    # feature flag (beta builds), see utils/flags.py.
+    write: bool = False
+    # Only registered with that flag too, but changes nothing (opensak.attach)
+    beta: bool = False
 
     @property
     def signatures(self) -> list[str]:
@@ -2708,6 +3232,115 @@ _TEXT = Param("text", "string", "The text.")
 _PATTERN = Param("pattern", "string", "Regular expression (Python syntax); a "
                                       "long bracket string [[...]] avoids "
                                       "doubling backslashes.")
+
+
+# (list, insert, update, delete) examples of the functions _child_api() makes
+_CHILD_EXAMPLES: dict[str, tuple[str, str, str, str]] = {
+    "log": (
+        'for _, l in ipairs(opensak.logs("GC12345") or {}) do\n'
+        '    print(l.date, l.type, l.finder)\nend',
+        'local id = opensak.insert_log("GC12345", { type = "Write note", date = "2026-10-11",\n'
+        '                                          finder = "me", text = "Final solved" })',
+        'for _, l in ipairs(opensak.logs("GC12345")) do\n'
+        '    if l.type == "Write note" then opensak.update_log(l.id, { text = "checked" }) end\nend',
+        'for _, l in ipairs(opensak.logs("GC12345")) do\n'
+        '    if l.type == "Write note" and l.finder == "me" then opensak.delete_log(l.id) end\nend',
+    ),
+    "waypoint": (
+        'for _, w in ipairs(opensak.waypoints("GC12345") or {}) do\n'
+        '    print(w.prefix, w.type, w.lat, w.lon)\nend',
+        'opensak.insert_waypoint("GC12345", { prefix = "FN", type = "Final Location",\n'
+        '                                     name = "Final", lat = 47.36872, lon = 8.54093 })',
+        'for _, w in ipairs(opensak.waypoints("GC12345")) do\n'
+        '    if w.prefix == "PK" then opensak.update_waypoint(w.id, { comment = "free parking" }) end\nend',
+        'for _, w in ipairs(opensak.waypoints("GC12345")) do\n'
+        '    if w.prefix == "FN" then opensak.delete_waypoint(w.id) end\nend',
+    ),
+    "attribute": (
+        'for _, a in ipairs(opensak.attributes("GC12345") or {}) do\n'
+        '    print(a.attribute_id, a.name, a.on)\nend',
+        'opensak.insert_attribute("GC12345", { attribute_id = 1, name = "Dogs", on = false })',
+        'for _, a in ipairs(opensak.attributes("GC12345")) do\n'
+        '    if a.attribute_id == 1 then opensak.update_attribute(a.id, { on = true }) end\nend',
+        'for _, a in ipairs(opensak.attributes("GC12345")) do\n'
+        '    if a.attribute_id == 1 then opensak.delete_attribute(a.id) end\nend',
+    ),
+    "trackable": (
+        'for _, t in ipairs(opensak.trackables("GC12345") or {}) do print(t.ref, t.name) end',
+        'opensak.insert_trackable("GC12345", { ref = "TB1234", name = "My travel bug" })',
+        'for _, t in ipairs(opensak.trackables("GC12345")) do\n'
+        '    if t.ref == "TB1234" then opensak.update_trackable(t.id, { name = "Renamed" }) end\nend',
+        'for _, t in ipairs(opensak.trackables("GC12345")) do\n'
+        '    if t.ref == "TB1234" then opensak.delete_trackable(t.id) end\nend',
+    ),
+}
+
+
+def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
+    """opensak.<plural>(), insert_<singular>(), update_<singular>() and
+    delete_<singular>()."""
+    list_ex, insert_ex, update_ex, delete_ex = _CHILD_EXAMPLES[t.singular]
+    required = ", ".join(f"`{n}`" for n in t.required)
+    derived = {
+        "logs": " OpenSAK updates the cache's log counts and dates.",
+        "waypoints": " OpenSAK updates the cache's waypoint count.",
+        "trackables": " OpenSAK updates the cache's trackable count.",
+    }.get(t.kind or "", "")
+    return (
+        ApiFunction(
+            name=t.plural,
+            description=f"The {t.plural} of a cache, each with its `id` for "
+                        f"opensak.update_{t.singular}() and the fields listed "
+                        "under Logs, waypoints, attributes and trackables. "
+                        "Missing data is nil.",
+            example=list_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._children(lua, t, *a),
+            params=(_CODE, _READ_OPTIONS),
+            returns=(f"{t.class_name}[]?", "nil if the cache is not in the database."),
+        ),
+        ApiFunction(
+            name=f"insert_{t.singular}",
+            description=f"Add a {t.singular} to a cache in the active database"
+                        + (f"; {required} required" if required else "")
+                        + "." + derived
+                        + " Needs the user's permission like opensak.update().",
+            example=insert_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._insert_child(t, *a),
+            params=(_CODE, Param("fields", f"{t.class_name}Insert", f"The new {t.singular}'s fields.")),
+            returns=("integer?", f"The new {t.singular}'s id; nil if the cache is not in the database."),
+            write=True,
+        ),
+        ApiFunction(
+            name=f"update_{t.singular}",
+            description=f"Change fields of a {t.singular} in the active "
+                        "database; only the given fields change, and `false` "
+                        "clears a field that is not required or a boolean. Needs "
+                        "the user's permission like opensak.update().",
+            example=update_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._update_child(t, *a),
+            params=(
+                Param("id", "integer", f"The {t.singular}'s id from opensak.{t.plural}()."),
+                Param("fields", f"{t.class_name}Update", "The fields to change."),
+            ),
+            returns=("boolean", f"false if there is no {t.singular} with this id."),
+            write=True,
+        ),
+        ApiFunction(
+            name=f"delete_{t.singular}",
+            description=f"Delete a {t.singular} from the active database."
+                        + derived
+                        + " Needs the user's permission like opensak.update().",
+            example=delete_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._delete_child(t, *a),
+            params=(Param("id", "integer", f"The {t.singular}'s id from opensak.{t.plural}()."),),
+            returns=("boolean", f"false if there is no {t.singular} with this id."),
+            write=True,
+        ),
+    )
 
 
 def _rot13(text=None) -> str:
@@ -2883,7 +3516,14 @@ API: tuple[ApiFunction, ...] = (
         description="Run a read-only SQL query (SQLite) against the active "
                     "database (or the one named by the `database` option) "
                     "and return all rows. Only reading statements "
-                    "are allowed; the connection itself is read-only. "
+                    "are allowed, except on TEMP tables: a macro "
+                    "may create, fill, change and drop its own TEMP tables, "
+                    "views and indexes (`CREATE TEMP TABLE ...`) and use them "
+                    "in any query, opensak.sql_write() included. They are "
+                    "never stored in the database and are gone when the macro "
+                    "ends or calls opensak.switch_database(); changes to them "
+                    "inside opensak.transaction() are undone with it. A TEMP "
+                    "table may not take the name of a table of the database. "
                     "Column names follow the database schema, which may "
                     "change between versions (see opensak.tables() and "
                     "opensak.columns()). Use `AS` to name computed columns. "
@@ -2904,6 +3544,7 @@ API: tuple[ApiFunction, ...] = (
             _READ_OPTIONS,
         ),
         returns=("table<string, any>[]", "One table per row, keyed by column name."),
+        changed=((3, "TEMP tables, views and indexes"),),
     ),
     ApiFunction(
         name="sql_each",
@@ -2925,12 +3566,16 @@ API: tuple[ApiFunction, ...] = (
         name="tables",
         description="The tables and views of the active database (or the "
                     "one named by the `database` option), for use with "
-                    "opensak.sql().",
+                    "opensak.sql(). The macro's TEMP tables and views are "
+                    "included.",
         example='print(table.concat(opensak.tables(), ", "))',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._tables(lua, *a),
         params=(_READ_OPTIONS,),
         returns=("string[]", "Table and view names, sorted."),
+        changed=((3, "lists the macro's TEMP tables and views, the tables "
+                     "of opensak.macro_db() as `macro.<name>` and those of "
+                     "opensak.attach() as `<schema>.<name>`"),),
     ),
     ApiFunction(
         name="columns",
@@ -2940,7 +3585,124 @@ API: tuple[ApiFunction, ...] = (
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
         params=(Param("table", "string", "Table or view name."), _READ_OPTIONS),
-        returns=("{name: string, type: string}[]", "Column names and SQL types, in table order."),
+        returns=("{name: string, type: string, required: boolean}[]",
+                 "Column names and SQL types, in table order; `required`: NOT "
+                 "NULL without a default, so an INSERT must give it."),
+        changed=((3, "added `required`"),),
+    ),
+    ApiFunction(
+        name="macro_db",
+        description="Attach the macro's own SQLite database — a file named "
+                    "after the macro file with the extension .db3, in the "
+                    "macro's folder, created if missing — to the SQL "
+                    "functions as schema `macro`. In it the macro has full "
+                    "access through opensak.sql(), sql_each() and sql_write(): "
+                    "CREATE, DROP, ALTER, INSERT, UPDATE and DELETE on "
+                    "`macro.<name>` tables, indexes, views and triggers, and "
+                    "`PRAGMA macro.user_version`. Its data stays between runs. "
+                    "One statement can read and write the active database and "
+                    "the macro database together, e.g. `INSERT INTO macro.seen "
+                    "SELECT gc_code FROM caches`; the rules for the active "
+                    "database stay the same. Unqualified names mean the active "
+                    "database first, so create with `macro.` in front. "
+                    "opensak.tables() lists its tables as `macro.<name>`. "
+                    "The macro's folder must be writable for macros, like any "
+                    "file a macro writes (Settings → Folder permissions; the "
+                    "macros folder is by default); otherwise OpenSAK asks the "
+                    "user to allow it, and a denial makes the call fail. The "
+                    "first call creates the file, even if nothing is written "
+                    "to it, and prints its path in the macro output. OpenSAK "
+                    "remembers the file, and its backups include it in "
+                    "`macro_databases/`, wherever it is. If the "
+                    "folder cannot be written the call fails; a read-only "
+                    "file can be read but not changed. Unlike opensak.update() "
+                    "it needs no approval to change databases (see Changing "
+                    "caches). Changes inside opensak.transaction() "
+                    "are kept or undone together with those of the active "
+                    "database. The SQL statement ATTACH itself stays refused. "
+                    "Cannot be called inside opensak.transaction(); stays "
+                    "attached after opensak.switch_database(). The macro must "
+                    "be saved, as the file is named after it. In a macro "
+                    "started with opensak.run_macro() it attaches the called "
+                    "macro's own file instead; the caller's file is attached "
+                    "again when the called macro returns.",
+        example='opensak.macro_db()\n'
+                'opensak.sql("CREATE TABLE IF NOT EXISTS macro.seen (code TEXT PRIMARY KEY, at TEXT)")\n'
+                'opensak.sql("INSERT OR IGNORE INTO macro.seen SELECT gc_code, date(\'now\') FROM caches WHERE found = 1")\n'
+                'for _, r in ipairs(opensak.sql("SELECT c.gc_code, s.at FROM caches c "\n'
+                '        .. "JOIN macro.seen s ON s.code = c.gc_code LIMIT 5")) do\n'
+                '    print(r.gc_code, r.at)\nend',
+        since=3,
+        bind=lambda rt, lua: rt._macro_db,
+        returns=("string", "The path of the macro database file."),
+    ),
+    ApiFunction(
+        name="attach",
+        description="Attach another OpenSAK database read-only to the SQL "
+                    "functions, under a schema name, so one opensak.sql() or "
+                    "sql_write() statement can read it together with the "
+                    "active database and opensak.macro_db(): "
+                    "`SELECT … FROM caches c JOIN found.caches f ON "
+                    "f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which "
+                    "stays refused. Nothing can write to an attached "
+                    "database: the file is opened read-only, and SQL that "
+                    "would change it is refused. Without `schema`, the name "
+                    "is made from the database name: lower case, `_` for "
+                    "anything but letters and digits (\"Found 2020\" → "
+                    "`found_2020`). The schema name must be letters, digits "
+                    "and `_`; `main`, `temp`, `macro`, `companion` and names "
+                    "starting with `opensak_` are reserved. The active "
+                    "database cannot be attached, and neither can a database "
+                    "twice. Attaching the same database under the same name "
+                    "again does nothing. SQLite allows 10 attached databases "
+                    "at once, opensak.macro_db() included. The database is "
+                    "not updated to the current schema, so one last opened "
+                    "by an older OpenSAK version may lack columns; "
+                    "`opensak.columns(\"<schema>.caches\")` shows what is "
+                    "there. Each attach prints a line in the macro output. "
+                    "Cannot be called inside opensak.transaction(). Stays "
+                    "attached after opensak.switch_database(), unless the "
+                    "database becomes the active one. Everything is "
+                    "detached when the macro ends. A macro started with "
+                    "opensak.run_macro() sees its caller's attached "
+                    "databases; what it attaches or detaches is undone when "
+                    "it returns. See Several databases in one query.",
+        example='local found = opensak.attach("Found 2020", "found")\n'
+                'for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name FROM caches c "\n'
+                '        .. "JOIN found.caches f ON f.gc_code = c.gc_code")) do\n'
+                '    print(r.gc_code, r.name)\nend',
+        since=3,
+        bind=lambda rt, lua: rt._attach,
+        params=(
+            Param("name", "string", "Database name, as in opensak.databases()."),
+            Param("schema", "string", "Schema name to use in SQL; default: "
+                  "made from the database name.", optional=True),
+        ),
+        returns=("string", "The schema name."),
+        beta=True,
+    ),
+    ApiFunction(
+        name="detach",
+        description="Detach a database attached with opensak.attach(). "
+                    "Optional: everything is detached when the macro ends. "
+                    "Cannot be called inside opensak.transaction().",
+        example='opensak.detach("found")',
+        since=3,
+        bind=lambda rt, lua: rt._detach,
+        params=(Param("schema", "string", "The schema name opensak.attach() returned."),),
+        beta=True,
+    ),
+    ApiFunction(
+        name="attached",
+        description="The databases attached with opensak.attach(), in the "
+                    "order they were attached. `opensak` is always true: "
+                    "only OpenSAK databases can be attached so far.",
+        example='for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._attached(lua),
+        returns=("{schema: string, name: string, path: string, opensak: boolean}[]",
+                 "One table per attached database."),
+        beta=True,
     ),
     ApiFunction(
         name="databases",
@@ -3055,6 +3817,190 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._clear_corrected,
         params=(_CODE,),
         returns=("boolean", "false if the cache is not in the database."),
+    ),
+    ApiFunction(
+        name="update",
+        description="Change fields of a cache in the active database. The "
+                    "keys are cache field names (see Changing caches); only "
+                    "the given fields change. `false` clears a field that is "
+                    "not a boolean. Fields OpenSAK maintains itself, such as "
+                    "`code`, `distance` or `log_count`, cannot be written. "
+                    "Before a macro's first change, OpenSAK asks the user to "
+                    "allow that macro (see Changing caches).",
+        example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
+                'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
+                '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',
+        since=3,
+        bind=lambda rt, lua: rt._update,
+        params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
+        returns=("boolean", "false if the cache is not in the database."),
+        write=True,
+    ),
+    ApiFunction(
+        name="insert",
+        description="Add a new cache to the active database. `code`, `name`, "
+                    "`type`, `lat` and `lon` are required; any other writable "
+                    "field may be given too (see Changing caches). Fails if "
+                    "the code is already in the database. Needs the user's "
+                    "permission like opensak.update().",
+        example='opensak.insert{ code = "GC12345", name = "My bonus", type = "Unknown",\n'
+                '                lat = 47.36872, lon = 8.54093, user_flag = true }',
+        since=3,
+        bind=lambda rt, lua: rt._insert,
+        params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
+        returns=("string", "The cache code as stored (upper case)."),
+        write=True,
+    ),
+    ApiFunction(
+        name="delete",
+        description="Delete caches from the active database, each with its "
+                    "logs, waypoints, attributes, trackables and user note, "
+                    "like Waypoint → Delete cache. Takes one GC code, or a list of "
+                    "them, e.g. opensak.codes() for the caches of the active "
+                    "filter. Deleted caches cannot be restored from inside "
+                    "OpenSAK (only from a backup); at the end of the run the "
+                    "macro output says how many caches were deleted. The "
+                    "cache list and map drop them after the macro. Needs the "
+                    "user's permission like opensak.update().",
+        example='for c in opensak.caches{ archived = true, fields = {"code"} } do\n'
+                '    opensak.delete(c.code)\nend\n'
+                '-- all caches of the active filter at once:\n'
+                'print(opensak.delete(opensak.codes()) .. " caches deleted")',
+        since=3,
+        bind=lambda rt, lua: rt._delete,
+        params=(_CODE,),
+        overloads=((Param("codes", "string[]", "GC codes."),),),
+        returns=("boolean|integer", "For one code: false if the cache is not in the "
+                                    "database. For a list: the number of caches deleted."),
+        write=True,
+    ),
+    *_child_api(LOG),
+    *_child_api(WAYPOINT),
+    *_child_api(ATTRIBUTE),
+    *_child_api(TRACKABLE),
+    ApiFunction(
+        name="sql_write",
+        description="Run one INSERT, UPDATE or DELETE statement (SQLite) against the "
+                    "active database — the power tool for bulk work, changing "
+                    "many rows with one statement. For a single cache or row, "
+                    "prefer `opensak.update()`, `insert{}`, `delete()`, "
+                    "`insert_<x>()`, `update_<x>()` and `delete_<x>()`, which "
+                    "check each field and need no "
+                    "knowledge of the schema (see Changing caches). Only the cache tables can be changed ("
+                    + ", ".join(f"`{t}`" for t in sorted(WRITABLE_TABLES)) +
+                    "), and an UPDATE may not set the "
+                    "keys or the columns OpenSAK maintains itself (see "
+                    "Changing caches). Deleting a cache also deletes its "
+                    "logs, waypoints, attributes, trackables and user note, "
+                    "as opensak.delete() does. OpenSAK recalculates distances, counts "
+                    "and log dates of the caches the statement touched — inside "
+                    "opensak.transaction() once at its end (see opensak.resync()). An "
+                    "INSERT only needs the real data: the columns "
+                    "opensak.columns() marks as `required`, e.g. `gc_code`, "
+                    "`name`, `cache_type`, `latitude` and `longitude` for a "
+                    "cache (see Changing caches); every other column gets its "
+                    "default. Each "
+                    "statement is committed on its own (or with the "
+                    "surrounding opensak.transaction()), or not at all on an "
+                    "error. BEGIN, COMMIT and the like are refused; use "
+                    "opensak.transaction(). Needs the user's permission like "
+                    "opensak.update().",
+        example='local n = opensak.sql_write(\n'
+                '  "UPDATE caches SET user_data_1 = ? WHERE country = ? AND found = 0",\n'
+                '  { "todo", "Switzerland" })\n'
+                'print(n .. " caches marked")\n'
+                '-- a found log: only cache_id and log_type are required\n'
+                'opensak.sql_write([[\n'
+                '  INSERT INTO logs (cache_id, log_type, log_date, finder, text)\n'
+                '  SELECT id, \'Found it\', ?, ?, ? FROM caches WHERE gc_code = ?]],\n'
+                '  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })\n'
+                '-- keep only the 5 newest logs of each cache\n'
+                'opensak.sql_write([[DELETE FROM logs WHERE id NOT IN (\n'
+                '  SELECT l2.id FROM logs l2 WHERE l2.cache_id = logs.cache_id\n'
+                '  ORDER BY l2.log_date DESC LIMIT 5)]])',
+        since=3,
+        bind=lambda rt, lua: rt._sql_write,
+        params=(
+            Param("query", "string", "One INSERT, UPDATE or DELETE statement."),
+            Param("params", "table", "As for opensak.sql().", optional=True),
+        ),
+        returns=("integer", "Number of rows inserted, updated or deleted (without "
+                            "the rows deleted along with a cache)."),
+        write=True,
+    ),
+    ApiFunction(
+        name="transaction",
+        description="Run *fn* as one transaction: every change it makes to the "
+                    "active database (opensak.update, insert, delete, "
+                    "sql_write, set_corrected, clear_corrected and the "
+                    "functions for logs, waypoints, ...) is kept when *fn* returns, "
+                    "and all of it is undone if *fn* raises an error, which "
+                    "opensak.transaction() then raises again. Many changes in "
+                    "one transaction are also faster than the same changes "
+                    "committed one by one. Inside *fn*, opensak.cache, "
+                    "caches, sql and the like see the changes already made, "
+                    "except the columns OpenSAK maintains (counts, log dates, "
+                    "distance), which are recalculated once before the commit "
+                    "or when opensak.resync() is called; "
+                    "everything else in OpenSAK, exports included, sees them "
+                    "only afterwards. A transaction inside another one is "
+                    "undone on its own on an error, and kept with the outer "
+                    "one otherwise. opensak.switch_database, move_caches and "
+                    "copy_caches cannot be used inside. Needs the user's "
+                    "permission like opensak.update(). A macro that ends "
+                    "inside a transaction (e.g. cancelled) keeps none of it.",
+        example='local n = opensak.transaction(function()\n'
+                '    local n = 0\n'
+                '    for c in opensak.caches{ found = true, fields = {"code"} } do\n'
+                '        opensak.update(c.code, { user_flag = true })\n'
+                '        n = n + 1\n'
+                '    end\n'
+                '    return n\n'
+                'end)\n'
+                'print(n .. " caches flagged")\n'
+                '-- error() inside the function undoes everything it changed:\n'
+                'local ok, err = pcall(opensak.transaction, function()\n'
+                '    opensak.update("GC12345", { user_flag = true })\n'
+                '    error("changed my mind")\n'
+                'end)',
+        since=3,
+        bind=lambda rt, lua: lua.execute(
+            _TRANSACTION_LUA, rt._wrap(rt._tx_begin), rt._wrap(rt._tx_end)
+        ),
+        params=(Param("fn", "fun()", "The function to run."),),
+        returns=("any...", "What *fn* returns."),
+        write=True,
+    ),
+    ApiFunction(
+        name="in_transaction",
+        description="Whether the macro is inside opensak.transaction().",
+        example='if not opensak.in_transaction() then print("each change is committed on its own") end',
+        since=3,
+        bind=lambda rt, lua: rt._in_transaction,
+        returns=("boolean", "true inside opensak.transaction()."),
+        write=True,
+    ),
+    ApiFunction(
+        name="resync",
+        description="Recalculate now the columns OpenSAK maintains itself "
+                    "(distance and bearing, log, waypoint and trackable counts, "
+                    "log dates) for the caches changed so far in the open "
+                    "opensak.transaction(). Inside a transaction they are "
+                    "recalculated only once, just before the commit, which "
+                    "makes many writes much faster; until then opensak.cache, "
+                    "sql and the like still see the old values. Call resync() "
+                    "when a later read inside the transaction depends on "
+                    "them. Outside a transaction it does nothing, as every "
+                    "write is recalculated before its own commit.",
+        example='opensak.transaction(function()\n'
+                '    for i = 1, 3 do opensak.insert_log("GC12345", { type = "Write note" }) end\n'
+                '    opensak.resync()\n'
+                '    print(opensak.cache("GC12345").log_count)\n'
+                'end)',
+        since=3,
+        bind=lambda rt, lua: rt._resync,
+        returns=("integer", "Number of caches recalculated (0 outside a transaction)."),
+        write=True,
     ),
     ApiFunction(
         name="read_csv",
