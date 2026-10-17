@@ -272,7 +272,8 @@ def test_set_corrected_needs_approval():
 _WRITE_FUNCTIONS = ("update", "insert", "sql_write", "transaction", "in_transaction",
                     "resync", "insert_log", "update_log", "insert_waypoint",
                     "update_waypoint", "insert_attribute", "update_attribute",
-                    "insert_trackable", "update_trackable")
+                    "insert_trackable", "update_trackable", "delete", "delete_log",
+                    "delete_waypoint", "delete_attribute", "delete_trackable")
 
 
 def test_write_functions_need_the_flag(monkeypatch):
@@ -345,7 +346,7 @@ def test_sql_write_updates_and_reports_changed_caches():
     "UPDATE caches SET log_count = 5 WHERE gc_code = 'GCSQL3'",
     "UPDATE user_notes SET cache_id = 1",
     "UPDATE logs SET cache_id = 1",
-    "DELETE FROM caches WHERE gc_code = 'GCSQL3'",
+    "DELETE FROM db_settings",
     "DROP TABLE caches",
     "CREATE TABLE x (a)",
     "ATTACH DATABASE 'other.db' AS other",
@@ -361,12 +362,6 @@ def test_sql_write_refuses(query):
     after = _cache("GCSQL3")
     assert (after.id, after.gc_code, after.distance, after.log_count) == (
         before.id, before.gc_code, before.distance, before.log_count)
-
-
-def test_sql_write_insert_or_replace_cannot_delete():
-    with pytest.raises(MacroError, match="may not delete"):
-        _run(f"opensak.sql_write([[{_insert_cache_sql('INSERT OR REPLACE', 'GCSQL3')}]])")
-    assert _cache("GCSQL3").name == "GCSQL3"
 
 
 def test_sql_write_insert_gets_derived_columns_recalculated():

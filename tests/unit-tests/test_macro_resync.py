@@ -113,7 +113,7 @@ def test_failed_statement_keeps_earlier_pending_caches():
     _run("""
         opensak.transaction(function()
             opensak.insert_log("GCRS3", { type = "Write note" })
-            print(pcall(opensak.sql_write, "DELETE FROM logs"))
+            print(pcall(opensak.sql_write, "UPDATE logs SET cache_id = 1"))
         end)
     """)
     assert _cache("GCRS3").log_count == 1
