@@ -20,7 +20,9 @@ from opensak.filters.engine import (
     CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, GcCodeFilter,
     NotFoundFilter, apply_filters_auto,
 )
-from opensak.macro import FolderApproval, MacroError, MacroRuntime, build_filterset
+from opensak.macro import (
+    FolderApproval, MacroError, MacroRuntime, WriteApproval, build_filterset,
+)
 from opensak.macro import cache_data
 from opensak.macro.permissions import FolderPermission
 
@@ -83,6 +85,17 @@ class FakeHost:
 
     def approve_folder(self, target, folder, write):
         return FolderApproval.DENY
+
+    write_answer = WriteApproval.SESSION
+
+    def approve_macro_write(self, macro):
+        self.write_asked = getattr(self, "write_asked", [])
+        self.write_asked.append(macro)
+        return self.write_answer
+
+    def caches_changed(self, codes, added):
+        self.changed = getattr(self, "changed", [])
+        self.changed.append((list(codes), added))
 
 
 class DbHost(FakeHost):
@@ -665,17 +678,22 @@ def test_end_macro_called_once_after_run_even_on_error():
     assert host.ended == 1
 
 
-@pytest.mark.parametrize("n, row_refreshes, full_reloads", [(3, 3, 0), (51, 0, 1)])
-def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
+@pytest.mark.parametrize("n, added, row_refreshes, full_reloads", [
+    (3, False, 3, 0), (51, False, 0, 1),
+    (3, True, 0, 1),     # inserted caches are not in the table model yet
+])
+def test_mainwindow_batches_macro_refresh(n, added, row_refreshes, full_reloads):
     from types import SimpleNamespace
     from opensak.gui import mainwindow as mw
 
-    calls = {"row": [], "full": 0, "detail": []}
+    calls = {"row": [], "full": 0, "detail": [], "info": 0}
     win = SimpleNamespace(
         _macro_changed_codes={f"GC{i}" for i in range(n)},
         _macro_caches_removed=False,
+        _macro_caches_added=added,
         _on_corrected_coords_changed=calls["row"].append,
         _refresh_cache_list=lambda: calls.__setitem__("full", calls["full"] + 1),
+        _update_info_bar=lambda: calls.__setitem__("info", calls["info"] + 1),
         _detail_panel=SimpleNamespace(_current_gc_code="GC1",
                                       show_cache=calls["detail"].append),
         _load_full_cache=lambda code: code,
@@ -684,8 +702,9 @@ def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
 
     assert len(calls["row"]) == row_refreshes
     assert calls["full"] == full_reloads
+    assert calls["info"] == (1 if row_refreshes else 0)
     assert calls["detail"] == (["GC1"] if full_reloads else [])
-    assert win._macro_changed_codes == set()
+    assert win._macro_changed_codes == set() and win._macro_caches_added is False
 
 
 def test_mainwindow_reloads_once_after_macro_moved_caches():
@@ -696,6 +715,7 @@ def test_mainwindow_reloads_once_after_macro_moved_caches():
     win = SimpleNamespace(
         _macro_changed_codes={"GC1"},
         _macro_caches_removed=True,
+        _macro_caches_added=True,
         _on_corrected_coords_changed=calls["row"].append,
         _on_caches_moved=lambda: calls.__setitem__("moved", calls["moved"] + 1),
     )
@@ -841,7 +861,7 @@ def test_sql_connection_is_read_only_even_without_authorizer(monkeypatch):
 
     from opensak.db.database import get_engine
     from opensak.macro import sql
-    monkeypatch.setattr(sql, "_authorizer", lambda *a: sqlite3.SQLITE_OK)
+    monkeypatch.setattr(sql, "_read_authorizer", lambda names: lambda *a: sqlite3.SQLITE_OK)
     db = sql.ReadOnlyDatabase(get_engine().url.database)
     try:
         db.query("PRAGMA query_only = OFF")
@@ -1019,7 +1039,7 @@ def test_sql_connection_is_closed_after_run():
     host = FakeHost()
     runtime = MacroRuntime(host, output=lambda _: None)
     runtime.run('opensak.sql("SELECT 1")')
-    assert runtime._sql_db is None
+    assert runtime._sql_write_db is None
 
 
 def test_current_and_selected_follow_host():

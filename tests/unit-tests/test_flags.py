@@ -13,6 +13,7 @@ class TestLoad:
             "reverse-geocoding": True,
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -28,6 +29,7 @@ class TestLoad:
             "reverse-geocoding": True,
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):
@@ -70,6 +72,17 @@ class TestLuaMacros:
         assert flags_module.lua_macros is True
         patch_features_file({"lua-macros": False})
         assert flags_module.lua_macros is False
+
+
+class TestLuaMacroWrite:
+    def test_default_follows_version(self, no_features_file):
+        # beta-only on its own, so the rest of the macro system can go stable
+        assert flags_module.lua_macro_write is ("-" in opensak.__version__)
+
+    def test_independent_of_lua_macros(self, patch_features_file):
+        patch_features_file({"lua-macros": True, "lua-macro-write": False})
+        assert flags_module.lua_macros is True
+        assert flags_module.lua_macro_write is False
 
 
 # ── _parse_argv() ─────────────────────────────────────────────────────────────

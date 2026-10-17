@@ -29,6 +29,8 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from opensak.macro.cache_data import CACHE_FIELDS
+from opensak.macro.cache_write import INSERT_REQUIRED, PROTECTED_FIELDS, WRITABLE_FIELDS
+from opensak.macro.child_write import CHILD_TABLES, ChildField
 from opensak.macro.editor_support import (
     LUARC,
     NPP_NAME,
@@ -42,8 +44,10 @@ from opensak.macro.forms import (
     FORM_KEY_DOCS,
     FORM_METHOD_DOCS,
 )
+from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
+from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
 DOC_PATH = Path("docs/macros/api.md")
 STUB_PATH = Path("macros") / TYPES_DIR / STUB_NAME
@@ -303,6 +307,152 @@ def _forms_section() -> list[str]:
     return lines
 
 
+# Appended to the functions that need the lua-macro-write feature flag
+_WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
+               "is on, as it is in beta builds; check with `if opensak.update then`. "
+               "Changing caches needs the user's approval, given per macro "
+               "(see Changing caches).")
+
+
+def _changing_section() -> list[str]:
+    writable = ", ".join(f"`{f.name}`" for f in WRITABLE_FIELDS)
+    required = ", ".join(f"`{k}`" for k in INSERT_REQUIRED)
+    lines = [
+        "",
+        "## Changing caches",
+        "",
+        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
+        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
+        "`opensak.sql_write()`, `opensak.transaction()`, "
+        "`opensak.in_transaction()` and `opensak.resync()` are only available "
+        "while the `lua-macro-write` feature flag is on, as it is in beta "
+        "builds. Without it they are nil, and `opensak.set_corrected()` and "
+        "`opensak.clear_corrected()` change the database without asking.",
+        "",
+        "`opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
+        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
+        "`opensak.sql_write()`, "
+        "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
+        "active database. Before a macro's first change, OpenSAK asks "
+        "whether this macro may change your OpenSAK databases: **Deny** (the "
+        "function fails, and OpenSAK does not ask again during this run), "
+        "**Until OpenSAK closes**, or **Always**. The answer belongs to the "
+        "macro file, not to a database: editing the macro keeps it, a moved "
+        "or renamed file is asked about again. Macros allowed always are "
+        "listed in Settings → Folder permissions, where they can be removed "
+        "again. An unsaved macro can only be allowed until OpenSAK closes. "
+        "A macro started with `opensak.run_macro()` is asked about on its "
+        "own. A run from an external editor (`opensak --run-macro`) asks in "
+        "the OpenSAK window, like any other run.",
+        "",
+        "Which function to use:",
+        "",
+        "- A cache: `opensak.update(code, fields)` changes it, "
+        "`opensak.insert{}` adds a new one, `opensak.delete(code)` deletes "
+        "it with all its rows (also a list of codes).",
+        "- Its logs, waypoints, attributes and trackables: "
+        "`opensak.insert_<x>(code, fields)`, `opensak.update_<x>(id, fields)` "
+        "and `opensak.delete_<x>(id)` "
+        "(see Logs, waypoints, attributes and trackables).",
+        "- Corrected coordinates: `opensak.set_corrected()` and "
+        "`opensak.clear_corrected()`.",
+        "- `opensak.sql_write()` is the power tool for bulk work: one "
+        "INSERT, UPDATE or DELETE statement that changes many rows at once, e.g. "
+        "marking every unfound cache of a country, or copying rows from the "
+        "macro's own database. Use it when a loop over the functions above "
+        "would be too slow or too long-winded.",
+        "",
+        "Start with the dedicated functions: they take Lua values, check each "
+        "field (type, range, date format) with a clear error message, and need "
+        "no knowledge of the database schema. `opensak.sql_write()` only "
+        "refuses protected columns and what SQLite itself rejects, and its "
+        "column names follow the schema, which may change between versions.",
+        "",
+        f"Writable cache fields: {writable}. `false` clears a field that is "
+        'not a boolean, and "" clears a text field. `user_data` takes the '
+        'slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes '
+        "`{ lat = .., lon = .. }` or a coordinate string. Dates are "
+        f'`"YYYY-MM-DD"`. `opensak.insert{{}}` also needs `code`, and {required}.',
+        "",
+        "These fields cannot be written:",
+        "",
+    ]
+    lines += [f"- `{name}` — {why}" for name, why in PROTECTED_FIELDS.items()]
+    lines += [
+        "",
+        "Each change is committed on its own. To keep several changes "
+        "together, or undo them all on an error, run them inside "
+        "`opensak.transaction(function() ... end)`, which is also faster for "
+        "many changes. SQL `BEGIN`/`COMMIT` is refused.",
+        "",
+        "`opensak.sql_write()` may INSERT into, UPDATE and DELETE from these "
+        "tables. An "
+        "INSERT only has to give the required columns; every other column "
+        "gets its default (`opensak.columns()` marks them as `required`). "
+        "An UPDATE may not set the protected columns. Whatever an INSERT "
+        "puts into the columns OpenSAK maintains is recalculated right away. "
+        "A DELETE from `caches` also deletes the logs, waypoints, attributes, "
+        "trackables and user note of each cache, like `opensak.delete()`.",
+        "",
+        "Deleted caches cannot be restored from inside OpenSAK, only from a "
+        "backup. At the end of a run that deleted caches, the macro output "
+        "says how many, per database; the cache list, map and detail panel "
+        "drop them once the macro has ended. Deletes inside "
+        "`opensak.transaction()` are undone with it.",
+        "",
+        "OpenSAK recalculates the columns it maintains (distance, bearing, "
+        "counts, log dates) after every write. Inside "
+        "`opensak.transaction()` it does so only once, just before the "
+        "commit, for all caches the transaction changed — much faster for "
+        "many writes. Until then reads inside the transaction see the old "
+        "values; `opensak.resync()` recalculates them on demand.",
+        "",
+        "| Table | Required for INSERT | Protected columns |",
+        "|---|---|---|",
+    ]
+    for table in sorted(WRITABLE_TABLES):
+        required = ", ".join(f"`{c}`" for c in INSERT_COLUMNS[table])
+        cols = ", ".join(f"`{c}`" for c in sorted(PROTECTED_COLUMNS[table]))
+        lines.append(f"| `{table}` | {required} | {cols} |")
+    return lines + _children_section()
+
+
+def _update_type(field: ChildField) -> str:
+    """The type opensak.update_<x>() accepts: `false` clears a nil-able field."""
+    return f"{field.type[:-1]}|false" if field.type.endswith("?") else field.type
+
+
+def _children_section() -> list[str]:
+    lines = [
+        "",
+        "## Logs, waypoints, attributes and trackables",
+        "",
+        "The rows belonging to a cache are read with "
+        + ", ".join(f"`opensak.{t.plural}()`" for t in CHILD_TABLES)
+        + ", added with `opensak.insert_<x>(code, fields)`, changed with "
+        "`opensak.update_<x>(id, fields)` and deleted with "
+        "`opensak.delete_<x>(id)`, without SQL. These are the way to "
+        "add, change or delete a single row; keep `opensak.sql_write()` for bulk "
+        "changes across many caches. Each row has an `id`, "
+        "which identifies it and cannot be changed, as cannot the cache it "
+        "belongs to. The changes need the user's permission and can be kept "
+        "together with `opensak.transaction()`, like those of caches; OpenSAK "
+        "updates the cache's counts and log dates itself.",
+    ]
+    for t in CHILD_TABLES:
+        lines += [
+            "",
+            f"### {t.plural.capitalize()}",
+            "",
+            "| Field | Type | Meaning |",
+            "|---|---|---|",
+        ]
+        for f in t.fields:
+            required = " Required for `opensak.insert_" + t.singular + "`." if f.name in t.required else ""
+            lines.append(f"| `{f.name}` | `{f.type.replace('|', chr(92) + '|')}` | {f.description}{required} |")
+    return lines
+
+
 def _param_line(p: Param) -> str:
     optional = ", optional" if p.optional else ""
     return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
@@ -362,7 +512,10 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
             lines.append("")
         if func.returns:
             lines += [f"Returns `{func.returns[0]}` — {func.returns[1]}", ""]
-        lines += [_since(func), "", "Example:", ""]
+        lines += [_since(func), ""]
+        if func.write:
+            lines += [_WRITE_BETA, ""]
+        lines += ["Example:", ""]
         lines += _code(func.example)
 
     lines += [
@@ -408,6 +561,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         type_ = field.type.replace("|", "\\|")
         lines.append(f"| `{field.name}` | `{type_}` | {field.description} |")
 
+    lines += _changing_section()
     lines += _examples_section(examples_dir)
     lines += _editor_section()
 
@@ -423,6 +577,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "(to stdout when run with `opensak --run-macro`, see "
         "[Running macros from an editor](run-from-editor.md)).",
         "",
+        *GSAK_COMPARE.splitlines(),
     ]
     return "\n".join(lines)
 
@@ -540,6 +695,46 @@ def render_lua_stub() -> str:
     for field in CACHE_FIELDS:
         lines.append(f"---@field {field.name} {field.type} {field.description}")
 
+    descriptions = {f.name: f.description for f in CACHE_FIELDS}
+    lines += [
+        "",
+        "---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.",
+        "---@class opensak.CacheUpdate",
+    ]
+    for writable in WRITABLE_FIELDS:
+        lines.append(f"---@field {writable.name}? {writable.type} {descriptions[writable.name]}")
+    lines += [
+        "",
+        "---A new cache for `opensak.insert{}`.",
+        "---@class opensak.CacheInsert: opensak.CacheUpdate",
+        '---@field code string Cache code, e.g. "GC12345".',
+    ]
+    for writable in WRITABLE_FIELDS:
+        if writable.name in INSERT_REQUIRED:
+            lines.append(f"---@field {writable.name} {writable.type} {descriptions[writable.name]}")
+
+    for t in CHILD_TABLES:
+        lines += [
+            "",
+            f"---A {t.singular} as returned by `opensak.{t.plural}()` (a snapshot).",
+            f"---@class {t.class_name}",
+            f"---@field id integer Identifies the {t.singular}, for `opensak.update_{t.singular}()`.",
+        ]
+        lines += [f"---@field {f.name} {f.type} {f.description}" for f in t.fields]
+        lines += [
+            "",
+            f"---The fields `opensak.update_{t.singular}()` may change; `false` clears a field that may be nil.",
+            f"---@class {t.class_name}Update",
+        ]
+        lines += [f"---@field {f.name}? {_update_type(f)} {f.description}" for f in t.fields]
+        lines += [
+            "",
+            f"---A new {t.singular} for `opensak.insert_{t.singular}()`.",
+            f"---@class {t.class_name}Insert: {t.class_name}Update",
+        ]
+        lines += [f"---@field {f.name} {f.type} {f.description}"
+                  for f in t.fields if f.name in t.required]
+
     lines += [
         "",
         "---The OpenSAK API, available as a global in every macro.",
@@ -554,6 +749,8 @@ def render_lua_stub() -> str:
             lines += [f"opensak.{namespace} = {{}}", ""]
         lines += _comment(func.description)
         lines += ["---", f"---{_since(func)}", "---"]
+        if func.write:
+            lines += _comment(_WRITE_BETA) + ["---"]
         lines += _comment(f"```lua\n{func.example}\n```")
         for p in func.params:
             lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")
