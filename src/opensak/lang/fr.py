@@ -895,6 +895,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "Le dossier '{path}' est maintenant vide.\n\nVoulez-vous également le supprimer ?",
     "db_err_delete_folder":         "Impossible de supprimer le dossier '{path}' :",
     "db_delete_active_error":       "Impossible de supprimer '{name}' car c'est la base de données active.\n\nBasculez d'abord vers une autre base de données.",
+    "db_active_locked_tip":         "C'est la base de données active. Basculez d'abord vers une autre base de données.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Sélectionnez les colonnes à afficher dans la liste de caches.\nLe code GC et le nom ne peuvent pas être masqués.",

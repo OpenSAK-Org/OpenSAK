@@ -183,6 +183,15 @@ class TestManagerDialog:
         assert dlg._btn_delete.isEnabled() is False
         assert dlg._btn_remove.isEnabled() is False
 
+    def test_active_selection_explains_disabled_buttons(self, dlg):
+        _select(dlg, "Active")
+        tip = dd.tr("db_active_locked_tip")
+        assert dlg._btn_delete.toolTip() == tip
+        assert dlg._btn_remove.toolTip() == tip
+        _select(dlg, "Other")
+        assert dlg._btn_delete.toolTip() == ""
+        assert dlg._btn_remove.toolTip() == ""
+
     def test_missing_db_shows_not_found(self, dlg):
         _select(dlg, "Gone")
         assert dlg._info_size.text() != ""

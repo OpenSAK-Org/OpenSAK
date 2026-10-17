@@ -362,7 +362,9 @@ class DatabaseManagerDialog(QDialog):
 
         self._btn_delete = QPushButton(tr("db_delete_btn"))
         self._btn_delete.setEnabled(False)
-        self._btn_delete.setStyleSheet("color: #c62828;")
+        # Only when enabled — a plain "color:" rule also overrides Qt's greyed
+        # disabled text, making the disabled button look clickable.
+        self._btn_delete.setStyleSheet("QPushButton:enabled { color: #c62828; }")
         self._btn_delete.clicked.connect(self._delete_database)
         btn_layout.addWidget(self._btn_delete)
 
@@ -439,6 +441,11 @@ class DatabaseManagerDialog(QDialog):
         self._btn_remove.setEnabled(db is not None and not is_active)
         # Delete requires: something selected, not active, and file exists on disk
         self._btn_delete.setEnabled(db is not None and not is_active and db.exists)
+        # The disabled buttons otherwise give no hint why clicking them
+        # does nothing (a new database becomes the active one right away).
+        tip = tr("db_active_locked_tip") if is_active else ""
+        self._btn_remove.setToolTip(tip)
+        self._btn_delete.setToolTip(tip)
 
     def _switch_to_selected(self, *_) -> None:
         db = self._selected_db()

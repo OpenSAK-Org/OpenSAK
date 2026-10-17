@@ -893,6 +893,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "The folder '{path}' is now empty.\n\nDo you want to delete it as well?",
     "db_err_delete_folder":         "Could not delete the folder '{path}':",
     "db_delete_active_error":       "Cannot delete '{name}' because it is the active database.\n\nSwitch to another database first.",
+    "db_active_locked_tip":         "This is the active database. Switch to another database first.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Select which columns to show in the cache list.\nGC Code and Name cannot be hidden.",

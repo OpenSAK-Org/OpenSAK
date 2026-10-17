@@ -894,6 +894,7 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "Složka '{path}' je nyní prázdná.\n\nChcete ji také smazat?",
     "db_err_delete_folder":         "Složku '{path}' se nepodařilo smazat:",
     "db_delete_active_error":       "Nelze smazat '{name}', protože je to aktivní databáze.\n\nNejprve přepněte na jinou databázi.",
+    "db_active_locked_tip":         "Toto je aktivní databáze. Nejprve přepněte na jinou databázi.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Vyberte, které sloupce zobrazit v seznamu keší.\nGC kód a Název nelze skrýt.",
