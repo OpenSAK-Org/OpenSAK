@@ -1534,6 +1534,12 @@ class MacroRuntime:
             self._attach_macro_db(path)
         except SqlError as exc:
             raise MacroError(f"{func}: {exc}") from None
+        # Recorded so OpenSAK's backups include it (#942); best-effort.
+        try:
+            from opensak.backup.backupset import remember_macro_database
+            remember_macro_database(path)
+        except Exception:
+            logger.warning("%s: could not record %s for backups", func, path, exc_info=True)
         if created:
             # Shown in the macro output, so a new file never appears silently.
             self._output(f"{func}: created {path}")
@@ -3420,7 +3426,9 @@ API: tuple[ApiFunction, ...] = (
                     "macros folder is by default); otherwise OpenSAK asks the "
                     "user to allow it, and a denial makes the call fail. The "
                     "first call creates the file, even if nothing is written "
-                    "to it, and prints its path in the macro output. If the "
+                    "to it, and prints its path in the macro output. OpenSAK "
+                    "remembers the file, and its backups include it in "
+                    "`macro_databases/`, wherever it is. If the "
                     "folder cannot be written the call fails; a read-only "
                     "file can be read but not changed. Unlike opensak.update() "
                     "it needs no approval to change databases (see Changing "

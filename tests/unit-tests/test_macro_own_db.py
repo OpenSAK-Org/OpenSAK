@@ -267,3 +267,11 @@ def test_called_macro_gets_its_own_db_and_the_callers_comes_back(tmp_path):
     conn = sqlite3.connect(helper_db)
     assert conn.execute("SELECT name FROM sqlite_master").fetchall() == [("theirs",)]
     conn.close()
+
+
+def test_macro_db_is_recorded_for_backups(tmp_path):
+    from opensak.backup.backupset import known_macro_databases
+    _run("opensak.macro_db() opensak.macro_db()", tmp_path, name="backed_up.lua")
+    _run("opensak.macro_db()", tmp_path, name="backed_up.lua")
+    recorded = (tmp_path / "backed_up.db3").resolve()
+    assert [p for p in known_macro_databases() if p == recorded] == [recorded]
