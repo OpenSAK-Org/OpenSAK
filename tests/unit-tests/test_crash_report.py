@@ -270,6 +270,14 @@ class TestDialog:
         assert opened[0].startswith(cr.GITHUB_NEW_ISSUE_URL)
         assert opened[1].startswith("file:")
 
+    def test_facebook_copies_report_and_opens_group(self, qtbot, opened):
+        from PySide6.QtWidgets import QApplication
+        dlg = self._make(qtbot)
+        dlg._btn_facebook.click()
+        assert QApplication.clipboard().text() == "Traceback\nValueError: x"
+        assert opened[0] == cr.FACEBOOK_GROUP_URL
+        assert opened[1].startswith("file:")
+
     def test_email_opens_mailto(self, qtbot, opened):
         dlg = self._make(qtbot)
         dlg._btn_email.click()

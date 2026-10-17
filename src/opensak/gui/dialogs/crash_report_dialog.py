@@ -5,7 +5,9 @@ problem" dialog (see opensak/crash_report.py).
 Shown for an uncaught exception, and at startup when the previous session
 did not exit cleanly. The scrubbed report is shown read-only so the user
 sees exactly what would be shared; nothing leaves the machine until they
-click GitHub or e-mail, and both only open a prefilled page/mail.
+click GitHub, Facebook or e-mail. GitHub and e-mail open a prefilled
+page/mail; Facebook cannot be prefilled, so the report is copied to the
+clipboard and the group is opened to paste it into a post.
 """
 
 from __future__ import annotations
@@ -66,13 +68,15 @@ class CrashReportDialog(QDialog):
         report_row = QHBoxLayout()
         self._btn_github = QPushButton(tr("crash_dialog_github"))
         self._btn_github.clicked.connect(self._open_github)
+        self._btn_facebook = QPushButton(tr("crash_dialog_facebook"))
+        self._btn_facebook.clicked.connect(self._open_facebook)
         self._btn_email = QPushButton(tr("crash_dialog_email"))
         self._btn_email.clicked.connect(self._open_email)
         self._btn_copy = QPushButton(tr("crash_dialog_copy"))
         self._btn_copy.clicked.connect(self._copy)
         self._btn_log = QPushButton(tr("crash_dialog_show_log"))
         self._btn_log.clicked.connect(self._show_log)
-        for btn in (self._btn_github, self._btn_email, self._btn_copy, self._btn_log):
+        for btn in (self._btn_github, self._btn_facebook, self._btn_email, self._btn_copy, self._btn_log):
             report_row.addWidget(btn)
         layout.addLayout(report_row)
 
@@ -97,6 +101,13 @@ class CrashReportDialog(QDialog):
             QUrl(crash_report.github_issue_url(self._report, self._previous_session))
         )
         # The issue page cannot take the log via URL — show it to drag in.
+        self._show_log()
+
+    def _open_facebook(self) -> None:
+        # A group post cannot be prefilled via URL — copy the report so it
+        # can be pasted, then open the group and the log folder.
+        self._copy()
+        QDesktopServices.openUrl(QUrl(crash_report.FACEBOOK_GROUP_URL))
         self._show_log()
 
     def _open_email(self) -> None:
