@@ -410,6 +410,30 @@ W,GC12345
 - Text after `#` is ignored, so you can annotate the list.
 - **Add flagged (user flag)** appends a `W,<code>` line for every cache with the user flag set.
 - **Read points from file** loads a GPX file (track points, else route points, else waypoints), a KML file, or a text file in the format above — replacing or appending to the list.
+- **Draw on map…** opens a map with the caches from the main map. Pick *Line*, *Polygon* or *Points* and click on the map to add points; double-click (or press Enter) to finish, and Esc cancels. Drag a point to move it, click the middle of an edge to add a point there, and right-click a point to remove it. **Draw new** starts a new shape, and switching the type keeps the points you have. If the list already has points, the map opens with that shape so you can edit it. **OK** replaces the list with the drawn points and sets the filter type to match.
+
+### Drawing on the main map
+
+The main map (and the pop-out map) has a **✎** button. It opens a menu where you can draw a polygon, a line or points, and act on the shape:
+
+- **Copy shape as text** copies the shape as a point list you can paste into the Line/Polygon tab.
+- **Filter by this shape…** opens *Set filter* with the shape on the Line/Polygon tab. The criteria of the active filter are kept. If that filter already has a line/polygon shape, the new shape replaces it and its distance and *Exclude* setting are kept.
+- **Clear shape** removes it.
+
+The same actions are in the map's right-click menu while a shape is shown. The shape stays on the map when the cache list changes, but is gone after a restart.
+
+A copied or drawn shape starts with a comment line naming its type, which the filter ignores:
+
+```text
+# mode: polygon
+53.183460, 8.711130
+53.393550, 8.015683
+53.250000, 8.400000
+```
+
+`W,<code>` lines become plain coordinates once a shape has been through the map.
+
+To copy a single coordinate, right-click the map → **Copy …** (in your preferred format) or **Copy as…** for another format.
 
 Choose the filter type:
 

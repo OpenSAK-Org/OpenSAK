@@ -16,7 +16,8 @@ from opensak.filters.engine import (
     apply_filters, apply_filters_lightweight, lookup_code_coords, user_flagged_codes,
 )
 from opensak.filters.line_polygon import (
-    LineShape, parse_point, parse_points_text, point_segment_km, read_points_file,
+    LineShape, detect_mode, format_point, format_points_text, parse_point,
+    parse_points_text, point_segment_km, read_points_file,
 )
 
 KM_PER_DEG = 6371.0 * math.pi / 180  # one degree of latitude on the sphere
@@ -87,6 +88,62 @@ class TestParsing:
 
     def test_code_line_without_resolver_is_bad(self):
         assert parse_points_text("W,GC12345") == ([], ["W,GC12345"])
+
+
+# ── shape ↔ text (map draw tool) ──────────────────────────────────────────────
+
+class TestFormatPointsText:
+    POINTS = [(55.123456, 10.5), (-33.9, -70.654321), (0.0, 0.000001)]
+
+    def test_format_point(self):
+        assert format_point((55.5, 10.25)) == "55.500000, 10.250000"
+
+    def test_mode_line_first(self):
+        text = format_points_text("polygon", self.POINTS)
+        assert text.splitlines()[0] == "# mode: polygon"
+        assert text.splitlines()[1:] == [format_point(p) for p in self.POINTS]
+
+    @pytest.mark.parametrize("mode", ["line", "polygon", "points"])
+    def test_round_trip(self, mode):
+        text = format_points_text(mode, self.POINTS)
+        points, bad = parse_points_text(text)
+        assert bad == []  # the comment line is ignored
+        assert points == self.POINTS
+        assert detect_mode(text) == mode
+
+    def test_polygon_not_closed_twice(self):
+        square = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
+        points, _ = parse_points_text(format_points_text("polygon", square))
+        assert points == square
+        assert LineShape(points, "polygon", 0).contains(0.5, 0.5)
+
+    def test_unknown_mode(self):
+        with pytest.raises(ValueError):
+            format_points_text("circle", self.POINTS)
+
+    def test_empty_shape(self):
+        assert format_points_text("points", []) == "# mode: points"
+
+
+class TestDetectMode:
+    @pytest.mark.parametrize("text, mode", [
+        ("# mode: line\n55, 10", "line"),
+        ("  #MODE:Polygon  \n55, 10", "polygon"),
+        ("\n# a note\n#  mode :  points\n", "points"),
+        ("55, 10\n# mode: polygon", "polygon"),
+    ])
+    def test_found(self, text, mode):
+        assert detect_mode(text) == mode
+
+    @pytest.mark.parametrize("text", [
+        "", "55, 10\n56, 11", "# mode: circle", "# the mode: line is nice",
+        "55, 10 # mode: line",
+    ])
+    def test_not_found(self, text):
+        assert detect_mode(text) is None
+
+    def test_first_mode_line_wins(self):
+        assert detect_mode("# mode: points\n# mode: line") == "points"
 
 
 # ── files ─────────────────────────────────────────────────────────────────────

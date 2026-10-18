@@ -18,7 +18,8 @@ from PySide6.QtGui import QClipboard
 from PySide6.QtWidgets import QApplication
 
 from opensak.db.models import Cache
-from opensak.lang import tr
+from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, Point, format_points_text
+from opensak.lang import current_language, tr
 from opensak.gui.theme import hint_text_color
 from opensak.utils.types import GcCode
 
@@ -64,6 +65,32 @@ def _js_inline_arg(value) -> str:
     return _js_arg(value).replace("</", "<\\/")
 
 
+# Leaflet-Geoman's own tooltips ("Click to place first vertex") — OpenSAK
+# language code → Geoman language code. Languages Geoman doesn't ship fall
+# back to English.
+_GEOMAN_LANGS = {"cs": "cz", "da": "da", "de": "de", "de_CH": "de", "en": "en",
+                 "es": "es", "fr": "fr", "nl": "nl", "pl": "pl", "pt": "pt",
+                 "se": "sv"}
+
+
+def _geoman_lang() -> str:
+    return _GEOMAN_LANGS.get(current_language(), "en")
+
+
+def _parse_shape_json(shape_json: str) -> Optional[tuple[str, list[Point]]]:
+    """(mode, points) from the JS draw layer's on_shape_changed() payload, or
+    None for anything malformed."""
+    try:
+        data = json.loads(shape_json)
+        mode = data["mode"]
+        points = [(float(lat), float(lon)) for lat, lon in data["points"]]
+    except (ValueError, TypeError, KeyError):
+        return None
+    if mode not in LP_MODES:
+        return None
+    return mode, points
+
+
 # ── Python ↔ JavaScript bro ───────────────────────────────────────────────────
 
 class MapBridge(QObject):
@@ -78,6 +105,9 @@ class MapBridge(QObject):
     # Signals for map control buttons (maximize / pop-out)
     maximize_clicked = Signal()
     popout_clicked = Signal()
+    draw_clicked = Signal()
+    # Drawn shape changed: '{"mode": …, "points": [[lat, lon], …]}'
+    shape_changed = Signal(str)
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
@@ -99,6 +129,16 @@ class MapBridge(QObject):
         """Kaldes fra JavaScript når pop-out-knappen klikkes."""
         self.popout_clicked.emit()
 
+    @Slot()
+    def on_draw_clicked(self) -> None:
+        """Called from JavaScript when the draw button is clicked."""
+        self.draw_clicked.emit()
+
+    @Slot(str)
+    def on_shape_changed(self, shape_json: str) -> None:
+        """Called from JavaScript when the user draws, edits or removes the shape."""
+        self.shape_changed.emit(shape_json)
+
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
 
@@ -118,6 +158,10 @@ MAP_HTML = """<!DOCTYPE html>
   href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
 <link rel="stylesheet"
   href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+
+<!-- Leaflet-Geoman (draw tool for the Line/Polygon filter) -->
+<link rel="stylesheet"
+  href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.css"/>
 
 <style>
   html, body, #map { height: 100%; margin: 0; padding: 0; }
@@ -172,6 +216,13 @@ MAP_HTML = """<!DOCTYPE html>
   .leaflet-control-mapactions a:last-child {
     border-bottom: none;
   }
+  .draw-point-marker {
+    width: 12px; height: 12px;
+    background: #d81b60;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
   .leaflet-control-nearbylabel {
     background: #fff;
     padding: 4px 10px;
@@ -192,6 +243,9 @@ MAP_HTML = """<!DOCTYPE html>
 
 <!-- Leaflet MarkerCluster -->
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<!-- Leaflet-Geoman -->
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.js"></script>
 
 <!-- Qt WebChannel -->
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -237,6 +291,8 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
 
 // ── Højreklik på kortet ───────────────────────────────────────────────────────
 map.on('contextmenu', function(e) {
+    // While drawing, Geoman owns the clicks.
+    if (map.pm && map.pm.globalDrawModeEnabled()) return;
     if (bridge) {
         bridge.on_map_right_click(e.latlng.lat, e.latlng.lng);
     }
@@ -272,10 +328,185 @@ L.Control.MapActions = L.Control.extend({
             });
         }
 
+        if (MAP_DRAW_BUTTON) {
+            var drawBtn = L.DomUtil.create('a', '', container);
+            drawBtn.innerHTML = '✎';
+            drawBtn.title = MAP_TIP_DRAW;
+            drawBtn.href = '#';
+            drawBtn.setAttribute('role', 'button');
+            L.DomEvent.disableClickPropagation(drawBtn);
+            L.DomEvent.on(drawBtn, 'click', function(e) {
+                L.DomEvent.preventDefault(e);
+                if (bridge) bridge.on_draw_clicked();
+            });
+        }
+
         return container;
     }
 });
-new L.Control.MapActions().addTo(map);
+if (MAP_ACTIONS_ENABLED) {
+    new L.Control.MapActions().addTo(map);
+}
+
+// ── Draw tool (Line/Polygon filter) ──────────────────────────────────────────
+//
+// One user-drawn shape at a time, kept in drawLayer — separate from
+// clusterGroup, so loadCaches() never touches it. drawMode is the LP filter
+// mode: 'line' (one polyline), 'polygon' (one polygon) or 'points' (any
+// number of markers). Every change the user makes is sent to Python as
+// bridge.on_shape_changed('{"mode": …, "points": [[lat, lon], …]}');
+// changes made from Python (loadShape/clearShape) are not echoed back.
+var drawLayer = L.featureGroup().addTo(map);
+var drawMode = null;
+var drawEditable = true;
+var GEOMAN_SHAPES = {line: 'Line', polygon: 'Polygon', points: 'Marker'};
+var SHAPE_STYLE = {color: '#d81b60', weight: 3, fillColor: '#d81b60', fillOpacity: 0.12};
+
+function makeDrawPointIcon() {
+    return L.divIcon({
+        className: '',
+        html: '<div class="draw-point-marker"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+    });
+}
+
+if (map.pm) {
+    map.pm.setLang(GEOMAN_LANG);
+    map.pm.setGlobalOptions({
+        layerGroup: drawLayer,
+        snappable: false,
+        allowSelfIntersection: true,
+        finishOn: 'dblclick',
+        finishOnEnter: true,
+        exitModeOnEscape: true,
+        templineStyle: SHAPE_STYLE,
+        hintlineStyle: {color: '#d81b60', dashArray: [5, 5]},
+        pathOptions: SHAPE_STYLE,
+        markerStyle: {icon: makeDrawPointIcon(), draggable: true}
+    });
+
+    map.on('pm:create', function(e) {
+        var layer = e.layer;
+        // A new line/polygon replaces the old shape; a new point joins the
+        // other points.
+        drawLayer.getLayers().forEach(function(old) {
+            if (old !== layer && !(drawMode === 'points' && old instanceof L.Marker)) {
+                drawLayer.removeLayer(old);
+            }
+        });
+        watchShapeLayer(layer);
+        if (drawMode !== 'points') map.pm.disableDraw();
+        emitShape();
+    });
+}
+
+function shapePoints() {
+    var points = [];
+    drawLayer.getLayers().forEach(function(layer) {
+        if (layer instanceof L.Marker) {
+            var ll = layer.getLatLng();
+            points.push([ll.lat, ll.lng]);
+        } else if (layer instanceof L.Polyline) {
+            var lls = layer.getLatLngs();
+            // L.Polygon nests its outer ring one level deeper.
+            while (lls.length && Array.isArray(lls[0])) lls = lls[0];
+            lls.forEach(function(ll) { points.push([ll.lat, ll.lng]); });
+        }
+    });
+    return points;
+}
+
+function emitShape() {
+    if (bridge) {
+        bridge.on_shape_changed(JSON.stringify({mode: drawMode, points: shapePoints()}));
+    }
+}
+
+function watchShapeLayer(layer) {
+    layer.on('pm:edit pm:dragend', emitShape);
+    if (layer instanceof L.Marker) {
+        // Right-click removes a point. A marker's contextmenu doesn't
+        // bubble up to the map's copy-coordinates menu.
+        layer.on('contextmenu', function() {
+            if (!drawEditable) return;
+            drawLayer.removeLayer(layer);
+            emitShape();
+        });
+    }
+    setLayerEditable(layer, drawEditable);
+}
+
+function setLayerEditable(layer, editable) {
+    if (!layer.pm) return;
+    if (editable) {
+        layer.pm.enable({draggable: true, allowSelfIntersection: true, snappable: false});
+    } else {
+        layer.pm.disable();
+    }
+}
+
+// Start drawing a new shape. The current one stays until the new one is
+// finished (in 'points' mode new points are added to it instead).
+function startDraw(mode) {
+    if (!map.pm || !GEOMAN_SHAPES[mode]) return;
+    map.pm.disableDraw();
+    drawMode = mode;
+    map.pm.enableDraw(GEOMAN_SHAPES[mode], {continueDrawing: mode === 'points'});
+}
+
+function stopDraw() {
+    if (map.pm) map.pm.disableDraw();
+}
+
+function loadShape(mode, points, fit) {
+    stopDraw();
+    drawLayer.clearLayers();
+    drawMode = mode;
+    if (!points || !points.length) return;
+    var latlngs = points.map(function(p) { return L.latLng(p[0], p[1]); });
+    var layers = [];
+    if (mode === 'points') {
+        latlngs.forEach(function(ll) {
+            layers.push(L.marker(ll, {icon: makeDrawPointIcon()}));
+        });
+    } else if (mode === 'polygon') {
+        layers.push(L.polygon(latlngs, SHAPE_STYLE));
+    } else {
+        layers.push(L.polyline(latlngs, SHAPE_STYLE));
+    }
+    layers.forEach(function(layer) {
+        drawLayer.addLayer(layer);
+        watchShapeLayer(layer);
+    });
+    if (fit) fitShape();
+}
+
+function fitShape() {
+    try {
+        var bounds = drawLayer.getBounds();
+        if (bounds && bounds.isValid()) {
+            map.fitBounds(bounds, {padding: [40, 40], maxZoom: 15});
+        }
+    } catch (e) {}
+}
+
+function clearShape() {
+    stopDraw();
+    drawLayer.clearLayers();
+}
+
+function setDrawEnabled(enabled) {
+    drawEditable = !!enabled;
+    if (!drawEditable) stopDraw();
+    drawLayer.getLayers().forEach(function(layer) {
+        setLayerEditable(layer, drawEditable);
+    });
+}
+
+function setView(lat, lon, zoom) {
+    map.setView([lat, lon], zoom);
+}
 
 // ── Hjælpefunktioner ──────────────────────────────────────────────────────────
 function makePinIcon(pinHtml, found, corrected) {
@@ -366,7 +597,8 @@ function loadCaches(caches) {
         var lon = c.corrected ? c.clon : c.lon;
         var marker = L.marker([lat, lon], {
             icon: makePinIcon(c.pin_html, c.found, c.corrected),
-            title: c.name + (c.corrected ? ' 📍' : '')
+            title: c.name + (c.corrected ? ' 📍' : ''),
+            pmIgnore: true
         });
 
         marker.bindPopup(cachePopupHtml(c));
@@ -399,7 +631,7 @@ function afterCachesLoaded() {
     if (window._panHomeAfterLoad) {
         window._panHomeAfterLoad = false;
         panToHome();
-    } else if (Object.keys(markers).length > 0) {
+    } else if (AUTO_FIT_CACHES && Object.keys(markers).length > 0) {
         try {
             var bounds = clusterGroup.getBounds();
             if (bounds && bounds.isValid()) {
@@ -414,7 +646,8 @@ function setHomeLocation(lat, lon, label) {
     homeMarker = L.marker([lat, lon], {
         icon: makeHomeIcon(),
         zIndexOffset: 1000,
-        title: label
+        title: label,
+        pmIgnore: true
     }).addTo(map);
     homeMarker.bindPopup('<b>' + escapeHtml(label) + '</b>');
 }
@@ -496,7 +729,8 @@ function drawNearbyCircle(lat, lon, radiusKm) {
         weight: 2,
         fillColor: '#1976d2',
         fillOpacity: 0.05,
-        interactive: false
+        interactive: false,
+        pmIgnore: true
     }).addTo(map);
 }
 
@@ -577,7 +811,7 @@ function showWaypointMarkers(wps) {
         });
         var label = '[' + wp.prefix + '] ' + (wp.wp_type || '');
         var popup = '<b>[' + prefix + ']</b> ' + escapeHtml(wp.wp_type) + (wp.name ? '<br>' + escapeHtml(wp.name) : '');
-        var m = L.marker([wp.lat, wp.lon], {icon: icon, title: label});
+        var m = L.marker([wp.lat, wp.lon], {icon: icon, title: label, pmIgnore: true});
         m.bindPopup(popup);
         m.addTo(map);
         waypointMarkers.push(m);
@@ -601,7 +835,8 @@ function updateCacheMarker(c) {
     var lon = c.corrected ? c.clon : c.lon;
     var marker = L.marker([lat, lon], {
         icon: makePinIcon(c.pin_html, c.found, c.corrected),
-        title: c.name + (c.corrected ? ' 📍' : '')
+        title: c.name + (c.corrected ? ' 📍' : ''),
+        pmIgnore: true
     });
 
     marker.bindPopup(cachePopupHtml(c));
@@ -638,16 +873,37 @@ class MapWidget(QWidget):
     set_corrected_requested = Signal(str, float, float)  # gc_code, lat, lon
     maximize_requested = Signal()
     popout_requested = Signal()
+    # The user drew, edited or removed the shape: mode, [(lat, lon), …]
+    shape_changed = Signal(str, object)
+    # "Filter by this shape" in the draw/right-click menu: mode, points
+    filter_by_shape_requested = Signal(str, object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, map_actions: bool = True,
+                 draw_button: bool = False, auto_fit_caches: bool = True,
+                 center: Optional[Point] = None):
+        """*map_actions* shows the maximize/pop-out (and draw) buttons;
+        *draw_button* adds the draw button with its menu (the main map);
+        *auto_fit_caches* zooms to the caches after every load; *center*
+        is where the map opens instead of Home."""
         super().__init__(parent)
         self._caches: list[Cache] = []
         self._ready = False
         self._cleaned = False
-        self._pending_caches = None
+        self._pending_caches: Optional[list[Cache]] = None
         self._pending_refresh = None
         self._pending_home = None
         self._last_selected_gc: str = ""   # senest valgte cache via pin-klik
+        self._map_actions = map_actions
+        self._draw_button = draw_button
+        self._auto_fit_caches = auto_fit_caches
+        self._center = center
+        # The drawn shape, kept here so it survives reload_map() (re-sent in
+        # _on_leaflet_ready). Session only — never saved.
+        self._shape_mode: Optional[str] = None
+        self._shape_points: list[Point] = []
+        self._fit_shape_pending = False
+        self._pending_draw_mode: Optional[str] = None
+        self._draw_enabled = True
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -670,6 +926,8 @@ class MapWidget(QWidget):
             self._bridge.cache_clicked.connect(self.cache_selected)
             self._bridge.maximize_clicked.connect(self.maximize_requested)
             self._bridge.popout_clicked.connect(self.popout_requested)
+            self._bridge.draw_clicked.connect(self._show_draw_menu)
+            self._bridge.shape_changed.connect(self._on_shape_changed)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))
             return
@@ -694,6 +952,8 @@ class MapWidget(QWidget):
         self._bridge.map_right_clicked.connect(self._on_map_right_click)
         self._bridge.maximize_clicked.connect(self.maximize_requested)
         self._bridge.popout_clicked.connect(self.popout_requested)
+        self._bridge.draw_clicked.connect(self._show_draw_menu)
+        self._bridge.shape_changed.connect(self._on_shape_changed)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -703,9 +963,8 @@ class MapWidget(QWidget):
         import time
         from opensak.gui.settings import get_settings
         s = get_settings()
-        init_lat = s.home_lat
-        init_lon = s.home_lon
-        html = self._render_map_html(init_lat, init_lon)
+        init_lat, init_lon = self._center or (s.home_lat, s.home_lon)
+        html = self._render_map_html(init_lat, init_lon, **self._html_options())
         self._page.setHtml(html, QUrl(f"qrc:///{int(time.time())}"))
 
         layout.addWidget(self._view)
@@ -741,20 +1000,42 @@ class MapWidget(QWidget):
             self._do_load_caches(self._pending_caches)
             self._pending_caches = None
 
+        # The drawn shape lives in the page — put it back after a (re)load.
+        if self._shape_mode is not None:
+            self._run_js(
+                f"loadShape({_js_arg(self._shape_mode)}, {_js_arg(self._shape_points)}, "
+                f"{_js_arg(self._fit_shape_pending)})"
+            )
+        self._fit_shape_pending = False
+        if not self._draw_enabled:
+            self._run_js("setDrawEnabled(false)")
+        elif self._pending_draw_mode is not None:
+            self._run_js(f"startDraw({_js_arg(self._pending_draw_mode)})")
+        self._pending_draw_mode = None
+
         # Kald pending refresh callback
         if self._pending_refresh is not None:
             cb = self._pending_refresh
             self._pending_refresh = None
             cb()
 
+    def _html_options(self) -> dict:
+        return {"map_actions": self._map_actions, "draw_button": self._draw_button,
+                "auto_fit_caches": self._auto_fit_caches}
+
     @staticmethod
-    def _render_map_html(lat: float, lon: float) -> str:
+    def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
+                         draw_button: bool = False, auto_fit_caches: bool = True) -> str:
         """Render MAP_HTML template with dynamic values and localized tooltips."""
         import opensak.utils.flags as flags
         html = MAP_HTML.replace("INIT_LAT", str(lat))
         html = html.replace("INIT_LON", str(lon))
         html = html.replace("INIT_ZOOM", "12")
         html = html.replace("MAP_POPOUT_ENABLED", "true" if flags.map_popout else "false")
+        html = html.replace("MAP_ACTIONS_ENABLED", "true" if map_actions else "false")
+        html = html.replace("MAP_DRAW_BUTTON", "true" if draw_button else "false")
+        html = html.replace("AUTO_FIT_CACHES", "true" if auto_fit_caches else "false")
+        html = html.replace("GEOMAN_LANG", _js_inline_arg(_geoman_lang()))
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before
         # the HTML is handed to QtWebEngine, same as the other INIT_/MAP_
@@ -773,6 +1054,7 @@ class MapWidget(QWidget):
         html = html.replace(
             "MAP_TIP_POPOUT", _js_inline_arg(tr("toolbar_popout_map_tooltip"))
         )
+        html = html.replace("MAP_TIP_DRAW", _js_inline_arg(tr("map_draw_tooltip")))
         return html
 
     def _run_js(self, js: str) -> None:
@@ -780,6 +1062,10 @@ class MapWidget(QWidget):
         if self._page is None:
             return  # headless/test mode — no WebEngine
         self._page.runJavaScript(js)
+
+    def loaded_caches(self) -> list[Cache]:
+        """The caches last passed to load_caches()."""
+        return self._caches
 
     def load_caches(self, caches: list[Cache]) -> None:
         """Indlæs caches på kortet."""
@@ -945,15 +1231,131 @@ class MapWidget(QWidget):
         import time
         from opensak.gui.settings import get_settings
         s = get_settings()
-        init_lat = s.home_lat
-        init_lon = s.home_lon
-        html = self._render_map_html(init_lat, init_lon)
+        init_lat, init_lon = self._center or (s.home_lat, s.home_lon)
+        html = self._render_map_html(init_lat, init_lon, **self._html_options())
         self._ready = False
         self._page.setHtml(html, QUrl(f"qrc:///{int(time.time())}"))
 
     def pan_to_home(self) -> None:
         if self._ready:
             self._run_js("panToHome()")
+
+    # ── Drawn shape (Line/Polygon filter) ─────────────────────────────────────
+
+    def shape(self) -> Optional[tuple[str, list[Point]]]:
+        """The drawn shape as (mode, points), or None when there is none."""
+        if self._shape_mode is None or not self._shape_points:
+            return None
+        return self._shape_mode, list(self._shape_points)
+
+    def shape_is_valid(self) -> bool:
+        """True when the shape has enough points for its mode (LP_MIN_POINTS)."""
+        shape = self.shape()
+        return shape is not None and len(shape[1]) >= LP_MIN_POINTS[shape[0]]
+
+    def load_shape(self, mode: str, points: list[Point], fit: bool = True) -> None:
+        """Show (mode, points) as the editable shape, replacing any other;
+        *fit* zooms the map to it."""
+        if mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        self._shape_mode = mode
+        self._shape_points = [(float(lat), float(lon)) for lat, lon in points]
+        if self._ready:
+            self._run_js(
+                f"loadShape({_js_arg(mode)}, {_js_arg(self._shape_points)}, {_js_arg(fit)})"
+            )
+        else:
+            self._fit_shape_pending = fit
+
+    def start_draw(self, mode: str) -> None:
+        """Let the user draw a new shape of *mode* (in "points" mode: add
+        points to the current ones)."""
+        if mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        if self._shape_mode != mode:
+            # Keep the points, so a mode switch never loses the shape.
+            self.load_shape(mode, self._shape_points, fit=False)
+        if self._ready:
+            self._run_js(f"startDraw({_js_arg(mode)})")
+        else:
+            self._pending_draw_mode = mode
+
+    def clear_shape(self) -> None:
+        """Remove the drawn shape."""
+        had_shape = self.shape() is not None
+        self._shape_mode = None
+        self._shape_points = []
+        if self._ready:
+            self._run_js("clearShape()")
+        if had_shape:
+            self.shape_changed.emit("", [])
+
+    def set_draw_enabled(self, enabled: bool) -> None:
+        """Allow (True) or block (False) editing the drawn shape."""
+        self._draw_enabled = bool(enabled)
+        if self._ready:
+            self._run_js(f"setDrawEnabled({_js_arg(self._draw_enabled)})")
+
+    def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
+        if self._ready:
+            self._run_js(f"setView({lat}, {lon}, {int(zoom)})")
+
+    def _on_shape_changed(self, shape_json: str) -> None:
+        parsed = _parse_shape_json(shape_json)
+        if parsed is None:
+            return
+        mode, points = parsed
+        self._shape_mode = mode if points else None
+        self._shape_points = points
+        self.shape_changed.emit(mode if points else "", points)
+
+    def _shape_text(self) -> str:
+        shape = self.shape()
+        return format_points_text(*shape) if shape else ""
+
+    def _copy_shape_text(self) -> None:
+        text = self._shape_text()
+        if text:
+            QApplication.clipboard().setText(text)
+
+    def _add_shape_actions(self, menu: QMenu) -> dict:
+        """Add "Copy as text / Filter by this shape / Clear" to *menu*;
+        returns {action: callback}."""
+        has_shape = self.shape() is not None
+        act_copy = menu.addAction(tr("map_draw_copy_text"))
+        act_copy.setEnabled(has_shape)
+        act_filter = menu.addAction(tr("map_draw_filter"))
+        act_filter.setEnabled(self.shape_is_valid())
+        act_clear = menu.addAction(tr("map_draw_clear"))
+        act_clear.setEnabled(has_shape)
+        return {
+            act_copy: self._copy_shape_text,
+            act_filter: self._request_filter_by_shape,
+            act_clear: self.clear_shape,
+        }
+
+    def _request_filter_by_shape(self) -> None:
+        shape = self.shape()
+        if shape is not None and self.shape_is_valid():
+            self.filter_by_shape_requested.emit(*shape)
+
+    def _show_draw_menu(self) -> None:
+        """Menu of the map's draw button: start a shape, or act on the
+        current one."""
+        menu = QMenu(self)
+        starts = {
+            menu.addAction(tr("map_draw_polygon")): "polygon",
+            menu.addAction(tr("map_draw_line")): "line",
+            menu.addAction(tr("map_draw_points")): "points",
+        }
+        menu.addSeparator()
+        shape_actions = self._add_shape_actions(menu)
+        from PySide6.QtGui import QCursor
+        chosen = menu.exec(QCursor.pos())
+        if chosen in starts:
+            self.start_draw(starts[chosen])
+        elif chosen in shape_actions:
+            shape_actions[chosen]()
 
     def set_active_cache(self, gc_code: str) -> None:
         """Sæt den aktuelt valgte cache — bruges af højreklik-menuen til
@@ -998,11 +1400,19 @@ class MapWidget(QWidget):
                             self._last_selected_gc)
         act_corrected.setEnabled(has_selected)
 
+        # ── Drawn shape ───────────────────────────────────────────────────────
+        shape_actions = {}
+        if self._draw_button and self.shape() is not None:
+            menu.addSeparator()
+            shape_actions = self._add_shape_actions(menu)
+
         # ── Vis menuen ved musemarkøren ───────────────────────────────────────
         from PySide6.QtGui import QCursor
         chosen = menu.exec(QCursor.pos())
 
-        if chosen == act_preferred:
+        if chosen in shape_actions:
+            shape_actions[chosen]()
+        elif chosen == act_preferred:
             QApplication.clipboard().setText(preferred_str)
         elif chosen in sub_actions:
             QApplication.clipboard().setText(sub_actions[chosen])
