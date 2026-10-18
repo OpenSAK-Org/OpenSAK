@@ -162,6 +162,17 @@ class TestPreviousCrash:
         # This session's dump file starts empty.
         assert (tmp_path / cr._NATIVE_LOG_NAME).read_text(encoding="utf-8") == ""
 
+    @pytest.mark.parametrize("dump", [None, "", "  \n"])
+    def test_lock_without_native_dump_is_only_logged(self, tmp_path, caplog, dump):
+        # Killed, log-off/shutdown or power loss: the lock stays, no dump.
+        _leave_stale_lock(tmp_path / cr._SESSION_LOCK_NAME)
+        if dump is not None:
+            (tmp_path / cr._NATIVE_LOG_NAME).write_text(dump, encoding="utf-8")
+        caplog.set_level("INFO", logger="opensak.crash")
+        cr.install(tmp_path)
+        assert cr.take_previous_crash() is None
+        assert "left no native dump" in caplog.text
+
     def test_running_second_instance_is_not_a_crash(self, tmp_path):
         from PySide6.QtCore import QLockFile
         other = QLockFile(str(tmp_path / cr._SESSION_LOCK_NAME))

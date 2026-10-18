@@ -12,8 +12,11 @@ Two kinds of crash are covered:
     process being killed). faulthandler writes the native stack to
     crash_native.log, and a session lock file that is only removed on a
     clean exit tells the next start that the last session did not end
-    normally — the user is then offered to report it with the previous
-    session's log (opensak.log.previous, issue #737).
+    normally. If faulthandler left a dump, the user is offered to report it
+    with the previous session's log (opensak.log.previous, issue #737).
+    A lock without a dump (log-off/shutdown with OpenSAK open, a kill from
+    Task Manager, Force Quit, power loss) is only logged — those are not
+    OpenSAK bugs, and a dialog for each would teach users to dismiss it.
 
 Nothing is ever sent automatically: the report goes to a prefilled GitHub
 issue or e-mail, or is copied for a post in the Facebook group, only when
@@ -224,7 +227,9 @@ def _detect_previous_crash(app_dir: Path) -> PreviousCrash | None:
     QLockFile stores the owning PID: if the file is still there but tryLock()
     succeeds, its owner is gone without unlocking — it crashed or was killed.
     If tryLock() fails another OpenSAK is running right now, which is not a
-    crash (and this instance then runs without a lock of its own).
+    crash (and this instance then runs without a lock of its own). An
+    unclean exit without a native dump is logged but not reported: the
+    process was killed or the OS session ended, it did not crash.
     """
     global _session_lock
     from PySide6.QtCore import QLockFile
@@ -242,7 +247,13 @@ def _detect_previous_crash(app_dir: Path) -> PreviousCrash | None:
 
     from opensak.config import get_previous_log_path
     native = _read_tail(app_dir / _NATIVE_LOG_NAME, 200)
-    logger.warning("crash: previous session did not exit cleanly")
+    if not native.strip():
+        logger.info(
+            "crash: previous session did not exit cleanly, but left no native "
+            "dump (killed, log-off/shutdown or power loss) — not reported"
+        )
+        return None
+    logger.warning("crash: previous session crashed (native dump found)")
     return PreviousCrash(
         native_dump=native,
         log_tail=_read_tail(get_previous_log_path(), _LOG_TAIL_LINES),
