@@ -898,6 +898,7 @@ STRINGS: dict[str, str] = {
     "db_err_delete_folder":         "Kan de map '{path}' niet verwijderen:",
     "db_delete_active_error":       "Kan '{name}' niet verwijderen omdat het de actieve database is.\n\nSchakel eerst over naar een andere database.",
     "db_active_locked_tip":         "Dit is de actieve database. Schakel eerst over naar een andere database.",
+    "db_missing_file_delete_tip":   "Het databasebestand bestaat niet meer op de schijf, dus er valt niets te verwijderen. Gebruik ‘Uit lijst verwijderen’ om het uit de lijst te halen.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Selecteer welke kolommen in de cachelijst worden weergegeven.\nGC-code en naam kunnen niet worden verborgen.",

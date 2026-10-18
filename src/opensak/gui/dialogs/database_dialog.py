@@ -445,6 +445,8 @@ class DatabaseManagerDialog(QDialog):
         # does nothing (a new database becomes the active one right away).
         tip = tr("db_active_locked_tip") if is_active else ""
         self._btn_remove.setToolTip(tip)
+        if not tip and db is not None and not db.exists:
+            tip = tr("db_missing_file_delete_tip")
         self._btn_delete.setToolTip(tip)
 
     def _switch_to_selected(self, *_) -> None:

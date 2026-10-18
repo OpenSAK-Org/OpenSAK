@@ -192,6 +192,14 @@ class TestManagerDialog:
         assert dlg._btn_delete.toolTip() == ""
         assert dlg._btn_remove.toolTip() == ""
 
+    def test_missing_file_explains_disabled_delete(self, dlg):
+        _select(dlg, "Gone")
+        assert dlg._btn_delete.isEnabled() is False
+        assert dlg._btn_delete.toolTip() == dd.tr("db_missing_file_delete_tip")
+        # Remove stays usable for a missing file, so it needs no hint.
+        assert dlg._btn_remove.isEnabled() is True
+        assert dlg._btn_remove.toolTip() == ""
+
     def test_missing_db_shows_not_found(self, dlg):
         _select(dlg, "Gone")
         assert dlg._info_size.text() != ""

@@ -895,6 +895,7 @@ STRINGS: dict[str, str] = {
     "db_err_delete_folder":         "Kunne ikke slette mappen '{path}':",
     "db_delete_active_error":       "Kan ikke slette '{name}' fordi den er den aktive database.\n\nSkift til en anden database først.",
     "db_active_locked_tip":         "Dette er den aktive database. Skift til en anden database først.",
+    "db_missing_file_delete_tip":   "Databasefilen findes ikke længere på disken, så der er intet at slette. Brug “Fjern fra liste” for at fjerne den fra listen.",
 
     # ── Kolonne dialog ────────────────────────────────────────────────────────
     "column_dialog_hint":           "Vælg hvilke kolonner der skal vises i cachelisten.\nGC Kode og Navn kan ikke skjules.",
