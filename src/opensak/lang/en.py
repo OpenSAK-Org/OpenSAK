@@ -1809,7 +1809,7 @@ STRINGS: dict[str, str] = {
     "crash_dialog_title": "OpenSAK ran into a problem",
     "crash_dialog_msg": "OpenSAK hit an unexpected error. You can try to continue, but it is safer to save your work and restart.\n\nPlease help us fix it: report it on GitHub or send it to {email}, and attach the log file.",
     "crash_dialog_previous_msg": "OpenSAK did not close normally the last time it ran — it may have crashed.\n\nIf you remember what you were doing, please report it on GitHub or send it to {email}, and attach the log file.",
-    "crash_dialog_privacy": "This is exactly what will be shared. Nothing is sent automatically — the buttons only open a prefilled GitHub issue or e-mail. Your home folder, user name and tokens have been removed.",
+    "crash_dialog_privacy": "This is exactly what will be shared. Nothing is sent automatically — the buttons only open a prefilled GitHub issue or e-mail. Your home folder, your computer's user name and tokens have been removed.",
     "crash_dialog_github": "Report on GitHub",
     "crash_dialog_email": "Send by e-mail",
     "crash_dialog_copy": "Copy report",

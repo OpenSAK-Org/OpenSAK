@@ -50,7 +50,7 @@
 <main>
   <p class="doc-label">// Legal</p>
   <h1>Privacy Policy</h1>
-  <p class="effective">Effective date: September 29, 2026</p>
+  <p class="effective">Effective date: October 18, 2026</p>
 
   <h2>1. Overview</h2>
   <p>OpenSAK is a free, open source desktop application for managing geocaching data locally on your own computer. It runs on Windows, Linux, and macOS.</p>
@@ -89,12 +89,16 @@
   <p>If you set up <strong>Pocket Queries by e-mail</strong>, your mail server, port, security setting and username are stored in OpenSAK's settings file. The <strong>password</strong> is stored in your operating system's secure credential store (macOS Keychain, Windows Credential Manager, or the Secret Service keyring on Linux) — never in plain text.</p>
   <p>OpenSAK connects <strong>only to the mail server you entered</strong>, over an encrypted connection, and verifies the server's certificate before sending your password. Nothing from your mailbox is sent anywhere else.</p>
 
+  <h3>2.5 Logs and crash reports</h3>
+  <p>OpenSAK keeps a log file (opensak.log and opensak.log.previous) in its application data directory. To notice crashes it also keeps session.lock while it runs and, after a hard crash, crash_native.log in the same place. None of these files leave your device on their own.</p>
+  <p>After an unexpected error or a crash, OpenSAK shows a crash report dialog with the <strong>exact text</strong> that would be shared, with your home folder path, your computer's user name, e-mail addresses and access tokens removed. Other details, such as cache or database names, may still appear. The report is shared <strong>only if you choose to</strong>: <strong>Report on GitHub</strong> opens a prefilled issue that you submit yourself (GitHub's privacy statement applies), and <strong>Send e-mail</strong> opens a prefilled message to hello@opensak.com in your own mail program. Nothing is sent automatically.</p>
+
   <hr class="rule">
 
   <h2>3. Data We Do Not Collect</h2>
   <ul>
     <li>Usage statistics or analytics</li>
-    <li>Crash reports or error telemetry</li>
+    <li>Crash reports or error telemetry (a crash report is only shared when you send it yourself, see 2.5)</li>
     <li>Your location or GPS data</li>
     <li>Your name or email address</li>
     <li>Any data about how you use the application</li>

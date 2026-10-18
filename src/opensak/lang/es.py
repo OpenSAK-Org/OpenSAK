@@ -1811,7 +1811,7 @@ STRINGS: dict[str, str] = {
     "crash_dialog_title": "OpenSAK ha encontrado un problema",
     "crash_dialog_msg": "OpenSAK ha sufrido un error inesperado. Puedes intentar continuar, pero es más seguro guardar tu trabajo y reiniciar.\n\nAyúdanos a corregirlo: infórmalo en GitHub o envíalo a {email}, y adjunta el archivo de registro.",
     "crash_dialog_previous_msg": "OpenSAK no se cerró correctamente la última vez que se ejecutó; puede que se haya bloqueado.\n\nSi recuerdas lo que estabas haciendo, infórmalo en GitHub o envíalo a {email}, y adjunta el archivo de registro.",
-    "crash_dialog_privacy": "Esto es exactamente lo que se compartirá. No se envía nada automáticamente: los botones solo abren una incidencia de GitHub o un correo ya rellenados. Se han eliminado tu carpeta personal, tu nombre de usuario y los tokens.",
+    "crash_dialog_privacy": "Esto es exactamente lo que se compartirá. No se envía nada automáticamente: los botones solo abren una incidencia de GitHub o un correo ya rellenados. Se han eliminado tu carpeta personal, el nombre de usuario de tu ordenador y los tokens.",
     "crash_dialog_github": "Informar en GitHub",
     "crash_dialog_email": "Enviar por correo",
     "crash_dialog_copy": "Copiar informe",
