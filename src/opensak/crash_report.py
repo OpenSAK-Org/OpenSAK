@@ -339,7 +339,12 @@ def install(app_dir: Path | None = None) -> None:
         _previous_crash = _detect_previous_crash(app_dir)
     except Exception:
         logger.warning("crash: unclean-shutdown check failed", exc_info=True)
-    _enable_faulthandler(app_dir)
+    # The native dump file belongs to the lock holder: without the lock,
+    # another instance's faulthandler may be writing to it, and opening it
+    # here would truncate that dump. Our own dump would not be read anyway —
+    # only the next lock holder looks at the file.
+    if _session_lock is not None:
+        _enable_faulthandler(app_dir)
 
     from PySide6.QtCore import QObject, Qt, Signal, Slot
 

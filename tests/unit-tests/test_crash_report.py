@@ -172,6 +172,19 @@ class TestPreviousCrash:
         finally:
             other.unlock()
 
+    def test_second_instance_leaves_native_dump_alone(self, tmp_path):
+        from PySide6.QtCore import QLockFile
+        other = QLockFile(str(tmp_path / cr._SESSION_LOCK_NAME))
+        assert other.tryLock(0)
+        native = tmp_path / cr._NATIVE_LOG_NAME
+        native.write_text("Fatal Python error: first instance", encoding="utf-8")
+        try:
+            cr.install(tmp_path)
+            assert cr._native_file is None
+            assert native.read_text(encoding="utf-8") == "Fatal Python error: first instance"
+        finally:
+            other.unlock()
+
     def test_show_previous_crash_notice_without_crash_does_nothing(self, monkeypatch):
         import opensak.gui.dialogs.crash_report_dialog as dlg_mod
         monkeypatch.setattr(dlg_mod, "CrashReportDialog", None)  # would raise if used
