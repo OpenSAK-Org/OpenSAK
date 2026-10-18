@@ -43,6 +43,9 @@ opensak/
 ├── run.py
 ├── scripts/
 │   └── bump_version.py                 # Atomic version bump — ALWAYS use this
+├── tools/                              # Dev-only helpers, not shipped
+│   ├── boundaries/                     # Reverse-geocoding data build/verify
+│   └── demo_db/make_demo_db.py         # Synthetic, anonymous test database
 ├── src/opensak/
 │   ├── __init__.py                     # __version__ (single source of truth)
 │   ├── lang/
