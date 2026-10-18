@@ -196,6 +196,24 @@ class TestHooks:
         assert len(shown) == 1 and shown[0].endswith("ValueError: from gui")
         assert "Uncaught exception" in caplog.text
 
+    def test_gui_exception_dialog_waits_for_handler_to_unwind(self, tmp_path, monkeypatch, qtbot):
+        from PySide6.QtCore import QEventLoop, QTimer
+        shown = []
+        monkeypatch.setattr(cr, "_show_exception_dialog", shown.append)
+        cr.install(tmp_path)
+        during_handler = []
+
+        def failing_handler():
+            sys.excepthook(*_raise_and_capture(ValueError("in slot")))
+            during_handler.append(len(shown))
+
+        loop = QEventLoop()
+        QTimer.singleShot(0, failing_handler)
+        QTimer.singleShot(50, loop.quit)
+        loop.exec()
+        assert during_handler == [0]
+        assert len(shown) == 1 and shown[0].endswith("ValueError: in slot")
+
     def test_worker_thread_exception_reaches_gui_thread(self, tmp_path, monkeypatch, qtbot):
         shown = []
         monkeypatch.setattr(

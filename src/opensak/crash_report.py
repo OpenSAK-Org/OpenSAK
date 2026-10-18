@@ -285,8 +285,18 @@ def _handle(exc_type, exc_value, exc_tb) -> None:
         # Never let the reporter itself raise out of an excepthook.
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
-    if _bridge is not None:
-        # A queued signal when called from a worker thread, direct otherwise.
+    if _bridge is None:
+        return
+    from PySide6.QtCore import QThread
+    if _bridge.thread() is QThread.currentThread() and QThread.currentThread().loopLevel() == 0:
+        # GUI thread with no event loop yet (startup before app.exec(), or an
+        # exception escaping main()): a queued signal would never be
+        # delivered, so show the dialog right here — nothing to re-enter.
+        _show_exception_dialog(report)
+    else:
+        # Always queued, also on the GUI thread: the excepthook runs while the
+        # failing slot / paint event is still on the stack, and dlg.exec()
+        # there would start a nested event loop inside it.
         _bridge.crashed.emit(report)
 
 
@@ -331,17 +341,17 @@ def install(app_dir: Path | None = None) -> None:
         logger.warning("crash: unclean-shutdown check failed", exc_info=True)
     _enable_faulthandler(app_dir)
 
-    from PySide6.QtCore import QObject, Signal, Slot
+    from PySide6.QtCore import QObject, Qt, Signal, Slot
 
     class _Bridge(QObject):
         # The slot is a method of this GUI-thread object (not a plain
-        # function), so an emit from a worker thread is queued to the GUI
-        # thread instead of running the dialog in the worker.
+        # function), so the queued emit is delivered on the GUI thread even
+        # when it comes from a worker thread.
         crashed = Signal(str)
 
         def __init__(self) -> None:
             super().__init__()
-            self.crashed.connect(self._on_crashed)
+            self.crashed.connect(self._on_crashed, Qt.ConnectionType.QueuedConnection)
 
         @Slot(str)
         def _on_crashed(self, report: str) -> None:
