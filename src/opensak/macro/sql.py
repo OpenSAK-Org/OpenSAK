@@ -27,6 +27,12 @@ The macro's own database file (opensak.macro_db()) is attached to that
 connection as MACRO_SCHEMA; there the authorizer allows everything that
 stays inside the file (see _MACRO_ACTIONS). Macros themselves cannot ATTACH.
 
+Other OpenSAK databases can be attached to it read-only (opensak.attach(),
+#1074), so one statement can join them with the active database. Read-only
+is enforced twice: the file is attached with `mode=ro`, and the authorizers
+allow nothing but reading on a schema other than main, temp and
+MACRO_SCHEMA.
+
 For the active database, opensak.sql() and friends read through the
 WritableDatabase connection (reader()), so that the macro's TEMP tables are
 the same for opensak.sql_write() and inside opensak.transaction().
@@ -140,6 +146,14 @@ _MACRO_ACTIONS = frozenset({
 # most others, e.g. foreign_keys, would change the whole connection.
 _MACRO_PRAGMAS = frozenset({"user_version", "application_id", "integrity_check", "quick_check"})
 
+# Schema names an attached database (opensak.attach()) may not take: SQLite's
+# own, the macro database's, and names kept for OpenSAK's later use.
+_RESERVED_SCHEMAS = frozenset({"main", "temp", MACRO_SCHEMA, "companion"})
+_RESERVED_SCHEMA_PREFIX = "opensak_"
+_SCHEMA_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+# The first bytes of every SQLite database file.
+_SQLITE_HEADER = b"SQLite format 3\x00"
+
 
 class SqlError(Exception):
     """A query failed or tried to write."""
@@ -163,6 +177,10 @@ def _read_authorizer(main_names: frozenset[str]):
         if action in _ALLOWED_ACTIONS:
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _READ_PRAGMAS:
+            return sqlite3.SQLITE_OK
+        # Reading an attached database's schema version (`PRAGMA found.user_version`).
+        if (action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() == "user_version"
+                and arg2 is None and db_name not in (None, "main", "temp")):
             return sqlite3.SQLITE_OK
         if db_name == MACRO_SCHEMA and (
             action in _MACRO_ACTIONS
@@ -200,6 +218,36 @@ def connect_read_only(db_path: Path) -> sqlite3.Connection:
         conn.close()
         raise
     return conn
+
+
+def schema_name_error(schema: Any) -> Optional[str]:
+    """Why *schema* cannot name an attached database; None if it can."""
+    if not isinstance(schema, str) or not _SCHEMA_NAME.fullmatch(schema):
+        return (f"schema name {schema!r} must be a name of letters, digits and _ "
+                "(at most 64, not starting with a digit)")
+    lower = schema.lower()
+    if lower in _RESERVED_SCHEMAS or lower.startswith(_RESERVED_SCHEMA_PREFIX):
+        return f"schema name {schema!r} is reserved"
+    return None
+
+
+def default_schema_name(database: str) -> str:
+    """A schema name for an attached database, from its name: "Found 2020"
+    → "found_2020"."""
+    slug = re.sub(r"[^a-z0-9]+", "_", database.lower()).strip("_")[:60]
+    if not slug or slug[0].isdigit():
+        slug = f"db_{slug}".rstrip("_")
+    if schema_name_error(slug) is not None:       # e.g. "Main" or "Macro"
+        slug = f"db_{slug}"
+    return slug
+
+
+def is_sqlite_file(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(_SQLITE_HEADER)) == _SQLITE_HEADER
+    except OSError:
+        return False
 
 
 def _read_only_macro_db(conn: Optional[sqlite3.Connection], exc: sqlite3.Error) -> Optional[SqlError]:
@@ -352,18 +400,23 @@ class ReadOnlyDatabase:
         finally:
             cursor.close()
 
+    def _schemas(self) -> list[str]:
+        """The attached schemas: the macro database and opensak.attach()'s."""
+        return [r["name"] for r in self.query("PRAGMA database_list")
+                if r["name"] not in ("main", "temp")]
+
     def tables(self) -> list[str]:
         """Tables and views, the macro's TEMP ones included, and those of
-        the macro database as "macro.<name>" when it is attached."""
-        macro = any(r["name"] == MACRO_SCHEMA for r in self.query("PRAGMA database_list"))
+        the attached databases (the macro database, opensak.attach()) as
+        "<schema>.<name>"."""
+        # Schema names are checked identifiers (schema_name_error()).
+        parts = ["SELECT '' AS s, name, type FROM main.sqlite_master",
+                 "SELECT '', name, type FROM temp.sqlite_master"]
+        parts += [f"SELECT '{s}.', name, type FROM \"{s}\".sqlite_master" for s in self._schemas()]
         rows = self.query(
-            "SELECT name FROM (SELECT name, type FROM main.sqlite_master "
-            "UNION ALL SELECT name, type FROM temp.sqlite_master"
-            + (f" UNION ALL SELECT '{MACRO_SCHEMA}.' || name, type "
-               f"FROM {MACRO_SCHEMA}.sqlite_master" if macro else "")
-            + ") WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
-            f"AND name NOT LIKE '{MACRO_SCHEMA}.sqlite_%' "
-            "AND lower(substr(name, 1, :n)) <> :prefix ORDER BY name",
+            "SELECT s || name AS name FROM (" + " UNION ALL ".join(parts) + ") "
+            "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' "
+            "AND lower(substr(name, 1, :n)) <> :prefix ORDER BY 1",
             {"n": len(_RESERVED_PREFIX), "prefix": _RESERVED_PREFIX},
         )
         return [r["name"] for r in rows]
@@ -372,8 +425,8 @@ class ReadOnlyDatabase:
         if table not in self.tables():
             raise SqlError(f"no table named {table!r}")
         schema, dot, name = table.partition(".")
-        if dot and schema == MACRO_SCHEMA:
-            pragma = f"{MACRO_SCHEMA}.table_info"
+        if dot and schema in self._schemas():
+            pragma = f'"{schema}".table_info'
         else:
             pragma, name = "table_info", table
         quoted = name.replace('"', '""')
@@ -527,6 +580,8 @@ class WritableDatabase:
         self._depth = 0
         self._reader: Optional[ReadOnlyDatabase] = None
         self._macro_db: Optional[Path] = None
+        # opensak.attach(): schema → file, attached read-only
+        self._attached: dict[str, Path] = {}
 
     def attach_macro_db(self, path: Path) -> None:
         """ATTACH the macro's own database file (created if missing) as
@@ -556,12 +611,71 @@ class WritableDatabase:
             raise SqlError(f"cannot close the macro database {self._macro_db}: {exc}") from None
         self._macro_db = None
 
+    # opensak.attach(): further databases, read-only. The runtime decides
+    # which databases a macro may attach; this refuses what would break
+    # the connection or that SQLite would explain badly.
+
+    def attached(self) -> dict[str, Path]:
+        """The databases attached read-only, by schema name."""
+        return dict(self._attached)
+
+    def attach_read_only(self, path: Path, schema: str) -> None:
+        """ATTACH *path* read-only (`mode=ro`) as *schema*."""
+        error = schema_name_error(schema)
+        if error is not None:
+            raise SqlError(error)
+        if self._depth:
+            raise SqlError("cannot attach a database inside opensak.transaction()")
+        path = Path(path).resolve()
+        if schema.lower() in {s.lower() for s in self._attached}:
+            raise SqlError(f"schema name {schema!r} is in use already")
+        if path == self._db_path.resolve():
+            raise SqlError(f"{path} is the active database")
+        if self._macro_db is not None and path == Path(self._macro_db).resolve():
+            raise SqlError(f"{path} is the macro database (opensak.macro_db())")
+        other = next((s for s, p in self._attached.items() if p == path), None)
+        if other is not None:
+            raise SqlError(f"{path} is attached already, as {other!r}")
+        if not path.is_file():
+            raise SqlError(f"the file {path} is missing")
+        if not is_sqlite_file(path):
+            raise SqlError(f"{path} is not an SQLite database")
+        conn = self._connection()
+        limit = conn.getlimit(sqlite3.SQLITE_LIMIT_ATTACHED)
+        if len(self._attached) + (self._macro_db is not None) >= limit:
+            raise SqlError(
+                f"at most {limit} databases can be attached at once, the macro "
+                "database (opensak.macro_db()) included; detach one first"
+            )
+        try:
+            # Our own statement: no authorizer is set outside the macro's.
+            # The connection is opened with uri=True, so the URI works here.
+            conn.execute(f'ATTACH DATABASE ? AS "{schema}"', (f"{path.as_uri()}?mode=ro",))
+        except sqlite3.Error as exc:
+            raise SqlError(f"cannot open {path} read-only: {exc}") from None
+        self._attached[schema] = path
+
+    def detach(self, schema: str) -> None:
+        """DETACH what attach_read_only() attached as *schema*."""
+        if schema not in self._attached:
+            raise SqlError(f"no database is attached as {schema!r}")
+        if self._depth:
+            raise SqlError("cannot detach a database inside opensak.transaction()")
+        try:
+            self._connection().execute(f'DETACH DATABASE "{schema}"')
+        except sqlite3.Error as exc:
+            raise SqlError(f"cannot detach {schema!r}: {exc}") from None
+        del self._attached[schema]
+
     def _connection(self) -> sqlite3.Connection:
         if self._conn is None:
             try:
                 conn = sqlite3.connect(
                     self._db_path, timeout=30, isolation_level=None,
                     check_same_thread=False,
+                    # A plain path stays a path; this lets attach_read_only()
+                    # give ATTACH a `file:…?mode=ro` URI.
+                    uri=True,
                     # No statement cache: a statement prepared without the
                     # authorizer must never be reused for macro SQL.
                     cached_statements=0,
@@ -897,3 +1011,4 @@ class WritableDatabase:
             self._conn.close()
             self._conn = None
         self._macro_db = None
+        self._attached = {}
