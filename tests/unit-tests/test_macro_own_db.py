@@ -2,6 +2,7 @@
 own .db3 next to the macro file, attached as `macro` with full access
 there, used together with the active database, and no way past it."""
 
+import os
 import sqlite3
 
 import pytest
@@ -196,8 +197,9 @@ def test_unlisted_folder_approved_once_works(tmp_path):
     assert out == [f"opensak.macro_db: created {(tmp_path / 'once.db3').resolve()}"]
 
 
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0,
+                    reason="root ignores file permission bits")
 def test_read_only_macro_db_can_be_read_but_not_written(tmp_path):
-    import os
     import stat
     db_file = tmp_path / "ro.db3"
     conn = sqlite3.connect(db_file)
