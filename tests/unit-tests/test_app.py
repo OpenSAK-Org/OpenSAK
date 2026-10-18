@@ -144,16 +144,24 @@ def test_main_smoke(qapp, monkeypatch):
     monkeypatch.setattr("opensak.db.manager.get_db_manager",
                         lambda: SimpleNamespace(ensure_active_initialised=lambda: None))
 
+    notices = []
+
     class FakeWindow:
         def show(self):
             pass
 
         def show_premigration_backup_notices(self):  # issue #549
-            pass
+            notices.append("premigration")
+            raise RuntimeError("broken notice")
 
         def show_database_fallback_notice(self):  # issue #1045
-            pass
+            notices.append("fallback")
     monkeypatch.setattr("opensak.gui.mainwindow.MainWindow", FakeWindow)
+    from opensak import crash_report
+    reported = []
+    monkeypatch.setattr(crash_report, "_show_exception_dialog", reported.append)
+    monkeypatch.setattr(crash_report, "show_previous_crash_notice",
+                        lambda parent=None: notices.append("crash"))
 
     # Reuse the existing QApplication; restore the class *before* the test
     # returns so pytest-qt's post-call _process_events still sees the real one.
@@ -167,3 +175,8 @@ def test_main_smoke(qapp, monkeypatch):
     finally:
         W.QApplication = real_qapp_cls
         C.QTimer.singleShot = real_single
+        crash_report.shutdown()
+    # The startup notices run one after another from a single timer; a
+    # failing one is reported and doesn't hide the rest.
+    assert notices == ["premigration", "fallback", "crash"]
+    assert len(reported) == 1 and reported[0].endswith("RuntimeError: broken notice")
