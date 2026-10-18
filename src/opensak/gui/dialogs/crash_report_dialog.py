@@ -5,14 +5,12 @@ problem" dialog (see opensak/crash_report.py).
 Shown for an uncaught exception, and at startup when the previous session
 did not exit cleanly. The scrubbed report is shown read-only so the user
 sees exactly what would be shared; nothing leaves the machine until they
-click GitHub, Facebook or e-mail. GitHub and e-mail open a prefilled
-page/mail; Facebook cannot be prefilled, so the report is copied to the
-clipboard and the group is opened to paste it into a post.
+click GitHub or e-mail, which open a prefilled issue page / mail.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication,
@@ -65,20 +63,30 @@ class CrashReportDialog(QDialog):
         privacy.setStyleSheet("color: gray;")
         layout.addWidget(privacy)
 
+        # The two ways to report get full buttons; copying the report and
+        # opening the log folder are helpers, so they sit on a second row as
+        # flat buttons, which also leaves room for long translations.
         report_row = QHBoxLayout()
         self._btn_github = QPushButton(tr("crash_dialog_github"))
         self._btn_github.clicked.connect(self._open_github)
-        self._btn_facebook = QPushButton(tr("crash_dialog_facebook"))
-        self._btn_facebook.clicked.connect(self._open_facebook)
         self._btn_email = QPushButton(tr("crash_dialog_email"))
         self._btn_email.clicked.connect(self._open_email)
+        report_row.addWidget(self._btn_github)
+        report_row.addWidget(self._btn_email)
+        report_row.addStretch()
+        layout.addLayout(report_row)
+
+        helper_row = QHBoxLayout()
         self._btn_copy = QPushButton(tr("crash_dialog_copy"))
         self._btn_copy.clicked.connect(self._copy)
         self._btn_log = QPushButton(tr("crash_dialog_show_log"))
         self._btn_log.clicked.connect(self._show_log)
-        for btn in (self._btn_github, self._btn_facebook, self._btn_email, self._btn_copy, self._btn_log):
-            report_row.addWidget(btn)
-        layout.addLayout(report_row)
+        for btn in (self._btn_copy, self._btn_log):
+            btn.setFlat(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            helper_row.addWidget(btn)
+        helper_row.addStretch()
+        layout.addLayout(helper_row)
 
         close_row = QHBoxLayout()
         close_row.addStretch()
@@ -101,13 +109,6 @@ class CrashReportDialog(QDialog):
             QUrl(crash_report.github_issue_url(self._report, self._previous_session))
         )
         # The issue page cannot take the log via URL — show it to drag in.
-        self._show_log()
-
-    def _open_facebook(self) -> None:
-        # A group post cannot be prefilled via URL — copy the report so it
-        # can be pasted, then open the group and the log folder.
-        self._copy()
-        QDesktopServices.openUrl(QUrl(crash_report.FACEBOOK_GROUP_URL))
         self._show_log()
 
     def _open_email(self) -> None:

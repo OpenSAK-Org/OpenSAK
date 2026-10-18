@@ -19,8 +19,8 @@ Two kinds of crash are covered:
     OpenSAK bugs, and a dialog for each would teach users to dismiss it.
 
 Nothing is ever sent automatically: the report goes to a prefilled GitHub
-issue or e-mail, or is copied for a post in the Facebook group, only when
-the user clicks the button, and the text is scrubbed of home paths, the user name and tokens first.
+issue or e-mail only when the user clicks the button, and the text is
+scrubbed of home paths, the user name and tokens first.
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ logger = logging.getLogger("opensak.crash")
 
 GITHUB_NEW_ISSUE_URL = "https://github.com/OpenSAK-Org/OpenSAK/issues/new"
 SUPPORT_EMAIL = "hello@opensak.com"
-FACEBOOK_GROUP_URL = "https://www.facebook.com/groups/2062154441232996"
 
 # GitHub refuses very long URLs (~8 KB); mail clients choke much earlier
 # (Outlook/Windows mailto handlers at ~2 KB). The body is cut to fit.
