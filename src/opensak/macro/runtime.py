@@ -3666,6 +3666,8 @@ API: tuple[ApiFunction, ...] = (
                     "the given fields change. `false` clears a field that is "
                     "not a boolean. Fields OpenSAK maintains itself, such as "
                     "`code`, `distance` or `log_count`, cannot be written. "
+                    "Locked caches can be changed too: the lock only protects "
+                    "from imports. "
                     "Before a macro's first change, OpenSAK asks the user to "
                     "allow that macro (see Changing caches).",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
@@ -3701,8 +3703,9 @@ API: tuple[ApiFunction, ...] = (
                     "filter. Deleted caches cannot be restored from inside "
                     "OpenSAK (only from a backup); at the end of the run the "
                     "macro output says how many caches were deleted. The "
-                    "cache list and map drop them after the macro. Needs the "
-                    "user's permission like opensak.update().",
+                    "cache list and map drop them after the macro. Locked "
+                    "caches are deleted too: the lock only protects from "
+                    "imports. Needs the user's permission like opensak.update().",
         example='for c in opensak.caches{ archived = true, fields = {"code"} } do\n'
                 '    opensak.delete(c.code)\nend\n'
                 '-- all caches of the active filter at once:\n'
@@ -3733,7 +3736,9 @@ API: tuple[ApiFunction, ...] = (
                     "keys or the columns OpenSAK maintains itself (see "
                     "Changing caches). Deleting a cache also deletes its "
                     "logs, waypoints, attributes, trackables and user note, "
-                    "as opensak.delete() does. REPLACE (`INSERT OR REPLACE`, "
+                    "as opensak.delete() does. Locked caches are changed and "
+                    "deleted like any other (add `AND locked = 0` to leave "
+                    "them alone). REPLACE (`INSERT OR REPLACE`, "
                     "`REPLACE INTO`, …) is refused, as it would delete those too; "
                     "to update or insert, use `INSERT … ON CONFLICT (gc_code) "
                     "DO UPDATE SET …`. OpenSAK recalculates distances, counts "

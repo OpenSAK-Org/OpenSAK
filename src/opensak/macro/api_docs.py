@@ -345,6 +345,11 @@ def _changing_section() -> list[str]:
         "own. A run from an external editor (`opensak --run-macro`) asks in "
         "the OpenSAK window, like any other run.",
         "",
+        "Locked caches (`locked`) are only protected from being overwritten "
+        "by an import. Macros can change and delete them like any other "
+        "cache, as the GUI can; to leave them alone, filter them out, e.g. "
+        "`opensak.caches{ locked = false }`.",
+        "",
         "Which function to use:",
         "",
         "- A cache: `opensak.update(code, fields)` changes it, "
