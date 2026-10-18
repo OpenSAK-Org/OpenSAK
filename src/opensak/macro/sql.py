@@ -53,14 +53,21 @@ The schema's foreign keys to caches.id have no ON DELETE CASCADE (SQLite
 cannot add one without rebuilding the tables), so a temporary BEFORE DELETE
 trigger on caches deletes the cache's rows first, as the GUI delete does
 (#1035); it also records the deleted codes for the host. Deleting a log,
-waypoint or trackable records its cache like an insert does. With
-recursive_triggers on, these triggers also catch the rows INSERT OR
-REPLACE deletes.
+waypoint or trackable records its cache like an insert does.
+
+The REPLACE conflict resolution (INSERT OR REPLACE, REPLACE INTO, UPDATE OR
+REPLACE, ON CONFLICT REPLACE) is refused before the statement runs: it
+deletes the conflicting row, and with it, through that trigger, the cache's
+logs, waypoints and user note, where a macro mostly means "update or
+insert". INSERT ... ON CONFLICT (...) DO UPDATE is the upsert that keeps
+them. The authorizer reports no conflict resolution, hence the keyword
+check (_uses_replace); the schema has no ON CONFLICT REPLACE constraint.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -426,6 +433,20 @@ PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
     "trackables": frozenset({"id", "cache_id"}),
 }
 
+# Comments, string literals and quoted names, which may contain anything.
+_SQL_OPAQUE = re.compile(
+    r"--[^\n]*|/\*.*?(?:\*/|\Z)|'(?:[^']|'')*'?|\"(?:[^\"]|\"\")*\"?|`(?:[^`]|``)*`?|\[[^\]]*\]?",
+    re.DOTALL,
+)
+# The REPLACE conflict resolution; not the replace() function.
+_SQL_REPLACE = re.compile(r"\b(?:OR\s+REPLACE|REPLACE\s+INTO|CONFLICT\s+REPLACE)\b", re.IGNORECASE)
+
+
+def _uses_replace(query: str) -> bool:
+    """True if *query* resolves a conflict with REPLACE."""
+    return bool(_SQL_REPLACE.search(_SQL_OPAQUE.sub(" ", query)))
+
+
 _TOUCHED = f"{_RESERVED_PREFIX}touched"
 # Inside opensak.transaction(): the caches whose derived columns are still to
 # be recalculated, at the commit or by resync(). The triggers record into
@@ -774,6 +795,13 @@ class WritableDatabase:
         columns are recalculated at its commit or by resync()."""
         from opensak.macro.cache_write import normalize_inserted, refresh_derived
 
+        if _uses_replace(query):
+            raise SqlError(
+                "opensak.sql_write refuses REPLACE (INSERT OR REPLACE, REPLACE INTO, "
+                "UPDATE OR REPLACE, ON CONFLICT REPLACE): it deletes the existing cache "
+                "with its logs, waypoints, attributes, trackables and user note. To "
+                "update or insert, use INSERT ... ON CONFLICT (gc_code) DO UPDATE SET ..."
+            )
         params = _params(params)
         conn = self._connection()
         nested = self.in_transaction
@@ -818,11 +846,9 @@ class WritableDatabase:
                 )
             ]
             added = bool(inserted)
-            # Not those INSERT OR REPLACE deleted and inserted again.
             removed = [
                 code for (code,) in conn.execute(
-                    f"SELECT gc_code FROM temp.{_REMOVED} WHERE gc_code NOT IN "
-                    "(SELECT gc_code FROM caches) ORDER BY gc_code"
+                    f"SELECT gc_code FROM temp.{_REMOVED} ORDER BY gc_code"
                 )
             ]
             conn.execute(f"DELETE FROM temp.{_REMOVED}")

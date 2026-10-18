@@ -220,16 +220,38 @@ def test_sql_delete_of_logs_recalculates_the_caches():
     assert host.changed == [(["GCSQLLOG"], False)] and host.removed == 0
 
 
-def test_sql_insert_or_replace_replaces_the_cache_and_its_rows():
-    _add("GCREPL")
+@pytest.mark.parametrize("query", [
+    "INSERT OR REPLACE INTO caches (gc_code, name, cache_type, latitude, longitude) "
+    "VALUES ('GCREPL', 'Replaced', 'Traditional Cache', 1, 1)",
+    "replace into caches (gc_code, name, cache_type, latitude, longitude) "
+    "VALUES ('GCREPL', 'Replaced', 'Traditional Cache', 1, 1)",
+    "WITH x AS (SELECT 1) REPLACE INTO user_notes (cache_id, note) "
+    "SELECT id, 'n' FROM caches WHERE gc_code = 'GCREPL'",
+    "UPDATE OR /* x */ REPLACE caches SET name = 'Replaced' WHERE gc_code = 'GCREPL'",
+    "CREATE TEMP TABLE t (a UNIQUE ON CONFLICT REPLACE)",
+])
+def test_sql_replace_is_refused(query):
+    _add("GCREPL") if not _exists("GCREPL") else None
+    with pytest.raises(MacroError, match="ON CONFLICT \\(gc_code\\) DO UPDATE"):
+        _run(f"opensak.sql_write([[{query}]])")
+    assert _cache("GCREPL").name == "GCREPL"
+    assert len(_child_ids(Log, "GCREPL")) == 2 and len(_child_ids(UserNote, "GCREPL")) == 1
+
+
+def test_sql_upsert_keeps_the_cache_rows():
+    _add("GCUPS")
     host, out = _run("""
-        print(opensak.sql_write([[INSERT OR REPLACE INTO caches
+        print(opensak.sql_write([[INSERT INTO caches
             (gc_code, name, cache_type, latitude, longitude) VALUES
-            ('GCREPL', 'Replaced', 'Traditional Cache', 1, 1)]]))
+            ('GCUPS', 'Upserted', 'Traditional Cache', 47, 8)
+            ON CONFLICT (gc_code) DO UPDATE SET name = excluded.name]]))
+        -- replace() the function, and REPLACE in strings, comments and names
+        print(opensak.sql_write([[UPDATE caches SET name = replace(name, 'Up', 'Re') -- or replace
+            WHERE gc_code = 'GCUPS' AND 'or replace' <> "name"]]))
     """)
-    assert out == ["1"]                                  # nothing reported as deleted
-    assert _cache("GCREPL").name == "Replaced"
-    assert _child_ids(Log, "GCREPL") == [] and _orphans() == 0
+    assert out == ["1", "1"]
+    assert _cache("GCUPS").name == "Reserted"
+    assert len(_child_ids(Log, "GCUPS")) == 2 and len(_child_ids(UserNote, "GCUPS")) == 1
     assert host.removed == 0
 
 
