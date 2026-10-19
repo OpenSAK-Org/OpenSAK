@@ -4,6 +4,81 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.5] — 2026-10-19
+
+> Headline: **big exports no longer run out of memory**, and OpenSAK now
+> **catches crashes and offers to report them**. Beta testers get Lua
+> macros that can **change, delete and join** cache data.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Crash reports (#1077)** — an unexpected error no longer disappears
+  silently: OpenSAK shows an "OpenSAK ran into a problem" dialog where
+  you can continue or quit, and it notices at the next start when the
+  previous session crashed. The dialog shows the exact report text, with
+  your home folder, user name, e-mail addresses and tokens removed, and
+  can open a prefilled GitHub issue or e-mail, copy the report or open
+  the log folder. **Nothing is sent automatically.** The privacy policy
+  has a new section on logs and crash reports. Contributed by nagisml.
+
+### Changed
+
+- **GSAK import: filters and user locations are opt-in (#1090)** — when
+  a GSAK backup also holds cache databases, the checkboxes for GSAK's
+  saved filters and user locations now start unticked, so refreshing your GSAK
+  databases doesn't re-import those settings every time. Picking
+  `gsak.db3` on its own still starts with both ticked. Thanks to Allyn56
+  for the suggestion.
+
+### Fixed
+
+- **Large exports no longer run out of memory (#1075)** — GPX, LOC and
+  GGZ exports (file, GPS device and POI) now write one cache at a time
+  instead of building the whole file in memory, so 100,000+ caches
+  export fine. A failed export also keeps the existing file instead of
+  leaving a truncated one. Contributed by nagisml.
+- **Why can't I delete this database? (#1082)** — *Delete permanently…*
+  is disabled for the active database, but the red button still looked
+  clickable. It now greys out properly and a tooltip says to switch to
+  another database first. Contributed by nagisml.
+- **Small hardening (#1094)** — the map's button tooltips can no longer
+  be broken by a translation containing quotes or backslashes, and
+  database migration messages now go to the log file instead of being
+  lost in windowed builds.
+
+### In beta builds only
+
+- **Macros can change caches (#1080, #1034)** — new write functions
+  `opensak.update()`, `insert()`, `insert_<x>()` / `update_<x>()` for
+  logs, waypoints, attributes and trackables, `sql_write()` for bulk
+  work, and `opensak.transaction()` to group changes and undo them on
+  error. Before a macro's first write, OpenSAK asks whether *this macro*
+  may change your databases (Deny / Until OpenSAK closes / Always);
+  approved macros are listed under Settings → Folder permissions.
+  `opensak.macro_db()` gives each macro its own database for working
+  data, which is included in backups. Behind the separate
+  `lua-macro-write` flag. Contributed by nagisml.
+- **Macros can delete (#1083, #1035)** — `opensak.delete()` removes
+  caches with all their logs, waypoints, attributes, trackables and
+  notes; `delete_log/waypoint/attribute/trackable()` remove single rows.
+  Deletes take part in transactions. Contributed by nagisml.
+- **Join several databases in one query (#1084, #1074)** —
+  `opensak.attach()` attaches another OpenSAK database read-only, so one
+  SQL statement can combine it with the active database — a controlled
+  replacement for GSAK's SQL ATTACH. Contributed by nagisml.
+
+### For developers
+
+- **Demo database generator (#1088)** — `tools/demo_db/make_demo_db.py`
+  builds a reproducible, fully made-up OpenSAK database for trying
+  macros and filters, taking screenshots and reproducing bugs without
+  sharing real data. Contributed by nagisml.
+
+---
+
 ## [1.22.0-beta.4] — 2026-10-16
 
 > Headline: **macros can talk to you** — beta testers get dialogs, forms
