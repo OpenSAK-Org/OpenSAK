@@ -4,6 +4,7 @@ switch_database, move_caches, copy_caches) against real database files in
 an isolated DatabaseManager (conftest's _isolated_app_paths)."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -301,3 +302,46 @@ def test_older_schema_is_refused_for_cache_reads(two_dbs):
     conn = sqlite3.connect(target)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
     conn.close()
+
+
+# ── Example macro refile_by_country.lua (#808) ───────────────────────────────
+
+REFILE = Path(__file__).resolve().parents[2] / "macros" / "examples" / "refile_by_country.lua"
+
+
+@pytest.mark.parametrize("create_all", [False, True])
+def test_refile_by_country_example(dbs, create_all):
+    source, _ = dbs
+    manager = get_db_manager()
+    bavaria = manager.new_database("Germany_Bavaria")
+    places = {
+        "GCR1": ("Germany", "Bavaria"),            # own state database exists
+        "GCR2": ("Germany", "Baden-Württemberg"),  # → country (or state) database, created
+        "GCR6": ("Germany", None),                 # no state → country database
+        "GCR3": ("Switzerland", None),             # → country database, created
+        "GCR4": (None, None),                      # no country: stays
+        "GCR5": ("Source", None),                  # target is the active database: stays
+    }
+    with session_for(source.path) as s:
+        for code, (country, state) in places.items():
+            s.add(Cache(gc_code=code, name=code, cache_type="Traditional Cache",
+                        latitude=47.0, longitude=8.0, country=country, state=state))
+
+    host = Host()
+    host.confirm = lambda message: True
+    source_code = REFILE.read_text(encoding="utf-8")
+    if create_all:
+        source_code = source_code.replace("local CREATE_ALL = false", "local CREATE_ALL = true", 1)
+    _, out = _run(source_code, host=host)
+
+    assert out[-1] == "Done: 4 of 4 caches moved."
+    assert set(_codes(bavaria.path)) == {"GCR1"}
+    by_name = {d.name: d for d in manager.databases}
+    if create_all:
+        assert set(_codes(by_name["Germany_Baden_Württemberg"].path)) == {"GCR2"}
+        assert set(_codes(by_name["Germany"].path)) == {"GCR6"}
+    else:
+        assert "Germany_Baden_Württemberg" not in by_name
+        assert set(_codes(by_name["Germany"].path)) == {"GCR2", "GCR6"}
+    assert set(_codes(by_name["Switzerland"].path)) == {"GCR3"}
+    assert set(_codes(source.path)) == {"GCDB1", "GCDB2", "GCDB3", "GCR4", "GCR5"}
