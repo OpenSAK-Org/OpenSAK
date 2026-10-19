@@ -52,6 +52,18 @@ def _js_arg(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _js_inline_arg(value) -> str:
+    """Serialise *value* as a JS literal for splicing into an inline <script>.
+
+    Same as :func:`_js_arg`, plus ``</`` is written as ``<\\/`` so a value
+    containing ``</script>`` cannot close the surrounding script block
+    (``\\/`` is just ``/`` inside a JS string). Used for MAP_HTML template
+    tokens, which are substituted into the page source rather than passed
+    to runJavaScript() (issue #1094).
+    """
+    return _js_arg(value).replace("</", "<\\/")
+
+
 # ── Python ↔ JavaScript bro ───────────────────────────────────────────────────
 
 class MapBridge(QObject):
@@ -238,7 +250,7 @@ L.Control.MapActions = L.Control.extend({
 
         var maxBtn = L.DomUtil.create('a', '', container);
         maxBtn.innerHTML = '⛶';
-        maxBtn.title = 'MAP_TIP_MAXIMIZE';
+        maxBtn.title = MAP_TIP_MAXIMIZE;
         maxBtn.href = '#';
         maxBtn.setAttribute('role', 'button');
         L.DomEvent.disableClickPropagation(maxBtn);
@@ -250,7 +262,7 @@ L.Control.MapActions = L.Control.extend({
         if (MAP_POPOUT_ENABLED) {
             var popBtn = L.DomUtil.create('a', '', container);
             popBtn.innerHTML = '⧉';
-            popBtn.title = 'MAP_TIP_POPOUT';
+            popBtn.title = MAP_TIP_POPOUT;
             popBtn.href = '#';
             popBtn.setAttribute('role', 'button');
             L.DomEvent.disableClickPropagation(popBtn);
@@ -742,8 +754,6 @@ class MapWidget(QWidget):
         html = MAP_HTML.replace("INIT_LAT", str(lat))
         html = html.replace("INIT_LON", str(lon))
         html = html.replace("INIT_ZOOM", "12")
-        html = html.replace("MAP_TIP_MAXIMIZE", tr("toolbar_maximize_map_tooltip"))
-        html = html.replace("MAP_TIP_POPOUT", tr("toolbar_popout_map_tooltip"))
         html = html.replace("MAP_POPOUT_ENABLED", "true" if flags.map_popout else "false")
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before
@@ -752,6 +762,17 @@ class MapWidget(QWidget):
         # source (as opposed to here) throws "hint_text_color is not
         # defined", since that function only exists on the Python side.
         html = html.replace("HINT_TEXT_COLOR", hint_text_color())
+        # Issue #1094: translated tooltips are inserted as complete JS string
+        # literals (the template has no quotes around these tokens), so a
+        # translation containing ' " \ or </script> cannot break the map's
+        # JavaScript. Substituted last, so token names that happen to occur
+        # inside a translation are never rewritten by a later replace().
+        html = html.replace(
+            "MAP_TIP_MAXIMIZE", _js_inline_arg(tr("toolbar_maximize_map_tooltip"))
+        )
+        html = html.replace(
+            "MAP_TIP_POPOUT", _js_inline_arg(tr("toolbar_popout_map_tooltip"))
+        )
         return html
 
     def _run_js(self, js: str) -> None:

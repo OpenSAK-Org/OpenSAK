@@ -247,7 +247,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE user_notes ADD COLUMN is_corrected BOOLEAN NOT NULL DEFAULT 0"
             ))
             conn.commit()
-            print("Migration: tilføjede user_notes.is_corrected")
+            logger.info("Migration: tilføjede user_notes.is_corrected")
 
         # ── Migration 2: Udvid waypoints unique constraint ────────────────────
         logger.debug("[migrations] entering migration 2 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -319,7 +319,7 @@ def _run_migrations(engine: Engine) -> None:
                 "[migrations] 2: waypoints table rebuild done (+%.2fs)",
                 time.monotonic() - _step_t0,
             )
-            print("Migration: opdaterede waypoints unique constraint til (cache_id, prefix, name)")
+            logger.info("Migration: opdaterede waypoints unique constraint til (cache_id, prefix, name)")
 
         # ── Migration 3: Tilføj county til caches ────────────────────────────
         logger.debug("[migrations] entering migration 3 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -330,7 +330,7 @@ def _run_migrations(engine: Engine) -> None:
         if "county" not in existing_caches:
             conn.execute(text("ALTER TABLE caches ADD COLUMN county VARCHAR(64)"))
             conn.commit()
-            print("Migration: tilføjede caches.county")
+            logger.info("Migration: tilføjede caches.county")
 
         # ── Migration 4: GSAK field parity (issue #33) ───────────────────────
         logger.debug("[migrations] entering migration 4 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -362,7 +362,7 @@ def _run_migrations(engine: Engine) -> None:
 
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-felter til caches: {', '.join(added)}")
+            logger.info(f"Migration: tilføjede GSAK-felter til caches: {', '.join(added)}")
 
         # ── Migration 5: Normaliser GPS Adventures cache_type varianter ─────
         logger.debug("[migrations] entering migration 5 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -376,7 +376,7 @@ def _run_migrations(engine: Engine) -> None:
         """))
         if result.rowcount:
             conn.commit()
-            print(f"Migration: normaliserede {result.rowcount} GPS Adventures cache_type værdier")
+            logger.info(f"Migration: normaliserede {result.rowcount} GPS Adventures cache_type værdier")
 
         # ── Migration 6: indexes on logs table (issue #723) ──────────────────
         logger.debug("[migrations] entering migration 6 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -415,7 +415,7 @@ def _run_migrations(engine: Engine) -> None:
                 created_log_idx.append(idx_name)
         if created_log_idx:
             conn.commit()
-            print(f"Migration: oprettede {len(created_log_idx)} indexes på logs ({', '.join(created_log_idx)})")
+            logger.info(f"Migration: oprettede {len(created_log_idx)} indexes på logs ({', '.join(created_log_idx)})")
 
         # ── Migration 7: log_count kolonne (issue #87) ───────────────────────
         logger.debug("[migrations] entering migration 7 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -444,7 +444,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.log_count og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: tilføjede caches.log_count og opdaterede {result.rowcount} caches")
 
 
         # ── Migration 8: Nano → Micro (data normalisation) ───────────────────
@@ -459,7 +459,7 @@ def _run_migrations(engine: Engine) -> None:
         ))
         if result.rowcount:
             conn.commit()
-            print(f"Migration: konverterede {result.rowcount} 'Nano' container værdier til 'Micro'")
+            logger.info(f"Migration: konverterede {result.rowcount} 'Nano' container værdier til 'Micro'")
 
 
         # ── Migration 9: parent_gc_code (issue #141) ─────────────────────────
@@ -475,7 +475,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN parent_gc_code VARCHAR(16)"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.parent_gc_code")
+            logger.info("Migration: tilføjede caches.parent_gc_code")
 
         # ── Migration 10: owner_name (issue #158) ─────────────────────────────
         logger.debug("[migrations] entering migration 10 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -490,7 +490,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN owner_name VARCHAR(128)"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.owner_name")
+            logger.info("Migration: tilføjede caches.owner_name")
 
         # ── Migration 11: last_log_date (issue #186) ─────────────────────────
         logger.debug("[migrations] entering migration 11 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -514,7 +514,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.last_log_date og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: tilføjede caches.last_log_date og opdaterede {result.rowcount} caches")
 
         # ── Migration 12: indexes for filter/sort columns (#214 phase 3) ─────
         logger.debug("[migrations] entering migration 12 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -566,7 +566,7 @@ def _run_migrations(engine: Engine) -> None:
                 created_idx.append(idx_name)
         if created_idx:
             conn.commit()
-            print(f"Migration: oprettede {len(created_idx)} indexes på caches ({', '.join(created_idx)})")
+            logger.info(f"Migration: oprettede {len(created_idx)} indexes på caches ({', '.join(created_idx)})")
 
         # ── Migration 13: location provenance columns (issue #60 phase 3) ──────
         logger.debug("[migrations] entering migration 13 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -590,7 +590,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede provenance-kolonner til caches: {', '.join(added)}")
+            logger.info(f"Migration: tilføjede provenance-kolonner til caches: {', '.join(added)}")
 
         # ── Migration 14: parent_gc_code on waypoints (issue #376) ───────────
         logger.debug("[migrations] entering migration 14 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -612,7 +612,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print("Migration: tilføjede waypoints.parent_gc_code")
+            logger.info("Migration: tilføjede waypoints.parent_gc_code")
 
         # ── Migration 15: waypoint_count on caches (issue #377) ──────────────
         logger.debug("[migrations] entering migration 15 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -633,7 +633,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print("Migration: tilføjede caches.waypoint_count")
+            logger.info("Migration: tilføjede caches.waypoint_count")
 
         # ── Migration 16: locked flag on caches (issue #202) ─────────────────
         logger.debug("[migrations] entering migration 16 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -649,7 +649,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN locked BOOLEAN NOT NULL DEFAULT 0"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.locked")
+            logger.info("Migration: tilføjede caches.locked")
 
         # ── Migration 17: trackables table (issue #491) ───────────────────────
         logger.debug("[migrations] entering migration 17 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -681,7 +681,7 @@ def _run_migrations(engine: Engine) -> None:
                 "CREATE INDEX ix_trackables_cache_id ON trackables (cache_id)"
             ))
             conn.commit()
-            print("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
+            logger.info("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
 
         # ── Migration 18: trackable_count kolonne (issue #489/#491) ──────────
         logger.debug("[migrations] entering migration 18 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -706,7 +706,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.trackable_count og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: tilføjede caches.trackable_count og opdaterede {result.rowcount} caches")
 
         # ── Migration 19: GSAK database import schema additions (issue #469) ─
         logger.debug("[migrations] entering migration 19 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -734,7 +734,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til caches: {', '.join(added)}")
+            logger.info(f"Migration: tilføjede GSAK-import-felter til caches: {', '.join(added)}")
 
         existing_wpts_18 = [
             row[1]
@@ -754,7 +754,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til waypoints: {', '.join(added)}")
+            logger.info(f"Migration: tilføjede GSAK-import-felter til waypoints: {', '.join(added)}")
 
         existing_logs_18 = [
             row[1]
@@ -772,7 +772,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til logs: {', '.join(added)}")
+            logger.info(f"Migration: tilføjede GSAK-import-felter til logs: {', '.join(added)}")
 
         # ── Migration 20: find_count on caches (issue #517) ──────────────────
         logger.debug("[migrations] entering migration 20 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -787,7 +787,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN find_count INTEGER"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.find_count")
+            logger.info("Migration: tilføjede caches.find_count")
 
         # ── Migration 21: remove leftover favorite_point column (issue #530) ─
         logger.debug("[migrations] entering migration 21 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -816,9 +816,9 @@ def _run_migrations(engine: Engine) -> None:
             if sqlite3.sqlite_version_info >= (3, 35, 0):
                 conn.execute(text("ALTER TABLE caches DROP COLUMN favorite_point"))
                 conn.commit()
-                print("Migration: fjernede efterladt caches.favorite_point kolonne")
+                logger.info("Migration: fjernede efterladt caches.favorite_point kolonne")
             else:
-                print(
+                logger.warning(
                     "Migration: kunne ikke fjerne efterladt caches.favorite_point "
                     f"kolonne — SQLite {sqlite3.sqlite_version} understøtter ikke "
                     "DROP COLUMN (kræver 3.35+). Kontakt hello@opensak.com."
@@ -898,7 +898,7 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.execute(text("PRAGMA foreign_keys=ON"))
             conn.commit()
-            print("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
+            logger.info("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
 
         # ── Migration 23: found_log_count kolonne (issue #552) ───────────────
         logger.debug("[migrations] entering migration 23 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -951,12 +951,12 @@ def _run_migrations(engine: Engine) -> None:
                     WHERE caches.found = 1
                 """), {"gc_finder_id": gc_finder_id, "gc_username": gc_username})
                 conn.commit()
-                print(
+                logger.info(
                     "Migration: tilføjede caches.found_log_count og "
                     f"opdaterede {result.rowcount} caches"
                 )
             else:
-                print(
+                logger.info(
                     "Migration: tilføjede caches.found_log_count "
                     "(intet gc_username/gc_finder_id sat — springer backfill over)"
                 )
@@ -1057,7 +1057,7 @@ def _run_migrations(engine: Engine) -> None:
 
         if added_23:
             conn.commit()
-            print(f"Migration: tilføjede caches.{', caches.'.join(added_23)}")
+            logger.info(f"Migration: tilføjede caches.{', caches.'.join(added_23)}")
 
         # ── Migration 25: partial index on caches missing a distance ─────────
         logger.debug("[migrations] entering migration 25 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -1086,7 +1086,7 @@ def _run_migrations(engine: Engine) -> None:
                 "[migrations] 26: rebuilt %s with column defaults (+%.2fs)",
                 ", ".join(rebuilt), time.monotonic() - _step_t0,
             )
-            print(f"Migration: tilføjede database-defaults til {', '.join(rebuilt)}")
+            logger.info(f"Migration: tilføjede database-defaults til {', '.join(rebuilt)}")
 
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted

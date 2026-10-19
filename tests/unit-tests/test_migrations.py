@@ -464,3 +464,21 @@ def test_missing_distance_lookup_uses_partial_index(tmp_path):
             ))
         )
     assert "ix_caches_distance_missing" in plan, plan
+
+
+def test_migrations_report_via_logger_not_stdout(tmp_path, caplog, capsys):
+    # Issue #1094: migration notices go to the app log, not print() — stdout
+    # is gone in windowed PyInstaller builds and never reaches the log file.
+    engine = _make_engine(tmp_path / "logged.db")
+    with engine.connect() as c:
+        for ddl in _OLD_SCHEMA:
+            c.execute(text(ddl))
+        c.execute(text("PRAGMA user_version = 0"))
+        c.commit()
+
+    with caplog.at_level("INFO", logger="opensak.db.database"):
+        _run_migrations(engine)
+
+    migration_records = [r for r in caplog.records if r.getMessage().startswith("Migration:")]
+    assert migration_records, "expected at least one 'Migration:' log record"
+    assert "Migration:" not in capsys.readouterr().out
