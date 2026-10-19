@@ -1809,4 +1809,16 @@ STRINGS: dict[str, str] = {
     "gsak_filter_import_where_hint":         "    Abra esse filtro em Definir filtro → Where para as ver e terminar.",
     "gsak_filter_import_skipped_header":     "{count} filtro(s) ignorado(s) — já existe um perfil com esse nome:",
     "gsak_filter_import_failed_header":      "{count} filtro(s) não puderam ser convertidos:",
+
+    "crash_dialog_title": "O OpenSAK encontrou um problema",
+    "crash_dialog_msg": "O OpenSAK encontrou um erro inesperado. Pode tentar continuar, mas é mais seguro guardar o seu trabalho e reiniciar.\n\nAjude-nos a corrigi-lo: reporte-o no GitHub ou envie-o para {email}, e anexe o ficheiro de registo.",
+    "crash_dialog_previous_msg": "O OpenSAK não foi fechado normalmente da última vez que foi executado — pode ter falhado.\n\nSe se lembrar do que estava a fazer, reporte-o no GitHub ou envie-o para {email}, e anexe o ficheiro de registo.",
+    "crash_dialog_privacy": "É exatamente isto que será partilhado. Nada é enviado automaticamente — os botões apenas abrem um issue do GitHub ou um e-mail pré-preenchido. A sua pasta pessoal, o nome de utilizador do computador e os tokens foram removidos.",
+    "crash_dialog_github": "Reportar no GitHub",
+    "crash_dialog_email": "Enviar por e-mail",
+    "crash_dialog_copy": "Copiar relatório",
+    "crash_dialog_copied": "✓ Copiado",
+    "crash_dialog_show_log": "Mostrar ficheiro de registo",
+    "crash_dialog_quit": "Sair do OpenSAK",
+    "crash_dialog_continue": "Continuar",
 }

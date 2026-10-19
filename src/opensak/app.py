@@ -280,8 +280,14 @@ def main() -> None:
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
     from opensak.logger import setup_logging
-    setup_logging()
+    log_path = setup_logging()
     logger.info("startup: main() begin, version=%s", _ver)
+
+    # Catch crashes from here on: uncaught exceptions get a report dialog
+    # instead of vanishing (no console in a windowed build), and a hard
+    # crash of the last session is detected so it can be reported below.
+    from opensak import crash_report
+    crash_report.install(log_path.parent)
     _startup_t0 = time.monotonic()
 
     # Kør macOS-sti-migreringen (issue #825) FØR NOGET ANDET rører
@@ -458,16 +464,33 @@ def main() -> None:
 
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, _close_splash)
-    # Issue #549: after the splash has gone, tell the user if the active
-    # database was backed up before being migrated during startup.
-    QTimer.singleShot(500, window.show_premigration_backup_notices)
-    # Issue #1045: the last active database was unavailable (e.g. a removed
-    # USB drive) and startup fell back to another one.
-    QTimer.singleShot(550, window.show_database_fallback_notice)
+
+    # After the splash has gone, show the startup notices one after another.
+    # Each is modal, so separate timers would fire inside the first dialog's
+    # event loop and stack the others on top of it.
+    startup_notices = [
+        # Issue #549: the active database was backed up before being
+        # migrated during startup.
+        window.show_premigration_backup_notices,
+        # Issue #1045: the last active database was unavailable (e.g. a
+        # removed USB drive) and startup fell back to another one.
+        window.show_database_fallback_notice,
+    ]
     if settings_restore_result is not None:
-        QTimer.singleShot(
-            600, lambda: window.show_settings_restore_notice(settings_restore_result)
+        startup_notices.append(
+            lambda: window.show_settings_restore_notice(settings_restore_result)
         )
+    startup_notices.append(lambda: crash_report.show_previous_crash_notice(window))
+
+    def _show_startup_notices():
+        for notice in startup_notices:
+            try:
+                notice()
+            except Exception:
+                # Report it, but don't let one broken notice hide the rest.
+                sys.excepthook(*sys.exc_info())
+
+    QTimer.singleShot(500, _show_startup_notices)
 
     window.show()
     exit_code = app.exec()

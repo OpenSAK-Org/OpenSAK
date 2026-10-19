@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: September 29, 2026*
+*Effective date: October 18, 2026*
 
 ---
 
@@ -69,6 +69,19 @@ If you set up **Pocket Queries by e-mail**, OpenSAK stores your mail server name
 
 When you check for PQ e-mails, OpenSAK connects **only to the mail server you entered**, over an encrypted connection, and verifies the server's certificate before sending your password. It reads messages to find Pocket Query attachments and, if you chose so, deletes the e-mail after a successful import. Nothing from your mailbox is sent anywhere else.
 
+### 2.5 Logs and crash reports
+
+OpenSAK writes a log file (`opensak.log`, plus `opensak.log.previous` from the session before) to its application data directory. To notice crashes, it also keeps a `session.lock` file while it runs and, if it crashes hard, writes the technical details to `crash_native.log` in the same place. None of these files leave your device on their own.
+
+When OpenSAK runs into an unexpected error, or finds at startup that the previous session crashed, it shows a crash report dialog with the **exact text** that would be shared. Your home folder path, your computer's user name, e-mail addresses and access tokens are removed from it first. Other details, such as cache or database names, may still appear, so you can check the text before sharing it.
+
+A crash report is shared **only if you choose to**:
+
+- **Report on GitHub** opens a prefilled issue in your browser, which you can still edit and must submit yourself. GitHub's privacy statement applies.
+- **Send e-mail** opens a prefilled message to hello@opensak.com in your own mail program, which you send yourself.
+
+Nothing is sent automatically, and you can simply close the dialog.
+
 ---
 
 ## 3. Data We Do Not Collect
@@ -76,7 +89,7 @@ When you check for PQ e-mails, OpenSAK connects **only to the mail server you en
 OpenSAK does not collect, transmit, or process any of the following:
 
 - Usage statistics or analytics
-- Crash reports or error telemetry
+- Crash reports or error telemetry (a crash report is only shared when you send it yourself, see 2.5)
 - Your location or GPS data
 - Your name, email address, or Geocaching.com username (except as stored in locally imported cache logs)
 - Any data about how you use the application
