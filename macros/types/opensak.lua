@@ -214,6 +214,148 @@
 ---@field last_log_date string? Date of the latest log, "YYYY-MM-DD".
 ---@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh.
 
+---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.
+---@class opensak.CacheUpdate
+---@field name? string Cache name.
+---@field type? string Cache type, e.g. "Traditional Cache".
+---@field container? string|false Container size, e.g. "Small".
+---@field lat? number Posted latitude (decimal degrees).
+---@field lon? number Posted longitude (decimal degrees).
+---@field difficulty? number|false Difficulty 1–5.
+---@field terrain? number|false Terrain 1–5.
+---@field owner? string|false Owner name.
+---@field placed_by? string|false Placed-by name as shown on the listing.
+---@field hidden? string|false Hidden date, "YYYY-MM-DD".
+---@field found? boolean Found by you.
+---@field found_date? string|false Your find date, "YYYY-MM-DD".
+---@field dnf? boolean Your latest log is a Didn't find it.
+---@field dnf_date? string|false Date of your DNF, "YYYY-MM-DD".
+---@field ftf? boolean You were first to find.
+---@field available? boolean Not disabled.
+---@field archived? boolean Archived.
+---@field premium? boolean Premium-member only.
+---@field country? string|false Country.
+---@field state? string|false State / region.
+---@field county? string|false County.
+---@field elevation? number|false Elevation in metres.
+---@field favorite_points? integer|false Favourite points (nil until known).
+---@field find_count? integer|false Number of Found it logs by anyone.
+---@field user_flag? boolean User flag.
+---@field user_sort? integer|false User sort value.
+---@field user_data? table<integer, string|false> User data fields 1–4; "" when empty.
+---@field color? string|false Colour tag, e.g. "#FF5733".
+---@field locked? boolean Locked against import changes.
+---@field watch? boolean On the watchlist.
+---@field note? string|false Your local note.
+---@field gc_note? string|false Personal note from geocaching.com.
+---@field hint? string|false Hint text as imported.
+---@field url? string|false Listing URL.
+---@field corrected? {lat: number, lon: number}|string|false Corrected coordinates; nil if the cache is not solved.
+
+---A new cache for `opensak.insert{}`.
+---@class opensak.CacheInsert: opensak.CacheUpdate
+---@field code string Cache code, e.g. "GC12345".
+---@field name string Cache name.
+---@field type string Cache type, e.g. "Traditional Cache".
+---@field lat number Posted latitude (decimal degrees).
+---@field lon number Posted longitude (decimal degrees).
+
+---A log as returned by `opensak.logs()` (a snapshot).
+---@class opensak.Log
+---@field id integer Identifies the log, for `opensak.update_log()`.
+---@field type string Log type, e.g. "Found it", "Write note".
+---@field date string? Log date "YYYY-MM-DDTHH:MM:SS" (a date alone is midnight).
+---@field finder string? Name of the logger.
+---@field finder_id string? geocaching.com id of the logger.
+---@field text string? Log text.
+---@field encoded boolean The log text is encoded (ROT13).
+---@field lat number? Coordinates of the log (e.g. Earthcache logs).
+---@field lon number? Coordinates of the log.
+---@field by_owner boolean Logged by the cache owner.
+
+---The fields `opensak.update_log()` may change; `false` clears a field that may be nil.
+---@class opensak.LogUpdate
+---@field type? string Log type, e.g. "Found it", "Write note".
+---@field date? string|false Log date "YYYY-MM-DDTHH:MM:SS" (a date alone is midnight).
+---@field finder? string|false Name of the logger.
+---@field finder_id? string|false geocaching.com id of the logger.
+---@field text? string|false Log text.
+---@field encoded? boolean The log text is encoded (ROT13).
+---@field lat? number|false Coordinates of the log (e.g. Earthcache logs).
+---@field lon? number|false Coordinates of the log.
+---@field by_owner? boolean Logged by the cache owner.
+
+---A new log for `opensak.insert_log()`.
+---@class opensak.LogInsert: opensak.LogUpdate
+---@field type string Log type, e.g. "Found it", "Write note".
+
+---A waypoint as returned by `opensak.waypoints()` (a snapshot).
+---@class opensak.Waypoint
+---@field id integer Identifies the waypoint, for `opensak.update_waypoint()`.
+---@field prefix string Waypoint prefix, e.g. "PK", "S1".
+---@field type string Waypoint type, e.g. "Parking Area", "Final Location".
+---@field name string? Name.
+---@field code string? Waypoint code, unique within the cache.
+---@field lat number? Latitude; nil if not known yet.
+---@field lon number? Longitude; nil if not known yet.
+---@field description string? Description.
+---@field comment string? Comment.
+---@field url string? URL.
+---@field date string? Date "YYYY-MM-DDTHH:MM:SS".
+---@field flag boolean User flag of the waypoint.
+
+---The fields `opensak.update_waypoint()` may change; `false` clears a field that may be nil.
+---@class opensak.WaypointUpdate
+---@field prefix? string Waypoint prefix, e.g. "PK", "S1".
+---@field type? string Waypoint type, e.g. "Parking Area", "Final Location".
+---@field name? string|false Name.
+---@field code? string|false Waypoint code, unique within the cache.
+---@field lat? number|false Latitude; nil if not known yet.
+---@field lon? number|false Longitude; nil if not known yet.
+---@field description? string|false Description.
+---@field comment? string|false Comment.
+---@field url? string|false URL.
+---@field date? string|false Date "YYYY-MM-DDTHH:MM:SS".
+---@field flag? boolean User flag of the waypoint.
+
+---A new waypoint for `opensak.insert_waypoint()`.
+---@class opensak.WaypointInsert: opensak.WaypointUpdate
+---@field prefix string Waypoint prefix, e.g. "PK", "S1".
+---@field type string Waypoint type, e.g. "Parking Area", "Final Location".
+
+---A attribute as returned by `opensak.attributes()` (a snapshot).
+---@class opensak.Attribute
+---@field id integer Identifies the attribute, for `opensak.update_attribute()`.
+---@field attribute_id integer Groundspeak attribute id, unique within the cache.
+---@field name string? Name, e.g. "Dogs allowed".
+---@field on boolean true: yes, false: no (e.g. no dogs).
+
+---The fields `opensak.update_attribute()` may change; `false` clears a field that may be nil.
+---@class opensak.AttributeUpdate
+---@field attribute_id? integer Groundspeak attribute id, unique within the cache.
+---@field name? string|false Name, e.g. "Dogs allowed".
+---@field on? boolean true: yes, false: no (e.g. no dogs).
+
+---A new attribute for `opensak.insert_attribute()`.
+---@class opensak.AttributeInsert: opensak.AttributeUpdate
+---@field attribute_id integer Groundspeak attribute id, unique within the cache.
+
+---A trackable as returned by `opensak.trackables()` (a snapshot).
+---@class opensak.Trackable
+---@field id integer Identifies the trackable, for `opensak.update_trackable()`.
+---@field ref string? Reference, e.g. "TB1234".
+---@field name string? Name.
+---@field tracking_code string? Tracking code.
+
+---The fields `opensak.update_trackable()` may change; `false` clears a field that may be nil.
+---@class opensak.TrackableUpdate
+---@field ref? string|false Reference, e.g. "TB1234".
+---@field name? string|false Name.
+---@field tracking_code? string|false Tracking code.
+
+---A new trackable for `opensak.insert_trackable()`.
+---@class opensak.TrackableInsert: opensak.TrackableUpdate
+
 ---The OpenSAK API, available as a global in every macro.
 opensak = {}
 
@@ -380,9 +522,9 @@ function opensak.codes() end
 ---@return {short: string?, long: string?, html: boolean}? # Short and long description and whether they are HTML; nil if the cache is not in the database.
 function opensak.description(code, options) end
 
----Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed; the connection itself is read-only. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+---Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: TEMP tables, views and indexes.
 ---
 ---```lua
 ---local rows = opensak.sql(
@@ -410,9 +552,9 @@ function opensak.sql(query, params, options) end
 ---@return fun(): table<string, any>? # Iterator for a generic `for`.
 function opensak.sql_each(query, params, options) end
 
----The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql().
+---The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql(). The macro's TEMP tables and views are included.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, and the tables of opensak.macro_db() as `macro.<name>`.
 ---
 ---```lua
 ---print(table.concat(opensak.tables(), ", "))
@@ -423,15 +565,31 @@ function opensak.tables(options) end
 
 ---The columns of a table or view of the active database (or the one named by the `database` option).
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: added `required`.
 ---
 ---```lua
 ---for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end
 ---```
 ---@param table string Table or view name.
 ---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
----@return {name: string, type: string}[] # Column names and SQL types, in table order.
+---@return {name: string, type: string, required: boolean}[] # Column names and SQL types, in table order; `required`: NOT NULL without a default, so an INSERT must give it.
 function opensak.columns(table, options) end
+
+---Attach the macro's own SQLite database — a file named after the macro file with the extension .db3, in the macro's folder, created if missing — to the SQL functions as schema `macro`. In it the macro has full access through opensak.sql(), sql_each() and sql_write(): CREATE, DROP, ALTER, INSERT, UPDATE and DELETE on `macro.<name>` tables, indexes, views and triggers, and `PRAGMA macro.user_version`. Its data stays between runs. One statement can read and write the active database and the macro database together, e.g. `INSERT INTO macro.seen SELECT gc_code FROM caches`; the rules for the active database stay the same. Unqualified names mean the active database first, so create with `macro.` in front. opensak.tables() lists its tables as `macro.<name>`. The macro's folder must be writable for macros, like any file a macro writes (Settings → Folder permissions; the macros folder is by default); otherwise OpenSAK asks the user to allow it, and a denial makes the call fail. The first call creates the file, even if nothing is written to it, and prints its path in the macro output. OpenSAK remembers the file, and its backups include it in `macro_databases/`, wherever it is. If the folder cannot be written the call fails; a read-only file can be read but not changed. Unlike opensak.update() it needs no approval to change databases (see Changing caches). Changes inside opensak.transaction() are kept or undone together with those of the active database. The SQL statement ATTACH itself stays refused. Cannot be called inside opensak.transaction(); stays attached after opensak.switch_database(). The macro must be saved, as the file is named after it. In a macro started with opensak.run_macro() it attaches the called macro's own file instead; the caller's file is attached again when the called macro returns.
+---
+---Since API version 3.
+---
+---```lua
+---opensak.macro_db()
+---opensak.sql("CREATE TABLE IF NOT EXISTS macro.seen (code TEXT PRIMARY KEY, at TEXT)")
+---opensak.sql("INSERT OR IGNORE INTO macro.seen SELECT gc_code, date('now') FROM caches WHERE found = 1")
+---for _, r in ipairs(opensak.sql("SELECT c.gc_code, s.at FROM caches c "
+---        .. "JOIN macro.seen s ON s.code = c.gc_code LIMIT 5")) do
+---    print(r.gc_code, r.at)
+---end
+---```
+---@return string # The path of the macro database file.
+function opensak.macro_db() end
 
 ---All databases in OpenSAK's database list, sorted by name.
 ---
@@ -540,6 +698,289 @@ function opensak.set_corrected(code, lat, lon) end
 ---@param code string GC code, e.g. "GC12345".
 ---@return boolean # false if the cache is not in the database.
 function opensak.clear_corrected(code) end
+
+---Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })
+---for c in opensak.caches{ found = true, fields = {"color"} } do
+---    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end
+---end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param fields opensak.CacheUpdate The fields to change.
+---@return boolean # false if the cache is not in the database.
+function opensak.update(code, fields) end
+
+---Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon` are required; any other writable field may be given too (see Changing caches). Fails if the code is already in the database. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.insert{ code = "GC12345", name = "My bonus", type = "Unknown",
+---                lat = 47.36872, lon = 8.54093, user_flag = true }
+---```
+---@param fields opensak.CacheInsert The new cache's fields.
+---@return string # The cache code as stored (upper case).
+function opensak.insert(fields) end
+
+---The logs of a cache, each with its `id` for opensak.update_log() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
+---
+---Since API version 3.
+---
+---```lua
+---for _, l in ipairs(opensak.logs("GC12345") or {}) do
+---    print(l.date, l.type, l.finder)
+---end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
+---@return opensak.Log[]? # nil if the cache is not in the database.
+function opensak.logs(code, options) end
+
+---Add a log to a cache in the active database; `type` required. OpenSAK updates the cache's log counts and dates. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---local id = opensak.insert_log("GC12345", { type = "Write note", date = "2026-10-11",
+---                                          finder = "me", text = "Final solved" })
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param fields opensak.LogInsert The new log's fields.
+---@return integer? # The new log's id; nil if the cache is not in the database.
+function opensak.insert_log(code, fields) end
+
+---Change fields of a log in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, l in ipairs(opensak.logs("GC12345")) do
+---    if l.type == "Write note" then opensak.update_log(l.id, { text = "checked" }) end
+---end
+---```
+---@param id integer The log's id from opensak.logs().
+---@param fields opensak.LogUpdate The fields to change.
+---@return boolean # false if there is no log with this id.
+function opensak.update_log(id, fields) end
+
+---The waypoints of a cache, each with its `id` for opensak.update_waypoint() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
+---
+---Since API version 3.
+---
+---```lua
+---for _, w in ipairs(opensak.waypoints("GC12345") or {}) do
+---    print(w.prefix, w.type, w.lat, w.lon)
+---end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
+---@return opensak.Waypoint[]? # nil if the cache is not in the database.
+function opensak.waypoints(code, options) end
+
+---Add a waypoint to a cache in the active database; `prefix`, `type` required. OpenSAK updates the cache's waypoint count. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.insert_waypoint("GC12345", { prefix = "FN", type = "Final Location",
+---                                     name = "Final", lat = 47.36872, lon = 8.54093 })
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param fields opensak.WaypointInsert The new waypoint's fields.
+---@return integer? # The new waypoint's id; nil if the cache is not in the database.
+function opensak.insert_waypoint(code, fields) end
+
+---Change fields of a waypoint in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, w in ipairs(opensak.waypoints("GC12345")) do
+---    if w.prefix == "PK" then opensak.update_waypoint(w.id, { comment = "free parking" }) end
+---end
+---```
+---@param id integer The waypoint's id from opensak.waypoints().
+---@param fields opensak.WaypointUpdate The fields to change.
+---@return boolean # false if there is no waypoint with this id.
+function opensak.update_waypoint(id, fields) end
+
+---The attributes of a cache, each with its `id` for opensak.update_attribute() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
+---
+---Since API version 3.
+---
+---```lua
+---for _, a in ipairs(opensak.attributes("GC12345") or {}) do
+---    print(a.attribute_id, a.name, a.on)
+---end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
+---@return opensak.Attribute[]? # nil if the cache is not in the database.
+function opensak.attributes(code, options) end
+
+---Add a attribute to a cache in the active database; `attribute_id` required. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.insert_attribute("GC12345", { attribute_id = 1, name = "Dogs", on = false })
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param fields opensak.AttributeInsert The new attribute's fields.
+---@return integer? # The new attribute's id; nil if the cache is not in the database.
+function opensak.insert_attribute(code, fields) end
+
+---Change fields of a attribute in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, a in ipairs(opensak.attributes("GC12345")) do
+---    if a.attribute_id == 1 then opensak.update_attribute(a.id, { on = true }) end
+---end
+---```
+---@param id integer The attribute's id from opensak.attributes().
+---@param fields opensak.AttributeUpdate The fields to change.
+---@return boolean # false if there is no attribute with this id.
+function opensak.update_attribute(id, fields) end
+
+---The trackables of a cache, each with its `id` for opensak.update_trackable() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
+---
+---Since API version 3.
+---
+---```lua
+---for _, t in ipairs(opensak.trackables("GC12345") or {}) do print(t.ref, t.name) end
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param options? opensak.ReadOptions `database`: read another database instead of the active one.
+---@return opensak.Trackable[]? # nil if the cache is not in the database.
+function opensak.trackables(code, options) end
+
+---Add a trackable to a cache in the active database. OpenSAK updates the cache's trackable count. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.insert_trackable("GC12345", { ref = "TB1234", name = "My travel bug" })
+---```
+---@param code string GC code, e.g. "GC12345".
+---@param fields opensak.TrackableInsert The new trackable's fields.
+---@return integer? # The new trackable's id; nil if the cache is not in the database.
+function opensak.insert_trackable(code, fields) end
+
+---Change fields of a trackable in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, t in ipairs(opensak.trackables("GC12345")) do
+---    if t.ref == "TB1234" then opensak.update_trackable(t.id, { name = "Renamed" }) end
+---end
+---```
+---@param id integer The trackable's id from opensak.trackables().
+---@param fields opensak.TrackableUpdate The fields to change.
+---@return boolean # false if there is no trackable with this id.
+function opensak.update_trackable(id, fields) end
+
+---Run one INSERT or UPDATE statement (SQLite) against the active database — the power tool for bulk work, changing many rows with one statement. For a single cache or row, prefer `opensak.update()`, `insert{}`, `insert_<x>()` and `update_<x>()`, which check each field and need no knowledge of the schema (see Changing caches). Only the cache tables can be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`, `waypoints`); nothing can be deleted, and an UPDATE may not set the keys or the columns OpenSAK maintains itself (see Changing caches). OpenSAK recalculates distances, counts and log dates of the caches the statement touched — inside opensak.transaction() once at its end (see opensak.resync()). An INSERT only needs the real data: the columns opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`, `latitude` and `longitude` for a cache (see Changing caches); every other column gets its default. Each statement is committed on its own (or with the surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and the like are refused; use opensak.transaction(). Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---local n = opensak.sql_write(
+---  "UPDATE caches SET user_data_1 = ? WHERE country = ? AND found = 0",
+---  { "todo", "Switzerland" })
+---print(n .. " caches marked")
+----- a found log: only cache_id and log_type are required
+---opensak.sql_write([[
+---  INSERT INTO logs (cache_id, log_type, log_date, finder, text)
+---  SELECT id, 'Found it', ?, ?, ? FROM caches WHERE gc_code = ?]],
+---  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })
+---```
+---@param query string One INSERT or UPDATE statement.
+---@param params? table As for opensak.sql().
+---@return integer # Number of rows inserted or updated.
+function opensak.sql_write(query, params) end
+
+---Run *fn* as one transaction: every change it makes to the active database (opensak.update, insert, sql_write, set_corrected, clear_corrected) is kept when *fn* returns, and all of it is undone if *fn* raises an error, which opensak.transaction() then raises again. Many changes in one transaction are also faster than the same changes committed one by one. Inside *fn*, opensak.cache, caches, sql and the like see the changes already made, except the columns OpenSAK maintains (counts, log dates, distance), which are recalculated once before the commit or when opensak.resync() is called; everything else in OpenSAK, exports included, sees them only afterwards. A transaction inside another one is undone on its own on an error, and kept with the outer one otherwise. opensak.switch_database, move_caches and copy_caches cannot be used inside. Needs the user's permission like opensak.update(). A macro that ends inside a transaction (e.g. cancelled) keeps none of it.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---local n = opensak.transaction(function()
+---    local n = 0
+---    for c in opensak.caches{ found = true, fields = {"code"} } do
+---        opensak.update(c.code, { user_flag = true })
+---        n = n + 1
+---    end
+---    return n
+---end)
+---print(n .. " caches flagged")
+----- error() inside the function undoes everything it changed:
+---local ok, err = pcall(opensak.transaction, function()
+---    opensak.update("GC12345", { user_flag = true })
+---    error("changed my mind")
+---end)
+---```
+---@param fn fun() The function to run.
+---@return any ... # What *fn* returns.
+function opensak.transaction(fn) end
+
+---Whether the macro is inside opensak.transaction().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---if not opensak.in_transaction() then print("each change is committed on its own") end
+---```
+---@return boolean # true inside opensak.transaction().
+function opensak.in_transaction() end
+
+---Recalculate now the columns OpenSAK maintains itself (distance and bearing, log, waypoint and trackable counts, log dates) for the caches changed so far in the open opensak.transaction(). Inside a transaction they are recalculated only once, just before the commit, which makes many writes much faster; until then opensak.cache, sql and the like still see the old values. Call resync() when a later read inside the transaction depends on them. Outside a transaction it does nothing, as every write is recalculated before its own commit.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.transaction(function()
+---    for i = 1, 3 do opensak.insert_log("GC12345", { type = "Write note" }) end
+---    opensak.resync()
+---    print(opensak.cache("GC12345").log_count)
+---end)
+---```
+---@return integer # Number of caches recalculated (0 outside a transaction).
+function opensak.resync() end
 
 ---Read a CSV file (UTF-8) into an array of rows keyed by the header line. A relative path is resolved against the macro file's folder. If the file's folder has no read permission (Settings → Folder permissions), OpenSAK asks the user to allow it for this run or always. The file may be at most 10 MB.
 ---

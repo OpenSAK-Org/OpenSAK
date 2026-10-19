@@ -225,6 +225,12 @@
 			<Overload retVal="integer" descr="The API version of this OpenSAK build. Each function lists the version it was&#x0a;added in.&#x0a;Returns integer — The API version.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.attributes" func="yes">
+			<Overload retVal="opensak.Attribute[]?" descr="The attributes of a cache, each with its `id` for opensak.update_attribute() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Attribute[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.cache" func="yes">
 			<Overload retVal="opensak.Cache?" descr="One cache as a table (see Cache fields). It is a snapshot: changing it changes&#x0a;nothing in the database.&#x0a;Returns opensak.Cache? — The cache, or nil if it is not in the database.">
 				<Param name="code: string" />
@@ -270,7 +276,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.columns" func="yes">
-			<Overload retVal="{name: string, type: string}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option).&#x0a;Returns {name: string, type: string}[] — Column names and SQL types, in table&#x0a;order.">
+			<Overload retVal="{name: string, type: string, required: boolean}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option).&#x0a;Returns {name: string, type: string, required: boolean}[] — Column names and SQL&#x0a;types, in table order; `required`: NOT NULL without a default, so an INSERT must&#x0a;give it.">
 				<Param name="table: string" />
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
@@ -459,6 +465,10 @@
 				<Param name="spec: opensak.FormSpec" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.in_transaction" func="yes">
+			<Overload retVal="boolean" descr="Whether the macro is inside opensak.transaction().&#x0a;Returns boolean — true inside opensak.transaction().">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.input" func="yes">
 			<Overload retVal="string?" descr="Ask for one line of text.&#x0a;Returns string? — The text entered, or nil if cancelled.">
 				<Param name="prompt: string" />
@@ -466,9 +476,48 @@
 				<Param name="[title: string]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.insert" func="yes">
+			<Overload retVal="string" descr="Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon`&#x0a;are required; any other writable field may be given too (see Changing caches).&#x0a;Fails if the code is already in the database. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns string — The cache code as stored (upper case).">
+				<Param name="fields: opensak.CacheInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_attribute" func="yes">
+			<Overload retVal="integer?" descr="Add a attribute to a cache in the active database; `attribute_id` required.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns integer? — The new attribute's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.AttributeInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_log" func="yes">
+			<Overload retVal="integer?" descr="Add a log to a cache in the active database; `type` required. OpenSAK updates&#x0a;the cache's log counts and dates. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new log's id; nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.LogInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_trackable" func="yes">
+			<Overload retVal="integer?" descr="Add a trackable to a cache in the active database. OpenSAK updates the cache's&#x0a;trackable count. Needs the user's permission like opensak.update().&#x0a;Returns integer? — The new trackable's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.TrackableInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_waypoint" func="yes">
+			<Overload retVal="integer?" descr="Add a waypoint to a cache in the active database; `prefix`, `type` required.&#x0a;OpenSAK updates the cache's waypoint count. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new waypoint's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.WaypointInsert" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.log" func="yes">
 			<Overload descr="Write a message to OpenSAK's log file and the macro output. Run with `opensak&#x0a;--run-macro`, it goes to stderr while print() goes to stdout.">
 				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.logs" func="yes">
+			<Overload retVal="opensak.Log[]?" descr="The logs of a cache, each with its `id` for opensak.update_log() and the fields&#x0a;listed under Logs, waypoints, attributes and trackables. Missing data is nil.&#x0a;Returns opensak.Log[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.macro_db" func="yes">
+			<Overload retVal="string" descr="Attach the macro's own SQLite database — a file named after the macro file with&#x0a;the extension .db3, in the macro's folder, created if missing — to the SQL&#x0a;functions as schema `macro`. In it the macro has full access through&#x0a;opensak.sql(), sql_each() and sql_write(): CREATE, DROP, ALTER, INSERT, UPDATE&#x0a;and DELETE on `macro.&lt;name&gt;` tables, indexes, views and triggers, and `PRAGMA&#x0a;macro.user_version`. Its data stays between runs. One statement can read and&#x0a;write the active database and the macro database together, e.g. `INSERT INTO&#x0a;macro.seen SELECT gc_code FROM caches`; the rules for the active database stay&#x0a;the same. Unqualified names mean the active database first, so create with&#x0a;`macro.` in front. opensak.tables() lists its tables as `macro.&lt;name&gt;`. The&#x0a;macro's folder must be writable for macros, like any file a macro writes&#x0a;(Settings → Folder permissions; the macros folder is by default); otherwise&#x0a;OpenSAK asks the user to allow it, and a denial makes the call fail. The first&#x0a;call creates the file, even if nothing is written to it, and prints its path in&#x0a;the macro output. OpenSAK remembers the file, and its backups include it in&#x0a;`macro_databases/`, wherever it is. If the folder cannot be written the call&#x0a;fails; a read-only file can be read but not changed. Unlike opensak.update() it&#x0a;needs no approval to change databases (see Changing caches). Changes inside&#x0a;opensak.transaction() are kept or undone together with those of the active&#x0a;database. The SQL statement ATTACH itself stays refused. Cannot be called inside&#x0a;opensak.transaction(); stays attached after opensak.switch_database(). The macro&#x0a;must be saved, as the file is named after it. In a macro started with&#x0a;opensak.run_macro() it attaches the called macro's own file instead; the&#x0a;caller's file is attached again when the called macro returns.&#x0a;Returns string — The path of the macro database file.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.macros_dir" func="yes">
@@ -540,6 +589,10 @@
 			<Overload descr="Redraw the cache list, detail panel and map now. Changes a macro makes are&#x0a;otherwise shown when it ends.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.resync" func="yes">
+			<Overload retVal="integer" descr="Recalculate now the columns OpenSAK maintains itself (distance and bearing, log,&#x0a;waypoint and trackable counts, log dates) for the caches changed so far in the&#x0a;open opensak.transaction(). Inside a transaction they are recalculated only&#x0a;once, just before the commit, which makes many writes much faster; until then&#x0a;opensak.cache, sql and the like still see the old values. Call resync() when a&#x0a;later read inside the transaction depends on them. Outside a transaction it does&#x0a;nothing, as every write is recalculated before its own commit.&#x0a;Returns integer — Number of caches recalculated (0 outside a transaction).">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.run_macro" func="yes">
 			<Overload retVal="any..." descr="Run another macro and wait until it has finished, e.g. to chain several macros&#x0a;from one control macro. A relative path is looked up in the folder of the&#x0a;calling macro, and `.lua` is added when the name has no extension. The called&#x0a;macro gets its own global variables; values are passed as extra arguments (read&#x0a;them with `...`) and come back as its return values. An error in it stops the&#x0a;calling macro too, unless caught with `pcall`. Macros run this way share the&#x0a;run's limits, sleep time and folder approvals; they may call each other at most&#x0a;10 levels deep.&#x0a;Returns any... — What the macro returns.">
 				<Param name="file: string" />
@@ -592,7 +645,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.sql" func="yes">
-			<Overload retVal="table&lt;string, any&gt;[]" descr="Run a read-only SQL query (SQLite) against the active database (or the one named&#x0a;by the `database` option) and return all rows. Only reading statements are&#x0a;allowed; the connection itself is read-only. Column names follow the database&#x0a;schema, which may change between versions (see opensak.tables() and&#x0a;opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At&#x0a;most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60&#x0a;s.&#x0a;Returns table&lt;string, any&gt;[] — One table per row, keyed by column name.">
+			<Overload retVal="table&lt;string, any&gt;[]" descr="Run a read-only SQL query (SQLite) against the active database (or the one named&#x0a;by the `database` option) and return all rows. Only reading statements are&#x0a;allowed, except on TEMP tables: a macro may create, fill, change and drop its&#x0a;own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any&#x0a;query, opensak.sql_write() included. They are never stored in the database and&#x0a;are gone when the macro ends or calls opensak.switch_database(); changes to them&#x0a;inside opensak.transaction() are undone with it. A TEMP table may not take the&#x0a;name of a table of the database. Column names follow the database schema, which&#x0a;may change between versions (see opensak.tables() and opensak.columns()). Use&#x0a;`AS` to name computed columns. NULL values are nil. At most 100,000 rows; use&#x0a;opensak.sql_each() for more. A query is aborted after 60 s.&#x0a;Returns table&lt;string, any&gt;[] — One table per row, keyed by column name.">
 				<Param name="query: string" />
 				<Param name="[params: table]" />
 				<Param name="[options: opensak.ReadOptions]" />
@@ -605,13 +658,19 @@
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.sql_write" func="yes">
+			<Overload retVal="integer" descr="Run one INSERT or UPDATE statement (SQLite) against the active database — the&#x0a;power tool for bulk work, changing many rows with one statement. For a single&#x0a;cache or row, prefer `opensak.update()`, `insert{}`, `insert_&lt;x&gt;()` and&#x0a;`update_&lt;x&gt;()`, which check each field and need no knowledge of the schema (see&#x0a;Changing caches). Only the cache tables can be changed (`attributes`, `caches`,&#x0a;`logs`, `trackables`, `user_notes`, `waypoints`); nothing can be deleted, and an&#x0a;UPDATE may not set the keys or the columns OpenSAK maintains itself (see&#x0a;Changing caches). OpenSAK recalculates distances, counts and log dates of the&#x0a;caches the statement touched — inside opensak.transaction() once at its end (see&#x0a;opensak.resync()). An INSERT only needs the real data: the columns&#x0a;opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`,&#x0a;`latitude` and `longitude` for a cache (see Changing caches); every other column&#x0a;gets its default. Each statement is committed on its own (or with the&#x0a;surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and&#x0a;the like are refused; use opensak.transaction(). Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns integer — Number of rows inserted or updated.">
+				<Param name="query: string" />
+				<Param name="[params: table]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.switch_database" func="yes">
 			<Overload descr="Make another database the active one, as the toolbar dropdown does. The active&#x0a;filter is cleared.">
 				<Param name="name: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.tables" func="yes">
-			<Overload retVal="string[]" descr="The tables and views of the active database (or the one named by the `database`&#x0a;option), for use with opensak.sql().&#x0a;Returns string[] — Table and view names, sorted.">
+			<Overload retVal="string[]" descr="The tables and views of the active database (or the one named by the `database`&#x0a;option), for use with opensak.sql(). The macro's TEMP tables and views are&#x0a;included.&#x0a;Returns string[] — Table and view names, sorted.">
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
@@ -645,8 +704,55 @@
 				<Param name="text: string" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.trackables" func="yes">
+			<Overload retVal="opensak.Trackable[]?" descr="The trackables of a cache, each with its `id` for opensak.update_trackable() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Trackable[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.transaction" func="yes">
+			<Overload retVal="any..." descr="Run *fn* as one transaction: every change it makes to the active database&#x0a;(opensak.update, insert, sql_write, set_corrected, clear_corrected) is kept when&#x0a;*fn* returns, and all of it is undone if *fn* raises an error, which&#x0a;opensak.transaction() then raises again. Many changes in one transaction are&#x0a;also faster than the same changes committed one by one. Inside *fn*,&#x0a;opensak.cache, caches, sql and the like see the changes already made, except the&#x0a;columns OpenSAK maintains (counts, log dates, distance), which are recalculated&#x0a;once before the commit or when opensak.resync() is called; everything else in&#x0a;OpenSAK, exports included, sees them only afterwards. A transaction inside&#x0a;another one is undone on its own on an error, and kept with the outer one&#x0a;otherwise. opensak.switch_database, move_caches and copy_caches cannot be used&#x0a;inside. Needs the user's permission like opensak.update(). A macro that ends&#x0a;inside a transaction (e.g. cancelled) keeps none of it.&#x0a;Returns any... — What *fn* returns.">
+				<Param name="fn: fun()" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Before a macro's first change, OpenSAK asks the&#x0a;user to allow that macro (see Changing caches).&#x0a;Returns boolean — false if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.CacheUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_attribute" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a attribute in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no attribute with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.AttributeUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_log" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a log in the active database; only the given fields change, and&#x0a;`false` clears a field that is not required or a boolean. Needs the user's&#x0a;permission like opensak.update().&#x0a;Returns boolean — false if there is no log with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.LogUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_trackable" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a trackable in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no trackable with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.TrackableUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_waypoint" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a waypoint in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no waypoint with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.WaypointUpdate" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.version" func="yes">
 			<Overload retVal="string" descr="The OpenSAK version this macro runs in.&#x0a;Returns string — Version, e.g. &quot;1.21.0-beta.3&quot;.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoints" func="yes">
+			<Overload retVal="opensak.Waypoint[]?" descr="The waypoints of a cache, each with its `id` for opensak.update_waypoint() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Waypoint[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="or" />
