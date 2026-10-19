@@ -699,7 +699,7 @@ function opensak.set_corrected(code, lat, lon) end
 ---@return boolean # false if the cache is not in the database.
 function opensak.clear_corrected(code) end
 
----Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+---Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
 ---
 ---Since API version 3.
 ---
@@ -729,6 +729,24 @@ function opensak.update(code, fields) end
 ---@param fields opensak.CacheInsert The new cache's fields.
 ---@return string # The cache code as stored (upper case).
 function opensak.insert(fields) end
+
+---Delete caches from the active database, each with its logs, waypoints, attributes, trackables and user note, like Waypoint → Delete cache. Takes one GC code, or a list of them, e.g. opensak.codes() for the caches of the active filter. Deleted caches cannot be restored from inside OpenSAK (only from a backup); at the end of the run the macro output says how many caches were deleted. The cache list and map drop them after the macro. Locked caches are deleted too: the lock only protects from imports. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for c in opensak.caches{ archived = true, fields = {"code"} } do
+---    opensak.delete(c.code)
+---end
+----- all caches of the active filter at once:
+---print(opensak.delete(opensak.codes()) .. " caches deleted")
+---```
+---@param code string GC code, e.g. "GC12345".
+---@return boolean|integer # For one code: false if the cache is not in the database. For a list: the number of caches deleted.
+---@overload fun(codes: string[]): boolean|integer
+function opensak.delete(code) end
 
 ---The logs of a cache, each with its `id` for opensak.update_log() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
 ---
@@ -775,6 +793,21 @@ function opensak.insert_log(code, fields) end
 ---@return boolean # false if there is no log with this id.
 function opensak.update_log(id, fields) end
 
+---Delete a log from the active database. OpenSAK updates the cache's log counts and dates. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, l in ipairs(opensak.logs("GC12345")) do
+---    if l.type == "Write note" and l.finder == "me" then opensak.delete_log(l.id) end
+---end
+---```
+---@param id integer The log's id from opensak.logs().
+---@return boolean # false if there is no log with this id.
+function opensak.delete_log(id) end
+
 ---The waypoints of a cache, each with its `id` for opensak.update_waypoint() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
 ---
 ---Since API version 3.
@@ -820,6 +853,21 @@ function opensak.insert_waypoint(code, fields) end
 ---@return boolean # false if there is no waypoint with this id.
 function opensak.update_waypoint(id, fields) end
 
+---Delete a waypoint from the active database. OpenSAK updates the cache's waypoint count. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, w in ipairs(opensak.waypoints("GC12345")) do
+---    if w.prefix == "FN" then opensak.delete_waypoint(w.id) end
+---end
+---```
+---@param id integer The waypoint's id from opensak.waypoints().
+---@return boolean # false if there is no waypoint with this id.
+function opensak.delete_waypoint(id) end
+
 ---The attributes of a cache, each with its `id` for opensak.update_attribute() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
 ---
 ---Since API version 3.
@@ -864,6 +912,21 @@ function opensak.insert_attribute(code, fields) end
 ---@return boolean # false if there is no attribute with this id.
 function opensak.update_attribute(id, fields) end
 
+---Delete a attribute from the active database. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, a in ipairs(opensak.attributes("GC12345")) do
+---    if a.attribute_id == 1 then opensak.delete_attribute(a.id) end
+---end
+---```
+---@param id integer The attribute's id from opensak.attributes().
+---@return boolean # false if there is no attribute with this id.
+function opensak.delete_attribute(id) end
+
 ---The trackables of a cache, each with its `id` for opensak.update_trackable() and the fields listed under Logs, waypoints, attributes and trackables. Missing data is nil.
 ---
 ---Since API version 3.
@@ -906,7 +969,22 @@ function opensak.insert_trackable(code, fields) end
 ---@return boolean # false if there is no trackable with this id.
 function opensak.update_trackable(id, fields) end
 
----Run one INSERT or UPDATE statement (SQLite) against the active database — the power tool for bulk work, changing many rows with one statement. For a single cache or row, prefer `opensak.update()`, `insert{}`, `insert_<x>()` and `update_<x>()`, which check each field and need no knowledge of the schema (see Changing caches). Only the cache tables can be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`, `waypoints`); nothing can be deleted, and an UPDATE may not set the keys or the columns OpenSAK maintains itself (see Changing caches). OpenSAK recalculates distances, counts and log dates of the caches the statement touched — inside opensak.transaction() once at its end (see opensak.resync()). An INSERT only needs the real data: the columns opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`, `latitude` and `longitude` for a cache (see Changing caches); every other column gets its default. Each statement is committed on its own (or with the surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and the like are refused; use opensak.transaction(). Needs the user's permission like opensak.update().
+---Delete a trackable from the active database. OpenSAK updates the cache's trackable count. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---for _, t in ipairs(opensak.trackables("GC12345")) do
+---    if t.ref == "TB1234" then opensak.delete_trackable(t.id) end
+---end
+---```
+---@param id integer The trackable's id from opensak.trackables().
+---@return boolean # false if there is no trackable with this id.
+function opensak.delete_trackable(id) end
+
+---Run one INSERT, UPDATE or DELETE statement (SQLite) against the active database — the power tool for bulk work, changing many rows with one statement. For a single cache or row, prefer `opensak.update()`, `insert{}`, `delete()`, `insert_<x>()`, `update_<x>()` and `delete_<x>()`, which check each field and need no knowledge of the schema (see Changing caches). Only the cache tables can be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`, `waypoints`), and an UPDATE may not set the keys or the columns OpenSAK maintains itself (see Changing caches). Deleting a cache also deletes its logs, waypoints, attributes, trackables and user note, as opensak.delete() does. Locked caches are changed and deleted like any other (add `AND locked = 0` to leave them alone). REPLACE (`INSERT OR REPLACE`, `REPLACE INTO`, …) is refused, as it would delete those too; to update or insert, use `INSERT … ON CONFLICT (gc_code) DO UPDATE SET …`. OpenSAK recalculates distances, counts and log dates of the caches the statement touched — inside opensak.transaction() once at its end (see opensak.resync()). An INSERT only needs the real data: the columns opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`, `latitude` and `longitude` for a cache (see Changing caches); every other column gets its default. Each statement is committed on its own (or with the surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and the like are refused; use opensak.transaction(). Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
 ---
@@ -922,13 +1000,17 @@ function opensak.update_trackable(id, fields) end
 ---  INSERT INTO logs (cache_id, log_type, log_date, finder, text)
 ---  SELECT id, 'Found it', ?, ?, ? FROM caches WHERE gc_code = ?]],
 ---  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })
+----- keep only the 5 newest logs of each cache
+---opensak.sql_write([[DELETE FROM logs WHERE id NOT IN (
+---  SELECT l2.id FROM logs l2 WHERE l2.cache_id = logs.cache_id
+---  ORDER BY l2.log_date DESC LIMIT 5)]])
 ---```
----@param query string One INSERT or UPDATE statement.
+---@param query string One INSERT, UPDATE or DELETE statement.
 ---@param params? table As for opensak.sql().
----@return integer # Number of rows inserted or updated.
+---@return integer # Number of rows inserted, updated or deleted (without the rows deleted along with a cache).
 function opensak.sql_write(query, params) end
 
----Run *fn* as one transaction: every change it makes to the active database (opensak.update, insert, sql_write, set_corrected, clear_corrected) is kept when *fn* returns, and all of it is undone if *fn* raises an error, which opensak.transaction() then raises again. Many changes in one transaction are also faster than the same changes committed one by one. Inside *fn*, opensak.cache, caches, sql and the like see the changes already made, except the columns OpenSAK maintains (counts, log dates, distance), which are recalculated once before the commit or when opensak.resync() is called; everything else in OpenSAK, exports included, sees them only afterwards. A transaction inside another one is undone on its own on an error, and kept with the outer one otherwise. opensak.switch_database, move_caches and copy_caches cannot be used inside. Needs the user's permission like opensak.update(). A macro that ends inside a transaction (e.g. cancelled) keeps none of it.
+---Run *fn* as one transaction: every change it makes to the active database (opensak.update, insert, delete, sql_write, set_corrected, clear_corrected and the functions for logs, waypoints, ...) is kept when *fn* returns, and all of it is undone if *fn* raises an error, which opensak.transaction() then raises again. Many changes in one transaction are also faster than the same changes committed one by one. Inside *fn*, opensak.cache, caches, sql and the like see the changes already made, except the columns OpenSAK maintains (counts, log dates, distance), which are recalculated once before the commit or when opensak.resync() is called; everything else in OpenSAK, exports included, sees them only afterwards. A transaction inside another one is undone on its own on an error, and kept with the outer one otherwise. opensak.switch_database, move_caches and copy_caches cannot be used inside. Needs the user's permission like opensak.update(). A macro that ends inside a transaction (e.g. cancelled) keeps none of it.
 ---
 ---Since API version 3.
 ---
