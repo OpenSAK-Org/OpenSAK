@@ -422,6 +422,14 @@ def main() -> None:
         set_progress_callback(None)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
 
+    # #1050: record when OpenSAK was first started (for Help → About). Only
+    # does real work once — later starts just read the stored date.
+    from opensak.usage import ensure_first_started
+    try:
+        ensure_first_started(db.path for db in manager.databases)
+    except Exception:
+        logger.warning("startup: could not record first-start date", exc_info=True)
+
     # #1012: keep the LuaLS stub and .luarc.json in the macros folder
     # current, so an external editor completes opensak.* after an update.
     import opensak.utils.flags as flags

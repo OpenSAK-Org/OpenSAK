@@ -652,8 +652,9 @@ STRINGS: dict[str, str] = {
         "<p>Byggt med Python och PySide6.</p>"
         "<p>Boundary data &copy; OpenStreetMap contributors and GSAK, "
         "licensed <a href='https://opendatacommons.org/licenses/odbl/'>ODbL</a>.</p>"
-        "<p><a href='https://github.com/AgreeDK/opensak'>"
-        "github.com/AgreeDK/opensak</a></p>",
+        "<p><a href='https://github.com/OpenSAK-Org/OpenSAK'>"
+        "github.com/OpenSAK-Org/OpenSAK</a></p>",
+    "about_using_since":            "Har använt OpenSAK sedan {date} — dag {day}",
     # ── Waypoint dialog — validation ──────────────────────────────────────────
     "wp_tab_basic":                 "Grund",
     "wp_tab_status":                "Status",

@@ -3768,11 +3768,19 @@ class MainWindow(QMainWindow):
 
     def _show_about(self) -> None:
         from opensak import __version__
-        QMessageBox.about(
-            self,
-            tr("about_title"),
-            tr("about_text", version=__version__),
-        )
+        from opensak.gui.date_format import format_date
+        from opensak.usage import day_number, first_started
+        text = tr("about_text", version=__version__)
+        # Issue #1050: "Using OpenSAK since <date> — day N", like GSAK.
+        first = first_started()
+        if first is not None:
+            since = tr(
+                "about_using_since",
+                date=format_date(first, get_settings().date_format),
+                day=day_number(first),
+            )
+            text += f"<p><i>{since}</i></p>"
+        QMessageBox.about(self, tr("about_title"), text)
 
     def _open_user_guide(self) -> None:
         """Open the online User Guide in the default browser."""
