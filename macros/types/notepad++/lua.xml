@@ -798,6 +798,13 @@
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.write_text" func="yes">
+			<Overload retVal="string" descr="Write *text* to a file as UTF-8 and return the file written. A relative path is&#x0a;resolved against the macro file's folder. The folder needs write permission (the&#x0a;OpenSAK temp folder, opensak.temp_dir(), has it by default); for an unapproved&#x0a;one the user is asked first. Only these file types can be written: .txt .csv&#x0a;.tsv .html .htm .svg .md .json. An existing file is replaced, or extended with&#x0a;`append = true`. At most 20 MB.&#x0a;Returns string — The file written (full path).">
+				<Param name="path: string" />
+				<Param name="text: string" />
+				<Param name="[options: {append?: boolean}]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="or" />
 		<KeyWord name="os" />
 		<KeyWord name="os.clock" func="yes">

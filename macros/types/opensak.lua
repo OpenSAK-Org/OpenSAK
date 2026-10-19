@@ -1120,6 +1120,21 @@ function opensak.resync() end
 ---@return table<string, string>[] # One table per data row, keyed by header.
 function opensak.read_csv(path, sep) end
 
+---Write *text* to a file as UTF-8 and return the file written. A relative path is resolved against the macro file's folder. The folder needs write permission (the OpenSAK temp folder, opensak.temp_dir(), has it by default); for an unapproved one the user is asked first. Only these file types can be written: .txt .csv .tsv .html .htm .svg .md .json. An existing file is replaced, or extended with `append = true`. At most 20 MB.
+---
+---Since API version 3.
+---
+---```lua
+---local path = opensak.write_text(opensak.temp_dir() .. "/report.html",
+---  "<h1>" .. opensak.count() .. " caches</h1>")
+---print("written: " .. path)
+---```
+---@param path string The file to write.
+---@param text string The content.
+---@param options? {append?: boolean} `append`: add *text* at the end of an existing file.
+---@return string # The file written (full path).
+function opensak.write_text(path, text, options) end
+
 ---Export the caches of the active filter with a saved export setting (File → Export → GPX/LOC/GGZ: format, folder, file name, if the file exists, corrected coordinates, max. caches). The file name variables are filled in as in the dialog, {filter} with the name of the active filter and {center} with the active centre point. The file goes into *folder* if given, else into the setting's folder. That folder needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. Nothing is written when no cache with coordinates is shown, or when the file exists and the setting says skip (or ask, and the user answers No).
 ---
 ---Since API version 2.
