@@ -38,12 +38,19 @@ from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
+from opensak.macro.runtime import API_VERSION
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.macro_help import MacroHelpDialog
 
 EXAMPLE_MACRO = """\
--- OpenSAK macro (Lua)
+-- OpenSAK Macro
+-- Name: Easy unfound caches
+-- Author: OpenSAK
+-- Version: 1.0
+-- Requires-API: 1
+-- Description: Filter for unfound traditional and multi-caches up to difficulty 2.5
+--
 -- F1 opens the API reference, F5 runs the macro.
 
 local n = opensak.filter{
@@ -60,8 +67,15 @@ else
 end
 """
 
-NEW_MACRO = """\
--- New macro — describe what it does
+# The header is read by the Macro manager; empty values count as not set.
+NEW_MACRO = f"""\
+-- OpenSAK Macro
+-- Name:
+-- Author:
+-- Version: 1.0
+-- Requires-API: {API_VERSION}
+-- Description:
+--
 -- F1 opens the API reference, F5 runs the macro.
 
 """
@@ -532,6 +546,16 @@ class MacroDialog(QDialog):
         """The line of this macro named in a Lua error ("name.lua:12: ...")."""
         m = re.search(rf"(?<![\w.]){re.escape(self._chunk_name())}:(\d+):", message)
         return int(m.group(1)) if m else None
+
+    def show_error(self, message: str) -> None:
+        """Show the Lua error *message* of a run elsewhere (the Macro
+        manager) in the output pane and mark the line it names."""
+        self._output.clear()
+        self._editor.clear_error_line()
+        self._append_output(tr("macro_error", msg=message))
+        line = self.error_line(message)
+        if line is not None:
+            self._editor.mark_error_line(line)
 
     def _save_and_run(self) -> None:
         if self._save():

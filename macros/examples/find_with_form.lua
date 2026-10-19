@@ -1,4 +1,9 @@
--- find_with_form.lua — pick search options in a form, then step through the matches
+-- OpenSAK Macro
+-- Name: Find with form
+-- Author: OpenSAK
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Pick search options in a form, then step through the matches
 --
 -- Shows the user-interface functions: a form (opensak.form{}) whose fields
 -- react to each other while it is open, remembers its values for the next

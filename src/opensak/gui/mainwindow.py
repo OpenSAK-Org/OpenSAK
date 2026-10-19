@@ -260,6 +260,8 @@ class MainWindow(QMainWindow):
         self._setup_toolbar()
         self._setup_shortcut_registry()
         self._apply_saved_shortcuts()
+        self._macro_shortcut_actions: list[QAction] = []
+        self._apply_macro_shortcuts()
         self._setup_search_bar()
         self._setup_statusbar()
         self._restore_state()
@@ -609,6 +611,10 @@ class MainWindow(QMainWindow):
         act_run_macro = QAction(tr("action_run_macro"), self)
         act_run_macro.triggered.connect(self._open_macro_dialog)
         macros_menu.addAction(act_run_macro)
+
+        act_macro_manager = QAction(tr("action_macro_manager"), self)
+        act_macro_manager.triggered.connect(self._open_macro_manager)
+        macros_menu.addAction(act_macro_manager)
 
         from opensak.macro.examples import list_examples
         examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
@@ -3413,6 +3419,101 @@ class MainWindow(QMainWindow):
         self._macro_dialog.show()
         self._macro_dialog.raise_()
         self._macro_dialog.activateWindow()
+
+    def _macro_manager_instance(self):
+        """The Macro manager window, created (hidden) on first use: macro
+        shortcuts run through it, so their output is there to look at."""
+        from opensak.gui.dialogs.macro_manager import MacroManagerDialog
+        if getattr(self, "_macro_manager", None) is None:
+            self._macro_manager = MacroManagerDialog(
+                host=self, parent=self,
+                taken_shortcuts=self._taken_shortcuts,
+                shortcuts_changed=self._apply_macro_shortcuts,
+                edit_macro=self._edit_macro,
+            )
+        return self._macro_manager
+
+    def _open_macro_manager(self) -> None:
+        manager = self._macro_manager_instance()
+        manager.reload()
+        manager.show()
+        manager.raise_()
+        manager.activateWindow()
+
+    def _edit_macro(self, path, error: Optional[str] = None) -> None:
+        """Open macro *path* in the editor (asking about unsaved changes
+        there), marking the line of the Lua *error* if given."""
+        self._open_macro_dialog()
+        if self._macro_dialog.open_path(path) and error:
+            self._macro_dialog.show_error(error)
+
+    def _apply_macro_shortcuts(self) -> None:
+        """(Re)create the main window actions behind the macro shortcuts
+        set in the Macro manager."""
+        from pathlib import Path
+        from opensak.macro.shortcuts import macro_shortcuts
+        from opensak.utils import flags
+        for act in self._macro_shortcut_actions:
+            self.removeAction(act)
+            act.deleteLater()
+        self._macro_shortcut_actions = []
+        if not flags.lua_macros:
+            return
+        for path, seq in macro_shortcuts().items():
+            act = QAction(path.stem, self)
+            act.setShortcut(QKeySequence(seq))
+            act.setData(str(path))
+            act.triggered.connect(lambda _=False, p=Path(path): self._run_macro_shortcut(p))
+            self.addAction(act)
+            self._macro_shortcut_actions.append(act)
+
+    def _taken_shortcuts(self, exclude) -> dict[str, str]:
+        """Shortcuts in use in the main window (portable text → the action
+        or macro using it), except that of macro *exclude*."""
+        from pathlib import Path
+        from PySide6.QtGui import QShortcut
+        from opensak.macro.metadata import read_metadata
+        portable = QKeySequence.SequenceFormat.PortableText
+        taken: dict[str, str] = {}
+        for act in self.findChildren(QAction):
+            if act in self._macro_shortcut_actions:
+                if Path(act.data()) == Path(exclude):
+                    continue
+                label = read_metadata(Path(act.data())).name
+            else:
+                label = act.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
+            for seq in act.shortcuts():
+                taken.setdefault(seq.toString(portable), label.strip())
+        for shortcut in self.findChildren(QShortcut):
+            if not shortcut.key().isEmpty():
+                taken.setdefault(shortcut.key().toString(portable), shortcut.whatsThis() or "OpenSAK")
+        return {k: v for k, v in taken.items() if k}
+
+    def _run_macro_shortcut(self, path) -> None:
+        """Run a macro from its shortcut. The output goes to the Macro
+        manager; with that window closed, the status bar says the macro
+        finished, and an error is shown with the choice to edit the macro."""
+        manager = self._macro_manager_instance()
+        if manager.isVisible():
+            manager.select_path(path)
+            manager.run_path(path)
+            return
+        error = manager.run_path(path, parent=self)
+        if error is None:
+            self._statusbar.showMessage(tr("macro_mgr_shortcut_done", name=path.name), 5000)
+            return
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("macro_mgr_title"),
+                          tr("macro_mgr_shortcut_failed", name=path.name), parent=self)
+        box.setInformativeText(error)
+        btn_edit = box.addButton(tr("edit"), QMessageBox.ButtonRole.AcceptRole)
+        btn_output = box.addButton(tr("macro_mgr_show_output"), QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if box.clickedButton() is btn_edit:
+            self._edit_macro(path, error)
+        elif box.clickedButton() is btn_output:
+            self._open_macro_manager()
+            manager.select_path(path)
 
     def _open_macro_example(self, name: str) -> None:
         """Copy a shipped example into the macros folder and open the copy."""
