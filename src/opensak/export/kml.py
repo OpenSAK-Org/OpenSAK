@@ -15,6 +15,7 @@ from xml.dom import minidom
 
 from ..db.models import Cache, Waypoint
 from .cache_text import NO_TEXT, ExportText
+from .file_export import Saver, save_file
 
 # ---------------------------------------------------------------------------
 # Icon URLs (Google Maps built-in paddle icons)
@@ -151,9 +152,10 @@ def export_kml(
     progress_cb=None,
     use_corrected: bool = True,
     text: ExportText = NO_TEXT,
+    save: Saver = save_file,
 ) -> int:
     """
-    Write a KML file to *output_path*.
+    Write a KML file to *output_path* (with *save*, see Saver).
 
     Returns the number of caches written.
 
@@ -257,8 +259,6 @@ def export_kml(
     raw = ET.tostring(kml, encoding="unicode")
     pretty = minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8")
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(pretty)
+    save(Path(output_path), lambda f: f.write(pretty), True)
 
     return len(cache_list)

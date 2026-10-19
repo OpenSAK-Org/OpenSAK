@@ -37,6 +37,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
+from opensak.export.file_export import Saver, save_file
+
 # Garmin time counts from 1989-12-31 00:00 UTC.
 _GARMIN_EPOCH = 631065600
 _POINTS_PER_BLOCK = 128
@@ -239,10 +241,12 @@ def write_gpi(
     points: Sequence[GpiPoint],
     category: str,
     icon: Optional[bytes] = None,
+    save: Saver = save_file,
 ) -> None:
-    """Write *points* to the GPI file *path* (see build_gpi)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(build_gpi(points, category, icon))
+    """Write *points* to the GPI file *path* (see build_gpi) with *save*
+    (see Saver)."""
+    data = build_gpi(points, category, icon)
+    save(path, lambda f: f.write(data), True)
 
 
 def load_gpi_icon(path: Path) -> bytes:

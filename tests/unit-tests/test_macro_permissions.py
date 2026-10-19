@@ -28,6 +28,7 @@ from opensak.macro.permissions import (
     protected_reason,
     resolve_path,
     safe_write,
+    safe_write_stream,
     save_permissions,
     with_grant,
 )
@@ -256,6 +257,43 @@ def test_safe_write_keeps_mode_of_overwritten_file(tmp_path):
 
 
 # ── check_access ─────────────────────────────────────────────────────────────
+
+def test_safe_write_stream_text_mode_and_result(tmp_path):
+    def write(f):
+        f.write("a\nä\n")
+        return 42
+
+    target, result = safe_write_stream(tmp_path / "a.gpx", write,
+                                       permissions=[_rw(tmp_path)], binary=False)
+    assert (target, result) == (tmp_path.resolve() / "a.gpx", 42)
+    assert target.read_bytes() == f"a{os.linesep}ä{os.linesep}".encode("utf-8")
+    assert _leftovers(tmp_path) == []
+
+
+def test_safe_write_stream_failure_keeps_old_file(tmp_path):
+    target = tmp_path / "a.gpx"
+    target.write_text("old", encoding="utf-8")
+
+    def write(f):
+        f.write(b"half")
+        raise ValueError("export failed")
+
+    with pytest.raises(ValueError):
+        safe_write_stream(target, write, permissions=[_rw(tmp_path)])
+    assert target.read_text(encoding="utf-8") == "old"
+    assert _leftovers(tmp_path) == []
+
+
+def test_safe_write_stream_checks_before_writing(tmp_path):
+    folder = tmp_path / "read_only"
+    folder.mkdir()
+    called = []
+    with pytest.raises(FolderAccessDenied):
+        safe_write_stream(folder / "a.gpx", called.append,
+                          permissions=[_rw(folder, write=False)])
+    assert called == []
+    assert list(folder.iterdir()) == []
+
 
 def test_read_and_write_are_checked_separately(tmp_path):
     perms = [_rw(tmp_path / "ro", write=False), _rw(tmp_path / "wo", read=False)]

@@ -9,13 +9,28 @@ Qt-free, so the file export dialog (on a worker thread) and Lua macros
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional
+from typing import IO, Any, Callable, Optional
 
 from opensak.export.cache_text import NO_TEXT, ExportText
 
 # What write_export_file() writes; the export dialog and its saved settings
 # offer the first three.
 EXPORT_FORMATS = ("gpx", "loc", "ggz", "kml")
+
+# Saves an export file: save(path, write, binary) calls write(f) with f
+# open on the file (binary, or UTF-8 text with the platform's newlines) and
+# returns what it returns. The default, save_file(), is used by the export
+# dialogs; Lua macros pass one that goes through
+# opensak.macro.permissions.safe_write_stream().
+Saver = Callable[[Path, Callable[[IO[Any]], Any], bool], Any]
+
+
+def save_file(path: Path, write: Callable[[IO[Any]], Any], binary: bool = False) -> Any:
+    """The default Saver: create the folder, then write_export()."""
+    from opensak.gps.garmin import write_export
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return write_export(path, write, binary)
 
 
 def select_for_export(caches: list, max_records: int = 0) -> list:
@@ -34,8 +49,10 @@ def write_export_file(
     text: ExportText = NO_TEXT,
     attributes: bool = True,
     child_waypoints: bool = True,
+    save: Saver = save_file,
 ) -> int:
-    """Write *caches* to *output_path* in *fmt* (one of EXPORT_FORMATS).
+    """Write *caches* to *output_path* in *fmt* (one of EXPORT_FORMATS)
+    with *save* (see Saver).
 
     The caches are reloaded with everything the export needs first (see
     reload_caches_full). *text* replaces names and descriptions per cache;
@@ -49,18 +66,18 @@ def write_export_file(
     replaces it only once complete, so a failed export never leaves a
     truncated file behind.
     """
-    from opensak.gps.garmin import write_export, write_gpx, write_loc, write_ggz
+    from opensak.gps.garmin import write_gpx, write_loc, write_ggz
     from opensak.db.database import iter_caches_full, reload_caches_full
 
     if fmt not in EXPORT_FORMATS:
         raise ValueError(f"unknown export format {fmt!r}")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if fmt == "kml":
         from opensak.export.kml import export_kml
         caches = reload_caches_full(caches)
         export_kml(caches, output_path, include_waypoints=child_waypoints,
-                   progress_cb=progress_cb, use_corrected=use_corrected, text=text)
+                   progress_cb=progress_cb, use_corrected=use_corrected, text=text,
+                   save=save)
         return len([c for c in caches if c.latitude is not None])
 
     caches = list(caches)
@@ -80,7 +97,7 @@ def write_export_file(
                          attributes=attributes, child_waypoints=child_waypoints,
                          total=len(caches))
 
-    return write_export(output_path, _write, binary=fmt == "ggz")
+    return save(output_path, _write, fmt == "ggz")
 
 
 def active_database_name() -> str:

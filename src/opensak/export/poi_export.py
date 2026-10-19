@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+from opensak.export.file_export import Saver, save_file
 from opensak.export.file_export_settings import expand_file_name
 from opensak.export.gpi import GpiPoint, load_gpi_icon, write_gpi
 from opensak.export.poi_export_settings import DEFAULT_CATEGORY, PoiExportSettings
@@ -282,13 +283,16 @@ def settings_icon_path(settings: PoiExportSettings) -> Optional[Path]:
     return Path(settings.icon.strip()).expanduser() if settings.icon.strip() else None
 
 
-def write_poi_files(files: list[PoiFile], icon_path: Optional[Path] = None) -> list[tuple[Path, int]]:
-    """Write *files* (see plan_poi_export), all with the icon *icon_path*.
+def write_poi_files(
+    files: list[PoiFile], icon_path: Optional[Path] = None, save: Saver = save_file,
+) -> list[tuple[Path, int]]:
+    """Write *files* (see plan_poi_export) with *save* (see Saver), all
+    with the icon *icon_path*.
     Returns (file, number of POIs) for each. Raises ValueError if the icon
     is no readable image (before anything is written)."""
     icon = load_gpi_icon(icon_path) if icon_path is not None else None
     for f in files:
-        write_gpi(f.path, f.group.points, f.group.category, icon)
+        write_gpi(f.path, f.group.points, f.group.category, icon, save=save)
     return [(f.path, len(f.group.points)) for f in files]
 
 
@@ -302,9 +306,10 @@ def write_poi_export(
     center_name: str = "",
     should_write: Optional[Callable[[Path], bool]] = None,
     icon_path: Optional[Path] = None,
+    save: Saver = save_file,
 ) -> list[tuple[Path, int]]:
     """Export *caches* as POI files into *folder* (plan_poi_export, then
-    write_poi_files).
+    write_poi_files with *save*).
 
     *should_write(path)* is asked for every file that already exists; the
     file is left alone when it returns False (default: overwrite).
@@ -320,4 +325,4 @@ def write_poi_export(
         files = [f for f in files if not f.path.exists() or should_write(f.path)]
     if not files:
         return []
-    return write_poi_files(files, icon_path or settings_icon_path(settings))
+    return write_poi_files(files, icon_path or settings_icon_path(settings), save)
