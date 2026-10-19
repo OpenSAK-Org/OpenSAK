@@ -154,6 +154,7 @@ from opensak.macro.permissions import (
     FolderPermission,
     approvable_folder,
     check_access,
+    expand_path,
     grant_permanently,
     load_permissions,
     macros_dir,
@@ -2070,7 +2071,7 @@ class MacroRuntime:
         self._require_write(func)
 
         # %APPDATA%\gsak, $HOME/... — as the folder permissions expand them.
-        path = Path(os.path.expandvars(source.strip())).expanduser()
+        path = expand_path(source.strip())
         if not path.is_absolute():
             path = (self._base_dir or macros_dir()) / path
         if not path.exists():

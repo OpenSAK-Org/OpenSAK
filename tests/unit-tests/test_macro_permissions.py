@@ -22,6 +22,7 @@ from opensak.macro.permissions import (
     approvable_folder,
     check_access,
     default_permissions,
+    expand_path,
     is_root_folder,
     load_permissions,
     protected_inside,
@@ -97,6 +98,19 @@ def test_load_skips_malformed_entries():
     get_store().set(STORE_KEY, ["junk", {"read": True}, {"path": "/ok", "read": 1}])
     assert load_permissions() == [FolderPermission("/ok", read=True, write=False)]
 
+
+
+def test_expand_path_expands_percent_variables_on_every_platform(tmp_path, monkeypatch):
+    # os.path.expandvars only knows %NAME% on Windows; use the POSIX one to
+    # check that "%APPDATA%/gsak" still works on Linux and macOS.
+    import posixpath
+    monkeypatch.setattr(os.path, "expandvars", posixpath.expandvars)
+    monkeypatch.setenv("OPENSAK_TEST_DIR", str(tmp_path))
+    assert expand_path("%OPENSAK_TEST_DIR%/gsak") == tmp_path / "gsak"
+    assert expand_path("$OPENSAK_TEST_DIR/gsak") == tmp_path / "gsak"
+    monkeypatch.delenv("OPENSAK_TEST_UNSET", raising=False)
+    assert expand_path("%OPENSAK_TEST_UNSET%/gsak") == Path("%OPENSAK_TEST_UNSET%/gsak")
+    assert expand_path("100% sure/50% off") == Path("100% sure/50% off")
 
 # ── OpenSAK's own data ───────────────────────────────────────────────────────
 
