@@ -3457,6 +3457,11 @@ class MainWindow(QMainWindow):
         """MacroHost: name of the active filter ("" = none)."""
         return self._active_filter_name
 
+    def active_filterset(self) -> FilterSet:
+        """MacroHost: the whole active filter, quick filter and search boxes
+        included (opensak.save_filter)."""
+        return self._build_active_filterset()
+
     def set_sort(self, sort) -> None:
         """MacroHost: sort the list like a column-header click. filtered_caches()
         reads _current_sort, so the new order applies to it at once."""
