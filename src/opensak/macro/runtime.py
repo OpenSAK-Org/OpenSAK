@@ -98,6 +98,7 @@ from opensak.filters.engine import (
 )
 from opensak import __version__, geodesy
 from opensak.coord_formats import INPUT_KEYS, parse_any
+from opensak.db.cache_delete import delete_caches
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
@@ -139,6 +140,7 @@ from opensak.macro.child_write import (
     TRACKABLE,
     WAYPOINT,
     ChildTable,
+    delete_child,
     insert_child,
     list_children,
     parse_child_values,
@@ -995,6 +997,17 @@ def _gc_code(code: Any, func: str) -> str:
     return code.strip().upper()
 
 
+def _row_id(func: str, table: ChildTable, row_id: Any) -> int:
+    """The id of a log, waypoint, ... a macro passed."""
+    if isinstance(row_id, float) and row_id.is_integer():
+        row_id = int(row_id)
+    if isinstance(row_id, bool) or not isinstance(row_id, int):
+        raise MacroError(
+            f"{func} expects the {table.singular}'s id from opensak.{table.plural}(), got {row_id!r}"
+        )
+    return row_id
+
+
 def _db_name(name: Any, func: str) -> str:
     if not isinstance(name, str) or not name.strip():
         raise MacroError(f"{func} expects a database name")
@@ -1283,6 +1296,11 @@ class MacroRuntime:
         # Macro files (None: unsaved) the user refused to let change
         # databases during this run
         self._write_denied: set[Optional[Path]] = set()
+        # Caches deleted during this run, by database name — reported at
+        # its end. Inside opensak.transaction() they are counted per level
+        # (_tx_deleted) and only kept when it commits.
+        self._deleted: dict[str, int] = {}
+        self._tx_deleted: list[dict[str, int]] = []
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1471,12 +1489,7 @@ class MacroRuntime:
 
     def _update_child(self, table: ChildTable, row_id=None, values=None) -> bool:
         func = f"opensak.update_{table.singular}"
-        if isinstance(row_id, float) and row_id.is_integer():
-            row_id = int(row_id)
-        if isinstance(row_id, bool) or not isinstance(row_id, int):
-            raise MacroError(
-                f"{func} expects the {table.singular}'s id from opensak.{table.plural}(), got {row_id!r}"
-            )
+        row_id = _row_id(func, table, row_id)
         parsed = self._child_values(func, table, values, insert=False)
         self._require_write(func)
         refresh = not self._in_transaction()
@@ -1486,6 +1499,56 @@ class MacroRuntime:
             return False
         self._host.caches_changed([code], False)
         return True
+
+    # Deleting (#1035): needs the same write permission. A deleted cache
+    # takes its logs, waypoints, attributes, trackables and user note along.
+
+    def _delete(self, codes=None) -> Any:
+        func = "opensak.delete"
+        single = isinstance(codes, str)
+        if not single and not hasattr(codes, "values"):
+            raise MacroError(
+                f'{func} expects a GC code or a list of codes, e.g. opensak.delete("GC12345"), '
+                f"got {codes!r}"
+            )
+        gc_codes = [_gc_code(c, func) for c in _as_list(codes)]
+        if not gc_codes:
+            return 0
+        self._require_write(func)
+        with self._active_session() as session:
+            deleted = delete_caches(session, gc_codes)
+        self._caches_deleted(len(deleted))
+        return bool(deleted) if single else len(deleted)
+
+    def _delete_child(self, table: ChildTable, row_id=None) -> bool:
+        func = f"opensak.delete_{table.singular}"
+        row_id = _row_id(func, table, row_id)
+        self._require_write(func)
+        refresh = not self._in_transaction()
+        code = self._write_child(func, lambda s: delete_child(s, table, row_id, refresh=refresh))
+        if code is None:
+            return False
+        self._host.caches_changed([code], False)
+        return True
+
+    def _caches_deleted(self, count: int) -> None:
+        """Tell the host, and count *count* deleted caches for the report
+        at the end of the run."""
+        if not count:
+            return
+        self._host.caches_removed()
+        counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
+        name = self._host.database_name()
+        counts[name] = counts.get(name, 0) + count
+
+    def _report_deleted(self) -> None:
+        """One line per database in the macro output, so deletes never go
+        unnoticed. What a transaction left open (rolled back) is dropped."""
+        self._tx_deleted = []
+        for name, count in self._deleted.items():
+            caches = "1 cache" if count == 1 else f"{count} caches"
+            self._output(f"opensak: {caches} deleted from database {name!r}")
+        self._deleted = {}
 
     def _writable_db(self) -> WritableDatabase:
         if self._sql_write_db is None:
@@ -1566,6 +1629,7 @@ class MacroRuntime:
             raise MacroError(str(exc)) from None
         if result.codes:
             self._host.caches_changed(result.codes, result.added)
+        self._caches_deleted(len(result.removed))
         return result.rows
 
     def _close_sql_write(self) -> None:
@@ -1588,12 +1652,18 @@ class MacroRuntime:
             self._writable_db().begin()
         except SqlError as exc:
             raise MacroError(f"opensak.transaction: {exc}") from None
+        self._tx_deleted.append({})
 
     def _tx_end(self, commit=None) -> None:
+        deleted = self._tx_deleted.pop() if self._tx_deleted else {}
         try:
             self._writable_db().end(bool(commit))
         except SqlError as exc:
             raise MacroError(f"opensak.transaction: {exc}") from None
+        if commit:
+            counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
+            for name, count in deleted.items():
+                counts[name] = counts.get(name, 0) + count
 
     def _resync(self) -> int:
         if not self._in_transaction():
@@ -2701,6 +2771,8 @@ class MacroRuntime:
         )
         self._denied = set()
         self._write_denied = set()
+        self._deleted = {}
+        self._tx_deleted = []
         self._picked = set()
         self._cancelled.clear()
         self._exit_code = None
@@ -2775,6 +2847,7 @@ class MacroRuntime:
                 self._boundaries[0].close()
                 self._boundaries = None
             self._close_sql_write()
+            self._report_deleted()
             self._close_other_databases()
             self._load_macro = None
             self._close_progress_windows()
@@ -3071,8 +3144,8 @@ _PATTERN = Param("pattern", "string", "Regular expression (Python syntax); a "
                                       "doubling backslashes.")
 
 
-# (list, insert, update) examples of the functions _child_api() makes
-_CHILD_EXAMPLES: dict[str, tuple[str, str, str]] = {
+# (list, insert, update, delete) examples of the functions _child_api() makes
+_CHILD_EXAMPLES: dict[str, tuple[str, str, str, str]] = {
     "log": (
         'for _, l in ipairs(opensak.logs("GC12345") or {}) do\n'
         '    print(l.date, l.type, l.finder)\nend',
@@ -3080,6 +3153,8 @@ _CHILD_EXAMPLES: dict[str, tuple[str, str, str]] = {
         '                                          finder = "me", text = "Final solved" })',
         'for _, l in ipairs(opensak.logs("GC12345")) do\n'
         '    if l.type == "Write note" then opensak.update_log(l.id, { text = "checked" }) end\nend',
+        'for _, l in ipairs(opensak.logs("GC12345")) do\n'
+        '    if l.type == "Write note" and l.finder == "me" then opensak.delete_log(l.id) end\nend',
     ),
     "waypoint": (
         'for _, w in ipairs(opensak.waypoints("GC12345") or {}) do\n'
@@ -3088,6 +3163,8 @@ _CHILD_EXAMPLES: dict[str, tuple[str, str, str]] = {
         '                                     name = "Final", lat = 47.36872, lon = 8.54093 })',
         'for _, w in ipairs(opensak.waypoints("GC12345")) do\n'
         '    if w.prefix == "PK" then opensak.update_waypoint(w.id, { comment = "free parking" }) end\nend',
+        'for _, w in ipairs(opensak.waypoints("GC12345")) do\n'
+        '    if w.prefix == "FN" then opensak.delete_waypoint(w.id) end\nend',
     ),
     "attribute": (
         'for _, a in ipairs(opensak.attributes("GC12345") or {}) do\n'
@@ -3095,19 +3172,24 @@ _CHILD_EXAMPLES: dict[str, tuple[str, str, str]] = {
         'opensak.insert_attribute("GC12345", { attribute_id = 1, name = "Dogs", on = false })',
         'for _, a in ipairs(opensak.attributes("GC12345")) do\n'
         '    if a.attribute_id == 1 then opensak.update_attribute(a.id, { on = true }) end\nend',
+        'for _, a in ipairs(opensak.attributes("GC12345")) do\n'
+        '    if a.attribute_id == 1 then opensak.delete_attribute(a.id) end\nend',
     ),
     "trackable": (
         'for _, t in ipairs(opensak.trackables("GC12345") or {}) do print(t.ref, t.name) end',
         'opensak.insert_trackable("GC12345", { ref = "TB1234", name = "My travel bug" })',
         'for _, t in ipairs(opensak.trackables("GC12345")) do\n'
         '    if t.ref == "TB1234" then opensak.update_trackable(t.id, { name = "Renamed" }) end\nend',
+        'for _, t in ipairs(opensak.trackables("GC12345")) do\n'
+        '    if t.ref == "TB1234" then opensak.delete_trackable(t.id) end\nend',
     ),
 }
 
 
 def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
-    """opensak.<plural>(), insert_<singular>() and update_<singular>()."""
-    list_ex, insert_ex, update_ex = _CHILD_EXAMPLES[t.singular]
+    """opensak.<plural>(), insert_<singular>(), update_<singular>() and
+    delete_<singular>()."""
+    list_ex, insert_ex, update_ex, delete_ex = _CHILD_EXAMPLES[t.singular]
     required = ", ".join(f"`{n}`" for n in t.required)
     derived = {
         "logs": " OpenSAK updates the cache's log counts and dates.",
@@ -3153,6 +3235,18 @@ def _child_api(t: ChildTable) -> tuple[ApiFunction, ...]:
                 Param("id", "integer", f"The {t.singular}'s id from opensak.{t.plural}()."),
                 Param("fields", f"{t.class_name}Update", "The fields to change."),
             ),
+            returns=("boolean", f"false if there is no {t.singular} with this id."),
+            write=True,
+        ),
+        ApiFunction(
+            name=f"delete_{t.singular}",
+            description=f"Delete a {t.singular} from the active database."
+                        + derived
+                        + " Needs the user's permission like opensak.update().",
+            example=delete_ex,
+            since=3,
+            bind=lambda rt, lua: lambda *a: rt._delete_child(t, *a),
+            params=(Param("id", "integer", f"The {t.singular}'s id from opensak.{t.plural}()."),),
             returns=("boolean", f"false if there is no {t.singular} with this id."),
             write=True,
         ),
@@ -3572,6 +3666,8 @@ API: tuple[ApiFunction, ...] = (
                     "the given fields change. `false` clears a field that is "
                     "not a boolean. Fields OpenSAK maintains itself, such as "
                     "`code`, `distance` or `log_count`, cannot be written. "
+                    "Locked caches can be changed too: the lock only protects "
+                    "from imports. "
                     "Before a macro's first change, OpenSAK asks the user to "
                     "allow that macro (see Changing caches).",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
@@ -3598,22 +3694,54 @@ API: tuple[ApiFunction, ...] = (
         returns=("string", "The cache code as stored (upper case)."),
         write=True,
     ),
+    ApiFunction(
+        name="delete",
+        description="Delete caches from the active database, each with its "
+                    "logs, waypoints, attributes, trackables and user note, "
+                    "like Waypoint → Delete cache. Takes one GC code, or a list of "
+                    "them, e.g. opensak.codes() for the caches of the active "
+                    "filter. Deleted caches cannot be restored from inside "
+                    "OpenSAK (only from a backup); at the end of the run the "
+                    "macro output says how many caches were deleted. The "
+                    "cache list and map drop them after the macro. Locked "
+                    "caches are deleted too: the lock only protects from "
+                    "imports. Needs the user's permission like opensak.update().",
+        example='for c in opensak.caches{ archived = true, fields = {"code"} } do\n'
+                '    opensak.delete(c.code)\nend\n'
+                '-- all caches of the active filter at once:\n'
+                'print(opensak.delete(opensak.codes()) .. " caches deleted")',
+        since=3,
+        bind=lambda rt, lua: rt._delete,
+        params=(_CODE,),
+        overloads=((Param("codes", "string[]", "GC codes."),),),
+        returns=("boolean|integer", "For one code: false if the cache is not in the "
+                                    "database. For a list: the number of caches deleted."),
+        write=True,
+    ),
     *_child_api(LOG),
     *_child_api(WAYPOINT),
     *_child_api(ATTRIBUTE),
     *_child_api(TRACKABLE),
     ApiFunction(
         name="sql_write",
-        description="Run one INSERT or UPDATE statement (SQLite) against the "
+        description="Run one INSERT, UPDATE or DELETE statement (SQLite) against the "
                     "active database — the power tool for bulk work, changing "
                     "many rows with one statement. For a single cache or row, "
-                    "prefer `opensak.update()`, `insert{}`, `insert_<x>()` and "
-                    "`update_<x>()`, which check each field and need no "
+                    "prefer `opensak.update()`, `insert{}`, `delete()`, "
+                    "`insert_<x>()`, `update_<x>()` and `delete_<x>()`, which "
+                    "check each field and need no "
                     "knowledge of the schema (see Changing caches). Only the cache tables can be changed ("
                     + ", ".join(f"`{t}`" for t in sorted(WRITABLE_TABLES)) +
-                    "); nothing can be deleted, and an UPDATE may not set the "
+                    "), and an UPDATE may not set the "
                     "keys or the columns OpenSAK maintains itself (see "
-                    "Changing caches). OpenSAK recalculates distances, counts "
+                    "Changing caches). Deleting a cache also deletes its "
+                    "logs, waypoints, attributes, trackables and user note, "
+                    "as opensak.delete() does. Locked caches are changed and "
+                    "deleted like any other (add `AND locked = 0` to leave "
+                    "them alone). REPLACE (`INSERT OR REPLACE`, "
+                    "`REPLACE INTO`, …) is refused, as it would delete those too; "
+                    "to update or insert, use `INSERT … ON CONFLICT (gc_code) "
+                    "DO UPDATE SET …`. OpenSAK recalculates distances, counts "
                     "and log dates of the caches the statement touched — inside "
                     "opensak.transaction() once at its end (see opensak.resync()). An "
                     "INSERT only needs the real data: the columns "
@@ -3634,21 +3762,27 @@ API: tuple[ApiFunction, ...] = (
                 'opensak.sql_write([[\n'
                 '  INSERT INTO logs (cache_id, log_type, log_date, finder, text)\n'
                 '  SELECT id, \'Found it\', ?, ?, ? FROM caches WHERE gc_code = ?]],\n'
-                '  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })',
+                '  { "2026-10-10 14:30:00.000000", "myUsername", "TFTC", "GC12345" })\n'
+                '-- keep only the 5 newest logs of each cache\n'
+                'opensak.sql_write([[DELETE FROM logs WHERE id NOT IN (\n'
+                '  SELECT l2.id FROM logs l2 WHERE l2.cache_id = logs.cache_id\n'
+                '  ORDER BY l2.log_date DESC LIMIT 5)]])',
         since=3,
         bind=lambda rt, lua: rt._sql_write,
         params=(
-            Param("query", "string", "One INSERT or UPDATE statement."),
+            Param("query", "string", "One INSERT, UPDATE or DELETE statement."),
             Param("params", "table", "As for opensak.sql().", optional=True),
         ),
-        returns=("integer", "Number of rows inserted or updated."),
+        returns=("integer", "Number of rows inserted, updated or deleted (without "
+                            "the rows deleted along with a cache)."),
         write=True,
     ),
     ApiFunction(
         name="transaction",
         description="Run *fn* as one transaction: every change it makes to the "
-                    "active database (opensak.update, insert, sql_write, "
-                    "set_corrected, clear_corrected) is kept when *fn* returns, "
+                    "active database (opensak.update, insert, delete, "
+                    "sql_write, set_corrected, clear_corrected and the "
+                    "functions for logs, waypoints, ...) is kept when *fn* returns, "
                     "and all of it is undone if *fn* raises an error, which "
                     "opensak.transaction() then raises again. Many changes in "
                     "one transaction are also faster than the same changes "

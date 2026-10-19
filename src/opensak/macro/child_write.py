@@ -7,7 +7,7 @@ is parsed (the parsers of cache_write.py, so `false` clears a field there
 too) and the model attribute it goes to. opensak.logs(code) and friends
 list the rows of a cache, each with its `id`; opensak.insert_log(code, {..})
 adds one and returns its id; opensak.update_log(id, {..}) changes the given
-fields of one.
+fields of one; opensak.delete_log(id) deletes one.
 
 The keys (`id`, the cache a row belongs to) and the columns OpenSAK
 maintains (a waypoint's parent_gc_code, a log's gc.com log_id) cannot be
@@ -245,3 +245,17 @@ def update_child(
     if refresh:
         _refresh(session, table, row.cache_id)
     return session.query(Cache.gc_code).filter_by(id=row.cache_id).scalar()
+
+
+def delete_child(session, table: ChildTable, row_id: int, refresh: bool = True) -> Optional[str]:
+    """Delete the row *row_id*; returns the GC code of its cache, None if
+    there is no such row. *refresh* as for cache_write.update_cache()."""
+    row = session.get(table.model, row_id)
+    if row is None:
+        return None
+    cache_id = row.cache_id
+    session.delete(row)
+    session.flush()
+    if refresh:
+        _refresh(session, table, cache_id)
+    return session.query(Cache.gc_code).filter_by(id=cache_id).scalar()

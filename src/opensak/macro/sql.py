@@ -36,8 +36,8 @@ QUERY_TIMEOUT_S, since the Lua instruction limit does not count time spent
 inside SQLite.
 
 opensak.sql_write() uses a separate WritableDatabase on the active
-database only. Its authorizer allows INSERT and UPDATE on the cache tables
-(WRITABLE_TABLES) and nothing else that changes data: no DELETE, no schema
+database only. Its authorizer allows INSERT, UPDATE and DELETE on the cache
+tables (WRITABLE_TABLES) and nothing else that changes data: no schema
 changes, no ATTACH, no PRAGMA that writes, no transaction control
 (macros use opensak.transaction(), WritableDatabase.begin()/end()). An
 UPDATE of a PROTECTED_COLUMNS column is refused by the same authorizer,
@@ -47,13 +47,27 @@ cache_write.refresh_derived() then recalculates their derived columns
 (overwriting whatever the INSERT put there) before the statement's
 transaction is committed. Inside opensak.transaction() the recorded caches
 are collected instead (_PENDING), also those of the ORM writes sharing the
-connection, and recalculated once before the commit or by resync(). With recursive_triggers on, a BEFORE DELETE
-trigger also catches the rows INSERT OR REPLACE would delete.
+connection, and recalculated once before the commit or by resync().
+
+The schema's foreign keys to caches.id have no ON DELETE CASCADE (SQLite
+cannot add one without rebuilding the tables), so a temporary BEFORE DELETE
+trigger on caches deletes the cache's rows first, as the GUI delete does
+(#1035); it also records the deleted codes for the host. Deleting a log,
+waypoint or trackable records its cache like an insert does.
+
+The REPLACE conflict resolution (INSERT OR REPLACE, REPLACE INTO, UPDATE OR
+REPLACE, ON CONFLICT REPLACE) is refused before the statement runs: it
+deletes the conflicting row, and with it, through that trigger, the cache's
+logs, waypoints and user note, where a macro mostly means "update or
+insert". INSERT ... ON CONFLICT (...) DO UPDATE is the upsert that keeps
+them. The authorizer reports no conflict resolution, hence the keyword
+check (_uses_replace); the schema has no ON CONFLICT REPLACE constraint.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -386,7 +400,7 @@ def _row(names: list[str], values: tuple) -> dict:
 
 # ── Writing: opensak.sql_write() ─────────────────────────────────────────────
 
-# Tables a macro may INSERT into and UPDATE.
+# Tables a macro may INSERT into, UPDATE and DELETE from.
 WRITABLE_TABLES = frozenset({
     "caches", "user_notes", "waypoints", "logs", "attributes", "trackables",
 })
@@ -419,12 +433,30 @@ PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
     "trackables": frozenset({"id", "cache_id"}),
 }
 
+# Comments, string literals and quoted names, which may contain anything.
+_SQL_OPAQUE = re.compile(
+    r"--[^\n]*|/\*.*?(?:\*/|\Z)|'(?:[^']|'')*'?|\"(?:[^\"]|\"\")*\"?|`(?:[^`]|``)*`?|\[[^\]]*\]?",
+    re.DOTALL,
+)
+# The REPLACE conflict resolution; not the replace() function.
+_SQL_REPLACE = re.compile(r"\b(?:OR\s+REPLACE|REPLACE\s+INTO|CONFLICT\s+REPLACE)\b", re.IGNORECASE)
+
+
+def _uses_replace(query: str) -> bool:
+    """True if *query* resolves a conflict with REPLACE."""
+    return bool(_SQL_REPLACE.search(_SQL_OPAQUE.sub(" ", query)))
+
+
 _TOUCHED = f"{_RESERVED_PREFIX}touched"
 # Inside opensak.transaction(): the caches whose derived columns are still to
 # be recalculated, at the commit or by resync(). The triggers record into
 # _TOUCHED, from where _stash() moves the rows here; as TEMP tables both
 # follow the transaction's savepoints, so undone writes leave nothing behind.
 _PENDING = f"{_RESERVED_PREFIX}pending"
+# GC codes of the caches the current statement deleted.
+_REMOVED = f"{_RESERVED_PREFIX}removed"
+# The tables holding a cache's rows, deleted along with it.
+_CHILD_TABLES = ("logs", "waypoints", "attributes", "trackables", "user_notes")
 
 # (table, what a change there means for refresh_derived(), cache id column)
 _TRACKED = (
@@ -439,7 +471,7 @@ _TRACKED = (
 
 def _write_authorizer(main_names: frozenset[str]):
     """The authorizer of opensak.sql_write(): that of opensak.sql(), plus
-    INSERT and UPDATE on the cache tables."""
+    INSERT, UPDATE and DELETE on the cache tables."""
     read = _read_authorizer(main_names)
 
     def authorize(action, arg1, arg2, db_name, trigger) -> int:
@@ -450,7 +482,7 @@ def _write_authorizer(main_names: frozenset[str]):
             return sqlite3.SQLITE_OK
         if db_name not in (None, "main"):
             return sqlite3.SQLITE_DENY
-        if action == sqlite3.SQLITE_INSERT and arg1 in WRITABLE_TABLES:
+        if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_DELETE) and arg1 in WRITABLE_TABLES:
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_UPDATE and arg1 in WRITABLE_TABLES:
             return sqlite3.SQLITE_DENY if arg2 in PROTECTED_COLUMNS[arg1] else sqlite3.SQLITE_OK
@@ -463,9 +495,10 @@ def _write_authorizer(main_names: frozenset[str]):
 class WriteResult:
     """What one opensak.sql_write() statement changed."""
 
-    rows: int                       # rows inserted or updated (not by triggers)
+    rows: int                       # rows inserted, updated or deleted (not by triggers)
     codes: list[str]                # GC codes of the caches touched
     added: bool                     # a cache row was inserted
+    removed: list[str]              # GC codes of the caches deleted
 
 
 class WritableDatabase:
@@ -545,12 +578,13 @@ class WritableDatabase:
     @staticmethod
     def _create_triggers(conn: sqlite3.Connection) -> None:
         """TEMP triggers (this connection only) that record the caches a
-        statement touches, and refuse deletes."""
+        statement touches, and delete a cache's rows along with it."""
         for name in (_TOUCHED, _PENDING):
             conn.execute(
                 f"CREATE TEMP TABLE {name} "
                 "(cache_id INTEGER NOT NULL, kind TEXT NOT NULL, PRIMARY KEY (cache_id, kind))"
             )
+        conn.execute(f"CREATE TEMP TABLE {_REMOVED} (gc_code TEXT PRIMARY KEY)")
         for table, kind, id_col in _TRACKED:
             for event in ("INSERT", "UPDATE"):
                 record = f"INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.{id_col}, '{kind}');"
@@ -560,11 +594,23 @@ class WritableDatabase:
                     f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{table}_{event.lower()} "
                     f"AFTER {event} ON main.{table} BEGIN {record} END"
                 )
-            conn.execute(
-                f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{table}_delete "
-                f"BEFORE DELETE ON main.{table} "
-                "BEGIN SELECT RAISE(ABORT, 'macros may not delete rows'); END"
-            )
+            if table == "caches":
+                # Unqualified names in a TEMP trigger find main's tables:
+                # TEMP objects cannot take their names (_read_authorizer).
+                cascade = " ".join(
+                    f"DELETE FROM {child} WHERE cache_id = OLD.id;" for child in _CHILD_TABLES
+                )
+                conn.execute(
+                    f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_delete "
+                    "BEFORE DELETE ON main.caches BEGIN "
+                    f"INSERT OR IGNORE INTO {_REMOVED} VALUES (OLD.gc_code); {cascade} END"
+                )
+            else:
+                conn.execute(
+                    f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}{table}_delete "
+                    f"AFTER DELETE ON main.{table} BEGIN "
+                    f"INSERT OR IGNORE INTO {_TOUCHED} VALUES (OLD.{id_col}, '{kind}'); END"
+                )
         conn.execute(
             f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_coords "
             "AFTER UPDATE OF latitude, longitude ON main.caches "
@@ -582,7 +628,7 @@ class WritableDatabase:
             return read_only
         if "not authorized" in str(exc) or "prohibited" in str(exc):
             return SqlError(
-                "opensak.sql_write may only INSERT into and UPDATE the cache tables "
+                "opensak.sql_write may only INSERT into, UPDATE and DELETE from the cache tables "
                 f"({', '.join(sorted(WRITABLE_TABLES))}), and not the keys or the "
                 f"columns OpenSAK maintains itself (besides TEMP tables): {exc}"
             )
@@ -742,13 +788,20 @@ class WritableDatabase:
     # -- opensak.sql_write() ---------------------------------------------------
 
     def execute(self, query: str, params: Any = None) -> WriteResult:
-        """Run one INSERT or UPDATE statement and commit it together with
+        """Run one INSERT, UPDATE or DELETE statement and commit it together with
         the recalculated derived columns. Rolls everything back on error.
         Inside a transaction, "commit" means releasing the statement's
         SAVEPOINT; the transaction decides what is kept, and the derived
         columns are recalculated at its commit or by resync()."""
         from opensak.macro.cache_write import normalize_inserted, refresh_derived
 
+        if _uses_replace(query):
+            raise SqlError(
+                "opensak.sql_write refuses REPLACE (INSERT OR REPLACE, REPLACE INTO, "
+                "UPDATE OR REPLACE, ON CONFLICT REPLACE): it deletes the existing cache "
+                "with its logs, waypoints, attributes, trackables and user note. To "
+                "update or insert, use INSERT ... ON CONFLICT (gc_code) DO UPDATE SET ..."
+            )
         params = _params(params)
         conn = self._connection()
         nested = self.in_transaction
@@ -763,6 +816,9 @@ class WritableDatabase:
                 self._stash(conn)
             else:
                 conn.execute(f"DELETE FROM temp.{_TOUCHED}")
+            # Also left over from ORM deletes of the transaction, which
+            # report their caches themselves.
+            conn.execute(f"DELETE FROM temp.{_REMOVED}")
             self._deadline = time.monotonic() + self._timeout_s
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
             conn.set_authorizer(self._authorizer)
@@ -790,6 +846,12 @@ class WritableDatabase:
                 )
             ]
             added = bool(inserted)
+            removed = [
+                code for (code,) in conn.execute(
+                    f"SELECT gc_code FROM temp.{_REMOVED} ORDER BY gc_code"
+                )
+            ]
+            conn.execute(f"DELETE FROM temp.{_REMOVED}")
             if nested:
                 self._stash(conn)
             else:
@@ -815,7 +877,7 @@ class WritableDatabase:
             # The connection also serves the ORM writes and reads of a
             # transaction, which this statement's deadline must not cut off.
             conn.set_progress_handler(None, 0)
-        return WriteResult(rows, codes, added)
+        return WriteResult(rows, codes, added, removed)
 
     def close(self) -> None:
         """Close the connection; a transaction still open is rolled back."""

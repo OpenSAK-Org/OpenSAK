@@ -321,15 +321,17 @@ def _changing_section() -> list[str]:
         "",
         "## Changing caches",
         "",
-        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.insert_<x>()`, "
-        "`opensak.update_<x>()`, `opensak.sql_write()`, `opensak.transaction()`, "
+        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
+        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
+        "`opensak.sql_write()`, `opensak.transaction()`, "
         "`opensak.in_transaction()` and `opensak.resync()` are only available "
         "while the `lua-macro-write` feature flag is on, as it is in beta "
         "builds. Without it they are nil, and `opensak.set_corrected()` and "
         "`opensak.clear_corrected()` change the database without asking.",
         "",
-        "`opensak.update()`, `opensak.insert{}`, `opensak.insert_<x>()`, "
-        "`opensak.update_<x>()`, `opensak.sql_write()`, "
+        "`opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
+        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
+        "`opensak.sql_write()`, "
         "`opensak.set_corrected()` and `opensak.clear_corrected()` change the "
         "active database. Before a macro's first change, OpenSAK asks "
         "whether this macro may change your OpenSAK databases: **Deny** (the "
@@ -343,17 +345,24 @@ def _changing_section() -> list[str]:
         "own. A run from an external editor (`opensak --run-macro`) asks in "
         "the OpenSAK window, like any other run.",
         "",
+        "Locked caches (`locked`) are only protected from being overwritten "
+        "by an import. Macros can change and delete them like any other "
+        "cache, as the GUI can; to leave them alone, filter them out, e.g. "
+        "`opensak.caches{ locked = false }`.",
+        "",
         "Which function to use:",
         "",
         "- A cache: `opensak.update(code, fields)` changes it, "
-        "`opensak.insert{}` adds a new one.",
+        "`opensak.insert{}` adds a new one, `opensak.delete(code)` deletes "
+        "it with all its rows (also a list of codes).",
         "- Its logs, waypoints, attributes and trackables: "
-        "`opensak.insert_<x>(code, fields)` and `opensak.update_<x>(id, fields)` "
+        "`opensak.insert_<x>(code, fields)`, `opensak.update_<x>(id, fields)` "
+        "and `opensak.delete_<x>(id)` "
         "(see Logs, waypoints, attributes and trackables).",
         "- Corrected coordinates: `opensak.set_corrected()` and "
         "`opensak.clear_corrected()`.",
         "- `opensak.sql_write()` is the power tool for bulk work: one "
-        "INSERT or UPDATE statement that changes many rows at once, e.g. "
+        "INSERT, UPDATE or DELETE statement that changes many rows at once, e.g. "
         "marking every unfound cache of a country, or copying rows from the "
         "macro's own database. Use it when a loop over the functions above "
         "would be too slow or too long-winded.",
@@ -381,11 +390,20 @@ def _changing_section() -> list[str]:
         "`opensak.transaction(function() ... end)`, which is also faster for "
         "many changes. SQL `BEGIN`/`COMMIT` is refused.",
         "",
-        "`opensak.sql_write()` may INSERT into and UPDATE these tables. An "
+        "`opensak.sql_write()` may INSERT into, UPDATE and DELETE from these "
+        "tables. An "
         "INSERT only has to give the required columns; every other column "
         "gets its default (`opensak.columns()` marks them as `required`). "
         "An UPDATE may not set the protected columns. Whatever an INSERT "
-        "puts into the columns OpenSAK maintains is recalculated right away.",
+        "puts into the columns OpenSAK maintains is recalculated right away. "
+        "A DELETE from `caches` also deletes the logs, waypoints, attributes, "
+        "trackables and user note of each cache, like `opensak.delete()`.",
+        "",
+        "Deleted caches cannot be restored from inside OpenSAK, only from a "
+        "backup. At the end of a run that deleted caches, the macro output "
+        "says how many, per database; the cache list, map and detail panel "
+        "drop them once the macro has ended. Deletes inside "
+        "`opensak.transaction()` are undone with it.",
         "",
         "OpenSAK recalculates the columns it maintains (distance, bearing, "
         "counts, log dates) after every write. Inside "
@@ -416,9 +434,10 @@ def _children_section() -> list[str]:
         "",
         "The rows belonging to a cache are read with "
         + ", ".join(f"`opensak.{t.plural}()`" for t in CHILD_TABLES)
-        + ", added with `opensak.insert_<x>(code, fields)` and changed with "
-        "`opensak.update_<x>(id, fields)`, without SQL. These are the way to "
-        "add or change a single row; keep `opensak.sql_write()` for bulk "
+        + ", added with `opensak.insert_<x>(code, fields)`, changed with "
+        "`opensak.update_<x>(id, fields)` and deleted with "
+        "`opensak.delete_<x>(id)`, without SQL. These are the way to "
+        "add, change or delete a single row; keep `opensak.sql_write()` for bulk "
         "changes across many caches. Each row has an `id`, "
         "which identifies it and cannot be changed, as cannot the cache it "
         "belongs to. The changes need the user's permission and can be kept "

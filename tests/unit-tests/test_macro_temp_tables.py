@@ -126,7 +126,7 @@ def test_sql_write_and_transaction_see_temp_tables():
     "DELETE FROM temp.opensak_macro_touched",
     "DROP TABLE opensak_macro_touched",
     "CREATE TEMP TABLE opensak_macro_x (x)",
-    "DELETE FROM caches",
+    "DELETE FROM db_settings",
     "CREATE TEMP TABLE t AS SELECT 1; DELETE FROM caches",
 ])
 def test_temp_rules_are_enforced(query):
