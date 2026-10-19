@@ -3649,6 +3649,14 @@ class MainWindow(QMainWindow):
         while generation in self._refresh_started_at and time.monotonic() < deadline:
             QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
 
+    def locations_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() changed the user locations."""
+        self._on_home_points_imported()
+
+    def filter_profiles_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() wrote filter profiles."""
+        self._on_filter_profiles_imported()
+
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's cache changes affect. A
         handful of caches get the same per-cache refresh as the other entry

@@ -42,6 +42,10 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.settings import get_settings
+from opensak.importer import gsak_import_service as service
+from opensak.importer.gsak_import_service import (  # noqa: F401 — re-exported
+    TARGET_BLOCKED, TARGET_EXISTING, TARGET_NEW, TARGET_ORPHAN,
+)
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
 
@@ -54,12 +58,6 @@ COL_GSAK, COL_SIZE, COL_TARGET, COL_STATUS = range(4)
 MODE_NEW = "new"          # created by this import
 MODE_MERGE = "merge"      # existing — upsert into it (the pre-backup behaviour)
 MODE_REPLACE = "replace"  # existing — emptied first, then imported
-
-# What a proposed OpenSAK database name resolves to (see _target_state)
-TARGET_NEW = "new"            # nothing there yet — will be created
-TARGET_EXISTING = "existing"  # a database in OpenSAK's list
-TARGET_ORPHAN = "orphan"      # a valid database file that isn't in the list
-TARGET_BLOCKED = "blocked"    # some other file sits on the path the name maps to
 
 
 class GsakImportJob:
@@ -141,45 +139,13 @@ class GsakImportWorker(QThread):
     @staticmethod
     def _update_distances(db_path: Path | None) -> None:
         """Bring the imported database's distances up to date while still in
-        the background, so neither the refresh after the import nor a later
-        switch to that database has to recalculate them on the GUI thread
-        (both still check, as a safety net). Works on *db_path* through its own
-        session when that isn't the active database, and its home point and
-        the centre used are read from and stored in that file, not in the
-        active database's settings. A failure
-        here only means that check recalculates later — the import itself
-        succeeded.
-        """
-        if db_path is None:
-            return
-        try:
-            from opensak.db.database import distances_up_to_date, recalculate_distances
-            lat, lon = get_settings().home_for_db_file(db_path)
-            if lat and lon and not distances_up_to_date(lat, lon, db_path=db_path):
-                recalculate_distances(lat, lon, db_path=db_path)
-        except Exception:
-            logger.warning("GSAK import: could not update distances for %s",
-                           db_path, exc_info=True)
+        the background (see gsak_import_service.update_distances)."""
+        service.update_distances(db_path)
 
     @staticmethod
     def _invalidate_distances(db_path: Path | None) -> None:
-        """Forget the centre *db_path*'s distances were calculated for, so
-        distances_up_to_date() reports them stale. The target's last job
-        then recalculates; should it never run (skipped, failed, cancelled),
-        the check after the import or on switching to that database does.
-        """
-        if db_path is None:
-            return
-        try:
-            from opensak.db import db_settings
-            db_settings.write_file(db_path, {
-                "dist_calc_lat": None,
-                "dist_calc_lon": None,
-                "dist_calc_method": None,
-            })
-        except Exception:
-            logger.warning("GSAK import: could not invalidate distances for %s",
-                           db_path, exc_info=True)
+        """See gsak_import_service.invalidate_distances."""
+        service.invalidate_distances(db_path)
 
 
 class GsakExtractWorker(QThread):
@@ -476,52 +442,19 @@ class GsakImportDialog(QDialog):
         combo = self._table.cellWidget(row, COL_TARGET)
         return combo.currentText().strip() if isinstance(combo, QComboBox) else ""
 
+    # The target rules are shared with the unattended import (macros, #937).
+
     @staticmethod
     def _find_existing(name: str):
-        """The known OpenSAK database called *name* (case-insensitive — the
-        file name is derived from it, and Windows file names ignore case)."""
-        from opensak.db.manager import get_db_manager
+        return service.find_existing(name)
 
-        wanted = name.lower()
-        for db in get_db_manager().databases:
-            if db.name.lower() == wanted:
-                return db
-        return None
+    @staticmethod
+    def _target_state(name: str):
+        return service.target_state(name)
 
-    @classmethod
-    def _target_state(cls, name: str):
-        """Resolve an OpenSAK database name: ``(TARGET_*, DatabaseInfo | Path)``.
-
-        A name that isn't in the database list can still collide with a file
-        on disk (new_database() derives the path from the name and refuses
-        to reuse a file) — e.g. a stale ``Default.db`` left behind. A valid
-        database file is offered as an existing target; anything else blocks
-        the name.
-        """
-        from opensak.db.manager import get_db_manager
-
-        existing = cls._find_existing(name)
-        if existing is not None:
-            return TARGET_EXISTING, existing
-        manager = get_db_manager()
-        path = manager.default_path_for(name)
-        for db in manager.databases:
-            if db.path == path:
-                return TARGET_EXISTING, db
-        if path.exists():
-            if manager.is_valid_database_file(path):
-                return TARGET_ORPHAN, path
-            return TARGET_BLOCKED, path
-        return TARGET_NEW, path
-
-    @classmethod
-    def _free_name(cls, name: str) -> str:
-        """*name*, or ``name-2``, ``name-3``, … when a stray file blocks it."""
-        candidate, n = name, 2
-        while cls._target_state(candidate)[0] == TARGET_BLOCKED:
-            candidate = f"{name}-{n}"
-            n += 1
-        return candidate
+    @staticmethod
+    def _free_name(name: str) -> str:
+        return service.free_name(name)
 
     def _update_status(self, row: int) -> None:
         item = self._table.item(row, COL_STATUS)
