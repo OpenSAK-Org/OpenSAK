@@ -158,9 +158,11 @@ from opensak.macro.permissions import (
     macros_dir,
     protected_reason,
     resolve_path,
+    safe_write,
     safe_write_stream,
     temp_dir,
     with_grant,
+    write_denied_reason,
 )
 from opensak.macro.sql import (
     MAX_ROWS,
@@ -213,6 +215,9 @@ EXPORT_KEYS = frozenset({
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
+# opensak.write_text(): the file types it may write, and the largest file.
+WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
+MAX_WRITE_BYTES = 20 * 1024 * 1024
 # opensak.exit(code): highest accepted exit code (portable process exit codes)
 MAX_EXIT_CODE = 255
 
@@ -2050,6 +2055,50 @@ class MacroRuntime:
             raise MacroError("opensak.read_csv: separator must be a string")
         rows = read_csv_rows(self._readable_file(path), sep)
         return lua.table_from([lua.table_from(r) for r in rows])
+
+    def _write_text(self, path=None, text=None, options=None) -> str:
+        func = "opensak.write_text"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a file path")
+        if isinstance(text, (int, float)) and not isinstance(text, bool):
+            text = macro_forms.format_number(text)
+        if not isinstance(text, (str, bytes)):
+            raise MacroError(f"{func}: text must be a string, got {_lua_kind(text) or repr(text)}")
+        opts = {} if options is None else _from_lua(options)
+        if not isinstance(opts, dict) or set(opts) - {"append"}:
+            raise MacroError(f"{func}: options must be a table, e.g. {{ append = true }}")
+        append = opts.get("append", False)
+        if not isinstance(append, bool):
+            raise MacroError(f"{func}: append must be true or false, got {append!r}")
+        data = text.encode("utf-8") if isinstance(text, str) else text
+        file = Path(path.strip()).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or macros_dir()) / file
+        # Refused before the user is asked to approve the folder.
+        try:
+            reason = write_denied_reason(resolve_path(file), WRITE_TEXT_SUFFIXES)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {file}: {exc}") from None
+        if reason is not None:
+            raise MacroError(f"{func}: macros may not write {file} — {reason}")
+        target = self._check_access(file, write=True)
+        permissions = self._run_permissions
+        if (target, True) in self._picked:
+            permissions = with_grant(permissions, target.parent, True)
+        try:
+            if append and target.is_file():
+                data = target.read_bytes() + data
+            if len(data) > MAX_WRITE_BYTES:
+                raise MacroError(
+                    f"{func}: the file would be larger than "
+                    f"{MAX_WRITE_BYTES // (1024 * 1024)} MB"
+                )
+            return str(safe_write(target, data, permissions=permissions,
+                                  allowed_suffixes=WRITE_TEXT_SUFFIXES))
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
+        except OSError as exc:
+            raise MacroError(f"cannot write {target}: {exc}") from None
 
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
         for name, value in (("title", title), ("filter", file_filter)):
@@ -4053,6 +4102,31 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("table<string, string>[]", "One table per data row, keyed by header."),
+    ),
+    ApiFunction(
+        name="write_text",
+        description="Write *text* to a file as UTF-8 and return the file "
+                    "written. A relative path is resolved against the macro "
+                    "file's folder. The folder needs write permission (the "
+                    "OpenSAK temp folder, opensak.temp_dir(), has it by "
+                    "default); for an unapproved one the user is asked first. "
+                    "Only these file types can be written: "
+                    + " ".join(WRITE_TEXT_SUFFIXES) + ". An existing file is "
+                    "replaced, or extended with `append = true`. At most "
+                    f"{MAX_WRITE_BYTES // (1024 * 1024)} MB.",
+        example='local path = opensak.write_text(opensak.temp_dir() .. "/report.html",\n'
+                '  "<h1>" .. opensak.count() .. " caches</h1>")\n'
+                'print("written: " .. path)',
+        since=3,
+        bind=lambda rt, lua: rt._write_text,
+        params=(
+            Param("path", "string", "The file to write."),
+            Param("text", "string", "The content."),
+            Param("options", "{append?: boolean}",
+                  "`append`: add *text* at the end of an existing file.",
+                  optional=True),
+        ),
+        returns=("string", "The file written (full path)."),
     ),
     ApiFunction(
         name="export_file",
