@@ -554,7 +554,7 @@ function opensak.sql_each(query, params, options) end
 
 ---The tables and views of the active database (or the one named by the `database` option), for use with opensak.sql(). The macro's TEMP tables and views are included.
 ---
----Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, and the tables of opensak.macro_db() as `macro.<name>`.
+---Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, the tables of opensak.macro_db() as `macro.<name>` and those of opensak.attach() as `<schema>.<name>`.
 ---
 ---```lua
 ---print(table.concat(opensak.tables(), ", "))
@@ -590,6 +590,48 @@ function opensak.columns(table, options) end
 ---```
 ---@return string # The path of the macro database file.
 function opensak.macro_db() end
+
+---Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. See Several databases in one query.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+---
+---```lua
+---local found = opensak.attach("Found 2020", "found")
+---for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name FROM caches c "
+---        .. "JOIN found.caches f ON f.gc_code = c.gc_code")) do
+---    print(r.gc_code, r.name)
+---end
+---```
+---@param name string Database name, as in opensak.databases().
+---@param schema? string Schema name to use in SQL; default: made from the database name.
+---@return string # The schema name.
+function opensak.attach(name, schema) end
+
+---Detach a database attached with opensak.attach(). Optional: everything is detached when the macro ends. Cannot be called inside opensak.transaction().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+---
+---```lua
+---opensak.detach("found")
+---```
+---@param schema string The schema name opensak.attach() returned.
+function opensak.detach(schema) end
+
+---The databases attached with opensak.attach(), in the order they were attached. `opensak` is always true: only OpenSAK databases can be attached so far.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+---
+---```lua
+---for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end
+---```
+---@return {schema: string, name: string, path: string, opensak: boolean}[] # One table per attached database.
+function opensak.attached() end
 
 ---All databases in OpenSAK's database list, sorted by name.
 ---

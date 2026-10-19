@@ -225,6 +225,16 @@
 			<Overload retVal="integer" descr="The API version of this OpenSAK build. Each function lists the version it was&#x0a;added in.&#x0a;Returns integer — The API version.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.attach" func="yes">
+			<Overload retVal="string" descr="Attach another OpenSAK database read-only to the SQL functions, under a schema&#x0a;name, so one opensak.sql() or sql_write() statement can read it together with&#x0a;the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN&#x0a;found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays&#x0a;refused. Nothing can write to an attached database: the file is opened read-&#x0a;only, and SQL that would change it is refused. Without `schema`, the name is&#x0a;made from the database name: lower case, `_` for anything but letters and digits&#x0a;(&quot;Found 2020&quot; → `found_2020`). The schema name must be letters, digits and `_`;&#x0a;`main`, `temp`, `macro`, `companion` and names starting with `opensak_` are&#x0a;reserved. The active database cannot be attached, and neither can a database&#x0a;twice. Attaching the same database under the same name again does nothing.&#x0a;SQLite allows 10 attached databases at once, opensak.macro_db() included. The&#x0a;database is not updated to the current schema, so one last opened by an older&#x0a;OpenSAK version may lack columns; `opensak.columns(&quot;&lt;schema&gt;.caches&quot;)` shows&#x0a;what is there. Each attach prints a line in the macro output. Cannot be called&#x0a;inside opensak.transaction(). Stays attached after opensak.switch_database(),&#x0a;unless the database becomes the active one. Everything is detached when the&#x0a;macro ends. A macro started with opensak.run_macro() sees its caller's attached&#x0a;databases; what it attaches or detaches is undone when it returns. See Several&#x0a;databases in one query.&#x0a;Returns string — The schema name.">
+				<Param name="name: string" />
+				<Param name="[schema: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.attached" func="yes">
+			<Overload retVal="{schema: string, name: string, path: string, opensak: boolean}[]" descr="The databases attached with opensak.attach(), in the order they were attached.&#x0a;`opensak` is always true: only OpenSAK databases can be attached so far.&#x0a;Returns {schema: string, name: string, path: string, opensak: boolean}[] — One&#x0a;table per attached database.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.attributes" func="yes">
 			<Overload retVal="opensak.Attribute[]?" descr="The attributes of a cache, each with its `id` for opensak.update_attribute() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Attribute[]? — nil if the cache is not in the database.">
 				<Param name="code: string" />
@@ -450,6 +460,11 @@
 			<Overload retVal="{short: string?, long: string?, html: boolean}?" descr="The listing description of a cache. Not part of the cache table because it can&#x0a;be large.&#x0a;Returns {short: string?, long: string?, html: boolean}? — Short and long&#x0a;description and whether they are HTML; nil if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.detach" func="yes">
+			<Overload descr="Detach a database attached with opensak.attach(). Optional: everything is&#x0a;detached when the macro ends. Cannot be called inside opensak.transaction().">
+				<Param name="schema: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.exit" func="yes">
