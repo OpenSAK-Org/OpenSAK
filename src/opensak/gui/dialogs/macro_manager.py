@@ -135,7 +135,7 @@ class MacroManagerDialog(QDialog):
         self._search.returnPressed.connect(self._focus_first_match)
         act_find = QAction(self)
         act_find.setShortcut(QKeySequence.StandardKey.Find)
-        act_find.triggered.connect(lambda: (self._search.setFocus(), self._search.selectAll()))
+        act_find.triggered.connect(self._focus_search)
         self.addAction(act_find)
 
         self._empty = QLabel(tr("macro_mgr_empty"))
@@ -238,10 +238,20 @@ class MacroManagerDialog(QDialog):
         items = self._tree.selectedItems()
         return Path(items[0].data(COL_NAME, _PATH_ROLE)) if items else None
 
+    def _items(self) -> list[QTreeWidgetItem]:
+        """The rows of the list, in the order shown."""
+        tree = self._tree
+        return [item for i in range(tree.topLevelItemCount())
+                if (item := tree.topLevelItem(i)) is not None]
+
+    def _focus_search(self) -> None:
+        """Ctrl+F: put the cursor in the search box, its text selected."""
+        self._search.setFocus()
+        self._search.selectAll()
+
     def select_path(self, path: Path) -> bool:
         """Select the macro *path* in the list; False if it is not listed."""
-        for i in range(self._tree.topLevelItemCount()):
-            item = self._tree.topLevelItem(i)
+        for item in self._items():
             if Path(item.data(COL_NAME, _PATH_ROLE)) == Path(path):
                 if item.isHidden():
                     self._search.clear()
@@ -254,8 +264,7 @@ class MacroManagerDialog(QDialog):
         shortcut, folder or file name contain every word typed in the
         search box (case-insensitive). A hidden macro is deselected."""
         words = self._search.text().casefold().split()
-        for i in range(self._tree.topLevelItemCount()):
-            item = self._tree.topLevelItem(i)
+        for item in self._items():
             text = " ".join(
                 [item.text(c) for c in range(self._tree.columnCount())]
                 + [Path(item.data(COL_NAME, _PATH_ROLE)).name]
@@ -268,8 +277,7 @@ class MacroManagerDialog(QDialog):
 
     def _focus_first_match(self) -> None:
         """Enter in the search box: select the first macro shown."""
-        for i in range(self._tree.topLevelItemCount()):
-            item = self._tree.topLevelItem(i)
+        for item in self._items():
             if not item.isHidden():
                 self._tree.setCurrentItem(item)
                 self._tree.setFocus()
