@@ -1292,6 +1292,7 @@ STRINGS: dict[str, str] = {
     "map_draw_line":                "Rita linje",
     "map_draw_points":              "Rita punkter",
     "map_draw_copy_text":           "Kopiera formen som text",
+    "map_draw_edit_filter":         "Redigera filtrets form",
     "map_draw_filter":              "Filtrera efter denna form…",
     "map_draw_clear":               "Rensa formen",
     "map_draw_dialog_title":        "Rita på kartan",

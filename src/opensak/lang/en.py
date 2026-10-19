@@ -1291,6 +1291,7 @@ STRINGS: dict[str, str] = {
     "map_draw_line":                "Draw line",
     "map_draw_points":              "Draw points",
     "map_draw_copy_text":           "Copy shape as text",
+    "map_draw_edit_filter":         "Edit filter shape",
     "map_draw_filter":              "Filter by this shape…",
     "map_draw_clear":               "Clear shape",
     "map_draw_dialog_title":        "Draw on map",

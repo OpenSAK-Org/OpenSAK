@@ -349,6 +349,106 @@ class TestDrawMenu:
         assert mw_mod.tr("map_draw_clear") not in texts
 
 
+# ── active filter's shape (read-only overlay) ─────────────────────────────────
+
+class TestFilterShape:
+    def test_template_has_overlay(self):
+        assert "function setFilterShape" in mw_mod.MAP_HTML
+        # Read-only: Geoman must never make it editable.
+        start = mw_mod.MAP_HTML.index("var FILTER_SHAPE_STYLE")
+        assert "pmIgnore: true" in mw_mod.MAP_HTML[start:start + 300]
+
+    def test_set_ready(self, ready):
+        ready.set_filter_shape("polygon", SQUARE)
+        assert ready._page.js[-1].startswith('setFilterShape("polygon", [[55.0, 10.0]')
+        assert ready.filter_shape() == ("polygon", SQUARE)
+        assert ready.shape() is None  # the editable shape is separate
+
+    def test_unchanged_not_resent(self, ready):
+        ready.set_filter_shape("line", SQUARE)
+        n = len(ready._page.js)
+        ready.set_filter_shape("line", list(SQUARE))
+        assert len(ready._page.js) == n
+
+    def test_remove(self, ready):
+        ready.set_filter_shape("line", SQUARE)
+        ready.set_filter_shape(None)
+        assert ready._page.js[-1] == "setFilterShape(null, [])"
+        assert ready.filter_shape() is None
+
+    def test_remove_without_shape_is_silent(self, ready):
+        ready.set_filter_shape(None)
+        assert ready._page.js == []
+
+    def test_bad_mode(self, w):
+        with pytest.raises(ValueError):
+            w.set_filter_shape("circle", SQUARE)
+
+    def test_resent_after_reload(self, w):
+        w.set_filter_shape("points", [(1.0, 2.0)])
+        w._page = FakePage()
+        w._on_leaflet_ready(True)
+        assert 'setFilterShape("points", [[1.0, 2.0]])' in w._page.js
+
+    def test_edit_filter_shape(self, ready):
+        ready.set_filter_shape("polygon", SQUARE)
+        got = []
+        ready.shape_changed.connect(lambda m, p: got.append((m, p)))
+        ready.edit_filter_shape()
+        assert ready.shape() == ("polygon", SQUARE)
+        assert ready._page.js[-1].startswith('loadShape("polygon"')
+        assert ready._page.js[-1].endswith(", true)")
+        assert got == [("polygon", SQUARE)]
+        assert ready.filter_shape() == ("polygon", SQUARE)  # overlay stays
+
+    def test_edit_without_filter_shape(self, ready):
+        ready.edit_filter_shape()
+        assert ready.shape() is None and ready._page.js == []
+
+    def test_draw_menu_edit(self, ready, monkeypatch):
+        menus = _fake_menu(monkeypatch, None)
+        ready._show_draw_menu()
+        state = {a.text: a.enabled for a in menus[0].actions}
+        assert state[mw_mod.tr("map_draw_edit_filter")] is False
+        ready.set_filter_shape("line", SQUARE)
+        _fake_menu(monkeypatch, mw_mod.tr("map_draw_edit_filter"))
+        ready._show_draw_menu()
+        assert ready.shape() == ("line", SQUARE)
+
+    def test_right_click_edit(self, ready, monkeypatch, fake_settings):
+        from opensak.utils.types import CoordFormat
+        fake_settings.coord_format = CoordFormat.DD
+        ready.set_filter_shape("line", SQUARE)
+        _fake_menu(monkeypatch, mw_mod.tr("map_draw_edit_filter"))
+        ready._on_map_right_click(55.5, 10.5)
+        assert ready.shape() == ("line", SQUARE)
+
+
+class TestMainWindowFilterShape:
+    def _update(self, filterset):
+        from opensak.gui import mainwindow
+        calls = []
+        win = SimpleNamespace(
+            _current_filterset=filterset,
+            _map_widget=SimpleNamespace(
+                set_filter_shape=lambda *a: calls.append(a)),
+        )
+        mainwindow.MainWindow._update_map_filter_shape(win)
+        return calls
+
+    def test_no_lp_filter(self):
+        assert self._update(FilterSet().add(NameFilter("x"))) == [(None,)]
+
+    def test_lp_filter(self):
+        lp = LinePolygonFilter(SQUARE, "polygon", 1.0)
+        assert self._update(FilterSet().add(NameFilter("x")).add(lp)) == [("polygon", SQUARE)]
+
+    def test_nested_lp_filter(self):
+        lp = LinePolygonFilter(SQUARE[:2], "line", 1.0)
+        fs = FilterSet().add(FilterSet("OR").add(NameFilter("x")).add(lp))
+        assert self._update(fs) == [("line", SQUARE[:2])]
+
+
 # ── MapDrawDialog ─────────────────────────────────────────────────────────────
 
 @pytest.fixture

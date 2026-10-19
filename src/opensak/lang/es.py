@@ -1293,6 +1293,7 @@ STRINGS: dict[str, str] = {
     "map_draw_line":                "Dibujar línea",
     "map_draw_points":              "Dibujar puntos",
     "map_draw_copy_text":           "Copiar forma como texto",
+    "map_draw_edit_filter":         "Editar la forma del filtro",
     "map_draw_filter":              "Filtrar por esta forma…",
     "map_draw_clear":               "Borrar forma",
     "map_draw_dialog_title":        "Dibujar en el mapa",

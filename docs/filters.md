@@ -416,11 +416,14 @@ W,GC12345
 
 The main map (and the pop-out map) has a **✎** button. It opens a menu where you can draw a polygon, a line or points, and act on the shape:
 
+- **Edit filter shape** loads the active filter's line/polygon shape so you can change it. Then use **Filter by this shape…** to apply the changed shape.
 - **Copy shape as text** copies the shape as a point list you can paste into the Line/Polygon tab.
 - **Filter by this shape…** opens *Set filter* with the shape on the Line/Polygon tab. The criteria of the active filter are kept. If that filter already has a line/polygon shape, the new shape replaces it and its distance and *Exclude* setting are kept.
 - **Clear shape** removes it.
 
-The same actions are in the map's right-click menu while a shape is shown. The shape stays on the map when the cache list changes, but is gone after a restart.
+When the active filter has a line/polygon shape, the map shows it as a dashed blue outline (points as blue dots). This outline can't be edited; **Edit filter shape** makes an editable copy of it.
+
+The same actions are in the map's right-click menu while a shape or a filter shape is shown. The shape stays on the map when the cache list changes, but is gone after a restart.
 
 A copied or drawn shape starts with a comment line naming its type, which the filter ignores:
 

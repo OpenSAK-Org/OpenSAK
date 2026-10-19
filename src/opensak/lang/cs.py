@@ -1293,6 +1293,7 @@ STRINGS: dict[str, str] = {
     "map_draw_line":                "Nakreslit čáru",
     "map_draw_points":              "Nakreslit body",
     "map_draw_copy_text":           "Kopírovat tvar jako text",
+    "map_draw_edit_filter":         "Upravit tvar filtru",
     "map_draw_filter":              "Filtrovat podle tohoto tvaru…",
     "map_draw_clear":               "Smazat tvar",
     "map_draw_dialog_title":        "Kreslit na mapě",

@@ -1292,6 +1292,7 @@ STRINGS: dict[str, str] = {
     "map_draw_line":                "Tegn linje",
     "map_draw_points":              "Tegn punkter",
     "map_draw_copy_text":           "Kopiér form som tekst",
+    "map_draw_edit_filter":         "Redigér filterets form",
     "map_draw_filter":              "Filtrér efter denne form…",
     "map_draw_clear":               "Ryd form",
     "map_draw_dialog_title":        "Tegn på kort",

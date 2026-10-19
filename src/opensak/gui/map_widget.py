@@ -356,11 +356,18 @@ if (MAP_ACTIONS_ENABLED) {
 // number of markers). Every change the user makes is sent to Python as
 // bridge.on_shape_changed('{"mode": …, "points": [[lat, lon], …]}');
 // changes made from Python (loadShape/clearShape) are not echoed back.
+//
+// filterLayer holds the active Line/Polygon filter's shape: read-only,
+// dashed, in another colour, below drawLayer so an edited copy shows on top.
+var filterLayer = L.featureGroup().addTo(map);
 var drawLayer = L.featureGroup().addTo(map);
 var drawMode = null;
 var drawEditable = true;
 var GEOMAN_SHAPES = {line: 'Line', polygon: 'Polygon', points: 'Marker'};
 var SHAPE_STYLE = {color: '#d81b60', weight: 3, fillColor: '#d81b60', fillOpacity: 0.12};
+var FILTER_SHAPE_STYLE = {color: '#1e66f5', weight: 3, dashArray: '8, 6',
+                          fillColor: '#1e66f5', fillOpacity: 0.06,
+                          interactive: false, pmIgnore: true};
 
 function makeDrawPointIcon() {
     return L.divIcon({
@@ -502,6 +509,23 @@ function setDrawEnabled(enabled) {
     drawLayer.getLayers().forEach(function(layer) {
         setLayerEditable(layer, drawEditable);
     });
+}
+
+// Show the active filter's shape read-only (empty points: remove it).
+function setFilterShape(mode, points) {
+    filterLayer.clearLayers();
+    if (!points || !points.length) return;
+    var latlngs = points.map(function(p) { return L.latLng(p[0], p[1]); });
+    if (mode === 'points') {
+        latlngs.forEach(function(ll) {
+            filterLayer.addLayer(L.circleMarker(ll, L.extend({}, FILTER_SHAPE_STYLE,
+                {radius: 6, dashArray: null, fillOpacity: 0.5})));
+        });
+    } else if (mode === 'polygon') {
+        filterLayer.addLayer(L.polygon(latlngs, FILTER_SHAPE_STYLE));
+    } else {
+        filterLayer.addLayer(L.polyline(latlngs, FILTER_SHAPE_STYLE));
+    }
 }
 
 function setView(lat, lon, zoom) {
@@ -902,6 +926,9 @@ class MapWidget(QWidget):
         self._shape_mode: Optional[str] = None
         self._shape_points: list[Point] = []
         self._fit_shape_pending = False
+        # The active Line/Polygon filter's shape, shown read-only (and re-sent
+        # after a reload like the drawn one).
+        self._filter_shape: Optional[tuple[str, list[Point]]] = None
         self._pending_draw_mode: Optional[str] = None
         self._draw_enabled = True
         self._setup_ui()
@@ -1000,7 +1027,12 @@ class MapWidget(QWidget):
             self._do_load_caches(self._pending_caches)
             self._pending_caches = None
 
-        # The drawn shape lives in the page — put it back after a (re)load.
+        # The shapes live in the page — put them back after a (re)load.
+        if self._filter_shape is not None:
+            self._run_js(
+                f"setFilterShape({_js_arg(self._filter_shape[0])}, "
+                f"{_js_arg(self._filter_shape[1])})"
+            )
         if self._shape_mode is not None:
             self._run_js(
                 f"loadShape({_js_arg(self._shape_mode)}, {_js_arg(self._shape_points)}, "
@@ -1296,6 +1328,35 @@ class MapWidget(QWidget):
         if self._ready:
             self._run_js(f"setDrawEnabled({_js_arg(self._draw_enabled)})")
 
+    def filter_shape(self) -> Optional[tuple[str, list[Point]]]:
+        """The active filter's shape as (mode, points), or None."""
+        if self._filter_shape is None:
+            return None
+        return self._filter_shape[0], list(self._filter_shape[1])
+
+    def set_filter_shape(self, mode: Optional[str], points: Optional[list[Point]] = None) -> None:
+        """Show the active Line/Polygon filter's shape read-only; *mode*
+        None (or no points) removes it."""
+        if mode is not None and mode not in LP_MODES:
+            raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+        pts = [(float(lat), float(lon)) for lat, lon in (points or [])]
+        shape = (mode, pts) if mode is not None and pts else None
+        if shape == self._filter_shape:
+            return  # called on every cache reload — skip the no-op JS call
+        self._filter_shape = shape
+        if self._ready:
+            if shape is None:
+                self._run_js("setFilterShape(null, [])")
+            else:
+                self._run_js(f"setFilterShape({_js_arg(shape[0])}, {_js_arg(shape[1])})")
+
+    def edit_filter_shape(self) -> None:
+        """Load the active filter's shape as the editable shape, so it can be
+        changed and applied again with "Filter by this shape"."""
+        if self._filter_shape is not None:
+            self.load_shape(*self._filter_shape, fit=True)
+            self.shape_changed.emit(*self.shape())
+
     def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
         if self._ready:
             self._run_js(f"setView({lat}, {lon}, {int(zoom)})")
@@ -1319,9 +1380,11 @@ class MapWidget(QWidget):
             QApplication.clipboard().setText(text)
 
     def _add_shape_actions(self, menu: QMenu) -> dict:
-        """Add "Copy as text / Filter by this shape / Clear" to *menu*;
-        returns {action: callback}."""
+        """Add "Edit filter shape / Copy as text / Filter by this shape /
+        Clear" to *menu*; returns {action: callback}."""
         has_shape = self.shape() is not None
+        act_edit = menu.addAction(tr("map_draw_edit_filter"))
+        act_edit.setEnabled(self._filter_shape is not None)
         act_copy = menu.addAction(tr("map_draw_copy_text"))
         act_copy.setEnabled(has_shape)
         act_filter = menu.addAction(tr("map_draw_filter"))
@@ -1329,6 +1392,7 @@ class MapWidget(QWidget):
         act_clear = menu.addAction(tr("map_draw_clear"))
         act_clear.setEnabled(has_shape)
         return {
+            act_edit: self.edit_filter_shape,
             act_copy: self._copy_shape_text,
             act_filter: self._request_filter_by_shape,
             act_clear: self.clear_shape,
@@ -1402,7 +1466,8 @@ class MapWidget(QWidget):
 
         # ── Drawn shape ───────────────────────────────────────────────────────
         shape_actions = {}
-        if self._draw_button and self.shape() is not None:
+        if self._draw_button and (self.shape() is not None
+                                  or self._filter_shape is not None):
             menu.addSeparator()
             shape_actions = self._add_shape_actions(menu)
 
