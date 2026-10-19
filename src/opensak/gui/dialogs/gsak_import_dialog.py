@@ -15,7 +15,8 @@ exist yet. An existing OpenSAK database is only touched after the user
 confirmed it — overwritten (emptied first) or merged into. When the backup
 also contains ``gsak.db3`` the saved filters can be migrated afterwards via
 the regular GSAK filter import dialog, and the user locations (#1001) via a
-preview of GSAK's location list. A single ``.db3`` file (or a zip with just
+preview of GSAK's location list. Both are opt-in (#1090) unless the pick
+holds nothing but ``gsak.db3``. A single ``.db3`` file (or a zip with just
 one database) is simply a list with one entry.
 
 Only the selected databases are unpacked, into one temp folder that is
@@ -390,9 +391,16 @@ class GsakImportDialog(QDialog):
             tr("gsak_import_databases_found", count=len(contents.databases))
         )
         if contents.has_settings_db:
+            # Issue #1090: migrating GSAK's saved filters and user locations is
+            # opt-in. Users who refresh their GSAK databases and re-import them
+            # regularly don't want those settings re-imported every time. The
+            # exception is a pick with no cache databases at all (just
+            # gsak.db3): the settings import is then the only thing the dialog
+            # can do, so it starts ticked rather than with Import disabled.
+            settings_only = not contents.databases
             for cb in (self._filters_cb, self._locations_cb):
                 cb.setVisible(True)
-                cb.setChecked(True)
+                cb.setChecked(settings_only)
         self._set_list_enabled(bool(contents.databases))
         self._update_import_button()
 

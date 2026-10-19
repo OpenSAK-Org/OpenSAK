@@ -324,7 +324,34 @@ class TestGsakImportDialogListing:
         assert all(dlg._table.item(r, gdlg.COL_GSAK).checkState() == Qt.CheckState.Checked
                    for r in range(2))
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("gsak_import_status_new")
-        assert not dlg._filters_cb.isHidden() and dlg._filters_cb.isChecked()
+        # #1090: shown, but opt-in when there are cache databases to import.
+        assert not dlg._filters_cb.isHidden() and not dlg._filters_cb.isChecked()
+        assert dlg._import_btn.isEnabled()
+
+    def test_settings_imports_are_opt_in_alongside_databases(self, dlg, tmp_path):
+        # Issue #1090: re-importing refreshed GSAK databases must not re-import
+        # GSAK's saved filters and user locations unless asked to.
+        dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        for cb in (dlg._filters_cb, dlg._locations_cb):
+            assert not cb.isHidden()
+            assert not cb.isChecked()
+
+    def test_settings_imports_reset_to_unticked_on_new_pick(self, dlg, tmp_path):
+        (tmp_path / "one").mkdir()
+        (tmp_path / "two").mkdir()
+        dlg.set_path(_backup(tmp_path / "one", {"A": "GC1"}))
+        dlg._filters_cb.setChecked(True)
+        dlg._locations_cb.setChecked(True)
+        dlg.set_path(_backup(tmp_path / "two", {"B": "GC2"}))
+        assert not dlg._filters_cb.isChecked()
+        assert not dlg._locations_cb.isChecked()
+
+    def test_settings_only_backup_starts_ticked(self, dlg, tmp_path):
+        # #1090 exception: with no cache databases, the gsak.db3 migrations
+        # are all the dialog can do — don't leave Import disabled.
+        dlg.set_path(_backup(tmp_path, {}))
+        assert dlg._table.rowCount() == 0
+        assert dlg._filters_cb.isChecked() and dlg._locations_cb.isChecked()
         assert dlg._import_btn.isEnabled()
 
     def test_filters_checkbox_hidden_without_gsak_db3(self, dlg, tmp_path):
@@ -356,6 +383,7 @@ class TestGsakImportDialogListing:
 
     def test_nothing_ticked_disables_import_unless_filters_wanted(self, dlg, tmp_path):
         dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        dlg._filters_cb.setChecked(True)
         dlg._check_all(False)
         dlg._locations_cb.setChecked(False)
         assert dlg._import_btn.isEnabled()          # filters still ticked
@@ -433,6 +461,8 @@ class TestGsakImportDialogRun:
         dlg.databases_changed.connect(lambda: signals.__setitem__("dbs", signals["dbs"] + 1))
 
         dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA", "Holidays": "GC2BBB"}))
+        dlg._filters_cb.setChecked(True)      # opt-in since #1090
+        dlg._locations_cb.setChecked(False)
         _run(dlg, qtbot)
 
         assert _codes(_db_by_name(manager, "AllCH").path) == ["GC1AAA"]
@@ -769,9 +799,10 @@ def auto_location_import(monkeypatch):
 
 @pytest.mark.usefixtures("sync_workers")
 class TestGsakImportDialogLocations:
-    def test_checkbox_shown_and_ticked_with_gsak_db3(self, dlg, tmp_path):
+    def test_checkbox_shown_but_unticked_with_gsak_db3(self, dlg, tmp_path):
+        # #1090: opt-in when the backup also holds cache databases.
         dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
-        assert not dlg._locations_cb.isHidden() and dlg._locations_cb.isChecked()
+        assert not dlg._locations_cb.isHidden() and not dlg._locations_cb.isChecked()
 
     def test_checkbox_hidden_without_gsak_db3(self, dlg, tmp_path):
         dlg.set_path(_backup(tmp_path, {"A": "GC1"}, with_settings=False))
@@ -779,6 +810,7 @@ class TestGsakImportDialogLocations:
 
     def test_locations_alone_enable_import(self, dlg, tmp_path):
         dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        dlg._locations_cb.setChecked(True)
         dlg._check_all(False)
         dlg._filters_cb.setChecked(False)
         assert dlg._import_btn.isEnabled()
@@ -797,6 +829,8 @@ class TestGsakImportDialogLocations:
         dlg.set_path(_locations_backup(
             tmp_path, "# comment\nZurich,47.371722, 8.537466\nBroken, nonsense\n"
                       "Paris,N48° 51.767 E2° 19.886", {"A": "GC1AAA"}))
+        dlg._filters_cb.setChecked(True)      # opt-in since #1090
+        dlg._locations_cb.setChecked(True)
         _run(dlg, qtbot)
 
         assert auto_location_import == [["Zurich", "Paris"]]
