@@ -720,6 +720,21 @@ def render_lua_stub() -> str:
         "---@field codes? string[] GC codes to transfer (default: the caches of the active filter).",
         '---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").',
         "",
+        "---A matrix from `opensak.stats.pivot()`, for `opensak.html.matrix()`.",
+        "---@class opensak.Matrix",
+        "---@field rows any[] Values of the row field.",
+        "---@field cols any[] Values of the column field.",
+        "---@field cells number[][] `cells[i][j]`: the count for rows[i] and cols[j].",
+        "---@field max number The largest cell.",
+        "---@field total number Sum of all cells.",
+        "---@field filled integer Number of cells that are not 0.",
+        "",
+        "---A run of days from `opensak.stats.streaks()`.",
+        "---@class opensak.Run",
+        "---@field days integer Number of days.",
+        '---@field first string First day, "YYYY-MM-DD".',
+        '---@field last string Last day, "YYYY-MM-DD".',
+        "",
         "---What `opensak.export_gpx{}` writes.",
         "---@class opensak.ExportSpec",
         '---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).',
@@ -764,6 +779,8 @@ def render_lua_stub() -> str:
     ]
     for field in CACHE_FIELDS:
         lines.append(f"---@field {field.name} {field.type} {field.description}")
+    # Macros may add fields of their own, e.g. to group by with opensak.stats.
+    lines.append("---@field [string] any")
 
     descriptions = {f.name: f.description for f in CACHE_FIELDS}
     lines += [
