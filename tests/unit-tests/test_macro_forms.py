@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 
 import pytest
 
-from opensak.macro import MacroError, MacroRuntime
+from opensak.macro import MacroError, MacroRuntime, WriteApproval
 from opensak.macro.form_code import (
     LuaSyntaxError,
     find_form_table,
@@ -437,6 +437,13 @@ class BaseHost:
 
     def end_macro(self):
         pass
+
+    def database_name(self):
+        return "Test"
+
+    def approve_macro_write(self, macro):
+        # set_corrected() in an example form asks before its first write
+        return WriteApproval.SESSION
 
 
 class UIHost(BaseHost):

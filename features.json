@@ -1,5 +1,6 @@
 {
   "reverse-geocoding": true,
   "map-popout": true,
-  "lua-macros": true
+  "lua-macros": true,
+  "lua-macro-write": true
 }

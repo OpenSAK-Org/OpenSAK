@@ -84,6 +84,8 @@ OpenSAK Backups/
     databases/
       Default.db
       Denmark.db
+    macro_databases/    (the Lua macros' own opensak.macro_db() files)
+      MyMacro.db3
     settings/
       opensak.json
       filters/          (filter profiles)
@@ -99,9 +101,12 @@ OpenSAK Backups/
 | --- | --- |
 | Every database in the database list whose file exists, also those outside the database folder | Log files |
 | opensak.json, filters/, column_views/, icons/ from the install folder | The Geocaching.com token file and keyring passwords (credentials never go into a backup) |
+| Every macro database (`opensak.macro_db()`, #1034) OpenSAK has opened whose file still exists — not in safety sets | |
 | | bootstrap.json (it only points to the install folder on this machine) |
 
 Databases are written with `snapshot_database()` (#943), so a backup is consistent even for the open database.
+
+**Macro databases:** a macro's own database is `<macro>.db3` next to the macro file, which can be in any folder, so `opensak.macro_db()` records every file it opens in opensak.json under `macros.databases` (resolved paths). Each backup snapshots the recorded files that still exist into `macro_databases/`; a missing file is left out silently (it may be on a drive that isn't connected), and one that can't be copied is left out with a warning in the log — a macro's data never makes the whole backup fail. Restore doesn't offer them yet: copy the file from the set (or the zip) back to the path in the manifest.
 
 **manifest.json** describes the set and is written last:
 
@@ -114,6 +119,10 @@ Databases are written with `snapshot_database()` (#943), so a backup is consiste
   "databases": [
     {"name": "Default", "file": "databases/Default.db",
      "db_uuid": "9f2c…", "schema_version": 24, "size_bytes": 52428800}
+  ],
+  "macro_databases": [
+    {"file": "macro_databases/FindStat.db3",
+     "path": "C:\\Users\\me\\Documents\\OpenSAK\\macros\\FindStat.db3", "size_bytes": 81920}
   ],
   "settings": true
 }
