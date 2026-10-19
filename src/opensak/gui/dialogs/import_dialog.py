@@ -13,6 +13,7 @@ recent import are restored when the dialog opens.
 
 from __future__ import annotations
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -27,6 +28,9 @@ from opensak.lang import tr
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog
 from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
+
+if TYPE_CHECKING:
+    from opensak.gui.dialogs.update_location_dialog import ReverseGeocodeWorker
 
 # File types a folder entry imports.
 FOLDER_IMPORT_SUFFIXES = (".gpx", ".zip")
@@ -172,7 +176,7 @@ class ImportDialog(SavedSettingsDialog):
         # scrollbar), so no additional QScrollArea needed here.
         clamp_dialog_height_to_screen(self, parent)
         self._worker: ImportWorker | None = None
-        self._geo_worker = None
+        self._geo_worker: ReverseGeocodeWorker | None = None
         self._selected_paths: list[Path] = []
         self._folders: set[Path] = set()
         self._run_paths: list[Path] = []
