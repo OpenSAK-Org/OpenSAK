@@ -1354,8 +1354,9 @@ class MapWidget(QWidget):
         """Load the active filter's shape as the editable shape, so it can be
         changed and applied again with "Filter by this shape"."""
         if self._filter_shape is not None:
-            self.load_shape(*self._filter_shape, fit=True)
-            self.shape_changed.emit(*self.shape())
+            mode, points = self._filter_shape
+            self.load_shape(mode, points, fit=True)
+            self.shape_changed.emit(mode, list(points))
 
     def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
         if self._ready:
