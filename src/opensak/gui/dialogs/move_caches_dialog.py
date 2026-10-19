@@ -88,7 +88,8 @@ class MoveCachesDialog(QDialog):
         layout.setSpacing(10)
 
         # ── Scope selection ───────────────────────────────────────────────
-        scope_lbl = QLabel(tr("move_caches_scope_label"))
+        scope_key = "copy_caches_scope_label" if self._copy_only else "move_caches_scope_label"
+        scope_lbl = QLabel(tr(scope_key))
         layout.addWidget(scope_lbl)
 
         self._scope_group = QButtonGroup(self)
@@ -194,7 +195,8 @@ class MoveCachesDialog(QDialog):
             QMessageBox.information(
                 self,
                 tr(self._title_key),
-                tr("move_caches_none_selected"),
+                tr("copy_caches_none_selected" if self._copy_only
+                   else "move_caches_none_selected"),
             )
             return
 
@@ -259,6 +261,7 @@ class MoveCachesDialog(QDialog):
         QMessageBox.critical(
             self,
             tr(self._title_key),
-            tr("move_caches_error", message=message),
+            tr("copy_caches_error" if self._copy_only else "move_caches_error",
+               message=message),
         )
 

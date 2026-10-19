@@ -28,7 +28,10 @@ permissions:
 
 jobs:
   capture:
-    runs-on: ubuntu-latest
+    # Pinned to 24.04 while ubuntu-latest migrates to 26.04 (Oct 19 - Nov 19 2026,
+    # actions/runner-images#14748). A gradual rollout would make this job flip
+    # between images run to run. Unpin once 26.04 is verified green.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7

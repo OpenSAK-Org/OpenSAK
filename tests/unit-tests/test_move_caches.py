@@ -359,3 +359,58 @@ class TestMoveWorker:
         init_db(db_path=source_db)
         with get_session() as session:
             assert session.query(Cache).filter_by(gc_code="GCERR").count() == 1
+
+
+# ── Dialog wording: Copy mode must not say "move" (#1107) ─────────────────────
+
+class TestDialogWording:
+    """The Copy Caches dialog reuses MoveCachesDialog; every user-facing text
+    must follow copy_only, not just the title, target label and button."""
+
+    @staticmethod
+    def _make(qtbot, copy_only):
+        from opensak.gui.dialogs.move_caches_dialog import MoveCachesDialog
+        dlg = MoveCachesDialog(None, None, [], [], copy_only=copy_only)
+        qtbot.addWidget(dlg)
+        return dlg
+
+    @staticmethod
+    def _label_texts(dlg):
+        from PySide6.QtWidgets import QLabel
+        return [lbl.text() for lbl in dlg.findChildren(QLabel)]
+
+    @pytest.mark.parametrize("copy_only, key", [
+        (True, "copy_caches_scope_label"),
+        (False, "move_caches_scope_label"),
+    ])
+    def test_scope_label(self, qtbot, copy_only, key):
+        from opensak.lang import tr
+        assert tr(key) in self._label_texts(self._make(qtbot, copy_only))
+
+    @pytest.mark.parametrize("copy_only, key", [
+        (True, "copy_caches_none_selected"),
+        (False, "move_caches_none_selected"),
+    ])
+    def test_none_selected_message(self, qtbot, monkeypatch, copy_only, key):
+        from PySide6.QtWidgets import QMessageBox
+        from opensak.lang import tr
+        shown = []
+        monkeypatch.setattr(QMessageBox, "information",
+                            lambda parent, title, text: shown.append(text))
+        dlg = self._make(qtbot, copy_only)
+        dlg._start_move()  # no selected cache → "none selected" message
+        assert shown == [tr(key)]
+
+    @pytest.mark.parametrize("copy_only, key", [
+        (True, "copy_caches_error"),
+        (False, "move_caches_error"),
+    ])
+    def test_error_message(self, qtbot, monkeypatch, copy_only, key):
+        from PySide6.QtWidgets import QMessageBox
+        from opensak.lang import tr
+        shown = []
+        monkeypatch.setattr(QMessageBox, "critical",
+                            lambda parent, title, text: shown.append(text))
+        dlg = self._make(qtbot, copy_only)
+        dlg._on_error("boom")
+        assert shown == [tr(key, message="boom")]

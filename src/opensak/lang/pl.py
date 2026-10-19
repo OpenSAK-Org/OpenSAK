@@ -1652,6 +1652,7 @@ STRINGS: dict[str, str] = {
     "move_caches_title":                       "Przenieś skrytki",
     "copy_caches_title":                       "Kopiuj skrytki",
     "move_caches_scope_label":                 "Które skrytki przenieść:",
+    "copy_caches_scope_label":                 "Które skrytki skopiować:",
     "move_caches_scope_selected":              "Wybrana skrytka ({gc_code})",
     "move_caches_scope_flagged":               "Oznaczone skrytki ({count})",
     "move_caches_scope_all":                   "Wszystkie skrytki w bieżącym filtrze ({count})",
@@ -1660,12 +1661,14 @@ STRINGS: dict[str, str] = {
     "move_caches_current_db":                  "bieżąca",
     "move_caches_btn_move":                    "Przenieś",
     "move_caches_none_selected":               "Nie wybrano skrytek do przeniesienia.",
+    "copy_caches_none_selected":               "Nie wybrano skrytek do skopiowania.",
     "move_caches_same_db":                     "Baza docelowa jest taka sama jak bieżąca baza danych.\nWybierz inną bazę danych.",
     "move_caches_confirm":                     "Przenieść {count} skrytek do {target}?\n\nSkrytki zostaną usunięte z bieżącej bazy danych.",
     "copy_caches_confirm":                     "Skopiować {count} skrytek do {target}?",
     "move_caches_done":                        "Pomyślnie przeniesiono {count} skrytek.",
     "copy_caches_done":                        "Pomyślnie skopiowano {count} skrytek.",
     "move_caches_error":                       "Wystąpił błąd podczas przenoszenia skrytek:\n{message}",
+    "copy_caches_error":                       "Wystąpił błąd podczas kopiowania skrytek:\n{message}",
 
     # ── AppImage self-integration (Linux, issue #835) ──────────────────────────
     "appimage_integrate_title":                "Zainstalować OpenSAK w menu aplikacji?",

@@ -1647,6 +1647,7 @@ STRINGS: dict[str, str] = {
     "move_caches_title":                       "Přesunout keše",
     "copy_caches_title":                       "Kopírovat keše",
     "move_caches_scope_label":                 "Které keše přesunout:",
+    "copy_caches_scope_label":                 "Které keše kopírovat:",
     "move_caches_scope_selected":              "Vybraná keš ({gc_code})",
     "move_caches_scope_flagged":               "Označené keše ({count})",
     "move_caches_scope_all":                   "Všechny keše v aktuálním filtru ({count})",
@@ -1655,12 +1656,14 @@ STRINGS: dict[str, str] = {
     "move_caches_current_db":                  "aktuální",
     "move_caches_btn_move":                    "Přesunout",
     "move_caches_none_selected":               "Nejsou vybrány žádné keše k přesunu.",
+    "copy_caches_none_selected":               "Nejsou vybrány žádné keše ke kopírování.",
     "move_caches_same_db":                     "Cílová databáze je stejná jako aktuální.\nVyberte prosím jinou databázi.",
     "move_caches_confirm":                     "Přesunout {count} keš(í) do {target}?\n\nBudou odstraněny z aktuální databáze.",
     "copy_caches_confirm":                     "Kopírovat {count} keš(í) do {target}?",
     "move_caches_done":                        "{count} keš(í) úspěšně přesunuto.",
     "copy_caches_done":                        "{count} keš(í) úspěšně zkopírováno.",
     "move_caches_error":                       "Při přesouvání keší došlo k chybě:\n{message}",
+    "copy_caches_error":                       "Při kopírování keší došlo k chybě:\n{message}",
 
     # ── AppImage selv-integration (Linux, issue #835) ──────────────────────────
     "appimage_integrate_title":                "Nainstalovat OpenSAK do nabídky aplikací?",

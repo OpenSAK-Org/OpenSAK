@@ -1652,6 +1652,7 @@ STRINGS: dict[str, str] = {
     "move_caches_title":                       "Mover cachés",
     "copy_caches_title":                       "Copiar cachés",
     "move_caches_scope_label":                 "Qué cachés mover:",
+    "copy_caches_scope_label":                 "Qué cachés copiar:",
     "move_caches_scope_selected":              "Caché seleccionada ({gc_code})",
     "move_caches_scope_flagged":               "Cachés marcadas ({count})",
     "move_caches_scope_all":                   "Todas las cachés del filtro actual ({count})",
@@ -1660,12 +1661,14 @@ STRINGS: dict[str, str] = {
     "move_caches_current_db":                  "actual",
     "move_caches_btn_move":                    "Mover",
     "move_caches_none_selected":               "No se ha seleccionado ninguna caché para mover.",
+    "copy_caches_none_selected":               "No se ha seleccionado ninguna caché para copiar.",
     "move_caches_same_db":                     "La base de datos de destino es la misma que la base de datos actual.\nSelecciona una base de datos diferente.",
     "move_caches_confirm":                     "¿Mover {count} caché(s) a {target}?\n\nLas cachés se eliminarán de la base de datos actual.",
     "copy_caches_confirm":                     "¿Copiar {count} caché(s) a {target}?",
     "move_caches_done":                        "{count} caché(s) movida(s) correctamente.",
     "copy_caches_done":                        "{count} caché(s) copiada(s) correctamente.",
     "move_caches_error":                       "Se produjo un error al mover las cachés:\n{message}",
+    "copy_caches_error":                       "Se produjo un error al copiar las cachés:\n{message}",
 
     # ── AppImage self-integration (Linux, issue #835) ──────────────────────────
     "appimage_integrate_title":                "¿Instalar OpenSAK en tu menú de aplicaciones?",

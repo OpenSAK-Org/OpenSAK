@@ -1651,6 +1651,7 @@ STRINGS: dict[str, str] = {
     "move_caches_title":                       "Flytta cacher",
     "copy_caches_title":                       "Kopiera cacher",
     "move_caches_scope_label":                 "Vilka cacher ska flyttas:",
+    "copy_caches_scope_label":                 "Vilka cacher ska kopieras:",
     "move_caches_scope_selected":              "Vald cache ({gc_code})",
     "move_caches_scope_flagged":               "Flaggade cacher ({count})",
     "move_caches_scope_all":                   "Alla cacher i aktuellt filter ({count})",
@@ -1659,12 +1660,14 @@ STRINGS: dict[str, str] = {
     "move_caches_current_db":                  "aktuell",
     "move_caches_btn_move":                    "Flytta",
     "move_caches_none_selected":               "Inga cacher valda att flytta.",
+    "copy_caches_none_selected":               "Inga cacher valda att kopiera.",
     "move_caches_same_db":                     "Måldatabasen är samma som den aktuella databasen.\nVälj en annan databas.",
     "move_caches_confirm":                     "Flytta {count} cache(r) till {target}?\n\nDe kommer att tas bort från den aktuella databasen.",
     "copy_caches_confirm":                     "Kopiera {count} cache(r) till {target}?",
     "move_caches_done":                        "{count} cache(r) har flyttats.",
     "copy_caches_done":                        "{count} cache(r) har kopierats.",
     "move_caches_error":                       "Ett fel uppstod vid flytt av cacher:\n{message}",
+    "copy_caches_error":                       "Ett fel uppstod vid kopiering av cacher:\n{message}",
 
     # ── AppImage selv-integration (Linux, issue #835) ──────────────────────────
     "appimage_integrate_title":                "Installera OpenSAK i din programmeny?",
