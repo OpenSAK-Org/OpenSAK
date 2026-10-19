@@ -1649,6 +1649,7 @@ STRINGS: dict[str, str] = {
     "move_caches_title":                       "Caches verplaatsen",
     "copy_caches_title":                       "Caches kopiëren",
     "move_caches_scope_label":                 "Welke caches verplaatsen:",
+    "copy_caches_scope_label":                 "Welke caches kopiëren:",
     "move_caches_scope_selected":              "Geselecteerde cache ({gc_code})",
     "move_caches_scope_flagged":               "Gemarkeerde caches ({count})",
     "move_caches_scope_all":                   "Alle caches in huidig filter ({count})",
@@ -1657,12 +1658,14 @@ STRINGS: dict[str, str] = {
     "move_caches_current_db":                  "huidig",
     "move_caches_btn_move":                    "Verplaatsen",
     "move_caches_none_selected":               "Geen caches geselecteerd om te verplaatsen.",
+    "copy_caches_none_selected":               "Geen caches geselecteerd om te kopiëren.",
     "move_caches_same_db":                     "De doeldatabase is dezelfde als de huidige database.\nSelecteer een andere database.",
     "move_caches_confirm":                     "{count} cache(s) verplaatsen naar {target}?\n\nZe worden verwijderd uit de huidige database.",
     "copy_caches_confirm":                     "{count} cache(s) kopiëren naar {target}?",
     "move_caches_done":                        "{count} cache(s) succesvol verplaatst.",
     "copy_caches_done":                        "{count} cache(s) succesvol gekopieerd.",
     "move_caches_error":                       "Er is een fout opgetreden bij het verplaatsen:\n{message}",
+    "copy_caches_error":                       "Er is een fout opgetreden bij het kopiëren:\n{message}",
 
     # ── AppImage selv-integration (Linux, issue #835) ──────────────────────────
     "appimage_integrate_title":                "OpenSAK installeren in uw toepassingsmenu?",
