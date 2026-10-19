@@ -158,6 +158,7 @@ from opensak.macro.permissions import (
     macros_dir,
     protected_reason,
     resolve_path,
+    safe_write_stream,
     temp_dir,
     with_grant,
 )
@@ -2100,6 +2101,20 @@ class MacroRuntime:
             self._run_permissions = with_grant(self._run_permissions, target, write)
         return target
 
+    def _safe_saver(self, target: Path) -> Callable[[Path, Callable, bool], Any]:
+        """The Saver (see opensak.export.file_export) for the files a macro
+        export writes: safe_write_stream() with this run's folder list, plus
+        the file the user picked if *target* is one. Raises
+        FolderAccessDenied."""
+        permissions = self._run_permissions
+        if (target, True) in self._picked:
+            permissions = with_grant(permissions, target.parent, True)
+
+        def save(path: Path, write: Callable, binary: bool) -> Any:
+            return safe_write_stream(path, write, permissions, binary=binary)[1]
+
+        return save
+
     def _check_access(self, path: Path, write: bool, allow_database: bool = False) -> Path:
         """check_access() against this run's list. A folder that is merely
         not listed is put to the user (host.approve_folder) instead of
@@ -2355,7 +2370,10 @@ class MacroRuntime:
             count = write_export_file(
                 caches, target, settings.fmt,
                 use_corrected=settings.use_corrected_coords,
+                save=self._safe_saver(target),
             )
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {target}: {exc}") from None
         return str(target), count
@@ -2439,7 +2457,10 @@ class MacroRuntime:
             count = write_export_file(
                 caches, output, fmt, use_corrected=corrected, text=text,
                 attributes=attributes, child_waypoints=child_waypoints,
+                save=self._safe_saver(output),
             )
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {output}: {exc}") from None
         return str(output), count
@@ -2809,7 +2830,10 @@ class MacroRuntime:
                 center_name=self._host.center_name(),
                 should_write=should_write,
                 icon_path=icon,
+                save=self._safe_saver(folder / "poi.gpi"),
             )
+        except FolderAccessDenied as exc:
+            raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write POI file: {exc}") from None
         except ValueError as exc:   # unreadable icon

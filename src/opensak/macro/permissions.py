@@ -18,9 +18,11 @@ Windows junctions) cannot lead out of a permitted folder. When folders are
 nested, the most specific entry decides — a sub-folder listed without
 rights therefore blocks it even if a parent folder is permitted.
 
-Every file a macro writes goes through safe_write(): it refuses a target
-with more than one hard link (resolve() cannot see through those, so a
-link in a permitted folder could otherwise lead to e.g. opensak.json) and
+Every file a macro writes goes through safe_write() (or
+safe_write_stream(), for a file written piece by piece, e.g. a large
+export): it refuses a target with more than one hard link (resolve()
+cannot see through those, so a link in a permitted folder could otherwise
+lead to e.g. opensak.json) and
 writes to a temporary file first, which then replaces the target. The
 check is repeated right before the replace.
 
@@ -50,7 +52,9 @@ import secrets
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Iterable, Optional
+from typing import IO, Any, Callable, Iterable, Optional, TypeVar
+
+T = TypeVar("T")
 
 STORE_KEY = "macros.folder_permissions"
 
@@ -432,9 +436,25 @@ def safe_write(
     permissions: Optional[Iterable[FolderPermission]] = None,
     encoding: str = "utf-8",
 ) -> Path:
-    """Write *data* to *path* for a macro and return the resolved path.
+    """Write *data* to *path* for a macro and return the resolved path
+    (see safe_write_stream)."""
+    payload = data.encode(encoding) if isinstance(data, str) else data
+    return safe_write_stream(path, lambda f: f.write(payload), permissions)[0]
 
-    The only way macro API functions may write files:
+
+def safe_write_stream(
+    path: str | Path,
+    write: Callable[[IO[Any]], T],
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    binary: bool = True,
+    encoding: str = "utf-8",
+) -> tuple[Path, T]:
+    """Call *write(f)* to write *path* for a macro; return the resolved path
+    and what *write* returned. *f* is a binary file, or with
+    ``binary=False`` a text file in *encoding* with the platform's newlines.
+
+    The only way macro API functions may write files (safe_write() for data
+    already in memory):
       * check_access(write=True), so the deny list and folder list apply;
       * a target with more than one hard link is refused;
       * the data goes to a temporary file in the same folder, which then
@@ -452,15 +472,14 @@ def safe_write(
         permissions = list(permissions)    # iterated twice
     target = check_access(path, write=True, permissions=permissions)
     _refuse_hard_link(target)
-    payload = data.encode(encoding) if isinstance(data, str) else data
 
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o666)
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(payload)
+        with (os.fdopen(fd, "wb") if binary else os.fdopen(fd, "w", encoding=encoding)) as f:
+            result = write(f)
         final = check_access(path, write=True, permissions=permissions)
         if final != target:
             raise FolderAccessDenied(
@@ -477,4 +496,4 @@ def safe_write(
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    return final
+    return final, result

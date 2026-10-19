@@ -1627,3 +1627,131 @@ def test_export_gpx_rejects_bad_input(tmp_path, export_cache, spec, msg):
     with pytest.raises(MacroError, match=msg):
         _export_gpx(tmp_path, spec)
     assert not (tmp_path / "out").exists()
+
+
+# ── Every file a macro writes goes through safe_write() ──────────────────────
+
+class _WriteGuard:
+    """While a macro runs: every file under tmp_path opened for writing
+    outside permissions.safe_write_stream() — which safe_write() uses too —
+    (*outside*), and every file it wrote (*safe*)."""
+
+    def __init__(self, tmp_path, monkeypatch):
+        import builtins
+        import io
+        import os
+
+        from opensak.macro import permissions as perm_mod
+        from opensak.macro import runtime as runtime_mod
+
+        self.root = tmp_path.resolve()
+        self.safe: list[Path] = []
+        self.outside: list[Path] = []
+        self._armed = False
+        self._inside = 0
+        real_stream, real_open, real_os_open = perm_mod.safe_write_stream, io.open, os.open
+        write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT
+
+        def safe_write_stream(*args, **kwargs):
+            self._inside += 1
+            try:
+                written, result = real_stream(*args, **kwargs)
+            finally:
+                self._inside -= 1
+            self.safe.append(written)
+            return written, result
+
+        def guarded_open(file, mode="r", *args, **kwargs):
+            if any(c in str(mode) for c in "wax+"):
+                self._record(file)
+            return real_open(file, mode, *args, **kwargs)
+
+        def guarded_os_open(path, flags, *args, **kwargs):
+            if flags & write_flags:
+                self._record(path)
+            return real_os_open(path, flags, *args, **kwargs)
+
+        # safe_write() calls the module's safe_write_stream; the runtime
+        # holds its own reference.
+        monkeypatch.setattr(perm_mod, "safe_write_stream", safe_write_stream)
+        monkeypatch.setattr(runtime_mod, "safe_write_stream", safe_write_stream)
+        monkeypatch.setattr(io, "open", guarded_open)
+        monkeypatch.setattr(builtins, "open", guarded_open)
+        monkeypatch.setattr(os, "open", guarded_os_open)
+
+    def _record(self, file):
+        if not self._armed or self._inside or isinstance(file, int):
+            return
+        path = Path(file).resolve()
+        if path.is_relative_to(self.root):
+            self.outside.append(path)
+
+    def run(self, runtime, source):
+        self._armed = True
+        try:
+            runtime.run(source)
+        finally:
+            self._armed = False
+
+
+@pytest.mark.parametrize("kind, call", [
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.gpx" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.loc" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.ggz" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.kml" }'),
+    ("file:gpx", 'opensak.export_file("GPX Export")'),
+    ("file:loc", 'opensak.export_file("GPX Export")'),
+    ("file:ggz", 'opensak.export_file("GPX Export")'),
+    ("poi", 'opensak.export_poi("Garmin POI")'),
+])
+def test_macro_file_writes_go_through_safe_write(
+        tmp_path, monkeypatch, export_cache, poi_cache, kind, call):
+    out_dir = tmp_path / "out"
+    if kind == "poi":
+        runtime, _ = _poi_runtime(tmp_path)
+    elif kind.startswith("file:"):
+        runtime, _ = _export_runtime(tmp_path, fmt=kind[5:], file_name="x")
+    else:
+        runtime, _ = _export_runtime(tmp_path)
+    guard = _WriteGuard(tmp_path, monkeypatch)
+    guard.run(runtime, f"""
+        OUT = {str(out_dir).replace(chr(92), "/")!r}
+        opensak.filter{{ codes = {{"GCEXP1", "GCPOI1"}} }}
+        {call}
+    """)
+    written = sorted(p.resolve() for p in out_dir.iterdir())
+    assert written, "the call wrote no file"
+    assert guard.outside == []
+    assert sorted(guard.safe) == written
+
+
+def test_runtime_writes_files_only_through_safe_write():
+    """runtime.py never writes a file itself, and hands every export writer
+    from opensak.export a save= hook (MacroRuntime._safe_saver)."""
+    import ast
+    import inspect
+
+    from opensak.macro import runtime as runtime_mod
+
+    tree = ast.parse(inspect.getsource(runtime_mod))
+    writers = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("opensak.export")
+        for alias in node.names
+        if alias.name.startswith(("write_", "export_"))
+    }
+    assert {"write_export_file", "write_poi_export"} <= writers
+    forbidden = {"open", "fdopen", "write_text", "write_bytes", "mkstemp", "NamedTemporaryFile",
+                 "copy", "copy2", "copyfile", "copyfileobj", "copytree", "move", "write_export"}
+    problems = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in forbidden:
+            problems.append(f"line {node.lineno}: {name}() writes outside safe_write")
+        if name in writers and not any(k.arg == "save" for k in node.keywords):
+            problems.append(f"line {node.lineno}: {name}() without save=")
+    assert problems == []
