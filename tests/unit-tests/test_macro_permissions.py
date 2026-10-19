@@ -223,11 +223,11 @@ def test_safe_write_rechecks_before_replace(tmp_path, monkeypatch):
     real = perm_mod.check_access
     calls = []
 
-    def swapped(path, write=False, permissions=None):
+    def swapped(path, write=False, permissions=None, allowed_suffixes=None):
         calls.append(path)
         if len(calls) == 2:
-            return real(tmp_path / "elsewhere.gpx", write, permissions)
-        return real(path, write, permissions)
+            return real(tmp_path / "elsewhere.gpx", write, permissions, allowed_suffixes)
+        return real(path, write, permissions, allowed_suffixes)
 
     monkeypatch.setattr(perm_mod, "check_access", swapped)
     with pytest.raises(FolderAccessDenied, match="changed while writing"):
