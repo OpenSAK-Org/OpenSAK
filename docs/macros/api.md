@@ -31,6 +31,9 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.tables`](#opensaktables) | 2, changed in 3 |
 | [`opensak.columns`](#opensakcolumns) | 2, changed in 3 |
 | [`opensak.macro_db`](#opensakmacrodb) | 3 |
+| [`opensak.attach`](#opensakattach) | 3 |
+| [`opensak.detach`](#opensakdetach) | 3 |
+| [`opensak.attached`](#opensakattached) | 3 |
 | [`opensak.databases`](#opensakdatabases) | 2 |
 | [`opensak.database`](#opensakdatabase) | 2 |
 | [`opensak.database_exists`](#opensakdatabaseexists) | 2 |
@@ -465,7 +468,7 @@ Parameters:
 
 Returns `string[]` — Table and view names, sorted.
 
-Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, and the tables of opensak.macro_db() as `macro.<name>`.
+Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, the tables of opensak.macro_db() as `macro.<name>` and those of opensak.attach() as `<schema>.<name>`.
 
 Example:
 
@@ -518,6 +521,77 @@ for _, r in ipairs(opensak.sql("SELECT c.gc_code, s.at FROM caches c "
         .. "JOIN macro.seen s ON s.code = c.gc_code LIMIT 5")) do
     print(r.gc_code, r.at)
 end
+```
+
+### opensak.attach
+
+```lua
+opensak.attach(name [, schema])
+```
+
+Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. See Several databases in one query.
+
+Parameters:
+
+- `name` (`string`) — Database name, as in opensak.databases().
+- `schema` (`string`, optional) — Schema name to use in SQL; default: made from the database name.
+
+Returns `string` — The schema name.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+
+Example:
+
+```lua
+local found = opensak.attach("Found 2020", "found")
+for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name FROM caches c "
+        .. "JOIN found.caches f ON f.gc_code = c.gc_code")) do
+    print(r.gc_code, r.name)
+end
+```
+
+### opensak.detach
+
+```lua
+opensak.detach(schema)
+```
+
+Detach a database attached with opensak.attach(). Optional: everything is detached when the macro ends. Cannot be called inside opensak.transaction().
+
+Parameters:
+
+- `schema` (`string`) — The schema name opensak.attach() returned.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+
+Example:
+
+```lua
+opensak.detach("found")
+```
+
+### opensak.attached
+
+```lua
+opensak.attached()
+```
+
+The databases attached with opensak.attach(), in the order they were attached. `opensak` is always true: only OpenSAK databases can be attached so far.
+
+Returns `{schema: string, name: string, path: string, opensak: boolean}[]` — One table per attached database.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
+
+Example:
+
+```lua
+for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end
 ```
 
 ### opensak.databases
@@ -2421,7 +2495,41 @@ Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 
 ## Reading another database
 
-`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, `opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and `opensak.columns()` take a `database` option with the name of a database from `opensak.databases()`. It reads that database without switching to it, so the active filter stays. The database is opened read-only. A database last opened by an older OpenSAK version must be opened once first, so its schema is updated. Naming the active database is the same as leaving `database` out.
+`opensak.cache()`, `opensak.caches{}`, `opensak.description()`, `opensak.sql()`, `opensak.sql_each()`, `opensak.tables()` and `opensak.columns()` take a `database` option with the name of a database from `opensak.databases()`. It reads that database without switching to it, so the active filter stays. The database is opened read-only. A database last opened by an older OpenSAK version must be opened once first, so its schema is updated. Naming the active database is the same as leaving `database` out. To join another database with the active one in one statement, see [Several databases in one query](#several-databases-in-one-query).
+
+## Several databases in one query
+
+Beta: `opensak.attach()`, `opensak.detach()` and `opensak.attached()` are only available while the `lua-macro-write` feature flag is on.
+
+The `database` option reads one other database per call. To join several databases in one statement, as GSAK macros do with SQL `ATTACH`, attach them with `opensak.attach()`: each one becomes a schema of the active database's SQL connection, next to `opensak.macro_db()`'s `macro`. Attached databases are read-only; `opensak.sql_write()` still only changes the active database (and `macro`), but may read the attached ones, e.g. in a subquery. SQL `ATTACH` and `DETACH` stay refused, so a macro cannot open files past the folder permissions.
+
+For example, with found caches in one database and placed caches in another, as FindStatGen keeps them:
+
+```lua
+opensak.attach("Found")                -- schema "found"
+opensak.attach("Placed 2020", "placed")
+
+-- found caches that are also in the active database
+for _, r in ipairs(opensak.sql([[
+    SELECT c.gc_code, c.name, f.found_date FROM caches c
+    JOIN found.caches f ON f.gc_code = c.gc_code
+    ORDER BY f.found_date]])) do
+    print(r.gc_code, r.name, r.found_date)
+end
+
+-- flag the active database's caches placed by me
+opensak.sql_write("UPDATE caches SET user_flag = 1 "
+    .. "WHERE gc_code IN (SELECT gc_code FROM placed.caches)")
+```
+
+An attached database is not updated to the current schema: one last opened by an older OpenSAK version may lack columns. Open it once (Manage Databases) to update it, or check with `opensak.columns("found.caches")`. A database in use by another OpenSAK window can be attached; the statement sees what that window has committed.
+
+| GSAK | OpenSAK |
+|---|---|
+| `ATTACH 'x\sqlite.db3' AS x` (an OpenSAK database) | `opensak.attach("x", "x")` |
+| `ATTACH 'any.db3' AS y` (any other file) | not available yet |
+| `DETACH x` | `opensak.detach("x")`, or nothing: all are detached when the macro ends |
+| own writable database | `opensak.macro_db()` |
 
 ## Forms
 
@@ -2820,6 +2928,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | SQLGet / SQLNext / SQLGetClose | ✅ | `sql_each()` |
 | SQLQuote | ✅ | `?` / `:name` parameters make it unnecessary |
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
+| SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
 | SqlToHtml | ❌ | planned |
 | Table | ➖ | separate functions per table |
