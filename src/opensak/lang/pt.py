@@ -894,6 +894,8 @@ STRINGS: dict[str, str] = {
     "db_delete_folder_msg":         "A pasta '{path}' está agora vazia.\n\nDeseja excluí-la também?",
     "db_err_delete_folder":         "Não foi possível excluir a pasta '{path}':",
     "db_delete_active_error":       "Não é possível eliminar '{name}' porque é a base de dados ativa.\n\nMude primeiro para outra base de dados.",
+    "db_active_locked_tip":         "Esta é a base de dados ativa. Mude primeiro para outra base de dados.",
+    "db_missing_file_delete_tip":   "O ficheiro da base de dados já não existe no disco, por isso não há nada a eliminar. Use «Remover da lista» para a retirar da lista.",
 
     # ── Column dialog ─────────────────────────────────────────────────────────
     "column_dialog_hint":           "Selecione quais as colunas a mostrar na lista de caches.\nO Código GC e o Nome não podem ser ocultados.",
