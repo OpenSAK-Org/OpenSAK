@@ -30,11 +30,12 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Mapping, Optional
 
 from opensak.importer.gsak_importer import (
     GSAK_SETTINGS_DB_NAME,
     GsakBackupContents,
+    GsakBackupDatabase,
     GsakImportResult,
     clear_opensak_cache_data,
     extract_gsak_member,
@@ -42,6 +43,10 @@ from opensak.importer.gsak_importer import (
     list_gsak_backup,
     list_gsak_folder,
 )
+
+if TYPE_CHECKING:
+    from opensak.importer.gsak_filter_importer import GsakFilterImportResult
+    from opensak.importer.gsak_location_importer import LocationImportResult
 
 logger = logging.getLogger(__name__)
 
@@ -259,9 +264,9 @@ class GsakImportReport:
     databases: list[DatabaseReport] = field(default_factory=list)
     # OpenSAK databases created or added to the list by this run
     new_databases: list[str] = field(default_factory=list)
-    filters: Optional[object] = None      # GsakFilterImportResult
+    filters: Optional[GsakFilterImportResult] = None
     filters_error: str = ""
-    locations: Optional[object] = None    # LocationImportResult
+    locations: Optional[LocationImportResult] = None
     locations_invalid: int = 0
     locations_error: str = ""
     notes: list[str] = field(default_factory=list)
@@ -324,7 +329,7 @@ class GsakImportReport:
 
 @dataclass
 class _Job:
-    entry: object                    # GsakBackupDatabase
+    entry: GsakBackupDatabase
     report: DatabaseReport
     create: bool = False             # target to be created first
     register: bool = False           # orphan file: add it to the list first
@@ -334,9 +339,11 @@ class _Job:
     started: bool = False            # the import itself has begun
 
 
-def _by_name(names: list[str], available: dict[str, object], what: str) -> list[str]:
+def _by_name(names: list[str], available: Mapping[str, GsakBackupDatabase],
+             what: str) -> list[str]:
     """*names* as the GSAK database names they match (case-insensitive)."""
-    found, unknown = [], []
+    found: list[str] = []
+    unknown: list[str] = []
     for name in names:
         key = name.lower()
         (found if key in available else unknown).append(key)
@@ -498,13 +505,14 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
     if entry.member is not None:
         assert temp_dir is not None
         progress(f"{entry.name}: unpacking")
-        job.db3_path = extract_gsak_member(contents.source, entry.member,
-                                           temp_dir / f"{index:02d}")
-        job.unpacked = True
+        db3_path = extract_gsak_member(contents.source, entry.member,
+                                       temp_dir / f"{index:02d}")
+        job.db3_path, job.unpacked = db3_path, True
     else:
-        job.db3_path = entry.path
+        assert entry.path is not None   # not in a zip: a file on disk
+        db3_path = job.db3_path = entry.path
         if check_file is not None:
-            check_file(job.db3_path)
+            check_file(db3_path)
 
     # Created only now, so nothing is created for a database that fails to
     # unpack or that the user may not read.
@@ -536,7 +544,7 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
         if job.replace:
             rep.cleared = clear_opensak_cache_data(session)
         rep.result = import_gsak_db(
-            job.db3_path, session,
+            db3_path, session,
             progress_cb=lambda done, total: progress(label, done, total),
         )
     if all(j.report.target.lower() != rep.target.lower() for j in later):
