@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
 from opensak.gui.settings import get_settings, HomePoint
-from opensak.gui.dialogs.widgets import DirRow, clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import (
+    DirRow, clamp_dialog_height_to_screen, remember_dialog_geometry,
+)
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.gui.theme import hint_style
 from opensak.coords import FORMATS, format_coords
@@ -111,6 +113,9 @@ class SettingsDialog(QDialog):
         self._editing_original_name: str | None = None   # Issue #157
         self._setup_ui()
         self._load()
+        # Issue #1030: reopen at the size/position the user left it at,
+        # clamped to the screens connected now.
+        remember_dialog_geometry(self, "settings")
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
