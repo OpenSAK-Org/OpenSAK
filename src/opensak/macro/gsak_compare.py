@@ -20,8 +20,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Loading GPX / ZIP files (`Load`). Planned.
-- Reading text files (`GetFile`, `FileRead`): only `opensak.read_csv()` exists. Planned. Writing works with `opensak.write_text()`, for text file types only.
-- File system helpers (`FileExists`, `FolderExists`, `Dir`, `FileCopy`, `FileErase`).
+- Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
 - Setting the centre point (`Centre`), saving and restoring the filter (`SaveFilter`, `RestoreFilter`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
@@ -92,9 +91,9 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 |---|---|---|
 | AppendFile / PutFile / FileOpen | ✅ | `write_text(path, text)`, `write_text(path, text, {append=true})`; only `.txt .csv .tsv .html .htm .svg .md .json`, at most 20 MB, never an autostart location |
 | TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV helper yet |
-| GetFile / FileRead / EndRead / StopRead | ❌ | `read_csv` for CSV only; text files planned |
-| FileExists / FolderExists | ❌ | |
-| Dir | ❌ | |
+| GetFile / FileRead / EndRead / StopRead | ✅ | `read_text(path)` reads the whole file (any file type, UTF-8 or `{encoding="cp1252"}`, at most 10 MB); loop over the lines with `text:gmatch("[^\\n]+")`; `read_csv` for CSV |
+| FileExists / FolderExists | ✅ | `file_exists(path)`, `folder_exists(path)` |
+| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders |
 | FileCopy / FileErase | ❌ | |
 | DriveExists | 🚫 | Windows-specific |
 | ZipFile | ❌ | |
