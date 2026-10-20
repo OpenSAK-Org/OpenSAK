@@ -27,36 +27,12 @@ from opensak.gui.settings import get_settings
 from opensak.lang import tr
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog
-from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
+from opensak.importer.gpx_import_settings import (
+    GpxImportProfile, GpxImportSettings, folder_import_files, import_file,
+)
 
 if TYPE_CHECKING:
     from opensak.gui.dialogs.update_location_dialog import ReverseGeocodeWorker
-
-# File types a folder entry imports.
-FOLDER_IMPORT_SUFFIXES = (".gpx", ".zip")
-
-
-def folder_import_files(folder: Path) -> list[Path]:
-    """Return the files a folder entry imports: every GPX / zip file
-    directly in *folder* (not in subfolders), sorted by name. Companion
-    waypoint files are left out when a main cache GPX is there — the
-    import picks them up next to that file.
-    """
-    from opensak.importer import _is_companion_gpx
-
-    try:
-        files = sorted(
-            f for f in folder.iterdir()
-            if f.is_file() and f.suffix.lower() in FOLDER_IMPORT_SUFFIXES
-        )
-    except OSError:
-        return []
-    gpx = [f for f in files if f.suffix.lower() == ".gpx"]
-    companions = {f for f in gpx if _is_companion_gpx(f)}
-    if companions and any(f not in companions for f in gpx):
-        files = [f for f in files if f not in companions]
-    return files
-
 
 class ImportWorker(QThread):
     """Imports a list of files sequentially in a background thread."""
@@ -79,7 +55,7 @@ class ImportWorker(QThread):
     def run(self) -> None:
         from opensak.db.database import get_session, session_for
         from opensak.db.manager import get_db_manager
-        from opensak.importer import import_gpx, import_zip, _count_wpts, _is_companion_gpx
+        from opensak.importer import _count_wpts
         from opensak.utils.utils import get_import_type, ImportType
 
         # Another database than the active one gets a private session —
@@ -96,39 +72,15 @@ class ImportWorker(QThread):
         for i, path in enumerate(self.paths):
             self.file_started.emit(i, path.name)
             try:
-                import_type: ImportType = get_import_type(path)
-
-                if import_type == ImportType.GPX:
+                if get_import_type(path) == ImportType.GPX:
                     try:
                         self.total.emit(_count_wpts(path))
                     except Exception:
                         self.total.emit(-1)
-                    # Find a companion file by inspecting GPX content,
-                    # not by assuming a specific filename convention.
-                    wpts_path = None
-                    try:
-                        wpts_path = next(
-                            (
-                                f for f in sorted(path.parent.glob("*.gpx"))
-                                if f != path and _is_companion_gpx(f)
-                            ),
-                            None,
-                        )
-                    except Exception:
-                        pass
-                    with _session() as session:
-                        result = import_gpx(
-                            path, session,
-                            wpts_path=wpts_path,
-                            progress_cb=self.progress.emit,
-                        )
                 else:
                     self.total.emit(-1)
-                    with _session() as session:
-                        result = import_zip(
-                            path, session,
-                            progress_cb=self.progress.emit,
-                        )
+                with _session() as session:
+                    result = import_file(path, session, progress_cb=self.progress.emit)
 
                 self.file_finished.emit(i, result)
 

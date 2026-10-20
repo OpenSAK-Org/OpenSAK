@@ -116,6 +116,13 @@ from opensak.export.file_export_settings import (
 from opensak.export.poi_export import write_poi_export
 from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.line_polygon import LineShape, read_points_file
+from opensak.importer.gpx_import_settings import (
+    FOLDER_IMPORT_SUFFIXES,
+    GpxImportProfile,
+    GpxImportSettings,
+    folder_import_files,
+    import_file,
+)
 from opensak.hint_detect import rot13
 from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
@@ -225,6 +232,10 @@ EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 GSAK_IMPORT_KEYS = ("databases", "exclude", "target", "if_exists", "create",
                     "filters", "locations", "quiet")
 GSAK_REPORT_MAX_ERRORS = 20
+# opensak.import_gpx(): the keys of its options table, and how many cache
+# errors per file its report lists.
+GPX_IMPORT_KEYS = ("database", "quiet")
+GPX_REPORT_MAX_ERRORS = 20
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
@@ -1331,6 +1342,7 @@ class MacroRuntime:
         profiles_dir: Optional[Path] = None,
         export_settings_dir: Optional[Path] = None,
         poi_settings_dir: Optional[Path] = None,
+        import_settings_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
@@ -1351,6 +1363,7 @@ class MacroRuntime:
         self._profiles_dir = profiles_dir
         self._export_settings_dir = export_settings_dir
         self._poi_settings_dir = poi_settings_dir
+        self._import_settings_dir = import_settings_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
@@ -2202,6 +2215,192 @@ class MacroRuntime:
                 self._output(line)
         self._check_cancelled()
         return self._gsak_report_table(lua, report)
+
+    # opensak.import_gpx(): the GPX import dialog without its window — a
+    # saved import setting, or one file or folder. The folder and write
+    # approvals still apply.
+
+    def _import_gpx(self, lua, source=None, options=None):
+        func = "opensak.import_gpx"
+        from opensak.db.database import session_for
+
+        # It writes through its own sessions, which would wait for the
+        # transaction's write lock.
+        self._no_transaction(func)
+        if not isinstance(source, str) or not source.strip():
+            raise MacroError(f"{func} expects the name of a saved import setting, "
+                             "or the path of a .gpx / .zip file or a folder")
+        source = source.strip()
+        opts = self._gpx_import_options(func, options)
+        manager = get_db_manager()
+
+        # (path, is a folder) of everything to import, and the target.
+        db: Optional[DatabaseInfo] = None
+        settings = self._load_import_settings(source)
+        if settings is not None:
+            entries = [(Path(f), False) for f in settings.files]
+            entries += [(Path(f), True) for f in settings.folders]
+            if settings.database and "database" not in opts:
+                db = next((d for d in manager.databases
+                           if str(d.path) == settings.database), None)
+                if db is None:
+                    raise MacroError(f"{func}: the database of import setting {source!r} "
+                                     f"is no longer in the list: {settings.database}")
+        else:
+            # %USERPROFILE%\..., $HOME/... — as the folder permissions expand them.
+            path = expand_path(source)
+            if not path.is_absolute():
+                path = (self._base_dir or macros_dir()) / path
+            if not path.exists():
+                raise MacroError(f"{func}: {source!r} is neither a saved import setting "
+                                 f"nor an existing file or folder ({path})")
+            if not path.is_dir() and path.suffix.lower() not in FOLDER_IMPORT_SUFFIXES:
+                raise MacroError(f"{func}: {path} is not a .gpx or .zip file")
+            entries = [(path, path.is_dir())]
+        if "database" in opts:
+            db = self._require_database(opts["database"], func)
+        if db is None:
+            db = manager.active
+            if db is None:
+                raise MacroError(f"{func}: no database is open")
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        self._require_write(func)
+
+        # The files to import, each once. Files and folders of a setting
+        # that were moved or deleted since are left out, as in the dialog,
+        # and a refused one fails only that entry.
+        missing: list[str] = []
+        rows: list[dict[str, Any]] = []
+        run: list[Path] = []
+        for entry, is_folder in entries:
+            if not (entry.is_dir() if is_folder else entry.is_file()):
+                missing.append(str(entry))
+                continue
+            try:
+                self._check_access(entry / "_" if is_folder else entry, write=False)
+            except MacroError as exc:
+                if settings is None:
+                    raise
+                rows.append({"path": str(entry), "error": str(exc)})
+                continue
+            for f in folder_import_files(entry) if is_folder else [entry]:
+                if f not in run:
+                    run.append(f)
+
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            handle = self._host.progress("GPX import", len(run))
+            self._progress_windows.append(handle)
+        cancelled = False
+        other_db = db.path != manager.active_path
+        try:
+            for i, f in enumerate(run):
+                if self._cancelled.is_set() or (
+                        handle is not None and not handle.update(i, f.name)):
+                    cancelled = True
+                    break
+
+                def on_progress(count: int, name: str = f.name) -> None:
+                    nonlocal cancelled
+                    if handle is not None and not handle.update(None, f"{name}: {count} caches"):
+                        cancelled = True
+
+                row: dict[str, Any] = {"path": str(f)}
+                try:
+                    with (session_for(db.path) if other_db else get_session()) as session:
+                        r = import_file(f, session, progress_cb=on_progress)
+                except Exception as exc:
+                    logger.exception("%s: %s failed", func, f)
+                    row["error"] = str(exc) or type(exc).__name__
+                else:
+                    row.update(created=r.created, updated=r.updated, skipped=r.skipped,
+                               waypoints=r.waypoints, warnings=len(r.warnings),
+                               errors=r.errors)
+                rows.append(row)
+                # A file is not stopped half way; Cancel stops before the next.
+                if cancelled:
+                    break
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
+
+        def total(key: str) -> int:
+            return sum(r.get(key, 0) for r in rows)
+
+        errors = sum(len(r["errors"]) if "errors" in r else 1 for r in rows)
+        if not other_db and (total("created") or total("updated")):
+            self._host.caches_changed([], True)
+
+        kind = "saved setting" if settings is not None else "folder" if entries[0][1] else "file"
+        lines = [f"GPX import from {source} ({kind}) into {db.name}"]
+        for r in rows:
+            name = Path(r["path"]).name or r["path"]
+            if "error" in r:
+                lines.append(f"  {name}: failed ({r['error']})")
+            else:
+                lines.append(f"  {name}: {r['created']} new, {r['updated']} updated, "
+                             f"{r['skipped']} skipped, {r['waypoints']} waypoints, "
+                             f"{len(r['errors'])} errors")
+        if not rows:
+            lines.append("  no .gpx or .zip files to import")
+        if missing:
+            lines.append(f"  {len(missing)} files or folders of the setting no longer exist")
+        if cancelled:
+            lines.append("  cancelled")
+        for line in lines:
+            logger.info("%s", line)
+        if not opts.get("quiet", False):
+            for line in lines:
+                self._output(line)
+        self._check_cancelled()
+
+        for r in rows:
+            if "errors" in r:
+                r["errors"] = lua.table_from(r["errors"][:GPX_REPORT_MAX_ERRORS])
+        result: dict[str, Any] = {
+            "ok": not errors and not cancelled,
+            "cancelled": cancelled,
+            "source": source,
+            "kind": kind.split()[-1],
+            "database": db.name,
+            "created": total("created"),
+            "updated": total("updated"),
+            "skipped": total("skipped"),
+            "waypoints": total("waypoints"),
+            "errors": errors,
+            "files": lua.table_from([lua.table_from(r) for r in rows]),
+            "missing": lua.table_from(missing),
+        }
+        return lua.table_from(result)
+
+    def _load_import_settings(self, name: str) -> Optional[GpxImportSettings]:
+        """The GPX import setting saved as *name*, or None."""
+        for path in GpxImportProfile.list_profiles(self._import_settings_dir):
+            try:
+                profile = GpxImportProfile.load(path)
+            except Exception:
+                continue
+            if profile.name == name:
+                return profile.settings
+        return None
+
+    @staticmethod
+    def _gpx_import_options(func: str, options: Any) -> dict[str, Any]:
+        """The options table of opensak.import_gpx() as a dict."""
+        if options is None:
+            return {}
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ database = "PQ" }}')
+        raw = {k: _from_lua(v) for k, v in options.items()}
+        unknown = set(raw) - set(GPX_IMPORT_KEYS)
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                             f"valid: {', '.join(GPX_IMPORT_KEYS)}")
+        if "quiet" in raw and not isinstance(raw["quiet"], bool):
+            raise MacroError(f"{func}: quiet must be true or false")
+        return raw
 
     @staticmethod
     def _gsak_import_options(func: str, options: Any) -> dict[str, Any]:
@@ -4563,6 +4762,45 @@ API: tuple[ApiFunction, ...] = (
                   "locations, quiet.", optional=True),
         ),
         returns=("opensak.GsakImportReport", "What was imported, per database."),
+        write=True,
+    ),
+    ApiFunction(
+        name="import_gpx",
+        description="Import GPX files and Pocket Query zips without any "
+                    "question (like File → Import GPX / PQ zip, then Import) "
+                    "and return what was done. *source* is the name of an "
+                    "import setting saved in that dialog — its files, "
+                    "folders and target database are used — or else the "
+                    "path of a `.gpx` / `.zip` file or of a folder. A "
+                    "folder imports every GPX / zip file directly in it "
+                    "(not in subfolders), looked up at each run, so the "
+                    "folder Pocket Queries are downloaded to can be "
+                    "imported every night. A GPX file's waypoints file "
+                    "next to it is imported with it. A relative path is "
+                    "resolved against the macro file's folder, and "
+                    "environment variables such as `%USERPROFILE%` are "
+                    "expanded; the files need read permission. The caches "
+                    "go into `database` if given, else the setting's "
+                    "database, else the active one. Files and folders of a "
+                    "setting that no longer exist are left out and listed "
+                    "in `missing`; a file that fails is reported and the "
+                    "others are still imported. Cancel stops after the "
+                    "current file. Unlike the dialog, country and state "
+                    "are not looked up afterwards (reverse geocoding). The "
+                    "summary is printed (unless `quiet`) and written to "
+                    "the log file.",
+        example='local r = opensak.import_gpx("Nightly PQs")\n'
+                '-- or a folder: opensak.import_gpx("%USERPROFILE%/Downloads/PQ", { database = "PQ" })\n'
+                'print(r.created .. " new, " .. r.updated .. " updated")\n'
+                'if not r.ok then opensak.exit(1) end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._import_gpx(lua, *a),
+        params=(
+            Param("source", "string",
+                  "Name of a saved import setting, or a .gpx / .zip file or a folder."),
+            Param("options", "opensak.GpxImportOptions", "database, quiet.", optional=True),
+        ),
+        returns=("opensak.GpxImportReport", "What was imported, per file."),
         write=True,
     ),
     ApiFunction(

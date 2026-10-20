@@ -19,7 +19,6 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 ### Main gaps
 
-- Loading GPX / ZIP files (`Load`). Planned.
 - Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
 - Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
@@ -49,7 +48,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
 | IsOwner | ✅ partial | `filter{owned=true}`; no `owned` cache field, no log-owner check |
-| Load | ❌ | planned |
+| Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
 | MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
 | MacroFlag | ❌ | workaround: `filter{codes=}` or a table in `macro_db()` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
