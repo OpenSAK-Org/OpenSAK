@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from opensak.lang import tr
+
 # GSAK's Width/Height of the form include the window frame; the field
 # area of an opensak form is the inside.
 FRAME_WIDTH = 16
@@ -171,9 +173,9 @@ def convert(form: GsakForm) -> tuple[dict, list[str]]:
     delay = _int(main.get("delay"))
     if delay:
         model["timeout"] = delay
-        notes.append('Delay became timeout: the form then returns "timeout" instead of "DelayExit".')
+        notes.append(tr("gsak_form_note_delay"))
     if _yes(main.get("exitonclick")):
-        notes.append(f"{main['name']}: ExitOnClick is not supported.")
+        notes.append(tr("gsak_form_note_exitonclick", name=main["name"]))
 
     # Containers first, in file order, so children can find their group.
     groups: dict[str, dict] = {}
@@ -188,7 +190,7 @@ def convert(form: GsakForm) -> tuple[dict, list[str]]:
             continue
         ftype = _TYPES.get(kind)
         if ftype is None:
-            notes.append(f"{control['name']}: type {control['type']} is not supported and was left out.")
+            notes.append(tr("gsak_form_note_type", name=control["name"], type=control["type"]))
             continue
         container = control.get("container", "").strip()
         if ftype == "radio":
@@ -205,18 +207,15 @@ def convert(form: GsakForm) -> tuple[dict, list[str]]:
 
     for container, buttons in radios.items():
         item = _radio(buttons, used)
-        notes.append(
-            f"Radio buttons {', '.join(b['name'] for b in buttons)} became the radio field "
-            f"{item['id']!r}: its value is the caption of the chosen button, not one "
-            "boolean per button."
-        )
+        notes.append(tr("gsak_form_note_radio",
+                        buttons=", ".join(b["name"] for b in buttons), id=item["id"]))
         order = min((_int(b.get("taborder")) or 10_000, i) for i, b in enumerate(buttons))
         (children.setdefault(container.lower(), []) if container else roots).append((order, item))
 
     for name, items in children.items():
         group = groups.get(name)
         if group is None:
-            notes.append(f"Container {name!r} does not exist; its fields were put on the form.")
+            notes.append(tr("gsak_form_note_container", name=name))
             roots.extend(items)
             continue
         group["fields"] = [item for _, item in sorted(items, key=lambda p: p[0])]
@@ -224,10 +223,9 @@ def convert(form: GsakForm) -> tuple[dict, list[str]]:
     model["fields"] = [item for _, item in sorted(roots, key=lambda p: p[0])]
     if has_buttons:
         model["buttons"] = []
-        notes.append("The form's own buttons close it and return their name, as in GSAK; "
-                     "a button with Escape = Yes returns nil (cancel).")
+        notes.append(tr("gsak_form_note_buttons"))
     for prop, names in sorted(ignored.items()):
-        notes.append(f"Property {prop} is not supported ({', '.join(sorted(names))}).")
+        notes.append(tr("gsak_form_note_property", prop=prop, names=", ".join(sorted(names))))
     return model, notes
 
 
@@ -270,18 +268,16 @@ def _field(control: dict[str, str], ftype: str, used: set[str], notes: list[str]
         if _yes(control.get("escape")):
             item["cancel"] = True
         if control.get("spellcheck"):
-            notes.append(f"{name}: Spellcheck buttons are not supported.")
+            notes.append(tr("gsak_form_note_spellcheck", name=name))
     if ftype == "image":
         if control.get("file"):
             item["path"] = control["file"]
         if _yes(control.get("resize")):
             item["scale"] = True
         if control.get("source", "").strip().lower() == "macro":
-            notes.append(f"{name}: the picture was embedded in the GSAK macro — pass it "
-                         "as base64 `data` or save it as a file for `path`.")
+            notes.append(tr("gsak_form_note_image", name=name))
     if ftype == "html":
-        notes.append(f"{name}: the Browser control became read-only HTML text; web "
-                     "pages (Url) are not loaded.")
+        notes.append(tr("gsak_form_note_browser", name=name))
     style = (control.get("fontstyle") or control.get("style") or "").lower()
     if "bold" in style:
         item["bold"] = True

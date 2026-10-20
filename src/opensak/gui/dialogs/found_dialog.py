@@ -66,7 +66,7 @@ class FoundUpdaterDialog(QDialog):
 
         # ── Aktiv database ────────────────────────────────────────────────────
         manager = get_db_manager()
-        active_name = manager.active.name if manager.active else "Ingen"
+        active_name = manager.active.name if manager.active else tr("found_no_active_db")
         active_lbl = QLabel(f"<b>{tr('found_active_db')}</b> {active_name}")
         active_lbl.setStyleSheet("color: #1565c0;")
         layout.addWidget(active_lbl)
@@ -88,7 +88,7 @@ class FoundUpdaterDialog(QDialog):
         for db in other_dbs:
             self._db_combo.addItem(db.name, db.path)
         if not other_dbs:
-            self._db_combo.addItem("(Ingen andre databaser)")
+            self._db_combo.addItem(tr("found_no_other_dbs"))
             self._db_combo.setEnabled(False)
         ref_layout.addWidget(self._db_combo)
 
@@ -186,7 +186,8 @@ class FoundUpdaterDialog(QDialog):
 
         lines = [
             tr("found_completed") + "\n",
-            str(result),
+            tr("found_summary", updated=result.updated, already=result.already,
+               not_found=result.not_found),
         ]
         if result.errors:
             lines.append(f"\n{tr('found_errors')}")

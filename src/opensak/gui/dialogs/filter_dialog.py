@@ -1548,7 +1548,7 @@ class FilterDialog(QDialog):
 
         for i, (attr_id, attr_key) in enumerate(unique_attrs):
             name_item = QTableWidgetItem(tr(attr_key))
-            name_item.setToolTip(f"Attribut ID: {attr_id}")
+            name_item.setToolTip(tr("filter_attr_id_tip", id=attr_id))
             table.setItem(i, 0, name_item)
 
             ja_cb    = QCheckBox()

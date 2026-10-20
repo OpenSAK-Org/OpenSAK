@@ -47,9 +47,9 @@ def build_ssl_context() -> ssl.SSLContext:
         import certifi
         ctx.load_verify_locations(cafile=certifi.where())
     except ImportError:
-        log.warning("certifi ikke tilgængeligt — bruger kun systemets certifikater")
+        log.warning("certifi not available — using system certificates only")
     except (OSError, ssl.SSLError) as exc:
-        log.warning("kunne ikke indlæse certifi's certifikater (%s) — bruger kun systemets", exc)
+        log.warning("could not load certifi's certificates (%s) — using system certificates only", exc)
     return ctx
 
 

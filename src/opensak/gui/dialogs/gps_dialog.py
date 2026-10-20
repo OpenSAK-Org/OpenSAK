@@ -298,11 +298,7 @@ class GpsExportDialog(QDialog):
 
         # Slet eksisterende filer (kun relevant ved eksport direkte til enhed)
         self._cb_delete_gpx = QCheckBox(tr("gps_delete_cb"))
-        self._cb_delete_gpx.setToolTip(
-            "Sletter alle eksisterende filer af samme format (GPX eller GGZ)\n"
-            "i den relevante Garmin-mappe på enheden, inden den nye fil uploades.\n"
-            "Virker kun ved eksport direkte til GPS."
-        )
+        self._cb_delete_gpx.setToolTip(tr("gps_delete_cb_tip"))
         opt_layout.addWidget(self._cb_delete_gpx)
 
         content_layout.addWidget(opt_group)
@@ -418,9 +414,9 @@ class GpsExportDialog(QDialog):
         ext_up = ext.upper()
         path, _ = QFileDialog.getSaveFileName(
             self,
-            f"Gem {ext_up} fil",
+            tr("gps_save_file_title", fmt=ext_up),
             str(Path.home()),
-            f"{ext_up} filer (*.{ext})",
+            tr("gps_file_filter", fmt=ext_up, ext=ext),
         )
         if path:
             p = Path(path)

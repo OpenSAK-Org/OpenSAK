@@ -2855,7 +2855,7 @@ class MainWindow(QMainWindow):
         from opensak.db.manager import get_db_manager
         manager = get_db_manager()
         if not manager.active:
-            print("DEBUG save: ingen aktiv database")
+            print("DEBUG save: no active database")
             return
         path = manager.active.path
         for suffix, value in (
@@ -2874,7 +2874,7 @@ class MainWindow(QMainWindow):
         from opensak.filters.engine import FilterProfile
         manager = get_db_manager()
         if not manager.active:
-            print("DEBUG load: ingen aktiv database")
+            print("DEBUG load: no active database")
             return
         path = manager.active.path
 
@@ -2894,7 +2894,7 @@ class MainWindow(QMainWindow):
             # et sort-felt denne version ikke kender endnu (fixes crash on
             # startup, se #498). Falder tilbage til default og retter den
             # gemte værdi, så det ikke gentager sig ved næste opstart.
-            print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
+            print(f"DEBUG load: unknown sort field {field!r} ignored ({e}); using 'name'")
             field = "name"
             self._current_sort = SortSpec(field, ascending=ascending)
             db_settings.set_value(
@@ -2923,7 +2923,7 @@ class MainWindow(QMainWindow):
                             self._populate_filter_profile_combo(select_name=profile.name)
                         return
                 except Exception as e:
-                    print(f"DEBUG load: fejl ved indlæsning af {path}: {e}")
+                    print(f"DEBUG load: error loading {path}: {e}")
         # Ingen gemt profil — nulstil filter
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
@@ -4307,11 +4307,11 @@ class MainWindow(QMainWindow):
             suppress_exit_backup()
             self.close()
 
-        _ERROR_MESSAGES = {
-            "unsupported_platform": "unsupported platform",
-            "asset_not_found": "no matching release asset found",
-            "checksum_unavailable": "checksum verification unavailable for this release",
-            "checksum_mismatch": "downloaded file failed checksum verification",
+        _ERROR_KEYS = {
+            "unsupported_platform": "update_err_unsupported_platform",
+            "asset_not_found": "update_err_asset_not_found",
+            "checksum_unavailable": "update_err_checksum_unavailable",
+            "checksum_mismatch": "update_err_checksum_mismatch",
         }
 
         def _on_error(error: str) -> None:
@@ -4319,7 +4319,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 tr("update_download_error_title"),
-                tr("update_download_error_msg", error=_ERROR_MESSAGES.get(error, error)),
+                tr("update_download_error_msg", error=tr(_ERROR_KEYS[error]) if error in _ERROR_KEYS else error),
             )
 
         self._self_update_worker.progress.connect(_on_progress)

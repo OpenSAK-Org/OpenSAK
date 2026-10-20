@@ -16,6 +16,7 @@ from xml.dom import minidom
 from ..db.models import Cache, Waypoint
 from .cache_text import NO_TEXT, ExportText
 from .file_export import Saver, save_file
+from opensak.lang import tr
 
 # ---------------------------------------------------------------------------
 # Icon URLs (Google Maps built-in paddle icons)
@@ -174,7 +175,7 @@ def export_kml(
     doc = ET.SubElement(kml, "Document")
     ET.SubElement(doc, "name").text = "OpenSAK geocaches"
     ET.SubElement(doc, "description").text = (
-        f"Eksporteret fra OpenSAK — {len(cache_list)} cache(s)"
+        tr("kml_export_description", count=len(cache_list))
     )
 
     # -----------------------------------------------------------------------

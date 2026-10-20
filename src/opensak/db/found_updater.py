@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache
+from opensak.lang import tr
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.types import GcCode
 
@@ -32,9 +33,9 @@ class UpdateResult:
 
     def __str__(self) -> str:
         return (
-            f"  Opdateret til fundet : {self.updated}\n"
-            f"  Allerede fundet      : {self.already}\n"
-            f"  Ikke i denne DB      : {self.not_found}"
+            f"  Marked as found : {self.updated}\n"
+            f"  Already found   : {self.already}\n"
+            f"  Not in this DB  : {self.not_found}"
         )
 
 
@@ -108,7 +109,7 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
 
             return found_dates
     except Exception as e:
-        raise RuntimeError(f"Kunne ikke læse reference database: {e}")
+        raise RuntimeError(f"Could not read reference database: {e}") from e
     finally:
         engine.dispose()
 
@@ -132,11 +133,11 @@ def update_found_from_reference(reference_db_path: Path) -> UpdateResult:
     try:
         found_map = get_found_gc_codes(reference_db_path)
     except RuntimeError as e:
-        result.errors.append(str(e))
+        result.errors.append(tr("found_err_read_ref", error=e.__cause__ or e))
         return result
 
     if not found_map:
-        result.errors.append("Ingen caches fundet i reference databasen")
+        result.errors.append(tr("found_err_no_caches"))
         return result
 
     # Opdater aktiv database

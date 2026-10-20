@@ -335,7 +335,10 @@ def test_gsak_forms_are_found_by_block():
     assert find_gsak_forms("print('no form')") == []
 
 
-def test_gsak_form_converts_to_an_absolute_form():
+def test_gsak_form_converts_to_an_absolute_form(monkeypatch):
+    import opensak.lang as lang
+    from opensak.lang.en import STRINGS
+    monkeypatch.setattr(lang, "_translations", STRINGS)
     model, notes = convert(find_gsak_forms(GSAK_MACRO)[0])
     assert model["title"] == "Export" and model["layout"] == "absolute"
     assert (model["width"], model["height"], model["timeout"]) == (384, 261, 30)

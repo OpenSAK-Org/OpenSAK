@@ -57,7 +57,7 @@ class TestGetFoundGcCodes:
 
     def test_nonexistent_path_raises_runtime_error(self, tmp_path):
         bad_path = tmp_path / "does_not_exist.db"
-        with pytest.raises(RuntimeError, match="Kunne ikke læse reference database"):
+        with pytest.raises(RuntimeError, match="Could not read reference database"):
             get_found_gc_codes(bad_path)
 
     def test_parses_found_it_log_date(self, tmp_path, make_cache):
