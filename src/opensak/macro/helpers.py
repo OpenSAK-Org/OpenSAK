@@ -292,6 +292,56 @@ def re_escape(value: Any) -> str:
     return regex.escape(_text(value, "opensak.re.escape"))
 
 
+# geocaching.com codes (GC…, TB…, GL…): up to …FFFF the part after the
+# prefix is hexadecimal; from …G000 on it is base 31 in these digits (no I,
+# L, O, S, U), offset so that GCG000 follows GCFFFF.
+_GC_DIGITS = "0123456789ABCDEFGHJKMNPQRTVWXYZ"
+_GC_OFFSET = 16 * 31 ** 3 - 0x10000     # 411120
+_GC_CODE_RE = re.compile(r"([A-Z]{2})([0-9A-Z]+)")
+
+
+def gc_to_id(value: Any) -> Optional[int]:
+    """The number behind a geocaching.com code ("GC1" → 1, "GCG000" →
+    65536), like GSAK's GsCodeToNum; None if *value* is not such a code."""
+    s = _text(value, "opensak.text.gc_to_id").strip().upper()
+    m = _GC_CODE_RE.fullmatch(s)
+    if m is None:
+        return None
+    digits = m.group(2)
+    if len(digits) <= 4 and all(c in "0123456789ABCDEF" for c in digits):
+        return int(digits, 16)
+    if any(c not in _GC_DIGITS for c in digits):
+        return None
+    n = 0
+    for c in digits:
+        n = n * 31 + _GC_DIGITS.index(c)
+    n -= _GC_OFFSET
+    # A base-31 value below 65536 would be a hex code written another way.
+    return n if n >= 0x10000 else None
+
+
+def id_to_gc(value: Any, prefix: Any = None) -> str:
+    """The geocaching.com code for a number (1 → "GC1"), like GSAK's
+    NumToGsCode; *prefix* "TB", "GL" … instead of "GC"."""
+    func = "opensak.text.id_to_gc"
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) \
+            or value < 0:
+        raise MacroError(f"{func}: the number must be a whole number >= 0, got {value!r}")
+    if prefix is None:
+        prefix = "GC"
+    if not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z]{2}", prefix):
+        raise MacroError(f'{func}: prefix must be two letters such as "TB", got {prefix!r}')
+    n = int(value)
+    if n < 0x10000:
+        return f"{prefix.upper()}{n:X}"
+    n += _GC_OFFSET
+    digits = ""
+    while n:
+        n, r = divmod(n, 31)
+        digits = _GC_DIGITS[r] + digits
+    return prefix.upper() + digits
+
+
 def digit_sum(value: Any) -> int:
     """Sum of all digits in a number or string (other characters ignored)."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):

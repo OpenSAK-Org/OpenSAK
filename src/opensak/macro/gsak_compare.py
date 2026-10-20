@@ -186,7 +186,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GetEnvV | 🚫 | deliberately not exposed; `temp_dir`/`macros_dir` cover the common use |
 | GPSInfo / GPSReceive | 🚫 | |
 | GrabImages | ❌ | |
-| GsCodeToNum / NumToGsCode | ❌ | |
+| GsCodeToNum / NumToGsCode | ✅ | `text.gc_to_id(code)`, `text.id_to_gc(id [, prefix])` |
 | ImageInfo / PlayWav | 🚫 | |
 | MacroSet | ➖ | options are passed as tables (`export_gpx{}`, `filter{}`) or saved settings (`export_file`) |
 | MacSettings | ✅ | `settings.load/save/clear` |

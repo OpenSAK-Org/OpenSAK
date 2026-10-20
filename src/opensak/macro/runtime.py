@@ -6342,6 +6342,34 @@ API: tuple[ApiFunction, ...] = (
         params=(Param("text", "string", "The Base64 text."),),
         returns=("string", "The decoded text."),
     ),
+    ApiFunction(
+        name="text.gc_to_id",
+        description="The number behind a geocaching.com code (GSAK's "
+                    "GsCodeToNum): up to GCFFFF the code is hexadecimal, from "
+                    "GCG000 on it is base 31. Works for TB, GL and other "
+                    "two-letter prefixes too; any case.",
+        example='print(opensak.text.gc_to_id("GC12345"))  -- 574995\n'
+                'print(opensak.text.gc_to_id("GCG000"))   -- 65536',
+        since=3,
+        bind=lambda rt, lua: helpers.gc_to_id,
+        params=(Param("code", "string", 'A code such as "GC12345".'),),
+        returns=("integer?", "The number; nil if *code* is not a geocaching.com code."),
+    ),
+    ApiFunction(
+        name="text.id_to_gc",
+        description="The geocaching.com code for a number (GSAK's "
+                    "NumToGsCode), the reverse of opensak.text.gc_to_id().",
+        example='print(opensak.text.id_to_gc(574995))      -- GC12345\n'
+                'print(opensak.text.id_to_gc(1, "TB"))     -- TB1',
+        since=3,
+        bind=lambda rt, lua: helpers.id_to_gc,
+        params=(
+            Param("id", "integer", "The number, 0 or more."),
+            Param("prefix", "string", 'Two letters instead of "GC", e.g. "TB".',
+                  optional=True),
+        ),
+        returns=("string", "The code."),
+    ),
 
     # -- opensak.stats --------------------------------------------------------
     ApiFunction(
