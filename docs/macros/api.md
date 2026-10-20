@@ -68,6 +68,10 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.resync`](#opensakresync) | 3 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.write_text`](#opensakwritetext) | 3 |
+| [`opensak.read_text`](#opensakreadtext) | 3 |
+| [`opensak.file_exists`](#opensakfileexists) | 3 |
+| [`opensak.folder_exists`](#opensakfolderexists) | 3 |
+| [`opensak.list_dir`](#opensaklistdir) | 3 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
 | [`opensak.export_gpx`](#opensakexportgpx) | 2 |
 | [`opensak.export_poi`](#opensakexportpoi) | 3 |
@@ -1458,6 +1462,103 @@ Example:
 local path = opensak.write_text(opensak.temp_dir() .. "/report.html",
   "<h1>" .. opensak.count() .. " caches</h1>")
 print("written: " .. path)
+```
+
+### opensak.read_text
+
+```lua
+opensak.read_text(path [, options])
+```
+
+Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
+
+Parameters:
+
+- `path` (`string`) — The file to read.
+- `options` (`{encoding?: string}`, optional) — `encoding`: e.g. `"cp1252"` for a file from an older Windows program.
+
+Returns `string` — The file's text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local text = opensak.read_text("notes.txt")
+for line in text:gmatch("[^\n]+") do
+    print(line)
+end
+```
+
+### opensak.file_exists
+
+```lua
+opensak.file_exists(path)
+```
+
+Whether a file exists (false for a folder). A relative path is resolved against the macro file's folder. The folder needs read permission, like opensak.read_text().
+
+Parameters:
+
+- `path` (`string`) — The file.
+
+Returns `boolean` — true if the file exists.
+
+Since API version 3.
+
+Example:
+
+```lua
+if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then
+    print("no report yet")
+end
+```
+
+### opensak.folder_exists
+
+```lua
+opensak.folder_exists(path)
+```
+
+Whether a folder exists. A relative path is resolved against the macro file's folder. The folder containing it needs read permission.
+
+Parameters:
+
+- `path` (`string`) — The folder.
+
+Returns `boolean` — true if the folder exists.
+
+Since API version 3.
+
+Example:
+
+```lua
+if opensak.folder_exists("C:/GPX") then print("found") end
+```
+
+### opensak.list_dir
+
+```lua
+opensak.list_dir(folder [, pattern])
+```
+
+The files and folders in a folder (not in its subfolders), sorted by name. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. `pattern` keeps the names that match it, ignoring case: `*` stands for any text, `?` for one character. At most 10,000 entries. Each entry has `name`, `path` (full path), `dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified` (seconds since the epoch, like `os.time()`).
+
+Parameters:
+
+- `folder` (`string`) — The folder.
+- `pattern` (`string`, optional) — A file name pattern, e.g. "*.gpx".
+
+Returns `{name: string, path: string, dir: boolean, size: integer, modified: integer}[]` — One table per entry.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do
+    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))
+end
 ```
 
 ### opensak.export_file
@@ -2910,8 +3011,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Loading GPX / ZIP files (`Load`). Planned.
-- Reading text files (`GetFile`, `FileRead`): only `opensak.read_csv()` exists. Planned. Writing works with `opensak.write_text()`, for text file types only.
-- File system helpers (`FileExists`, `FolderExists`, `Dir`, `FileCopy`, `FileErase`).
+- Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
 - Setting the centre point (`Centre`), saving and restoring the filter (`SaveFilter`, `RestoreFilter`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
@@ -2982,9 +3082,9 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 |---|---|---|
 | AppendFile / PutFile / FileOpen | ✅ | `write_text(path, text)`, `write_text(path, text, {append=true})`; only `.txt .csv .tsv .html .htm .svg .md .json`, at most 20 MB, never an autostart location |
 | TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV helper yet |
-| GetFile / FileRead / EndRead / StopRead | ❌ | `read_csv` for CSV only; text files planned |
-| FileExists / FolderExists | ❌ | |
-| Dir | ❌ | |
+| GetFile / FileRead / EndRead / StopRead | ✅ | `read_text(path)` reads the whole file (any file type, UTF-8 or `{encoding="cp1252"}`, at most 10 MB); loop over the lines with `text:gmatch("[^\n]+")`; `read_csv` for CSV |
+| FileExists / FolderExists | ✅ | `file_exists(path)`, `folder_exists(path)` |
+| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders |
 | FileCopy / FileErase | ❌ | |
 | DriveExists | 🚫 | Windows-specific |
 | ZipFile | ❌ | |
