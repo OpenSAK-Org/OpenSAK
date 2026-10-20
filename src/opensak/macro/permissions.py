@@ -48,6 +48,7 @@ folder like any other file.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import tempfile
 from dataclasses import dataclass
@@ -91,10 +92,23 @@ class FolderPermission:
         )
 
 
+_WINDOWS_VAR = re.compile(r"%([^%/\\\s]+)%")
+
+
+def expand_path(path: str | Path) -> Path:
+    """Expand ~ and environment variables. %NAME% is expanded on every
+    platform (os.path.expandvars only does that on Windows), so a path such
+    as "%APPDATA%/gsak" works wherever the variable is set; unknown
+    variables are left as they are."""
+    text = os.path.expandvars(os.path.expanduser(str(path)))
+    text = _WINDOWS_VAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), text)
+    return Path(text)
+
+
 def resolve_path(path: str | Path) -> Path:
     """Expand ~ and environment variables, make absolute and resolve
     "..", "." and symlinks."""
-    return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+    return expand_path(path).resolve()
 
 
 def is_root_folder(path: str | Path) -> bool:

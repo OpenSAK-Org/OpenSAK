@@ -156,6 +156,7 @@ from opensak.macro.permissions import (
     FolderPermission,
     approvable_folder,
     check_access,
+    expand_path,
     grant_permanently,
     load_permissions,
     macros_dir,
@@ -217,6 +218,11 @@ EXPORT_KEYS = frozenset({
     "if_exists", "target", "device",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
+# opensak.import_gsak(): the keys of its options table, and how many cache
+# errors per database its report lists.
+GSAK_IMPORT_KEYS = ("databases", "exclude", "target", "if_exists", "create",
+                    "filters", "locations", "quiet")
+GSAK_REPORT_MAX_ERRORS = 20
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
@@ -747,6 +753,15 @@ class MacroHost(Protocol):
 
     def refresh(self) -> None:
         """Apply the refreshes deferred so far and redraw the grid now."""
+
+    # Optional too: told after opensak.import_gsak() changed OpenSAK's user
+    # locations or filter profiles, so lists showing them can reload.
+
+    def locations_changed(self) -> None:
+        """User locations were added or replaced."""
+
+    def filter_profiles_changed(self) -> None:
+        """Filter profiles were added or replaced."""
 
 
 class ProgressHandle(Protocol):
@@ -2054,6 +2069,202 @@ class MacroRuntime:
         if count and not copy_only:
             self._host.caches_removed()
         return count
+
+    # opensak.import_gsak(): the GSAK import dialog without its questions
+    # (importer/gsak_import_service.py). What the dialog asks is decided by
+    # the options up front; the folder and write approvals still apply.
+
+    def _import_gsak(self, lua, source=None, options=None):
+        func = "opensak.import_gsak"
+        from opensak.importer import gsak_import_service as service
+
+        # It writes through its own sessions, which would wait for the
+        # transaction's write lock.
+        self._no_transaction(func)
+        if not isinstance(source, str) or not source.strip():
+            raise MacroError(f"{func} expects the path of a GSAK backup .zip, "
+                             "GSAK folder or .db3 file")
+        opts = self._gsak_import_options(func, options)
+        quiet = bool(opts.pop("quiet", False))
+        settings = service.GsakImportOptions(**opts)
+        self._require_write(func)
+
+        # %APPDATA%\gsak, $HOME/... — as the folder permissions expand them.
+        path = expand_path(source.strip())
+        if not path.is_absolute():
+            path = (self._base_dir or macros_dir()) / path
+        if not path.exists():
+            raise MacroError(f"{func}: {path} does not exist")
+        # GSAK databases are SQLite files, which the file functions never
+        # read; this one only hands them to the importer, which opens them
+        # read-only. A folder is approved as a whole, not per database.
+        self._check_access(path / service.GSAK_SETTINGS_DB_NAME if path.is_dir() else path,
+                           write=False, allow_database=True)
+
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            handle = self._host.progress("GSAK import", 0)
+            self._progress_windows.append(handle)
+        cancelled = False
+
+        def on_progress(text: str, done: int, total: int) -> None:
+            nonlocal cancelled
+            if handle is not None:
+                shown = f"{text}: {done} / {total}" if total else text
+                if not handle.update(None, shown):
+                    cancelled = True
+
+        try:
+            report = service.run_gsak_import(
+                path, settings,
+                progress_cb=on_progress,
+                cancel_cb=lambda: cancelled or self._cancelled.is_set(),
+                check_file=lambda p: self._check_access(p, write=False, allow_database=True),
+            )
+        except service.GsakImportError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
+
+        self._gsak_import_notify(report)
+        if not quiet:
+            for line in report.summary_lines():
+                self._output(line)
+        self._check_cancelled()
+        return self._gsak_report_table(lua, report)
+
+    @staticmethod
+    def _gsak_import_options(func: str, options: Any) -> dict[str, Any]:
+        """The options table of opensak.import_gsak() as GsakImportOptions
+        keyword arguments (plus `quiet`)."""
+        from opensak.importer.gsak_import_service import IF_EXISTS, settings_mode
+
+        if options is None:
+            return {}
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "merge" }}')
+        raw = {k: _from_lua(v) for k, v in options.items()}
+        unknown = set(raw) - set(GSAK_IMPORT_KEYS)
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                             f"valid: {', '.join(GSAK_IMPORT_KEYS)}")
+        result: dict[str, Any] = {}
+
+        def names(key: str) -> list[str]:
+            value = raw[key]
+            values = [value] if isinstance(value, str) else ([] if value == {} else value)
+            if not isinstance(values, list) or not all(
+                    isinstance(v, str) and v.strip() for v in values):
+                raise MacroError(f'{func}: {key} must be a name or a list of names, '
+                                 f'e.g. {{"AllCH", "Holidays"}}')
+            return [v.strip() for v in values]
+
+        if "databases" in raw:
+            result["databases"] = names("databases")
+        if "exclude" in raw:
+            result["exclude"] = names("exclude")
+        if "target" in raw:
+            target = raw["target"]
+            if isinstance(target, str) and target.strip():
+                result["target"] = target.strip()
+            elif isinstance(target, dict) and target and all(
+                    isinstance(k, str) and isinstance(v, str) and v.strip()
+                    for k, v in target.items()):
+                result["targets"] = {k: v.strip() for k, v in target.items()}
+            else:
+                raise MacroError(f'{func}: target must be a database name, or a table '
+                                 f'of GSAK name = database name, e.g. {{ AllCH = "Switzerland" }}')
+        if_exists = raw.get("if_exists", "skip")
+        if if_exists not in IF_EXISTS:
+            raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, "
+                             f"got {if_exists!r}")
+        result["if_exists"] = if_exists
+        for key in ("filters", "locations"):
+            value = raw.get(key, False)
+            if value is True:
+                result[key] = settings_mode(if_exists)
+            elif value in ("skip", "overwrite"):
+                result[key] = value
+            elif value is not False:
+                raise MacroError(f'{func}: {key} must be true, false, "skip" or '
+                                 f'"overwrite", got {value!r}')
+        for key in ("create", "quiet"):
+            if key in raw:
+                if not isinstance(raw[key], bool):
+                    raise MacroError(f"{func}: {key} must be true or false")
+                result[key] = raw[key]
+        return result
+
+    def _gsak_import_notify(self, report) -> None:
+        """Tell the host what the import changed, like the dialog's signals."""
+        from opensak.importer.gsak_import_service import ACTION_OVERWRITTEN
+
+        if report.new_databases:
+            self._host.database_list_changed()
+        active = [d for d in report.databases if d.active and d.result is not None]
+        if any(d.action == ACTION_OVERWRITTEN for d in active):
+            self._host.caches_removed()
+        elif any(d.result.created or d.result.updated for d in active):
+            self._host.caches_changed([], True)
+        loc = report.locations
+        if loc is not None and (loc.added or loc.updated):
+            notify = getattr(self._host, "locations_changed", None)
+            if callable(notify):
+                notify()
+        if report.filters is not None and report.filters.written:
+            notify = getattr(self._host, "filter_profiles_changed", None)
+            if callable(notify):
+                notify()
+
+    @staticmethod
+    def _gsak_report_table(lua, report):
+        databases = []
+        for d in report.databases:
+            row: dict[str, Any] = {"gsak": d.gsak_name, "target": d.target,
+                                   "action": d.action, "cleared": d.cleared}
+            if d.reason:
+                row["reason"] = d.reason
+            r = d.result
+            if r is not None:
+                row.update(
+                    created=r.created, updated=r.updated, skipped=r.skipped,
+                    waypoints=r.waypoints, logs=r.logs, attributes=r.attributes,
+                    notes=r.notes, trackables=r.trackables, corrected=r.corrected,
+                    note_images=r.note_images_replaced, warnings=len(r.warnings),
+                    errors=lua.table_from(r.errors[:GSAK_REPORT_MAX_ERRORS]),
+                )
+            databases.append(lua.table_from(row))
+        result: dict[str, Any] = {
+            "ok": report.ok,
+            "cancelled": report.cancelled,
+            "source": str(report.source),
+            "kind": report.kind,
+            "created": report.total("created"),
+            "updated": report.total("updated"),
+            "skipped": report.total("skipped"),
+            "errors": report.errors,
+            "databases": lua.table_from(databases),
+            "new_databases": lua.table_from(report.new_databases),
+            "notes": lua.table_from(report.notes),
+        }
+        if report.locations is not None:
+            loc = report.locations
+            result["locations"] = lua.table_from({
+                "added": len(loc.added), "updated": len(loc.updated),
+                "skipped": len(loc.skipped), "invalid": report.locations_invalid,
+            })
+        elif report.locations_error:
+            result["locations"] = lua.table_from({"error": report.locations_error})
+        if report.filters is not None:
+            f = report.filters
+            result["filters"] = lua.table_from({
+                "imported": f.written, "skipped": f.skipped, "failed": f.failed,
+            })
+        elif report.filters_error:
+            result["filters"] = lua.table_from({"error": report.filters_error})
+        return lua.table_from(result)
 
     def _confirm(self, message=None) -> bool:
         if not isinstance(message, str) or not message.strip():
@@ -4091,6 +4302,51 @@ API: tuple[ApiFunction, ...] = (
             Param("options", "opensak.TransferOptions", "codes, if_exists.", optional=True),
         ),
         returns=("integer", "Number of caches copied."),
+    ),
+    ApiFunction(
+        name="import_gsak",
+        description="Import GSAK databases without any question (like File → "
+                    "Import GSAK database, with the answers given up front) "
+                    "and return what was done. *source* is a GSAK backup "
+                    ".zip, a GSAK folder (the install / data folder with "
+                    "`gsak.db3` and `data/<name>/sqlite.db3`, its `data` "
+                    "folder, or one database's folder), a single `.db3` "
+                    "cache database (just that database), or `gsak.db3` "
+                    "(only user locations and saved filters). A relative "
+                    "path is resolved against the macro file's folder, and "
+                    "environment variables such as `%APPDATA%` are expanded; the "
+                    "folder needs read permission. Each GSAK database goes "
+                    "into the OpenSAK database of the same name, created if "
+                    "missing, unless `target` says otherwise. For an "
+                    "OpenSAK database that exists, `if_exists` decides: "
+                    "`\"skip\"` (default), `\"merge\"` (new caches added, "
+                    "existing ones updated, locked caches kept) or "
+                    "`\"overwrite\"` (emptied first). `filters` and "
+                    "`locations` also import the saved filters and user "
+                    "locations of `gsak.db3`; `true` skips the ones whose "
+                    "name exists when `if_exists` is `\"skip\"` and "
+                    "replaces them otherwise. Embedded note images are "
+                    "replaced by placeholders without asking. A database "
+                    "that fails is reported and the others are still "
+                    "imported. The summary is printed (unless `quiet`) and "
+                    "written to the log file.",
+        example='local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {\n'
+                '  databases = {"AllCH", "Holidays"}, if_exists = "merge",\n'
+                '  locations = true })\n'
+                'for _, db in ipairs(r.databases) do\n'
+                '  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)\n'
+                'end\n'
+                'if not r.ok then opensak.exit(1) end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._import_gsak(lua, *a),
+        params=(
+            Param("source", "string", "GSAK backup .zip, GSAK folder or .db3 file."),
+            Param("options", "opensak.GsakImportOptions",
+                  "databases, exclude, target, if_exists, create, filters, "
+                  "locations, quiet.", optional=True),
+        ),
+        returns=("opensak.GsakImportReport", "What was imported, per database."),
+        write=True,
     ),
     ApiFunction(
         name="set_corrected",

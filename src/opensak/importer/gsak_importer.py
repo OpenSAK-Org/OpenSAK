@@ -530,6 +530,39 @@ def list_gsak_backup(path: Path) -> GsakBackupContents:
     return contents
 
 
+def list_gsak_folder(path: Path) -> GsakBackupContents:
+    """List the GSAK cache databases (and gsak.db3) of a GSAK folder on disk.
+
+    *path* is either a GSAK install / data location (``gsak.db3`` next to a
+    ``data`` folder holding ``<name>/sqlite.db3`` — e.g. ``%AppData%\\gsak``),
+    its ``data`` folder itself, or the folder of a single database (one
+    ``sqlite.db3`` in it). Only those levels are searched, never deeper, so a
+    stray copy in some subfolder is not picked up.
+    """
+    path = Path(path)
+    contents = GsakBackupContents(path)
+    data_dir = path / "data"
+    if (path / GSAK_CACHE_DB_NAME).is_file():
+        db_files = [path / GSAK_CACHE_DB_NAME]
+        settings_candidates = [path.parent.parent / GSAK_SETTINGS_DB_NAME,
+                               path.parent / GSAK_SETTINGS_DB_NAME]
+    else:
+        base = data_dir if data_dir.is_dir() else path
+        db_files = [d / GSAK_CACHE_DB_NAME for d in base.iterdir()
+                    if d.is_dir() and (d / GSAK_CACHE_DB_NAME).is_file()]
+        settings_candidates = [path / GSAK_SETTINGS_DB_NAME,
+                               path.parent / GSAK_SETTINGS_DB_NAME]
+    for db3 in db_files:
+        contents.databases.append(
+            GsakBackupDatabase(db3.parent.name, db3.stat().st_size, path=db3)
+        )
+    contents.settings_path = next(
+        (c for c in settings_candidates if c.is_file()), None
+    )
+    contents.databases.sort(key=lambda db: db.name.lower())
+    return contents
+
+
 def extract_gsak_member(zip_path: Path, member: str, dest_dir: Path,
                         progress_cb=None) -> Path:
     """Unpack the single zip *member* into *dest_dir* and return its path.

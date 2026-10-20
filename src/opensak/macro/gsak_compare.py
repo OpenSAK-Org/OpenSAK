@@ -178,7 +178,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| Backup / Restore | ❌ | backup planned |
+| Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
 | CacheType / ChildType | ❌ | |
 | Centre | ❌ | planned |
