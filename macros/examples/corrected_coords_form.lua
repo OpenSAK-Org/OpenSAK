@@ -1,4 +1,9 @@
--- corrected_coords_form.lua — enter or remove the corrected coordinates of the selected cache
+-- OpenSAK Macro
+-- Name: Corrected coordinates (form)
+-- Author: OpenSAK
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Enter or remove the corrected coordinates of the selected cache
 --
 -- The form below was built with the form designer of the macro window
 -- (Tools → Form designer) and pasted in unchanged: the designer writes the

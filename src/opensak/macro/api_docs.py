@@ -46,6 +46,7 @@ from opensak.macro.forms import (
 )
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
+from opensak.macro.metadata import read_metadata
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
@@ -110,14 +111,9 @@ def _code(text: str, lang: str = "lua") -> list[str]:
 
 
 def _example_summary(path: Path) -> str:
-    """The text after the dash in the first line, e.g.
-    "-- name.lua — set corrected coordinates" → "set corrected coordinates"."""
-    first = path.read_text(encoding="utf-8").splitlines()[0]
-    if first.startswith("--"):
-        for dash in ("—", " - "):
-            if dash in first:
-                return first.split(dash, 1)[1].strip()
-    return ""
+    """The Description of the example's metadata header (or the text after
+    the dash of an older "-- name.lua — what it does" first line)."""
+    return read_metadata(path).description
 
 
 def _examples_section(examples_dir: Path) -> list[str]:
@@ -137,6 +133,36 @@ def _examples_section(examples_dir: Path) -> list[str]:
         entry = f"- [`{path.name}`]({_EXAMPLES_LINK}/{path.name})"
         lines.append(f"{entry} — {summary}" if summary else entry)
     return lines
+
+
+def _header_section() -> list[str]:
+    return [
+        "",
+        "## Macro header",
+        "",
+        "**Macros → Macro manager** lists the macros in your macros folder and "
+        "its subfolders. It shows what a comment block at the top of each macro "
+        "says about it:",
+        "",
+        *_code(
+            "-- OpenSAK Macro\n"
+            "-- Name: Find easy traditionals\n"
+            "-- Author: Jane Doe\n"
+            "-- Version: 1.0\n"
+            f"-- Requires-API: {API_VERSION}\n"
+            "-- Description: Filters for unfound traditional caches with low difficulty."
+        ),
+        "",
+        "Every line is optional, and the keys are not case-sensitive. Without a "
+        "`Name` the file name is shown. `Requires-API` is the lowest "
+        "`opensak.api_version()` the macro works with: the manager marks a "
+        "macro that needs a newer one and asks before running it. Only the "
+        "comment lines before the first line of code are read.",
+        "",
+        "From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, "
+        "or a function key) that runs it from the main window. The output then "
+        "goes to the manager's output pane.",
+    ]
 
 
 def _editor_section() -> list[str]:
@@ -633,6 +659,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
 
     lines += _changing_section()
     lines += _examples_section(examples_dir)
+    lines += _header_section()
     lines += _editor_section()
 
     lines += [
