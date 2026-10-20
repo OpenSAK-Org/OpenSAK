@@ -36,6 +36,7 @@ import csv
 import fnmatch
 import functools
 import io
+import json
 import locale
 import logging
 import os
@@ -650,6 +651,12 @@ class MacroHost(Protocol):
         """Name of the active filter ("" = none) — the {filter} variable of
         an export file name."""
 
+    def active_filterset(self) -> FilterSet:
+        """The whole active filter as one FilterSet — the advanced filter
+        combined with any quick filter or search box — so that applying it
+        with apply_filter() shows the same caches. Empty when no filter is
+        active."""
+
     def set_sort(self, sort: SortSpec) -> None:
         """Sort the cache list, like a click on a column header (also when
         the column is hidden). filtered_caches() must return the new order
@@ -923,6 +930,38 @@ def _near_filter(value: Any) -> DistanceFilter:
     else:
         lat, lon = resolve_coords(opts.get("lat"), opts.get("lon"))
     return DistanceFilter(lat, lon, op="at_most", dist1_km=km)
+
+
+# opensak.save_filter(): marks (and versions) the string it returns
+_SAVED_FILTER_KEY = "opensak_filter"
+_SAVED_FILTER_VERSION = 1
+
+
+def _parse_saved_filter(saved: Any) -> tuple[FilterSet, str]:
+    """The filter and its name from a string returned by
+    opensak.save_filter()."""
+    bad = MacroError(
+        "opensak.restore_filter expects a string returned by opensak.save_filter()"
+    )
+    if not isinstance(saved, str):
+        raise bad
+    try:
+        data = json.loads(saved)
+    except ValueError:
+        raise bad from None
+    if not isinstance(data, dict) or _SAVED_FILTER_KEY not in data:
+        raise bad
+    if data[_SAVED_FILTER_KEY] != _SAVED_FILTER_VERSION:
+        raise MacroError(
+            "opensak.restore_filter: the filter was saved by a newer OpenSAK"
+        )
+    name, spec = data.get("name", ""), data.get("filter")
+    if not isinstance(name, str) or not isinstance(spec, dict):
+        raise bad
+    try:
+        return FilterSet.from_dict(spec), name
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise bad from None
 
 
 def _owned_filter(value: Any) -> OwnerFilter:
@@ -1402,6 +1441,24 @@ class MacroRuntime:
             raise MacroError("opensak.filter_profile expects the profile name")
         profile = self._load_profile(name)
         return self._host.apply_filter(profile.filterset, profile.name)
+
+    def _save_filter(self) -> str:
+        fs = self._host.active_filterset()
+        return json.dumps(
+            {
+                _SAVED_FILTER_KEY: _SAVED_FILTER_VERSION,
+                "name": self._host.filter_name() if len(fs) else "",
+                "filter": fs.to_dict(),
+            },
+            ensure_ascii=False, separators=(",", ":"),
+        )
+
+    def _restore_filter(self, saved=None) -> int:
+        fs, name = _parse_saved_filter(saved)
+        if not len(fs):
+            self._host.clear_filter()
+            return self._host.cache_count()
+        return self._host.apply_filter(fs, name)
 
     def _profile_names(self) -> list[str]:
         names = []
@@ -3927,6 +3984,39 @@ API: tuple[ApiFunction, ...] = (
         example="opensak.clear_filter()",
         since=1,
         bind=lambda rt, lua: rt._host.clear_filter,
+    ),
+    ApiFunction(
+        name="save_filter",
+        description="The active filter (with its name, and any quick filter "
+                    "or search box) as a string, to put back later with "
+                    "opensak.restore_filter() — e.g. to leave the user's "
+                    "filter as it was after the macro filtered for its own "
+                    "work. Like GSAK's SaveFilter(). The sort order is not "
+                    "included. The string can be stored with "
+                    "opensak.settings.save(); don't build or change it.",
+        example='local saved = opensak.save_filter()\n'
+                'opensak.filter{ found = false }\n'
+                '-- ... work on the unfound caches ...\n'
+                'opensak.restore_filter(saved)',
+        since=3,
+        bind=lambda rt, lua: rt._save_filter,
+        returns=("string", "The saved filter; when no filter is active, "
+                           "restoring it clears the filter."),
+    ),
+    ApiFunction(
+        name="restore_filter",
+        description="Apply a filter saved with opensak.save_filter(), like "
+                    "GSAK's RestoreFilter(). As with opensak.filter{}, the "
+                    "view is left unchanged when nothing matches. A filter "
+                    "saved while none was active clears the filter.",
+        example='local saved = opensak.save_filter()\n'
+                'opensak.filter{ found = false }\n'
+                'opensak.restore_filter(saved)',
+        since=3,
+        bind=lambda rt, lua: rt._restore_filter,
+        params=(Param("saved", "string", "A string from opensak.save_filter()."),),
+        returns=("integer", "Number of matching caches (0 = view unchanged, "
+                            "unless the saved filter was empty)."),
     ),
     ApiFunction(
         name="count",

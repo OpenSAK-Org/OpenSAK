@@ -51,6 +51,9 @@ class FakeHost:
     def filter_name(self):
         return self.applied[-1][1] if self.applied else ""
 
+    def active_filterset(self):
+        return self.applied[-1][0] if self.applied else FilterSet()
+
     def set_sort(self, sort):
         self.sort = sort
 
@@ -118,8 +121,20 @@ class DbHost(FakeHost):
         with get_session() as s:
             return apply_filters_auto(s, self.filterset)
 
+    def clear_filter(self):
+        super().clear_filter()
+        self.filterset, self.label = FilterSet(), ""
+        self.selected = set()
+
+    def cache_count(self):
+        with get_session() as s:
+            return len(apply_filters_auto(s, self.filterset))
+
     def filter_name(self):
         return self.label
+
+    def active_filterset(self):
+        return self.filterset
 
     def set_corrected_coords(self, gc_code, lat, lon):
         return set_corrected_coords(gc_code, lat, lon)
@@ -371,6 +386,66 @@ def test_empty_result_keeps_previous_selection():
         assert(opensak.filter{ name = "does-not-exist" } == 0)
     """, host=host)
     assert host.selected == {"GCMAC3"}
+
+
+def test_save_and_restore_filter():
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ codes = {"GCMAC1", "GCMAC2"}, label = "Mine" }
+        local saved = opensak.save_filter()
+        assert(type(saved) == "string")
+        opensak.filter{ codes = "GCMAC5" }
+        print(opensak.restore_filter(saved), opensak.filter_name())
+    """, host=host)
+    assert out == ["2	Mine"]
+    assert host.selected == {"GCMAC1", "GCMAC2"}
+
+
+def test_restore_filter_saved_without_filter_clears_it():
+    host = DbHost()
+    _, out = _run("""
+        local saved = opensak.save_filter()
+        opensak.filter{ codes = "GCMAC5" }
+        print(opensak.restore_filter(saved), opensak.filter_name() == "")
+    """, host=host)
+    assert out == [f"{host.cache_count()}	true"]
+    assert host.cleared == 1 and len(host.filterset) == 0
+
+
+def test_restore_filter_with_no_match_keeps_view():
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ codes = "GCNOPE" }
+        local saved = opensak.save_filter()
+        opensak.filter{ codes = "GCMAC3" }
+        print(opensak.restore_filter(saved))
+    """, host=host)
+    # "GCNOPE" never matched, so nothing was active when saving
+    assert out == [str(host.cache_count())]
+
+
+def test_saved_filter_round_trips_nested_sets():
+    fs, label = build_filterset({"mode": "OR", "found": True,
+                                 "difficulty": [1, 2], "where": "terrain > 1"},
+                                lambda v: [])
+    host = FakeHost()
+    host.applied.append((fs, label))
+    _, out = _run("print(opensak.save_filter())", host=host)
+    _run(f"opensak.restore_filter({out[0]!r})", host=host)
+    assert host.applied[-1][0].to_dict() == fs.to_dict()
+
+
+@pytest.mark.parametrize("arg, msg", [
+    ("nil", "expects a string returned by opensak.save_filter"),
+    ("42", "expects a string returned by opensak.save_filter"),
+    ('"not json"', "expects a string returned by opensak.save_filter"),
+    ("'{\"mode\":\"AND\"}'", "expects a string returned by opensak.save_filter"),
+    ("'{\"opensak_filter\":1,\"filter\":[]}'", "expects a string returned"),
+    ("'{\"opensak_filter\":99,\"filter\":{}}'", "saved by a newer OpenSAK"),
+])
+def test_restore_filter_rejects_bad_input(arg, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(f"opensak.restore_filter({arg})")
 
 
 # ── Corrected coordinates / CSV ──────────────────────────────────────────────

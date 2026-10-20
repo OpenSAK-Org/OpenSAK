@@ -22,7 +22,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 - Loading GPX / ZIP files (`Load`). Planned.
 - Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
-- Setting the centre point (`Centre`), saving and restoring the filter (`SaveFilter`, `RestoreFilter`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
+- Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
 ### Database / Waypoints
@@ -56,7 +56,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
 | PurgeNote | ✅ β | `update(code, {note=false, gc_note=false})` |
-| SaveFilter / RestoreFilter | ❌ | only `filter_name()` |
+| SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
 | ReSync | ✅ β | `resync()` |
 | ReSyncLogs | 🚫 | needs the geocaching.com API |
 | SetColor | ✅ partial β | `update(code, {color=})` for the cache colour; no per-column colouring |
