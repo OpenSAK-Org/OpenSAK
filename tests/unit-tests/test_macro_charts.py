@@ -1,17 +1,26 @@
 """tests/unit-tests/test_macro_charts.py — the SVG charts and maps of
 opensak.chart.*, the boundary outlines of opensak.geo.* (no Vega, no
-JavaScript) and opensak.open(), which shows a generated report."""
+JavaScript), opensak.open(), which shows a generated report, and the
+statistics example macros built on them."""
 
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import pytest
 
+from opensak.db.database import session_for
+from opensak.db.manager import get_db_manager
+from opensak.db.models import Cache, Log
 from opensak.macro import FolderApproval, MacroError, MacroRuntime
+from opensak.macro.permissions import temp_dir
 from opensak.export.file_export import active_database_name
 from opensak.stats import charts, tables
 from opensak.stats import maps as report_maps
+
+EXAMPLES = Path(__file__).resolve().parents[2] / "macros" / "examples"
+
 
 class FakeHost:
     """Only folder approval and the database name are used here."""
@@ -488,3 +497,316 @@ def test_open_is_limited_per_run(own_temp_dir):
             for i = 1, 6 do opensak.open(path) end
         """, host)
     assert len(host.opened) == 5
+
+
+# ── caches{ all = true } ────────────────────────────────────────────────────
+
+def _cache(s, code, found_date, cache_type="Traditional Cache", d=1.5, t=2.0, logs=()):
+    cache = Cache(gc_code=code, name=f"Cache {code}", cache_type=cache_type,
+                  latitude=47.0, longitude=8.0, difficulty=d, terrain=t,
+                  found=found_date is not None, found_date=found_date,
+                  url=f"https://coord.info/{code}")
+    s.add(cache)
+    s.flush()
+    for log_type, when in logs:
+        s.add(Log(cache_id=cache.id, log_type=log_type, log_date=when, finder="me"))
+    return cache
+
+
+@pytest.fixture
+def finds_db():
+    manager = get_db_manager()
+    db = manager.new_database("Finds")
+    manager.switch_to(db)
+    with session_for(db.path) as s:
+        day = datetime(2024, 3, 4)
+        # Same day: GCB's find log was imported first, so it is find no. 2
+        # although GCA sorts first by code (and by found time).
+        _cache(s, "GCB", day.replace(hour=12), logs=[("Found it", day)])
+        _cache(s, "GCA", day.replace(hour=9), "Multi-cache", 3.0, 4.5,
+               logs=[("Found it", day)])
+        _cache(s, "GCZ", datetime(2023, 12, 31), logs=[("Found it", datetime(2023, 12, 31))])
+        _cache(s, "GCN", datetime(2024, 5, 1), "Unknown Cache", 5.0, 5.0)
+        _cache(s, "GCX", None)                          # not found
+    return db
+
+
+def _describe(db, updates):
+    with session_for(db.path) as s:
+        for code, values in updates.items():
+            cache = s.query(Cache).filter_by(gc_code=code).one()
+            for key, value in values.items():
+                setattr(cache, key, value)
+
+
+class EmptyFilterHost(OpenHost):
+    """The active filter shows no cache at all."""
+
+    def filtered_caches(self):
+        return []
+
+
+def test_caches_all_ignores_the_active_filter(finds_db):
+    out = _run("""
+        local n, all = 0, 0
+        for _ in opensak.caches() do n = n + 1 end
+        for c in opensak.caches{ all = true, fields = { "found" } } do all = all + 1 end
+        print(n, all)
+    """, EmptyFilterHost())
+    assert out == ["0\t5"]
+    with pytest.raises(MacroError, match="cannot be combined with filter keys"):
+        _run("for _ in opensak.caches{ all = true, found = true } do end", EmptyFilterHost())
+    with pytest.raises(MacroError, match="all must be true or false"):
+        _run('for _ in opensak.caches{ all = "yes" } do end', EmptyFilterHost())
+
+
+# ── Example macros ──────────────────────────────────────────────────────────
+
+def _tile(page, label):
+    m = re.search(r'<div class="value">([^<]*)</div><div class="label">' + re.escape(label), page)
+    return m and m.group(1)
+
+
+def _example(name):
+    return (EXAMPLES / name).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", ["find_statistics.lua", "database_statistics.lua",
+                                  "region_coverage.lua"])
+def test_statistics_examples_state_their_limitations(name):
+    head = _example(name).split("\nlocal ", 1)[0]
+    assert "-- Known limitations:" in head
+    assert "template macro" in head and "geocaching.com" in head
+    assert "boundary data" in head and "not yet stable" in head
+
+
+def test_find_statistics_example(finds_db, boundaries):
+    _describe(finds_db, {
+        "GCA": {"latitude": 47.0, "longitude": 5.0, "country": "Alpha", "state": "North A"},
+        "GCB": {"latitude": 46.0, "longitude": 6.0, "country": "Alpha", "state": "North A"},
+        "GCN": {"latitude": 42.0, "longitude": 5.0, "country": "Alpha", "state": "South A"},
+        "GCZ": {"latitude": 45.0, "longitude": 15.0, "country": "Beta", "state": "Beta One"},
+    })
+    source = _example("find_statistics.lua").replace(
+        "local MILESTONE_STEP = nil", "local MILESTONE_STEP = 2")
+    host = OpenHost()
+    out = _run(source, host)
+    target = temp_dir() / "find_statistics.html"
+    assert out == [f"4 finds → {target}"]
+    assert host.opened == [target] and host.asked == []
+    page = target.read_text(encoding="utf-8")
+
+    assert _tile(page, "finds") == "4"
+    assert _tile(page, "cache days") == "3"
+    assert _tile(page, "finds per cache day") == "1.33"
+    assert _tile(page, "D/T combinations") == "3 / 81"
+    # 2023-12-31, 2024-03-04, 2024-05-01: no two days in a row; the longest
+    # break is 1 January to 3 March 2024 (leap year).
+    assert _tile(page, "longest streak (days)") == "1"
+    assert _tile(page, "longest break (days)") == "63"
+    assert _tile(page, "countries") == "2 / 2"
+    assert _tile(page, "states in Alpha") == "2 / 2"
+    assert "2023-12-31 to 2024-05-01" in page
+    # Per year, stacked by cache type; the running total ends at 4 in May 2024.
+    assert "<title>2024 · Traditional Cache: 1 (total 3)</title>" in page
+    assert "<title>2024-04: 3</title>" in page and "<title>2024-05: 4</title>" in page
+    for weekday in ("Mon: 2", "Tue: 0", "Wed: 1", "Sun: 1"):
+        assert f"<title>{weekday}</title>" in page
+    assert "<title>Traditional Cache: 2</title>" in page
+    # Maps: countries and the states of the home country ("South A" is the
+    # outline "South Ä").
+    assert "<title>Alpha: 3</title>" in page and "<title>Beta: 1</title>" in page
+    assert "<title>North A: 2</title>" in page and "<title>South Ä: 1</title>" in page
+    assert page.count("<circle") >= 4                    # dots + rose rings
+    assert "<script" not in page
+    # Milestones 1, 2 and the last one (4); 2 is GCB, found on the same day
+    # as GCA but with the earlier imported find log.
+    rows = re.findall(r'<tr><td class="num">(\d+)</td><td>([\d-]+)</td><td class="num">(\d*)</td>'
+                      r'<td><a href="https://coord.info/(GC\w+)">GC\w+</a></td>', page)
+    assert rows == [("1", "2023-12-31", "", "GCZ"), ("2", "2024-03-04", "64", "GCB"),
+                    ("4", "2024-05-01", "58", "GCN")]
+
+
+def test_find_statistics_example_without_boundary_data(finds_db):
+    out = _run(_example("find_statistics.lua"), OpenHost())
+    assert out[0].startswith("4 finds → ")
+    page = (temp_dir() / "find_statistics.html").read_text(encoding="utf-8")
+    assert "Map not available: the boundary data is not installed." in page
+    assert _tile(page, "countries") == "0"
+
+
+def test_find_statistics_example_without_finds():
+    manager = get_db_manager()
+    manager.switch_to(manager.new_database("Empty"))
+    host = OpenHost()
+    assert _run(_example("find_statistics.lua"), host) == [
+        "No found caches with a found date in Empty."]
+    assert host.opened == []
+
+
+def test_database_statistics_example(finds_db, boundaries):
+    _describe(finds_db, {
+        "GCA": {"hidden_date": datetime(2020, 5, 1), "country": "Alpha", "state": "North A",
+                "owner_name": "Alice", "favorite_points": 7, "container": "Small",
+                "latitude": 47.0, "longitude": 5.0},
+        "GCB": {"hidden_date": datetime(2022, 1, 1), "country": "Alpha", "state": "North A",
+                "owner_name": "Alice", "favorite_points": 3, "container": "Micro",
+                "latitude": 46.0, "longitude": 6.0},
+        "GCZ": {"hidden_date": datetime(2022, 1, 2), "country": "Beta", "state": "Beta One",
+                "owner_name": "Bob", "favorite_points": 12, "archived": True,
+                "latitude": 45.0, "longitude": 15.0},
+        "GCX": {"hidden_date": datetime(2023, 3, 3), "country": "Alpha", "state": "South A",
+                "owner_name": "<Eve>", "favorite_points": 0, "latitude": 42.0, "longitude": 5.0},
+    })
+    host = EmptyFilterHost()
+    out = _run(_example("database_statistics.lua"), host)
+    target = temp_dir() / "database_statistics.html"
+    assert out == [f"5 caches → {target}"]
+    assert host.opened == [target]
+    page = target.read_text(encoding="utf-8")
+
+    assert _tile(page, "caches") == "5"
+    assert _tile(page, "found by you (80 %)") == "4"
+    assert _tile(page, "still to find (active)") == "1"        # GCX
+    assert (_tile(page, "active"), _tile(page, "disabled"), _tile(page, "archived")) == ("4", "0", "1")
+    assert _tile(page, "owners") == "3"
+    assert _tile(page, "countries") == "2 / 2"
+    assert _tile(page, "states in Alpha") == "2 / 2"
+    assert _tile(page, "favourite points") == "22"
+    assert _tile(page, "most days in a row with a new cache") == "2"   # 1 and 2 January 2022
+    assert "placed 2020-05-01 to 2023-03-03" in page
+    # Per type with the found share, and placed per year stacked by status.
+    assert ('<td>Traditional Cache</td><td class="num">3</td>' in page
+            and "<td>67 %</td>" in page)
+    assert "<title>2022 · active: 1 (total 2)</title>" in page
+    assert "<title>2022 · archived: 1 (total 2)</title>" in page
+    # Maps: caches per country; still to find per state of Alpha.
+    assert "<title>Alpha: 3</title>" in page and "<title>Beta: 1</title>" in page
+    assert "<title>South Ä: 1</title>" in page and "<title>North A</title>" in page
+    assert "&lt;Eve&gt;" in page and "<Eve>" not in page
+    # Most favourite points first, linked to the listing.
+    first = re.search(r'<td class="num">(\d+)</td><td><a href="https://coord.info/(GC\w+)">', page)
+    assert first is not None and first.groups() == ("12", "GCZ")
+
+
+def _coverage_db(db):
+    _describe(db, {
+        "GCA": {"country": "Alpha", "state": "North A", "latitude": 47.0, "longitude": 5.0},
+        # Case and punctuation of country and state do not matter.
+        "GCB": {"country": "alpha", "state": "north-a", "latitude": 46.0, "longitude": 6.0},
+        # No state of the boundary data: not counted, listed.
+        "GCN": {"country": "Alpha", "state": "Atlantis", "latitude": 44.0, "longitude": 5.0},
+        "GCZ": {"country": "Beta", "state": "Beta One", "latitude": 45.0, "longitude": 15.0},
+        # Not found; without the accent of the outline "South Ä", which it
+        # still matches.
+        "GCX": {"country": "Alpha", "state": "South A", "latitude": 42.0, "longitude": 5.0},
+    })
+
+
+def test_region_coverage_example_states(finds_db, boundaries):
+    _coverage_db(finds_db)
+    host = EmptyFilterHost()
+    out = _run(_example("region_coverage.lua"), host)
+    target = temp_dir() / "region_coverage.html"
+    assert out == [f"1 of 2 states → {target}"]
+    assert host.opened == [target]
+    page = target.read_text(encoding="utf-8")
+    assert "<title>Region coverage: states in Alpha</title>" in page
+    assert _tile(page, "states found") == "1 / 2"
+    assert _tile(page, "coverage") == "50 %"
+    assert _tile(page, "missing with a cache to find") == "1"
+    assert _tile(page, "finds in Alpha") == "2"
+    # The missing state with its nearest cache still to find, linked.
+    assert re.search(r'<td>South Ä</td><td class="num">\d+</td>'
+                     r'<td><a href="https://coord.info/GCX">GCX</a></td>', page)
+    # North A was got with GCA (found at 9:00, before GCB).
+    assert re.search(r'<td>North A</td><td><a href="https://coord.info/GCA">GCA</a></td>', page)
+    assert "Names that match no region" in page and "<td>Atlantis</td>" in page
+    assert "<title>North A: 2</title>" in page
+
+
+def test_region_coverage_example_country_setting(finds_db, boundaries):
+    _coverage_db(finds_db)
+    source = _example("region_coverage.lua").replace("local COUNTRY = nil", 'local COUNTRY = "BETA"')
+    out = _run(source, EmptyFilterHost())
+    assert out[0].startswith("1 of 1 states → ")
+    page = (temp_dir() / "region_coverage.html").read_text(encoding="utf-8")
+    assert "<title>Region coverage: states in Beta</title>" in page
+    source = _example("region_coverage.lua").replace("local COUNTRY = nil", 'local COUNTRY = "Gamma"')
+    assert _run(source, EmptyFilterHost()) == ["The boundary data has no country Gamma: set COUNTRY."]
+
+
+def test_region_coverage_example_countries(finds_db, boundaries):
+    _coverage_db(finds_db)
+    source = _example("region_coverage.lua").replace('local LAYER = "state"', 'local LAYER = "country"')
+    out = _run(source, EmptyFilterHost())
+    assert out[0].startswith("2 of 2 countries → ")
+    page = (temp_dir() / "region_coverage.html").read_text(encoding="utf-8")
+    assert _tile(page, "countries found") == "2 / 2"
+    assert "None — you have them all." in page
+    assert "Names that match no region" not in page
+
+
+def test_region_coverage_example_without_boundary_data(finds_db):
+    host = OpenHost()
+    assert _run(_example("region_coverage.lua"), host) == [
+        "The boundary data is not installed (see Update location)."]
+    assert host.opened == []
+
+
+# ── geo.regions{ rows = }: counting regions like the maps match them ───────
+
+def test_match_regions_like_the_map(map_data):
+    found, unmatched = report_maps.match(map_data, [
+        {"key": "south a", "count": 2}, {"key": "South-Ä", "count": 1},
+        {"key": "Atlantis", "count": 5}, {"key": None, "count": 9}], "state", within="Alpha")
+    assert found == [{"name": "North A", "country": "Alpha"},
+                     {"name": "South Ä", "country": "Alpha", "count": 3}]
+    assert unmatched == ["Atlantis"]
+    assert report_maps.match(map_data, None)[0] == report_maps.regions(map_data)
+
+
+def test_geo_regions_with_rows_from_lua(boundaries):
+    out = _run("""
+        local all, unmatched = opensak.geo.regions("state",
+            { within = "Alpha", rows = { { st = "North A", n = 2 }, { st = "Nowhere" } },
+              key = "st", value = "n" })
+        print(#all, all[1].name, all[1].n, all[2].n, #unmatched, unmatched[1])
+        print(select("#", opensak.geo.regions("state")))
+    """)
+    assert out == ["2\tNorth A\t2\tnil\t1\tNowhere", "1"]
+    with pytest.raises(MacroError, match=r"unknown option\(s\) \['around'\]"):
+        _run('opensak.geo.regions("state", { around = {} })')
+
+
+def test_find_statistics_counts_only_states_on_the_map(finds_db, boundaries):
+    # Four spellings, two of them of the same state, and one that is no
+    # state of Alpha at all: still 2 of 2 states.
+    _describe(finds_db, {
+        "GCA": {"latitude": 47.0, "longitude": 5.0, "country": "Alpha", "state": "North A"},
+        "GCB": {"latitude": 46.0, "longitude": 6.0, "country": "alpha", "state": "North-A"},
+        "GCN": {"latitude": 42.0, "longitude": 5.0, "country": "Alpha", "state": "South Ä"},
+        "GCZ": {"latitude": 45.0, "longitude": 15.0, "country": "Alpha", "state": "Atlantis"},
+    })
+    _run(_example("find_statistics.lua"), OpenHost())
+    page = (temp_dir() / "find_statistics.html").read_text(encoding="utf-8")
+    assert _tile(page, "states in Alpha") == "2 / 2"
+    assert _tile(page, "countries") == "1 / 2"
+    assert "Names that match no region" in page
+    assert re.search(r"<td>state</td><td>Atlantis</td><td class=\"num\">1</td>", page)
+
+
+def test_database_statistics_country_setting(finds_db, boundaries):
+    _describe(finds_db, {
+        "GCA": {"country": "Alpha", "state": "North A"},
+        "GCB": {"country": "Alpha", "state": "North A"},
+        "GCZ": {"country": "Beta", "state": "Beta One"},
+    })
+    source = _example("database_statistics.lua").replace(
+        "local COUNTRY = nil", 'local COUNTRY = "Beta"')
+    _run(source, EmptyFilterHost())
+    page = (temp_dir() / "database_statistics.html").read_text(encoding="utf-8")
+    assert _tile(page, "states in Beta") == "1 / 1"
+    assert "Still to find in Beta" in page
+    assert "Names that match no region" not in page
+

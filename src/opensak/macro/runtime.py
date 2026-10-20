@@ -301,7 +301,7 @@ MAP_KEYS = {
 }
 # opensak.geo.*: the keys of their option tables (Lua name → Python keyword).
 GEO_OPTIONS = {
-    "regions": {"within": "within"},
+    "regions": {"within": "within", "rows": "rows", "key": "key", "value": "value"},
     "outlines": {"within": "within", "rows": "rows", "key": "key", "value": "value",
                  "extent": "extent", "around": "around", "lat": "lat", "lon": "lon",
                  "box": "box", "detail": "detail"},
@@ -2089,9 +2089,14 @@ class MacroRuntime:
         fields = CACHE_FIELDS
         if "fields" in spec:
             fields = _cache_fields(spec.pop("fields"))
+        every = spec.pop("all", False)
+        if not isinstance(every, bool):
+            raise MacroError(f"opensak.caches: all must be true or false, got {every!r}")
         db = self._other_database("opensak.caches", spec.pop("database", None))
         session_factory = self._session_factory(db, "opensak.caches")
-        if spec or db is not None:
+        if every and spec:
+            raise MacroError("opensak.caches: all = true cannot be combined with filter keys")
+        if spec or db is not None or every:
             # Another database has no active filter: no keys = all its caches.
             filterset = build_filterset(spec, self._filter_polygon)[0] if spec else None
             with session_factory() as session:
@@ -3119,37 +3124,48 @@ class MacroRuntime:
         except charts.ChartError as exc:
             raise MacroError(f"{func}: {exc}") from None
 
-    def _geo_regions(self, lua, layer="country", options=None):
-        func = "opensak.geo.regions"
-        opts = self._options(func, GEO_OPTIONS["regions"], options)
-        data = self._maps()
-        if data is None:
-            return None
-        try:
-            return lua.table_from(report_maps.regions(data, layer, opts.get("within")),
-                                  recursive=True)
-        except charts.ChartError as exc:
-            raise MacroError(f"{func}: {exc}") from None
-
-    def _geo_outlines(self, lua, layer="country", options=None):
-        func = "opensak.geo.outlines"
+    def _geo_options(self, lua, func: str, kind: str, options: Any) -> dict[str, Any]:
+        """The options of opensak.geo.*; rows / around are read field by
+        field, like the rows of stats.*."""
         if options is not None and not _is_lua_table(options):
             raise MacroError(f'{func}: options must be a table, e.g. {{ within = "Switzerland" }}')
-        # rows / around are read field by field, like the rows of stats.*.
         rows_value = options["rows"] if options is not None else None
         around_value = options["around"] if options is not None else None
         plain = {k: v for k, v in (options.items() if options is not None else [])
                  if k not in ("rows", "around")}
-        opts = self._options(func, GEO_OPTIONS["outlines"], lua.table_from(plain))
+        opts = self._options(func, GEO_OPTIONS[kind], lua.table_from(plain))
         for key in ("key", "value", "lat", "lon", "extent"):
             if key in opts and not isinstance(opts[key], str):
                 raise MacroError(f"{func}: {key} must be a string, got {opts[key]!r}")
         if rows_value is not None:
             opts["rows"] = self._fields(self._row_list(f"{func}: rows", rows_value),
                                         (opts.get("key", "key"), opts.get("value", "count")))
-        if around_value is not None:
+        if around_value is not None and "around" in GEO_OPTIONS[kind]:
             opts["around"] = self._fields(self._row_list(f"{func}: around", around_value),
                                           (opts.get("lat", "lat"), opts.get("lon", "lon")))
+        elif around_value is not None:
+            raise MacroError(f"{func}: unknown option(s) ['around']; "
+                             f"valid: {', '.join(sorted(GEO_OPTIONS[kind]))}")
+        return opts
+
+    def _geo_regions(self, lua, layer="country", options=None):
+        func = "opensak.geo.regions"
+        opts = self._geo_options(lua, func, "regions", options)
+        data = self._maps()
+        if data is None:
+            return None
+        try:
+            if "rows" not in opts:
+                return lua.table_from(report_maps.regions(data, layer, opts.get("within")),
+                                      recursive=True)
+            found, unmatched = report_maps.match(data, opts.pop("rows"), layer, **opts)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return lua.table_from(found, recursive=True), lua.table_from(unmatched)
+
+    def _geo_outlines(self, lua, layer="country", options=None):
+        func = "opensak.geo.outlines"
+        opts = self._geo_options(lua, func, "outlines", options)
         data = self._maps()
         if data is None:
             return None
@@ -4897,7 +4913,9 @@ API: tuple[ApiFunction, ...] = (
                     "caches of the active filter, in grid order. With filter "
                     "keys (see Filter keys): the caches matching them, sorted "
                     "by name; the view and the active filter stay "
-                    "unchanged. `database` reads another database, without "
+                    "unchanged. `all = true`: every cache of the database, "
+                    "sorted by name, whatever the active filter shows. "
+                    "`database` reads another database, without "
                     "switching: its caches matching the filter keys, or all "
                     "of them, sorted by name. `fields` limits the fields "
                     "loaded (`code` is always included), which makes loops "
@@ -4911,9 +4929,10 @@ API: tuple[ApiFunction, ...] = (
                 'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
                 "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
+        changed=((3, "added `all`"),),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys, `database` and/or `fields`; nothing = the "
+                      "Filter keys, `all`, `database` and/or `fields`; nothing = the "
                       "active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
@@ -6845,18 +6864,32 @@ API: tuple[ApiFunction, ...] = (
                     "\"county\") in the boundary data used by Update location "
                     "and opensak.chart.map, one row per name: `{name =}`, for "
                     "states and counties also `country`. `within` limits them "
-                    "to one country or a list. With it a macro can say "
-                    "\"18 of 26 cantons\". nil if the boundary data is not "
-                    "installed.",
+                    "to one country or a list. With `rows` (e.g. finds per "
+                    "state from opensak.stats.group) the rows are matched to "
+                    "the regions like opensak.chart.map does — the field `key` "
+                    "(default \"key\") names the region, ignoring case, "
+                    "accents and punctuation — and a region named by rows gets "
+                    "the sum of their field `value` (default \"count\"); the "
+                    "second value then lists the names that match no region. "
+                    "With it a macro can say \"18 of 26 cantons\". nil if the "
+                    "boundary data is not installed.",
         example='local cantons = opensak.geo.regions("state", { within = "Switzerland" })\n'
-                'if cantons then print(#cantons .. " cantons") end',
+                'if cantons then print(#cantons .. " cantons") end\n'
+                '-- the cantons you have found a cache in\n'
+                'local all, unmatched = opensak.geo.regions("state",\n'
+                '  { within = "Switzerland", rows = opensak.stats.group(finds, "state") })\n'
+                'local n = 0\n'
+                'for _, r in ipairs(all or {}) do if r.count then n = n + 1 end end\n'
+                'print(n .. " of " .. #(all or {}) .. " cantons")',
         since=3,
         bind=lambda rt, lua: lambda *a: rt._geo_regions(lua, *a),
         params=(
             Param("layer", "string", '"country" (default), "state" or "county".', optional=True),
-            Param("options", "{within?: string|string[]}", "See above.", optional=True),
+            Param("options", "{within?: string|string[], rows?: table[], key?: string, "
+                  "value?: string}", "See above.", optional=True),
         ),
-        returns=("{name: string, country?: string}[]?", "The regions, sorted."),
+        returns=("{name: string, country?: string}[]?, string[]?",
+                 "The regions, sorted (with `rows`: and the names that match none)."),
     ),
 
     # -- opensak.stats --------------------------------------------------------

@@ -733,8 +733,9 @@ def render_lua_stub() -> str:
 
     lines += [
         "",
-        "---Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.",
+        "---Filter keys plus `fields`, `all` and `database`, understood by `opensak.caches{}`.",
         "---@class opensak.CachesSpec: opensak.FilterSpec",
+        "---@field all? boolean Every cache of the database, whatever the active filter shows.",
         "---@field fields? string[] Cache fields to load (`code` is always included).",
         "---@field database? string Read this database instead of the active one.",
         "",

@@ -175,20 +175,40 @@ def _check_layer(layer: Any) -> str:
 def regions(data: MapData, layer: str = "country", within: Any = None) -> list[dict[str, Any]]:
     """The regions of *layer* (optionally only those in the *within*
     countries), one row per name: {name[, country]}, sorted."""
+    return match(data, None, layer, within)[0]
+
+
+def match(
+    data: MapData,
+    rows: Optional[Sequence[Mapping[str, Any]]],
+    layer: str = "country",
+    within: Any = None,
+    key: str = "key",
+    value: str = "count",
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """regions(), with *rows* matched to them like a map does: a region
+    named by the field *key* of rows gets the sum of their field *value*
+    (nil counts as 0) → (regions, names that match none of them)."""
     _check_layer(layer)
+    values = _values(rows or [], key, value)
     countries = _within_filter(data, layer, within)
     seen: dict[tuple[str, Optional[str]], dict[str, Any]] = {}
     for f in data.features(layer):
         country = data.country_of(f)
         if countries is not None and (country is None or normalize(country) not in countries):
             continue
-        key = (f.name, None if layer == "country" else country)
-        if key not in seen:
+        ident = (f.name, None if layer == "country" else country)
+        if ident not in seen:
             row: dict[str, Any] = {"name": f.name}
             if layer != "country":
                 row["country"] = country
-            seen[key] = row
-    return sorted(seen.values(), key=lambda r: (normalize(r.get("country") or ""), normalize(r["name"])))
+            if normalize(f.name) in values:
+                row[value] = values[normalize(f.name)][1]
+            seen[ident] = row
+    names = {normalize(r["name"]) for r in seen.values()}
+    unmatched = sorted((v[0] for k, v in values.items() if k not in names), key=normalize)
+    result = sorted(seen.values(), key=lambda r: (normalize(r.get("country") or ""), normalize(r["name"])))
+    return result, unmatched
 
 
 # ── Projection and drawing ───────────────────────────────────────────────────
@@ -345,6 +365,24 @@ class _Selection:
     box: Box
 
 
+def _values(rows: Sequence[Mapping[str, Any]], key: str, value: str) -> dict[str, list[Any]]:
+    """normalised region name -> [name as given, sum of *value*] of *rows*."""
+    values: dict[str, list[Any]] = {}
+    for i, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping):
+            raise MapError(f"row {i} is not a table")
+        name, v = row.get(key), row.get(value)
+        if name is None:
+            continue
+        if v is None:
+            v = 0
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            raise MapError(f"row {i}: {value} must be a number, got {v!r}")
+        entry = values.setdefault(normalize(name), [str(name), 0])
+        entry[1] += v
+    return values
+
+
 def _select(
     data: MapData,
     rows: Sequence[Mapping[str, Any]],
@@ -360,19 +398,7 @@ def _select(
     _check_layer(layer)
     if extent not in EXTENTS:
         raise MapError(f"extent must be one of {', '.join(EXTENTS)}, got {extent!r}")
-    values: dict[str, list[Any]] = {}
-    for i, row in enumerate(rows, 1):
-        if not isinstance(row, Mapping):
-            raise MapError(f"row {i} is not a table")
-        name, v = row.get(key), row.get(value)
-        if name is None:
-            continue
-        if v is None:
-            v = 0
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
-            raise MapError(f"row {i}: {value} must be a number, got {v!r}")
-        entry = values.setdefault(normalize(name), [str(name), 0])
-        entry[1] += v
+    values = _values(rows, key, value)
     countries = _within_filter(data, layer, within)
 
     def in_within(f: Feature) -> bool:
