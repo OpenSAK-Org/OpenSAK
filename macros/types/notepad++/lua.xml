@@ -545,6 +545,12 @@
 				<Param name="items: {label: string, value: any}[]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.import_gsak" func="yes">
+			<Overload retVal="opensak.GsakImportReport" descr="Import GSAK databases without any question (like File → Import GSAK database,&#x0a;with the answers given up front) and return what was done. *source* is a GSAK&#x0a;backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and&#x0a;`data/&lt;name&gt;/sqlite.db3`, its `data` folder, or one database's folder), a single&#x0a;`.db3` cache database (just that database), or `gsak.db3` (only user locations&#x0a;and saved filters). A relative path is resolved against the macro file's folder,&#x0a;and environment variables such as `%APPDATA%` are expanded; the folder needs&#x0a;read permission. Each GSAK database goes into the OpenSAK database of the same&#x0a;name, created if missing, unless `target` says otherwise. For an OpenSAK&#x0a;database that exists, `if_exists` decides: `&quot;skip&quot;` (default), `&quot;merge&quot;` (new&#x0a;caches added, existing ones updated, locked caches kept) or `&quot;overwrite&quot;`&#x0a;(emptied first). `filters` and `locations` also import the saved filters and&#x0a;user locations of `gsak.db3`; `true` skips the ones whose name exists when&#x0a;`if_exists` is `&quot;skip&quot;` and replaces them otherwise. Embedded note images are&#x0a;replaced by placeholders without asking. A database that fails is reported and&#x0a;the others are still imported. The summary is printed (unless `quiet`) and&#x0a;written to the log file.&#x0a;Returns opensak.GsakImportReport — What was imported, per database.">
+				<Param name="source: string" />
+				<Param name="[options: opensak.GsakImportOptions]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.in_transaction" func="yes">
 			<Overload retVal="boolean" descr="Whether the macro is inside opensak.transaction().&#x0a;Returns boolean — true inside opensak.transaction().">
 			</Overload>

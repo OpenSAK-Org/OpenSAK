@@ -41,6 +41,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.switch_database`](#opensakswitchdatabase) | 2 |
 | [`opensak.move_caches`](#opensakmovecaches) | 2 |
 | [`opensak.copy_caches`](#opensakcopycaches) | 2 |
+| [`opensak.import_gsak`](#opensakimportgsak) | 3 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.update`](#opensakupdate) | 3 |
@@ -754,6 +755,37 @@ Example:
 
 ```lua
 local n = opensak.copy_caches("CH_Zurich", { codes = {"GC1", "GC2"}, if_exists = "replace" })
+```
+
+### opensak.import_gsak
+
+```lua
+opensak.import_gsak(source [, options])
+```
+
+Import GSAK databases without any question (like File → Import GSAK database, with the answers given up front) and return what was done. *source* is a GSAK backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and `data/<name>/sqlite.db3`, its `data` folder, or one database's folder), a single `.db3` cache database (just that database), or `gsak.db3` (only user locations and saved filters). A relative path is resolved against the macro file's folder, and environment variables such as `%APPDATA%` are expanded; the folder needs read permission. Each GSAK database goes into the OpenSAK database of the same name, created if missing, unless `target` says otherwise. For an OpenSAK database that exists, `if_exists` decides: `"skip"` (default), `"merge"` (new caches added, existing ones updated, locked caches kept) or `"overwrite"` (emptied first). `filters` and `locations` also import the saved filters and user locations of `gsak.db3`; `true` skips the ones whose name exists when `if_exists` is `"skip"` and replaces them otherwise. Embedded note images are replaced by placeholders without asking. A database that fails is reported and the others are still imported. The summary is printed (unless `quiet`) and written to the log file.
+
+Parameters:
+
+- `source` (`string`) — GSAK backup .zip, GSAK folder or .db3 file.
+- `options` (`opensak.GsakImportOptions`, optional) — databases, exclude, target, if_exists, create, filters, locations, quiet.
+
+Returns `opensak.GsakImportReport` — What was imported, per database.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+
+Example:
+
+```lua
+local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
+  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+  locations = true })
+for _, db in ipairs(r.databases) do
+  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
+end
+if not r.ok then opensak.exit(1) end
 ```
 
 ### opensak.set_corrected
@@ -3059,6 +3091,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
 - [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — choose export options in a GSAK-style form, then export the list
 - [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — pick search options in a form, then step through the matches
+- [`import_gsak_appdata.lua`](../../macros/examples/import_gsak_appdata.lua)
 - [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
 
 ## Editor support
@@ -3299,7 +3332,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| Backup / Restore | ❌ | backup planned |
+| Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
 | CacheType / ChildType | ❌ | |
 | Centre | ❌ | planned |

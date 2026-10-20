@@ -62,6 +62,53 @@
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
 ---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").
 
+---Options of `opensak.import_gsak()`.
+---@class opensak.GsakImportOptions
+---@field databases? string|string[] GSAK databases to import, by name (default: all of them).
+---@field exclude? string|string[] GSAK databases to leave out.
+---@field target? string|table<string, string> One OpenSAK database for all, or GSAK name = OpenSAK database (default: the GSAK name).
+---@field if_exists? "skip"|"merge"|"overwrite" When the OpenSAK database exists (default "skip").
+---@field create? boolean Create a missing OpenSAK database (default true).
+---@field filters? boolean|"skip"|"overwrite" Import the saved filters of gsak.db3 (default false).
+---@field locations? boolean|"skip"|"overwrite" Import the user locations of gsak.db3 (default false).
+---@field quiet? boolean Don't print the summary (default false).
+
+---What one GSAK database of `opensak.import_gsak()` did.
+---@class opensak.GsakImportDatabase
+---@field gsak string GSAK database name.
+---@field target string OpenSAK database.
+---@field action "created"|"merged"|"overwritten"|"skipped"|"failed"|"cancelled"
+---@field reason? string Why it was skipped, failed or cancelled.
+---@field cleared integer Caches removed first (overwrite).
+---@field created? integer New caches.
+---@field updated? integer Updated caches.
+---@field skipped? integer Caches that could not be imported.
+---@field waypoints? integer
+---@field logs? integer
+---@field attributes? integer
+---@field notes? integer
+---@field trackables? integer
+---@field corrected? integer
+---@field note_images? integer Embedded note images replaced by placeholders.
+---@field warnings? integer
+---@field errors? string[] The first cache errors.
+
+---The report of `opensak.import_gsak()`.
+---@class opensak.GsakImportReport
+---@field ok boolean Nothing failed and the run was not cancelled.
+---@field cancelled boolean
+---@field source string
+---@field kind "backup"|"folder"|"file"|"settings"
+---@field created integer New caches, all databases.
+---@field updated integer Updated caches, all databases.
+---@field skipped integer Caches that could not be imported.
+---@field errors integer Failed caches, databases and settings imports.
+---@field databases opensak.GsakImportDatabase[]
+---@field new_databases string[] OpenSAK databases created or added to the list.
+---@field locations? {added?: integer, updated?: integer, skipped?: integer, invalid?: integer, error?: string}
+---@field filters? {imported?: integer, skipped?: integer, failed?: integer, error?: string}
+---@field notes string[]
+
 ---What `opensak.export_gpx{}` writes.
 ---@class opensak.ExportSpec
 ---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).
@@ -714,6 +761,26 @@ function opensak.move_caches(target, options) end
 ---@param options? opensak.TransferOptions codes, if_exists.
 ---@return integer # Number of caches copied.
 function opensak.copy_caches(target, options) end
+
+---Import GSAK databases without any question (like File → Import GSAK database, with the answers given up front) and return what was done. *source* is a GSAK backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and `data/<name>/sqlite.db3`, its `data` folder, or one database's folder), a single `.db3` cache database (just that database), or `gsak.db3` (only user locations and saved filters). A relative path is resolved against the macro file's folder, and environment variables such as `%APPDATA%` are expanded; the folder needs read permission. Each GSAK database goes into the OpenSAK database of the same name, created if missing, unless `target` says otherwise. For an OpenSAK database that exists, `if_exists` decides: `"skip"` (default), `"merge"` (new caches added, existing ones updated, locked caches kept) or `"overwrite"` (emptied first). `filters` and `locations` also import the saved filters and user locations of `gsak.db3`; `true` skips the ones whose name exists when `if_exists` is `"skip"` and replaces them otherwise. Embedded note images are replaced by placeholders without asking. A database that fails is reported and the others are still imported. The summary is printed (unless `quiet`) and written to the log file.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
+---  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+---  locations = true })
+---for _, db in ipairs(r.databases) do
+---  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
+---end
+---if not r.ok then opensak.exit(1) end
+---```
+---@param source string GSAK backup .zip, GSAK folder or .db3 file.
+---@param options? opensak.GsakImportOptions databases, exclude, target, if_exists, create, filters, locations, quiet.
+---@return opensak.GsakImportReport # What was imported, per database.
+function opensak.import_gsak(source, options) end
 
 ---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
 ---
