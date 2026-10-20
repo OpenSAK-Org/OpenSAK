@@ -28,12 +28,14 @@ from opensak.backup.backupset import (
     BackupResult,
     NotEnoughSpaceError,
     get_backup_dir,
+    nearest_existing_dir,
     rotate,
     set_backup_dir,
     validate_backup_dir,
     write_backup_set,
 )
 from opensak.backup.exit_state import record_backup_state
+from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
@@ -200,21 +202,18 @@ class BackupDialog(QDialog):
         return self._folder
 
     def _browse(self) -> None:
+        # #1032: open at the folder in the box, or its nearest existing
+        # parent — Qt opens an unrelated folder for one that doesn't exist.
         chosen = QFileDialog.getExistingDirectory(
-            self, tr("backup_folder_label"), str(self._folder),
+            self, tr("backup_folder_label"), str(nearest_existing_dir(self._folder)),
             QFileDialog.Option.ShowDirsOnly,
         )
         if chosen:
             self.choose_folder(Path(chosen))
 
     def choose_folder(self, folder: Path) -> bool:
-        """Use *folder* if it can hold backups; explain why not otherwise."""
-        try:
-            validate_backup_dir(folder)
-        except BackupError:
-            QMessageBox.warning(
-                self, tr("backup_dialog_title"), tr("backup_folder_invalid")
-            )
+        """Use *folder* if it can hold backups; explain why not, or ask (#1032)."""
+        if not confirm_backup_folder(self, Path(folder), title=tr("backup_dialog_title")):
             return False
         self._folder = Path(folder)
         self._folder_edit.setText(str(self._folder))

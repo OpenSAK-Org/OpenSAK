@@ -196,7 +196,11 @@ class DirRow(QWidget):
             self._btn.clicked.connect(self._browse)
 
     def _browse(self) -> None:
-        current = Path(self._edit.text())
+        from opensak.backup.backupset import nearest_existing_dir
+        # #1032: a folder that doesn't exist yet (e.g. the default backup
+        # folder, created on first use) makes Qt open an unrelated folder,
+        # especially on Windows — start at its nearest existing parent.
+        current = nearest_existing_dir(Path(self._edit.text()))
         chosen = QFileDialog.getExistingDirectory(
             self,
             tr("wizard_choose_dir"),

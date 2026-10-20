@@ -1784,23 +1784,20 @@ class SettingsDialog(QDialog):
         self._refresh_gc_status_on_open()
 
     def _backup_dir_is_valid(self) -> bool:
-        """Issue #986: warn and return False if the backup folder is unsuitable."""
-        from opensak.backup.backupset import (
-            BackupError, get_backup_dir, validate_backup_dir,
-        )
+        """
+        Issue #986: return False if the backup folder can't be used. #1032:
+        a folder inside OpenSAK's folders is allowed after a confirmation.
+        """
+        from opensak.backup.backupset import get_backup_dir
+        from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
         from opensak.settings_store import get_db_dir
         new_backup_dir = self._backup_dir_row.path
         new_db_dir = self._db_dir_row.path
         if new_backup_dir == get_backup_dir() and new_db_dir == get_db_dir():
             return True
-        try:
-            validate_backup_dir(new_backup_dir, db_dir=new_db_dir)
-        except BackupError:
-            QMessageBox.warning(
-                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
-            )
-            return False
-        return True
+        return confirm_backup_folder(
+            self, new_backup_dir, title=tr("wizard_backup_dir_title"), db_dir=new_db_dir,
+        )
 
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK

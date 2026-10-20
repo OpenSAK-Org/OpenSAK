@@ -37,10 +37,12 @@ from opensak.backup.backupset import (
     BackupError,
     BackupResult,
     get_backup_dir,
+    nearest_existing_dir,
     set_backup_dir,
     validate_backup_dir,
 )
 from opensak.gui.dialogs.backup_dialog import BackupWorker
+from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.theme import hint_style
@@ -168,7 +170,9 @@ class ExitBackupPrompt(QDialog):
         self._backup_btn.setEnabled(available)
 
     def _browse(self) -> None:
-        start = self._folder if folder_available(self._folder) else Path.home()
+        # #1032: the folder in the box or its nearest existing parent (e.g.
+        # /Volumes when the USB disk isn't connected); home only if none.
+        start = nearest_existing_dir(self._folder)
         chosen = QFileDialog.getExistingDirectory(
             self, tr("backup_folder_label"), str(start),
             QFileDialog.Option.ShowDirsOnly,
@@ -177,11 +181,8 @@ class ExitBackupPrompt(QDialog):
             self.choose_folder(Path(chosen))
 
     def choose_folder(self, folder: Path) -> bool:
-        """Use *folder* if it can hold backups; explain why not otherwise."""
-        try:
-            validate_backup_dir(folder)
-        except BackupError:
-            QMessageBox.warning(self, tr("exit_backup_title"), tr("backup_folder_invalid"))
+        """Use *folder* if it can hold backups; explain why not, or ask (#1032)."""
+        if not confirm_backup_folder(self, Path(folder), title=tr("exit_backup_title")):
             return False
         self._folder = Path(folder)
         self._folder_edit.setText(str(self._folder))

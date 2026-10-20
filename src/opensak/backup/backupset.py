@@ -100,8 +100,8 @@ _ZIP_LEVEL = 1
 # (OneDrive, Dropbox, …) would otherwise start uploading every staged
 # database only for it to be deleted seconds later, and may hold on to the
 # staging folder so it can't be removed. The install folder is local by
-# default, never the backup folder (validate_backup_dir), and closed to
-# macros.
+# default, never the backup folder itself, and the staging folder can never
+# be (or contain) it (validate_backup_dir); it is closed to macros.
 STAGING_DIRNAME = "backup-staging"
 # Removing a folder another program (sync client, antivirus, indexer) has
 # just looked at often fails on Windows; try a few times before giving up.
@@ -222,6 +222,17 @@ def set_backup_dir(path: Path) -> None:
     get_store().set(BACKUP_DIR_KEY, str(path))
 
 
+def _opensak_folders(
+    install_dir: Optional[Path], db_dir: Optional[Path]
+) -> tuple[Path, Path]:
+    """The install and database folders: as given, else the ones in use now."""
+    from opensak.settings_store import get_db_dir, get_install_dir
+    return (
+        install_dir if install_dir is not None else get_install_dir(),
+        db_dir if db_dir is not None else get_db_dir(),
+    )
+
+
 def validate_backup_dir(
     path: Path,
     *,
@@ -229,25 +240,106 @@ def validate_backup_dir(
     db_dir: Optional[Path] = None,
 ) -> None:
     """
-    Raise BackupError if *path* can't hold backups: it must not be (inside)
-    the install folder or the database folder. A backup inside what it
-    backs up would copy itself, and an uninstall would remove it.
+    Raise BackupError if *path* can't hold backups at all (#1032):
+
+    - the install folder or the database folder itself — a backup set would
+      sit among the very files it is a copy of;
+    - the settings folders a backup copies (``filters``, ``column_views``,
+      ``icons`` in the install folder) or anything inside them — the backup
+      would copy itself;
+    - OpenSAK's own working folders in the install folder (compressed-set
+      staging, pending/failed settings restores), which it empties itself.
+
+    Any other folder inside the install or database folder is allowed: a
+    backup set only copies the registered database files and the settings
+    above, so it never copies itself, and a normal uninstall keeps user
+    data. Such a folder is only lost when the user chooses to remove all
+    OpenSAK data, so the GUI asks for confirmation instead (see
+    backup_dir_inside_opensak()).
 
     *install_dir* and *db_dir* default to the folders in use now. The
     Welcome Wizard and Settings pass the folders the user has just chosen
     but not saved yet (#986).
     """
-    from opensak.settings_store import get_db_dir, get_install_dir
+    from opensak.backup.settings_restore import FAILED_DIRNAME, PENDING_DIRNAME
+    install, db = _opensak_folders(install_dir, db_dir)
     candidate = _resolved(Path(path))
-    for label, protected in (
-        ("install folder", install_dir if install_dir is not None else get_install_dir()),
-        ("database folder", db_dir if db_dir is not None else get_db_dir()),
-    ):
-        root = _resolved(protected)
-        if candidate == root or candidate.is_relative_to(root):
+    for label, root in (("install folder", install), ("database folder", db)):
+        if candidate == _resolved(root):
+            raise BackupError(f"The backup folder can't be the {label} itself ({root})")
+    for name in (*_SETTINGS_DIRS, STAGING_DIRNAME, PENDING_DIRNAME, FAILED_DIRNAME):
+        reserved = _resolved(Path(install) / name)
+        if candidate == reserved or candidate.is_relative_to(reserved):
             raise BackupError(
-                f"The backup folder can't be inside the {label} ({protected})"
+                f"The backup folder can't be inside OpenSAK's own {name} folder ({reserved})"
             )
+
+
+def backup_dir_inside_opensak(
+    path: Path,
+    *,
+    install_dir: Optional[Path] = None,
+    db_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """
+    The install or database folder that *path* is inside, or None (#1032).
+
+    For a folder validate_backup_dir() accepts but that would be deleted
+    along with OpenSAK's data if the user ever chooses "remove all data" on
+    uninstall. The GUI warns and lets the user decide. The folders
+    themselves (refused by validate_backup_dir()) are not reported here.
+    """
+    install, db = _opensak_folders(install_dir, db_dir)
+    candidate = _resolved(Path(path))
+    for root in (install, db):
+        resolved_root = _resolved(root)
+        if candidate != resolved_root and candidate.is_relative_to(resolved_root):
+            return Path(root)
+    return None
+
+
+def backup_dir_removed_on_purge() -> Optional[Path]:
+    """
+    The configured backup folder if "remove all data" on uninstall would
+    delete it, else None (#1032) — so the confirmation can say so.
+
+    Only a folder the user has set counts: the default in Documents is never
+    inside a folder OpenSAK removes.
+    """
+    from opensak.paths import get_all_storage_locations
+    from opensak.settings_store import get_store
+    raw = get_store().get(BACKUP_DIR_KEY)
+    if not raw:
+        return None
+    folder = Path(raw)
+    candidate = _resolved(folder)
+    for loc in get_all_storage_locations():
+        if not (loc.removed_on_purge and loc.is_path):
+            continue
+        root = _resolved(Path(loc.location))
+        if candidate == root or candidate.is_relative_to(root):
+            return folder
+    return None
+
+
+def nearest_existing_dir(path: Optional[Path]) -> Path:
+    """
+    *path* if it is an existing folder, else its nearest existing parent,
+    else the home folder (#1032) — where a Browse dialog should open.
+
+    When the folder in the box doesn't exist yet (a default not created
+    until first use, or a drive that isn't connected), Qt's folder dialog
+    opens some unrelated folder instead, especially on Windows.
+    """
+    if path is not None:
+        current = Path(path).expanduser()
+        for candidate in (current, *current.parents):
+            try:
+                if candidate.is_dir():
+                    return candidate
+            except OSError:
+                continue
+    return Path.home()
 
 
 def get_compress() -> bool:

@@ -255,9 +255,11 @@ class TestNothingLeftBehind:
         assert _names(backups) == []
 
     def test_unsuitable_folder_is_refused(self, dbs, install):
-        with pytest.raises(BackupError, match="install folder"):
-            write_backup_set(dbs, KIND_AUTO, folder=install / "backups", now=NOW)
-        assert not (install / "backups").exists()
+        # #1032: a settings folder the set copies is still refused (a folder
+        # merely inside the install folder is allowed now).
+        with pytest.raises(BackupError, match="filters"):
+            write_backup_set(dbs, KIND_AUTO, folder=install / "filters" / "backups", now=NOW)
+        assert not (install / "filters" / "backups").exists()
 
 
 # ── Progress ──────────────────────────────────────────────────────────────────
@@ -412,18 +414,24 @@ class TestBackupFolder:
         assert get_store().get(BACKUP_DIR_KEY) == str(tmp_path / "usb" / "OpenSAK")
         assert get_backup_dir() == tmp_path / "usb" / "OpenSAK"
 
-    def test_inside_install_folder_is_refused(self):
+    def test_install_folder_itself_and_its_settings_folders_are_refused(self):
         with pytest.raises(BackupError, match="install folder"):
-            validate_backup_dir(get_install_dir() / "backups")
-        with pytest.raises(BackupError):
             validate_backup_dir(get_install_dir())
+        with pytest.raises(BackupError, match="filters"):
+            validate_backup_dir(get_install_dir() / "filters")
 
-    def test_inside_database_folder_is_refused(self, tmp_path):
+    def test_other_folder_inside_install_folder_is_allowed(self):
+        # #1032: a backup set never copies it; the GUI warns instead.
+        validate_backup_dir(get_install_dir() / "backups")
+
+    def test_database_folder_itself_is_refused(self, tmp_path):
         db_dir = tmp_path / "my databases"
         get_store().set("databases.dir", str(db_dir))
         with pytest.raises(BackupError, match="database folder"):
-            set_backup_dir(db_dir / "backups")
+            set_backup_dir(db_dir)
         assert get_store().get(BACKUP_DIR_KEY) is None
+        set_backup_dir(db_dir / "backups")   # #1032: inside it is allowed
+        assert get_store().get(BACKUP_DIR_KEY) == str(db_dir / "backups")
 
     def test_folder_elsewhere_is_fine(self, tmp_path):
         validate_backup_dir(tmp_path / "external" / "OpenSAK Backups")

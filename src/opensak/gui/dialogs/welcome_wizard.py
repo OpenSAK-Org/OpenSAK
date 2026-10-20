@@ -392,23 +392,19 @@ class WelcomeWizard(QDialog):
 
     def _check_backup_dir(self) -> bool:
         """
-        Issue #986: the backup folder must not be inside the install or
-        database folder chosen on the earlier pages (not saved yet). Warn and
-        return False if it is.
+        Issue #986: check the backup folder against the install and database
+        folders chosen on the earlier pages (not saved yet). Return False if
+        it can't be used; #1032: a folder inside them is allowed after a
+        confirmation.
         """
-        from opensak.backup.backupset import BackupError, validate_backup_dir
-        try:
-            validate_backup_dir(
-                self._backup_row.path,
-                install_dir=self._install_row.path,
-                db_dir=self._db_row.path,
-            )
-        except BackupError:
-            QMessageBox.warning(
-                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
-            )
-            return False
-        return True
+        from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
+        return confirm_backup_folder(
+            self,
+            self._backup_row.path,
+            title=tr("wizard_backup_dir_title"),
+            install_dir=self._install_row.path,
+            db_dir=self._db_row.path,
+        )
 
     def _save_all(self, use_defaults: bool = False):
         from opensak.settings_store import (
