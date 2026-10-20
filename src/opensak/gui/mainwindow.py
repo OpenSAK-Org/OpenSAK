@@ -204,6 +204,20 @@ _MACRO_ROW_REFRESH_LIMIT = 50
 _MACRO_REFRESH_WAIT_S = 10.0
 
 
+def _find_line_polygon_filter(filterset: FilterSet):
+    """The first LinePolygonFilter in *filterset* (nested sets included),
+    or None. The filter dialog builds at most one."""
+    from opensak.filters.engine import LinePolygonFilter
+    for f in filterset._filters:
+        if isinstance(f, LinePolygonFilter):
+            return f
+        if isinstance(f, FilterSet):
+            found = _find_line_polygon_filter(f)
+            if found is not None:
+                return found
+    return None
+
+
 class MainWindow(QMainWindow):
     # #959: the back-up-on-exit flow. While a backup runs the controller is
     # kept here; once it says "close", the second close skips the prompt.
@@ -334,8 +348,9 @@ class MainWindow(QMainWindow):
 
         # Map widget
         from opensak.gui.map_widget import MapWidget
-        self._map_widget = MapWidget()
+        self._map_widget = MapWidget(draw_button=True)
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
+        self._map_widget.filter_by_shape_requested.connect(self._filter_by_map_shape)
         self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
         self._map_widget.maximize_requested.connect(self._toggle_maximize_map)
         self._map_widget.popout_requested.connect(self._toggle_popout_map)
@@ -1647,6 +1662,7 @@ class MainWindow(QMainWindow):
             time.monotonic() - _t0,
         )
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(map_caches)
             logger.info(
                 "mainwindow: map_widget.load_caches done (+%.2fs)",
@@ -2942,7 +2958,8 @@ class MainWindow(QMainWindow):
             return
         self._show_filter_dialog(self._current_filterset, self._active_filter_name)
 
-    def _show_filter_dialog(self, filterset, active_name: str) -> None:
+    def _show_filter_dialog(self, filterset, active_name: str,
+                            initial_tab: Optional[str] = None) -> None:
         """Åbn "Set filter"-dialogen forudfyldt med et givet filterset/navn.
 
         Delt af den normale menu-indgang (_open_filter_dialog) og af
@@ -2953,11 +2970,51 @@ class MainWindow(QMainWindow):
         dlg = FilterDialog(
             self, filterset, active_name,
             current_cache=self._cache_table.selected_cache(),
+            map_caches=self._map_widget.loaded_caches(),
+            initial_tab=initial_tab,
         )
         dlg.filter_applied.connect(self._on_filter_applied)
         dlg.profile_deleted.connect(self._on_profile_deleted)
         dlg.profile_saved.connect(self._on_profile_saved)
         dlg.exec()
+
+    def _update_map_filter_shape(self) -> None:
+        """Show the active filter's line/polygon shape on the map (or remove
+        it when the active filter has none)."""
+        lp = _find_line_polygon_filter(self._current_filterset)
+        if lp is None:
+            self._map_widget.set_filter_shape(None)
+        else:
+            self._map_widget.set_filter_shape(lp.mode, lp.points)
+
+    def _filter_by_map_shape(self, mode: str, points: list) -> None:
+        """"Filter by this shape" on the map: open "Set filter" with the
+        active filter's criteria plus the drawn shape in the Line/Polygon
+        tab. The distance and "Exclude" of an active line/polygon filter are
+        kept; it is the shape that is replaced."""
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.filters.engine import FilterSet, LinePolygonFilter
+        from opensak.filters.line_polygon import format_points_text
+        from opensak.gui.dialogs.filter_dialog import _LP_DEFAULT_DISTANCE
+        active = self._current_filterset
+        filterset = FilterSet(active.mode, active.negate)
+        distance_km = _LP_DEFAULT_DISTANCE * (1.60934 if get_settings().use_miles else 1.0)
+        exclude = False
+        for f in active._filters:
+            if isinstance(f, LinePolygonFilter):
+                distance_km, exclude = f.distance_km, f.exclude
+            else:
+                filterset.add(f)
+        try:
+            filterset.add(LinePolygonFilter(
+                points, mode, distance_km, exclude=exclude,
+                text=format_points_text(mode, points),
+            ))
+        except ValueError:
+            return  # too few points — the map only offers this for valid shapes
+        self._show_filter_dialog(filterset, "", initial_tab="line_polygon")
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
@@ -2997,6 +3054,7 @@ class MainWindow(QMainWindow):
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:
@@ -3185,6 +3243,7 @@ class MainWindow(QMainWindow):
             )
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:

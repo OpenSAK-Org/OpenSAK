@@ -671,6 +671,14 @@ class AppSettings:
     def map_popout_geometry(self, value) -> None:
         get_store().set("window.map_popout_geometry", value)
 
+    @property
+    def map_draw_dialog_geometry(self):
+        return get_store().get("window.map_draw_dialog_geometry", None)
+
+    @map_draw_dialog_geometry.setter
+    def map_draw_dialog_geometry(self, value) -> None:
+        get_store().set("window.map_draw_dialog_geometry", value)
+
     # ── Search thresholds ─────────────────────────────────────────────────────
 
     @property
