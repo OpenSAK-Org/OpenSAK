@@ -85,10 +85,9 @@ def _check_hex(color: Optional[str]) -> str:
         return ACCENT_COLORS[0]
     if not isinstance(color, str) or len(color) not in (4, 7) or not color.startswith("#"):
         raise HtmlError(f'color must be "#rrggbb", got {color!r}')
-    try:
-        int(color[1:], 16)
-    except ValueError:
-        raise HtmlError(f'color must be "#rrggbb", got {color!r}') from None
+    # Hex digits only: int(x, 16) would also take "+1f" or "1_f".
+    if not all(ch in "0123456789abcdefABCDEF" for ch in color[1:]):
+        raise HtmlError(f'color must be "#rrggbb", got {color!r}')
     return color
 
 
@@ -235,3 +234,80 @@ def page(
         parts.append(f"<footer>{escape(footer)}</footer>")
     parts.append("</body></html>")
     return "\n".join(parts)
+
+
+def _rgba(color: str, alpha: float) -> str:
+    """#rrggbb (or #rgb) + opacity → rgba(), for inline styles."""
+    c = color.lstrip("#")
+    if len(c) == 3:
+        c = "".join(ch * 2 for ch in c)
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha:.2f})"
+
+
+def matrix(
+    data: Mapping[str, Any],
+    shade: bool = True,
+    percent: bool = False,
+    totals: bool = False,
+    row_title: Optional[str] = None,
+    col_title: Optional[str] = None,
+    color: Optional[str] = None,
+) -> str:
+    """A matrix (from stats.pivot) as an HTML table: the row and column
+    values as headings, each cell shaded by its value (*shade*), shown as a
+    share of all cells with *percent*, with a total row and column with
+    *totals*. Cells that are 0 stay empty. Inline styles only."""
+    if not isinstance(data, Mapping):
+        raise HtmlError("matrix expects a table {rows =, cols =, cells =}, e.g. from stats.pivot")
+    rows_, cols, cells = (data.get(k) for k in ("rows", "cols", "cells"))
+    rows_ = [] if rows_ in (None, {}) else rows_
+    cols = [] if cols in (None, {}) else cols
+    cells = [] if cells in (None, {}) else cells
+    if not isinstance(rows_, list) or not isinstance(cols, list) or not isinstance(cells, list) \
+            or len(cells) != len(rows_) \
+            or not all(isinstance(line, list) and len(line) == len(cols) for line in cells):
+        raise HtmlError("matrix needs rows, cols and one line of cells per row")
+    values = [[v if _is_number(v) else 0 for v in line] for line in cells]
+    total = sum(sum(line) for line in values)
+    top = max((v for line in values for v in line), default=0)
+    hex_color = _check_hex(color)
+
+    def show(v: float) -> str:
+        if not v:
+            return ""
+        if percent:
+            share = 100 * v / total if total else 0
+            # Half up: 12.5 % is shown as 13 %, not 12 %.
+            return f"{share:.1f} %" if share < 10 else f"{math.floor(share + 0.5)} %"
+        return text(v)
+
+    cell_style = "text-align:center;min-width:34px;border:1px solid rgba(128,128,128,0.25)"
+    corner = " \\ ".join(t for t in (row_title, col_title) if t)
+    out = ['<div class="table"><table style="border-collapse:collapse">', "<thead><tr>",
+           f'<th style="{cell_style}">{escape(corner)}</th>']
+    out += [f'<th style="{cell_style}">{escape(c)}</th>' for c in cols]
+    if totals:
+        out.append(f'<th style="{cell_style}">Total</th>')
+    out.append("</tr></thead><tbody>")
+    for r, line in zip(rows_, values):
+        out.append(f'<tr><th style="{cell_style}">{escape(r)}</th>')
+        for v in line:
+            style = cell_style
+            if shade and v > 0 and top > 0:
+                alpha = 0.12 + 0.88 * v / top
+                style += f";background:{_rgba(hex_color, alpha)}"
+                if alpha > 0.55:
+                    style += ";color:#fff"
+            out.append(f'<td style="{style}">{show(v)}</td>')
+        if totals:
+            out.append(f'<td style="{cell_style};font-weight:600">{show(sum(line))}</td>')
+        out.append("</tr>")
+    if totals:
+        out.append(f'<tr><th style="{cell_style}">Total</th>')
+        for j in range(len(cols)):
+            out.append(f'<td style="{cell_style};font-weight:600">'
+                       f'{show(sum(line[j] for line in values))}</td>')
+        out.append(f'<td style="{cell_style};font-weight:600">{show(total)}</td></tr>')
+    out.append("</tbody></table></div>")
+    return "".join(out)
