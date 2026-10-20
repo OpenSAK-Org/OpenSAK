@@ -518,6 +518,33 @@
 				<Param name="spec: opensak.FormSpec" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.html" />
+		<KeyWord name="opensak.html.columns" func="yes">
+			<Overload retVal="string" descr="Put HTML parts (e.g. two tables) side by side; on a narrow window they go one&#x0a;below the other.&#x0a;Returns string — HTML.">
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.escape" func="yes">
+			<Overload retVal="string" descr="*value* as text for HTML: `&amp; &lt; &gt; &quot; '` are escaped, nil becomes &quot;&quot;, 3.0 becomes&#x0a;&quot;3&quot;.&#x0a;Returns string — Escaped text.">
+				<Param name="value: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.page" func="yes">
+			<Overload retVal="string" descr="A complete HTML page for opensak.write_text: `title` (also the heading),&#x0a;`subtitle`, the body — the strings in the list part of the table, and/or `body`&#x0a;— and `footer`. A built-in stylesheet with a light and a dark theme styles&#x0a;headings (`&lt;h2&gt;`), tables, tiles and columns; `css` is added after it. The body&#x0a;is put in as it is: build it from the html.* functions, or escape your own text&#x0a;with html.escape.&#x0a;Returns string — The page.">
+				<Param name="spec: {title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string}" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.table" func="yes">
+			<Overload retVal="string" descr="*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's&#x0a;SqlToHtml). `columns` lists the fields to show, each a field name or `{field,&#x0a;heading}`; without it all fields are shown, sorted by name — a Lua table has no&#x0a;field order, so pass `columns` to keep the order of the query. Number columns&#x0a;are right-aligned. `link = { code = &quot;url&quot; }` turns the code cells into links to&#x0a;the row's url field (http/https only). `bars = {&quot;count&quot;}` adds a bar next to&#x0a;each value of those number fields, scaled to the largest (in `color`,&#x0a;&quot;#rrggbb&quot;). The bars use inline styles only, so they also show without the&#x0a;stylesheet of opensak.html.page.&#x0a;Returns string — HTML.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {columns?: (string|string[])[], link?: table&lt;string, string&gt;, caption?: string, bars?: string[], color?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.tiles" func="yes">
+			<Overload retVal="string" descr="Key figures as a row of tiles: a list of `{label =, value =}`.&#x0a;Returns string — HTML.">
+				<Param name="items: {label: string, value: any}[]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.in_transaction" func="yes">
 			<Overload retVal="boolean" descr="Whether the macro is inside opensak.transaction().&#x0a;Returns boolean — true inside opensak.transaction().">
 			</Overload>
