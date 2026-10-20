@@ -19,7 +19,6 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 ### Main gaps
 
-- Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
@@ -91,8 +90,9 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV helper yet |
 | GetFile / FileRead / EndRead / StopRead | ✅ | `read_text(path)` reads the whole file (any file type, UTF-8 or `{encoding="cp1252"}`, at most 10 MB); loop over the lines with `text:gmatch("[^\\n]+")`; `read_csv` for CSV |
 | FileExists / FolderExists | ✅ | `file_exists(path)`, `folder_exists(path)` |
-| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders |
-| FileCopy / FileErase | ❌ | |
+| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders; `file_info(path)` for one entry |
+| FileCopy / FileErase | ✅ | `copy_file`, `move_file`, `delete_file`: data and picture file types only (no programs or scripts), write permission on the folder |
+| MkDir / RmDir | ✅ | `create_folder`, `delete_folder` (empty folders only) |
 | DriveExists | 🚫 | Windows-specific |
 | ZipFile | ❌ | |
 

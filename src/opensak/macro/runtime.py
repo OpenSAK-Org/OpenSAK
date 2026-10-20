@@ -170,6 +170,8 @@ from opensak.macro.permissions import (
     macros_dir,
     protected_reason,
     resolve_path,
+    safe_copy,
+    safe_delete,
     safe_write,
     safe_write_stream,
     temp_dir,
@@ -241,6 +243,16 @@ DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
 WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
 MAX_WRITE_BYTES = 20 * 1024 * 1024
+# opensak.copy_file / move_file / delete_file: the file types they handle
+# (what write_text writes plus geocaching data and pictures — no programs
+# or scripts), the largest file copied, and what to do with an existing
+# target.
+FILE_SUFFIXES = WRITE_TEXT_SUFFIXES + (
+    ".gpx", ".loc", ".kml", ".kmz", ".ggz", ".zip", ".xml", ".log",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf",
+)
+MAX_COPY_BYTES = 1024 * 1024 * 1024
+COPY_IF_EXISTS = ("overwrite", "skip")
 
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
@@ -2924,6 +2936,121 @@ class MacroRuntime:
         entries.sort(key=lambda e: (e["name"].lower(), e["name"]))
         return lua.table_from([lua.table_from(e) for e in entries])
 
+    # Copying, moving and deleting files (GSAK's FileCopy / FileErase): only
+    # through safe_copy() / safe_delete(), with write permission on the
+    # target folder and only the file types of FILE_SUFFIXES.
+
+    def _file_arg(self, func: str, path: Any, what: str) -> Path:
+        """*path* of a file function, resolved against the macro's folder."""
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a {what} path")
+        file = Path(path.strip()).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or macros_dir()) / file
+        return file
+
+    def _writable(self, func: str, file: Path, suffixes: Optional[tuple[str, ...]],
+                  kind: str = "write") -> list[FolderPermission]:
+        """Check that the running macro may write (or delete) *file*,
+        asking the user to approve the folder; the folder list to pass to
+        safe_write() and friends. A file type or location that is never
+        allowed is refused before the user is asked."""
+        try:
+            reason = write_denied_reason(resolve_path(file), suffixes)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {file}: {exc}") from None
+        if reason is not None:
+            raise MacroError(f"{func}: macros may not {kind} {file} — {reason}")
+        target = self._check_access(file, write=True)
+        permissions = self._run_permissions
+        if (target, True) in self._picked:
+            permissions = with_grant(permissions, target.parent, True)
+        return permissions
+
+    def _copy_file(self, func: str, move: bool, source=None, target=None, options=None):
+        src = self._file_arg(func, source, "source file")
+        dest = self._file_arg(func, target, "target file or folder")
+        opts = {} if options is None else _from_lua(options)
+        if not isinstance(opts, dict) or set(opts) - {"if_exists"}:
+            raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "skip" }}')
+        if_exists = opts.get("if_exists", "overwrite")
+        if if_exists not in COPY_IF_EXISTS:
+            raise MacroError(f"{func}: if_exists must be one of {', '.join(COPY_IF_EXISTS)}, "
+                             f"got {if_exists!r}")
+        src_resolved = self._check_access(src, write=False)
+        if not src_resolved.is_file():
+            raise MacroError(f"{func}: file not found: {src_resolved}")
+        # Moving deletes the source, so it needs write permission as well —
+        # checked before anything is copied.
+        src_permissions = (self._writable(func, src, FILE_SUFFIXES, "move") if move else None)
+        if target.strip().endswith(("/", "\\")) or dest.is_dir():
+            dest = dest / src_resolved.name
+        permissions = self._writable(func, dest, FILE_SUFFIXES)
+        if if_exists == "skip" and dest.exists():
+            return None
+        try:
+            final = safe_copy(src_resolved, dest, permissions, FILE_SUFFIXES, MAX_COPY_BYTES)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot copy {src_resolved} to {dest}: {exc}") from None
+        if move:
+            try:
+                safe_delete(src, src_permissions, FILE_SUFFIXES)
+            except (FolderAccessDenied, OSError) as exc:
+                raise MacroError(f"{func}: copied to {final}, but cannot delete "
+                                 f"{src_resolved}: {exc}") from None
+        return str(final)
+
+    def _delete_path(self, func: str, folder: bool, path=None) -> bool:
+        file = self._file_arg(func, path, "folder" if folder else "file")
+        kind = "delete the folder" if folder else "delete"
+        permissions = self._writable(func, file, None if folder else FILE_SUFFIXES, kind)
+        try:
+            return safe_delete(file, permissions, FILE_SUFFIXES, folder=folder)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            if folder and file.is_dir() and any(file.iterdir()):
+                raise MacroError(f"{func}: {file} is not empty") from None
+            raise MacroError(f"{func}: cannot delete {file}: {exc}") from None
+
+    def _create_folder(self, path=None) -> str:
+        func = "opensak.create_folder"
+        folder = self._file_arg(func, path, "folder")
+        permissions = self._writable(func, folder, None, "create")
+        try:
+            target = check_access(folder, write=True, permissions=permissions)
+            if target.exists() and not target.is_dir():
+                raise MacroError(f"{func}: {target} exists and is not a folder")
+            target.mkdir(parents=True, exist_ok=True)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot create {folder}: {exc}") from None
+        return str(target)
+
+    def _file_info(self, lua, path=None):
+        func = "opensak.file_info"
+        # Only looks at the entry, like file_exists(), so a database file
+        # can be checked too; reading it is still refused.
+        target = self._check_access(self._file_arg(func, path, "file or folder"),
+                                    write=False, allow_database=True)
+        try:
+            st = target.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot read {target}: {exc}") from None
+        is_dir = target.is_dir()
+        return lua.table_from({
+            "name": target.name,
+            "path": str(target),
+            "dir": is_dir,
+            "size": 0 if is_dir else st.st_size,
+            "modified": int(st.st_mtime),
+        })
+
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
         for name, value in (("title", title), ("filter", file_filter)):
             if value is not None and (
@@ -5137,6 +5264,106 @@ API: tuple[ApiFunction, ...] = (
         ),
         returns=("{name: string, path: string, dir: boolean, size: integer, modified: integer}[]",
                  "One table per entry."),
+    ),
+    ApiFunction(
+        name="file_info",
+        description="Size and modification time of one file or folder, as "
+                    "in opensak.list_dir(); nil if it does not exist. A "
+                    "relative path is resolved against the macro file's "
+                    "folder. The folder needs read permission.",
+        example='local f = opensak.file_info("C:/GPX/pq.zip")\n'
+                'if f and os.time() - f.modified < 86400 then print("downloaded today") end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._file_info(lua, *a),
+        params=(Param("path", "string", "The file or folder."),),
+        returns=("{name: string, path: string, dir: boolean, size: integer, modified: integer}?",
+                 "nil if there is nothing at *path*."),
+    ),
+    ApiFunction(
+        name="copy_file",
+        description="Copy a file (GSAK's FileCopy) and return the file "
+                    "written. *target* is a file, or a folder (existing, or "
+                    "ending in `/`) to copy into under the same name. "
+                    "Relative paths are resolved against the macro file's "
+                    "folder. The source's folder needs read permission and "
+                    "the target's folder write permission; for an unapproved "
+                    "one the user is asked first. Only these file types can "
+                    "be written: " + " ".join(FILE_SUFFIXES) + " — no "
+                    "programs or scripts. An existing target is replaced, "
+                    "the same way opensak.write_text() replaces a file, unless "
+                    '`if_exists = "skip"`. The modification time is kept. At '
+                    f"most {MAX_COPY_BYTES // (1024 * 1024 * 1024)} GB.",
+        example='local backup = opensak.copy_file("C:/GPX/pq.zip", opensak.temp_dir() .. "/")\n'
+                'print("copied to " .. backup)',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._copy_file("opensak.copy_file", False, *a),
+        params=(
+            Param("source", "string", "The file to copy."),
+            Param("target", "string", "The new file, or the folder to copy into."),
+            Param("options", '{if_exists?: "overwrite"|"skip"}',
+                  '`if_exists`: `"overwrite"` (default) or `"skip"`.', optional=True),
+        ),
+        returns=("string?", 'The file written (full path); nil if skipped.'),
+    ),
+    ApiFunction(
+        name="move_file",
+        description="Move or rename a file: like opensak.copy_file(), then "
+                    "the source is deleted, so its folder needs write "
+                    "permission too and it must be one of the file types "
+                    "listed there. Nothing is copied when the source may not "
+                    "be deleted.",
+        example='for _, f in ipairs(opensak.list_dir("C:/Downloads", "*.zip")) do\n'
+                '    opensak.move_file(f.path, "C:/GPX/done/")\nend',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._copy_file("opensak.move_file", True, *a),
+        params=(
+            Param("source", "string", "The file to move."),
+            Param("target", "string", "The new file, or the folder to move into."),
+            Param("options", '{if_exists?: "overwrite"|"skip"}',
+                  '`if_exists`: `"overwrite"` (default) or `"skip"`.', optional=True),
+        ),
+        returns=("string?", "The new file (full path); nil if skipped (the "
+                            "source is then kept)."),
+    ),
+    ApiFunction(
+        name="delete_file",
+        description="Delete a file (GSAK's FileErase). A relative path is "
+                    "resolved against the macro file's folder. Its folder "
+                    "needs write permission; for an unapproved one the user "
+                    "is asked first. Only the file types opensak.copy_file() "
+                    "writes can be deleted, never a folder, a link or "
+                    "OpenSAK's own files.",
+        example='for _, f in ipairs(opensak.list_dir(opensak.temp_dir(), "*.gpx")) do\n'
+                '    opensak.delete_file(f.path)\nend',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._delete_path("opensak.delete_file", False, path),
+        params=(Param("path", "string", "The file."),),
+        returns=("boolean", "false if the file did not exist."),
+    ),
+    ApiFunction(
+        name="create_folder",
+        description="Create a folder, with any missing folders above it, and "
+                    "return it. A relative path is resolved against the "
+                    "macro file's folder. The folder it goes into needs "
+                    "write permission; for an unapproved one the user is "
+                    "asked first. A folder that exists already is fine.",
+        example='local out = opensak.create_folder(opensak.temp_dir() .. "/" .. os.date("%Y-%m-%d"))',
+        since=3,
+        bind=lambda rt, lua: rt._create_folder,
+        params=(Param("path", "string", "The folder."),),
+        returns=("string", "The folder (full path)."),
+    ),
+    ApiFunction(
+        name="delete_folder",
+        description="Delete an empty folder; a folder with anything in it is "
+                    "an error, so delete its files first. The folder it is "
+                    "in needs write permission. A folder listed in Settings "
+                    "→ Folder permissions is never deleted.",
+        example='opensak.delete_folder(opensak.temp_dir() .. "/old")',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._delete_path("opensak.delete_folder", True, path),
+        params=(Param("path", "string", "The folder."),),
+        returns=("boolean", "false if the folder did not exist."),
     ),
     ApiFunction(
         name="export_file",

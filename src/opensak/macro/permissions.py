@@ -24,7 +24,9 @@ export): it refuses a target with more than one hard link (resolve()
 cannot see through those, so a link in a permitted folder could otherwise
 lead to e.g. opensak.json) and
 writes to a temporary file first, which then replaces the target. The
-check is repeated right before the replace.
+check is repeated right before the replace. A copy is such a write
+(safe_copy()); a delete (safe_delete()) needs write access too, refuses
+a link and repeats the check right before the delete.
 
 A filesystem root (/, a drive such as C:\\ or a network share such as
 \\\\server\\share) is never a permitted folder, since it would open the
@@ -517,6 +519,109 @@ def safe_write(
     payload = data.encode(encoding) if isinstance(data, str) else data
     return safe_write_stream(path, lambda f: f.write(payload), permissions,
                              allowed_suffixes=allowed_suffixes)[0]
+
+
+def _refuse_link(path: str | Path, kind: str) -> None:
+    """Raise if *path* itself (not a folder above it) is a symbolic link or
+    junction: resolve() follows it, so removing the resolved path would
+    remove the file it points to, not the link."""
+    try:
+        unresolved = Path(os.path.abspath(expand_path(path)))
+        is_link = unresolved.is_symlink() or (
+            hasattr(unresolved, "is_junction") and unresolved.is_junction()
+        )
+    except OSError:
+        is_link = False
+    if is_link:
+        raise FolderAccessDenied(f"macros may not {kind} {path} — it is a link")
+
+
+def safe_copy(
+    source: Path,
+    path: str | Path,
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    allowed_suffixes: Optional[Iterable[str]] = None,
+    max_bytes: Optional[int] = None,
+) -> Path:
+    """Copy the already read-checked, resolved file *source* to *path* for a
+    macro through safe_write_stream() (so every check of a write applies)
+    and return the resolved target. The modification time is kept."""
+    st = source.stat()
+    if max_bytes is not None and st.st_size > max_bytes:
+        raise FolderAccessDenied(
+            f"macros may not copy {source} — it is larger than "
+            f"{max_bytes // (1024 * 1024)} MB"
+        )
+    # resolve() so that a target naming the source through another path is caught.
+    if resolve_path(path) == source:
+        raise FolderAccessDenied(f"macros may not copy {source} onto itself")
+
+    def copy(f: IO[Any]) -> None:
+        import shutil
+
+        with open(source, "rb") as src:
+            shutil.copyfileobj(src, f, 1024 * 1024)
+
+    final = safe_write_stream(path, copy, permissions, allowed_suffixes=allowed_suffixes)[0]
+    try:
+        os.utime(final, ns=(st.st_atime_ns, st.st_mtime_ns))
+    except OSError:
+        pass
+    return final
+
+
+def safe_delete(
+    path: str | Path,
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    allowed_suffixes: Optional[Iterable[str]] = None,
+    folder: bool = False,
+) -> bool:
+    """Delete the file (or with *folder*, the empty folder) *path* for a
+    macro; False if there is nothing to delete.
+
+    Deleting is writing: check_access(write=True) applies, with the deny
+    list, autostart locations and *allowed_suffixes* (files only). A link
+    is refused (see _refuse_link), and the check is repeated right before
+    the delete, as in safe_write_stream(). Never deletes a folder that is
+    not empty. Raises FolderAccessDenied or OSError.
+    """
+    if permissions is not None:
+        permissions = list(permissions)    # iterated twice
+    suffixes = None if folder or allowed_suffixes is None else tuple(allowed_suffixes)
+    kind = "delete the folder" if folder else "delete"
+    _refuse_link(path, kind)
+    target = check_access(path, write=True, permissions=permissions,
+                          allowed_suffixes=suffixes)
+    if not target.exists():
+        return False
+    if folder != target.is_dir():
+        what = "a folder" if target.is_dir() else "not a folder"
+        raise FolderAccessDenied(f"macros may not {kind} {target} — it is {what}")
+    if folder:
+        if _is_root(target):
+            raise FolderAccessDenied(f"macros may not {kind} {target} — it is a drive")
+        listed = load_permissions() if permissions is None else permissions
+        for perm in listed:
+            try:
+                same = resolve_path(perm.path) == target
+            except (OSError, RuntimeError):
+                same = False
+            if same:
+                raise FolderAccessDenied(
+                    f"macros may not {kind} {target} — it is a folder in "
+                    "Settings → Folder permissions"
+                )
+    _refuse_link(path, kind)
+    final = check_access(path, write=True, permissions=permissions, allowed_suffixes=suffixes)
+    if final != target:
+        raise FolderAccessDenied(
+            f"macros may not {kind} {path} — the path changed (now {final})"
+        )
+    if folder:
+        os.rmdir(final)     # fails for a folder that is not empty
+    else:
+        os.remove(final)
+    return True
 
 
 def safe_write_stream(
