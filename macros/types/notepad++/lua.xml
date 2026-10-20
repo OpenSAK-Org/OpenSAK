@@ -687,6 +687,11 @@
 			<Overload descr="Redraw the cache list, detail panel and map now. Changes a macro makes are&#x0a;otherwise shown when it ends.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.restore_filter" func="yes">
+			<Overload retVal="integer" descr="Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As&#x0a;with opensak.filter{}, the view is left unchanged when nothing matches. A filter&#x0a;saved while none was active clears the filter.&#x0a;Returns integer — Number of matching caches (0 = view unchanged, unless the&#x0a;saved filter was empty).">
+				<Param name="saved: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.resync" func="yes">
 			<Overload retVal="integer" descr="Recalculate now the columns OpenSAK maintains itself (distance and bearing, log,&#x0a;waypoint and trackable counts, log dates) for the caches changed so far in the&#x0a;open opensak.transaction(). Inside a transaction they are recalculated only&#x0a;once, just before the commit, which makes many writes much faster; until then&#x0a;opensak.cache, sql and the like still see the old values. Call resync() when a&#x0a;later read inside the transaction depends on them. Outside a transaction it does&#x0a;nothing, as every write is recalculated before its own commit.&#x0a;Returns integer — Number of caches recalculated (0 outside a transaction).">
 			</Overload>
@@ -695,6 +700,10 @@
 			<Overload retVal="any..." descr="Run another macro and wait until it has finished, e.g. to chain several macros&#x0a;from one control macro. A relative path is looked up in the folder of the&#x0a;calling macro, and `.lua` is added when the name has no extension. The called&#x0a;macro gets its own global variables; values are passed as extra arguments (read&#x0a;them with `...`) and come back as its return values. An error in it stops the&#x0a;calling macro too, unless caught with `pcall`. Macros run this way share the&#x0a;run's limits, sleep time and folder approvals; they may call each other at most&#x0a;10 levels deep.&#x0a;Returns any... — What the macro returns.">
 				<Param name="file: string" />
 				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.save_filter" func="yes">
+			<Overload retVal="string" descr="The active filter (with its name, and any quick filter or search box) as a&#x0a;string, to put back later with opensak.restore_filter() — e.g. to leave the&#x0a;user's filter as it was after the macro filtered for its own work. Like GSAK's&#x0a;SaveFilter(). The sort order is not included. The string can be stored with&#x0a;opensak.settings.save(); don't build or change it.&#x0a;Returns string — The saved filter; when no filter is active, restoring it clears&#x0a;the filter.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.select" func="yes">
