@@ -1135,6 +1135,59 @@ function opensak.read_csv(path, sep) end
 ---@return string # The file written (full path).
 function opensak.write_text(path, text, options) end
 
+---Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
+---
+---Since API version 3.
+---
+---```lua
+---local text = opensak.read_text("notes.txt")
+---for line in text:gmatch("[^\n]+") do
+---    print(line)
+---end
+---```
+---@param path string The file to read.
+---@param options? {encoding?: string} `encoding`: e.g. `"cp1252"` for a file from an older Windows program.
+---@return string # The file's text.
+function opensak.read_text(path, options) end
+
+---Whether a file exists (false for a folder). A relative path is resolved against the macro file's folder. The folder needs read permission, like opensak.read_text().
+---
+---Since API version 3.
+---
+---```lua
+---if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then
+---    print("no report yet")
+---end
+---```
+---@param path string The file.
+---@return boolean # true if the file exists.
+function opensak.file_exists(path) end
+
+---Whether a folder exists. A relative path is resolved against the macro file's folder. The folder containing it needs read permission.
+---
+---Since API version 3.
+---
+---```lua
+---if opensak.folder_exists("C:/GPX") then print("found") end
+---```
+---@param path string The folder.
+---@return boolean # true if the folder exists.
+function opensak.folder_exists(path) end
+
+---The files and folders in a folder (not in its subfolders), sorted by name. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. `pattern` keeps the names that match it, ignoring case: `*` stands for any text, `?` for one character. At most 10,000 entries. Each entry has `name`, `path` (full path), `dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified` (seconds since the epoch, like `os.time()`).
+---
+---Since API version 3.
+---
+---```lua
+---for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do
+---    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))
+---end
+---```
+---@param folder string The folder.
+---@param pattern? string A file name pattern, e.g. "*.gpx".
+---@return {name: string, path: string, dir: boolean, size: integer, modified: integer}[] # One table per entry.
+function opensak.list_dir(folder, pattern) end
+
 ---Export the caches of the active filter with a saved export setting (File → Export → GPX/LOC/GGZ: format, folder, file name, if the file exists, corrected coordinates, max. caches). The file name variables are filled in as in the dialog, {filter} with the name of the active filter and {center} with the active centre point. The file goes into *folder* if given, else into the setting's folder. That folder needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. Nothing is written when no cache with coordinates is shown, or when the file exists and the setting says skip (or ask, and the user answers No).
 ---
 ---Since API version 2.
