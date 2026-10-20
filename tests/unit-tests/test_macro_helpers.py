@@ -363,9 +363,25 @@ def test_sleep_budget(monkeypatch):
 
 def test_cancel_interrupts_sleep():
     rt = MacroRuntime(_Host(), output=lambda s: None)  # type: ignore[arg-type]
-    threading.Timer(0.1, rt.cancel).start()
+    # run() clears any earlier cancel when it starts (so each run begins
+    # uncancelled). A single cancel fired on a timer could therefore land
+    # *before* that point on a slow CI runner and be wiped, and the sleep
+    # would then run its full 5 s (seen on Windows CI). Keep cancelling
+    # until the run has ended, so one cancel always arrives during it.
+    done = threading.Event()
+
+    def keep_cancelling() -> None:
+        while not done.wait(0.05):
+            rt.cancel()
+
+    canceller = threading.Thread(target=keep_cancelling, daemon=True)
+    canceller.start()
     start = time.monotonic()
-    with pytest.raises(MacroError, match="cancelled"):
-        rt.run("opensak.sleep(5000)")
+    try:
+        with pytest.raises(MacroError, match="cancelled"):
+            rt.run("opensak.sleep(5000)")
+    finally:
+        done.set()
+        canceller.join()
     assert time.monotonic() - start < 2
     rt.run("opensak.sleep(1)")  # the next run starts uncancelled
