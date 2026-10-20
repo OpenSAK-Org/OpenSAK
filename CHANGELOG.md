@@ -4,6 +4,126 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.6] — 2026-10-20
+
+> Headline: **draw a line, polygon or points on the map and filter by
+> it**, and the GPX import now **remembers its settings and imports
+> whole folders**. Beta testers get a **macro manager** and macros that
+> can **read files, list folders, import from GSAK and build HTML
+> reports with statistics**.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Draw a shape on the map to filter by it (#1089)** — the ✎ button in
+  the map controls (and the right-click menu) draws a polygon, line or
+  set of points; *Filter by this shape…* opens Set filter on the
+  Line/Polygon tab with the shape filled in, keeping the rest of the
+  active filter. The Line/Polygon tab also has *Draw on map…*. The
+  active filter's shape is shown on the map as a dashed outline, and
+  *Edit filter shape* loads it again for changes. Contributed by nagisml.
+- **GPX import remembers its settings and imports folders (#1110)** —
+  the GPX / Pocket Query import dialog has an *Import settings* box like
+  the export dialog: save the target database and file list under a
+  name, load it again, and the last import's settings come back when
+  the dialog opens. *Add folder…* (or dropping a folder on the main
+  window) imports every GPX and ZIP file directly in that folder; the
+  folder is read when the import starts, so a saved setting picks up
+  new files each time. Contributed by nagisml.
+- **How long have you used OpenSAK? (#1050)** — *Help → About* now
+  shows "Using OpenSAK since … — day N", like GSAK. Existing users are
+  counted from their oldest cache import. Thanks to CheminerWill for the
+  idea.
+
+### Changed
+
+- **Backup folder inside OpenSAK's folders (#1032)** — a backup folder
+  inside OpenSAK's data or database folder is now allowed after a
+  warning instead of refused: backups there survive a normal uninstall,
+  but are deleted if you choose to remove all OpenSAK data. You choose
+  *Use this folder* or *Choose another*, and are asked once per folder.
+  The data and database folders themselves, and the folders OpenSAK
+  copies into every backup, are still refused. When *Remove program and
+  all data* would delete your backup folder, its confirmation now says
+  so. Thanks to C3GPS and CheminerWill for the feedback.
+- **The Settings window remembers its size (#1030)** — size, position
+  and maximized state are restored the next time it opens. If the screen
+  it was on is no longer connected (a laptop off its external monitor),
+  it opens at the remembered size, made to fit, in the usual place.
+  Thanks to C3GPS, CheminerWill and GeePa67.
+
+### Fixed
+
+- **"Copy Caches" said "move" (#1107)** — the Copy Caches dialog asked
+  "Which caches to move", and its empty-selection and error messages
+  also said move. They now say copy. Thanks to ianwok for the report.
+- **Browse opens in the right folder (#1032)** — when the folder in the
+  box didn't exist yet (for example the default backup folder before the
+  first backup), Browse opened an unrelated folder, especially on
+  Windows. It now opens the nearest existing parent folder.
+- **About linked to the old repository** — *Help → About* still pointed
+  to `github.com/AgreeDK/opensak`; it now links to
+  `github.com/OpenSAK-Org/OpenSAK`.
+
+### In beta builds only
+
+- **Macro manager (#938)** — **Macros → Macro manager…** lists the
+  macros in your macros folder with name, description, version, author
+  and required API version, read from a short header at the top of each
+  macro (like GSAK's MacHeader). Run, edit, search, and give a macro a
+  keyboard shortcut that runs it from the main window. Contributed by
+  nagisml.
+- **Macros can read files and list folders (#1113, #1102)** —
+  `opensak.read_text()` reads a text file (UTF-8, or the Windows code
+  page older GSAK files often use), `file_exists()` / `folder_exists()`
+  check for a file or folder, and `list_dir()` lists a folder, e.g. all
+  `*.gpx` files in it. `opensak.write_text()` writes `.txt`, `.csv`,
+  `.html`, `.json` and similar files. As with other file access, you
+  approve each folder first. Contributed by nagisml.
+- **HTML reports and statistics in macros (#1114, #1116)** —
+  `opensak.html.*` turns query results into escaped HTML tables, key
+  figure tiles and a complete light/dark page (GSAK's SqlToHtml), and
+  `opensak.stats.*` groups, counts, pivots and finds streaks in rows,
+  with `html.matrix()` to show a pivot as a shaded table. All
+  calculations stay on your computer. Contributed by nagisml.
+- **GSAK import from a macro (#937)** — `opensak.import_gsak()` imports
+  a GSAK backup, folder or database without any questions and returns a
+  report, with options for which databases, where they go and what
+  happens to existing ones. New example macro *import_gsak_appdata*.
+  Contributed by nagisml.
+- **Save and restore the filter (#1115)** — `opensak.save_filter()` and
+  `restore_filter()`, like GSAK's SaveFilter/RestoreFilter, so a macro
+  can put your filter back the way it found it. Contributed by nagisml.
+- **Example macro "Refile by country" (#808)** — sorts the caches of the
+  active database into one database per country or state, shows the
+  plan first and has a dry-run option. Contributed by nagisml.
+- **Safer macro exports (#1101)** — every file a macro exports now goes
+  through the same checks as other macro writes: hard-linked files are
+  refused, the check is repeated just before the file is replaced, and
+  the file is replaced in one step. Macro writes are also always refused
+  in autostart locations. Contributed by nagisml.
+
+### For developers
+
+- **Regression test for clipped button labels (#928)** — the dialogs
+  fixed in #927 are built in every language, and each text button must
+  be at least as wide as its label needs; a second check scans the GUI
+  source for hardcoded widths on text buttons. On the Windows CI runner
+  the column dialog's Save button is narrower than its label in de,
+  de_CH and fr; those three cases are marked as a known failure on
+  Windows while it is looked into.
+- **CI pinned to Ubuntu 24.04 (#1108)** — GitHub is moving
+  `ubuntu-latest` to Ubuntu 26.04 gradually until 19 November, so the
+  test, type-check and screenshot jobs now run on `ubuntu-24.04` until
+  26.04 has been checked.
+- **A timing test no longer fails on slow runners** —
+  `test_cancel_interrupts_sleep` could lose its single cancel on a slow
+  Windows runner; it now keeps cancelling until the run ends.
+
+---
+
 ## [1.22.0-beta.5] — 2026-10-19
 
 > Headline: **big exports no longer run out of memory**, and OpenSAK now
