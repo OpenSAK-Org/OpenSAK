@@ -489,6 +489,11 @@
 				<Param name="[folder: string]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.file_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a file exists (false for a folder). A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission, like&#x0a;opensak.read_text().&#x0a;Returns boolean — true if the file exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.filter" func="yes">
 			<Overload retVal="integer" descr="Build a filter from the given keys (see Filter keys; combined with AND unless&#x0a;`mode = &quot;OR&quot;`) and apply it. Usually called with table syntax: `opensak.filter{&#x0a;... }`. When nothing matches, the view is left unchanged.&#x0a;Returns integer — Number of matching caches (0 = view unchanged).">
 				<Param name="spec: opensak.FilterSpec" />
@@ -503,9 +508,47 @@
 				<Param name="name: string" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.folder_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a folder exists. A relative path is resolved against the macro file's&#x0a;folder. The folder containing it needs read permission.&#x0a;Returns boolean — true if the folder exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.form" func="yes">
 			<Overload retVal="table&lt;string, any&gt;?, string?" descr="Show a dialog built from a table (see Forms) and wait until it is closed. Fields&#x0a;with a value come back in a table keyed by their `id`. Callbacks such as&#x0a;`on_change` run while the form stays open and can change it through the handle&#x0a;they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in&#x0a;the macro window builds forms visually and imports GSAK forms.&#x0a;Returns table&lt;string, any&gt;?, string? — The values by field id and the id of the&#x0a;button (or `exit_on_change` field, or &quot;timeout&quot;) that closed the form; nil if it&#x0a;was cancelled.">
 				<Param name="spec: opensak.FormSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html" />
+		<KeyWord name="opensak.html.columns" func="yes">
+			<Overload retVal="string" descr="Put HTML parts (e.g. two tables) side by side; on a narrow window they go one&#x0a;below the other.&#x0a;Returns string — HTML.">
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.escape" func="yes">
+			<Overload retVal="string" descr="*value* as text for HTML: `&amp; &lt; &gt; &quot; '` are escaped, nil becomes &quot;&quot;, 3.0 becomes&#x0a;&quot;3&quot;.&#x0a;Returns string — Escaped text.">
+				<Param name="value: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.page" func="yes">
+			<Overload retVal="string" descr="A complete HTML page for opensak.write_text: `title` (also the heading),&#x0a;`subtitle`, the body — the strings in the list part of the table, and/or `body`&#x0a;— and `footer`. A built-in stylesheet with a light and a dark theme styles&#x0a;headings (`&lt;h2&gt;`), tables, tiles and columns; `css` is added after it. The body&#x0a;is put in as it is: build it from the html.* functions, or escape your own text&#x0a;with html.escape.&#x0a;Returns string — The page.">
+				<Param name="spec: {title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string}" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.table" func="yes">
+			<Overload retVal="string" descr="*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's&#x0a;SqlToHtml). `columns` lists the fields to show, each a field name or `{field,&#x0a;heading}`; without it all fields are shown, sorted by name — a Lua table has no&#x0a;field order, so pass `columns` to keep the order of the query. Number columns&#x0a;are right-aligned. `link = { code = &quot;url&quot; }` turns the code cells into links to&#x0a;the row's url field (http/https only). `bars = {&quot;count&quot;}` adds a bar next to&#x0a;each value of those number fields, scaled to the largest (in `color`,&#x0a;&quot;#rrggbb&quot;). The bars use inline styles only, so they also show without the&#x0a;stylesheet of opensak.html.page.&#x0a;Returns string — HTML.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {columns?: (string|string[])[], link?: table&lt;string, string&gt;, caption?: string, bars?: string[], color?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.tiles" func="yes">
+			<Overload retVal="string" descr="Key figures as a row of tiles: a list of `{label =, value =}`.&#x0a;Returns string — HTML.">
+				<Param name="items: {label: string, value: any}[]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.import_gsak" func="yes">
+			<Overload retVal="opensak.GsakImportReport" descr="Import GSAK databases without any question (like File → Import GSAK database,&#x0a;with the answers given up front) and return what was done. *source* is a GSAK&#x0a;backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and&#x0a;`data/&lt;name&gt;/sqlite.db3`, its `data` folder, or one database's folder), a single&#x0a;`.db3` cache database (just that database), or `gsak.db3` (only user locations&#x0a;and saved filters). A relative path is resolved against the macro file's folder,&#x0a;and environment variables such as `%APPDATA%` are expanded; the folder needs&#x0a;read permission. Each GSAK database goes into the OpenSAK database of the same&#x0a;name, created if missing, unless `target` says otherwise. For an OpenSAK&#x0a;database that exists, `if_exists` decides: `&quot;skip&quot;` (default), `&quot;merge&quot;` (new&#x0a;caches added, existing ones updated, locked caches kept) or `&quot;overwrite&quot;`&#x0a;(emptied first). `filters` and `locations` also import the saved filters and&#x0a;user locations of `gsak.db3`; `true` skips the ones whose name exists when&#x0a;`if_exists` is `&quot;skip&quot;` and replaces them otherwise. Embedded note images are&#x0a;replaced by placeholders without asking. A database that fails is reported and&#x0a;the others are still imported. The summary is printed (unless `quiet`) and&#x0a;written to the log file.&#x0a;Returns opensak.GsakImportReport — What was imported, per database.">
+				<Param name="source: string" />
+				<Param name="[options: opensak.GsakImportOptions]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.in_transaction" func="yes">
@@ -546,6 +589,12 @@
 			<Overload retVal="integer?" descr="Add a waypoint to a cache in the active database; `prefix`, `type` required.&#x0a;OpenSAK updates the cache's waypoint count. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new waypoint's id; nil if the cache is not in the&#x0a;database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.WaypointInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.list_dir" func="yes">
+			<Overload retVal="{name: string, path: string, dir: boolean, size: integer, modified: integer}[]" descr="The files and folders in a folder (not in its subfolders), sorted by name. A&#x0a;relative path is resolved against the macro file's folder. The folder needs read&#x0a;permission; for an unapproved one the user is asked first. `pattern` keeps the&#x0a;names that match it, ignoring case: `*` stands for any text, `?` for one&#x0a;character. At most 10,000 entries. Each entry has `name`, `path` (full path),&#x0a;`dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified`&#x0a;(seconds since the epoch, like `os.time()`).&#x0a;Returns {name: string, path: string, dir: boolean, size: integer, modified:&#x0a;integer}[] — One table per entry.">
+				<Param name="folder: string" />
+				<Param name="[pattern: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.log" func="yes">
@@ -628,8 +677,19 @@
 				<Param name="[sep: string]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.read_text" func="yes">
+			<Overload retVal="string" descr="Read a whole text file, of any file type. A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission; for an unapproved one&#x0a;the user is asked first. UTF-8 unless `encoding` says otherwise (`&quot;utf-8&quot;`,&#x0a;`&quot;latin-1&quot;`, `&quot;cp1252&quot;`); a UTF-8 byte order mark is removed and line endings&#x0a;become `&quot;\n&quot;`. At most 10 MB.&#x0a;Returns string — The file's text.">
+				<Param name="path: string" />
+				<Param name="[options: {encoding?: string}]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.refresh" func="yes">
 			<Overload descr="Redraw the cache list, detail panel and map now. Changes a macro makes are&#x0a;otherwise shown when it ends.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.restore_filter" func="yes">
+			<Overload retVal="integer" descr="Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As&#x0a;with opensak.filter{}, the view is left unchanged when nothing matches. A filter&#x0a;saved while none was active clears the filter.&#x0a;Returns integer — Number of matching caches (0 = view unchanged, unless the&#x0a;saved filter was empty).">
+				<Param name="saved: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.resync" func="yes">
@@ -640,6 +700,10 @@
 			<Overload retVal="any..." descr="Run another macro and wait until it has finished, e.g. to chain several macros&#x0a;from one control macro. A relative path is looked up in the folder of the&#x0a;calling macro, and `.lua` is added when the name has no extension. The called&#x0a;macro gets its own global variables; values are passed as extra arguments (read&#x0a;them with `...`) and come back as its return values. An error in it stops the&#x0a;calling macro too, unless caught with `pcall`. Macros run this way share the&#x0a;run's limits, sleep time and folder approvals; they may call each other at most&#x0a;10 levels deep.&#x0a;Returns any... — What the macro returns.">
 				<Param name="file: string" />
 				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.save_filter" func="yes">
+			<Overload retVal="string" descr="The active filter (with its name, and any quick filter or search box) as a&#x0a;string, to put back later with opensak.restore_filter() — e.g. to leave the&#x0a;user's filter as it was after the macro filtered for its own work. Like GSAK's&#x0a;SaveFilter(). The sort order is not included. The string can be stored with&#x0a;opensak.settings.save(); don't build or change it.&#x0a;Returns string — The saved filter; when no filter is active, restoring it clears&#x0a;the filter.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.select" func="yes">

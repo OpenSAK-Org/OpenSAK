@@ -843,7 +843,18 @@ python run.py</code></pre>
       <li>Pins cluster automatically when zoomed out; click a cluster to zoom in.</li>
       <li>Corrected coordinates are shown as a separate pin (📍) linked to the original.</li>
       <li>Use the <strong>⌂ button</strong> in the toolbar to pan the map to your active home point.</li>
+      <li>Right-click anywhere on the map to copy that spot's coordinates — <strong>Copy …</strong> uses your preferred format, <strong>Copy as…</strong> offers the others — or to set them as the selected cache's corrected coordinates.</li>
     </ul>
+
+    <h3>Drawing a shape</h3>
+    <p>The <strong>✎ button</strong> in the map's corner draws a polygon, a line or points for the <a href="#filter-types">Line/Polygon filter</a>. Click on the map to add points and double-click (or press <kbd>Enter</kbd>) to finish; <kbd>Esc</kbd> cancels. Drag a point to move it, click the middle of an edge to add a point there, and right-click a point to remove it. The same button (or a right-click on the map) then offers:</p>
+    <ul>
+      <li><strong>Edit filter shape</strong> — loads the active filter's line/polygon shape for editing; apply the change with <em>Filter by this shape…</em>.</li>
+      <li><strong>Copy shape as text</strong> — a point list ready to paste into the Line/Polygon tab.</li>
+      <li><strong>Filter by this shape…</strong> — opens <em>Set filter</em> on the Line/Polygon tab with the shape, keeping the rest of the active filter.</li>
+      <li><strong>Clear shape</strong>.</li>
+    </ul>
+    <p>When the active filter has a line/polygon shape, the map shows it as a dashed blue outline. The shape stays on the map when the cache list changes, until you clear it or close OpenSAK. In the filter dialog, <strong>Draw on map…</strong> on the Line/Polygon tab opens a map of its own for drawing or editing the tab's shape.</p>
 
     <h3>Maximize &amp; Pop-out</h3>
     <p>Two ways to work with a bigger map, both reachable from the two small buttons in the map's own corner, the toolbar, or the <strong>View</strong> menu:</p>
@@ -1034,6 +1045,7 @@ python run.py</code></pre>
         <tr><td>Latest log is a DNF</td><td>Logs tab: Logs to search = Latest + Not found only</td></tr>
         <tr><td>Caches without a parking waypoint</td><td>Child Waypoints tab: Type contains "Parking" + Count equal 0</td></tr>
         <tr><td>Caches along a route</td><td>Line/Polygon tab: Line, load the route from a GPX file, distance 0.5 km</td></tr>
+        <tr><td>Caches in an area you draw</td><td>Map: ✎ → Draw polygon, then ✎ → Filter by this shape…</td></tr>
         <tr><td>Solved finals outside the 2-mile rule</td><td>Other tab: Distance corrected ↔ posted, More than 3219 m</td></tr>
         <tr><td>Caches north of home</td><td>Other tab: centre point = your home point, Direction <em>Between</em> 315° and 45° (or click NW, N and NE on the compass)</td></tr>
         <tr><td>Caches without a geocoin</td><td>Trackables tab: Name contains "coin" + Count equal 0</td></tr>

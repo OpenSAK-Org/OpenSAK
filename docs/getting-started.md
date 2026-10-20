@@ -110,6 +110,8 @@ Shows the full description, hint (click to decode ROT13), attributes, and logs f
 ### Map
 Shows all caches in the current list as colour-coded pins, clustered when zoomed out. Click any pin to highlight that cache in the list and show its details. Use **View → Maximize map** or **Pop out map** for a bigger view.
 
+Right-click anywhere on the map to copy that spot's coordinates (or set them as the selected cache's corrected coordinates). With the **✎** button you can draw a polygon, a line or points and use the shape in the [Line/Polygon filter](filters.md#drawing-on-the-main-map).
+
 ---
 
 ## 5. Filtering Your Cache List

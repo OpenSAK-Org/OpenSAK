@@ -62,6 +62,53 @@
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
 ---@field if_exists? "newer"|"replace"|"skip" When the cache exists in the target (default "newer").
 
+---Options of `opensak.import_gsak()`.
+---@class opensak.GsakImportOptions
+---@field databases? string|string[] GSAK databases to import, by name (default: all of them).
+---@field exclude? string|string[] GSAK databases to leave out.
+---@field target? string|table<string, string> One OpenSAK database for all, or GSAK name = OpenSAK database (default: the GSAK name).
+---@field if_exists? "skip"|"merge"|"overwrite" When the OpenSAK database exists (default "skip").
+---@field create? boolean Create a missing OpenSAK database (default true).
+---@field filters? boolean|"skip"|"overwrite" Import the saved filters of gsak.db3 (default false).
+---@field locations? boolean|"skip"|"overwrite" Import the user locations of gsak.db3 (default false).
+---@field quiet? boolean Don't print the summary (default false).
+
+---What one GSAK database of `opensak.import_gsak()` did.
+---@class opensak.GsakImportDatabase
+---@field gsak string GSAK database name.
+---@field target string OpenSAK database.
+---@field action "created"|"merged"|"overwritten"|"skipped"|"failed"|"cancelled"
+---@field reason? string Why it was skipped, failed or cancelled.
+---@field cleared integer Caches removed first (overwrite).
+---@field created? integer New caches.
+---@field updated? integer Updated caches.
+---@field skipped? integer Caches that could not be imported.
+---@field waypoints? integer
+---@field logs? integer
+---@field attributes? integer
+---@field notes? integer
+---@field trackables? integer
+---@field corrected? integer
+---@field note_images? integer Embedded note images replaced by placeholders.
+---@field warnings? integer
+---@field errors? string[] The first cache errors.
+
+---The report of `opensak.import_gsak()`.
+---@class opensak.GsakImportReport
+---@field ok boolean Nothing failed and the run was not cancelled.
+---@field cancelled boolean
+---@field source string
+---@field kind "backup"|"folder"|"file"|"settings"
+---@field created integer New caches, all databases.
+---@field updated integer Updated caches, all databases.
+---@field skipped integer Caches that could not be imported.
+---@field errors integer Failed caches, databases and settings imports.
+---@field databases opensak.GsakImportDatabase[]
+---@field new_databases string[] OpenSAK databases created or added to the list.
+---@field locations? {added?: integer, updated?: integer, skipped?: integer, invalid?: integer, error?: string}
+---@field filters? {imported?: integer, skipped?: integer, failed?: integer, error?: string}
+---@field notes string[]
+
 ---What `opensak.export_gpx{}` writes.
 ---@class opensak.ExportSpec
 ---@field path? string File to write; the name may use {database}, {filter}, {date}, ... (default "{database}" for a device).
@@ -424,6 +471,32 @@ function opensak.filter_profile(name) end
 ---```
 function opensak.clear_filter() end
 
+---The active filter (with its name, and any quick filter or search box) as a string, to put back later with opensak.restore_filter() — e.g. to leave the user's filter as it was after the macro filtered for its own work. Like GSAK's SaveFilter(). The sort order is not included. The string can be stored with opensak.settings.save(); don't build or change it.
+---
+---Since API version 3.
+---
+---```lua
+---local saved = opensak.save_filter()
+---opensak.filter{ found = false }
+----- ... work on the unfound caches ...
+---opensak.restore_filter(saved)
+---```
+---@return string # The saved filter; when no filter is active, restoring it clears the filter.
+function opensak.save_filter() end
+
+---Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As with opensak.filter{}, the view is left unchanged when nothing matches. A filter saved while none was active clears the filter.
+---
+---Since API version 3.
+---
+---```lua
+---local saved = opensak.save_filter()
+---opensak.filter{ found = false }
+---opensak.restore_filter(saved)
+---```
+---@param saved string A string from opensak.save_filter().
+---@return integer # Number of matching caches (0 = view unchanged, unless the saved filter was empty).
+function opensak.restore_filter(saved) end
+
 ---The number of caches matching the active filter.
 ---
 ---Since API version 1.
@@ -714,6 +787,26 @@ function opensak.move_caches(target, options) end
 ---@param options? opensak.TransferOptions codes, if_exists.
 ---@return integer # Number of caches copied.
 function opensak.copy_caches(target, options) end
+
+---Import GSAK databases without any question (like File → Import GSAK database, with the answers given up front) and return what was done. *source* is a GSAK backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and `data/<name>/sqlite.db3`, its `data` folder, or one database's folder), a single `.db3` cache database (just that database), or `gsak.db3` (only user locations and saved filters). A relative path is resolved against the macro file's folder, and environment variables such as `%APPDATA%` are expanded; the folder needs read permission. Each GSAK database goes into the OpenSAK database of the same name, created if missing, unless `target` says otherwise. For an OpenSAK database that exists, `if_exists` decides: `"skip"` (default), `"merge"` (new caches added, existing ones updated, locked caches kept) or `"overwrite"` (emptied first). `filters` and `locations` also import the saved filters and user locations of `gsak.db3`; `true` skips the ones whose name exists when `if_exists` is `"skip"` and replaces them otherwise. Embedded note images are replaced by placeholders without asking. A database that fails is reported and the others are still imported. The summary is printed (unless `quiet`) and written to the log file.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
+---  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+---  locations = true })
+---for _, db in ipairs(r.databases) do
+---  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
+---end
+---if not r.ok then opensak.exit(1) end
+---```
+---@param source string GSAK backup .zip, GSAK folder or .db3 file.
+---@param options? opensak.GsakImportOptions databases, exclude, target, if_exists, create, filters, locations, quiet.
+---@return opensak.GsakImportReport # What was imported, per database.
+function opensak.import_gsak(source, options) end
 
 ---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
 ---
@@ -1134,6 +1227,59 @@ function opensak.read_csv(path, sep) end
 ---@param options? {append?: boolean} `append`: add *text* at the end of an existing file.
 ---@return string # The file written (full path).
 function opensak.write_text(path, text, options) end
+
+---Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
+---
+---Since API version 3.
+---
+---```lua
+---local text = opensak.read_text("notes.txt")
+---for line in text:gmatch("[^\n]+") do
+---    print(line)
+---end
+---```
+---@param path string The file to read.
+---@param options? {encoding?: string} `encoding`: e.g. `"cp1252"` for a file from an older Windows program.
+---@return string # The file's text.
+function opensak.read_text(path, options) end
+
+---Whether a file exists (false for a folder). A relative path is resolved against the macro file's folder. The folder needs read permission, like opensak.read_text().
+---
+---Since API version 3.
+---
+---```lua
+---if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then
+---    print("no report yet")
+---end
+---```
+---@param path string The file.
+---@return boolean # true if the file exists.
+function opensak.file_exists(path) end
+
+---Whether a folder exists. A relative path is resolved against the macro file's folder. The folder containing it needs read permission.
+---
+---Since API version 3.
+---
+---```lua
+---if opensak.folder_exists("C:/GPX") then print("found") end
+---```
+---@param path string The folder.
+---@return boolean # true if the folder exists.
+function opensak.folder_exists(path) end
+
+---The files and folders in a folder (not in its subfolders), sorted by name. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. `pattern` keeps the names that match it, ignoring case: `*` stands for any text, `?` for one character. At most 10,000 entries. Each entry has `name`, `path` (full path), `dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified` (seconds since the epoch, like `os.time()`).
+---
+---Since API version 3.
+---
+---```lua
+---for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do
+---    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))
+---end
+---```
+---@param folder string The folder.
+---@param pattern? string A file name pattern, e.g. "*.gpx".
+---@return {name: string, path: string, dir: boolean, size: integer, modified: integer}[] # One table per entry.
+function opensak.list_dir(folder, pattern) end
 
 ---Export the caches of the active filter with a saved export setting (File → Export → GPX/LOC/GGZ: format, folder, file name, if the file exists, corrected coordinates, max. caches). The file name variables are filled in as in the dialog, {filter} with the name of the active filter and {center} with the active centre point. The file goes into *folder* if given, else into the setting's folder. That folder needs write permission (Settings → Folder permissions); for an unapproved one the user is asked first. Nothing is written when no cache with coordinates is shown, or when the file exists and the setting says skip (or ask, and the user answers No).
 ---
@@ -1661,6 +1807,78 @@ function opensak.text.word_value(text) end
 ---@param s string The name.
 ---@return string # The safe name.
 function opensak.text.normalize_name(s) end
+
+opensak.html = {}
+
+---*value* as text for HTML: `& < > " '` are escaped, nil becomes "", 3.0 becomes "3".
+---
+---Since API version 3.
+---
+---```lua
+---local cell = "<td>" .. opensak.html.escape(c.name) .. "</td>"
+---```
+---@param value any A string, number, boolean or nil.
+---@return string # Escaped text.
+function opensak.html.escape(value) end
+
+---*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's SqlToHtml). `columns` lists the fields to show, each a field name or `{field, heading}`; without it all fields are shown, sorted by name — a Lua table has no field order, so pass `columns` to keep the order of the query. Number columns are right-aligned. `link = { code = "url" }` turns the code cells into links to the row's url field (http/https only). `bars = {"count"}` adds a bar next to each value of those number fields, scaled to the largest (in `color`, "#rrggbb"). The bars use inline styles only, so they also show without the stylesheet of opensak.html.page.
+---
+---Since API version 3.
+---
+---```lua
+---local rows = opensak.sql(
+---  "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")
+---local html = opensak.html.table(rows, {
+---  columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })
+---```
+---@param rows table[] The rows.
+---@param options? {columns?: (string|string[])[], link?: table<string, string>, caption?: string, bars?: string[], color?: string} See above.
+---@return string # HTML.
+function opensak.html.table(rows, options) end
+
+---Key figures as a row of tiles: a list of `{label =, value =}`.
+---
+---Since API version 3.
+---
+---```lua
+---local found = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE found = 1")[1].n
+---local html = opensak.html.tiles{
+---  { label = "caches", value = opensak.count() },
+---  { label = "found", value = found },
+---}
+---```
+---@param items {label: string, value: any}[] The tiles.
+---@return string # HTML.
+function opensak.html.tiles(items) end
+
+---Put HTML parts (e.g. two tables) side by side; on a narrow window they go one below the other.
+---
+---Since API version 3.
+---
+---```lua
+---local html = opensak.html.columns(table1, table2)
+---```
+---@param ... string The HTML parts (or one list of them).
+---@return string # HTML.
+function opensak.html.columns(...) end
+
+---A complete HTML page for opensak.write_text: `title` (also the heading), `subtitle`, the body — the strings in the list part of the table, and/or `body` — and `footer`. A built-in stylesheet with a light and a dark theme styles headings (`<h2>`), tables, tiles and columns; `css` is added after it. The body is put in as it is: build it from the html.* functions, or escape your own text with html.escape.
+---
+---Since API version 3.
+---
+---```lua
+---local rows = opensak.sql("SELECT code, name, difficulty FROM caches LIMIT 50")
+---local page = opensak.html.page{
+---  title = "Caches", subtitle = opensak.database(),
+---  opensak.html.tiles{ { label = "caches", value = opensak.count() } },
+---  "<h2>First 50</h2>",
+---  opensak.html.table(rows, { columns = { "code", "name", "difficulty" } }),
+---}
+---opensak.write_text(opensak.temp_dir() .. "/caches.html", page)
+---```
+---@param spec {title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string} See above.
+---@return string # The page.
+function opensak.html.page(spec) end
 
 opensak.date = {}
 

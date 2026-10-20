@@ -1,4 +1,9 @@
--- export_filters_to_gpx.lua — one GPX file per filter
+-- OpenSAK Macro
+-- Name: Export filters to GPX
+-- Author: OpenSAK
+-- Version: 1.0
+-- Requires-API: 2
+-- Description: One GPX file per filter
 --
 -- Applies each filter in FILTERS in turn and exports the caches it shows
 -- to <label>.gpx in OpenSAK's temp folder (opensak.temp_dir(), write

@@ -31,11 +31,15 @@ from __future__ import annotations
 
 import base64
 import binascii
+import codecs
 import csv
+import fnmatch
 import functools
 import io
+import json
 import locale
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -153,6 +157,7 @@ from opensak.macro.permissions import (
     FolderPermission,
     approvable_folder,
     check_access,
+    expand_path,
     grant_permanently,
     load_permissions,
     macros_dir,
@@ -215,11 +220,17 @@ EXPORT_KEYS = frozenset({
     "if_exists", "target", "device",
 })
 EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
+# opensak.import_gsak(): the keys of its options table, and how many cache
+# errors per database its report lists.
+GSAK_IMPORT_KEYS = ("databases", "exclude", "target", "if_exists", "create",
+                    "filters", "locations", "quiet")
+GSAK_REPORT_MAX_ERRORS = 20
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
 WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
 MAX_WRITE_BYTES = 20 * 1024 * 1024
+
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
     "table": {"columns": "columns", "link": "link", "caption": "caption", "bars": "bars",
@@ -237,6 +248,14 @@ STATS_OPTIONS = {
     "pivot": {"rows": "rows_order", "cols": "cols_order", "sum": "sum"},
     "every": {"first": "first", "last": "last", "date": "date_field"},
 }
+
+# opensak.read_text(): the largest file, and the encodings it reads (GSAK
+# macros often wrote files in the Windows code page).
+MAX_READ_BYTES = 10 * 1024 * 1024
+READ_TEXT_ENCODINGS = ("utf-8", "latin-1", "cp1252")
+# opensak.list_dir(): most entries returned; a pattern narrows a big folder.
+MAX_DIR_ENTRIES = 10_000
+
 # opensak.exit(code): highest accepted exit code (portable process exit codes)
 MAX_EXIT_CODE = 255
 
@@ -643,6 +662,12 @@ class MacroHost(Protocol):
         """Name of the active filter ("" = none) — the {filter} variable of
         an export file name."""
 
+    def active_filterset(self) -> FilterSet:
+        """The whole active filter as one FilterSet — the advanced filter
+        combined with any quick filter or search box — so that applying it
+        with apply_filter() shows the same caches. Empty when no filter is
+        active."""
+
     def set_sort(self, sort: SortSpec) -> None:
         """Sort the cache list, like a click on a column header (also when
         the column is hidden). filtered_caches() must return the new order
@@ -746,6 +771,15 @@ class MacroHost(Protocol):
 
     def refresh(self) -> None:
         """Apply the refreshes deferred so far and redraw the grid now."""
+
+    # Optional too: told after opensak.import_gsak() changed OpenSAK's user
+    # locations or filter profiles, so lists showing them can reload.
+
+    def locations_changed(self) -> None:
+        """User locations were added or replaced."""
+
+    def filter_profiles_changed(self) -> None:
+        """Filter profiles were added or replaced."""
 
 
 class ProgressHandle(Protocol):
@@ -907,6 +941,38 @@ def _near_filter(value: Any) -> DistanceFilter:
     else:
         lat, lon = resolve_coords(opts.get("lat"), opts.get("lon"))
     return DistanceFilter(lat, lon, op="at_most", dist1_km=km)
+
+
+# opensak.save_filter(): marks (and versions) the string it returns
+_SAVED_FILTER_KEY = "opensak_filter"
+_SAVED_FILTER_VERSION = 1
+
+
+def _parse_saved_filter(saved: Any) -> tuple[FilterSet, str]:
+    """The filter and its name from a string returned by
+    opensak.save_filter()."""
+    bad = MacroError(
+        "opensak.restore_filter expects a string returned by opensak.save_filter()"
+    )
+    if not isinstance(saved, str):
+        raise bad
+    try:
+        data = json.loads(saved)
+    except ValueError:
+        raise bad from None
+    if not isinstance(data, dict) or _SAVED_FILTER_KEY not in data:
+        raise bad
+    if data[_SAVED_FILTER_KEY] != _SAVED_FILTER_VERSION:
+        raise MacroError(
+            "opensak.restore_filter: the filter was saved by a newer OpenSAK"
+        )
+    name, spec = data.get("name", ""), data.get("filter")
+    if not isinstance(name, str) or not isinstance(spec, dict):
+        raise bad
+    try:
+        return FilterSet.from_dict(spec), name
+    except (TypeError, ValueError, KeyError, AttributeError):
+        raise bad from None
 
 
 def _owned_filter(value: Any) -> OwnerFilter:
@@ -1386,6 +1452,24 @@ class MacroRuntime:
             raise MacroError("opensak.filter_profile expects the profile name")
         profile = self._load_profile(name)
         return self._host.apply_filter(profile.filterset, profile.name)
+
+    def _save_filter(self) -> str:
+        fs = self._host.active_filterset()
+        return json.dumps(
+            {
+                _SAVED_FILTER_KEY: _SAVED_FILTER_VERSION,
+                "name": self._host.filter_name() if len(fs) else "",
+                "filter": fs.to_dict(),
+            },
+            ensure_ascii=False, separators=(",", ":"),
+        )
+
+    def _restore_filter(self, saved=None) -> int:
+        fs, name = _parse_saved_filter(saved)
+        if not len(fs):
+            self._host.clear_filter()
+            return self._host.cache_count()
+        return self._host.apply_filter(fs, name)
 
     def _profile_names(self) -> list[str]:
         names = []
@@ -2054,18 +2138,214 @@ class MacroRuntime:
             self._host.caches_removed()
         return count
 
+    # opensak.import_gsak(): the GSAK import dialog without its questions
+    # (importer/gsak_import_service.py). What the dialog asks is decided by
+    # the options up front; the folder and write approvals still apply.
+
+    def _import_gsak(self, lua, source=None, options=None):
+        func = "opensak.import_gsak"
+        from opensak.importer import gsak_import_service as service
+
+        # It writes through its own sessions, which would wait for the
+        # transaction's write lock.
+        self._no_transaction(func)
+        if not isinstance(source, str) or not source.strip():
+            raise MacroError(f"{func} expects the path of a GSAK backup .zip, "
+                             "GSAK folder or .db3 file")
+        opts = self._gsak_import_options(func, options)
+        quiet = bool(opts.pop("quiet", False))
+        settings = service.GsakImportOptions(**opts)
+        self._require_write(func)
+
+        # %APPDATA%\gsak, $HOME/... — as the folder permissions expand them.
+        path = expand_path(source.strip())
+        if not path.is_absolute():
+            path = (self._base_dir or macros_dir()) / path
+        if not path.exists():
+            raise MacroError(f"{func}: {path} does not exist")
+        # GSAK databases are SQLite files, which the file functions never
+        # read; this one only hands them to the importer, which opens them
+        # read-only. A folder is approved as a whole, not per database.
+        self._check_access(path / service.GSAK_SETTINGS_DB_NAME if path.is_dir() else path,
+                           write=False, allow_database=True)
+
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            handle = self._host.progress("GSAK import", 0)
+            self._progress_windows.append(handle)
+        cancelled = False
+
+        def on_progress(text: str, done: int, total: int) -> None:
+            nonlocal cancelled
+            if handle is not None:
+                shown = f"{text}: {done} / {total}" if total else text
+                if not handle.update(None, shown):
+                    cancelled = True
+
+        try:
+            report = service.run_gsak_import(
+                path, settings,
+                progress_cb=on_progress,
+                cancel_cb=lambda: cancelled or self._cancelled.is_set(),
+                check_file=lambda p: self._check_access(p, write=False, allow_database=True),
+            )
+        except service.GsakImportError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
+
+        self._gsak_import_notify(report)
+        if not quiet:
+            for line in report.summary_lines():
+                self._output(line)
+        self._check_cancelled()
+        return self._gsak_report_table(lua, report)
+
+    @staticmethod
+    def _gsak_import_options(func: str, options: Any) -> dict[str, Any]:
+        """The options table of opensak.import_gsak() as GsakImportOptions
+        keyword arguments (plus `quiet`)."""
+        from opensak.importer.gsak_import_service import IF_EXISTS, settings_mode
+
+        if options is None:
+            return {}
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "merge" }}')
+        raw = {k: _from_lua(v) for k, v in options.items()}
+        unknown = set(raw) - set(GSAK_IMPORT_KEYS)
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                             f"valid: {', '.join(GSAK_IMPORT_KEYS)}")
+        result: dict[str, Any] = {}
+
+        def names(key: str) -> list[str]:
+            value = raw[key]
+            values = [value] if isinstance(value, str) else ([] if value == {} else value)
+            if not isinstance(values, list) or not all(
+                    isinstance(v, str) and v.strip() for v in values):
+                raise MacroError(f'{func}: {key} must be a name or a list of names, '
+                                 f'e.g. {{"AllCH", "Holidays"}}')
+            return [v.strip() for v in values]
+
+        if "databases" in raw:
+            result["databases"] = names("databases")
+        if "exclude" in raw:
+            result["exclude"] = names("exclude")
+        if "target" in raw:
+            target = raw["target"]
+            if isinstance(target, str) and target.strip():
+                result["target"] = target.strip()
+            elif isinstance(target, dict) and target and all(
+                    isinstance(k, str) and isinstance(v, str) and v.strip()
+                    for k, v in target.items()):
+                result["targets"] = {k: v.strip() for k, v in target.items()}
+            else:
+                raise MacroError(f'{func}: target must be a database name, or a table '
+                                 f'of GSAK name = database name, e.g. {{ AllCH = "Switzerland" }}')
+        if_exists = raw.get("if_exists", "skip")
+        if if_exists not in IF_EXISTS:
+            raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, "
+                             f"got {if_exists!r}")
+        result["if_exists"] = if_exists
+        for key in ("filters", "locations"):
+            value = raw.get(key, False)
+            if value is True:
+                result[key] = settings_mode(if_exists)
+            elif value in ("skip", "overwrite"):
+                result[key] = value
+            elif value is not False:
+                raise MacroError(f'{func}: {key} must be true, false, "skip" or '
+                                 f'"overwrite", got {value!r}')
+        for key in ("create", "quiet"):
+            if key in raw:
+                if not isinstance(raw[key], bool):
+                    raise MacroError(f"{func}: {key} must be true or false")
+                result[key] = raw[key]
+        return result
+
+    def _gsak_import_notify(self, report) -> None:
+        """Tell the host what the import changed, like the dialog's signals."""
+        from opensak.importer.gsak_import_service import ACTION_OVERWRITTEN
+
+        if report.new_databases:
+            self._host.database_list_changed()
+        active = [d for d in report.databases if d.active and d.result is not None]
+        if any(d.action == ACTION_OVERWRITTEN for d in active):
+            self._host.caches_removed()
+        elif any(d.result.created or d.result.updated for d in active):
+            self._host.caches_changed([], True)
+        loc = report.locations
+        if loc is not None and (loc.added or loc.updated):
+            notify = getattr(self._host, "locations_changed", None)
+            if callable(notify):
+                notify()
+        if report.filters is not None and report.filters.written:
+            notify = getattr(self._host, "filter_profiles_changed", None)
+            if callable(notify):
+                notify()
+
+    @staticmethod
+    def _gsak_report_table(lua, report):
+        databases = []
+        for d in report.databases:
+            row: dict[str, Any] = {"gsak": d.gsak_name, "target": d.target,
+                                   "action": d.action, "cleared": d.cleared}
+            if d.reason:
+                row["reason"] = d.reason
+            r = d.result
+            if r is not None:
+                row.update(
+                    created=r.created, updated=r.updated, skipped=r.skipped,
+                    waypoints=r.waypoints, logs=r.logs, attributes=r.attributes,
+                    notes=r.notes, trackables=r.trackables, corrected=r.corrected,
+                    note_images=r.note_images_replaced, warnings=len(r.warnings),
+                    errors=lua.table_from(r.errors[:GSAK_REPORT_MAX_ERRORS]),
+                )
+            databases.append(lua.table_from(row))
+        result: dict[str, Any] = {
+            "ok": report.ok,
+            "cancelled": report.cancelled,
+            "source": str(report.source),
+            "kind": report.kind,
+            "created": report.total("created"),
+            "updated": report.total("updated"),
+            "skipped": report.total("skipped"),
+            "errors": report.errors,
+            "databases": lua.table_from(databases),
+            "new_databases": lua.table_from(report.new_databases),
+            "notes": lua.table_from(report.notes),
+        }
+        if report.locations is not None:
+            loc = report.locations
+            result["locations"] = lua.table_from({
+                "added": len(loc.added), "updated": len(loc.updated),
+                "skipped": len(loc.skipped), "invalid": report.locations_invalid,
+            })
+        elif report.locations_error:
+            result["locations"] = lua.table_from({"error": report.locations_error})
+        if report.filters is not None:
+            f = report.filters
+            result["filters"] = lua.table_from({
+                "imported": f.written, "skipped": f.skipped, "failed": f.failed,
+            })
+        elif report.filters_error:
+            result["filters"] = lua.table_from({"error": report.filters_error})
+        return lua.table_from(result)
+
     def _confirm(self, message=None) -> bool:
         if not isinstance(message, str) or not message.strip():
             raise MacroError("opensak.confirm expects a message")
         return bool(self._host.confirm(message))
 
-    def _readable_file(self, path: str) -> Path:
+    def _readable_file(self, path: str, allow_database: bool = False) -> Path:
         """*path* resolved against the macro's folder and checked against the
         folder permissions (asking the user for an unapproved folder)."""
         file = Path(path).expanduser()
         if not file.is_absolute():
             file = (self._base_dir or macros_dir()) / file
-        return self._check_access(file, write=False)
+        return self._check_access(file, write=False, allow_database=allow_database)
 
     def _read_csv(self, lua, path=None, sep=None):
         if not isinstance(path, str) or not path.strip():
@@ -2348,6 +2628,102 @@ class MacroRuntime:
         if body is not None:
             parts.extend(body if isinstance(body, list) else [body])
         return self._report_call(func, report_html.page, parts, **opts)
+
+    def _read_text(self, path=None, options=None) -> str:
+        func = "opensak.read_text"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a file path")
+        opts = {} if options is None else _from_lua(options)
+        if not isinstance(opts, dict) or set(opts) - {"encoding"}:
+            raise MacroError(f'{func}: options must be a table, e.g. {{ encoding = "cp1252" }}')
+        names = ", ".join(f'"{e}"' for e in READ_TEXT_ENCODINGS)
+        encoding = opts.get("encoding", "utf-8")
+        try:
+            codec = codecs.lookup(encoding).name if isinstance(encoding, str) else None
+        except LookupError:
+            codec = None
+        # "latin1", "UTF8", "windows-1252", ... name the same codecs.
+        if codec not in {codecs.lookup(e).name for e in READ_TEXT_ENCODINGS}:
+            raise MacroError(f"{func}: encoding must be one of {names}, got {encoding!r}")
+        file = self._readable_file(path.strip())
+        try:
+            if file.is_dir():
+                raise MacroError(f"{func}: {file} is a folder — use opensak.list_dir()")
+            if file.stat().st_size > MAX_READ_BYTES:
+                raise MacroError(
+                    f"{func}: {file.name} is larger than "
+                    f"{MAX_READ_BYTES // (1024 * 1024)} MB"
+                )
+            data = file.read_bytes()
+        except FileNotFoundError:
+            raise MacroError(f"{func}: file not found: {file}") from None
+        except OSError as exc:
+            raise MacroError(f"cannot read {file}: {exc}") from None
+        try:
+            text = data.decode("utf-8-sig" if codec == "utf-8" else codec)
+        except UnicodeDecodeError as exc:
+            raise MacroError(
+                f"{func}: {file.name} is not UTF-8 text (byte {exc.start}); "
+                f'for a file from an older Windows program try {{ encoding = "cp1252" }}'
+            ) from None
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+
+    def _exists(self, func: str, path, folder: bool) -> bool:
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a {'folder' if folder else 'file'} path")
+        # Only asks whether it exists, so a database file (e.g. a GSAK
+        # sqlite.db3) can be checked; reading it is still refused.
+        target = self._readable_file(path.strip(), allow_database=True)
+        return target.is_dir() if folder else target.is_file()
+
+    def _list_dir(self, lua, folder=None, pattern=None):
+        func = "opensak.list_dir"
+        if not isinstance(folder, str) or not folder.strip():
+            raise MacroError(f"{func} expects a folder path")
+        if pattern is not None and (
+            not isinstance(pattern, str) or not pattern or "/" in pattern or "\\" in pattern
+        ):
+            raise MacroError(f'{func}: pattern must be a file name pattern such as "*.gpx"')
+        path = Path(folder.strip()).expanduser()
+        if not path.is_absolute():
+            path = (self._base_dir or macros_dir()) / path
+        try:
+            resolved = resolve_path(path)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {path}: {exc}") from None
+        # Listing a folder reads its entries: the permission (or the user's
+        # approval) is for the folder itself, as for a file in it.
+        self._check_access(resolved / "_", write=False)
+        if not resolved.is_dir():
+            raise MacroError(f"{func}: folder not found: {resolved}")
+        wanted = pattern.lower() if pattern else None
+        entries = []
+        try:
+            with os.scandir(resolved) as scan:
+                for entry in scan:
+                    if wanted and not fnmatch.fnmatchcase(entry.name.lower(), wanted):
+                        continue
+                    try:
+                        st = entry.stat()
+                    except OSError:
+                        continue    # a broken link, or gone since the scan
+                    if len(entries) == MAX_DIR_ENTRIES:
+                        raise MacroError(
+                            f"{func}: {resolved} has more than {MAX_DIR_ENTRIES} "
+                            'entries — pass a pattern such as "*.gpx"'
+                        )
+                    is_dir = entry.is_dir()
+                    entries.append({
+                        "name": entry.name,
+                        "path": str(resolved / entry.name),
+                        "dir": is_dir,
+                        "size": 0 if is_dir else st.st_size,
+                        "modified": int(st.st_mtime),
+                    })
+        except OSError as exc:
+            raise MacroError(f"cannot read {resolved}: {exc}") from None
+        entries.sort(key=lambda e: (e["name"].lower(), e["name"]))
+        return lua.table_from([lua.table_from(e) for e in entries])
 
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
         for name, value in (("title", title), ("filter", file_filter)):
@@ -3737,6 +4113,39 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._host.clear_filter,
     ),
     ApiFunction(
+        name="save_filter",
+        description="The active filter (with its name, and any quick filter "
+                    "or search box) as a string, to put back later with "
+                    "opensak.restore_filter() — e.g. to leave the user's "
+                    "filter as it was after the macro filtered for its own "
+                    "work. Like GSAK's SaveFilter(). The sort order is not "
+                    "included. The string can be stored with "
+                    "opensak.settings.save(); don't build or change it.",
+        example='local saved = opensak.save_filter()\n'
+                'opensak.filter{ found = false }\n'
+                '-- ... work on the unfound caches ...\n'
+                'opensak.restore_filter(saved)',
+        since=3,
+        bind=lambda rt, lua: rt._save_filter,
+        returns=("string", "The saved filter; when no filter is active, "
+                           "restoring it clears the filter."),
+    ),
+    ApiFunction(
+        name="restore_filter",
+        description="Apply a filter saved with opensak.save_filter(), like "
+                    "GSAK's RestoreFilter(). As with opensak.filter{}, the "
+                    "view is left unchanged when nothing matches. A filter "
+                    "saved while none was active clears the filter.",
+        example='local saved = opensak.save_filter()\n'
+                'opensak.filter{ found = false }\n'
+                'opensak.restore_filter(saved)',
+        since=3,
+        bind=lambda rt, lua: rt._restore_filter,
+        params=(Param("saved", "string", "A string from opensak.save_filter()."),),
+        returns=("integer", "Number of matching caches (0 = view unchanged, "
+                            "unless the saved filter was empty)."),
+    ),
+    ApiFunction(
         name="count",
         description="The number of caches matching the active filter.",
         example='print(opensak.count() .. " caches shown")',
@@ -4112,6 +4521,51 @@ API: tuple[ApiFunction, ...] = (
         returns=("integer", "Number of caches copied."),
     ),
     ApiFunction(
+        name="import_gsak",
+        description="Import GSAK databases without any question (like File → "
+                    "Import GSAK database, with the answers given up front) "
+                    "and return what was done. *source* is a GSAK backup "
+                    ".zip, a GSAK folder (the install / data folder with "
+                    "`gsak.db3` and `data/<name>/sqlite.db3`, its `data` "
+                    "folder, or one database's folder), a single `.db3` "
+                    "cache database (just that database), or `gsak.db3` "
+                    "(only user locations and saved filters). A relative "
+                    "path is resolved against the macro file's folder, and "
+                    "environment variables such as `%APPDATA%` are expanded; the "
+                    "folder needs read permission. Each GSAK database goes "
+                    "into the OpenSAK database of the same name, created if "
+                    "missing, unless `target` says otherwise. For an "
+                    "OpenSAK database that exists, `if_exists` decides: "
+                    "`\"skip\"` (default), `\"merge\"` (new caches added, "
+                    "existing ones updated, locked caches kept) or "
+                    "`\"overwrite\"` (emptied first). `filters` and "
+                    "`locations` also import the saved filters and user "
+                    "locations of `gsak.db3`; `true` skips the ones whose "
+                    "name exists when `if_exists` is `\"skip\"` and "
+                    "replaces them otherwise. Embedded note images are "
+                    "replaced by placeholders without asking. A database "
+                    "that fails is reported and the others are still "
+                    "imported. The summary is printed (unless `quiet`) and "
+                    "written to the log file.",
+        example='local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {\n'
+                '  databases = {"AllCH", "Holidays"}, if_exists = "merge",\n'
+                '  locations = true })\n'
+                'for _, db in ipairs(r.databases) do\n'
+                '  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)\n'
+                'end\n'
+                'if not r.ok then opensak.exit(1) end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._import_gsak(lua, *a),
+        params=(
+            Param("source", "string", "GSAK backup .zip, GSAK folder or .db3 file."),
+            Param("options", "opensak.GsakImportOptions",
+                  "databases, exclude, target, if_exists, create, filters, "
+                  "locations, quiet.", optional=True),
+        ),
+        returns=("opensak.GsakImportReport", "What was imported, per database."),
+        write=True,
+    ),
+    ApiFunction(
         name="set_corrected",
         description="Set corrected coordinates, either as decimal degrees or "
                     "as one coordinate string in any format OpenSAK "
@@ -4376,6 +4830,75 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("string", "The file written (full path)."),
+    ),
+    ApiFunction(
+        name="read_text",
+        description="Read a whole text file, of any file type. A relative "
+                    "path is resolved against the macro file's folder. The "
+                    "folder needs read permission; for an unapproved one the "
+                    "user is asked first. UTF-8 unless `encoding` says "
+                    "otherwise (" + ", ".join(f'`"{e}"`' for e in READ_TEXT_ENCODINGS)
+                    + "); a UTF-8 byte order mark is removed and line endings "
+                    "become `\"\\n\"`. At most "
+                    f"{MAX_READ_BYTES // (1024 * 1024)} MB.",
+        example='local text = opensak.read_text("notes.txt")\n'
+                'for line in text:gmatch("[^\\n]+") do\n'
+                "    print(line)\nend",
+        since=3,
+        bind=lambda rt, lua: rt._read_text,
+        params=(
+            Param("path", "string", "The file to read."),
+            Param("options", "{encoding?: string}",
+                  '`encoding`: e.g. `"cp1252"` for a file from an older Windows program.',
+                  optional=True),
+        ),
+        returns=("string", "The file's text."),
+    ),
+    ApiFunction(
+        name="file_exists",
+        description="Whether a file exists (false for a folder). A relative "
+                    "path is resolved against the macro file's folder. The "
+                    "folder needs read permission, like opensak.read_text().",
+        example='if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then\n'
+                '    print("no report yet")\nend',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._exists("opensak.file_exists", path, False),
+        params=(Param("path", "string", "The file."),),
+        returns=("boolean", "true if the file exists."),
+    ),
+    ApiFunction(
+        name="folder_exists",
+        description="Whether a folder exists. A relative path is resolved "
+                    "against the macro file's folder. The folder containing "
+                    "it needs read permission.",
+        example='if opensak.folder_exists("C:/GPX") then print("found") end',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._exists("opensak.folder_exists", path, True),
+        params=(Param("path", "string", "The folder."),),
+        returns=("boolean", "true if the folder exists."),
+    ),
+    ApiFunction(
+        name="list_dir",
+        description="The files and folders in a folder (not in its "
+                    "subfolders), sorted by name. A relative path is resolved "
+                    "against the macro file's folder. The folder needs read "
+                    "permission; for an unapproved one the user is asked "
+                    "first. `pattern` keeps the names that match it, ignoring "
+                    "case: `*` stands for any text, `?` for one character. At "
+                    f"most {MAX_DIR_ENTRIES:,} entries. Each entry has `name`, "
+                    "`path` (full path), `dir` (true for a folder), `size` "
+                    "(bytes, 0 for a folder) and `modified` (seconds since the "
+                    "epoch, like `os.time()`).",
+        example='for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do\n'
+                '    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))\nend',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._list_dir(lua, *a),
+        params=(
+            Param("folder", "string", "The folder."),
+            Param("pattern", "string", 'A file name pattern, e.g. "*.gpx".', optional=True),
+        ),
+        returns=("{name: string, path: string, dir: boolean, size: integer, modified: integer}[]",
+                 "One table per entry."),
     ),
     ApiFunction(
         name="export_file",

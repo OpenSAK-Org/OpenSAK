@@ -204,6 +204,20 @@ _MACRO_ROW_REFRESH_LIMIT = 50
 _MACRO_REFRESH_WAIT_S = 10.0
 
 
+def _find_line_polygon_filter(filterset: FilterSet):
+    """The first LinePolygonFilter in *filterset* (nested sets included),
+    or None. The filter dialog builds at most one."""
+    from opensak.filters.engine import LinePolygonFilter
+    for f in filterset._filters:
+        if isinstance(f, LinePolygonFilter):
+            return f
+        if isinstance(f, FilterSet):
+            found = _find_line_polygon_filter(f)
+            if found is not None:
+                return found
+    return None
+
+
 class MainWindow(QMainWindow):
     # #959: the back-up-on-exit flow. While a backup runs the controller is
     # kept here; once it says "close", the second close skips the prompt.
@@ -260,6 +274,8 @@ class MainWindow(QMainWindow):
         self._setup_toolbar()
         self._setup_shortcut_registry()
         self._apply_saved_shortcuts()
+        self._macro_shortcut_actions: list[QAction] = []
+        self._apply_macro_shortcuts()
         self._setup_search_bar()
         self._setup_statusbar()
         self._restore_state()
@@ -332,8 +348,9 @@ class MainWindow(QMainWindow):
 
         # Map widget
         from opensak.gui.map_widget import MapWidget
-        self._map_widget = MapWidget()
+        self._map_widget = MapWidget(draw_button=True)
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
+        self._map_widget.filter_by_shape_requested.connect(self._filter_by_map_shape)
         self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
         self._map_widget.maximize_requested.connect(self._toggle_maximize_map)
         self._map_widget.popout_requested.connect(self._toggle_popout_map)
@@ -609,6 +626,10 @@ class MainWindow(QMainWindow):
         act_run_macro = QAction(tr("action_run_macro"), self)
         act_run_macro.triggered.connect(self._open_macro_dialog)
         macros_menu.addAction(act_run_macro)
+
+        act_macro_manager = QAction(tr("action_macro_manager"), self)
+        act_macro_manager.triggered.connect(self._open_macro_manager)
+        macros_menu.addAction(act_macro_manager)
 
         from opensak.macro.examples import list_examples
         examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
@@ -1641,6 +1662,7 @@ class MainWindow(QMainWindow):
             time.monotonic() - _t0,
         )
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(map_caches)
             logger.info(
                 "mainwindow: map_widget.load_caches done (+%.2fs)",
@@ -2089,17 +2111,22 @@ class MainWindow(QMainWindow):
     # ── Drag & drop ───────────────────────────────────────────────────────────
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Accept drag if it contains GPX or ZIP files."""
+        """Accept drag if it contains GPX or ZIP files, or folders."""
+        from pathlib import Path
+
         mime = event.mimeData()
         if mime.hasUrls():
             paths = [u.toLocalFile() for u in mime.urls()]
-            if any(p.lower().endswith((".gpx", ".zip", ".loc")) for p in paths):
+            if any(
+                p.lower().endswith((".gpx", ".zip", ".loc")) or (p and Path(p).is_dir())
+                for p in paths
+            ):
                 event.acceptProposedAction()
                 return
         event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """Open import dialog with dropped GPX/ZIP files pre-loaded."""
+        """Open import dialog with dropped GPX/ZIP files or folders pre-loaded."""
         from pathlib import Path
         from opensak.gui.dialogs.import_dialog import ImportDialog
 
@@ -2112,14 +2139,14 @@ class MainWindow(QMainWindow):
             Path(u.toLocalFile())
             for u in event.mimeData().urls()
             if u.toLocalFile().lower().endswith((".gpx", ".zip", ".loc"))
+            or (u.toLocalFile() and Path(u.toLocalFile()).is_dir())
         ]
         if not paths:
             event.ignore()
             return
 
         event.acceptProposedAction()
-        dlg = ImportDialog(self)
-        dlg.add_files(paths)
+        dlg = ImportDialog(self, paths=paths)
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
@@ -2931,7 +2958,8 @@ class MainWindow(QMainWindow):
             return
         self._show_filter_dialog(self._current_filterset, self._active_filter_name)
 
-    def _show_filter_dialog(self, filterset, active_name: str) -> None:
+    def _show_filter_dialog(self, filterset, active_name: str,
+                            initial_tab: Optional[str] = None) -> None:
         """Åbn "Set filter"-dialogen forudfyldt med et givet filterset/navn.
 
         Delt af den normale menu-indgang (_open_filter_dialog) og af
@@ -2942,11 +2970,51 @@ class MainWindow(QMainWindow):
         dlg = FilterDialog(
             self, filterset, active_name,
             current_cache=self._cache_table.selected_cache(),
+            map_caches=self._map_widget.loaded_caches(),
+            initial_tab=initial_tab,
         )
         dlg.filter_applied.connect(self._on_filter_applied)
         dlg.profile_deleted.connect(self._on_profile_deleted)
         dlg.profile_saved.connect(self._on_profile_saved)
         dlg.exec()
+
+    def _update_map_filter_shape(self) -> None:
+        """Show the active filter's line/polygon shape on the map (or remove
+        it when the active filter has none)."""
+        lp = _find_line_polygon_filter(self._current_filterset)
+        if lp is None:
+            self._map_widget.set_filter_shape(None)
+        else:
+            self._map_widget.set_filter_shape(lp.mode, lp.points)
+
+    def _filter_by_map_shape(self, mode: str, points: list) -> None:
+        """"Filter by this shape" on the map: open "Set filter" with the
+        active filter's criteria plus the drawn shape in the Line/Polygon
+        tab. The distance and "Exclude" of an active line/polygon filter are
+        kept; it is the shape that is replaced."""
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.filters.engine import FilterSet, LinePolygonFilter
+        from opensak.filters.line_polygon import format_points_text
+        from opensak.gui.dialogs.filter_dialog import _LP_DEFAULT_DISTANCE
+        active = self._current_filterset
+        filterset = FilterSet(active.mode, active.negate)
+        distance_km = _LP_DEFAULT_DISTANCE * (1.60934 if get_settings().use_miles else 1.0)
+        exclude = False
+        for f in active._filters:
+            if isinstance(f, LinePolygonFilter):
+                distance_km, exclude = f.distance_km, f.exclude
+            else:
+                filterset.add(f)
+        try:
+            filterset.add(LinePolygonFilter(
+                points, mode, distance_km, exclude=exclude,
+                text=format_points_text(mode, points),
+            ))
+        except ValueError:
+            return  # too few points — the map only offers this for valid shapes
+        self._show_filter_dialog(filterset, "", initial_tab="line_polygon")
 
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
@@ -2986,6 +3054,7 @@ class MainWindow(QMainWindow):
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:
@@ -3174,6 +3243,7 @@ class MainWindow(QMainWindow):
             )
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
         count = self._cache_table.row_count()
         if count == 1:
@@ -3414,6 +3484,101 @@ class MainWindow(QMainWindow):
         self._macro_dialog.raise_()
         self._macro_dialog.activateWindow()
 
+    def _macro_manager_instance(self):
+        """The Macro manager window, created (hidden) on first use: macro
+        shortcuts run through it, so their output is there to look at."""
+        from opensak.gui.dialogs.macro_manager import MacroManagerDialog
+        if getattr(self, "_macro_manager", None) is None:
+            self._macro_manager = MacroManagerDialog(
+                host=self, parent=self,
+                taken_shortcuts=self._taken_shortcuts,
+                shortcuts_changed=self._apply_macro_shortcuts,
+                edit_macro=self._edit_macro,
+            )
+        return self._macro_manager
+
+    def _open_macro_manager(self) -> None:
+        manager = self._macro_manager_instance()
+        manager.reload()
+        manager.show()
+        manager.raise_()
+        manager.activateWindow()
+
+    def _edit_macro(self, path, error: Optional[str] = None) -> None:
+        """Open macro *path* in the editor (asking about unsaved changes
+        there), marking the line of the Lua *error* if given."""
+        self._open_macro_dialog()
+        if self._macro_dialog.open_path(path) and error:
+            self._macro_dialog.show_error(error)
+
+    def _apply_macro_shortcuts(self) -> None:
+        """(Re)create the main window actions behind the macro shortcuts
+        set in the Macro manager."""
+        from pathlib import Path
+        from opensak.macro.shortcuts import macro_shortcuts
+        from opensak.utils import flags
+        for act in self._macro_shortcut_actions:
+            self.removeAction(act)
+            act.deleteLater()
+        self._macro_shortcut_actions = []
+        if not flags.lua_macros:
+            return
+        for path, seq in macro_shortcuts().items():
+            act = QAction(path.stem, self)
+            act.setShortcut(QKeySequence(seq))
+            act.setData(str(path))
+            act.triggered.connect(lambda _=False, p=Path(path): self._run_macro_shortcut(p))
+            self.addAction(act)
+            self._macro_shortcut_actions.append(act)
+
+    def _taken_shortcuts(self, exclude) -> dict[str, str]:
+        """Shortcuts in use in the main window (portable text → the action
+        or macro using it), except that of macro *exclude*."""
+        from pathlib import Path
+        from PySide6.QtGui import QShortcut
+        from opensak.macro.metadata import read_metadata
+        portable = QKeySequence.SequenceFormat.PortableText
+        taken: dict[str, str] = {}
+        for act in self.findChildren(QAction):
+            if act in self._macro_shortcut_actions:
+                if Path(act.data()) == Path(exclude):
+                    continue
+                label = read_metadata(Path(act.data())).name
+            else:
+                label = act.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
+            for seq in act.shortcuts():
+                taken.setdefault(seq.toString(portable), label.strip())
+        for shortcut in self.findChildren(QShortcut):
+            if not shortcut.key().isEmpty():
+                taken.setdefault(shortcut.key().toString(portable), shortcut.whatsThis() or "OpenSAK")
+        return {k: v for k, v in taken.items() if k}
+
+    def _run_macro_shortcut(self, path) -> None:
+        """Run a macro from its shortcut. The output goes to the Macro
+        manager; with that window closed, the status bar says the macro
+        finished, and an error is shown with the choice to edit the macro."""
+        manager = self._macro_manager_instance()
+        if manager.isVisible():
+            manager.select_path(path)
+            manager.run_path(path)
+            return
+        error = manager.run_path(path, parent=self)
+        if error is None:
+            self._statusbar.showMessage(tr("macro_mgr_shortcut_done", name=path.name), 5000)
+            return
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("macro_mgr_title"),
+                          tr("macro_mgr_shortcut_failed", name=path.name), parent=self)
+        box.setInformativeText(error)
+        btn_edit = box.addButton(tr("edit"), QMessageBox.ButtonRole.AcceptRole)
+        btn_output = box.addButton(tr("macro_mgr_show_output"), QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if box.clickedButton() is btn_edit:
+            self._edit_macro(path, error)
+        elif box.clickedButton() is btn_output:
+            self._open_macro_manager()
+            manager.select_path(path)
+
     def _open_macro_example(self, name: str) -> None:
         """Copy a shipped example into the macros folder and open the copy."""
         self._open_macro_dialog()
@@ -3456,6 +3621,11 @@ class MainWindow(QMainWindow):
     def filter_name(self) -> str:
         """MacroHost: name of the active filter ("" = none)."""
         return self._active_filter_name
+
+    def active_filterset(self) -> FilterSet:
+        """MacroHost: the whole active filter, quick filter and search boxes
+        included (opensak.save_filter)."""
+        return self._build_active_filterset()
 
     def set_sort(self, sort) -> None:
         """MacroHost: sort the list like a column-header click. filtered_caches()
@@ -3648,6 +3818,14 @@ class MainWindow(QMainWindow):
         deadline = time.monotonic() + _MACRO_REFRESH_WAIT_S
         while generation in self._refresh_started_at and time.monotonic() < deadline:
             QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    def locations_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() changed the user locations."""
+        self._on_home_points_imported()
+
+    def filter_profiles_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() wrote filter profiles."""
+        self._on_filter_profiles_imported()
 
     def end_macro(self) -> None:
         """MacroHost: refresh what the macro's cache changes affect. A

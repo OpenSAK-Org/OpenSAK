@@ -1,4 +1,9 @@
--- export_with_form.lua — choose export options in a GSAK-style form, then export the list
+-- OpenSAK Macro
+-- Name: Export with form
+-- Author: OpenSAK
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Choose export options in a GSAK-style form, then export the list
 --
 -- Shows a form in the absolute layout, as GSAK's form designer builds it:
 -- every control has its own position, grouped in frames, with the form's

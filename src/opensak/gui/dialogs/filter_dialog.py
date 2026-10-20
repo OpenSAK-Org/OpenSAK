@@ -67,7 +67,9 @@ from opensak.filters.engine import (
     LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
-from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
+from opensak.filters.line_polygon import (
+    LP_MIN_POINTS, format_point, format_points_text, parse_points_text, read_points_file,
+)
 
 
 # ── Groundspeak attribut definitioner ─────────────────────────────────────────
@@ -550,10 +552,6 @@ _FAV_DEFAULT_OP, _FAV_DEFAULT_PTS = "at_least", 10
 _ELEV_DEFAULT_OP, _ELEV_DEFAULT_M = "at_least", 1000.0
 
 
-def _format_lp_point(point: tuple[float, float]) -> str:
-    return f"{point[0]:.6f}, {point[1]:.6f}"
-
-
 def _qdate_to_date(qdate: QDate) -> date:
     return date(qdate.year(), qdate.month(), qdate.day())
 
@@ -768,8 +766,12 @@ class FilterDialog(QDialog):
                                     # and then closes the dialog without clicking Apply.
 
     def __init__(self, parent=None, current_filterset: Optional[FilterSet] = None,
-                 last_profile_name: str = "", current_cache=None):
+                 last_profile_name: str = "", current_cache=None,
+                 map_caches: Optional[list] = None, initial_tab: Optional[str] = None):
+        """*map_caches* are shown as context in the Line/Polygon tab's
+        "Draw on map" dialog; *initial_tab* ("line_polygon") opens that tab."""
         super().__init__(parent)
+        self._map_caches = map_caches or []
         self.setWindowTitle(tr("filter_dialog_title"))
         self._attr_boxes: dict[int, tuple] = {}
         # attr_id -> (table row, name item, folded search text)
@@ -822,6 +824,8 @@ class FilterDialog(QDialog):
                     break
         elif current_filterset:
             self._load_filterset(current_filterset)
+        if initial_tab == "line_polygon":
+            self._tabs.setCurrentWidget(self._line_polygon_tab)
 
     # ── UI bygning ────────────────────────────────────────────────────────────
 
@@ -1423,10 +1427,17 @@ class FilterDialog(QDialog):
         self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         left.addWidget(self._lp_text, 1)
 
+        lp_btn_row = QHBoxLayout()
         flagged_btn = QPushButton(tr("filter_lp_add_flagged_btn"))
         flagged_btn.setAutoDefault(False)
         flagged_btn.clicked.connect(self._add_flagged_points)
-        left.addWidget(flagged_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        lp_btn_row.addWidget(flagged_btn)
+        draw_btn = QPushButton(tr("filter_lp_draw_btn"))
+        draw_btn.setAutoDefault(False)
+        draw_btn.clicked.connect(self._draw_lp_on_map)
+        lp_btn_row.addWidget(draw_btn)
+        lp_btn_row.addStretch()
+        left.addLayout(lp_btn_row)
 
         file_group = QGroupBox(tr("filter_lp_file_group"))
         file_layout = QVBoxLayout(file_group)
@@ -2397,6 +2408,28 @@ class FilterDialog(QDialog):
             return
         self._add_lp_lines([f"W,{code}" for code in codes])
 
+    def _draw_lp_on_map(self) -> None:
+        """Draw/edit the tab's shape in MapDrawDialog; on OK the drawn
+        points replace the list and the filter type follows the drawing."""
+        points, bad = self._lp_points()
+        if bad:
+            self._validate_line_polygon()  # names the unreadable lines
+            return
+        center = None
+        if self._current_cache is not None:
+            from opensak.filters.engine import effective_coords
+            lat, lon = effective_coords(self._current_cache)
+            if lat is not None and lon is not None:
+                center = (lat, lon)
+        from opensak.gui.dialogs.map_draw_dialog import MapDrawDialog
+        dlg = MapDrawDialog(self, self._lp_mode(), points, self._map_caches, center)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._add_lp_lines(
+            format_points_text(dlg.mode(), dlg.points()).splitlines(), replace=True,
+        )
+        self._lp_mode_buttons[dlg.mode()].setChecked(True)
+
     def _load_points_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, tr("filter_lp_file_group"), "", tr("filter_lp_file_filter"),
@@ -2412,7 +2445,7 @@ class FilterDialog(QDialog):
             QMessageBox.warning(self, tr("warning"), tr("filter_lp_file_no_points"))
             return
         self._add_lp_lines(
-            [_format_lp_point(p) for p in points],
+            [format_point(p) for p in points],
             replace=self._lp_replace.isChecked(),
         )
 
@@ -3316,7 +3349,7 @@ class FilterDialog(QDialog):
                 self._set_ccd_distances(getattr(f, "dist1_m", 0.0), getattr(f, "dist2_m", 0.0))
             elif ftype == "line_polygon":
                 self._lp_text.setPlainText(
-                    f.text or "\n".join(_format_lp_point(p) for p in f.points)
+                    f.text or "\n".join(format_point(p) for p in f.points)
                 )
                 self._lp_mode_buttons[f.mode].setChecked(True)
                 from opensak.gui.settings import get_settings as _gs

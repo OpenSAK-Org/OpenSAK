@@ -18,6 +18,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.sort`](#opensaksort) | 2 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
+| [`opensak.save_filter`](#opensaksavefilter) | 3 |
+| [`opensak.restore_filter`](#opensakrestorefilter) | 3 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
 | [`opensak.cache`](#opensakcache) | 2 |
@@ -41,6 +43,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.switch_database`](#opensakswitchdatabase) | 2 |
 | [`opensak.move_caches`](#opensakmovecaches) | 2 |
 | [`opensak.copy_caches`](#opensakcopycaches) | 2 |
+| [`opensak.import_gsak`](#opensakimportgsak) | 3 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.update`](#opensakupdate) | 3 |
@@ -68,6 +71,10 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.resync`](#opensakresync) | 3 |
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.write_text`](#opensakwritetext) | 3 |
+| [`opensak.read_text`](#opensakreadtext) | 3 |
+| [`opensak.file_exists`](#opensakfileexists) | 3 |
+| [`opensak.folder_exists`](#opensakfolderexists) | 3 |
+| [`opensak.list_dir`](#opensaklistdir) | 3 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
 | [`opensak.export_gpx`](#opensakexportgpx) | 2 |
 | [`opensak.export_poi`](#opensakexportpoi) | 3 |
@@ -106,6 +113,11 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.text.digit_sum`](#opensaktextdigitsum) | 2 |
 | [`opensak.text.word_value`](#opensaktextwordvalue) | 2 |
 | [`opensak.text.normalize_name`](#opensaktextnormalizename) | 2 |
+| [`opensak.html.escape`](#opensakhtmlescape) | 3 |
+| [`opensak.html.table`](#opensakhtmltable) | 3 |
+| [`opensak.html.tiles`](#opensakhtmltiles) | 3 |
+| [`opensak.html.columns`](#opensakhtmlcolumns) | 3 |
+| [`opensak.html.page`](#opensakhtmlpage) | 3 |
 | [`opensak.date.parse`](#opensakdateparse) | 2 |
 | [`opensak.date.format`](#opensakdateformat) | 2 |
 | [`opensak.settings.load`](#opensaksettingsload) | 3 |
@@ -230,6 +242,51 @@ Example:
 
 ```lua
 opensak.clear_filter()
+```
+
+### opensak.save_filter
+
+```lua
+opensak.save_filter()
+```
+
+The active filter (with its name, and any quick filter or search box) as a string, to put back later with opensak.restore_filter() — e.g. to leave the user's filter as it was after the macro filtered for its own work. Like GSAK's SaveFilter(). The sort order is not included. The string can be stored with opensak.settings.save(); don't build or change it.
+
+Returns `string` — The saved filter; when no filter is active, restoring it clears the filter.
+
+Since API version 3.
+
+Example:
+
+```lua
+local saved = opensak.save_filter()
+opensak.filter{ found = false }
+-- ... work on the unfound caches ...
+opensak.restore_filter(saved)
+```
+
+### opensak.restore_filter
+
+```lua
+opensak.restore_filter(saved)
+```
+
+Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As with opensak.filter{}, the view is left unchanged when nothing matches. A filter saved while none was active clears the filter.
+
+Parameters:
+
+- `saved` (`string`) — A string from opensak.save_filter().
+
+Returns `integer` — Number of matching caches (0 = view unchanged, unless the saved filter was empty).
+
+Since API version 3.
+
+Example:
+
+```lua
+local saved = opensak.save_filter()
+opensak.filter{ found = false }
+opensak.restore_filter(saved)
 ```
 
 ### opensak.count
@@ -745,6 +802,37 @@ Example:
 
 ```lua
 local n = opensak.copy_caches("CH_Zurich", { codes = {"GC1", "GC2"}, if_exists = "replace" })
+```
+
+### opensak.import_gsak
+
+```lua
+opensak.import_gsak(source [, options])
+```
+
+Import GSAK databases without any question (like File → Import GSAK database, with the answers given up front) and return what was done. *source* is a GSAK backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and `data/<name>/sqlite.db3`, its `data` folder, or one database's folder), a single `.db3` cache database (just that database), or `gsak.db3` (only user locations and saved filters). A relative path is resolved against the macro file's folder, and environment variables such as `%APPDATA%` are expanded; the folder needs read permission. Each GSAK database goes into the OpenSAK database of the same name, created if missing, unless `target` says otherwise. For an OpenSAK database that exists, `if_exists` decides: `"skip"` (default), `"merge"` (new caches added, existing ones updated, locked caches kept) or `"overwrite"` (emptied first). `filters` and `locations` also import the saved filters and user locations of `gsak.db3`; `true` skips the ones whose name exists when `if_exists` is `"skip"` and replaces them otherwise. Embedded note images are replaced by placeholders without asking. A database that fails is reported and the others are still imported. The summary is printed (unless `quiet`) and written to the log file.
+
+Parameters:
+
+- `source` (`string`) — GSAK backup .zip, GSAK folder or .db3 file.
+- `options` (`opensak.GsakImportOptions`, optional) — databases, exclude, target, if_exists, create, filters, locations, quiet.
+
+Returns `opensak.GsakImportReport` — What was imported, per database.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+
+Example:
+
+```lua
+local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
+  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+  locations = true })
+for _, db in ipairs(r.databases) do
+  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
+end
+if not r.ok then opensak.exit(1) end
 ```
 
 ### opensak.set_corrected
@@ -1458,6 +1546,103 @@ Example:
 local path = opensak.write_text(opensak.temp_dir() .. "/report.html",
   "<h1>" .. opensak.count() .. " caches</h1>")
 print("written: " .. path)
+```
+
+### opensak.read_text
+
+```lua
+opensak.read_text(path [, options])
+```
+
+Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
+
+Parameters:
+
+- `path` (`string`) — The file to read.
+- `options` (`{encoding?: string}`, optional) — `encoding`: e.g. `"cp1252"` for a file from an older Windows program.
+
+Returns `string` — The file's text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local text = opensak.read_text("notes.txt")
+for line in text:gmatch("[^\n]+") do
+    print(line)
+end
+```
+
+### opensak.file_exists
+
+```lua
+opensak.file_exists(path)
+```
+
+Whether a file exists (false for a folder). A relative path is resolved against the macro file's folder. The folder needs read permission, like opensak.read_text().
+
+Parameters:
+
+- `path` (`string`) — The file.
+
+Returns `boolean` — true if the file exists.
+
+Since API version 3.
+
+Example:
+
+```lua
+if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then
+    print("no report yet")
+end
+```
+
+### opensak.folder_exists
+
+```lua
+opensak.folder_exists(path)
+```
+
+Whether a folder exists. A relative path is resolved against the macro file's folder. The folder containing it needs read permission.
+
+Parameters:
+
+- `path` (`string`) — The folder.
+
+Returns `boolean` — true if the folder exists.
+
+Since API version 3.
+
+Example:
+
+```lua
+if opensak.folder_exists("C:/GPX") then print("found") end
+```
+
+### opensak.list_dir
+
+```lua
+opensak.list_dir(folder [, pattern])
+```
+
+The files and folders in a folder (not in its subfolders), sorted by name. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. `pattern` keeps the names that match it, ignoring case: `*` stands for any text, `?` for one character. At most 10,000 entries. Each entry has `name`, `path` (full path), `dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified` (seconds since the epoch, like `os.time()`).
+
+Parameters:
+
+- `folder` (`string`) — The folder.
+- `pattern` (`string`, optional) — A file name pattern, e.g. "*.gpx".
+
+Returns `{name: string, path: string, dir: boolean, size: integer, modified: integer}[]` — One table per entry.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do
+    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))
+end
 ```
 
 ### opensak.export_file
@@ -2382,6 +2567,131 @@ Example:
 local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"
 ```
 
+### opensak.html.escape
+
+```lua
+opensak.html.escape(value)
+```
+
+*value* as text for HTML: `& < > " '` are escaped, nil becomes "", 3.0 becomes "3".
+
+Parameters:
+
+- `value` (`any`) — A string, number, boolean or nil.
+
+Returns `string` — Escaped text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local cell = "<td>" .. opensak.html.escape(c.name) .. "</td>"
+```
+
+### opensak.html.table
+
+```lua
+opensak.html.table(rows [, options])
+```
+
+*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's SqlToHtml). `columns` lists the fields to show, each a field name or `{field, heading}`; without it all fields are shown, sorted by name — a Lua table has no field order, so pass `columns` to keep the order of the query. Number columns are right-aligned. `link = { code = "url" }` turns the code cells into links to the row's url field (http/https only). `bars = {"count"}` adds a bar next to each value of those number fields, scaled to the largest (in `color`, "#rrggbb"). The bars use inline styles only, so they also show without the stylesheet of opensak.html.page.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `options` (`{columns?: (string|string[])[], link?: table<string, string>, caption?: string, bars?: string[], color?: string}`, optional) — See above.
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local rows = opensak.sql(
+  "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")
+local html = opensak.html.table(rows, {
+  columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })
+```
+
+### opensak.html.tiles
+
+```lua
+opensak.html.tiles(items)
+```
+
+Key figures as a row of tiles: a list of `{label =, value =}`.
+
+Parameters:
+
+- `items` (`{label: string, value: any}[]`) — The tiles.
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local found = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE found = 1")[1].n
+local html = opensak.html.tiles{
+  { label = "caches", value = opensak.count() },
+  { label = "found", value = found },
+}
+```
+
+### opensak.html.columns
+
+```lua
+opensak.html.columns(...)
+```
+
+Put HTML parts (e.g. two tables) side by side; on a narrow window they go one below the other.
+
+Parameters:
+
+- `...` (`string`) — The HTML parts (or one list of them).
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local html = opensak.html.columns(table1, table2)
+```
+
+### opensak.html.page
+
+```lua
+opensak.html.page(spec)
+```
+
+A complete HTML page for opensak.write_text: `title` (also the heading), `subtitle`, the body — the strings in the list part of the table, and/or `body` — and `footer`. A built-in stylesheet with a light and a dark theme styles headings (`<h2>`), tables, tiles and columns; `css` is added after it. The body is put in as it is: build it from the html.* functions, or escape your own text with html.escape.
+
+Parameters:
+
+- `spec` (`{title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string}`) — See above.
+
+Returns `string` — The page.
+
+Since API version 3.
+
+Example:
+
+```lua
+local rows = opensak.sql("SELECT code, name, difficulty FROM caches LIMIT 50")
+local page = opensak.html.page{
+  title = "Caches", subtitle = opensak.database(),
+  opensak.html.tiles{ { label = "caches", value = opensak.count() } },
+  "<h2>First 50</h2>",
+  opensak.html.table(rows, { columns = { "code", "name", "difficulty" } }),
+}
+opensak.write_text(opensak.temp_dir() .. "/caches.html", page)
+```
+
 ### opensak.date.parse
 
 ```lua
@@ -2823,12 +3133,30 @@ The rows belonging to a cache are read with `opensak.logs()`, `opensak.waypoints
 
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
 
-- [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — enter or remove the corrected coordinates of the selected cache
-- [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
-- [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
-- [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — choose export options in a GSAK-style form, then export the list
-- [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — pick search options in a form, then step through the matches
-- [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
+- [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — Enter or remove the corrected coordinates of the selected cache
+- [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
+- [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — One GPX file per filter
+- [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — Choose export options in a GSAK-style form, then export the list
+- [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — Pick search options in a form, then step through the matches
+- [`import_gsak_appdata.lua`](../../macros/examples/import_gsak_appdata.lua) — Import every GSAK database, filter and location
+- [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — Show the unfound caches updated since the last run
+
+## Macro header
+
+**Macros → Macro manager** lists the macros in your macros folder and its subfolders. It shows what a comment block at the top of each macro says about it:
+
+```lua
+-- OpenSAK Macro
+-- Name: Find easy traditionals
+-- Author: Jane Doe
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Filters for unfound traditional caches with low difficulty.
+```
+
+Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read.
+
+From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, or a function key) that runs it from the main window. The output then goes to the manager's output pane.
 
 ## Editor support
 
@@ -2910,10 +3238,9 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Loading GPX / ZIP files (`Load`). Planned.
-- Reading text files (`GetFile`, `FileRead`): only `opensak.read_csv()` exists. Planned. Writing works with `opensak.write_text()`, for text file types only.
-- File system helpers (`FileExists`, `FolderExists`, `Dir`, `FileCopy`, `FileErase`).
+- Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
-- Setting the centre point (`Centre`), saving and restoring the filter (`SaveFilter`, `RestoreFilter`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
+- Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
 ### Database / Waypoints
@@ -2947,7 +3274,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
 | PurgeNote | ✅ β | `update(code, {note=false, gc_note=false})` |
-| SaveFilter / RestoreFilter | ❌ | only `filter_name()` |
+| SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
 | ReSync | ✅ β | `resync()` |
 | ReSyncLogs | 🚫 | needs the geocaching.com API |
 | SetColor | ✅ partial β | `update(code, {color=})` for the cache colour; no per-column colouring |
@@ -2956,7 +3283,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
 | SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
-| SqlToHtml | ❌ | planned; meanwhile build the HTML from `sql()` and write it with `write_text()` |
+| SqlToHtml | ✅ | `html.table(sql(…), {columns=…})`, wrapped in `html.page{}` and written with `write_text()` |
 | Table | ➖ | separate functions per table |
 | TotChild | ✅ | `waypoint_count` field, `waypoints(code)` |
 | Transaction / InTransaction | ✅ β | `transaction(fn)`, `in_transaction()` |
@@ -2982,9 +3309,9 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 |---|---|---|
 | AppendFile / PutFile / FileOpen | ✅ | `write_text(path, text)`, `write_text(path, text, {append=true})`; only `.txt .csv .tsv .html .htm .svg .md .json`, at most 20 MB, never an autostart location |
 | TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV helper yet |
-| GetFile / FileRead / EndRead / StopRead | ❌ | `read_csv` for CSV only; text files planned |
-| FileExists / FolderExists | ❌ | |
-| Dir | ❌ | |
+| GetFile / FileRead / EndRead / StopRead | ✅ | `read_text(path)` reads the whole file (any file type, UTF-8 or `{encoding="cp1252"}`, at most 10 MB); loop over the lines with `text:gmatch("[^\n]+")`; `read_csv` for CSV |
+| FileExists / FolderExists | ✅ | `file_exists(path)`, `folder_exists(path)` |
+| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders |
 | FileCopy / FileErase | ❌ | |
 | DriveExists | 🚫 | Windows-specific |
 | ZipFile | ❌ | |
@@ -3016,7 +3343,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | Delay | ✅ | `sleep(ms)` (max 10 s per call, 60 s per run) |
 | Include | ❌ | `require` is removed |
 | Macro | ✅ | `run_macro(path, ...)` |
-| MacHeader | ❌ | planned |
+| MacHeader | ✅ | comment header (`-- Name:`, `-- Version:`, `-- Requires-API:`, …), shown in the Macro manager; see "Macro header" |
 | NoError / Deprecated / VerCheck | ✅ | `api_version()`, `version()`, `if opensak.x then` |
 | UpdateCheck | 🚫 | online version check |
 | SpeedMode | ➖ | the UI refreshes when the macro ends; `refresh()` redraws it earlier |
@@ -3069,7 +3396,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| Backup / Restore | ❌ | backup planned |
+| Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
 | CacheType / ChildType | ❌ | |
 | Centre | ❌ | planned |
