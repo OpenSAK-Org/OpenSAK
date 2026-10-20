@@ -144,6 +144,28 @@ class BoundaryStore:
             feature_index=int(row["feature_index"]),
         )
 
+    def regions_with_boxes(
+        self, layer: str
+    ) -> list[tuple[Region, tuple[float, float, float, float]]]:
+        """Every region of *layer* with its R-Tree box (min_lat, max_lat,
+        min_lon, max_lon) — for drawing maps, which need all regions of an
+        area rather than the ones at one point."""
+        name = self._layer(layer)
+        cur = self._conn().execute(
+            f"SELECT r.id, r.name, r.parent, r.pack, r.feature_index, "
+            f"b.min_lat, b.max_lat, b.min_lon, b.max_lon "
+            f"FROM region_{name} r JOIN rtree_{name} b ON b.id = r.id"
+        )
+        return [
+            (
+                Region(id=int(row["id"]), name=str(row["name"]), parent=row["parent"],
+                       pack=str(row["pack"]), feature_index=int(row["feature_index"])),
+                (float(row["min_lat"]), float(row["max_lat"]),
+                 float(row["min_lon"]), float(row["max_lon"])),
+            )
+            for row in cur.fetchall()
+        ]
+
     def geometry(self, layer: str, region: Region) -> dict[str, Any]:
         # Stage 2 input: the region's GeoJSON geometry, lazily loaded and cached.
         pack = self._load_pack(layer, region.pack)

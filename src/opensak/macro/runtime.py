@@ -188,7 +188,9 @@ from opensak.macro.sql import (
     connect_read_only,
     default_schema_name,
 )
+from opensak.stats import charts
 from opensak.stats import html as report_html
+from opensak.stats import maps as report_maps
 from opensak.stats import tables as stats_tables
 from opensak.utils import flags
 from opensak.utils.constants import (
@@ -259,6 +261,11 @@ FILE_SUFFIXES = WRITE_TEXT_SUFFIXES + (
 )
 MAX_COPY_BYTES = 1024 * 1024 * 1024
 COPY_IF_EXISTS = ("overwrite", "skip")
+# opensak.open(): the file types it opens in their default app (documents
+# only — never a script, program or shortcut), and how often per run.
+OPEN_SUFFIXES = (".html", ".htm", ".svg", ".txt", ".csv", ".tsv", ".md", ".json",
+                 ".gpx", ".kml", ".pdf")
+MAX_OPENS_PER_RUN = 5
 
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
@@ -276,6 +283,28 @@ STATS_OPTIONS = {
     "fill": {"key": "key", "period": "period", "from": "start", "to": "end"},
     "pivot": {"rows": "rows_order", "cols": "cols_order", "sum": "sum"},
     "every": {"first": "first", "last": "last", "date": "date_field"},
+}
+# opensak.chart.bar() / chart.line() / ...: the keys of the option table.
+CHART_KEYS = {
+    "bar": frozenset({"x", "y", "title", "width", "height", "color", "horizontal", "labels",
+                      "names"}),
+    "line": frozenset({"x", "y", "title", "width", "height", "color", "area", "labels"}),
+    "heatmap": frozenset({"title", "width", "color", "labels", "row_title", "col_title"}),
+    "rose": frozenset({"x", "y", "title", "width", "color", "labels"}),
+}
+# opensak.chart.map() / chart.points(): the keys of the option table.
+MAP_KEYS = {
+    "map": frozenset({"key", "value", "layer", "within", "title", "width", "height", "color",
+                      "extent", "legend"}),
+    "points": frozenset({"lat", "lon", "label", "layer", "within", "title", "width", "height",
+                         "color", "radius"}),
+}
+# opensak.geo.*: the keys of their option tables (Lua name → Python keyword).
+GEO_OPTIONS = {
+    "regions": {"within": "within"},
+    "outlines": {"within": "within", "rows": "rows", "key": "key", "value": "value",
+                 "extent": "extent", "around": "around", "lat": "lat", "lon": "lon",
+                 "box": "box", "detail": "detail"},
 }
 
 # opensak.read_text(): the largest file, and the encodings it reads (GSAK
@@ -803,6 +832,10 @@ class MacroHost(Protocol):
     def select_cache(self, gc_code: str) -> bool:
         """Select the cache in the grid and show it in the detail panel
         and map; False if it is not among the caches of the active filter."""
+
+    def open_file(self, path: Path) -> bool:
+        """Open the existing file *path* in its default app (e.g. an HTML
+        report in the browser); False if none could open it."""
 
     def refresh(self) -> None:
         """Apply the refreshes deferred so far and redraw the grid now."""
@@ -1473,6 +1506,10 @@ class MacroRuntime:
         # (file, write) picked by the user in opensak.choose_file() — usable
         # for the rest of this run only, whatever the folder list says
         self._picked: set[tuple[Path, bool]] = set()
+        # Files this run wrote (write_text, export_*, copy/move), resolved —
+        # the ones opensak.open() shows without asking.
+        self._written: set[Path] = set()
+        self._opened = 0
         self._cancelled = threading.Event()
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
@@ -1485,6 +1522,9 @@ class MacroRuntime:
         self._slept = 0.0
         self._polygons: dict[Path, LineShape] = {}
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
+        # opensak.chart.map / points / geo.*: the boundary data, False once
+        # it was found missing in this run.
+        self._map_data: Any = None
         # The active database's connection for opensak.sql*() and
         # transaction(), opened on first use and closed after the run (or on
         # switch_database), which drops the macro's TEMP tables.
@@ -2748,12 +2788,52 @@ class MacroRuntime:
                     f"{func}: the file would be larger than "
                     f"{MAX_WRITE_BYTES // (1024 * 1024)} MB"
                 )
-            return str(safe_write(target, data, permissions=permissions,
-                                  allowed_suffixes=WRITE_TEXT_SUFFIXES))
+            written = safe_write(target, data, permissions=permissions,
+                                 allowed_suffixes=WRITE_TEXT_SUFFIXES)
+            self._written.add(written)
+            return str(written)
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {target}: {exc}") from None
+
+    def _open(self, path=None) -> None:
+        func = "opensak.open"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a file path")
+        if path.strip().find(":") > 1:
+            # file:, http:, mailto:, ... — only a drive letter (C:\) has its
+            # colon second.
+            raise MacroError(f"{func} opens files only, not URLs: {path}")
+        file = Path(path.strip()).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or macros_dir()) / file
+        try:
+            target = resolve_path(file)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {file}: {exc}") from None
+        # A ":" would name an NTFS alternate data stream ("a.html:x.bat").
+        if ":" in target.name or target.suffix.lower() not in OPEN_SUFFIXES:
+            raise MacroError(f"{func}: only these file types can be opened: "
+                             f"{' '.join(OPEN_SUFFIXES)}")
+        reason = protected_reason(target)
+        if reason is not None:
+            raise MacroError(f"{func}: macros may not open {target} — {reason}")
+        if not target.is_file():
+            raise MacroError(f"{func}: file not found: {target}")
+        if self._opened >= MAX_OPENS_PER_RUN:
+            raise MacroError(f"{func}: at most {MAX_OPENS_PER_RUN} files per run")
+        open_file = self._ui("open_file", func)
+        # The macro's own output opens directly; any other file is put to
+        # the user first.
+        if target not in self._written and not target.is_relative_to(temp_dir()):
+            if not self._host.confirm(
+                    f"The macro wants to open this file in its default app:\n\n{target}\n\n"
+                    "Open it?"):
+                raise MacroError(f"{func}: the user did not allow opening {target}")
+        self._opened += 1
+        if not open_file(target):
+            raise MacroError(f"{func}: no app could open {target}")
 
     # ── opensak.stats.* / opensak.html.* ─────────────────────────────────
     # The rows are Lua tables; only the fields a function needs are read,
@@ -2922,6 +3002,163 @@ class MacroRuntime:
 
     def _date_period(self, value=None, length=None) -> str:
         return self._report_call("opensak.date.period", stats_tables.period, value, length)
+
+    # ── opensak.chart.* / opensak.geo.* ──────────────────────────────────
+    # Plain SVG strings (opensak.stats.charts / maps): no script, so they
+    # work in any HTML page or as a .svg file.
+
+    def _chart(self, kind: str, rows=None, options=None) -> str:
+        func = f"opensak.chart.{kind}"
+        rows = _from_lua(rows)
+        matrix_input = isinstance(rows, dict) and "cells" in rows
+        if kind == "heatmap":
+            if not isinstance(rows, dict):
+                raise MacroError(f"{func} expects a matrix, e.g. from opensak.stats.pivot()")
+        elif rows == {}:
+            rows = []    # an empty Lua table
+        if kind != "heatmap" and not isinstance(rows, list) \
+                and not (kind == "bar" and matrix_input):
+            raise MacroError(
+                f"{func} expects a list of rows, e.g. {func}({{ {{ key = 2024, count = 12 }} }})"
+            )
+        opts = {} if options is None else _from_lua(options)
+        if opts == []:
+            opts = {}
+        if not isinstance(opts, dict):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ title = "Finds" }}')
+        unknown = set(opts) - CHART_KEYS[kind]
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                f"valid: {', '.join(sorted(CHART_KEYS[kind]))}"
+            )
+        for key in ("x", "title", "color", "row_title", "col_title"):
+            if key in opts and not isinstance(opts[key], str):
+                raise MacroError(f"{func}: {key} must be a string, got {opts[key]!r}")
+        if "y" in opts and not isinstance(opts["y"], str) \
+                and not (kind == "bar" and isinstance(opts["y"], list)):
+            raise MacroError(f"{func}: y must be a field name"
+                             + (" or a list of them" if kind == "bar" else "")
+                             + f", got {opts['y']!r}")
+        for key in ("horizontal", "area", "labels"):
+            if key in opts and not isinstance(opts[key], bool):
+                raise MacroError(f"{func}: {key} must be true or false, got {opts[key]!r}")
+        try:
+            if kind == "bar" and matrix_input:
+                # A matrix from stats.pivot: one stacked bar per row.
+                if "x" in opts or "y" in opts:
+                    raise MacroError(f"{func}: x and y are taken from the matrix")
+                rows, fields, names = charts.matrix_rows(rows)
+                opts = {"names": names, **opts, "y": fields}
+            # kind is one of CHART_KEYS: charts.bar, line, heatmap or rose.
+            draw: Callable[..., str] = getattr(charts, kind)
+            return draw(rows, **opts)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+
+    def _maps(self) -> Any:
+        """The boundary data for maps, or None if it is not installed."""
+        if self._map_data is None:
+            from opensak.geo import BoundaryStore
+
+            store = BoundaryStore()
+            self._map_data = report_maps.MapData(store) if store.available() else False
+        return self._map_data or None
+
+    @staticmethod
+    def _no_map(title: Any) -> str:
+        text = "Map not available: the boundary data is not installed."
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="40" role="img" '
+                f'aria-label="{report_html.escape(title or text)}" style="max-width:100%">'
+                f'<text x="0" y="24" font-size="13" fill="currentColor">'
+                f'{report_html.escape(text)}</text></svg>')
+
+    def _map_options(self, func: str, kind: str, options: Any) -> dict[str, Any]:
+        opts = {} if options is None else _from_lua(options)
+        if opts == []:
+            opts = {}
+        if not isinstance(opts, dict):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ layer = "state" }}')
+        unknown = set(opts) - MAP_KEYS[kind]
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                f"valid: {', '.join(sorted(MAP_KEYS[kind]))}"
+            )
+        for key in ("key", "value", "lat", "lon", "label", "layer", "title", "color", "extent"):
+            if key in opts and not isinstance(opts[key], str):
+                raise MacroError(f"{func}: {key} must be a string, got {opts[key]!r}")
+        if "legend" in opts and not isinstance(opts["legend"], bool):
+            raise MacroError(f"{func}: legend must be true or false, got {opts['legend']!r}")
+        return opts
+
+    def _chart_map(self, rows=None, options=None) -> str:
+        func = "opensak.chart.map"
+        rows = self._row_list(func, rows)
+        opts = self._map_options(func, "map", options)
+        data = self._maps()
+        if data is None:
+            return self._no_map(opts.get("title"))
+        fields = self._fields(rows, (opts.get("key", "key"), opts.get("value", "count")))
+        try:
+            return report_maps.choropleth(data, fields, **opts)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+
+    def _chart_points(self, rows=None, options=None) -> str:
+        func = "opensak.chart.points"
+        rows = self._row_list(func, rows)
+        opts = self._map_options(func, "points", options)
+        data = self._maps()
+        if data is None:
+            return self._no_map(opts.get("title"))
+        fields = self._fields(rows, (opts.get("lat", "lat"), opts.get("lon", "lon"),
+                                     opts.get("label")))
+        try:
+            return report_maps.points(data, fields, **opts)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+
+    def _geo_regions(self, lua, layer="country", options=None):
+        func = "opensak.geo.regions"
+        opts = self._options(func, GEO_OPTIONS["regions"], options)
+        data = self._maps()
+        if data is None:
+            return None
+        try:
+            return lua.table_from(report_maps.regions(data, layer, opts.get("within")),
+                                  recursive=True)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+
+    def _geo_outlines(self, lua, layer="country", options=None):
+        func = "opensak.geo.outlines"
+        if options is not None and not _is_lua_table(options):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ within = "Switzerland" }}')
+        # rows / around are read field by field, like the rows of stats.*.
+        rows_value = options["rows"] if options is not None else None
+        around_value = options["around"] if options is not None else None
+        plain = {k: v for k, v in (options.items() if options is not None else [])
+                 if k not in ("rows", "around")}
+        opts = self._options(func, GEO_OPTIONS["outlines"], lua.table_from(plain))
+        for key in ("key", "value", "lat", "lon", "extent"):
+            if key in opts and not isinstance(opts[key], str):
+                raise MacroError(f"{func}: {key} must be a string, got {opts[key]!r}")
+        if rows_value is not None:
+            opts["rows"] = self._fields(self._row_list(f"{func}: rows", rows_value),
+                                        (opts.get("key", "key"), opts.get("value", "count")))
+        if around_value is not None:
+            opts["around"] = self._fields(self._row_list(f"{func}: around", around_value),
+                                          (opts.get("lat", "lat"), opts.get("lon", "lon")))
+        data = self._maps()
+        if data is None:
+            return None
+        try:
+            collection, unmatched = report_maps.outlines(data, layer, **opts)
+        except charts.ChartError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return (lua.table_from(collection, recursive=True),
+                lua.table_from(unmatched))
 
     def _html_matrix(self, matrix=None, options=None) -> str:
         func = "opensak.html.matrix"
@@ -3135,6 +3372,7 @@ class MacroRuntime:
             return None
         try:
             final = safe_copy(src_resolved, dest, permissions, FILE_SUFFIXES, MAX_COPY_BYTES)
+            self._written.add(final)
         except FolderAccessDenied as exc:
             raise MacroError(f"{func}: {exc}") from None
         except OSError as exc:
@@ -3256,7 +3494,9 @@ class MacroRuntime:
             permissions = with_grant(permissions, target.parent, True)
 
         def save(path: Path, write: Callable, binary: bool) -> Any:
-            return safe_write_stream(path, write, permissions, binary=binary)[1]
+            written, result = safe_write_stream(path, write, permissions, binary=binary)
+            self._written.add(written)
+            return result
 
         return save
 
@@ -4029,6 +4269,8 @@ class MacroRuntime:
         self._deleted = {}
         self._tx_deleted = []
         self._picked = set()
+        self._written = set()
+        self._opened = 0
         self._cancelled.clear()
         self._exit_code = None
         self._slept = 0.0
@@ -4101,6 +4343,9 @@ class MacroRuntime:
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
+            if self._map_data:
+                self._map_data.close()
+            self._map_data = None
             # Closing the connection detaches every database.
             self._close_sql_write()
             self._attachments = {}
@@ -5396,6 +5641,26 @@ API: tuple[ApiFunction, ...] = (
         returns=("string", "The file written (full path)."),
     ),
     ApiFunction(
+        name="open",
+        description="Open a file in its default app, e.g. an HTML report in "
+                    "the browser, so a report macro can end by showing its "
+                    "result. A relative path is resolved against the macro "
+                    "file's folder. A file this run wrote (opensak.write_text, "
+                    "opensak.export_*, opensak.copy_file / move_file) or one "
+                    "in opensak.temp_dir() opens directly; for any other file "
+                    "the user is asked first. Only these file types: "
+                    + " ".join(OPEN_SUFFIXES) + " — never a program, script or "
+                    "shortcut — and no URLs. At most "
+                    f"{MAX_OPENS_PER_RUN} files per run. Needs the user "
+                    "interface.",
+        example='local path = opensak.write_text(opensak.temp_dir() .. "/report.html",\n'
+                '  opensak.html.page{ title = "Report", opensak.html.table(rows) })\n'
+                "opensak.open(path)",
+        since=3,
+        bind=lambda rt, lua: rt._open,
+        params=(Param("path", "string", "The file to open."),),
+    ),
+    ApiFunction(
         name="read_text",
         description="Read a whole text file, of any file type. A relative "
                     "path is resolved against the macro file's folder. The "
@@ -6369,6 +6634,229 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("string", "The code."),
+    ),
+
+    # -- opensak.chart --------------------------------------------------------
+    ApiFunction(
+        name="chart.bar",
+        description="A bar chart of *rows* as an SVG string, for an HTML "
+                    "page (opensak.html.page, opensak.write_text) or a .svg "
+                    "file. Each row is a "
+                    "table; `x` names its category field (default \"key\") "
+                    "and `y` its value field (default \"count\"), nil "
+                    "counts as 0. `horizontal = true` draws the bars from "
+                    "the left, for long category names. Text and grid lines "
+                    "take the colour of the surrounding page; the bars use "
+                    "the CSS variable --chart-color, else `color`. Each bar "
+                    "shows its value as tooltip; `labels` also writes it on "
+                    f"the bar (default: up to {charts.MAX_VALUE_LABELS} bars). "
+                    "With a list of fields as `y`, the bars are stacked, one "
+                    "segment per field, with a legend (`names` instead of the "
+                    f"field names; at most {len(charts.SERIES_COLORS)}); a "
+                    "matrix from opensak.stats.pivot gives one stacked bar per "
+                    "matrix row, e.g. finds per year and cache type. "
+                    f"At most {charts.MAX_POINTS} rows.",
+        example="local rows = opensak.sql([[SELECT strftime('%Y', found_date) AS year,\n"
+                "  COUNT(*) AS finds FROM caches WHERE found GROUP BY year ORDER BY year]])\n"
+                'local svg = opensak.chart.bar(rows, { x = "year", y = "finds", title = "Finds per year" })\n'
+                'opensak.write_text(opensak.temp_dir() .. "/finds.svg", svg)\n'
+                '-- stacked: finds per year and type\n'
+                'local by_type = opensak.stats.pivot(finds, "year", "type")\n'
+                'local svg2 = opensak.chart.bar(by_type, { title = "Finds per year and type" })',
+        since=3,
+        bind=lambda rt, lua: functools.partial(rt._chart, "bar"),
+        params=(
+            Param("rows", "table[]|opensak.Matrix",
+                  "The rows, e.g. the result of opensak.sql(), or a matrix."),
+            Param("options", "{x?: string, y?: string|string[], title?: string, width?: number, "
+                  "height?: number, color?: string, horizontal?: boolean, labels?: boolean, "
+                  "names?: string[]}",
+                  "Fields to draw, title, size in pixels (default 640 × 280), "
+                  "colour (name or \"#rrggbb\").", optional=True),
+        ),
+        returns=("string", "The chart as SVG."),
+    ),
+    ApiFunction(
+        name="chart.line",
+        description="A line chart of *rows* in their order as an SVG string, "
+                    "like opensak.chart.bar: `x` the label on the x axis "
+                    "(evenly spaced, e.g. months), `y` the value. `area = "
+                    "true` fills below the line. The value of the last point "
+                    "is written next to it unless `labels = false`. Each "
+                    "point shows its value as tooltip.",
+        example="local rows, total = {}, 0\n"
+                "for _, r in ipairs(opensak.sql([[SELECT strftime('%Y-%m', found_date) AS month,\n"
+                "    COUNT(*) AS n FROM caches WHERE found GROUP BY month ORDER BY month]])) do\n"
+                "  total = total + r.n\n"
+                "  rows[#rows + 1] = { key = r.month, count = total }\n"
+                "end\n"
+                'local svg = opensak.chart.line(rows, { title = "Total finds", area = true })',
+        since=3,
+        bind=lambda rt, lua: functools.partial(rt._chart, "line"),
+        params=(
+            Param("rows", "table[]", "The rows, in the order to draw."),
+            Param("options", "{x?: string, y?: string, title?: string, width?: number, "
+                  "height?: number, color?: string, area?: boolean, labels?: boolean}",
+                  "As for opensak.chart.bar, plus `area`.", optional=True),
+        ),
+        returns=("string", "The chart as SVG."),
+    ),
+    ApiFunction(
+        name="chart.heatmap",
+        description="A grid chart of a matrix (see opensak.stats.pivot) as an "
+                    "SVG string: one cell per row × column value, the darker "
+                    "the larger, e.g. finds per difficulty × terrain. "
+                    "`labels = false` leaves the numbers out of the cells; "
+                    "`row_title` and `col_title` name the two fields.",
+        example='local dt = opensak.stats.pivot(finds, "difficulty", "terrain",\n'
+                '  { rows = {1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}, cols = {1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5} })\n'
+                'local svg = opensak.chart.heatmap(dt, { row_title = "D", col_title = "T" })',
+        since=3,
+        bind=lambda rt, lua: functools.partial(rt._chart, "heatmap"),
+        params=(
+            Param("matrix", "opensak.Matrix", "The result of opensak.stats.pivot()."),
+            Param("options", "{title?: string, width?: number, color?: string, "
+                  "labels?: boolean, row_title?: string, col_title?: string}",
+                  "As for opensak.chart.bar, plus the field titles.", optional=True),
+        ),
+        returns=("string", "The chart as SVG."),
+    ),
+    ApiFunction(
+        name="chart.rose",
+        description="A rose (polar area) chart of *rows* as an SVG string: one "
+                    "sector per row, in row order clockwise from the top, e.g. "
+                    "finds per compass direction (N, NE, E, …). The area of a "
+                    "sector grows with its value; `x` names the label field, "
+                    "`y` the value (as for opensak.chart.bar).",
+        example='local DIRS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }\n'
+                'for _, c in ipairs(finds) do\n'
+                '  c.dir = DIRS[math.floor((opensak.coords.bearing(HOME_LAT, HOME_LON, c.lat, c.lon) + 22.5) / 45) % 8 + 1]\n'
+                'end\n'
+                'local rows = {}\n'
+                'for _, g in ipairs(opensak.stats.group(finds, "dir")) do rows[g.key] = g.count end\n'
+                'local sectors = {}\n'
+                'for i, d in ipairs(DIRS) do sectors[i] = { key = d, count = rows[d] or 0 } end\n'
+                'local svg = opensak.chart.rose(sectors, { title = "Finds by direction" })',
+        since=3,
+        bind=lambda rt, lua: functools.partial(rt._chart, "rose"),
+        params=(
+            Param("rows", "table[]", "One row per sector, clockwise from north."),
+            Param("options", "{x?: string, y?: string, title?: string, width?: number, "
+                  "color?: string, labels?: boolean}",
+                  "As for opensak.chart.bar; `width` is also the height.", optional=True),
+        ),
+        returns=("string", "The chart as SVG."),
+    ),
+    ApiFunction(
+        name="chart.map",
+        description="A map of countries, states or counties as an SVG string, "
+                    "each region coloured by a value — e.g. finds per country "
+                    "from opensak.stats.group. `key` names the field with the "
+                    "region name (default \"key\"), `value` the number "
+                    "(default \"count\"), `layer` the kind of region: "
+                    "\"country\" (default), \"state\" or \"county\". `within` "
+                    "(a country name or a list) limits a state or county map "
+                    "to those countries; without it the countries the regions "
+                    "are in are shown. `extent = \"all\"` shows every region of "
+                    "the layer instead of zooming to the ones with a value. "
+                    "Names are matched ignoring case, accents and punctuation; "
+                    "those that match no region are listed below the map. The "
+                    "outlines are those of Update location (offline, no "
+                    "internet needed; county outlines are downloaded per "
+                    "country on first use, like there). Without the boundary "
+                    "data the map is a short note instead.",
+        example='local countries = opensak.stats.group(finds, "country")\n'
+                'local map = opensak.chart.map(countries, { title = "Finds per country" })\n'
+                'local cantons = opensak.stats.group(finds, "state")\n'
+                'local map2 = opensak.chart.map(cantons, { layer = "state", within = "Switzerland" })',
+        since=3,
+        bind=lambda rt, lua: rt._chart_map,
+        params=(
+            Param("rows", "table[]", "One row per region with its value."),
+            Param("options", "{key?: string, value?: string, layer?: string, "
+                  "within?: string|string[], title?: string, width?: number, "
+                  "height?: number, color?: string, extent?: string, legend?: boolean}",
+                  "See above. The height follows the shape of the area unless given.",
+                  optional=True),
+        ),
+        returns=("string", "The map as SVG."),
+    ),
+    ApiFunction(
+        name="chart.points",
+        description="A dot map as an SVG string: one dot per row at its "
+                    "coordinates (fields `lat` and `lon`), over the outlines of "
+                    "`layer` (\"country\", \"state\" or \"county\"), zoomed to "
+                    "the dots or to the `within` countries. `label` names the "
+                    f"field shown as tooltip. At most {report_maps.MAX_MAP_POINTS} "
+                    "rows; dots on the same pixel are drawn once.",
+        example='local svg = opensak.chart.points(finds, { label = "name", title = "My finds" })',
+        since=3,
+        bind=lambda rt, lua: rt._chart_points,
+        params=(
+            Param("rows", "table[]", "The rows, e.g. caches from opensak.caches()."),
+            Param("options", "{lat?: string, lon?: string, label?: string, layer?: string, "
+                  "within?: string|string[], title?: string, width?: number, "
+                  "height?: number, color?: string, radius?: number}",
+                  "See above; `radius` of the dots in pixels (default 2.5).", optional=True),
+        ),
+        returns=("string", "The map as SVG."),
+    ),
+
+    # -- opensak.geo ----------------------------------------------------------
+    ApiFunction(
+        name="geo.outlines",
+        description="The outlines of countries, states or counties (`layer`) "
+                    "as a GeoJSON FeatureCollection (a table), e.g. for a "
+                    "map drawn by the macro itself or for another program. "
+                    "Like opensak.chart.map, `rows` puts the "
+                    "value (field `value`, default \"count\") of each row into "
+                    "the properties of the region its field `key` (default "
+                    "\"key\") names — matched ignoring case, accents and "
+                    "punctuation — `within` limits the countries and `extent "
+                    "= \"all\"` shows all regions instead of zooming to the ones "
+                    "with a value. `around` (rows with `lat`/`lon`) zooms to "
+                    "those points instead, `box` (`{min_lon, min_lat, max_lon, "
+                    "max_lat}`, e.g. the `bbox` of another collection) to an "
+                    "area. The outlines are clipped to the area and simplified "
+                    "for a map about `detail` pixels wide (default 800). Every "
+                    "feature has `properties.name` (and `country` for states "
+                    "and counties). The second value lists the names that match "
+                    "no region. nil if the boundary data is not installed.",
+        example='local outlines, unmatched = opensak.geo.outlines("country",\n'
+                '  { rows = opensak.stats.group(finds, "country") })\n'
+                'if outlines then\n'
+                '  for _, f in ipairs(outlines.features) do\n'
+                '    print(f.properties.name, f.properties.count or 0)\n'
+                '  end\n'
+                'end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._geo_outlines(lua, *a),
+        params=(
+            Param("layer", "string", '"country" (default), "state" or "county".', optional=True),
+            Param("options", "{within?: string|string[], rows?: table[], key?: string, "
+                  "value?: string, extent?: string, around?: table[], lat?: string, "
+                  "lon?: string, box?: number[], detail?: number}", "See above.", optional=True),
+        ),
+        returns=("table?, string[]?", "The FeatureCollection and the names without a region."),
+    ),
+    ApiFunction(
+        name="geo.regions",
+        description="The regions of a layer (\"country\", \"state\" or "
+                    "\"county\") in the boundary data used by Update location "
+                    "and opensak.chart.map, one row per name: `{name =}`, for "
+                    "states and counties also `country`. `within` limits them "
+                    "to one country or a list. With it a macro can say "
+                    "\"18 of 26 cantons\". nil if the boundary data is not "
+                    "installed.",
+        example='local cantons = opensak.geo.regions("state", { within = "Switzerland" })\n'
+                'if cantons then print(#cantons .. " cantons") end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._geo_regions(lua, *a),
+        params=(
+            Param("layer", "string", '"country" (default), "state" or "county".', optional=True),
+            Param("options", "{within?: string|string[]}", "See above.", optional=True),
+        ),
+        returns=("{name: string, country?: string}[]?", "The regions, sorted."),
     ),
 
     # -- opensak.stats --------------------------------------------------------
