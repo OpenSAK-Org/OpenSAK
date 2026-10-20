@@ -178,7 +178,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 |---|---|---|
 | Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
-| CacheType / ChildType | ❌ | |
+| CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
 | Centre | ✅ β | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
 | Clip / GetClipText | ❌ | |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |

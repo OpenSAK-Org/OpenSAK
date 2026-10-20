@@ -191,7 +191,13 @@ from opensak.macro.sql import (
 from opensak.stats import html as report_html
 from opensak.stats import tables as stats_tables
 from opensak.utils import flags
-from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
+from opensak.utils.constants import (
+    ATTRIBUTES,
+    CACHE_TYPES,
+    CHILD_WP_TYPES,
+    KNOWN_PREFIXES,
+    KNOWN_SINGLE_PREFIXES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -831,6 +837,70 @@ def _as_list(value: Any) -> list:
     if hasattr(value, "values"):  # lupa LuaTable
         return list(value.values())
     return [value]
+
+
+def _gsak_type_codes() -> dict[str, str]:
+    """GSAK's one-letter cache type codes: letter → OpenSAK cache type."""
+    from opensak.importer.gsak_importer import GSAK_CACHE_TYPE_MAP
+    return GSAK_CACHE_TYPE_MAP
+
+
+def _cache_types(lua):
+    letters = {name: code for code, name in _gsak_type_codes().items()}
+    return lua.table_from([
+        lua.table_from({"name": name, "code": letters.get(name)}) for name in CACHE_TYPES
+    ])
+
+
+def _cache_type(value: Any = None) -> tuple[Optional[str], Optional[str]]:
+    """(cache type, GSAK letter) for a letter, a full or a short type name,
+    like GSAK's CacheType(); (None, None) if unknown."""
+    if not isinstance(value, str) or not value.strip():
+        raise MacroError("opensak.cache_type expects a type name or a GSAK letter, "
+                         'e.g. "Traditional" or "T"')
+    codes = _gsak_type_codes()
+    letters = {name: code for code, name in codes.items()}
+    wanted = value.strip()
+    if len(wanted) == 1:
+        name = codes.get(wanted.upper())
+        return (name, wanted.upper()) if name else (None, None)
+    low = wanted.lower()
+    for name in (*CACHE_TYPES, *codes.values()):
+        if name.lower() in (low, f"{low} cache"):
+            return name, letters.get(name)
+    return None, None
+
+
+def _wp_prefixes() -> dict[str, str]:
+    """Waypoint type → its usual (first listed) prefix."""
+    prefixes: dict[str, str] = {}
+    for prefix, name in KNOWN_PREFIXES.items():
+        prefixes.setdefault(name, prefix)
+    return prefixes
+
+
+def _waypoint_types(lua):
+    prefixes = _wp_prefixes()
+    return lua.table_from([
+        lua.table_from({"name": name, "prefix": prefixes[name]}) for name in CHILD_WP_TYPES
+    ])
+
+
+def _waypoint_type(value: Any = None) -> tuple[Optional[str], Optional[str]]:
+    """(waypoint type, its usual prefix) for a type name or a waypoint
+    prefix, like GSAK's ChildType(); (None, None) if unknown."""
+    if not isinstance(value, str) or not value.strip():
+        raise MacroError("opensak.waypoint_type expects a waypoint type or a prefix, "
+                         'e.g. "Parking Area" or "PK"')
+    wanted = value.strip()
+    low = wanted.lower()
+    name = next((t for t in CHILD_WP_TYPES if t.lower() == low), None)
+    if name is None:
+        upper = wanted.upper()
+        name = KNOWN_PREFIXES.get(upper) or KNOWN_SINGLE_PREFIXES.get(upper)
+    if name is None:
+        return None, None
+    return name, _wp_prefixes().get(name)
 
 
 def _resolve_cache_type(name: str) -> str:
@@ -5767,6 +5837,52 @@ API: tuple[ApiFunction, ...] = (
         since=1,
         bind=lambda rt, lua: lambda: str(macros_dir()),
         returns=("string", "Folder path."),
+    ),
+    ApiFunction(
+        name="cache_types",
+        description="All cache types OpenSAK knows, with GSAK's one-letter "
+                    "code where GSAK has one, e.g. for a form's choice list "
+                    "or `filter{ type = … }`.",
+        example='for _, t in ipairs(opensak.cache_types()) do print(t.code or "-", t.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: _cache_types(lua),
+        returns=("{name: string, code: string?}[]", "One table per cache type."),
+    ),
+    ApiFunction(
+        name="cache_type",
+        description="Convert a cache type between GSAK's one-letter code and "
+                    "its name, like GSAK's CacheType(): *value* is a letter "
+                    '("T"), a full name ("Traditional Cache") or a short one '
+                    '("Traditional"), in any case.',
+        example='local name, code = opensak.cache_type("U")  -- "Unknown Cache", "U"\n'
+                'print(select(2, opensak.cache_type("multi-cache")))  -- M',
+        since=3,
+        bind=lambda rt, lua: _cache_type,
+        params=(Param("value", "string", "A GSAK letter or a cache type name."),),
+        returns=("string?, string?", "The cache type and its GSAK letter (nil if "
+                                     "it has none); nil if the type is unknown."),
+    ),
+    ApiFunction(
+        name="waypoint_types",
+        description="The child waypoint types, as in the waypoint dialog, each "
+                    "with its usual prefix — e.g. for "
+                    "opensak.insert_waypoint().",
+        example='for _, t in ipairs(opensak.waypoint_types()) do print(t.prefix, t.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: _waypoint_types(lua),
+        returns=("{name: string, prefix: string}[]", "One table per waypoint type."),
+    ),
+    ApiFunction(
+        name="waypoint_type",
+        description="The waypoint type for a type name (any case) or a "
+                    'waypoint prefix ("PK", "S1", "F"), with its usual prefix '
+                    "(GSAK's ChildType).",
+        example='local name, prefix = opensak.waypoint_type("PK")  -- "Parking Area", "PK"',
+        since=3,
+        bind=lambda rt, lua: _waypoint_type,
+        params=(Param("value", "string", "A waypoint type or prefix."),),
+        returns=("string?, string?", "The waypoint type and its usual prefix; nil "
+                                     "if it is unknown."),
     ),
     ApiFunction(
         name="version",

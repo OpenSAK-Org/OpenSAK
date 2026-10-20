@@ -36,12 +36,9 @@ from opensak.gui.theme import hint_style
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 from opensak.utils.constants import (
-    CACHE_TYPES, CONTAINER_SIZES, VALID_DT, CUSTOM_WP_TYPES, KNOWN_PREFIXES,
+    CACHE_TYPES, CHILD_WP_TYPES, CONTAINER_SIZES, VALID_DT, CUSTOM_WP_TYPES, KNOWN_PREFIXES,
 )
 
-# Waypoint-typer til child-waypoint-dialogens (redigerbare) type-dropdown —
-# de kendte Groundspeak/GSAK-typer i deres første forekomst-rækkefølge.
-CHILD_WP_TYPES: list[str] = list(dict.fromkeys(KNOWN_PREFIXES.values()))
 
 # Waypoint-kolonner som child-waypoint-dialogen kan redigere.
 _WP_FIELDS = (

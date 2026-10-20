@@ -238,6 +238,11 @@ KNOWN_SINGLE_PREFIXES: dict[str, str] = {
     "R": "Reference Point",
 }
 
+# Child waypoint types: the known Groundspeak/GSAK types in the order they
+# first appear above (the waypoint dialog's type drop-down, and
+# opensak.waypoint_types() in Lua macros).
+CHILD_WP_TYPES: list[str] = list(dict.fromkeys(KNOWN_PREFIXES.values()))
+
 # ── Colour mappings ───────────────────────────────────────────────────────────
 
 CACHE_COLOURS: dict[str, str] = {
