@@ -1136,3 +1136,56 @@ def test_puzzle_helper_without_coordinates_or_hint(tmp_db):
     assert form.field("found").options == ["(none found)"]
     assert form.field("found").get("enabled") is False
     assert form.field("solve").get("enabled") is False
+
+
+class ReportHost(DbUIHost):
+    """Allows the writes to the temp folder that _run's empty folder
+    permissions would refuse."""
+
+    def approve_folder(self, target, folder, write):
+        return FolderApproval.ONCE
+
+
+def test_sql_report_example(tmp_db, tmp_path, monkeypatch):
+    """sql_report.lua: the result in query column order, a typing error shown
+    without ending the macro, and one report file per loop value."""
+    import tempfile
+
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with get_session() as s:
+        for code, country, found in [("GCR1", "Denmark", True), ("GCR2", "Denmark", False),
+                                     ("GCR3", "Sweden", False), ("GCR4", None, False)]:
+            s.add(Cache(gc_code=code, name=f"Cache {code}", cache_type="Traditional Cache",
+                        country=country, found=found, latitude=55.0, longitude=12.0))
+        s.commit()
+
+    steps = iter([
+        lambda c: c.click("run"),                     # the example query
+        lambda c: c.click("edit"),
+        lambda c: (c.change("query", "SELEKT 1"), c.click("run")),
+        lambda c: (c.change("query", "SELECT name, gc_code FROM caches "
+                                     "WHERE country = :value ORDER BY gc_code;"),
+                   c.change("loop", "SELECT DISTINCT country FROM caches ORDER BY 1"),
+                   c.click("run")),
+        lambda c: c.click("close"),
+    ])
+    host = ReportHost(lambda c: next(steps)(c))
+    out = _run(host, (EXAMPLES / "sql_report.lua").read_text(encoding="utf-8"),
+               settings_dir=tmp_path / "s", macro_path=tmp_path / "m.lua")
+
+    first = host.shown[1].form.fields[0].get("html")
+    assert first.index("country") < first.index("caches") < first.index("found")
+    assert '<td>Denmark</td><td class="num">2</td><td class="num">1</td>' in first
+    assert host.messages == [('SQL error: near "1": syntax error', "SQL report")]
+    loop = host.shown[4].form.fields[0].get("html")
+    assert loop.index("<h2>Denmark</h2>") < loop.index("GCR2") < loop.index("<h2>Sweden</h2>")
+    assert loop.index("name") < loop.index("gc_code")
+    assert out[0].startswith("Report: ") and "(empty): skipped" in out   # no country: NULL
+    files = {line.split(": ", 1)[0]: Path(line.split(": ", 1)[1]) for line in out}
+    assert files["Denmark"].parent == tmp_path / "opensak"
+    assert len(set(files.values())) == len(files)                        # each its own file
+    assert "GCR3" in files["Sweden"].read_text(encoding="utf-8")
+    assert "GCR3" not in files["Denmark"].read_text(encoding="utf-8")
