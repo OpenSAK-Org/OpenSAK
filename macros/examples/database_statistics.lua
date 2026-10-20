@@ -27,8 +27,8 @@
 -- - All caches of the database are read, whatever the active filter shows;
 --   a large database (100 000+ caches) takes a while. The dot map shows at
 --   most MAX_DOTS caches (every n-th one).
--- - "Home" for the direction is the middle (median) of the caches you
---   found (else of all caches) unless HOME is set below.
+-- - "Home" for the direction is HOME below, else the active centre point
+--   (the centre drop-down in the toolbar).
 -- - The states shown are those of one country: COUNTRY below, or else the
 --   country with the most caches in the database. In a database mixing
 --   countries (e.g. a holiday area larger than your home), set COUNTRY.
@@ -47,7 +47,7 @@
 -- opensak.html.* functions, like find_statistics.lua.
 
 local DATABASE = nil    -- e.g. "Switzerland"; nil = the active database
-local HOME = nil        -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = middle of your finds
+local HOME = nil        -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = the active centre point
 local COUNTRY = nil     -- e.g. "United States": whose states are shown; nil = the country with most caches
 local TOP = 15          -- rows in the region, owner and favourite lists
 local MAX_DOTS = 20000  -- the dot map shows at most this many caches
@@ -88,7 +88,12 @@ for _, c in ipairs(caches) do
     if c.to_find == 1 then open_caches[#open_caches + 1] = c end
 end
 local around = #found_caches > 0 and found_caches or caches
-local home = HOME or { lat = stats.summary(around, "lat").median, lon = stats.summary(around, "lon").median }
+-- Home: HOME, else the active centre point (the centre drop-down in the
+-- toolbar, which OpenSAK's distances are measured from), else the middle
+-- of the caches you found (else of all caches).
+local center = opensak.center()
+local home = HOME or (center.lat and center.lon and { lat = center.lat, lon = center.lon })
+    or { lat = stats.summary(around, "lat").median, lon = stats.summary(around, "lon").median }
 local DIRS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
 for _, c in ipairs(open_caches) do
     local deg = opensak.coords.bearing(home.lat, home.lon, c.lat, c.lon)

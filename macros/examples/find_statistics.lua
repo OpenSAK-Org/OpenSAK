@@ -28,8 +28,8 @@
 -- - Only caches with a found date are counted. Finds on the same day are
 --   ordered by the import order of their "Found it" log, so a milestone
 --   (e.g. your 1000th find) can be off by a few caches on busy days.
--- - "Home" for direction and distance is the middle (median) of your finds
---   unless HOME is set below.
+-- - "Home" for direction and distance is HOME below, else the active centre
+--   point (the centre drop-down in the toolbar).
 -- - The states shown are those of one country: COUNTRY below, or else the
 --   country with the most finds. If you found more caches abroad than at
 --   home, set COUNTRY.
@@ -49,7 +49,7 @@
 -- own statistics.
 
 local DATABASE = nil          -- e.g. "My Finds"; nil = the active database
-local HOME = nil              -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = middle of your finds
+local HOME = nil              -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = the active centre point
 local COUNTRY = nil           -- e.g. "United States": whose states are shown; nil = the country with most finds
 local MILESTONE_STEP = nil    -- e.g. 500; nil = chosen from the number of finds
 local MAIN_TYPES = 4          -- cache types shown on their own in "finds per year"
@@ -87,7 +87,12 @@ for _, c in ipairs(finds) do c.log_row = log_row[c.code] end
 finds = stats.sort(finds, "found_date", "log_row", "code")
 
 -- ── Fields of our own, to group and pivot by ─────────────────────────────
-local home = HOME or { lat = stats.summary(finds, "lat").median, lon = stats.summary(finds, "lon").median }
+-- Home: HOME, else the active centre point (the centre drop-down in the
+-- toolbar, which OpenSAK's distances are measured from), else the middle
+-- of your finds.
+local center = opensak.center()
+local home = HOME or (center.lat and center.lon and { lat = center.lat, lon = center.lon })
+    or { lat = stats.summary(finds, "lat").median, lon = stats.summary(finds, "lon").median }
 local DIRS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
 local BANDS = { 10, 25, 50, 100, 250, 500, 1000, 2500 }     -- km
 

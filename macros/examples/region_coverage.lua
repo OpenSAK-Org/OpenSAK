@@ -26,8 +26,10 @@
 -- - Only finds in the database count; caches without a country or state
 --   are left out.
 -- - "Nearest cache still to find" is the nearest active, unfound cache in
---   the database, in a straight line from HOME — not a route, and only
+--   the database, in a straight line from home — not a route, and only
 --   among the caches you have imported.
+-- - Home is HOME below, else the active centre point (the centre drop-down
+--   in the toolbar).
 -- - The page is in English only; dates are shown as stored (YYYY-MM-DD).
 --
 -- For a "find a cache in every state / canton / country" challenge: reads
@@ -43,7 +45,7 @@
 local DATABASE = nil    -- e.g. "Switzerland"; nil = the active database
 local LAYER = "state"   -- "state" (in COUNTRY) or "country"
 local COUNTRY = nil     -- for LAYER "state", e.g. "Switzerland"; nil = the country with most finds
-local HOME = nil        -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = middle of your finds
+local HOME = nil        -- e.g. { lat = 47.3769, lon = 8.5417 }; nil = the active centre point
 local FILE = opensak.temp_dir() .. "/region_coverage.html"
 local OPEN = true       -- open the page in the browser when done
 
@@ -113,7 +115,12 @@ if #regions == 0 then
     return
 end
 
-local home = HOME or { lat = stats.summary(finds, "lat").median, lon = stats.summary(finds, "lon").median }
+-- Home: HOME, else the active centre point (the centre drop-down in the
+-- toolbar, which OpenSAK's distances are measured from), else the middle
+-- of your finds.
+local center = opensak.center()
+local home = HOME or (center.lat and center.lon and { lat = center.lat, lon = center.lon })
+    or { lat = stats.summary(finds, "lat").median, lon = stats.summary(finds, "lon").median }
 
 -- The region of a cache, or nil; for states only the caches in COUNTRY.
 -- The second value is true if the cache names a region that matches none.

@@ -810,3 +810,14 @@ def test_database_statistics_country_setting(finds_db, boundaries):
     assert "Still to find in Beta" in page
     assert "Names that match no region" not in page
 
+
+
+def test_examples_measure_from_the_active_centre(finds_db, boundaries):
+    from opensak.gui.settings import get_settings
+
+    _coverage_db(finds_db)
+    settings = get_settings()
+    settings.home_lat, settings.home_lon = 42.0, 5.0      # where GCX is
+    _run(_example("region_coverage.lua"), EmptyFilterHost())
+    page = (temp_dir() / "region_coverage.html").read_text(encoding="utf-8")
+    assert re.search(r'<td>South Ä</td><td class="num">0</td>', page)
