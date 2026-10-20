@@ -489,6 +489,11 @@
 				<Param name="[folder: string]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.file_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a file exists (false for a folder). A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission, like&#x0a;opensak.read_text().&#x0a;Returns boolean — true if the file exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.filter" func="yes">
 			<Overload retVal="integer" descr="Build a filter from the given keys (see Filter keys; combined with AND unless&#x0a;`mode = &quot;OR&quot;`) and apply it. Usually called with table syntax: `opensak.filter{&#x0a;... }`. When nothing matches, the view is left unchanged.&#x0a;Returns integer — Number of matching caches (0 = view unchanged).">
 				<Param name="spec: opensak.FilterSpec" />
@@ -501,6 +506,11 @@
 		<KeyWord name="opensak.filter_profile" func="yes">
 			<Overload retVal="integer" descr="Apply a saved filter profile.&#x0a;Returns integer — Number of matching caches.">
 				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.folder_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a folder exists. A relative path is resolved against the macro file's&#x0a;folder. The folder containing it needs read permission.&#x0a;Returns boolean — true if the folder exists.">
+				<Param name="path: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.form" func="yes">
@@ -546,6 +556,12 @@
 			<Overload retVal="integer?" descr="Add a waypoint to a cache in the active database; `prefix`, `type` required.&#x0a;OpenSAK updates the cache's waypoint count. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new waypoint's id; nil if the cache is not in the&#x0a;database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.WaypointInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.list_dir" func="yes">
+			<Overload retVal="{name: string, path: string, dir: boolean, size: integer, modified: integer}[]" descr="The files and folders in a folder (not in its subfolders), sorted by name. A&#x0a;relative path is resolved against the macro file's folder. The folder needs read&#x0a;permission; for an unapproved one the user is asked first. `pattern` keeps the&#x0a;names that match it, ignoring case: `*` stands for any text, `?` for one&#x0a;character. At most 10,000 entries. Each entry has `name`, `path` (full path),&#x0a;`dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified`&#x0a;(seconds since the epoch, like `os.time()`).&#x0a;Returns {name: string, path: string, dir: boolean, size: integer, modified:&#x0a;integer}[] — One table per entry.">
+				<Param name="folder: string" />
+				<Param name="[pattern: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.log" func="yes">
@@ -626,6 +642,12 @@
 			<Overload retVal="table&lt;string, string&gt;[]" descr="Read a CSV file (UTF-8) into an array of rows keyed by the header line. A&#x0a;relative path is resolved against the macro file's folder. If the file's folder&#x0a;has no read permission (Settings → Folder permissions), OpenSAK asks the user to&#x0a;allow it for this run or always. The file may be at most 10 MB.&#x0a;Returns table&lt;string, string&gt;[] — One table per data row, keyed by header.">
 				<Param name="path: string" />
 				<Param name="[sep: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.read_text" func="yes">
+			<Overload retVal="string" descr="Read a whole text file, of any file type. A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission; for an unapproved one&#x0a;the user is asked first. UTF-8 unless `encoding` says otherwise (`&quot;utf-8&quot;`,&#x0a;`&quot;latin-1&quot;`, `&quot;cp1252&quot;`); a UTF-8 byte order mark is removed and line endings&#x0a;become `&quot;\n&quot;`. At most 10 MB.&#x0a;Returns string — The file's text.">
+				<Param name="path: string" />
+				<Param name="[options: {encoding?: string}]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.refresh" func="yes">

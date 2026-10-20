@@ -31,11 +31,14 @@ from __future__ import annotations
 
 import base64
 import binascii
+import codecs
 import csv
+import fnmatch
 import functools
 import io
 import locale
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -219,6 +222,7 @@ DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
 WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
 MAX_WRITE_BYTES = 20 * 1024 * 1024
+
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
     "table": {"columns": "columns", "link": "link", "caption": "caption", "bars": "bars",
@@ -226,6 +230,14 @@ HTML_OPTIONS = {
     "page": {"title": "title", "subtitle": "subtitle", "css": "css", "lang": "lang",
              "footer": "footer", "body": "body"},
 }
+
+# opensak.read_text(): the largest file, and the encodings it reads (GSAK
+# macros often wrote files in the Windows code page).
+MAX_READ_BYTES = 10 * 1024 * 1024
+READ_TEXT_ENCODINGS = ("utf-8", "latin-1", "cp1252")
+# opensak.list_dir(): most entries returned; a pattern narrows a big folder.
+MAX_DIR_ENTRIES = 10_000
+
 # opensak.exit(code): highest accepted exit code (portable process exit codes)
 MAX_EXIT_CODE = 255
 
@@ -2048,13 +2060,13 @@ class MacroRuntime:
             raise MacroError("opensak.confirm expects a message")
         return bool(self._host.confirm(message))
 
-    def _readable_file(self, path: str) -> Path:
+    def _readable_file(self, path: str, allow_database: bool = False) -> Path:
         """*path* resolved against the macro's folder and checked against the
         folder permissions (asking the user for an unapproved folder)."""
         file = Path(path).expanduser()
         if not file.is_absolute():
             file = (self._base_dir or macros_dir()) / file
-        return self._check_access(file, write=False)
+        return self._check_access(file, write=False, allow_database=allow_database)
 
     def _read_csv(self, lua, path=None, sep=None):
         if not isinstance(path, str) or not path.strip():
@@ -2221,6 +2233,102 @@ class MacroRuntime:
         if body is not None:
             parts.extend(body if isinstance(body, list) else [body])
         return self._html_call(func, report_html.page, parts, **opts)
+
+    def _read_text(self, path=None, options=None) -> str:
+        func = "opensak.read_text"
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a file path")
+        opts = {} if options is None else _from_lua(options)
+        if not isinstance(opts, dict) or set(opts) - {"encoding"}:
+            raise MacroError(f'{func}: options must be a table, e.g. {{ encoding = "cp1252" }}')
+        names = ", ".join(f'"{e}"' for e in READ_TEXT_ENCODINGS)
+        encoding = opts.get("encoding", "utf-8")
+        try:
+            codec = codecs.lookup(encoding).name if isinstance(encoding, str) else None
+        except LookupError:
+            codec = None
+        # "latin1", "UTF8", "windows-1252", ... name the same codecs.
+        if codec not in {codecs.lookup(e).name for e in READ_TEXT_ENCODINGS}:
+            raise MacroError(f"{func}: encoding must be one of {names}, got {encoding!r}")
+        file = self._readable_file(path.strip())
+        try:
+            if file.is_dir():
+                raise MacroError(f"{func}: {file} is a folder — use opensak.list_dir()")
+            if file.stat().st_size > MAX_READ_BYTES:
+                raise MacroError(
+                    f"{func}: {file.name} is larger than "
+                    f"{MAX_READ_BYTES // (1024 * 1024)} MB"
+                )
+            data = file.read_bytes()
+        except FileNotFoundError:
+            raise MacroError(f"{func}: file not found: {file}") from None
+        except OSError as exc:
+            raise MacroError(f"cannot read {file}: {exc}") from None
+        try:
+            text = data.decode("utf-8-sig" if codec == "utf-8" else codec)
+        except UnicodeDecodeError as exc:
+            raise MacroError(
+                f"{func}: {file.name} is not UTF-8 text (byte {exc.start}); "
+                f'for a file from an older Windows program try {{ encoding = "cp1252" }}'
+            ) from None
+        return text.replace("\r\n", "\n").replace("\r", "\n")
+
+    def _exists(self, func: str, path, folder: bool) -> bool:
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a {'folder' if folder else 'file'} path")
+        # Only asks whether it exists, so a database file (e.g. a GSAK
+        # sqlite.db3) can be checked; reading it is still refused.
+        target = self._readable_file(path.strip(), allow_database=True)
+        return target.is_dir() if folder else target.is_file()
+
+    def _list_dir(self, lua, folder=None, pattern=None):
+        func = "opensak.list_dir"
+        if not isinstance(folder, str) or not folder.strip():
+            raise MacroError(f"{func} expects a folder path")
+        if pattern is not None and (
+            not isinstance(pattern, str) or not pattern or "/" in pattern or "\\" in pattern
+        ):
+            raise MacroError(f'{func}: pattern must be a file name pattern such as "*.gpx"')
+        path = Path(folder.strip()).expanduser()
+        if not path.is_absolute():
+            path = (self._base_dir or macros_dir()) / path
+        try:
+            resolved = resolve_path(path)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {path}: {exc}") from None
+        # Listing a folder reads its entries: the permission (or the user's
+        # approval) is for the folder itself, as for a file in it.
+        self._check_access(resolved / "_", write=False)
+        if not resolved.is_dir():
+            raise MacroError(f"{func}: folder not found: {resolved}")
+        wanted = pattern.lower() if pattern else None
+        entries = []
+        try:
+            with os.scandir(resolved) as scan:
+                for entry in scan:
+                    if wanted and not fnmatch.fnmatchcase(entry.name.lower(), wanted):
+                        continue
+                    try:
+                        st = entry.stat()
+                    except OSError:
+                        continue    # a broken link, or gone since the scan
+                    if len(entries) == MAX_DIR_ENTRIES:
+                        raise MacroError(
+                            f"{func}: {resolved} has more than {MAX_DIR_ENTRIES} "
+                            'entries — pass a pattern such as "*.gpx"'
+                        )
+                    is_dir = entry.is_dir()
+                    entries.append({
+                        "name": entry.name,
+                        "path": str(resolved / entry.name),
+                        "dir": is_dir,
+                        "size": 0 if is_dir else st.st_size,
+                        "modified": int(st.st_mtime),
+                    })
+        except OSError as exc:
+            raise MacroError(f"cannot read {resolved}: {exc}") from None
+        entries.sort(key=lambda e: (e["name"].lower(), e["name"]))
+        return lua.table_from([lua.table_from(e) for e in entries])
 
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
         for name, value in (("title", title), ("filter", file_filter)):
@@ -4249,6 +4357,75 @@ API: tuple[ApiFunction, ...] = (
                   optional=True),
         ),
         returns=("string", "The file written (full path)."),
+    ),
+    ApiFunction(
+        name="read_text",
+        description="Read a whole text file, of any file type. A relative "
+                    "path is resolved against the macro file's folder. The "
+                    "folder needs read permission; for an unapproved one the "
+                    "user is asked first. UTF-8 unless `encoding` says "
+                    "otherwise (" + ", ".join(f'`"{e}"`' for e in READ_TEXT_ENCODINGS)
+                    + "); a UTF-8 byte order mark is removed and line endings "
+                    "become `\"\\n\"`. At most "
+                    f"{MAX_READ_BYTES // (1024 * 1024)} MB.",
+        example='local text = opensak.read_text("notes.txt")\n'
+                'for line in text:gmatch("[^\\n]+") do\n'
+                "    print(line)\nend",
+        since=3,
+        bind=lambda rt, lua: rt._read_text,
+        params=(
+            Param("path", "string", "The file to read."),
+            Param("options", "{encoding?: string}",
+                  '`encoding`: e.g. `"cp1252"` for a file from an older Windows program.',
+                  optional=True),
+        ),
+        returns=("string", "The file's text."),
+    ),
+    ApiFunction(
+        name="file_exists",
+        description="Whether a file exists (false for a folder). A relative "
+                    "path is resolved against the macro file's folder. The "
+                    "folder needs read permission, like opensak.read_text().",
+        example='if not opensak.file_exists(opensak.temp_dir() .. "/report.html") then\n'
+                '    print("no report yet")\nend',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._exists("opensak.file_exists", path, False),
+        params=(Param("path", "string", "The file."),),
+        returns=("boolean", "true if the file exists."),
+    ),
+    ApiFunction(
+        name="folder_exists",
+        description="Whether a folder exists. A relative path is resolved "
+                    "against the macro file's folder. The folder containing "
+                    "it needs read permission.",
+        example='if opensak.folder_exists("C:/GPX") then print("found") end',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._exists("opensak.folder_exists", path, True),
+        params=(Param("path", "string", "The folder."),),
+        returns=("boolean", "true if the folder exists."),
+    ),
+    ApiFunction(
+        name="list_dir",
+        description="The files and folders in a folder (not in its "
+                    "subfolders), sorted by name. A relative path is resolved "
+                    "against the macro file's folder. The folder needs read "
+                    "permission; for an unapproved one the user is asked "
+                    "first. `pattern` keeps the names that match it, ignoring "
+                    "case: `*` stands for any text, `?` for one character. At "
+                    f"most {MAX_DIR_ENTRIES:,} entries. Each entry has `name`, "
+                    "`path` (full path), `dir` (true for a folder), `size` "
+                    "(bytes, 0 for a folder) and `modified` (seconds since the "
+                    "epoch, like `os.time()`).",
+        example='for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do\n'
+                '    print(f.name, f.size, os.date("%Y-%m-%d", f.modified))\nend',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._list_dir(lua, *a),
+        params=(
+            Param("folder", "string", "The folder."),
+            Param("pattern", "string", 'A file name pattern, e.g. "*.gpx".', optional=True),
+        ),
+        returns=("{name: string, path: string, dir: boolean, size: integer, modified: integer}[]",
+                 "One table per entry."),
     ),
     ApiFunction(
         name="export_file",
