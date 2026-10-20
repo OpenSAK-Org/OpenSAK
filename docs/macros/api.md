@@ -3086,13 +3086,30 @@ The rows belonging to a cache are read with `opensak.logs()`, `opensak.waypoints
 
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
 
-- [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — enter or remove the corrected coordinates of the selected cache
-- [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — set corrected coordinates from a CSV file
-- [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — one GPX file per filter
-- [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — choose export options in a GSAK-style form, then export the list
-- [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — pick search options in a form, then step through the matches
-- [`import_gsak_appdata.lua`](../../macros/examples/import_gsak_appdata.lua)
-- [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — show the unfound caches updated since the last run
+- [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — Enter or remove the corrected coordinates of the selected cache
+- [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
+- [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — One GPX file per filter
+- [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — Choose export options in a GSAK-style form, then export the list
+- [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — Pick search options in a form, then step through the matches
+- [`import_gsak_appdata.lua`](../../macros/examples/import_gsak_appdata.lua) — Import every GSAK database, filter and location
+- [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — Show the unfound caches updated since the last run
+
+## Macro header
+
+**Macros → Macro manager** lists the macros in your macros folder and its subfolders. It shows what a comment block at the top of each macro says about it:
+
+```lua
+-- OpenSAK Macro
+-- Name: Find easy traditionals
+-- Author: Jane Doe
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Filters for unfound traditional caches with low difficulty.
+```
+
+Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read.
+
+From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, or a function key) that runs it from the main window. The output then goes to the manager's output pane.
 
 ## Editor support
 
@@ -3279,7 +3296,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | Delay | ✅ | `sleep(ms)` (max 10 s per call, 60 s per run) |
 | Include | ❌ | `require` is removed |
 | Macro | ✅ | `run_macro(path, ...)` |
-| MacHeader | ❌ | planned |
+| MacHeader | ✅ | comment header (`-- Name:`, `-- Version:`, `-- Requires-API:`, …), shown in the Macro manager; see "Macro header" |
 | NoError / Deprecated / VerCheck | ✅ | `api_version()`, `version()`, `if opensak.x then` |
 | UpdateCheck | 🚫 | online version check |
 | SpeedMode | ➖ | the UI refreshes when the macro ends; `refresh()` redraws it earlier |
