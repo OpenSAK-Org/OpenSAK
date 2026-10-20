@@ -2473,10 +2473,15 @@ class MainWindow(QMainWindow):
         """
         if cache.latitude is None or cache.longitude is None:
             return
-        from opensak.gui.settings import get_settings, HomePoint
-        s = get_settings()
+        from opensak.gui.settings import HomePoint
         label = f"📍 {cache.gc_code} — {cache.name}".strip(" —")
-        point = HomePoint(label, cache.latitude, cache.longitude)
+        self._activate_center(HomePoint(label, cache.latitude, cache.longitude))
+
+    def _activate_center(self, point) -> None:
+        """Make *point* (a HomePoint, saved or not) the active centre: store
+        it, show it in the drop-down, pan the map and recalculate and store
+        distance and bearing for every cache."""
+        s = get_settings()
         s.set_active_home(point)
         self._reload_home_combo()
         self._map_widget.pan_to_location(point.lat, point.lon, point.name)
@@ -3642,6 +3647,12 @@ class MainWindow(QMainWindow):
     def center_name(self) -> str:
         """MacroHost: name of the active centre point ("" = none)."""
         return get_settings().active_home_name or ""
+
+    def set_center(self, name: str, lat: float, lon: float) -> None:
+        """MacroHost: make (lat, lon) the active centre, shown as *name*,
+        like a choice in the centre drop-down."""
+        from opensak.gui.settings import HomePoint
+        self._activate_center(HomePoint(name, lat, lon))
 
     def set_corrected_coords(self, gc_code, lat, lon) -> bool:
         """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.

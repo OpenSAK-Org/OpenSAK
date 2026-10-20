@@ -703,6 +703,12 @@ class MacroHost(Protocol):
         """Name of the active centre point ("" = none) — the {center}
         variable."""
 
+    def set_center(self, name: str, lat: float, lon: float) -> None:
+        """Make (*lat*, *lon*) the active centre point, shown as *name*,
+        like the centre drop-down: store it, recalculate every cache's
+        distance and bearing and refresh the list and map. Optional — without
+        it opensak.set_center() reports that it is not available."""
+
     def switch_database(self, name: str) -> None:
         """Make the database *name* active and clear the active filter.
 
@@ -2119,6 +2125,75 @@ class MacroRuntime:
             raise MacroError(f"opensak.create_database: {exc}") from None
         self._host.database_list_changed()
         return db.name
+
+    # Centre points (GSAK's Centre): the saved ones are the user locations of
+    # Settings; set_center() works like the centre drop-down of the toolbar.
+
+    @staticmethod
+    def _center(lua):
+        from opensak.gui.settings import get_settings
+
+        s = get_settings()
+        name = s.active_home_name or ""
+        return lua.table_from({
+            "name": name,
+            "lat": s.home_lat,
+            "lon": s.home_lon,
+            "saved": any(p.name == name for p in s.home_points) if name else False,
+        })
+
+    @staticmethod
+    def _centers(lua):
+        from opensak.gui.settings import get_settings, sort_home_points
+
+        s = get_settings()
+        active = s.active_home_name
+        return lua.table_from([
+            lua.table_from({"name": p.name, "lat": p.lat, "lon": p.lon,
+                            "active": p.name == active})
+            for p in sort_home_points(s.home_points)
+        ])
+
+    def _set_center(self, lua, *args):
+        func = "opensak.set_center"
+        from opensak.gui.settings import get_settings
+
+        if not args or args[0] is None:
+            raise MacroError(f"{func} expects the name of a saved centre point, "
+                             "lat, lon or a coordinate string")
+        points = get_settings().home_points
+        saved = (next((p for p in points if p.name == args[0]), None)
+                 if isinstance(args[0], str) and len(args) == 1 else None)
+        if saved is not None:
+            name, lat, lon = saved.name, saved.lat, saved.lon
+        else:
+            try:
+                (point,), rest = take_points(args, 1, func)
+            except MacroError as exc:
+                if isinstance(args[0], str) and len(args) == 1:
+                    raise MacroError(f"{func}: {args[0]!r} is neither a saved centre point "
+                                     f"(see opensak.centers()) nor coordinates") from None
+                raise MacroError(f"{func}: {exc}") from None
+            if len(rest) > 1 or (rest and rest[0] is not None and not isinstance(rest[0], str)):
+                raise MacroError(f"{func}: the name after the coordinates must be a string")
+            lat, lon = point
+            label = rest[0].strip() if rest and rest[0] else ""
+            if any(p.name == label for p in points):
+                raise MacroError(f"{func}: {label!r} is a saved centre point — use "
+                                 f"opensak.set_center({label!r}) to make it the centre")
+            name = label or f"📍 {helpers.format_coordinate(lat, lon)}"
+        set_center = getattr(self._host, "set_center", None)
+        if not callable(set_center):
+            raise MacroError(f"{func} is not available here")
+        # Every cache's distance and bearing is rewritten through OpenSAK's
+        # own session, which would wait for the transaction's write lock.
+        self._no_transaction(func)
+        self._require_write(func)
+        try:
+            set_center(name, lat, lon)
+        except Exception as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return self._center(lua)
 
     def _switch_database(self, name=None) -> None:
         self._no_transaction("opensak.switch_database")
@@ -4801,6 +4876,60 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._create_database,
         params=(Param("name", "string", "Name of the new database."),),
         returns=("string", "The name actually used (surrounding spaces removed)."),
+    ),
+    ApiFunction(
+        name="center",
+        description="The active centre point, which distances and bearings "
+                    "are measured from. `name` is the saved centre point's "
+                    "name, the label of a centre set from coordinates or a "
+                    "cache, or \"\" when none was chosen; `saved` tells "
+                    "whether it is one of opensak.centers().",
+        example='local c = opensak.center()\n'
+                'print(c.name, opensak.coords.format(c.lat, c.lon))',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._center(lua),
+        returns=("{name: string, lat: number, lon: number, saved: boolean}",
+                 "The active centre point."),
+    ),
+    ApiFunction(
+        name="centers",
+        description="The saved centre points (Settings → User locations, "
+                    "with ★ Home from your geocaching.com home location "
+                    "first), as in the centre drop-down. "
+                    "`filter{ near = { point = name, km = … } }` filters by one.",
+        example='for _, p in ipairs(opensak.centers()) do\n'
+                '    print(p.active and "*" or " ", p.name)\nend',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._centers(lua),
+        returns=("{name: string, lat: number, lon: number, active: boolean}[]",
+                 "One table per saved centre point."),
+    ),
+    ApiFunction(
+        name="set_center",
+        description="Change the active centre point, like the centre "
+                    "drop-down in the toolbar (GSAK's Centre): a saved "
+                    "centre point by name, or coordinates with an optional "
+                    "name to show. Coordinates are not saved as a user "
+                    "location. Distance and bearing of every cache in the "
+                    "active database are recalculated and stored, so the "
+                    "macro needs permission to change the database, and it "
+                    "cannot be used inside opensak.transaction(). The "
+                    "centre stays when the macro ends.",
+        example='opensak.set_center("★ Home")\n'
+                'local c = opensak.cache("GC12345")\n'
+                'opensak.set_center(c.lat, c.lon, c.code)',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._set_center(lua, *a),
+        params=(Param("name", "string", "A saved centre point (see opensak.centers())."),),
+        overloads=(
+            (_LAT, _LON, Param("name", "string", "Name to show (default: the coordinates).",
+                               optional=True)),
+            (_COORDS, Param("name", "string", "Name to show (default: the coordinates).",
+                            optional=True)),
+        ),
+        returns=("{name: string, lat: number, lon: number, saved: boolean}",
+                 "The new centre point, as opensak.center() returns it."),
+        write=True,
     ),
     ApiFunction(
         name="switch_database",
