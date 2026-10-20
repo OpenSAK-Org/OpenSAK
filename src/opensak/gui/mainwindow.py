@@ -2095,17 +2095,22 @@ class MainWindow(QMainWindow):
     # ── Drag & drop ───────────────────────────────────────────────────────────
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Accept drag if it contains GPX or ZIP files."""
+        """Accept drag if it contains GPX or ZIP files, or folders."""
+        from pathlib import Path
+
         mime = event.mimeData()
         if mime.hasUrls():
             paths = [u.toLocalFile() for u in mime.urls()]
-            if any(p.lower().endswith((".gpx", ".zip", ".loc")) for p in paths):
+            if any(
+                p.lower().endswith((".gpx", ".zip", ".loc")) or (p and Path(p).is_dir())
+                for p in paths
+            ):
                 event.acceptProposedAction()
                 return
         event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """Open import dialog with dropped GPX/ZIP files pre-loaded."""
+        """Open import dialog with dropped GPX/ZIP files or folders pre-loaded."""
         from pathlib import Path
         from opensak.gui.dialogs.import_dialog import ImportDialog
 
@@ -2118,14 +2123,14 @@ class MainWindow(QMainWindow):
             Path(u.toLocalFile())
             for u in event.mimeData().urls()
             if u.toLocalFile().lower().endswith((".gpx", ".zip", ".loc"))
+            or (u.toLocalFile() and Path(u.toLocalFile()).is_dir())
         ]
         if not paths:
             event.ignore()
             return
 
         event.acceptProposedAction()
-        dlg = ImportDialog(self)
-        dlg.add_files(paths)
+        dlg = ImportDialog(self, paths=paths)
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 

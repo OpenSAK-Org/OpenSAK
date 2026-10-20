@@ -1,16 +1,23 @@
 """
 src/opensak/gui/dialogs/import_dialog.py — GPX / PQ zip import dialog.
 
-Supports selecting and importing multiple files in one session.
-Files are imported sequentially in a background thread.
+Supports selecting and importing multiple files in one session, and
+folders: every GPX / zip file directly in a folder is imported, looked up
+when the import starts. Files are imported sequentially in a background
+thread.
+
+The target database and the file and folder list can be saved under a name
+and loaded again (see opensak.importer.gpx_import_settings); the settings of the most
+recent import are restored when the dialog opens.
 """
 
 from __future__ import annotations
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QProgressBar,
     QTextEdit, QListWidget, QListWidgetItem,
     QAbstractItemView, QComboBox,
@@ -19,6 +26,36 @@ from PySide6.QtWidgets import (
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog
+from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
+
+if TYPE_CHECKING:
+    from opensak.gui.dialogs.update_location_dialog import ReverseGeocodeWorker
+
+# File types a folder entry imports.
+FOLDER_IMPORT_SUFFIXES = (".gpx", ".zip")
+
+
+def folder_import_files(folder: Path) -> list[Path]:
+    """Return the files a folder entry imports: every GPX / zip file
+    directly in *folder* (not in subfolders), sorted by name. Companion
+    waypoint files are left out when a main cache GPX is there — the
+    import picks them up next to that file.
+    """
+    from opensak.importer import _is_companion_gpx
+
+    try:
+        files = sorted(
+            f for f in folder.iterdir()
+            if f.is_file() and f.suffix.lower() in FOLDER_IMPORT_SUFFIXES
+        )
+    except OSError:
+        return []
+    gpx = [f for f in files if f.suffix.lower() == ".gpx"]
+    companions = {f for f in gpx if _is_companion_gpx(f)}
+    if companions and any(f not in companions for f in gpx):
+        files = [f for f in files if f not in companions]
+    return files
 
 
 class ImportWorker(QThread):
@@ -104,12 +141,31 @@ class ImportWorker(QThread):
         # once this method returns, and the dialog reacts to that instead.
 
 
-class ImportDialog(QDialog):
-    """Dialog for importing one or more GPX or PQ zip files."""
+class ImportDialog(SavedSettingsDialog):
+    """Dialog for importing one or more GPX or PQ zip files.
+
+    *paths* (e.g. files or folders dropped on the main window) replace
+    the file and folder list of the restored "last used" settings; the
+    target database is kept.
+
+    _selected_paths holds the list entries (files and folders, one per
+    row); the folders among them are in _folders. _run_paths are the files
+    an import of these entries covers — the worker's indices refer to it —
+    and _run_rows the list row each of them belongs to.
+    """
 
     import_completed = Signal()   # emitted when at least one file imported successfully
 
-    def __init__(self, parent=None):
+    _profile_cls = GpxImportProfile
+    _settings_tr_keys = {
+        "label":         "import_settings_label",
+        "save_title":    "import_settings_save_title",
+        "overwrite_msg": "import_settings_overwrite_msg",
+        "delete_msg":    "import_settings_delete_msg",
+        "load_error":    "import_settings_load_error",
+    }
+
+    def __init__(self, parent=None, paths: list[Path] | None = None):
         super().__init__(parent)
         self.setWindowTitle(tr("import_dialog_title"))
         self.setMinimumWidth(540)
@@ -120,12 +176,21 @@ class ImportDialog(QDialog):
         # scrollbar), so no additional QScrollArea needed here.
         clamp_dialog_height_to_screen(self, parent)
         self._worker: ImportWorker | None = None
-        self._geo_worker = None
+        self._geo_worker: ReverseGeocodeWorker | None = None
         self._selected_paths: list[Path] = []
+        self._folders: set[Path] = set()
+        self._run_paths: list[Path] = []
+        self._run_rows: list[int] = []
+        self._failed_rows: set[int] = set()
         self._any_success = False
         self._db_combo: QComboBox | None = None
         self._setup_ui()
         self._populate_db_combo()
+        settings = GpxImportProfile.load_last_used()
+        if paths is not None:
+            settings.files = [str(p) for p in paths if not p.is_dir()]
+            settings.folders = [str(p) for p in paths if p.is_dir()]
+        self._apply_settings(settings)
 
     def _populate_db_combo(self) -> None:
         """Fill the database combo with all known databases; pre-select the active one."""
@@ -177,6 +242,11 @@ class ImportDialog(QDialog):
         self._browse_btn.clicked.connect(self._browse)
         btn_row.addWidget(self._browse_btn)
 
+        self._browse_folder_btn = QPushButton(tr("settings_folder_perm_add"))
+        self._browse_folder_btn.setToolTip(tr("import_browse_folder_tip"))
+        self._browse_folder_btn.clicked.connect(self._browse_folder)
+        btn_row.addWidget(self._browse_folder_btn)
+
         self._remove_btn = QPushButton(tr("import_remove_selected"))
         self._remove_btn.setEnabled(False)
         self._remove_btn.clicked.connect(self._remove_selected)
@@ -195,6 +265,10 @@ class ImportDialog(QDialog):
 
         layout.addLayout(btn_row)
 
+        # ── Saved settings ────────────────────────────────────────────────────
+        self._settings_group = self._build_settings_group()
+        layout.addWidget(self._settings_group)
+
         # ── Progress ──────────────────────────────────────────────────────────
         self._progress = QProgressBar()
         self._progress.setRange(0, 0)   # indeterminate
@@ -209,6 +283,43 @@ class ImportDialog(QDialog):
 
         # Connect selection change for remove button state
         self._file_list.itemSelectionChanged.connect(self._on_selection_changed)
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+
+    def _collect_settings(self) -> GpxImportSettings:
+        database = (
+            self._db_combo.currentData()
+            if self._db_combo is not None and self._db_combo.count() > 0
+            else None
+        )
+        return GpxImportSettings(
+            database=str(database) if database is not None else "",
+            files=[str(p) for p in self._selected_paths if p not in self._folders],
+            folders=[str(p) for p in self._selected_paths if p in self._folders],
+        )
+
+    def _apply_settings(self, settings: GpxImportSettings) -> None:
+        if self._db_combo is not None and settings.database:
+            for i in range(self._db_combo.count()):
+                if str(self._db_combo.itemData(i)) == settings.database:
+                    self._db_combo.setCurrentIndex(i)
+                    break
+        self._file_list.clear()
+        self._selected_paths = []
+        self._folders = set()
+        self._update_run()
+        self._remove_btn.setEnabled(False)
+        # Files and folders that have been moved or deleted since are left out.
+        files = [Path(f) for f in settings.files]
+        folders = [Path(f) for f in settings.folders]
+        existing_files = [p for p in files if p.is_file()]
+        existing_folders = [p for p in folders if p.is_dir()]
+        missing = len(files) + len(folders) - len(existing_files) - len(existing_folders)
+        self._log.clear()
+        if missing:
+            self._append_log(tr("import_settings_missing_files", count=missing))
+        self.add_files(existing_files)
+        self.add_folders(existing_folders)
 
     # ── File management ───────────────────────────────────────────────────────
 
@@ -241,16 +352,58 @@ class ImportDialog(QDialog):
     def add_files(self, paths: list[Path]) -> None:
         """Add files to the import list (used by drag & drop from MainWindow)."""
         paths = self._filter_companion_wpts(paths)
-        existing_names = {p.name for p in self._selected_paths}
+        existing_names = {
+            p.name for p in self._selected_paths if p not in self._folders
+        }
         for p in paths:
             if p.name not in existing_names:
-                self._selected_paths.append(p)
-                item = QListWidgetItem(f"⏳  {p.name}")
-                item.setToolTip(str(p))
-                self._file_list.addItem(item)
+                self._add_entry(p)
                 existing_names.add(p.name)
-        if self._selected_paths:
-            self._import_btn.setEnabled(True)
+        self._update_run()
+
+    def add_folders(self, folders: list[Path]) -> None:
+        """Add folders to the import list: each imports every GPX / zip file
+        directly in it, looked up when the import starts."""
+        for folder in folders:
+            if folder not in self._folders:
+                self._folders.add(folder)
+                self._add_entry(folder)
+        self._update_run()
+
+    def _add_entry(self, path: Path) -> None:
+        self._selected_paths.append(path)
+        item = QListWidgetItem(self._entry_text("⏳", len(self._selected_paths) - 1))
+        item.setToolTip(str(path))
+        self._file_list.addItem(item)
+
+    def _entry_text(self, icon: str, row: int) -> str:
+        path = self._selected_paths[row]
+        if path in self._folders:
+            return f"{icon}  📁 {path.name or path}"
+        return f"{icon}  {path.name}"
+
+    def _set_row_icon(self, row: int, icon: str) -> None:
+        item = self._file_list.item(row)
+        if item:
+            item.setText(self._entry_text(icon, row))
+
+    def _update_run(self) -> None:
+        """Work out the files an import of the current entries covers.
+
+        Folders are looked up again on every call, so a later import picks
+        up files added to them since. A file listed twice (on its own and
+        in a folder) is imported once.
+        """
+        self._run_paths, self._run_rows = [], []
+        seen: set[Path] = set()
+        for row, entry in enumerate(self._selected_paths):
+            files = folder_import_files(entry) if entry in self._folders else [entry]
+            for f in files:
+                if f not in seen:
+                    seen.add(f)
+                    self._run_paths.append(f)
+                    self._run_rows.append(row)
+        self._import_btn.setEnabled(bool(self._selected_paths))
 
     def _browse(self) -> None:
         settings = get_settings()
@@ -261,19 +414,18 @@ class ImportDialog(QDialog):
             tr("import_file_filter")
         )
         if paths:
-            filtered = self._filter_companion_wpts([Path(s) for s in paths])
-            existing_names = {p.name for p in self._selected_paths}
-            for p in filtered:
-                if p.name not in existing_names:
-                    self._selected_paths.append(p)
-                    item = QListWidgetItem(f"⏳  {p.name}")
-                    item.setToolTip(str(p))
-                    self._file_list.addItem(item)
-                    existing_names.add(p.name)
-
+            self.add_files([Path(s) for s in paths])
             if self._selected_paths:
-                settings.last_import_dir = str(self._selected_paths[-1].parent)
-                self._import_btn.setEnabled(True)
+                settings.last_import_dir = str(Path(paths[-1]).parent)
+
+    def _browse_folder(self) -> None:
+        settings = get_settings()
+        folder = QFileDialog.getExistingDirectory(
+            self, tr("import_browse_folder_title"), settings.last_import_dir,
+        )
+        if folder:
+            self.add_folders([Path(folder)])
+            settings.last_import_dir = str(Path(folder))
 
     def _remove_selected(self) -> None:
         selected_rows = sorted(
@@ -282,9 +434,9 @@ class ImportDialog(QDialog):
         )
         for row in selected_rows:
             self._file_list.takeItem(row)
-            del self._selected_paths[row]
+            self._folders.discard(self._selected_paths.pop(row))
 
-        self._import_btn.setEnabled(bool(self._selected_paths))
+        self._update_run()
         self._remove_btn.setEnabled(False)
 
     def _on_selection_changed(self) -> None:
@@ -295,10 +447,18 @@ class ImportDialog(QDialog):
     def _start_import(self) -> None:
         if not self._selected_paths:
             return
+        self._update_run()
+        if not self._run_paths:
+            self._log.clear()
+            self._append_log(tr("import_folder_empty"))
+            return
 
         self._import_btn.setEnabled(False)
         self._browse_btn.setEnabled(False)
+        self._browse_folder_btn.setEnabled(False)
         self._remove_btn.setEnabled(False)
+        # Loading other settings would replace the list being imported.
+        self._settings_group.setEnabled(False)
         # Issue #802: the import step itself has no cancellation support
         # (ImportWorker.run() has no cancel flag to check between files),
         # so simply disable Close rather than pretending it can respond —
@@ -307,19 +467,23 @@ class ImportDialog(QDialog):
         self._close_btn.setEnabled(False)
         self._progress.setVisible(True)
         self._any_success = False
+        self._failed_rows = set()
         self._log.clear()
 
         # Reset all list item icons to waiting
-        for i in range(self._file_list.count()):
-            item = self._file_list.item(i)
-            item.setText(f"⏳  {self._selected_paths[i].name}")
+        for row in range(self._file_list.count()):
+            self._set_row_icon(row, "⏳")
 
         target_db_path = (
             self._db_combo.currentData()
             if self._db_combo is not None and self._db_combo.count() > 0
             else None
         )
-        self._worker = ImportWorker(list(self._selected_paths), target_db_path=target_db_path)
+        try:
+            GpxImportProfile.save_last_used(self._collect_settings())
+        except OSError:
+            pass  # failing to remember the settings must not block the import
+        self._worker = ImportWorker(list(self._run_paths), target_db_path=target_db_path)
         self._worker.file_started.connect(self._on_file_started)
         self._worker.file_finished.connect(self._on_file_finished)
         self._worker.file_error.connect(self._on_file_error)
@@ -341,10 +505,9 @@ class ImportDialog(QDialog):
         self._worker.start()
 
     def _on_file_started(self, index: int, name: str) -> None:
-        item = self._file_list.item(index)
-        if item:
-            item.setText(f"🔄  {name}")
-        self._file_list.scrollToItem(self._file_list.item(index))
+        row = self._run_rows[index]
+        self._set_row_icon(row, "🔄")
+        self._file_list.scrollToItem(self._file_list.item(row))
         self._append_log(tr("import_running_file", name=name))
         self._progress.setRange(0, 0)  # indeterminate while pre-counting
 
@@ -364,10 +527,11 @@ class ImportDialog(QDialog):
             self._progress.setValue(count)
 
     def _on_file_finished(self, index: int, result) -> None:
-        path = self._selected_paths[index]
-        item = self._file_list.item(index)
-        if item:
-            item.setText(f"✅  {path.name}")
+        path = self._run_paths[index]
+        row = self._run_rows[index]
+        # A folder stays marked failed when one of its files failed.
+        if row not in self._failed_rows:
+            self._set_row_icon(row, "✅")
 
         lines = [
             tr("import_complete", name=path.name),
@@ -387,17 +551,16 @@ class ImportDialog(QDialog):
             self._any_success = True
 
     def _on_file_error(self, index: int, msg: str) -> None:
-        path = self._selected_paths[index]
-        item = self._file_list.item(index)
-        if item:
-            item.setText(f"❌  {path.name}")
+        path = self._run_paths[index]
+        row = self._run_rows[index]
+        self._failed_rows.add(row)
+        self._set_row_icon(row, "❌")
         self._append_log(f"{tr('import_failed')} {path.name}\n{msg}")
 
     def _on_all_done(self) -> None:
         self._progress.setVisible(False)
 
-        total = self._file_list.count()
-        self._append_log(tr("import_all_done", count=total))
+        self._append_log(tr("import_all_done", count=len(self._run_paths)))
 
         if self._any_success:
             self.import_completed.emit()
@@ -407,6 +570,8 @@ class ImportDialog(QDialog):
             self._start_geocoding()
         else:
             self._browse_btn.setEnabled(True)
+            self._browse_folder_btn.setEnabled(True)
+            self._settings_group.setEnabled(True)
             self._import_btn.setText(tr("import_again"))
             self._import_btn.setEnabled(True)
             self._close_btn.setEnabled(True)
@@ -480,6 +645,8 @@ class ImportDialog(QDialog):
 
     def _finish_geocoding(self) -> None:
         self._browse_btn.setEnabled(True)
+        self._browse_folder_btn.setEnabled(True)
+        self._settings_group.setEnabled(True)
         self._import_btn.setText(tr("import_again"))
         self._import_btn.setEnabled(True)
         # Issue #802: revert Close back from its "Cancel" state.

@@ -74,10 +74,21 @@ class SavedSettingsDialog(QDialog):
     with "… last used" and the saved settings, plus Save and Delete.
 
     Subclasses set _profile_cls (a FileExportProfile class) and implement
-    _collect_settings() and _apply_settings().
+    _collect_settings() and _apply_settings(). _settings_tr_keys names the
+    texts of the box, so it can be about other than export settings.
     """
 
     _profile_cls: type[FileExportProfile] = FileExportProfile
+    _settings_tr_keys = {
+        "label":         "file_export_settings_label",
+        "save_title":    "file_export_settings_save_title",
+        "overwrite_msg": "file_export_settings_overwrite_msg",
+        "delete_msg":    "file_export_settings_delete_msg",
+        "load_error":    "file_export_settings_load_error",
+    }
+
+    def _settings_tr(self, text: str, **kwargs) -> str:
+        return tr(self._settings_tr_keys[text], **kwargs)
 
     def _collect_settings(self):
         raise NotImplementedError
@@ -86,7 +97,7 @@ class SavedSettingsDialog(QDialog):
         raise NotImplementedError
 
     def _build_settings_group(self) -> QGroupBox:
-        settings_group = QGroupBox(tr("file_export_settings_label"))
+        settings_group = QGroupBox(self._settings_tr("label"))
         settings_row = QHBoxLayout(settings_group)
         self._settings_combo = QComboBox()
         self._settings_combo.setMinimumWidth(200)
@@ -136,7 +147,7 @@ class SavedSettingsDialog(QDialog):
                 self._apply_settings(self._profile_cls.load(path).settings)
         except Exception as e:
             QMessageBox.warning(
-                self, tr("error"), tr("file_export_settings_load_error", error=e)
+                self, tr("error"), self._settings_tr("load_error", error=e)
             )
 
     def _save_profile(self) -> None:
@@ -146,7 +157,7 @@ class SavedSettingsDialog(QDialog):
             else ""
         )
         name, ok = QInputDialog.getText(
-            self, tr("file_export_settings_save_title"),
+            self, self._settings_tr("save_title"),
             tr("file_export_settings_name_label"), text=current,
         )
         if not ok or not name.strip():
@@ -154,8 +165,8 @@ class SavedSettingsDialog(QDialog):
         name = name.strip()
         if self._profile_cls.profile_path(name).exists():
             reply = QMessageBox.question(
-                self, tr("file_export_settings_save_title"),
-                tr("file_export_settings_overwrite_msg", name=name),
+                self, self._settings_tr("save_title"),
+                self._settings_tr("overwrite_msg", name=name),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -175,7 +186,7 @@ class SavedSettingsDialog(QDialog):
         name = self._settings_combo.currentText()
         reply = QMessageBox.question(
             self, tr("delete"),
-            tr("file_export_settings_delete_msg", name=name),
+            self._settings_tr("delete_msg", name=name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
