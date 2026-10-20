@@ -65,7 +65,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
 | SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
-| SqlToHtml | ❌ | planned; meanwhile build the HTML from `sql()` and write it with `write_text()` |
+| SqlToHtml | ✅ | `html.table(sql(…), {columns=…})`, wrapped in `html.page{}` and written with `write_text()` |
 | Table | ➖ | separate functions per table |
 | TotChild | ✅ | `waypoint_count` field, `waypoints(code)` |
 | Transaction / InTransaction | ✅ β | `transaction(fn)`, `in_transaction()` |

@@ -177,6 +177,7 @@ from opensak.macro.sql import (
     connect_read_only,
     default_schema_name,
 )
+from opensak.stats import html as report_html
 from opensak.utils import flags
 from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
 
@@ -221,12 +222,22 @@ DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
 WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
 MAX_WRITE_BYTES = 20 * 1024 * 1024
+
+# opensak.html.*: the keys of their option tables (Lua name → Python keyword).
+HTML_OPTIONS = {
+    "table": {"columns": "columns", "link": "link", "caption": "caption", "bars": "bars",
+              "color": "color"},
+    "page": {"title": "title", "subtitle": "subtitle", "css": "css", "lang": "lang",
+             "footer": "footer", "body": "body"},
+}
+
 # opensak.read_text(): the largest file, and the encodings it reads (GSAK
 # macros often wrote files in the Windows code page).
 MAX_READ_BYTES = 10 * 1024 * 1024
 READ_TEXT_ENCODINGS = ("utf-8", "latin-1", "cp1252")
 # opensak.list_dir(): most entries returned; a pattern narrows a big folder.
 MAX_DIR_ENTRIES = 10_000
+
 # opensak.exit(code): highest accepted exit code (portable process exit codes)
 MAX_EXIT_CODE = 255
 
@@ -2108,6 +2119,120 @@ class MacroRuntime:
             raise MacroError(str(exc)) from None
         except OSError as exc:
             raise MacroError(f"cannot write {target}: {exc}") from None
+
+    # ── opensak.html.* ───────────────────────────────────────────────────
+    # The rows are Lua tables; only the fields a function needs are read,
+    # which keeps a list of 20 000 finds fast.
+
+    @staticmethod
+    def _row_list(func: str, rows: Any) -> list:
+        """The Lua rows 1..n, each checked to be a table."""
+        if not _is_lua_table(rows):
+            raise MacroError(f"{func} expects a list of rows (tables)")
+        result = [rows[i] for i in range(1, len(rows) + 1)]
+        if result:
+            # All rows are of one Python class (a Lua table) unless one is not.
+            table_class = type(result[0])
+            if not _is_lua_table(result[0]) or any(type(r) is not table_class for r in result):
+                for i, row in enumerate(result, 1):
+                    if not _is_lua_table(row):
+                        raise MacroError(f"{func}: row {i} is not a table")
+        return result
+
+    @staticmethod
+    def _fields(rows: list, names: Any) -> list[dict[str, Any]]:
+        """{name: value} of the given fields of each Lua row."""
+        names = [n for n in dict.fromkeys(names) if n is not None]
+        plain = (str, int, float, bool, type(None))
+        result = []
+        for row in rows:
+            values = {}
+            for n in names:
+                v = row[n]
+                values[n] = v if type(v) in plain else _from_lua(v)
+            result.append(values)
+        return result
+
+    @staticmethod
+    def _html_options(func: str, kind: str, options: Any) -> dict[str, Any]:
+        opts = {} if options is None else _from_lua(options)
+        if opts == []:
+            opts = {}
+        if not isinstance(opts, dict):
+            raise MacroError(f"{func}: options must be a table")
+        names = HTML_OPTIONS[kind]
+        unknown = set(opts) - set(names)
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                f"valid: {', '.join(sorted(names))}"
+            )
+        # 10.0 from Lua arithmetic counts as the whole number 10.
+        return {
+            names[k]: int(v) if isinstance(v, float) and v.is_integer() else v
+            for k, v in opts.items()
+        }
+
+    @staticmethod
+    def _html_call(func: str, fn: Callable, *args, **kwargs) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except (report_html.HtmlError, TypeError) as exc:
+            raise MacroError(f"{func}: {exc}") from None
+
+    def _html_table(self, rows=None, options=None) -> str:
+        func = "opensak.html.table"
+        rows = self._row_list(func, rows)
+        opts = self._html_options(func, "table", options)
+        columns, link = opts.get("columns"), opts.get("link")
+        if link is not None and not (isinstance(link, dict)
+                                     and all(isinstance(v, str) for v in link.values())):
+            raise MacroError(f'{func}: link must be a table, e.g. {{ code = "url" }}')
+        if columns is None:
+            data = [_from_lua(r) for r in rows]
+        else:
+            names = [c if isinstance(c, str) else (c[0] if isinstance(c, list) and c else None)
+                     for c in (columns if isinstance(columns, list) else [])]
+            data = self._fields(rows, [*names, *(link or {}).values()])
+        if "bars" in opts and not isinstance(opts["bars"], list):
+            raise MacroError(f'{func}: bars must be a list of field names, e.g. {{ "count" }}')
+        return self._html_call(func, report_html.table, data, **opts)
+
+    @staticmethod
+    def _html_escape(value=None) -> str:
+        if _is_lua_table(value) or _is_lua_function(value):
+            raise MacroError("opensak.html.escape expects a string, number, boolean or nil")
+        return report_html.escape(value)
+
+    def _html_tiles(self, items=None) -> str:
+        func = "opensak.html.tiles"
+        data = _from_lua(items)
+        return self._html_call(func, report_html.tiles, [] if data == {} else data)
+
+    def _html_columns(self, *parts) -> str:
+        func = "opensak.html.columns"
+        if len(parts) == 1 and _is_lua_table(parts[0]):
+            parts = tuple(_from_lua(parts[0]) or [])
+        return self._html_call(func, report_html.columns, list(parts))
+
+    def _html_page(self, spec=None) -> str:
+        func = "opensak.html.page"
+        if not _is_lua_table(spec):
+            raise MacroError(f'{func} expects a table, e.g. {func}{{ title = "Report", body }}')
+        # The array part of the table is the body: html.page{ title = "x", part1, part2 }.
+        parts = [spec[i] for i in range(1, len(spec) + 1)]
+        named = {k: v for k, v in spec.items() if not isinstance(k, int) or isinstance(k, bool)}
+        unknown = set(named) - set(HTML_OPTIONS["page"])
+        if unknown:
+            raise MacroError(
+                f"{func}: unknown key(s) {sorted(map(str, unknown))}; "
+                f"valid: {', '.join(sorted(HTML_OPTIONS['page']))}"
+            )
+        opts: dict[str, Any] = {str(k): _from_lua(v) for k, v in named.items()}
+        body = opts.pop("body", None)
+        if body is not None:
+            parts.extend(body if isinstance(body, list) else [body])
+        return self._html_call(func, report_html.page, parts, **opts)
 
     def _read_text(self, path=None, options=None) -> str:
         func = "opensak.read_text"
@@ -4899,6 +5024,95 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: helpers.normalize_name,
         params=(Param("s", "string", "The name."),),
         returns=("string", "The safe name."),
+    ),
+
+    # -- opensak.html ---------------------------------------------------------
+    ApiFunction(
+        name="html.escape",
+        description="*value* as text for HTML: `& < > \" '` are escaped, nil "
+                    "becomes \"\", 3.0 becomes \"3\".",
+        example='local cell = "<td>" .. opensak.html.escape(c.name) .. "</td>"',
+        since=3,
+        bind=lambda rt, lua: rt._html_escape,
+        params=(Param("value", "any", "A string, number, boolean or nil."),),
+        returns=("string", "Escaped text."),
+    ),
+    ApiFunction(
+        name="html.table",
+        description="*rows* as an HTML table (values escaped), e.g. the rows "
+                    "of opensak.sql() (GSAK's SqlToHtml). `columns` lists the "
+                    "fields to show, each a field name or `{field, heading}`; "
+                    "without it all fields are shown, sorted by name — a Lua "
+                    "table has no field order, so pass `columns` to keep the "
+                    "order of the query. Number columns are right-aligned. "
+                    "`link = { code = \"url\" }` turns the code cells into "
+                    "links to the row's url field (http/https only). `bars = "
+                    "{\"count\"}` adds a bar next to each value of those "
+                    "number fields, scaled to the largest (in `color`, "
+                    "\"#rrggbb\"). The bars use inline styles only, so they "
+                    "also show without the stylesheet of opensak.html.page.",
+        example='local rows = opensak.sql(\n'
+                '  "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")\n'
+                'local html = opensak.html.table(rows, {\n'
+                '  columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })',
+        since=3,
+        bind=lambda rt, lua: rt._html_table,
+        params=(
+            Param("rows", "table[]", "The rows."),
+            Param("options", "{columns?: (string|string[])[], link?: table<string, string>, "
+                  "caption?: string, bars?: string[], color?: string}", "See above.",
+                  optional=True),
+        ),
+        returns=("string", "HTML."),
+    ),
+    ApiFunction(
+        name="html.tiles",
+        description="Key figures as a row of tiles: a list of `{label =, "
+                    "value =}`.",
+        example='local found = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE found = 1")[1].n\n'
+                'local html = opensak.html.tiles{\n'
+                '  { label = "caches", value = opensak.count() },\n'
+                '  { label = "found", value = found },\n'
+                '}',
+        since=3,
+        bind=lambda rt, lua: rt._html_tiles,
+        params=(Param("items", "{label: string, value: any}[]", "The tiles."),),
+        returns=("string", "HTML."),
+    ),
+    ApiFunction(
+        name="html.columns",
+        description="Put HTML parts (e.g. two tables) side by side; on a "
+                    "narrow window they go one below the other.",
+        example='local html = opensak.html.columns(table1, table2)',
+        since=3,
+        bind=lambda rt, lua: rt._html_columns,
+        params=(Param("...", "string", "The HTML parts (or one list of them)."),),
+        returns=("string", "HTML."),
+    ),
+    ApiFunction(
+        name="html.page",
+        description="A complete HTML page for opensak.write_text: `title` "
+                    "(also the heading), `subtitle`, the body — the strings "
+                    "in the list part of the table, and/or `body` — and "
+                    "`footer`. A built-in stylesheet with a light and a dark "
+                    "theme styles headings (`<h2>`), tables, tiles and "
+                    "columns; `css` is added after it. The body is put in as "
+                    "it is: build it from the html.* functions, or escape "
+                    "your own text with html.escape.",
+        example='local rows = opensak.sql("SELECT code, name, difficulty FROM caches LIMIT 50")\n'
+                'local page = opensak.html.page{\n'
+                '  title = "Caches", subtitle = opensak.database(),\n'
+                '  opensak.html.tiles{ { label = "caches", value = opensak.count() } },\n'
+                '  "<h2>First 50</h2>",\n'
+                '  opensak.html.table(rows, { columns = { "code", "name", "difficulty" } }),\n'
+                '}\n'
+                'opensak.write_text(opensak.temp_dir() .. "/caches.html", page)',
+        since=3,
+        bind=lambda rt, lua: rt._html_page,
+        params=(Param("spec", "{title?: string, subtitle?: string, css?: string, "
+                      "lang?: string, footer?: string, body?: string|string[], "
+                      "[integer]: string}", "See above."),),
+        returns=("string", "The page."),
     ),
 
     # -- opensak.date ---------------------------------------------------------
