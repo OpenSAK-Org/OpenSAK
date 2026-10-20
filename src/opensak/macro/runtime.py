@@ -5681,6 +5681,18 @@ API: tuple[ApiFunction, ...] = (
         params=(_TEXT, _PATTERN),
         returns=("string[]", "The pieces between the matches."),
     ),
+    ApiFunction(
+        name="re.escape",
+        description="Escape every character that has a meaning in a regular "
+                    "expression, so the text matches literally (GSAK's "
+                    "RegExEscape), e.g. to search for a cache name in a pattern.",
+        example='local pattern = "^" .. opensak.re.escape("Bonus (1/3)") .. "$"\n'
+                'print(opensak.re.match("Bonus (1/3)", pattern))  -- true',
+        since=3,
+        bind=lambda rt, lua: helpers.re_escape,
+        params=(_TEXT,),
+        returns=("string", "The escaped text."),
+    ),
 
     # -- opensak.text ---------------------------------------------------------
     ApiFunction(
@@ -5735,6 +5747,128 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: helpers.normalize_name,
         params=(Param("s", "string", "The name."),),
         returns=("string", "The safe name."),
+    ),
+    ApiFunction(
+        name="text.upper",
+        description="Upper case for all letters, not only ASCII: "
+                    "`string.upper` and `s:upper()` leave ä, é, ø … as they "
+                    "are. ß becomes SS.",
+        example='print(opensak.text.upper("zürich"))  -- ZÜRICH; ("zürich"):upper() gives ZüRICH',
+        since=3,
+        bind=lambda rt, lua: helpers.upper,
+        params=(_TEXT,),
+        returns=("string", "The text in upper case."),
+    ),
+    ApiFunction(
+        name="text.lower",
+        description="Lower case for all letters, not only ASCII (see "
+                    "opensak.text.upper()).",
+        example='if opensak.text.lower(c.country) == "österreich" then print(c.code) end',
+        since=3,
+        bind=lambda rt, lua: helpers.lower,
+        params=(_TEXT,),
+        returns=("string", "The text in lower case."),
+    ),
+    ApiFunction(
+        name="text.trim",
+        description="Remove white space at the start and end, including "
+                    "line breaks and Unicode spaces such as the no-break "
+                    "space that `%s` in a Lua pattern does not match "
+                    "(GSAK's Alltrim).",
+        example='local name = opensak.text.trim("  Zürich\\u{00A0}")  -- "Zürich"',
+        since=3,
+        bind=lambda rt, lua: helpers.trim,
+        params=(_TEXT,),
+        returns=("string", "The trimmed text."),
+    ),
+    ApiFunction(
+        name="text.sub",
+        description="Like `string.sub`, but counting characters instead of "
+                    "bytes, so it never cuts an ü or é in half (GSAK's Left, "
+                    "Right and SubStr). Positions start at 1; negative ones "
+                    "count from the end; both ends are included. "
+                    "`utf8.len(s)` gives the number of characters.",
+        example='local s = "Zürich Nord"\n'
+                'print(opensak.text.sub(s, 1, 6))  -- Zürich (Left)\n'
+                'print(opensak.text.sub(s, -4))    -- Nord (Right)',
+        since=3,
+        bind=lambda rt, lua: helpers.sub,
+        params=(
+            _TEXT,
+            Param("i", "integer", "First character (default 1).", optional=True),
+            Param("j", "integer", "Last character (default -1, the end).", optional=True),
+        ),
+        returns=("string", "The characters from i to j."),
+    ),
+    ApiFunction(
+        name="text.html_decode",
+        description="Decode HTML entities such as `&amp;`, `&auml;` and "
+                    "`&#228;` and keep everything else, tags included "
+                    "(GSAK's EntityDecode). opensak.text.html_to_text() "
+                    "also removes the tags.",
+        example='print(opensak.text.html_decode("Z&uuml;rich &amp; Bern"))  -- Zürich & Bern',
+        since=3,
+        bind=lambda rt, lua: helpers.html_decode,
+        params=(_TEXT,),
+        returns=("string", "The decoded text."),
+    ),
+    ApiFunction(
+        name="text.csv_split",
+        description="Split one CSV line into its fields (GSAK's CsvGet): a "
+                    "field in double quotes may contain the separator, and "
+                    "`\"\"` inside quotes is one quote. For a whole file use "
+                    "opensak.read_csv().",
+        example='local f = opensak.text.csv_split([[GC12345,"Bonus, final",N47 22.123]])\n'
+                'print(f[2])  -- Bonus, final',
+        since=3,
+        bind=lambda rt, lua: lambda *a: lua.table_from(helpers.csv_split(*a)),
+        params=(
+            Param("line", "string", "One line of CSV."),
+            Param("sep", "string", 'Field separator, one character (default ",").',
+                  optional=True),
+        ),
+        returns=("string[]", "The fields."),
+    ),
+    ApiFunction(
+        name="text.url_encode",
+        description="Percent-encode text for a URL, e.g. a search term in a "
+                    "link: everything except letters, digits and `-._~` "
+                    "becomes `%XX` of its UTF-8 bytes (GSAK's HttpEncode).",
+        example='local url = "https://www.geocaching.com/play/search?q=" .. '
+                'opensak.text.url_encode("Zürich & Bern")',
+        since=3,
+        bind=lambda rt, lua: helpers.url_encode,
+        params=(_TEXT,),
+        returns=("string", "The encoded text."),
+    ),
+    ApiFunction(
+        name="text.url_decode",
+        description="Decode `%XX` sequences, and `+` as a space as in a "
+                    "query string.",
+        example='print(opensak.text.url_decode("Z%C3%BCrich+Nord"))  -- Zürich Nord',
+        since=3,
+        bind=lambda rt, lua: helpers.url_decode,
+        params=(_TEXT,),
+        returns=("string", "The decoded text."),
+    ),
+    ApiFunction(
+        name="text.base64_encode",
+        description="Base64-encode text (GSAK's MimeEncode).",
+        example='print(opensak.text.base64_encode("Zürich"))  -- WsO8cmljaA==',
+        since=3,
+        bind=lambda rt, lua: helpers.base64_encode,
+        params=(_TEXT,),
+        returns=("string", "The Base64 text."),
+    ),
+    ApiFunction(
+        name="text.base64_decode",
+        description="Decode Base64 (GSAK's MimeDecode); white space and line "
+                    "breaks in it are ignored. Invalid Base64 is an error.",
+        example='print(opensak.text.base64_decode("WsO8cmljaA=="))  -- Zürich',
+        since=3,
+        bind=lambda rt, lua: helpers.base64_decode,
+        params=(Param("text", "string", "The Base64 text."),),
+        returns=("string", "The decoded text."),
     ),
 
     # -- opensak.stats --------------------------------------------------------

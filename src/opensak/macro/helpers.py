@@ -181,6 +181,117 @@ def html_to_text(text: Any) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def upper(value: Any) -> str:
+    """Upper case for every letter, not only ASCII ("zürich" → "ZÜRICH")."""
+    return _text(value, "opensak.text.upper").upper()
+
+
+def lower(value: Any) -> str:
+    """Lower case for every letter, not only ASCII ("ZÜRICH" → "zürich")."""
+    return _text(value, "opensak.text.lower").lower()
+
+
+def trim(value: Any) -> str:
+    """Remove leading and trailing white space, Unicode spaces such as the
+    no-break space included."""
+    return _text(value, "opensak.text.trim").strip()
+
+
+def _char_index(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+        raise MacroError(f"opensak.text.sub: {name} must be an integer, got {value!r}")
+    return int(value)
+
+
+def sub(text: Any, i: Any = 1, j: Any = -1) -> str:
+    """string.sub() counting characters instead of bytes: positions start at
+    1, negative ones count from the end, both ends included."""
+    s = _text(text, "opensak.text.sub")
+    n = len(s)
+    first = 1 if i is None else _char_index(i, "i")
+    last = -1 if j is None else _char_index(j, "j")
+    if first < 0:
+        first = max(n + first + 1, 1)
+    elif first == 0:
+        first = 1
+    if last < 0:
+        last = n + last + 1
+    elif last > n:
+        last = n
+    return s[first - 1:last] if first <= last else ""
+
+
+def html_decode(value: Any) -> str:
+    """Decode HTML entities (&amp;, &auml;, &#228; …) and leave the rest as is."""
+    import html as html_lib
+
+    return html_lib.unescape(_text(value, "opensak.text.html_decode"))
+
+
+def csv_split(line: Any, sep: Any = ",") -> list[str]:
+    """The fields of one CSV line: quoted fields may contain the separator,
+    and "" inside quotes is one quote."""
+    import csv
+
+    s = _text(line, "opensak.text.csv_split")
+    if not isinstance(sep, str) or len(sep) != 1 or sep in '"\r\n':
+        raise MacroError(f"opensak.text.csv_split: sep must be one character, got {sep!r}")
+    if not s:
+        return []
+    return next(csv.reader([s], delimiter=sep), [])
+
+
+def url_encode(value: Any) -> str:
+    """Percent-encode for a URL query value: everything except letters,
+    digits and -._~ (a space becomes %20)."""
+    from urllib.parse import quote
+
+    return quote(_text(value, "opensak.text.url_encode"), safe="")
+
+
+def url_decode(value: Any) -> str:
+    """Undo url_encode(): %XX sequences and + (a space in a query string)."""
+    from urllib.parse import unquote_plus
+
+    return unquote_plus(_text(value, "opensak.text.url_decode"))
+
+
+def base64_encode(value: Any) -> str:
+    """Base64 of the text's UTF-8 bytes (of the raw bytes for binary data)."""
+    import base64
+
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    elif not isinstance(value, bytes):
+        raise MacroError(f"opensak.text.base64_encode: text must be a string, got {value!r}")
+    return base64.b64encode(value).decode("ascii")
+
+
+def base64_decode(value: Any) -> str | bytes:
+    """Decode Base64; white space is ignored. Text that is not UTF-8 comes
+    back as the raw bytes."""
+    import base64
+    import binascii
+
+    s = "".join(_text(value, "opensak.text.base64_decode").split())
+    try:
+        data = base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError):
+        raise MacroError("opensak.text.base64_decode: not valid Base64") from None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+
+
+def re_escape(value: Any) -> str:
+    """*value* with every regular expression character escaped, so it
+    matches literally inside a pattern."""
+    import regex
+
+    return regex.escape(_text(value, "opensak.re.escape"))
+
+
 def digit_sum(value: Any) -> int:
     """Sum of all digits in a number or string (other characters ignored)."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):

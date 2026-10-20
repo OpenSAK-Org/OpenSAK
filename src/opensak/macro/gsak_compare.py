@@ -20,7 +20,6 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
-- Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
 - Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
@@ -146,18 +145,18 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| AddStr, Alltrim, Trim, Left, Right, SubStr, Len, Asc, Chr, At, AtStart, Replace, Quote, SlashAdd, Equal, IsEmpty, BoolToStr, StrToBool, Keep, Remove, Extract | ➖ | `string.*`, `table.concat`, `gsub`, `find(…, 1, true)`, `gmatch` |
-| Upper / Lower | ➖ ⚠️ | ASCII letters only |
+| AddStr, Alltrim, Trim, Left, Right, SubStr, Len, Asc, Chr, At, AtStart, Replace, Quote, SlashAdd, Equal, IsEmpty, BoolToStr, StrToBool, Keep, Remove, Extract | ➖ | `string.*`, `table.concat`, `gsub`, `find(…, 1, true)`, `gmatch`; `text.sub` for Left / Right / SubStr by characters, `text.trim` for Unicode spaces |
+| Upper / Lower | ✅ | `text.upper` / `text.lower` (all letters; `string.upper` changes ASCII only) |
 | Array / List | ➖ | Lua tables |
 | `<Data>` | ➖ | long strings `[[ … ]]` |
 | UTF8 / UTF16 | ➖ | strings are UTF-8; `utf8.*` |
 | RegEx, RegExData, RegExSub, RegExPos, RegExReplace, RegExCount | ✅ | `re.match/find/findall/replace/split`; count = `#re.findall()` |
-| RegExEscape | ❌ | |
+| RegExEscape | ✅ | `re.escape` |
 | ROT13 | ✅ | `text.rot13` |
-| EntityDecode | ✅ partial | `text.html_to_text` decodes entities |
-| CsvGet | ❌ | `read_csv` for files only |
-| HttpEncode | ❌ | |
-| MimeEncode / MimeDecode | ❌ | |
+| EntityDecode | ✅ | `text.html_decode`; `text.html_to_text` also removes the tags |
+| CsvGet | ✅ | `text.csv_split(line)[n]`; `read_csv` for files |
+| HttpEncode | ✅ | `text.url_encode`, `text.url_decode` |
+| MimeEncode / MimeDecode | ✅ | `text.base64_encode` / `text.base64_decode` |
 | SmartName | ❌ | |
 | Eval | 🚫 | GSAK special tags |
 
