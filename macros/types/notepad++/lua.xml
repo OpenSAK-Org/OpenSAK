@@ -416,6 +416,12 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.date" />
+		<KeyWord name="opensak.date.diff" func="yes">
+			<Overload retVal="integer" descr="Whole days from date *a* to date *b* (negative if *b* is earlier). Dates are&#x0a;&quot;YYYY-MM-DD&quot; strings (a time after it is ignored) or seconds since the epoch.&#x0a;Returns integer — Days.">
+				<Param name="a: string|number" />
+				<Param name="b: string|number" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.date.format" func="yes">
 			<Overload retVal="string" descr="Format seconds since the epoch (e.g. from `os.time()` or `opensak.date.parse()`)&#x0a;in local time.&#x0a;Returns string — The formatted date.">
 				<Param name="t: number" />
@@ -426,6 +432,12 @@
 			<Overload retVal="integer?" descr="Parse a date into seconds since the epoch, the same kind of value as&#x0a;`os.time()`. Without a format, ISO 8601 (`&quot;2026-10-06&quot;`,&#x0a;`&quot;2026-10-06T14:30:00Z&quot;`) and `&quot;06.10.2026 [14:30[:00]]&quot;` are understood. Times&#x0a;without a zone are local time.&#x0a;Returns integer? — Seconds since the epoch, or nil if the text does not parse.">
 				<Param name="text: string" />
 				<Param name="[fmt: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.date.period" func="yes">
+			<Overload retVal="string" descr="The period a date falls in, named as opensak.stats.group names it: &quot;day&quot;&#x0a;(&quot;2026-10-06&quot;), &quot;week&quot; (&quot;2026-W41&quot;), &quot;month&quot; (&quot;2026-10&quot;), &quot;year&quot; (&quot;2026&quot;) or&#x0a;&quot;weekday&quot; (&quot;Tue&quot;). For a field of your own to group or pivot by, e.g. the year ×&#x0a;month table of your finds.&#x0a;Returns string — The period.">
+				<Param name="date: string|number" />
+				<Param name="period: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.delete" func="yes">
@@ -527,6 +539,12 @@
 		<KeyWord name="opensak.html.escape" func="yes">
 			<Overload retVal="string" descr="*value* as text for HTML: `&amp; &lt; &gt; &quot; '` are escaped, nil becomes &quot;&quot;, 3.0 becomes&#x0a;&quot;3&quot;.&#x0a;Returns string — Escaped text.">
 				<Param name="value: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.matrix" func="yes">
+			<Overload retVal="string" descr="A matrix (from opensak.stats.pivot) as an HTML table: the values of the two&#x0a;fields as headings, each cell shaded by its value. `percent = true` shows each&#x0a;cell as a share of all, `totals = true` adds a total row and column, `shade =&#x0a;false` leaves the colours out; `row_title` and `col_title` name the fields,&#x0a;`color` (&quot;#rrggbb&quot;) the shading. Inline styles only, so the shading also shows&#x0a;without the stylesheet of opensak.html.page.&#x0a;Returns string — HTML.">
+				<Param name="matrix: opensak.Matrix" />
+				<Param name="[options: {shade?: boolean, percent?: boolean, totals?: boolean, row_title?: string, col_title?: string, color?: string}]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.html.page" func="yes">
@@ -769,6 +787,60 @@
 			<Overload retVal="integer" descr="Run one INSERT, UPDATE or DELETE statement (SQLite) against the active database&#x0a;— the power tool for bulk work, changing many rows with one statement. For a&#x0a;single cache or row, prefer `opensak.update()`, `insert{}`, `delete()`,&#x0a;`insert_&lt;x&gt;()`, `update_&lt;x&gt;()` and `delete_&lt;x&gt;()`, which check each field and&#x0a;need no knowledge of the schema (see Changing caches). Only the cache tables can&#x0a;be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`,&#x0a;`waypoints`), and an UPDATE may not set the keys or the columns OpenSAK&#x0a;maintains itself (see Changing caches). Deleting a cache also deletes its logs,&#x0a;waypoints, attributes, trackables and user note, as opensak.delete() does.&#x0a;Locked caches are changed and deleted like any other (add `AND locked = 0` to&#x0a;leave them alone). REPLACE (`INSERT OR REPLACE`, `REPLACE INTO`, …) is refused,&#x0a;as it would delete those too; to update or insert, use `INSERT … ON CONFLICT&#x0a;(gc_code) DO UPDATE SET …`. OpenSAK recalculates distances, counts and log dates&#x0a;of the caches the statement touched — inside opensak.transaction() once at its&#x0a;end (see opensak.resync()). An INSERT only needs the real data: the columns&#x0a;opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`,&#x0a;`latitude` and `longitude` for a cache (see Changing caches); every other column&#x0a;gets its default. Each statement is committed on its own (or with the&#x0a;surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and&#x0a;the like are refused; use opensak.transaction(). Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns integer — Number of rows inserted, updated or deleted (without the rows&#x0a;deleted along with a cache).">
 				<Param name="query: string" />
 				<Param name="[params: table]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats" />
+		<KeyWord name="opensak.stats.every" func="yes">
+			<Overload retVal="table[]" descr="Every *step*-th row of *rows*, e.g. every 1000th find (sort the rows first, see&#x0a;opensak.stats.sort): copies with the row number in `n`. The first and the last&#x0a;row are included unless `first = false` / `last = false`. With `date = field`,&#x0a;`days` holds the days since the previous row picked.&#x0a;Returns table[] — Copies of the picked rows.">
+				<Param name="rows: table[]" />
+				<Param name="step: integer" />
+				<Param name="[options: {first?: boolean, last?: boolean, date?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.fill" func="yes">
+			<Overload retVal="table[]" descr="*rows* sorted by the period in field `key` (default &quot;key&quot;), with a row added for&#x0a;each missing &quot;day&quot;, &quot;month&quot; (default) or &quot;year&quot; between the first and the last&#x0a;row, or between `from` and `to`. Number fields of an added row are 0. Use it&#x0a;before a chart or table over time, so months without finds still take their&#x0a;place.&#x0a;Returns table[] — New rows.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {key?: string, period?: string, from?: string, to?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.group" func="yes">
+			<Overload retVal="{key: any, count: integer, distinct?: integer, sum?: number}[]" descr="Count *rows* per value of the field *by* and return one row per group: `{key =,&#x0a;count =}`, sorted by key. Rows can come from opensak.caches(), opensak.sql() or&#x0a;opensak.read_csv(); rows whose *by* is nil are left out. Options: `period`&#x0a;groups a date field (&quot;YYYY-MM-DD&quot; or os.time() seconds) by &quot;day&quot;, &quot;week&quot;&#x0a;(&quot;2026-W41&quot;), &quot;month&quot; (&quot;2026-10&quot;), &quot;year&quot; or &quot;weekday&quot; (&quot;Mon&quot;…&quot;Sun&quot;, sorted&#x0a;Monday first). `count_distinct = field` adds `distinct`, the number of different&#x0a;values of that field per group; `sum = field` adds `sum`. `sort = &quot;count&quot;` (or&#x0a;&quot;sum&quot;) puts the largest group first. `top = n` keeps n groups and puts the rest&#x0a;into one group named `other` (default &quot;Other&quot;).&#x0a;Returns {key: any, count: integer, distinct?: integer, sum?: number}[] — One row&#x0a;per group.">
+				<Param name="rows: table[]" />
+				<Param name="by: string" />
+				<Param name="[options: {period?: string, count_distinct?: string, sum?: string, sort?: string, top?: integer, other?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.pivot" func="yes">
+			<Overload retVal="opensak.Matrix" descr="Count *rows* per pair of values of two fields, e.g. difficulty × terrain.&#x0a;Returns `{rows =, cols =, cells =, max =, total =, filled =}`: `rows` and `cols`&#x0a;are the values of the two fields (sorted), `cells[i][j]` the count for rows[i]&#x0a;and cols[j], `filled` the number of cells that are not 0. The options `rows` and&#x0a;`cols` give the values and their order instead (other values are left out); `sum&#x0a;= field` adds up that field instead of counting. For opensak.html.matrix.&#x0a;Returns opensak.Matrix — The matrix.">
+				<Param name="rows: table[]" />
+				<Param name="row_field: string" />
+				<Param name="col_field: string" />
+				<Param name="[options: {rows?: any[], cols?: any[], sum?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.running" func="yes">
+			<Overload retVal="table[]" descr="Copies of *rows* with the running total of *field* (default &quot;count&quot;) in *into*&#x0a;(default &quot;total&quot;), e.g. the total number of finds at the end of each month.&#x0a;Returns table[] — New rows.">
+				<Param name="rows: table[]" />
+				<Param name="[field: string]" />
+				<Param name="[into: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.sort" func="yes">
+			<Overload retVal="table[]" descr="A new list of *rows* sorted by the fields in turn; &quot;-field&quot; sorts largest first.&#x0a;nil values come last. Faster than table.sort with a compare function, and&#x0a;stable: rows with equal fields keep their order.&#x0a;Returns table[] — The same rows in the new order.">
+				<Param name="rows: table[]" />
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.streaks" func="yes">
+			<Overload retVal="{days: integer, longest?: opensak.Run, gap?: opensak.Run, last?: opensak.Run}" descr="Runs of days in a date field: `days` (the number of different days), `longest`&#x0a;(most days in a row with at least one row, e.g. your longest caching streak),&#x0a;`gap` (most days in a row without, between the first and the last day) and&#x0a;`last` (the run that ends on the last day). Each run is `{days =, first =, last&#x0a;=}`; `gap` is nil if there is none.&#x0a;Returns {days: integer, longest?: opensak.Run, gap?: opensak.Run, last?:&#x0a;opensak.Run} — The runs.">
+				<Param name="rows: table[]" />
+				<Param name="field: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.summary" func="yes">
+			<Overload retVal="{count: integer, distinct: integer, min?: any, max?: any, sum?: number, mean?: number, median?: number}" descr="Key figures of *field* over *rows* (nil values left out): `count`, `distinct`,&#x0a;`min` and `max` (also for dates and text), and for numbers `sum`, `mean` and&#x0a;`median`.&#x0a;Returns {count: integer, distinct: integer, min?: any, max?: any, sum?: number,&#x0a;mean?: number, median?: number} — The figures.">
+				<Param name="rows: table[]" />
+				<Param name="field: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.switch_database" func="yes">

@@ -113,13 +113,24 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.text.digit_sum`](#opensaktextdigitsum) | 2 |
 | [`opensak.text.word_value`](#opensaktextwordvalue) | 2 |
 | [`opensak.text.normalize_name`](#opensaktextnormalizename) | 2 |
+| [`opensak.stats.group`](#opensakstatsgroup) | 3 |
+| [`opensak.stats.fill`](#opensakstatsfill) | 3 |
+| [`opensak.stats.running`](#opensakstatsrunning) | 3 |
+| [`opensak.stats.pivot`](#opensakstatspivot) | 3 |
+| [`opensak.stats.every`](#opensakstatsevery) | 3 |
+| [`opensak.stats.summary`](#opensakstatssummary) | 3 |
+| [`opensak.stats.sort`](#opensakstatssort) | 3 |
+| [`opensak.stats.streaks`](#opensakstatsstreaks) | 3 |
 | [`opensak.html.escape`](#opensakhtmlescape) | 3 |
 | [`opensak.html.table`](#opensakhtmltable) | 3 |
+| [`opensak.html.matrix`](#opensakhtmlmatrix) | 3 |
 | [`opensak.html.tiles`](#opensakhtmltiles) | 3 |
 | [`opensak.html.columns`](#opensakhtmlcolumns) | 3 |
 | [`opensak.html.page`](#opensakhtmlpage) | 3 |
 | [`opensak.date.parse`](#opensakdateparse) | 2 |
 | [`opensak.date.format`](#opensakdateformat) | 2 |
+| [`opensak.date.diff`](#opensakdatediff) | 3 |
+| [`opensak.date.period`](#opensakdateperiod) | 3 |
 | [`opensak.settings.load`](#opensaksettingsload) | 3 |
 | [`opensak.settings.save`](#opensaksettingssave) | 3 |
 | [`opensak.settings.clear`](#opensaksettingsclear) | 3 |
@@ -2567,6 +2578,211 @@ Example:
 local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"
 ```
 
+### opensak.stats.group
+
+```lua
+opensak.stats.group(rows, by [, options])
+```
+
+Count *rows* per value of the field *by* and return one row per group: `{key =, count =}`, sorted by key. Rows can come from opensak.caches(), opensak.sql() or opensak.read_csv(); rows whose *by* is nil are left out. Options: `period` groups a date field ("YYYY-MM-DD" or os.time() seconds) by "day", "week" ("2026-W41"), "month" ("2026-10"), "year" or "weekday" ("Mon"…"Sun", sorted Monday first). `count_distinct = field` adds `distinct`, the number of different values of that field per group; `sum = field` adds `sum`. `sort = "count"` (or "sum") puts the largest group first. `top = n` keeps n groups and puts the rest into one group named `other` (default "Other").
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `by` (`string`) — The field to group by.
+- `options` (`{period?: string, count_distinct?: string, sum?: string, sort?: string, top?: integer, other?: string}`, optional) — See above.
+
+Returns `{key: any, count: integer, distinct?: integer, sum?: number}[]` — One row per group.
+
+Since API version 3.
+
+Example:
+
+```lua
+local finds = {}
+for c in opensak.caches{ found = true, fields = {"found_date", "type"} } do
+  finds[#finds + 1] = c
+end
+for _, g in ipairs(opensak.stats.group(finds, "found_date",
+    { period = "year", count_distinct = "found_date" })) do
+  print(g.key, g.count .. " finds", g.distinct .. " cache days")
+end
+local types = opensak.stats.group(finds, "type", { sort = "count", top = 8 })
+```
+
+### opensak.stats.fill
+
+```lua
+opensak.stats.fill(rows [, options])
+```
+
+*rows* sorted by the period in field `key` (default "key"), with a row added for each missing "day", "month" (default) or "year" between the first and the last row, or between `from` and `to`. Number fields of an added row are 0. Use it before a chart or table over time, so months without finds still take their place.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows, e.g. from opensak.stats.group.
+- `options` (`{key?: string, period?: string, from?: string, to?: string}`, optional) — Field with the period, its length, first and last period (e.g. "2020-01").
+
+Returns `table[]` — New rows.
+
+Since API version 3.
+
+Example:
+
+```lua
+local months = opensak.stats.fill(
+  opensak.stats.group(finds, "found_date", { period = "month" }))
+```
+
+### opensak.stats.running
+
+```lua
+opensak.stats.running(rows [, field] [, into])
+```
+
+Copies of *rows* with the running total of *field* (default "count") in *into* (default "total"), e.g. the total number of finds at the end of each month.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows, in order.
+- `field` (`string`, optional) — The number field to add up.
+- `into` (`string`, optional) — The field for the total.
+
+Returns `table[]` — New rows.
+
+Since API version 3.
+
+Example:
+
+```lua
+local total = opensak.stats.running(months)   -- months[i].total
+print("finds at the end: " .. total[#total].total)
+```
+
+### opensak.stats.pivot
+
+```lua
+opensak.stats.pivot(rows, row_field, col_field [, options])
+```
+
+Count *rows* per pair of values of two fields, e.g. difficulty × terrain. Returns `{rows =, cols =, cells =, max =, total =, filled =}`: `rows` and `cols` are the values of the two fields (sorted), `cells[i][j]` the count for rows[i] and cols[j], `filled` the number of cells that are not 0. The options `rows` and `cols` give the values and their order instead (other values are left out); `sum = field` adds up that field instead of counting. For opensak.html.matrix.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `row_field` (`string`) — Field for the rows of the matrix.
+- `col_field` (`string`) — Field for the columns.
+- `options` (`{rows?: any[], cols?: any[], sum?: string}`, optional) — See above.
+
+Returns `opensak.Matrix` — The matrix.
+
+Since API version 3.
+
+Example:
+
+```lua
+local dt = opensak.stats.pivot(finds, "difficulty", "terrain")
+print(dt.filled .. " of 81 D/T combinations")
+```
+
+### opensak.stats.every
+
+```lua
+opensak.stats.every(rows, step [, options])
+```
+
+Every *step*-th row of *rows*, e.g. every 1000th find (sort the rows first, see opensak.stats.sort): copies with the row number in `n`. The first and the last row are included unless `first = false` / `last = false`. With `date = field`, `days` holds the days since the previous row picked.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows, in order.
+- `step` (`integer`) — Pick every step-th row.
+- `options` (`{first?: boolean, last?: boolean, date?: string}`, optional) — See above.
+
+Returns `table[]` — Copies of the picked rows.
+
+Since API version 3.
+
+Example:
+
+```lua
+local milestones = opensak.stats.every(finds, 1000, { date = "found_date" })
+for _, m in ipairs(milestones) do print(m.n, m.found_date, m.code, m.days) end
+```
+
+### opensak.stats.summary
+
+```lua
+opensak.stats.summary(rows, field)
+```
+
+Key figures of *field* over *rows* (nil values left out): `count`, `distinct`, `min` and `max` (also for dates and text), and for numbers `sum`, `mean` and `median`.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `field` (`string`) — The field.
+
+Returns `{count: integer, distinct: integer, min?: any, max?: any, sum?: number, mean?: number, median?: number}` — The figures.
+
+Since API version 3.
+
+Example:
+
+```lua
+local f = opensak.stats.summary(finds, "found_date")
+print(f.count .. " finds on " .. f.distinct .. " days, first " .. f.min)
+print("mean difficulty", opensak.stats.summary(finds, "difficulty").mean)
+```
+
+### opensak.stats.sort
+
+```lua
+opensak.stats.sort(rows, ...)
+```
+
+A new list of *rows* sorted by the fields in turn; "-field" sorts largest first. nil values come last. Faster than table.sort with a compare function, and stable: rows with equal fields keep their order.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `...` (`string`) — The fields to sort by.
+
+Returns `table[]` — The same rows in the new order.
+
+Since API version 3.
+
+Example:
+
+```lua
+finds = opensak.stats.sort(finds, "found_date", "code")
+local best = opensak.stats.sort(caches, "-favorite_points", "name")
+```
+
+### opensak.stats.streaks
+
+```lua
+opensak.stats.streaks(rows, field)
+```
+
+Runs of days in a date field: `days` (the number of different days), `longest` (most days in a row with at least one row, e.g. your longest caching streak), `gap` (most days in a row without, between the first and the last day) and `last` (the run that ends on the last day). Each run is `{days =, first =, last =}`; `gap` is nil if there is none.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `field` (`string`) — The date field.
+
+Returns `{days: integer, longest?: opensak.Run, gap?: opensak.Run, last?: opensak.Run}` — The runs.
+
+Since API version 3.
+
+Example:
+
+```lua
+local s = opensak.stats.streaks(finds, "found_date")
+print("longest streak: " .. s.longest.days .. " days, from " .. s.longest.first)
+```
+
 ### opensak.html.escape
 
 ```lua
@@ -2613,6 +2829,30 @@ local rows = opensak.sql(
   "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")
 local html = opensak.html.table(rows, {
   columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })
+```
+
+### opensak.html.matrix
+
+```lua
+opensak.html.matrix(matrix [, options])
+```
+
+A matrix (from opensak.stats.pivot) as an HTML table: the values of the two fields as headings, each cell shaded by its value. `percent = true` shows each cell as a share of all, `totals = true` adds a total row and column, `shade = false` leaves the colours out; `row_title` and `col_title` name the fields, `color` ("#rrggbb") the shading. Inline styles only, so the shading also shows without the stylesheet of opensak.html.page.
+
+Parameters:
+
+- `matrix` (`opensak.Matrix`) — The matrix.
+- `options` (`{shade?: boolean, percent?: boolean, totals?: boolean, row_title?: string, col_title?: string, color?: string}`, optional) — See above.
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local dt = opensak.stats.pivot(finds, "difficulty", "terrain")
+local html = opensak.html.matrix(dt, { row_title = "D", col_title = "T", totals = true })
 ```
 
 ### opensak.html.tiles
@@ -2737,6 +2977,56 @@ Example:
 
 ```lua
 print(opensak.date.format(os.time(), "%d.%m.%Y %H:%M"))
+```
+
+### opensak.date.diff
+
+```lua
+opensak.date.diff(a, b)
+```
+
+Whole days from date *a* to date *b* (negative if *b* is earlier). Dates are "YYYY-MM-DD" strings (a time after it is ignored) or seconds since the epoch.
+
+Parameters:
+
+- `a` (`string|number`) — The first date.
+- `b` (`string|number`) — The second date.
+
+Returns `integer` — Days.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.date.diff("2026-01-01", "2026-10-06"))   -- 278
+```
+
+### opensak.date.period
+
+```lua
+opensak.date.period(date, period)
+```
+
+The period a date falls in, named as opensak.stats.group names it: "day" ("2026-10-06"), "week" ("2026-W41"), "month" ("2026-10"), "year" ("2026") or "weekday" ("Tue"). For a field of your own to group or pivot by, e.g. the year × month table of your finds.
+
+Parameters:
+
+- `date` (`string|number`) — "YYYY-MM-DD" (a time after it is ignored) or seconds since the epoch.
+- `period` (`string`) — "day", "week", "month", "year" or "weekday".
+
+Returns `string` — The period.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, c in ipairs(finds) do
+  c.year = opensak.date.period(c.found_date, "year")
+  c.month = c.found_date:sub(6, 7)
+end
+local grid = opensak.stats.pivot(finds, "year", "month")
 ```
 
 ### opensak.settings.load
