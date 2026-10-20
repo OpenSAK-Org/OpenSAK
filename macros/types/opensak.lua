@@ -1715,6 +1715,78 @@ function opensak.text.word_value(text) end
 ---@return string # The safe name.
 function opensak.text.normalize_name(s) end
 
+opensak.html = {}
+
+---*value* as text for HTML: `& < > " '` are escaped, nil becomes "", 3.0 becomes "3".
+---
+---Since API version 3.
+---
+---```lua
+---local cell = "<td>" .. opensak.html.escape(c.name) .. "</td>"
+---```
+---@param value any A string, number, boolean or nil.
+---@return string # Escaped text.
+function opensak.html.escape(value) end
+
+---*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's SqlToHtml). `columns` lists the fields to show, each a field name or `{field, heading}`; without it all fields are shown, sorted by name — a Lua table has no field order, so pass `columns` to keep the order of the query. Number columns are right-aligned. `link = { code = "url" }` turns the code cells into links to the row's url field (http/https only). `bars = {"count"}` adds a bar next to each value of those number fields, scaled to the largest (in `color`, "#rrggbb"). The bars use inline styles only, so they also show without the stylesheet of opensak.html.page.
+---
+---Since API version 3.
+---
+---```lua
+---local rows = opensak.sql(
+---  "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")
+---local html = opensak.html.table(rows, {
+---  columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })
+---```
+---@param rows table[] The rows.
+---@param options? {columns?: (string|string[])[], link?: table<string, string>, caption?: string, bars?: string[], color?: string} See above.
+---@return string # HTML.
+function opensak.html.table(rows, options) end
+
+---Key figures as a row of tiles: a list of `{label =, value =}`.
+---
+---Since API version 3.
+---
+---```lua
+---local found = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE found = 1")[1].n
+---local html = opensak.html.tiles{
+---  { label = "caches", value = opensak.count() },
+---  { label = "found", value = found },
+---}
+---```
+---@param items {label: string, value: any}[] The tiles.
+---@return string # HTML.
+function opensak.html.tiles(items) end
+
+---Put HTML parts (e.g. two tables) side by side; on a narrow window they go one below the other.
+---
+---Since API version 3.
+---
+---```lua
+---local html = opensak.html.columns(table1, table2)
+---```
+---@param ... string The HTML parts (or one list of them).
+---@return string # HTML.
+function opensak.html.columns(...) end
+
+---A complete HTML page for opensak.write_text: `title` (also the heading), `subtitle`, the body — the strings in the list part of the table, and/or `body` — and `footer`. A built-in stylesheet with a light and a dark theme styles headings (`<h2>`), tables, tiles and columns; `css` is added after it. The body is put in as it is: build it from the html.* functions, or escape your own text with html.escape.
+---
+---Since API version 3.
+---
+---```lua
+---local rows = opensak.sql("SELECT code, name, difficulty FROM caches LIMIT 50")
+---local page = opensak.html.page{
+---  title = "Caches", subtitle = opensak.database(),
+---  opensak.html.tiles{ { label = "caches", value = opensak.count() } },
+---  "<h2>First 50</h2>",
+---  opensak.html.table(rows, { columns = { "code", "name", "difficulty" } }),
+---}
+---opensak.write_text(opensak.temp_dir() .. "/caches.html", page)
+---```
+---@param spec {title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string} See above.
+---@return string # The page.
+function opensak.html.page(spec) end
+
 opensak.date = {}
 
 ---Parse a date into seconds since the epoch, the same kind of value as `os.time()`. Without a format, ISO 8601 (`"2026-10-06"`, `"2026-10-06T14:30:00Z"`) and `"06.10.2026 [14:30[:00]]"` are understood. Times without a zone are local time.

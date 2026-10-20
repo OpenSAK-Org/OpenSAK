@@ -110,6 +110,11 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.text.digit_sum`](#opensaktextdigitsum) | 2 |
 | [`opensak.text.word_value`](#opensaktextwordvalue) | 2 |
 | [`opensak.text.normalize_name`](#opensaktextnormalizename) | 2 |
+| [`opensak.html.escape`](#opensakhtmlescape) | 3 |
+| [`opensak.html.table`](#opensakhtmltable) | 3 |
+| [`opensak.html.tiles`](#opensakhtmltiles) | 3 |
+| [`opensak.html.columns`](#opensakhtmlcolumns) | 3 |
+| [`opensak.html.page`](#opensakhtmlpage) | 3 |
 | [`opensak.date.parse`](#opensakdateparse) | 2 |
 | [`opensak.date.format`](#opensakdateformat) | 2 |
 | [`opensak.settings.load`](#opensaksettingsload) | 3 |
@@ -2483,6 +2488,131 @@ Example:
 local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"
 ```
 
+### opensak.html.escape
+
+```lua
+opensak.html.escape(value)
+```
+
+*value* as text for HTML: `& < > " '` are escaped, nil becomes "", 3.0 becomes "3".
+
+Parameters:
+
+- `value` (`any`) — A string, number, boolean or nil.
+
+Returns `string` — Escaped text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local cell = "<td>" .. opensak.html.escape(c.name) .. "</td>"
+```
+
+### opensak.html.table
+
+```lua
+opensak.html.table(rows [, options])
+```
+
+*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's SqlToHtml). `columns` lists the fields to show, each a field name or `{field, heading}`; without it all fields are shown, sorted by name — a Lua table has no field order, so pass `columns` to keep the order of the query. Number columns are right-aligned. `link = { code = "url" }` turns the code cells into links to the row's url field (http/https only). `bars = {"count"}` adds a bar next to each value of those number fields, scaled to the largest (in `color`, "#rrggbb"). The bars use inline styles only, so they also show without the stylesheet of opensak.html.page.
+
+Parameters:
+
+- `rows` (`table[]`) — The rows.
+- `options` (`{columns?: (string|string[])[], link?: table<string, string>, caption?: string, bars?: string[], color?: string}`, optional) — See above.
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local rows = opensak.sql(
+  "SELECT country, COUNT(*) AS n FROM caches GROUP BY country ORDER BY n DESC")
+local html = opensak.html.table(rows, {
+  columns = { {"country", "Country"}, {"n", "Caches"} }, bars = { "n" } })
+```
+
+### opensak.html.tiles
+
+```lua
+opensak.html.tiles(items)
+```
+
+Key figures as a row of tiles: a list of `{label =, value =}`.
+
+Parameters:
+
+- `items` (`{label: string, value: any}[]`) — The tiles.
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local found = opensak.sql("SELECT COUNT(*) AS n FROM caches WHERE found = 1")[1].n
+local html = opensak.html.tiles{
+  { label = "caches", value = opensak.count() },
+  { label = "found", value = found },
+}
+```
+
+### opensak.html.columns
+
+```lua
+opensak.html.columns(...)
+```
+
+Put HTML parts (e.g. two tables) side by side; on a narrow window they go one below the other.
+
+Parameters:
+
+- `...` (`string`) — The HTML parts (or one list of them).
+
+Returns `string` — HTML.
+
+Since API version 3.
+
+Example:
+
+```lua
+local html = opensak.html.columns(table1, table2)
+```
+
+### opensak.html.page
+
+```lua
+opensak.html.page(spec)
+```
+
+A complete HTML page for opensak.write_text: `title` (also the heading), `subtitle`, the body — the strings in the list part of the table, and/or `body` — and `footer`. A built-in stylesheet with a light and a dark theme styles headings (`<h2>`), tables, tiles and columns; `css` is added after it. The body is put in as it is: build it from the html.* functions, or escape your own text with html.escape.
+
+Parameters:
+
+- `spec` (`{title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string}`) — See above.
+
+Returns `string` — The page.
+
+Since API version 3.
+
+Example:
+
+```lua
+local rows = opensak.sql("SELECT code, name, difficulty FROM caches LIMIT 50")
+local page = opensak.html.page{
+  title = "Caches", subtitle = opensak.database(),
+  opensak.html.tiles{ { label = "caches", value = opensak.count() } },
+  "<h2>First 50</h2>",
+  opensak.html.table(rows, { columns = { "code", "name", "difficulty" } }),
+}
+opensak.write_text(opensak.temp_dir() .. "/caches.html", page)
+```
+
 ### opensak.date.parse
 
 ```lua
@@ -3056,7 +3186,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
 | SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
-| SqlToHtml | ❌ | planned; meanwhile build the HTML from `sql()` and write it with `write_text()` |
+| SqlToHtml | ✅ | `html.table(sql(…), {columns=…})`, wrapped in `html.page{}` and written with `write_text()` |
 | Table | ➖ | separate functions per table |
 | TotChild | ✅ | `waypoint_count` field, `waypoints(code)` |
 | Transaction / InTransaction | ✅ β | `transaction(fn)`, `in_transaction()` |
