@@ -471,6 +471,32 @@ function opensak.filter_profile(name) end
 ---```
 function opensak.clear_filter() end
 
+---The active filter (with its name, and any quick filter or search box) as a string, to put back later with opensak.restore_filter() — e.g. to leave the user's filter as it was after the macro filtered for its own work. Like GSAK's SaveFilter(). The sort order is not included. The string can be stored with opensak.settings.save(); don't build or change it.
+---
+---Since API version 3.
+---
+---```lua
+---local saved = opensak.save_filter()
+---opensak.filter{ found = false }
+----- ... work on the unfound caches ...
+---opensak.restore_filter(saved)
+---```
+---@return string # The saved filter; when no filter is active, restoring it clears the filter.
+function opensak.save_filter() end
+
+---Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As with opensak.filter{}, the view is left unchanged when nothing matches. A filter saved while none was active clears the filter.
+---
+---Since API version 3.
+---
+---```lua
+---local saved = opensak.save_filter()
+---opensak.filter{ found = false }
+---opensak.restore_filter(saved)
+---```
+---@param saved string A string from opensak.save_filter().
+---@return integer # Number of matching caches (0 = view unchanged, unless the saved filter was empty).
+function opensak.restore_filter(saved) end
+
 ---The number of caches matching the active filter.
 ---
 ---Since API version 1.

@@ -18,6 +18,8 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.sort`](#opensaksort) | 2 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
+| [`opensak.save_filter`](#opensaksavefilter) | 3 |
+| [`opensak.restore_filter`](#opensakrestorefilter) | 3 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
 | [`opensak.cache`](#opensakcache) | 2 |
@@ -240,6 +242,51 @@ Example:
 
 ```lua
 opensak.clear_filter()
+```
+
+### opensak.save_filter
+
+```lua
+opensak.save_filter()
+```
+
+The active filter (with its name, and any quick filter or search box) as a string, to put back later with opensak.restore_filter() — e.g. to leave the user's filter as it was after the macro filtered for its own work. Like GSAK's SaveFilter(). The sort order is not included. The string can be stored with opensak.settings.save(); don't build or change it.
+
+Returns `string` — The saved filter; when no filter is active, restoring it clears the filter.
+
+Since API version 3.
+
+Example:
+
+```lua
+local saved = opensak.save_filter()
+opensak.filter{ found = false }
+-- ... work on the unfound caches ...
+opensak.restore_filter(saved)
+```
+
+### opensak.restore_filter
+
+```lua
+opensak.restore_filter(saved)
+```
+
+Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As with opensak.filter{}, the view is left unchanged when nothing matches. A filter saved while none was active clears the filter.
+
+Parameters:
+
+- `saved` (`string`) — A string from opensak.save_filter().
+
+Returns `integer` — Number of matching caches (0 = view unchanged, unless the saved filter was empty).
+
+Since API version 3.
+
+Example:
+
+```lua
+local saved = opensak.save_filter()
+opensak.filter{ found = false }
+opensak.restore_filter(saved)
 ```
 
 ### opensak.count
@@ -3193,7 +3240,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 - Loading GPX / ZIP files (`Load`). Planned.
 - Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
 - Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
-- Setting the centre point (`Centre`), saving and restoring the filter (`SaveFilter`, `RestoreFilter`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
+- Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
 ### Database / Waypoints
@@ -3227,7 +3274,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
 | PurgeNote | ✅ β | `update(code, {note=false, gc_note=false})` |
-| SaveFilter / RestoreFilter | ❌ | only `filter_name()` |
+| SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
 | ReSync | ✅ β | `resync()` |
 | ReSyncLogs | 🚫 | needs the geocaching.com API |
 | SetColor | ✅ partial β | `update(code, {color=})` for the cache colour; no per-column colouring |
