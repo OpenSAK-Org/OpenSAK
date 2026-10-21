@@ -40,10 +40,14 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.database`](#opensakdatabase) | 2 |
 | [`opensak.database_exists`](#opensakdatabaseexists) | 2 |
 | [`opensak.create_database`](#opensakcreatedatabase) | 2 |
+| [`opensak.center`](#opensakcenter) | 3 |
+| [`opensak.centers`](#opensakcenters) | 3 |
+| [`opensak.set_center`](#opensaksetcenter) | 3 |
 | [`opensak.switch_database`](#opensakswitchdatabase) | 2 |
 | [`opensak.move_caches`](#opensakmovecaches) | 2 |
 | [`opensak.copy_caches`](#opensakcopycaches) | 2 |
 | [`opensak.import_gsak`](#opensakimportgsak) | 3 |
+| [`opensak.import_gpx`](#opensakimportgpx) | 3 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.update`](#opensakupdate) | 3 |
@@ -75,6 +79,12 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.file_exists`](#opensakfileexists) | 3 |
 | [`opensak.folder_exists`](#opensakfolderexists) | 3 |
 | [`opensak.list_dir`](#opensaklistdir) | 3 |
+| [`opensak.file_info`](#opensakfileinfo) | 3 |
+| [`opensak.copy_file`](#opensakcopyfile) | 3 |
+| [`opensak.move_file`](#opensakmovefile) | 3 |
+| [`opensak.delete_file`](#opensakdeletefile) | 3 |
+| [`opensak.create_folder`](#opensakcreatefolder) | 3 |
+| [`opensak.delete_folder`](#opensakdeletefolder) | 3 |
 | [`opensak.export_file`](#opensakexportfile) | 2 |
 | [`opensak.export_gpx`](#opensakexportgpx) | 2 |
 | [`opensak.export_poi`](#opensakexportpoi) | 3 |
@@ -90,6 +100,10 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.refresh`](#opensakrefresh) | 3 |
 | [`opensak.temp_dir`](#opensaktempdir) | 1 |
 | [`opensak.macros_dir`](#opensakmacrosdir) | 1 |
+| [`opensak.cache_types`](#opensakcachetypes) | 3 |
+| [`opensak.cache_type`](#opensakcachetype) | 3 |
+| [`opensak.waypoint_types`](#opensakwaypointtypes) | 3 |
+| [`opensak.waypoint_type`](#opensakwaypointtype) | 3 |
 | [`opensak.version`](#opensakversion) | 2 |
 | [`opensak.run_macro`](#opensakrunmacro) | 3 |
 | [`opensak.sleep`](#opensaksleep) | 2 |
@@ -108,11 +122,24 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.re.findall`](#opensakrefindall) | 2 |
 | [`opensak.re.replace`](#opensakrereplace) | 2 |
 | [`opensak.re.split`](#opensakresplit) | 2 |
+| [`opensak.re.escape`](#opensakreescape) | 3 |
 | [`opensak.text.html_to_text`](#opensaktexthtmltotext) | 2 |
 | [`opensak.text.rot13`](#opensaktextrot13) | 2 |
 | [`opensak.text.digit_sum`](#opensaktextdigitsum) | 2 |
 | [`opensak.text.word_value`](#opensaktextwordvalue) | 2 |
 | [`opensak.text.normalize_name`](#opensaktextnormalizename) | 2 |
+| [`opensak.text.upper`](#opensaktextupper) | 3 |
+| [`opensak.text.lower`](#opensaktextlower) | 3 |
+| [`opensak.text.trim`](#opensaktexttrim) | 3 |
+| [`opensak.text.sub`](#opensaktextsub) | 3 |
+| [`opensak.text.html_decode`](#opensaktexthtmldecode) | 3 |
+| [`opensak.text.csv_split`](#opensaktextcsvsplit) | 3 |
+| [`opensak.text.url_encode`](#opensaktexturlencode) | 3 |
+| [`opensak.text.url_decode`](#opensaktexturldecode) | 3 |
+| [`opensak.text.base64_encode`](#opensaktextbase64encode) | 3 |
+| [`opensak.text.base64_decode`](#opensaktextbase64decode) | 3 |
+| [`opensak.text.gc_to_id`](#opensaktextgctoid) | 3 |
+| [`opensak.text.id_to_gc`](#opensaktextidtogc) | 3 |
 | [`opensak.stats.group`](#opensakstatsgroup) | 3 |
 | [`opensak.stats.fill`](#opensakstatsfill) | 3 |
 | [`opensak.stats.running`](#opensakstatsrunning) | 3 |
@@ -747,6 +774,76 @@ Example:
 local name = opensak.create_database("CH_Zurich")
 ```
 
+### opensak.center
+
+```lua
+opensak.center()
+```
+
+The active centre point, which distances and bearings are measured from. `name` is the saved centre point's name, the label of a centre set from coordinates or a cache, or "" when none was chosen; `saved` tells whether it is one of opensak.centers().
+
+Returns `{name: string, lat: number, lon: number, saved: boolean}` — The active centre point.
+
+Since API version 3.
+
+Example:
+
+```lua
+local c = opensak.center()
+print(c.name, opensak.coords.format(c.lat, c.lon))
+```
+
+### opensak.centers
+
+```lua
+opensak.centers()
+```
+
+The saved centre points (Settings → User locations, with ★ Home from your geocaching.com home location first), as in the centre drop-down. `filter{ near = { point = name, km = … } }` filters by one.
+
+Returns `{name: string, lat: number, lon: number, active: boolean}[]` — One table per saved centre point.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, p in ipairs(opensak.centers()) do
+    print(p.active and "*" or " ", p.name)
+end
+```
+
+### opensak.set_center
+
+```lua
+opensak.set_center(name)
+opensak.set_center(lat, lon [, name])
+opensak.set_center(coords [, name])
+```
+
+Change the active centre point, like the centre drop-down in the toolbar (GSAK's Centre): a saved centre point by name, or coordinates with an optional name to show. Coordinates are not saved as a user location. Distance and bearing of every cache in the active database are recalculated and stored, so the macro needs permission to change the database, and it cannot be used inside opensak.transaction(). The centre stays when the macro ends.
+
+Parameters:
+
+- `name` (`string`) — A saved centre point (see opensak.centers()).
+- `lat` (`number`) — Latitude in decimal degrees.
+- `lon` (`number`) — Longitude in decimal degrees.
+- `coords` (`string`) — Coordinates, e.g. "N47 22.123 E008 32.456".
+
+Returns `{name: string, lat: number, lon: number, saved: boolean}` — The new centre point, as opensak.center() returns it.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+
+Example:
+
+```lua
+opensak.set_center("★ Home")
+local c = opensak.cache("GC12345")
+opensak.set_center(c.lat, c.lon, c.code)
+```
+
 ### opensak.switch_database
 
 ```lua
@@ -843,6 +940,34 @@ local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
 for _, db in ipairs(r.databases) do
   print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
 end
+if not r.ok then opensak.exit(1) end
+```
+
+### opensak.import_gpx
+
+```lua
+opensak.import_gpx(source [, options])
+```
+
+Import GPX files and Pocket Query zips without any question (like File → Import GPX / PQ zip, then Import) and return what was done. *source* is the name of an import setting saved in that dialog — its files, folders and target database are used — or else the path of a `.gpx` / `.zip` file or of a folder. A folder imports every GPX / zip file directly in it (not in subfolders), looked up at each run, so the folder Pocket Queries are downloaded to can be imported every night. A GPX file's waypoints file next to it is imported with it. A relative path is resolved against the macro file's folder, and environment variables such as `%USERPROFILE%` are expanded; the files need read permission. The caches go into `database` if given, else the setting's database, else the active one. Files and folders of a setting that no longer exist are left out and listed in `missing`; a file that fails is reported and the others are still imported. Cancel stops after the current file. Unlike the dialog, country and state are not looked up afterwards (reverse geocoding). The summary is printed (unless `quiet`) and written to the log file.
+
+Parameters:
+
+- `source` (`string`) — Name of a saved import setting, or a .gpx / .zip file or a folder.
+- `options` (`opensak.GpxImportOptions`, optional) — database, quiet.
+
+Returns `opensak.GpxImportReport` — What was imported, per file.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+
+Example:
+
+```lua
+local r = opensak.import_gpx("Nightly PQs")
+-- or a folder: opensak.import_gpx("%USERPROFILE%/Downloads/PQ", { database = "PQ" })
+print(r.created .. " new, " .. r.updated .. " updated")
 if not r.ok then opensak.exit(1) end
 ```
 
@@ -1656,6 +1781,148 @@ for _, f in ipairs(opensak.list_dir("C:/GPX", "*.gpx")) do
 end
 ```
 
+### opensak.file_info
+
+```lua
+opensak.file_info(path)
+```
+
+Size and modification time of one file or folder, as in opensak.list_dir(); nil if it does not exist. A relative path is resolved against the macro file's folder. The folder needs read permission.
+
+Parameters:
+
+- `path` (`string`) — The file or folder.
+
+Returns `{name: string, path: string, dir: boolean, size: integer, modified: integer}?` — nil if there is nothing at *path*.
+
+Since API version 3.
+
+Example:
+
+```lua
+local f = opensak.file_info("C:/GPX/pq.zip")
+if f and os.time() - f.modified < 86400 then print("downloaded today") end
+```
+
+### opensak.copy_file
+
+```lua
+opensak.copy_file(source, target [, options])
+```
+
+Copy a file (GSAK's FileCopy) and return the file written. *target* is a file, or a folder (existing, or ending in `/`) to copy into under the same name. Relative paths are resolved against the macro file's folder. The source's folder needs read permission and the target's folder write permission; for an unapproved one the user is asked first. Only these file types can be written: .txt .csv .tsv .html .htm .svg .md .json .gpx .loc .kml .kmz .ggz .zip .xml .log .jpg .jpeg .png .gif .webp .pdf — no programs or scripts. An existing target is replaced, the same way opensak.write_text() replaces a file, unless `if_exists = "skip"`. The modification time is kept. At most 1 GB.
+
+Parameters:
+
+- `source` (`string`) — The file to copy.
+- `target` (`string`) — The new file, or the folder to copy into.
+- `options` (`{if_exists?: "overwrite"|"skip"}`, optional) — `if_exists`: `"overwrite"` (default) or `"skip"`.
+
+Returns `string?` — The file written (full path); nil if skipped.
+
+Since API version 3.
+
+Example:
+
+```lua
+local backup = opensak.copy_file("C:/GPX/pq.zip", opensak.temp_dir() .. "/")
+print("copied to " .. backup)
+```
+
+### opensak.move_file
+
+```lua
+opensak.move_file(source, target [, options])
+```
+
+Move or rename a file: like opensak.copy_file(), then the source is deleted, so its folder needs write permission too and it must be one of the file types listed there. Nothing is copied when the source may not be deleted.
+
+Parameters:
+
+- `source` (`string`) — The file to move.
+- `target` (`string`) — The new file, or the folder to move into.
+- `options` (`{if_exists?: "overwrite"|"skip"}`, optional) — `if_exists`: `"overwrite"` (default) or `"skip"`.
+
+Returns `string?` — The new file (full path); nil if skipped (the source is then kept).
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, f in ipairs(opensak.list_dir("C:/Downloads", "*.zip")) do
+    opensak.move_file(f.path, "C:/GPX/done/")
+end
+```
+
+### opensak.delete_file
+
+```lua
+opensak.delete_file(path)
+```
+
+Delete a file (GSAK's FileErase). A relative path is resolved against the macro file's folder. Its folder needs write permission; for an unapproved one the user is asked first. Only the file types opensak.copy_file() writes can be deleted, never a folder, a link or OpenSAK's own files.
+
+Parameters:
+
+- `path` (`string`) — The file.
+
+Returns `boolean` — false if the file did not exist.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, f in ipairs(opensak.list_dir(opensak.temp_dir(), "*.gpx")) do
+    opensak.delete_file(f.path)
+end
+```
+
+### opensak.create_folder
+
+```lua
+opensak.create_folder(path)
+```
+
+Create a folder, with any missing folders above it, and return it. A relative path is resolved against the macro file's folder. The folder it goes into needs write permission; for an unapproved one the user is asked first. A folder that exists already is fine.
+
+Parameters:
+
+- `path` (`string`) — The folder.
+
+Returns `string` — The folder (full path).
+
+Since API version 3.
+
+Example:
+
+```lua
+local out = opensak.create_folder(opensak.temp_dir() .. "/" .. os.date("%Y-%m-%d"))
+```
+
+### opensak.delete_folder
+
+```lua
+opensak.delete_folder(path)
+```
+
+Delete an empty folder; a folder with anything in it is an error, so delete its files first. The folder it is in needs write permission. A folder listed in Settings → Folder permissions is never deleted.
+
+Parameters:
+
+- `path` (`string`) — The folder.
+
+Returns `boolean` — false if the folder did not exist.
+
+Since API version 3.
+
+Example:
+
+```lua
+opensak.delete_folder(opensak.temp_dir() .. "/old")
+```
+
 ### opensak.export_file
 
 ```lua
@@ -2016,6 +2283,87 @@ Example:
 
 ```lua
 local rows = opensak.read_csv(opensak.macros_dir() .. "/data/solved.csv")
+```
+
+### opensak.cache_types
+
+```lua
+opensak.cache_types()
+```
+
+All cache types OpenSAK knows, with GSAK's one-letter code where GSAK has one, e.g. for a form's choice list or `filter{ type = … }`.
+
+Returns `{name: string, code: string?}[]` — One table per cache type.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, t in ipairs(opensak.cache_types()) do print(t.code or "-", t.name) end
+```
+
+### opensak.cache_type
+
+```lua
+opensak.cache_type(value)
+```
+
+Convert a cache type between GSAK's one-letter code and its name, like GSAK's CacheType(): *value* is a letter ("T"), a full name ("Traditional Cache") or a short one ("Traditional"), in any case.
+
+Parameters:
+
+- `value` (`string`) — A GSAK letter or a cache type name.
+
+Returns `string?, string?` — The cache type and its GSAK letter (nil if it has none); nil if the type is unknown.
+
+Since API version 3.
+
+Example:
+
+```lua
+local name, code = opensak.cache_type("U")  -- "Unknown Cache", "U"
+print(select(2, opensak.cache_type("multi-cache")))  -- M
+```
+
+### opensak.waypoint_types
+
+```lua
+opensak.waypoint_types()
+```
+
+The child waypoint types, as in the waypoint dialog, each with its usual prefix — e.g. for opensak.insert_waypoint().
+
+Returns `{name: string, prefix: string}[]` — One table per waypoint type.
+
+Since API version 3.
+
+Example:
+
+```lua
+for _, t in ipairs(opensak.waypoint_types()) do print(t.prefix, t.name) end
+```
+
+### opensak.waypoint_type
+
+```lua
+opensak.waypoint_type(value)
+```
+
+The waypoint type for a type name (any case) or a waypoint prefix ("PK", "S1", "F"), with its usual prefix (GSAK's ChildType).
+
+Parameters:
+
+- `value` (`string`) — A waypoint type or prefix.
+
+Returns `string?, string?` — The waypoint type and its usual prefix; nil if it is unknown.
+
+Since API version 3.
+
+Example:
+
+```lua
+local name, prefix = opensak.waypoint_type("PK")  -- "Parking Area", "PK"
 ```
 
 ### opensak.version
@@ -2468,6 +2816,29 @@ Example:
 local parts = opensak.re.split("a, b;c", [[[,;]\s*]])  -- {"a", "b", "c"}
 ```
 
+### opensak.re.escape
+
+```lua
+opensak.re.escape(text)
+```
+
+Escape every character that has a meaning in a regular expression, so the text matches literally (GSAK's RegExEscape), e.g. to search for a cache name in a pattern.
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The escaped text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local pattern = "^" .. opensak.re.escape("Bonus (1/3)") .. "$"
+print(opensak.re.match("Bonus (1/3)", pattern))  -- true
+```
+
 ### opensak.text.html_to_text
 
 ```lua
@@ -2576,6 +2947,279 @@ Example:
 
 ```lua
 local name = opensak.text.normalize_name("CH: Zürich / Nord")  -- "CH_ Zürich _ Nord"
+```
+
+### opensak.text.upper
+
+```lua
+opensak.text.upper(text)
+```
+
+Upper case for all letters, not only ASCII: `string.upper` and `s:upper()` leave ä, é, ø … as they are. ß becomes SS.
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The text in upper case.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.upper("zürich"))  -- ZÜRICH; ("zürich"):upper() gives ZüRICH
+```
+
+### opensak.text.lower
+
+```lua
+opensak.text.lower(text)
+```
+
+Lower case for all letters, not only ASCII (see opensak.text.upper()).
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The text in lower case.
+
+Since API version 3.
+
+Example:
+
+```lua
+if opensak.text.lower(c.country) == "österreich" then print(c.code) end
+```
+
+### opensak.text.trim
+
+```lua
+opensak.text.trim(text)
+```
+
+Remove white space at the start and end, including line breaks and Unicode spaces such as the no-break space that `%s` in a Lua pattern does not match (GSAK's Alltrim).
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The trimmed text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local name = opensak.text.trim("  Zürich\u{00A0}")  -- "Zürich"
+```
+
+### opensak.text.sub
+
+```lua
+opensak.text.sub(text [, i] [, j])
+```
+
+Like `string.sub`, but counting characters instead of bytes, so it never cuts an ü or é in half (GSAK's Left, Right and SubStr). Positions start at 1; negative ones count from the end; both ends are included. `utf8.len(s)` gives the number of characters.
+
+Parameters:
+
+- `text` (`string`) — The text.
+- `i` (`integer`, optional) — First character (default 1).
+- `j` (`integer`, optional) — Last character (default -1, the end).
+
+Returns `string` — The characters from i to j.
+
+Since API version 3.
+
+Example:
+
+```lua
+local s = "Zürich Nord"
+print(opensak.text.sub(s, 1, 6))  -- Zürich (Left)
+print(opensak.text.sub(s, -4))    -- Nord (Right)
+```
+
+### opensak.text.html_decode
+
+```lua
+opensak.text.html_decode(text)
+```
+
+Decode HTML entities such as `&amp;`, `&auml;` and `&#228;` and keep everything else, tags included (GSAK's EntityDecode). opensak.text.html_to_text() also removes the tags.
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The decoded text.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.html_decode("Z&uuml;rich &amp; Bern"))  -- Zürich & Bern
+```
+
+### opensak.text.csv_split
+
+```lua
+opensak.text.csv_split(line [, sep])
+```
+
+Split one CSV line into its fields (GSAK's CsvGet): a field in double quotes may contain the separator, and `""` inside quotes is one quote. For a whole file use opensak.read_csv().
+
+Parameters:
+
+- `line` (`string`) — One line of CSV.
+- `sep` (`string`, optional) — Field separator, one character (default ",").
+
+Returns `string[]` — The fields.
+
+Since API version 3.
+
+Example:
+
+```lua
+local f = opensak.text.csv_split([[GC12345,"Bonus, final",N47 22.123]])
+print(f[2])  -- Bonus, final
+```
+
+### opensak.text.url_encode
+
+```lua
+opensak.text.url_encode(text)
+```
+
+Percent-encode text for a URL, e.g. a search term in a link: everything except letters, digits and `-._~` becomes `%XX` of its UTF-8 bytes (GSAK's HttpEncode).
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The encoded text.
+
+Since API version 3.
+
+Example:
+
+```lua
+local url = "https://www.geocaching.com/play/search?q=" .. opensak.text.url_encode("Zürich & Bern")
+```
+
+### opensak.text.url_decode
+
+```lua
+opensak.text.url_decode(text)
+```
+
+Decode `%XX` sequences, and `+` as a space as in a query string.
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The decoded text.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.url_decode("Z%C3%BCrich+Nord"))  -- Zürich Nord
+```
+
+### opensak.text.base64_encode
+
+```lua
+opensak.text.base64_encode(text)
+```
+
+Base64-encode text (GSAK's MimeEncode).
+
+Parameters:
+
+- `text` (`string`) — The text.
+
+Returns `string` — The Base64 text.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.base64_encode("Zürich"))  -- WsO8cmljaA==
+```
+
+### opensak.text.base64_decode
+
+```lua
+opensak.text.base64_decode(text)
+```
+
+Decode Base64 (GSAK's MimeDecode); white space and line breaks in it are ignored. Invalid Base64 is an error.
+
+Parameters:
+
+- `text` (`string`) — The Base64 text.
+
+Returns `string` — The decoded text.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.base64_decode("WsO8cmljaA=="))  -- Zürich
+```
+
+### opensak.text.gc_to_id
+
+```lua
+opensak.text.gc_to_id(code)
+```
+
+The number behind a geocaching.com code (GSAK's GsCodeToNum): up to GCFFFF the code is hexadecimal, from GCG000 on it is base 31. Works for TB, GL and other two-letter prefixes too; any case.
+
+Parameters:
+
+- `code` (`string`) — A code such as "GC12345".
+
+Returns `integer?` — The number; nil if *code* is not a geocaching.com code.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.gc_to_id("GC12345"))  -- 574995
+print(opensak.text.gc_to_id("GCG000"))   -- 65536
+```
+
+### opensak.text.id_to_gc
+
+```lua
+opensak.text.id_to_gc(id [, prefix])
+```
+
+The geocaching.com code for a number (GSAK's NumToGsCode), the reverse of opensak.text.gc_to_id().
+
+Parameters:
+
+- `id` (`integer`) — The number, 0 or more.
+- `prefix` (`string`, optional) — Two letters instead of "GC", e.g. "TB".
+
+Returns `string` — The code.
+
+Since API version 3.
+
+Example:
+
+```lua
+print(opensak.text.id_to_gc(574995))      -- GC12345
+print(opensak.text.id_to_gc(1, "TB"))     -- TB1
 ```
 
 ### opensak.stats.group
@@ -3520,7 +4164,7 @@ Write the arguments, separated by tabs, to the macro output pane (to stdout when
 
 > **Generated by AI — needs careful review.** This comparison was compiled automatically by an AI assistant from the GSAK command list and the OpenSAK API. Statuses and mappings may be wrong or incomplete; check a row against the function's own documentation before relying on it.
 >
-> **Work in progress.** This section is a comparison, not part of the API: it maps the commands and functions of GSAK's macro language to their OpenSAK counterparts, to help when porting a GSAK macro. It was checked on 2026-10-19 against API version 3 and will change as functions are added.
+> **Work in progress.** This section is a comparison, not part of the API: it maps the commands and functions of GSAK's macro language to their OpenSAK counterparts, to help when porting a GSAK macro. It was checked on 2026-10-20 against API version 3 and will change as functions are added.
 
 The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` libraries, plus `os.time`, `os.date` and `os.clock`. It removes `io`, `debug`, `package`, `require`, `load*`, `dofile` and the rest of `os`. So most of GSAK's language, string and math functions need no API.
 
@@ -3528,10 +4172,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 ### Main gaps
 
-- Loading GPX / ZIP files (`Load`). Planned.
-- Copying and deleting files (`FileCopy`, `FileErase`). Text files can be read (`read_text`), written (`write_text`, text file types only) and listed (`list_dir`).
-- Unicode `Upper` / `Lower`: `string.upper` only changes ASCII letters, so `("zürich"):upper()` gives `"ZüRICH"`.
-- Setting the centre point (`Centre`), shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
+- Shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
 - Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
 
 ### Database / Waypoints
@@ -3558,7 +4199,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
 | IsOwner | ✅ partial | `filter{owned=true}`; no `owned` cache field, no log-owner check |
-| Load | ❌ | planned |
+| Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
 | MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
 | MacroFlag | ❌ | workaround: `filter{codes=}` or a table in `macro_db()` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
@@ -3587,23 +4228,24 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| DateDiff | ➖ | `(t2 - t1) // 86400` with `date.parse` / `os.time` |
+| DateDiff | ✅ | `date.diff(a, b)`: whole days; `date.period()` names the day, week, month or year |
 | DateFormat / DateToString | ✅ | `date.format(t, fmt)`, `os.date` |
 | DateToSQL / SQLToDate | ✅ | `date.format(t, "%Y-%m-%d")` / `date.parse()` |
 | StringToDate | ✅ | `date.parse(text, fmt)` |
 | Time | ➖ | `os.date("%H:%M:%S")` |
-| ValidDate | ✅ | `pcall(opensak.date.parse, s)` |
+| ValidDate | ✅ | `date.parse(s) ~= nil` (nil for text that is not a date) |
 
 ### File system
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
 | AppendFile / PutFile / FileOpen | ✅ | `write_text(path, text)`, `write_text(path, text, {append=true})`; only `.txt .csv .tsv .html .htm .svg .md .json`, at most 20 MB, never an autostart location |
-| TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV helper yet |
+| TextOut | ✅ partial | `write_text()` with the text built in Lua; no CSV writer yet (`text.csv_split` reads one line) |
 | GetFile / FileRead / EndRead / StopRead | ✅ | `read_text(path)` reads the whole file (any file type, UTF-8 or `{encoding="cp1252"}`, at most 10 MB); loop over the lines with `text:gmatch("[^\n]+")`; `read_csv` for CSV |
 | FileExists / FolderExists | ✅ | `file_exists(path)`, `folder_exists(path)` |
-| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders |
-| FileCopy / FileErase | ❌ | |
+| Dir | ✅ | `list_dir(folder, "*.gpx")`: name, path, dir, size, modified; not into subfolders; `file_info(path)` for one entry |
+| FileCopy / FileErase | ✅ | `copy_file`, `move_file`, `delete_file`: data and picture file types only (no programs or scripts), write permission on the folder |
+| MkDir / RmDir | ✅ | `create_folder`, `delete_folder` (empty folders only) |
 | DriveExists | 🚫 | Windows-specific |
 | ZipFile | ❌ | |
 
@@ -3630,7 +4272,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | Declare / Option / RemoveVar / VarExists / Vsub | ➖ | Lua variables (`x = nil`, `x ~= nil`) |
 | Return | ➖ | `return` at chunk level |
 | Cancel | ✅ | `exit()`, or `error()` for a failure |
-| Exit (quit GSAK) | ❌ | not needed |
+| Exit (quit GSAK) | 🚫 | a macro cannot close OpenSAK; `exit()` ends the macro |
 | Delay | ✅ | `sleep(ms)` (max 10 s per call, 60 s per run) |
 | Include | ❌ | `require` is removed |
 | Macro | ✅ | `run_macro(path, ...)` |
@@ -3656,18 +4298,18 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| AddStr, Alltrim, Trim, Left, Right, SubStr, Len, Asc, Chr, At, AtStart, Replace, Quote, SlashAdd, Equal, IsEmpty, BoolToStr, StrToBool, Keep, Remove, Extract | ➖ | `string.*`, `table.concat`, `gsub`, `find(…, 1, true)`, `gmatch` |
-| Upper / Lower | ➖ ⚠️ | ASCII letters only |
+| AddStr, Alltrim, Trim, Left, Right, SubStr, Len, Asc, Chr, At, AtStart, Replace, Quote, SlashAdd, Equal, IsEmpty, BoolToStr, StrToBool, Keep, Remove, Extract | ➖ | `string.*`, `table.concat`, `gsub`, `find(…, 1, true)`, `gmatch`; `text.sub` for Left / Right / SubStr and `utf8.len` for Len by characters, `text.trim` for Unicode spaces |
+| Upper / Lower | ✅ | `text.upper` / `text.lower` (all letters; `string.upper` changes ASCII only) |
 | Array / List | ➖ | Lua tables |
 | `<Data>` | ➖ | long strings `[[ … ]]` |
 | UTF8 / UTF16 | ➖ | strings are UTF-8; `utf8.*` |
 | RegEx, RegExData, RegExSub, RegExPos, RegExReplace, RegExCount | ✅ | `re.match/find/findall/replace/split`; count = `#re.findall()` |
-| RegExEscape | ❌ | |
+| RegExEscape | ✅ | `re.escape` |
 | ROT13 | ✅ | `text.rot13` |
-| EntityDecode | ✅ partial | `text.html_to_text` decodes entities |
-| CsvGet | ❌ | `read_csv` for files only |
-| HttpEncode | ❌ | |
-| MimeEncode / MimeDecode | ❌ | |
+| EntityDecode | ✅ | `text.html_decode`; `text.html_to_text` also removes the tags |
+| CsvGet | ✅ | `text.csv_split(line)[n]`; `read_csv` for files |
+| HttpEncode | ✅ | `text.url_encode`, `text.url_decode` |
+| MimeEncode / MimeDecode | ✅ | `text.base64_encode` / `text.base64_decode` |
 | SmartName | ❌ | |
 | Eval | 🚫 | GSAK special tags |
 
@@ -3689,15 +4331,15 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 |---|---|---|
 | Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
-| CacheType / ChildType | ❌ | |
-| Centre | ❌ | planned |
+| CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
+| Centre | ✅ β | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
 | Clip / GetClipText | ❌ | |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |
 | Dualscreen / SplitScreen | 🚫 | GSAK UI |
 | GetEnvV | 🚫 | deliberately not exposed; `temp_dir`/`macros_dir` cover the common use |
 | GPSInfo / GPSReceive | 🚫 | |
 | GrabImages | ❌ | |
-| GsCodeToNum / NumToGsCode | ❌ | |
+| GsCodeToNum / NumToGsCode | ✅ | `text.gc_to_id(code)`, `text.id_to_gc(id [, prefix])` |
 | ImageInfo / PlayWav | 🚫 | |
 | MacroSet | ➖ | options are passed as tables (`export_gpx{}`, `filter{}`) or saved settings (`export_file`) |
 | MacSettings | ✅ | `settings.load/save/clear` |

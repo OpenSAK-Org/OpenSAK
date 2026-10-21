@@ -247,9 +247,26 @@
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.cache_type" func="yes">
+			<Overload retVal="string?, string?" descr="Convert a cache type between GSAK's one-letter code and its name, like GSAK's&#x0a;CacheType(): *value* is a letter (&quot;T&quot;), a full name (&quot;Traditional Cache&quot;) or a&#x0a;short one (&quot;Traditional&quot;), in any case.&#x0a;Returns string?, string? — The cache type and its GSAK letter (nil if it has&#x0a;none); nil if the type is unknown.">
+				<Param name="value: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.cache_types" func="yes">
+			<Overload retVal="{name: string, code: string?}[]" descr="All cache types OpenSAK knows, with GSAK's one-letter code where GSAK has one,&#x0a;e.g. for a form's choice list or `filter{ type = … }`.&#x0a;Returns {name: string, code: string?}[] — One table per cache type.">
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.caches" func="yes">
 			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without arguments: the caches of the active filter, in grid order. With filter&#x0a;keys (see Filter keys): the caches matching them, sorted by name; the view and&#x0a;the active filter stay unchanged. `database` reads another database, without&#x0a;switching: its caches matching the filter keys, or all of them, sorted by name.&#x0a;`fields` limits the fields loaded (`code` is always included), which makes loops&#x0a;over many caches faster. Caches are loaded in chunks, so large databases do not&#x0a;hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
 				<Param name="[spec: opensak.CachesSpec]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.center" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="The active centre point, which distances and bearings are measured from. `name`&#x0a;is the saved centre point's name, the label of a centre set from coordinates or&#x0a;a cache, or &quot;&quot; when none was chosen; `saved` tells whether it is one of&#x0a;opensak.centers().&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The active&#x0a;centre point.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.centers" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, active: boolean}[]" descr="The saved centre points (Settings → User locations, with ★ Home from your&#x0a;geocaching.com home location first), as in the centre drop-down. `filter{ near =&#x0a;{ point = name, km = … } }` filters by one.&#x0a;Returns {name: string, lat: number, lon: number, active: boolean}[] — One table&#x0a;per saved centre point.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.choose" func="yes">
@@ -389,6 +406,13 @@
 				<Param name="[options: opensak.TransferOptions]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.copy_file" func="yes">
+			<Overload retVal="string?" descr="Copy a file (GSAK's FileCopy) and return the file written. *target* is a file,&#x0a;or a folder (existing, or ending in `/`) to copy into under the same name.&#x0a;Relative paths are resolved against the macro file's folder. The source's folder&#x0a;needs read permission and the target's folder write permission; for an&#x0a;unapproved one the user is asked first. Only these file types can be written:&#x0a;.txt .csv .tsv .html .htm .svg .md .json .gpx .loc .kml .kmz .ggz .zip .xml .log&#x0a;.jpg .jpeg .png .gif .webp .pdf — no programs or scripts. An existing target is&#x0a;replaced, the same way opensak.write_text() replaces a file, unless `if_exists =&#x0a;&quot;skip&quot;`. The modification time is kept. At most 1 GB.&#x0a;Returns string? — The file written (full path); nil if skipped.">
+				<Param name="source: string" />
+				<Param name="target: string" />
+				<Param name="[options: {if_exists?: &quot;overwrite&quot;|&quot;skip&quot;}]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.count" func="yes">
 			<Overload retVal="integer" descr="The number of caches matching the active filter.&#x0a;Returns integer — Number of caches shown.">
 			</Overload>
@@ -396,6 +420,11 @@
 		<KeyWord name="opensak.create_database" func="yes">
 			<Overload retVal="string" descr="Create a new, empty database in the default database folder and add it to the&#x0a;list. The active database does not change. Fails if the name is taken or its&#x0a;file already exists.&#x0a;Returns string — The name actually used (surrounding spaces removed).">
 				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.create_folder" func="yes">
+			<Overload retVal="string" descr="Create a folder, with any missing folders above it, and return it. A relative&#x0a;path is resolved against the macro file's folder. The folder it goes into needs&#x0a;write permission; for an unapproved one the user is asked first. A folder that&#x0a;exists already is fine.&#x0a;Returns string — The folder (full path).">
+				<Param name="path: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.current" func="yes">
@@ -453,6 +482,16 @@
 				<Param name="id: integer" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.delete_file" func="yes">
+			<Overload retVal="boolean" descr="Delete a file (GSAK's FileErase). A relative path is resolved against the macro&#x0a;file's folder. Its folder needs write permission; for an unapproved one the user&#x0a;is asked first. Only the file types opensak.copy_file() writes can be deleted,&#x0a;never a folder, a link or OpenSAK's own files.&#x0a;Returns boolean — false if the file did not exist.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_folder" func="yes">
+			<Overload retVal="boolean" descr="Delete an empty folder; a folder with anything in it is an error, so delete its&#x0a;files first. The folder it is in needs write permission. A folder listed in&#x0a;Settings → Folder permissions is never deleted.&#x0a;Returns boolean — false if the folder did not exist.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.delete_log" func="yes">
 			<Overload retVal="boolean" descr="Delete a log from the active database. OpenSAK updates the cache's log counts&#x0a;and dates. Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no log with this id.">
 				<Param name="id: integer" />
@@ -503,6 +542,11 @@
 		</KeyWord>
 		<KeyWord name="opensak.file_exists" func="yes">
 			<Overload retVal="boolean" descr="Whether a file exists (false for a folder). A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission, like&#x0a;opensak.read_text().&#x0a;Returns boolean — true if the file exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.file_info" func="yes">
+			<Overload retVal="{name: string, path: string, dir: boolean, size: integer, modified: integer}?" descr="Size and modification time of one file or folder, as in opensak.list_dir(); nil&#x0a;if it does not exist. A relative path is resolved against the macro file's&#x0a;folder. The folder needs read permission.&#x0a;Returns {name: string, path: string, dir: boolean, size: integer, modified:&#x0a;integer}? — nil if there is nothing at *path*.">
 				<Param name="path: string" />
 			</Overload>
 		</KeyWord>
@@ -561,6 +605,12 @@
 		<KeyWord name="opensak.html.tiles" func="yes">
 			<Overload retVal="string" descr="Key figures as a row of tiles: a list of `{label =, value =}`.&#x0a;Returns string — HTML.">
 				<Param name="items: {label: string, value: any}[]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.import_gpx" func="yes">
+			<Overload retVal="opensak.GpxImportReport" descr="Import GPX files and Pocket Query zips without any question (like File → Import&#x0a;GPX / PQ zip, then Import) and return what was done. *source* is the name of an&#x0a;import setting saved in that dialog — its files, folders and target database are&#x0a;used — or else the path of a `.gpx` / `.zip` file or of a folder. A folder&#x0a;imports every GPX / zip file directly in it (not in subfolders), looked up at&#x0a;each run, so the folder Pocket Queries are downloaded to can be imported every&#x0a;night. A GPX file's waypoints file next to it is imported with it. A relative&#x0a;path is resolved against the macro file's folder, and environment variables such&#x0a;as `%USERPROFILE%` are expanded; the files need read permission. The caches go&#x0a;into `database` if given, else the setting's database, else the active one.&#x0a;Files and folders of a setting that no longer exist are left out and listed in&#x0a;`missing`; a file that fails is reported and the others are still imported.&#x0a;Cancel stops after the current file. Unlike the dialog, country and state are&#x0a;not looked up afterwards (reverse geocoding). The summary is printed (unless&#x0a;`quiet`) and written to the log file.&#x0a;Returns opensak.GpxImportReport — What was imported, per file.">
+				<Param name="source: string" />
+				<Param name="[options: opensak.GpxImportOptions]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.import_gsak" func="yes">
@@ -646,6 +696,13 @@
 				<Param name="[options: opensak.TransferOptions]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.move_file" func="yes">
+			<Overload retVal="string?" descr="Move or rename a file: like opensak.copy_file(), then the source is deleted, so&#x0a;its folder needs write permission too and it must be one of the file types&#x0a;listed there. Nothing is copied when the source may not be deleted.&#x0a;Returns string? — The new file (full path); nil if skipped (the source is then&#x0a;kept).">
+				<Param name="source: string" />
+				<Param name="target: string" />
+				<Param name="[options: {if_exists?: &quot;overwrite&quot;|&quot;skip&quot;}]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.profiles" func="yes">
 			<Overload retVal="string[]" descr="The names of all saved filter profiles.&#x0a;Returns string[] — Profile names.">
 			</Overload>
@@ -657,6 +714,11 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.re" />
+		<KeyWord name="opensak.re.escape" func="yes">
+			<Overload retVal="string" descr="Escape every character that has a meaning in a regular expression, so the text&#x0a;matches literally (GSAK's RegExEscape), e.g. to search for a cache name in a&#x0a;pattern.&#x0a;Returns string — The escaped text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.re.find" func="yes">
 			<Overload retVal="string?, string?..." descr="Search for the first match of a regular expression (Python syntax). Each call&#x0a;may run at most 2 s.&#x0a;Returns string?, string?... — The whole match followed by the captures (nil for&#x0a;a group that did not take part), or nil if there is no match.">
 				<Param name="text: string" />
@@ -731,6 +793,20 @@
 		</KeyWord>
 		<KeyWord name="opensak.selected" func="yes">
 			<Overload retVal="string[]" descr="The GC codes of the rows selected in the grid.&#x0a;Returns string[] — GC codes; empty if nothing is selected.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.set_center" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="name: string" />
+			</Overload>
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+				<Param name="[name: string]" />
+			</Overload>
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="coords: string" />
+				<Param name="[name: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.set_corrected" func="yes">
@@ -858,14 +934,51 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.text" />
+		<KeyWord name="opensak.text.base64_decode" func="yes">
+			<Overload retVal="string" descr="Decode Base64 (GSAK's MimeDecode); white space and line breaks in it are&#x0a;ignored. Invalid Base64 is an error.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.base64_encode" func="yes">
+			<Overload retVal="string" descr="Base64-encode text (GSAK's MimeEncode).&#x0a;Returns string — The Base64 text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.csv_split" func="yes">
+			<Overload retVal="string[]" descr="Split one CSV line into its fields (GSAK's CsvGet): a field in double quotes may&#x0a;contain the separator, and `&quot;&quot;` inside quotes is one quote. For a whole file use&#x0a;opensak.read_csv().&#x0a;Returns string[] — The fields.">
+				<Param name="line: string" />
+				<Param name="[sep: string]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.text.digit_sum" func="yes">
 			<Overload retVal="integer" descr="Cross sum: the sum of all digits; other characters are ignored.&#x0a;Returns integer — Sum of the digits.">
 				<Param name="n: number|string" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.text.gc_to_id" func="yes">
+			<Overload retVal="integer?" descr="The number behind a geocaching.com code (GSAK's GsCodeToNum): up to GCFFFF the&#x0a;code is hexadecimal, from GCG000 on it is base 31. Works for TB, GL and other&#x0a;two-letter prefixes too; any case.&#x0a;Returns integer? — The number; nil if *code* is not a geocaching.com code.">
+				<Param name="code: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.html_decode" func="yes">
+			<Overload retVal="string" descr="Decode HTML entities such as `&amp;amp;`, `&amp;auml;` and `&amp;#228;` and keep everything&#x0a;else, tags included (GSAK's EntityDecode). opensak.text.html_to_text() also&#x0a;removes the tags.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.text.html_to_text" func="yes">
 			<Overload retVal="string" descr="Turn HTML (e.g. a cache description) into plain text: tags removed, entities&#x0a;decoded, block elements and `&lt;br&gt;` become line breaks.&#x0a;Returns string — The text.">
 				<Param name="html: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.id_to_gc" func="yes">
+			<Overload retVal="string" descr="The geocaching.com code for a number (GSAK's NumToGsCode), the reverse of&#x0a;opensak.text.gc_to_id().&#x0a;Returns string — The code.">
+				<Param name="id: integer" />
+				<Param name="[prefix: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.lower" func="yes">
+			<Overload retVal="string" descr="Lower case for all letters, not only ASCII (see opensak.text.upper()).&#x0a;Returns string — The text in lower case.">
+				<Param name="text: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.text.normalize_name" func="yes">
@@ -875,6 +988,33 @@
 		</KeyWord>
 		<KeyWord name="opensak.text.rot13" func="yes">
 			<Overload retVal="string" descr="ROT13 as used for hints. Text in [square brackets] stays unchanged, like on&#x0a;geocaching.com.&#x0a;Returns string — The decoded (or encoded) text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.sub" func="yes">
+			<Overload retVal="string" descr="Like `string.sub`, but counting characters instead of bytes, so it never cuts an&#x0a;ü or é in half (GSAK's Left, Right and SubStr). Positions start at 1; negative&#x0a;ones count from the end; both ends are included. `utf8.len(s)` gives the number&#x0a;of characters.&#x0a;Returns string — The characters from i to j.">
+				<Param name="text: string" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.trim" func="yes">
+			<Overload retVal="string" descr="Remove white space at the start and end, including line breaks and Unicode&#x0a;spaces such as the no-break space that `%s` in a Lua pattern does not match&#x0a;(GSAK's Alltrim).&#x0a;Returns string — The trimmed text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.upper" func="yes">
+			<Overload retVal="string" descr="Upper case for all letters, not only ASCII: `string.upper` and `s:upper()` leave&#x0a;ä, é, ø … as they are. ß becomes SS.&#x0a;Returns string — The text in upper case.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.url_decode" func="yes">
+			<Overload retVal="string" descr="Decode `%XX` sequences, and `+` as a space as in a query string.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.url_encode" func="yes">
+			<Overload retVal="string" descr="Percent-encode text for a URL, e.g. a search term in a link: everything except&#x0a;letters, digits and `-._~` becomes `%XX` of its UTF-8 bytes (GSAK's HttpEncode).&#x0a;Returns string — The encoded text.">
 				<Param name="text: string" />
 			</Overload>
 		</KeyWord>
@@ -926,6 +1066,15 @@
 		</KeyWord>
 		<KeyWord name="opensak.version" func="yes">
 			<Overload retVal="string" descr="The OpenSAK version this macro runs in.&#x0a;Returns string — Version, e.g. &quot;1.21.0-beta.3&quot;.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoint_type" func="yes">
+			<Overload retVal="string?, string?" descr="The waypoint type for a type name (any case) or a waypoint prefix (&quot;PK&quot;, &quot;S1&quot;,&#x0a;&quot;F&quot;), with its usual prefix (GSAK's ChildType).&#x0a;Returns string?, string? — The waypoint type and its usual prefix; nil if it is&#x0a;unknown.">
+				<Param name="value: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoint_types" func="yes">
+			<Overload retVal="{name: string, prefix: string}[]" descr="The child waypoint types, as in the waypoint dialog, each with its usual prefix&#x0a;— e.g. for opensak.insert_waypoint().&#x0a;Returns {name: string, prefix: string}[] — One table per waypoint type.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.waypoints" func="yes">
