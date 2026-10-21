@@ -116,6 +116,13 @@ from opensak.export.file_export_settings import (
 from opensak.export.poi_export import write_poi_export
 from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.line_polygon import LineShape, read_points_file
+from opensak.importer.gpx_import_settings import (
+    FOLDER_IMPORT_SUFFIXES,
+    GpxImportProfile,
+    GpxImportSettings,
+    folder_import_files,
+    import_file,
+)
 from opensak.hint_detect import rot13
 from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
@@ -163,6 +170,8 @@ from opensak.macro.permissions import (
     macros_dir,
     protected_reason,
     resolve_path,
+    safe_copy,
+    safe_delete,
     safe_write,
     safe_write_stream,
     temp_dir,
@@ -182,7 +191,13 @@ from opensak.macro.sql import (
 from opensak.stats import html as report_html
 from opensak.stats import tables as stats_tables
 from opensak.utils import flags
-from opensak.utils.constants import ATTRIBUTES, CACHE_TYPES
+from opensak.utils.constants import (
+    ATTRIBUTES,
+    CACHE_TYPES,
+    CHILD_WP_TYPES,
+    KNOWN_PREFIXES,
+    KNOWN_SINGLE_PREFIXES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -225,11 +240,25 @@ EXPORT_IF_EXISTS = ("overwrite", "skip", "ask")
 GSAK_IMPORT_KEYS = ("databases", "exclude", "target", "if_exists", "create",
                     "filters", "locations", "quiet")
 GSAK_REPORT_MAX_ERRORS = 20
+# opensak.import_gpx(): the keys of its options table, and how many cache
+# errors per file its report lists.
+GPX_IMPORT_KEYS = ("database", "quiet")
+GPX_REPORT_MAX_ERRORS = 20
 # Formats a Garmin device reads from its GPX / GGZ folder.
 DEVICE_FORMATS = ("gpx", "ggz")
 # opensak.write_text(): the file types it may write, and the largest file.
 WRITE_TEXT_SUFFIXES = (".txt", ".csv", ".tsv", ".html", ".htm", ".svg", ".md", ".json")
 MAX_WRITE_BYTES = 20 * 1024 * 1024
+# opensak.copy_file / move_file / delete_file: the file types they handle
+# (what write_text writes plus geocaching data and pictures — no programs
+# or scripts), the largest file copied, and what to do with an existing
+# target.
+FILE_SUFFIXES = WRITE_TEXT_SUFFIXES + (
+    ".gpx", ".loc", ".kml", ".kmz", ".ggz", ".zip", ".xml", ".log",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf",
+)
+MAX_COPY_BYTES = 1024 * 1024 * 1024
+COPY_IF_EXISTS = ("overwrite", "skip")
 
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
@@ -680,6 +709,12 @@ class MacroHost(Protocol):
         """Name of the active centre point ("" = none) — the {center}
         variable."""
 
+    def set_center(self, name: str, lat: float, lon: float) -> None:
+        """Make (*lat*, *lon*) the active centre point, shown as *name*,
+        like the centre drop-down: store it, recalculate every cache's
+        distance and bearing and refresh the list and map. Optional — without
+        it opensak.set_center() reports that it is not available."""
+
     def switch_database(self, name: str) -> None:
         """Make the database *name* active and clear the active filter.
 
@@ -802,6 +837,70 @@ def _as_list(value: Any) -> list:
     if hasattr(value, "values"):  # lupa LuaTable
         return list(value.values())
     return [value]
+
+
+def _gsak_type_codes() -> dict[str, str]:
+    """GSAK's one-letter cache type codes: letter → OpenSAK cache type."""
+    from opensak.importer.gsak_importer import GSAK_CACHE_TYPE_MAP
+    return GSAK_CACHE_TYPE_MAP
+
+
+def _cache_types(lua):
+    letters = {name: code for code, name in _gsak_type_codes().items()}
+    return lua.table_from([
+        lua.table_from({"name": name, "code": letters.get(name)}) for name in CACHE_TYPES
+    ])
+
+
+def _cache_type(value: Any = None) -> tuple[Optional[str], Optional[str]]:
+    """(cache type, GSAK letter) for a letter, a full or a short type name,
+    like GSAK's CacheType(); (None, None) if unknown."""
+    if not isinstance(value, str) or not value.strip():
+        raise MacroError("opensak.cache_type expects a type name or a GSAK letter, "
+                         'e.g. "Traditional" or "T"')
+    codes = _gsak_type_codes()
+    letters = {name: code for code, name in codes.items()}
+    wanted = value.strip()
+    if len(wanted) == 1:
+        name = codes.get(wanted.upper())
+        return (name, wanted.upper()) if name else (None, None)
+    low = wanted.lower()
+    for name in (*CACHE_TYPES, *codes.values()):
+        if name.lower() in (low, f"{low} cache"):
+            return name, letters.get(name)
+    return None, None
+
+
+def _wp_prefixes() -> dict[str, str]:
+    """Waypoint type → its usual (first listed) prefix."""
+    prefixes: dict[str, str] = {}
+    for prefix, name in KNOWN_PREFIXES.items():
+        prefixes.setdefault(name, prefix)
+    return prefixes
+
+
+def _waypoint_types(lua):
+    prefixes = _wp_prefixes()
+    return lua.table_from([
+        lua.table_from({"name": name, "prefix": prefixes[name]}) for name in CHILD_WP_TYPES
+    ])
+
+
+def _waypoint_type(value: Any = None) -> tuple[Optional[str], Optional[str]]:
+    """(waypoint type, its usual prefix) for a type name or a waypoint
+    prefix, like GSAK's ChildType(); (None, None) if unknown."""
+    if not isinstance(value, str) or not value.strip():
+        raise MacroError("opensak.waypoint_type expects a waypoint type or a prefix, "
+                         'e.g. "Parking Area" or "PK"')
+    wanted = value.strip()
+    low = wanted.lower()
+    name = next((t for t in CHILD_WP_TYPES if t.lower() == low), None)
+    if name is None:
+        upper = wanted.upper()
+        name = KNOWN_PREFIXES.get(upper) or KNOWN_SINGLE_PREFIXES.get(upper)
+    if name is None:
+        return None, None
+    return name, _wp_prefixes().get(name)
 
 
 def _resolve_cache_type(name: str) -> str:
@@ -1331,6 +1430,7 @@ class MacroRuntime:
         profiles_dir: Optional[Path] = None,
         export_settings_dir: Optional[Path] = None,
         poi_settings_dir: Optional[Path] = None,
+        import_settings_dir: Optional[Path] = None,
         instruction_limit: int = DEFAULT_INSTRUCTION_LIMIT,
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
@@ -1351,6 +1451,7 @@ class MacroRuntime:
         self._profiles_dir = profiles_dir
         self._export_settings_dir = export_settings_dir
         self._poi_settings_dir = poi_settings_dir
+        self._import_settings_dir = import_settings_dir
         self._instruction_limit = instruction_limit
         self._memory_limit = memory_limit
         self._folder_permissions = folder_permissions
@@ -2095,6 +2196,75 @@ class MacroRuntime:
         self._host.database_list_changed()
         return db.name
 
+    # Centre points (GSAK's Centre): the saved ones are the user locations of
+    # Settings; set_center() works like the centre drop-down of the toolbar.
+
+    @staticmethod
+    def _center(lua):
+        from opensak.gui.settings import get_settings
+
+        s = get_settings()
+        name = s.active_home_name or ""
+        return lua.table_from({
+            "name": name,
+            "lat": s.home_lat,
+            "lon": s.home_lon,
+            "saved": any(p.name == name for p in s.home_points) if name else False,
+        })
+
+    @staticmethod
+    def _centers(lua):
+        from opensak.gui.settings import get_settings, sort_home_points
+
+        s = get_settings()
+        active = s.active_home_name
+        return lua.table_from([
+            lua.table_from({"name": p.name, "lat": p.lat, "lon": p.lon,
+                            "active": p.name == active})
+            for p in sort_home_points(s.home_points)
+        ])
+
+    def _set_center(self, lua, *args):
+        func = "opensak.set_center"
+        from opensak.gui.settings import get_settings
+
+        if not args or args[0] is None:
+            raise MacroError(f"{func} expects the name of a saved centre point, "
+                             "lat, lon or a coordinate string")
+        points = get_settings().home_points
+        saved = (next((p for p in points if p.name == args[0]), None)
+                 if isinstance(args[0], str) and len(args) == 1 else None)
+        if saved is not None:
+            name, lat, lon = saved.name, saved.lat, saved.lon
+        else:
+            try:
+                (point,), rest = take_points(args, 1, func)
+            except MacroError as exc:
+                if isinstance(args[0], str) and len(args) == 1:
+                    raise MacroError(f"{func}: {args[0]!r} is neither a saved centre point "
+                                     f"(see opensak.centers()) nor coordinates") from None
+                raise MacroError(f"{func}: {exc}") from None
+            if len(rest) > 1 or (rest and rest[0] is not None and not isinstance(rest[0], str)):
+                raise MacroError(f"{func}: the name after the coordinates must be a string")
+            lat, lon = point
+            label = rest[0].strip() if rest and rest[0] else ""
+            if any(p.name == label for p in points):
+                raise MacroError(f"{func}: {label!r} is a saved centre point — use "
+                                 f"opensak.set_center({label!r}) to make it the centre")
+            name = label or f"📍 {helpers.format_coordinate(lat, lon)}"
+        set_center = getattr(self._host, "set_center", None)
+        if not callable(set_center):
+            raise MacroError(f"{func} is not available here")
+        # Every cache's distance and bearing is rewritten through OpenSAK's
+        # own session, which would wait for the transaction's write lock.
+        self._no_transaction(func)
+        self._require_write(func)
+        try:
+            set_center(name, lat, lon)
+        except Exception as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return self._center(lua)
+
     def _switch_database(self, name=None) -> None:
         self._no_transaction("opensak.switch_database")
         db = self._require_database(name, "opensak.switch_database")
@@ -2202,6 +2372,192 @@ class MacroRuntime:
                 self._output(line)
         self._check_cancelled()
         return self._gsak_report_table(lua, report)
+
+    # opensak.import_gpx(): the GPX import dialog without its window — a
+    # saved import setting, or one file or folder. The folder and write
+    # approvals still apply.
+
+    def _import_gpx(self, lua, source=None, options=None):
+        func = "opensak.import_gpx"
+        from opensak.db.database import session_for
+
+        # It writes through its own sessions, which would wait for the
+        # transaction's write lock.
+        self._no_transaction(func)
+        if not isinstance(source, str) or not source.strip():
+            raise MacroError(f"{func} expects the name of a saved import setting, "
+                             "or the path of a .gpx / .zip file or a folder")
+        source = source.strip()
+        opts = self._gpx_import_options(func, options)
+        manager = get_db_manager()
+
+        # (path, is a folder) of everything to import, and the target.
+        db: Optional[DatabaseInfo] = None
+        settings = self._load_import_settings(source)
+        if settings is not None:
+            entries = [(Path(f), False) for f in settings.files]
+            entries += [(Path(f), True) for f in settings.folders]
+            if settings.database and "database" not in opts:
+                db = next((d for d in manager.databases
+                           if str(d.path) == settings.database), None)
+                if db is None:
+                    raise MacroError(f"{func}: the database of import setting {source!r} "
+                                     f"is no longer in the list: {settings.database}")
+        else:
+            # %USERPROFILE%\..., $HOME/... — as the folder permissions expand them.
+            path = expand_path(source)
+            if not path.is_absolute():
+                path = (self._base_dir or macros_dir()) / path
+            if not path.exists():
+                raise MacroError(f"{func}: {source!r} is neither a saved import setting "
+                                 f"nor an existing file or folder ({path})")
+            if not path.is_dir() and path.suffix.lower() not in FOLDER_IMPORT_SUFFIXES:
+                raise MacroError(f"{func}: {path} is not a .gpx or .zip file")
+            entries = [(path, path.is_dir())]
+        if "database" in opts:
+            db = self._require_database(opts["database"], func)
+        if db is None:
+            db = manager.active
+            if db is None:
+                raise MacroError(f"{func}: no database is open")
+        if not db.exists:
+            raise MacroError(f"{func}: the file of database {db.name!r} is missing: {db.path}")
+        self._require_write(func)
+
+        # The files to import, each once. Files and folders of a setting
+        # that were moved or deleted since are left out, as in the dialog,
+        # and a refused one fails only that entry.
+        missing: list[str] = []
+        rows: list[dict[str, Any]] = []
+        run: list[Path] = []
+        for entry, is_folder in entries:
+            if not (entry.is_dir() if is_folder else entry.is_file()):
+                missing.append(str(entry))
+                continue
+            try:
+                self._check_access(entry / "_" if is_folder else entry, write=False)
+            except MacroError as exc:
+                if settings is None:
+                    raise
+                rows.append({"path": str(entry), "error": str(exc)})
+                continue
+            for f in folder_import_files(entry) if is_folder else [entry]:
+                if f not in run:
+                    run.append(f)
+
+        handle = None
+        if callable(getattr(self._host, "progress", None)):
+            handle = self._host.progress("GPX import", len(run))
+            self._progress_windows.append(handle)
+        cancelled = False
+        other_db = db.path != manager.active_path
+        try:
+            for i, f in enumerate(run):
+                if self._cancelled.is_set() or (
+                        handle is not None and not handle.update(i, f.name)):
+                    cancelled = True
+                    break
+
+                def on_progress(count: int, name: str = f.name) -> None:
+                    nonlocal cancelled
+                    if handle is not None and not handle.update(None, f"{name}: {count} caches"):
+                        cancelled = True
+
+                row: dict[str, Any] = {"path": str(f)}
+                try:
+                    with (session_for(db.path) if other_db else get_session()) as session:
+                        r = import_file(f, session, progress_cb=on_progress)
+                except Exception as exc:
+                    logger.exception("%s: %s failed", func, f)
+                    row["error"] = str(exc) or type(exc).__name__
+                else:
+                    row.update(created=r.created, updated=r.updated, skipped=r.skipped,
+                               waypoints=r.waypoints, warnings=len(r.warnings),
+                               errors=r.errors)
+                rows.append(row)
+                # A file is not stopped half way; Cancel stops before the next.
+                if cancelled:
+                    break
+        finally:
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
+
+        def total(key: str) -> int:
+            return sum(r.get(key, 0) for r in rows)
+
+        errors = sum(len(r["errors"]) if "errors" in r else 1 for r in rows)
+        if not other_db and (total("created") or total("updated")):
+            self._host.caches_changed([], True)
+
+        kind = "saved setting" if settings is not None else "folder" if entries[0][1] else "file"
+        lines = [f"GPX import from {source} ({kind}) into {db.name}"]
+        for r in rows:
+            name = Path(r["path"]).name or r["path"]
+            if "error" in r:
+                lines.append(f"  {name}: failed ({r['error']})")
+            else:
+                lines.append(f"  {name}: {r['created']} new, {r['updated']} updated, "
+                             f"{r['skipped']} skipped, {r['waypoints']} waypoints, "
+                             f"{len(r['errors'])} errors")
+        if not rows:
+            lines.append("  no .gpx or .zip files to import")
+        if missing:
+            lines.append(f"  {len(missing)} files or folders of the setting no longer exist")
+        if cancelled:
+            lines.append("  cancelled")
+        for line in lines:
+            logger.info("%s", line)
+        if not opts.get("quiet", False):
+            for line in lines:
+                self._output(line)
+        self._check_cancelled()
+
+        for r in rows:
+            if "errors" in r:
+                r["errors"] = lua.table_from(r["errors"][:GPX_REPORT_MAX_ERRORS])
+        result: dict[str, Any] = {
+            "ok": not errors and not cancelled,
+            "cancelled": cancelled,
+            "source": source,
+            "kind": kind.split()[-1],
+            "database": db.name,
+            "created": total("created"),
+            "updated": total("updated"),
+            "skipped": total("skipped"),
+            "waypoints": total("waypoints"),
+            "errors": errors,
+            "files": lua.table_from([lua.table_from(r) for r in rows]),
+            "missing": lua.table_from(missing),
+        }
+        return lua.table_from(result)
+
+    def _load_import_settings(self, name: str) -> Optional[GpxImportSettings]:
+        """The GPX import setting saved as *name*, or None."""
+        for path in GpxImportProfile.list_profiles(self._import_settings_dir):
+            try:
+                profile = GpxImportProfile.load(path)
+            except Exception:
+                continue
+            if profile.name == name:
+                return profile.settings
+        return None
+
+    @staticmethod
+    def _gpx_import_options(func: str, options: Any) -> dict[str, Any]:
+        """The options table of opensak.import_gpx() as a dict."""
+        if options is None:
+            return {}
+        if not hasattr(options, "items"):
+            raise MacroError(f'{func}: options must be a table, e.g. {{ database = "PQ" }}')
+        raw = {k: _from_lua(v) for k, v in options.items()}
+        unknown = set(raw) - set(GPX_IMPORT_KEYS)
+        if unknown:
+            raise MacroError(f"{func}: unknown option(s) {sorted(map(str, unknown))}; "
+                             f"valid: {', '.join(GPX_IMPORT_KEYS)}")
+        if "quiet" in raw and not isinstance(raw["quiet"], bool):
+            raise MacroError(f"{func}: quiet must be true or false")
+        return raw
 
     @staticmethod
     def _gsak_import_options(func: str, options: Any) -> dict[str, Any]:
@@ -2724,6 +3080,121 @@ class MacroRuntime:
             raise MacroError(f"cannot read {resolved}: {exc}") from None
         entries.sort(key=lambda e: (e["name"].lower(), e["name"]))
         return lua.table_from([lua.table_from(e) for e in entries])
+
+    # Copying, moving and deleting files (GSAK's FileCopy / FileErase): only
+    # through safe_copy() / safe_delete(), with write permission on the
+    # target folder and only the file types of FILE_SUFFIXES.
+
+    def _file_arg(self, func: str, path: Any, what: str) -> Path:
+        """*path* of a file function, resolved against the macro's folder."""
+        if not isinstance(path, str) or not path.strip():
+            raise MacroError(f"{func} expects a {what} path")
+        file = Path(path.strip()).expanduser()
+        if not file.is_absolute():
+            file = (self._base_dir or macros_dir()) / file
+        return file
+
+    def _writable(self, func: str, file: Path, suffixes: Optional[tuple[str, ...]],
+                  kind: str = "write") -> list[FolderPermission]:
+        """Check that the running macro may write (or delete) *file*,
+        asking the user to approve the folder; the folder list to pass to
+        safe_write() and friends. A file type or location that is never
+        allowed is refused before the user is asked."""
+        try:
+            reason = write_denied_reason(resolve_path(file), suffixes)
+        except (OSError, RuntimeError) as exc:
+            raise MacroError(f"cannot resolve {file}: {exc}") from None
+        if reason is not None:
+            raise MacroError(f"{func}: macros may not {kind} {file} — {reason}")
+        target = self._check_access(file, write=True)
+        permissions = self._run_permissions
+        if (target, True) in self._picked:
+            permissions = with_grant(permissions, target.parent, True)
+        return permissions
+
+    def _copy_file(self, func: str, move: bool, source=None, target=None, options=None):
+        src = self._file_arg(func, source, "source file")
+        dest = self._file_arg(func, target, "target file or folder")
+        opts = {} if options is None else _from_lua(options)
+        if not isinstance(opts, dict) or set(opts) - {"if_exists"}:
+            raise MacroError(f'{func}: options must be a table, e.g. {{ if_exists = "skip" }}')
+        if_exists = opts.get("if_exists", "overwrite")
+        if if_exists not in COPY_IF_EXISTS:
+            raise MacroError(f"{func}: if_exists must be one of {', '.join(COPY_IF_EXISTS)}, "
+                             f"got {if_exists!r}")
+        src_resolved = self._check_access(src, write=False)
+        if not src_resolved.is_file():
+            raise MacroError(f"{func}: file not found: {src_resolved}")
+        # Moving deletes the source, so it needs write permission as well —
+        # checked before anything is copied.
+        src_permissions = (self._writable(func, src, FILE_SUFFIXES, "move") if move else None)
+        if target.strip().endswith(("/", "\\")) or dest.is_dir():
+            dest = dest / src_resolved.name
+        permissions = self._writable(func, dest, FILE_SUFFIXES)
+        if if_exists == "skip" and dest.exists():
+            return None
+        try:
+            final = safe_copy(src_resolved, dest, permissions, FILE_SUFFIXES, MAX_COPY_BYTES)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot copy {src_resolved} to {dest}: {exc}") from None
+        if move:
+            try:
+                safe_delete(src, src_permissions, FILE_SUFFIXES)
+            except (FolderAccessDenied, OSError) as exc:
+                raise MacroError(f"{func}: copied to {final}, but cannot delete "
+                                 f"{src_resolved}: {exc}") from None
+        return str(final)
+
+    def _delete_path(self, func: str, folder: bool, path=None) -> bool:
+        file = self._file_arg(func, path, "folder" if folder else "file")
+        kind = "delete the folder" if folder else "delete"
+        permissions = self._writable(func, file, None if folder else FILE_SUFFIXES, kind)
+        try:
+            return safe_delete(file, permissions, FILE_SUFFIXES, folder=folder)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            if folder and file.is_dir() and any(file.iterdir()):
+                raise MacroError(f"{func}: {file} is not empty") from None
+            raise MacroError(f"{func}: cannot delete {file}: {exc}") from None
+
+    def _create_folder(self, path=None) -> str:
+        func = "opensak.create_folder"
+        folder = self._file_arg(func, path, "folder")
+        permissions = self._writable(func, folder, None, "create")
+        try:
+            target = check_access(folder, write=True, permissions=permissions)
+            if target.exists() and not target.is_dir():
+                raise MacroError(f"{func}: {target} exists and is not a folder")
+            target.mkdir(parents=True, exist_ok=True)
+        except FolderAccessDenied as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot create {folder}: {exc}") from None
+        return str(target)
+
+    def _file_info(self, lua, path=None):
+        func = "opensak.file_info"
+        # Only looks at the entry, like file_exists(), so a database file
+        # can be checked too; reading it is still refused.
+        target = self._check_access(self._file_arg(func, path, "file or folder"),
+                                    write=False, allow_database=True)
+        try:
+            st = target.stat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise MacroError(f"{func}: cannot read {target}: {exc}") from None
+        is_dir = target.is_dir()
+        return lua.table_from({
+            "name": target.name,
+            "path": str(target),
+            "dir": is_dir,
+            "size": 0 if is_dir else st.st_size,
+            "modified": int(st.st_mtime),
+        })
 
     def _choose_file(self, title=None, file_filter=None, mode=None) -> Optional[str]:
         for name, value in (("title", title), ("filter", file_filter)):
@@ -4477,6 +4948,60 @@ API: tuple[ApiFunction, ...] = (
         returns=("string", "The name actually used (surrounding spaces removed)."),
     ),
     ApiFunction(
+        name="center",
+        description="The active centre point, which distances and bearings "
+                    "are measured from. `name` is the saved centre point's "
+                    "name, the label of a centre set from coordinates or a "
+                    "cache, or \"\" when none was chosen; `saved` tells "
+                    "whether it is one of opensak.centers().",
+        example='local c = opensak.center()\n'
+                'print(c.name, opensak.coords.format(c.lat, c.lon))',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._center(lua),
+        returns=("{name: string, lat: number, lon: number, saved: boolean}",
+                 "The active centre point."),
+    ),
+    ApiFunction(
+        name="centers",
+        description="The saved centre points (Settings → User locations, "
+                    "with ★ Home from your geocaching.com home location "
+                    "first), as in the centre drop-down. "
+                    "`filter{ near = { point = name, km = … } }` filters by one.",
+        example='for _, p in ipairs(opensak.centers()) do\n'
+                '    print(p.active and "*" or " ", p.name)\nend',
+        since=3,
+        bind=lambda rt, lua: lambda: rt._centers(lua),
+        returns=("{name: string, lat: number, lon: number, active: boolean}[]",
+                 "One table per saved centre point."),
+    ),
+    ApiFunction(
+        name="set_center",
+        description="Change the active centre point, like the centre "
+                    "drop-down in the toolbar (GSAK's Centre): a saved "
+                    "centre point by name, or coordinates with an optional "
+                    "name to show. Coordinates are not saved as a user "
+                    "location. Distance and bearing of every cache in the "
+                    "active database are recalculated and stored, so the "
+                    "macro needs permission to change the database, and it "
+                    "cannot be used inside opensak.transaction(). The "
+                    "centre stays when the macro ends.",
+        example='opensak.set_center("★ Home")\n'
+                'local c = opensak.cache("GC12345")\n'
+                'opensak.set_center(c.lat, c.lon, c.code)',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._set_center(lua, *a),
+        params=(Param("name", "string", "A saved centre point (see opensak.centers())."),),
+        overloads=(
+            (_LAT, _LON, Param("name", "string", "Name to show (default: the coordinates).",
+                               optional=True)),
+            (_COORDS, Param("name", "string", "Name to show (default: the coordinates).",
+                            optional=True)),
+        ),
+        returns=("{name: string, lat: number, lon: number, saved: boolean}",
+                 "The new centre point, as opensak.center() returns it."),
+        write=True,
+    ),
+    ApiFunction(
         name="switch_database",
         description="Make another database the active one, as the toolbar "
                     "dropdown does. The active filter is cleared.",
@@ -4563,6 +5088,45 @@ API: tuple[ApiFunction, ...] = (
                   "locations, quiet.", optional=True),
         ),
         returns=("opensak.GsakImportReport", "What was imported, per database."),
+        write=True,
+    ),
+    ApiFunction(
+        name="import_gpx",
+        description="Import GPX files and Pocket Query zips without any "
+                    "question (like File → Import GPX / PQ zip, then Import) "
+                    "and return what was done. *source* is the name of an "
+                    "import setting saved in that dialog — its files, "
+                    "folders and target database are used — or else the "
+                    "path of a `.gpx` / `.zip` file or of a folder. A "
+                    "folder imports every GPX / zip file directly in it "
+                    "(not in subfolders), looked up at each run, so the "
+                    "folder Pocket Queries are downloaded to can be "
+                    "imported every night. A GPX file's waypoints file "
+                    "next to it is imported with it. A relative path is "
+                    "resolved against the macro file's folder, and "
+                    "environment variables such as `%USERPROFILE%` are "
+                    "expanded; the files need read permission. The caches "
+                    "go into `database` if given, else the setting's "
+                    "database, else the active one. Files and folders of a "
+                    "setting that no longer exist are left out and listed "
+                    "in `missing`; a file that fails is reported and the "
+                    "others are still imported. Cancel stops after the "
+                    "current file. Unlike the dialog, country and state "
+                    "are not looked up afterwards (reverse geocoding). The "
+                    "summary is printed (unless `quiet`) and written to "
+                    "the log file.",
+        example='local r = opensak.import_gpx("Nightly PQs")\n'
+                '-- or a folder: opensak.import_gpx("%USERPROFILE%/Downloads/PQ", { database = "PQ" })\n'
+                'print(r.created .. " new, " .. r.updated .. " updated")\n'
+                'if not r.ok then opensak.exit(1) end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._import_gpx(lua, *a),
+        params=(
+            Param("source", "string",
+                  "Name of a saved import setting, or a .gpx / .zip file or a folder."),
+            Param("options", "opensak.GpxImportOptions", "database, quiet.", optional=True),
+        ),
+        returns=("opensak.GpxImportReport", "What was imported, per file."),
         write=True,
     ),
     ApiFunction(
@@ -4901,6 +5465,106 @@ API: tuple[ApiFunction, ...] = (
                  "One table per entry."),
     ),
     ApiFunction(
+        name="file_info",
+        description="Size and modification time of one file or folder, as "
+                    "in opensak.list_dir(); nil if it does not exist. A "
+                    "relative path is resolved against the macro file's "
+                    "folder. The folder needs read permission.",
+        example='local f = opensak.file_info("C:/GPX/pq.zip")\n'
+                'if f and os.time() - f.modified < 86400 then print("downloaded today") end',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._file_info(lua, *a),
+        params=(Param("path", "string", "The file or folder."),),
+        returns=("{name: string, path: string, dir: boolean, size: integer, modified: integer}?",
+                 "nil if there is nothing at *path*."),
+    ),
+    ApiFunction(
+        name="copy_file",
+        description="Copy a file (GSAK's FileCopy) and return the file "
+                    "written. *target* is a file, or a folder (existing, or "
+                    "ending in `/`) to copy into under the same name. "
+                    "Relative paths are resolved against the macro file's "
+                    "folder. The source's folder needs read permission and "
+                    "the target's folder write permission; for an unapproved "
+                    "one the user is asked first. Only these file types can "
+                    "be written: " + " ".join(FILE_SUFFIXES) + " — no "
+                    "programs or scripts. An existing target is replaced, "
+                    "the same way opensak.write_text() replaces a file, unless "
+                    '`if_exists = "skip"`. The modification time is kept. At '
+                    f"most {MAX_COPY_BYTES // (1024 * 1024 * 1024)} GB.",
+        example='local backup = opensak.copy_file("C:/GPX/pq.zip", opensak.temp_dir() .. "/")\n'
+                'print("copied to " .. backup)',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._copy_file("opensak.copy_file", False, *a),
+        params=(
+            Param("source", "string", "The file to copy."),
+            Param("target", "string", "The new file, or the folder to copy into."),
+            Param("options", '{if_exists?: "overwrite"|"skip"}',
+                  '`if_exists`: `"overwrite"` (default) or `"skip"`.', optional=True),
+        ),
+        returns=("string?", 'The file written (full path); nil if skipped.'),
+    ),
+    ApiFunction(
+        name="move_file",
+        description="Move or rename a file: like opensak.copy_file(), then "
+                    "the source is deleted, so its folder needs write "
+                    "permission too and it must be one of the file types "
+                    "listed there. Nothing is copied when the source may not "
+                    "be deleted.",
+        example='for _, f in ipairs(opensak.list_dir("C:/Downloads", "*.zip")) do\n'
+                '    opensak.move_file(f.path, "C:/GPX/done/")\nend',
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._copy_file("opensak.move_file", True, *a),
+        params=(
+            Param("source", "string", "The file to move."),
+            Param("target", "string", "The new file, or the folder to move into."),
+            Param("options", '{if_exists?: "overwrite"|"skip"}',
+                  '`if_exists`: `"overwrite"` (default) or `"skip"`.', optional=True),
+        ),
+        returns=("string?", "The new file (full path); nil if skipped (the "
+                            "source is then kept)."),
+    ),
+    ApiFunction(
+        name="delete_file",
+        description="Delete a file (GSAK's FileErase). A relative path is "
+                    "resolved against the macro file's folder. Its folder "
+                    "needs write permission; for an unapproved one the user "
+                    "is asked first. Only the file types opensak.copy_file() "
+                    "writes can be deleted, never a folder, a link or "
+                    "OpenSAK's own files.",
+        example='for _, f in ipairs(opensak.list_dir(opensak.temp_dir(), "*.gpx")) do\n'
+                '    opensak.delete_file(f.path)\nend',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._delete_path("opensak.delete_file", False, path),
+        params=(Param("path", "string", "The file."),),
+        returns=("boolean", "false if the file did not exist."),
+    ),
+    ApiFunction(
+        name="create_folder",
+        description="Create a folder, with any missing folders above it, and "
+                    "return it. A relative path is resolved against the "
+                    "macro file's folder. The folder it goes into needs "
+                    "write permission; for an unapproved one the user is "
+                    "asked first. A folder that exists already is fine.",
+        example='local out = opensak.create_folder(opensak.temp_dir() .. "/" .. os.date("%Y-%m-%d"))',
+        since=3,
+        bind=lambda rt, lua: rt._create_folder,
+        params=(Param("path", "string", "The folder."),),
+        returns=("string", "The folder (full path)."),
+    ),
+    ApiFunction(
+        name="delete_folder",
+        description="Delete an empty folder; a folder with anything in it is "
+                    "an error, so delete its files first. The folder it is "
+                    "in needs write permission. A folder listed in Settings "
+                    "→ Folder permissions is never deleted.",
+        example='opensak.delete_folder(opensak.temp_dir() .. "/old")',
+        since=3,
+        bind=lambda rt, lua: lambda path=None: rt._delete_path("opensak.delete_folder", True, path),
+        params=(Param("path", "string", "The folder."),),
+        returns=("boolean", "false if the folder did not exist."),
+    ),
+    ApiFunction(
         name="export_file",
         description="Export the caches of the active filter with a saved export "
                     "setting (File → Export → GPX/LOC/GGZ: format, folder, file "
@@ -5175,6 +5839,52 @@ API: tuple[ApiFunction, ...] = (
         returns=("string", "Folder path."),
     ),
     ApiFunction(
+        name="cache_types",
+        description="All cache types OpenSAK knows, with GSAK's one-letter "
+                    "code where GSAK has one, e.g. for a form's choice list "
+                    "or `filter{ type = … }`.",
+        example='for _, t in ipairs(opensak.cache_types()) do print(t.code or "-", t.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: _cache_types(lua),
+        returns=("{name: string, code: string?}[]", "One table per cache type."),
+    ),
+    ApiFunction(
+        name="cache_type",
+        description="Convert a cache type between GSAK's one-letter code and "
+                    "its name, like GSAK's CacheType(): *value* is a letter "
+                    '("T"), a full name ("Traditional Cache") or a short one '
+                    '("Traditional"), in any case.',
+        example='local name, code = opensak.cache_type("U")  -- "Unknown Cache", "U"\n'
+                'print(select(2, opensak.cache_type("multi-cache")))  -- M',
+        since=3,
+        bind=lambda rt, lua: _cache_type,
+        params=(Param("value", "string", "A GSAK letter or a cache type name."),),
+        returns=("string?, string?", "The cache type and its GSAK letter (nil if "
+                                     "it has none); nil if the type is unknown."),
+    ),
+    ApiFunction(
+        name="waypoint_types",
+        description="The child waypoint types, as in the waypoint dialog, each "
+                    "with its usual prefix — e.g. for "
+                    "opensak.insert_waypoint().",
+        example='for _, t in ipairs(opensak.waypoint_types()) do print(t.prefix, t.name) end',
+        since=3,
+        bind=lambda rt, lua: lambda: _waypoint_types(lua),
+        returns=("{name: string, prefix: string}[]", "One table per waypoint type."),
+    ),
+    ApiFunction(
+        name="waypoint_type",
+        description="The waypoint type for a type name (any case) or a "
+                    'waypoint prefix ("PK", "S1", "F"), with its usual prefix '
+                    "(GSAK's ChildType).",
+        example='local name, prefix = opensak.waypoint_type("PK")  -- "Parking Area", "PK"',
+        since=3,
+        bind=lambda rt, lua: _waypoint_type,
+        params=(Param("value", "string", "A waypoint type or prefix."),),
+        returns=("string?, string?", "The waypoint type and its usual prefix; nil "
+                                     "if it is unknown."),
+    ),
+    ApiFunction(
         name="version",
         description="The OpenSAK version this macro runs in.",
         example='print("Running in OpenSAK " .. opensak.version())',
@@ -5443,6 +6153,18 @@ API: tuple[ApiFunction, ...] = (
         params=(_TEXT, _PATTERN),
         returns=("string[]", "The pieces between the matches."),
     ),
+    ApiFunction(
+        name="re.escape",
+        description="Escape every character that has a meaning in a regular "
+                    "expression, so the text matches literally (GSAK's "
+                    "RegExEscape), e.g. to search for a cache name in a pattern.",
+        example='local pattern = "^" .. opensak.re.escape("Bonus (1/3)") .. "$"\n'
+                'print(opensak.re.match("Bonus (1/3)", pattern))  -- true',
+        since=3,
+        bind=lambda rt, lua: helpers.re_escape,
+        params=(_TEXT,),
+        returns=("string", "The escaped text."),
+    ),
 
     # -- opensak.text ---------------------------------------------------------
     ApiFunction(
@@ -5497,6 +6219,156 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: helpers.normalize_name,
         params=(Param("s", "string", "The name."),),
         returns=("string", "The safe name."),
+    ),
+    ApiFunction(
+        name="text.upper",
+        description="Upper case for all letters, not only ASCII: "
+                    "`string.upper` and `s:upper()` leave ä, é, ø … as they "
+                    "are. ß becomes SS.",
+        example='print(opensak.text.upper("zürich"))  -- ZÜRICH; ("zürich"):upper() gives ZüRICH',
+        since=3,
+        bind=lambda rt, lua: helpers.upper,
+        params=(_TEXT,),
+        returns=("string", "The text in upper case."),
+    ),
+    ApiFunction(
+        name="text.lower",
+        description="Lower case for all letters, not only ASCII (see "
+                    "opensak.text.upper()).",
+        example='if opensak.text.lower(c.country) == "österreich" then print(c.code) end',
+        since=3,
+        bind=lambda rt, lua: helpers.lower,
+        params=(_TEXT,),
+        returns=("string", "The text in lower case."),
+    ),
+    ApiFunction(
+        name="text.trim",
+        description="Remove white space at the start and end, including "
+                    "line breaks and Unicode spaces such as the no-break "
+                    "space that `%s` in a Lua pattern does not match "
+                    "(GSAK's Alltrim).",
+        example='local name = opensak.text.trim("  Zürich\\u{00A0}")  -- "Zürich"',
+        since=3,
+        bind=lambda rt, lua: helpers.trim,
+        params=(_TEXT,),
+        returns=("string", "The trimmed text."),
+    ),
+    ApiFunction(
+        name="text.sub",
+        description="Like `string.sub`, but counting characters instead of "
+                    "bytes, so it never cuts an ü or é in half (GSAK's Left, "
+                    "Right and SubStr). Positions start at 1; negative ones "
+                    "count from the end; both ends are included. "
+                    "`utf8.len(s)` gives the number of characters.",
+        example='local s = "Zürich Nord"\n'
+                'print(opensak.text.sub(s, 1, 6))  -- Zürich (Left)\n'
+                'print(opensak.text.sub(s, -4))    -- Nord (Right)',
+        since=3,
+        bind=lambda rt, lua: helpers.sub,
+        params=(
+            _TEXT,
+            Param("i", "integer", "First character (default 1).", optional=True),
+            Param("j", "integer", "Last character (default -1, the end).", optional=True),
+        ),
+        returns=("string", "The characters from i to j."),
+    ),
+    ApiFunction(
+        name="text.html_decode",
+        description="Decode HTML entities such as `&amp;`, `&auml;` and "
+                    "`&#228;` and keep everything else, tags included "
+                    "(GSAK's EntityDecode). opensak.text.html_to_text() "
+                    "also removes the tags.",
+        example='print(opensak.text.html_decode("Z&uuml;rich &amp; Bern"))  -- Zürich & Bern',
+        since=3,
+        bind=lambda rt, lua: helpers.html_decode,
+        params=(_TEXT,),
+        returns=("string", "The decoded text."),
+    ),
+    ApiFunction(
+        name="text.csv_split",
+        description="Split one CSV line into its fields (GSAK's CsvGet): a "
+                    "field in double quotes may contain the separator, and "
+                    "`\"\"` inside quotes is one quote. For a whole file use "
+                    "opensak.read_csv().",
+        example='local f = opensak.text.csv_split([[GC12345,"Bonus, final",N47 22.123]])\n'
+                'print(f[2])  -- Bonus, final',
+        since=3,
+        bind=lambda rt, lua: lambda *a: lua.table_from(helpers.csv_split(*a)),
+        params=(
+            Param("line", "string", "One line of CSV."),
+            Param("sep", "string", 'Field separator, one character (default ",").',
+                  optional=True),
+        ),
+        returns=("string[]", "The fields."),
+    ),
+    ApiFunction(
+        name="text.url_encode",
+        description="Percent-encode text for a URL, e.g. a search term in a "
+                    "link: everything except letters, digits and `-._~` "
+                    "becomes `%XX` of its UTF-8 bytes (GSAK's HttpEncode).",
+        example='local url = "https://www.geocaching.com/play/search?q=" .. '
+                'opensak.text.url_encode("Zürich & Bern")',
+        since=3,
+        bind=lambda rt, lua: helpers.url_encode,
+        params=(_TEXT,),
+        returns=("string", "The encoded text."),
+    ),
+    ApiFunction(
+        name="text.url_decode",
+        description="Decode `%XX` sequences, and `+` as a space as in a "
+                    "query string.",
+        example='print(opensak.text.url_decode("Z%C3%BCrich+Nord"))  -- Zürich Nord',
+        since=3,
+        bind=lambda rt, lua: helpers.url_decode,
+        params=(_TEXT,),
+        returns=("string", "The decoded text."),
+    ),
+    ApiFunction(
+        name="text.base64_encode",
+        description="Base64-encode text (GSAK's MimeEncode).",
+        example='print(opensak.text.base64_encode("Zürich"))  -- WsO8cmljaA==',
+        since=3,
+        bind=lambda rt, lua: helpers.base64_encode,
+        params=(_TEXT,),
+        returns=("string", "The Base64 text."),
+    ),
+    ApiFunction(
+        name="text.base64_decode",
+        description="Decode Base64 (GSAK's MimeDecode); white space and line "
+                    "breaks in it are ignored. Invalid Base64 is an error.",
+        example='print(opensak.text.base64_decode("WsO8cmljaA=="))  -- Zürich',
+        since=3,
+        bind=lambda rt, lua: helpers.base64_decode,
+        params=(Param("text", "string", "The Base64 text."),),
+        returns=("string", "The decoded text."),
+    ),
+    ApiFunction(
+        name="text.gc_to_id",
+        description="The number behind a geocaching.com code (GSAK's "
+                    "GsCodeToNum): up to GCFFFF the code is hexadecimal, from "
+                    "GCG000 on it is base 31. Works for TB, GL and other "
+                    "two-letter prefixes too; any case.",
+        example='print(opensak.text.gc_to_id("GC12345"))  -- 574995\n'
+                'print(opensak.text.gc_to_id("GCG000"))   -- 65536',
+        since=3,
+        bind=lambda rt, lua: helpers.gc_to_id,
+        params=(Param("code", "string", 'A code such as "GC12345".'),),
+        returns=("integer?", "The number; nil if *code* is not a geocaching.com code."),
+    ),
+    ApiFunction(
+        name="text.id_to_gc",
+        description="The geocaching.com code for a number (GSAK's "
+                    "NumToGsCode), the reverse of opensak.text.gc_to_id().",
+        example='print(opensak.text.id_to_gc(574995))      -- GC12345\n'
+                'print(opensak.text.id_to_gc(1, "TB"))     -- TB1',
+        since=3,
+        bind=lambda rt, lua: helpers.id_to_gc,
+        params=(
+            Param("id", "integer", "The number, 0 or more."),
+            Param("prefix", "string", 'Two letters instead of "GC", e.g. "TB".',
+                  optional=True),
+        ),
+        returns=("string", "The code."),
     ),
 
     # -- opensak.stats --------------------------------------------------------

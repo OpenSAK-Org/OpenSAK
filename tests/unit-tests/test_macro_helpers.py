@@ -385,3 +385,148 @@ def test_cancel_interrupts_sleep():
         canceller.join()
     assert time.monotonic() - start < 2
     rt.run("opensak.sleep(1)")  # the next run starts uncancelled
+
+
+# ── opensak.text: Unicode case, characters and encodings (#1015) ─────────────
+
+def test_upper_lower_change_every_letter():
+    assert helpers.upper("zürich ångström éte") == "ZÜRICH ÅNGSTRÖM ÉTE"
+    assert helpers.lower("ZÜRICH ÅNGSTRÖM") == "zürich ångström"
+    assert helpers.upper("straße") == "STRASSE"
+
+
+def test_upper_lower_from_lua_unlike_string_upper():
+    out = _run('print(("zürich"):upper(), opensak.text.upper("zürich"), '
+               'opensak.text.lower("ÖSTERREICH"))')
+    assert out == ["ZüRICH\tZÜRICH\tösterreich"]
+
+
+def test_trim_removes_unicode_spaces():
+    assert helpers.trim(" \t Zürich\u00a0\n") == "Zürich"
+    assert helpers.trim("") == ""
+
+
+@pytest.mark.parametrize("args, expected", [
+    ((1, 6), "Zürich"),
+    ((-4,), "Nord"),
+    ((2, 2), "ü"),
+    ((0, 1), "Z"),
+    ((8, 100), "Nord"),
+    ((-100, 2), "Zü"),
+    ((5, 3), ""),
+    ((1, -6), "Zürich"),
+    ((), "Zürich Nord"),
+])
+def test_sub_counts_characters_like_string_sub(args, expected):
+    assert helpers.sub("Zürich Nord", *args) == expected
+
+
+def test_sub_from_lua():
+    out = _run('local s = "Zürich Nord"\n'
+               'print(opensak.text.sub(s, 1, 2), opensak.text.sub(s, -4), #s:sub(1, 2))')
+    # string.sub(s, 1, 2) is "Z" and half of the ü; text.sub counts characters.
+    assert out == ["Zü\tNord\t2"]
+
+
+def test_sub_rejects_fractional_positions():
+    with pytest.raises(MacroError, match="i must be an integer"):
+        helpers.sub("abc", 1.5)
+
+
+def test_html_decode_keeps_tags():
+    assert helpers.html_decode("<b>Z&uuml;rich</b> &amp; &#228;&#x00e9;") == "<b>Zürich</b> & äé"
+
+
+@pytest.mark.parametrize("line, sep, expected", [
+    ('GC12345,"Bonus, final",N47 22.123', ",", ["GC12345", "Bonus, final", "N47 22.123"]),
+    ('a;"say ""hi""";', ";", ["a", 'say "hi"', ""]),
+    ("", ",", []),
+    ("one", ",", ["one"]),
+])
+def test_csv_split(line, sep, expected):
+    assert helpers.csv_split(line, sep) == expected
+
+
+def test_csv_split_from_lua_and_bad_separator():
+    out = _run('local f = opensak.text.csv_split([[GC1,"x, y",z]]) print(#f, f[2])')
+    assert out == ["3\tx, y"]
+    with pytest.raises(MacroError, match="sep must be one character"):
+        _run('opensak.text.csv_split("a,b", ", ")')
+
+
+def test_url_encode_decode():
+    assert helpers.url_encode("Zürich & Bern/1") == "Z%C3%BCrich%20%26%20Bern%2F1"
+    assert helpers.url_decode("Z%C3%BCrich+Nord") == "Zürich Nord"
+    assert helpers.url_decode(helpers.url_encode("a+b c")) == "a+b c"
+
+
+def test_base64_round_trip():
+    assert helpers.base64_encode("Zürich") == "WsO8cmljaA=="
+    assert helpers.base64_decode("WsO8\ncmljaA==") == "Zürich"
+    assert helpers.base64_decode(helpers.base64_encode(b"\xff\x00")) == b"\xff\x00"
+    with pytest.raises(MacroError, match="not valid Base64"):
+        helpers.base64_decode("not base64!")
+
+
+def test_base64_from_lua():
+    out = _run('print(opensak.text.base64_decode(opensak.text.base64_encode("Zürich")))')
+    assert out == ["Zürich"]
+
+
+def test_re_escape_matches_literally():
+    out = _run('local p = "^" .. opensak.re.escape("Bonus (1/3) *") .. "$"\n'
+               'print(opensak.re.match("Bonus (1/3) *", p), opensak.re.match("Bonus 1/3", p))')
+    assert out == ["true\tfalse"]
+
+
+@pytest.mark.parametrize("func", ["upper", "lower", "trim", "sub", "html_decode",
+                                  "csv_split", "url_encode", "url_decode",
+                                  "base64_encode", "base64_decode"])
+def test_text_functions_need_a_string(func):
+    with pytest.raises(MacroError, match=f"opensak.text.{func}"):
+        _run(f"opensak.text.{func}(12)")
+
+
+# ── opensak.text.gc_to_id / id_to_gc (GSAK's GsCodeToNum / NumToGsCode) ──────
+
+@pytest.mark.parametrize("code, number", [
+    ("GC0", 0), ("GC1", 1), ("GCFFFF", 65535), ("GCG000", 65536), ("GCG001", 65537),
+    ("GC12345", 574995), ("GC7XDGP", 6900686),
+])
+def test_gc_codes_and_numbers(code, number):
+    assert helpers.gc_to_id(code) == number
+    assert helpers.id_to_gc(number) == code
+
+
+@pytest.mark.parametrize("code", ["GC", "GCOOO", "GC-1", "1234", "GC1 2", "GCG", "GC0G00"])
+def test_gc_to_id_is_nil_for_other_text(code):
+    assert helpers.gc_to_id(code) is None
+
+
+def test_gc_to_id_any_case_and_other_prefixes():
+    assert helpers.gc_to_id(" gcg000 ") == 65536
+    assert helpers.gc_to_id("TB1") == 1
+    assert helpers.id_to_gc(65536, "tb") == "TBG000"
+
+
+def test_gc_round_trip():
+    for n in range(60_000, 72_000, 7):
+        assert helpers.gc_to_id(helpers.id_to_gc(n)) == n
+
+
+def test_gc_functions_from_lua():
+    out = _run('print(opensak.text.gc_to_id("GC12345"), opensak.text.id_to_gc(574995), '
+               'opensak.text.gc_to_id("nope"))')
+    assert out == ["574995\tGC12345\tnil"]
+
+
+@pytest.mark.parametrize("call, message", [
+    ("opensak.text.id_to_gc(-1)", "whole number >= 0"),
+    ("opensak.text.id_to_gc(1.5)", "whole number >= 0"),
+    ('opensak.text.id_to_gc("1")', "whole number >= 0"),
+    ('opensak.text.id_to_gc(1, "T")', "prefix must be two letters"),
+    ("opensak.text.gc_to_id(12)", "opensak.text.gc_to_id"),
+])
+def test_gc_bad_arguments(call, message):
+    with pytest.raises(MacroError, match=message):
+        _run(call)

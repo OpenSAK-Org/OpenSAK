@@ -181,6 +181,167 @@ def html_to_text(text: Any) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+def upper(value: Any) -> str:
+    """Upper case for every letter, not only ASCII ("zürich" → "ZÜRICH")."""
+    return _text(value, "opensak.text.upper").upper()
+
+
+def lower(value: Any) -> str:
+    """Lower case for every letter, not only ASCII ("ZÜRICH" → "zürich")."""
+    return _text(value, "opensak.text.lower").lower()
+
+
+def trim(value: Any) -> str:
+    """Remove leading and trailing white space, Unicode spaces such as the
+    no-break space included."""
+    return _text(value, "opensak.text.trim").strip()
+
+
+def _char_index(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+        raise MacroError(f"opensak.text.sub: {name} must be an integer, got {value!r}")
+    return int(value)
+
+
+def sub(text: Any, i: Any = 1, j: Any = -1) -> str:
+    """string.sub() counting characters instead of bytes: positions start at
+    1, negative ones count from the end, both ends included."""
+    s = _text(text, "opensak.text.sub")
+    n = len(s)
+    first = 1 if i is None else _char_index(i, "i")
+    last = -1 if j is None else _char_index(j, "j")
+    if first < 0:
+        first = max(n + first + 1, 1)
+    elif first == 0:
+        first = 1
+    if last < 0:
+        last = n + last + 1
+    elif last > n:
+        last = n
+    return s[first - 1:last] if first <= last else ""
+
+
+def html_decode(value: Any) -> str:
+    """Decode HTML entities (&amp;, &auml;, &#228; …) and leave the rest as is."""
+    import html as html_lib
+
+    return html_lib.unescape(_text(value, "opensak.text.html_decode"))
+
+
+def csv_split(line: Any, sep: Any = ",") -> list[str]:
+    """The fields of one CSV line: quoted fields may contain the separator,
+    and "" inside quotes is one quote."""
+    import csv
+
+    s = _text(line, "opensak.text.csv_split")
+    if not isinstance(sep, str) or len(sep) != 1 or sep in '"\r\n':
+        raise MacroError(f"opensak.text.csv_split: sep must be one character, got {sep!r}")
+    if not s:
+        return []
+    return next(csv.reader([s], delimiter=sep), [])
+
+
+def url_encode(value: Any) -> str:
+    """Percent-encode for a URL query value: everything except letters,
+    digits and -._~ (a space becomes %20)."""
+    from urllib.parse import quote
+
+    return quote(_text(value, "opensak.text.url_encode"), safe="")
+
+
+def url_decode(value: Any) -> str:
+    """Undo url_encode(): %XX sequences and + (a space in a query string)."""
+    from urllib.parse import unquote_plus
+
+    return unquote_plus(_text(value, "opensak.text.url_decode"))
+
+
+def base64_encode(value: Any) -> str:
+    """Base64 of the text's UTF-8 bytes (of the raw bytes for binary data)."""
+    import base64
+
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    elif not isinstance(value, bytes):
+        raise MacroError(f"opensak.text.base64_encode: text must be a string, got {value!r}")
+    return base64.b64encode(value).decode("ascii")
+
+
+def base64_decode(value: Any) -> str | bytes:
+    """Decode Base64; white space is ignored. Text that is not UTF-8 comes
+    back as the raw bytes."""
+    import base64
+    import binascii
+
+    s = "".join(_text(value, "opensak.text.base64_decode").split())
+    try:
+        data = base64.b64decode(s, validate=True)
+    except (binascii.Error, ValueError):
+        raise MacroError("opensak.text.base64_decode: not valid Base64") from None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+
+
+def re_escape(value: Any) -> str:
+    """*value* with every regular expression character escaped, so it
+    matches literally inside a pattern."""
+    import regex
+
+    return regex.escape(_text(value, "opensak.re.escape"))
+
+
+# geocaching.com codes (GC…, TB…, GL…): up to …FFFF the part after the
+# prefix is hexadecimal; from …G000 on it is base 31 in these digits (no I,
+# L, O, S, U), offset so that GCG000 follows GCFFFF.
+_GC_DIGITS = "0123456789ABCDEFGHJKMNPQRTVWXYZ"
+_GC_OFFSET = 16 * 31 ** 3 - 0x10000     # 411120
+_GC_CODE_RE = re.compile(r"([A-Z]{2})([0-9A-Z]+)")
+
+
+def gc_to_id(value: Any) -> Optional[int]:
+    """The number behind a geocaching.com code ("GC1" → 1, "GCG000" →
+    65536), like GSAK's GsCodeToNum; None if *value* is not such a code."""
+    s = _text(value, "opensak.text.gc_to_id").strip().upper()
+    m = _GC_CODE_RE.fullmatch(s)
+    if m is None:
+        return None
+    digits = m.group(2)
+    if len(digits) <= 4 and all(c in "0123456789ABCDEF" for c in digits):
+        return int(digits, 16)
+    if any(c not in _GC_DIGITS for c in digits):
+        return None
+    n = 0
+    for c in digits:
+        n = n * 31 + _GC_DIGITS.index(c)
+    n -= _GC_OFFSET
+    # A base-31 value below 65536 would be a hex code written another way.
+    return n if n >= 0x10000 else None
+
+
+def id_to_gc(value: Any, prefix: Any = None) -> str:
+    """The geocaching.com code for a number (1 → "GC1"), like GSAK's
+    NumToGsCode; *prefix* "TB", "GL" … instead of "GC"."""
+    func = "opensak.text.id_to_gc"
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value) \
+            or value < 0:
+        raise MacroError(f"{func}: the number must be a whole number >= 0, got {value!r}")
+    if prefix is None:
+        prefix = "GC"
+    if not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z]{2}", prefix):
+        raise MacroError(f'{func}: prefix must be two letters such as "TB", got {prefix!r}')
+    n = int(value)
+    if n < 0x10000:
+        return f"{prefix.upper()}{n:X}"
+    n += _GC_OFFSET
+    digits = ""
+    while n:
+        n, r = divmod(n, 31)
+        digits = _GC_DIGITS[r] + digits
+    return prefix.upper() + digits
+
+
 def digit_sum(value: Any) -> int:
     """Sum of all digits in a number or string (other characters ignored)."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
