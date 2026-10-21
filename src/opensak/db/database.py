@@ -81,7 +81,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 # Steps of opening a database that can take a while, for set_progress_callback().
 PROGRESS_MIGRATING = "migrating"
@@ -1088,6 +1088,17 @@ def _run_migrations(engine: Engine) -> None:
             )
             logger.info(f"Migration: added database defaults to {', '.join(rebuilt)}")
 
+        # ── Migration 27: GSAK's small columns (#1139, #1028 step 2) ─────────
+        logger.debug("[migrations] entering migration 27 (+%.2fs)", time.monotonic() - _mig_t0)
+        # Plain ADD COLUMNs: SQLite allows NOT NULL here because each one has
+        # a constant default, so no table rebuild is needed. No backfill —
+        # the values only exist in GSAK (or come with the next import), and
+        # existing corrections keep corrected_source NULL ("unknown").
+        added_27 = _add_missing_columns(conn, _NEW_COLUMNS_27)
+        if added_27:
+            conn.commit()
+            logger.info(f"Migration: added {', '.join(added_27)}")
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1130,6 +1141,39 @@ _COLUMN_DEFAULTS_26: dict[str, dict[str, str]] = {
     # database; listed so the result does not depend on that.
     "waypoints": {"created_by_user": "0", "wp_flag": "0"},
 }
+
+# Migration 27 (#1139): table -> [(column, SQL definition)], frozen here so
+# later model changes don't alter what this migration does.
+_NEW_COLUMNS_27: dict[str, list[tuple[str, str]]] = {
+    "caches": [
+        ("last_user_update", "DATETIME"),
+        ("macro_flag", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("macro_sort", "TEXT"),
+        ("is_owner", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("symbol", "VARCHAR(64)"),
+    ],
+    "user_notes": [
+        ("corrected_source", "VARCHAR(16)"),
+    ],
+}
+
+
+def _add_missing_columns(conn: Connection, columns_by_table: dict[str, list[tuple[str, str]]]) -> list[str]:
+    """
+    ADD COLUMN every listed column its table doesn't have yet, so this can
+    run again safely (and is a no-op on a database create_all() just made).
+    Returns the added columns as "table.column".
+    """
+    added: list[str] = []
+    for table, columns in columns_by_table.items():
+        existing = {r[1] for r in conn.execute(text(f'PRAGMA table_info("{table}")'))}
+        for column, definition in columns:
+            if column not in existing:
+                # Table/column names and definitions are trusted constants.
+                conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+                added.append(f"{table}.{column}")
+    return added
+
 
 # A column type as SQLAlchemy writes it: BOOLEAN, VARCHAR(16), NUMERIC(10, 2).
 _SQL_TYPE = r"\w+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?"

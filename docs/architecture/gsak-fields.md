@@ -1,6 +1,6 @@
 # Full GSAK Field Compatibility — Design (Epic #1028)
 
-*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028. The custom-field storage model (runtime-built model, local and global fields, field ids) is now agreed in principle; the macro API shape and computed fields are still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
+*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, and 21 October 2026 when the small columns landed (#1139). The custom-field storage model (runtime-built model, local and global fields, field ids) is now agreed in principle; the macro API shape and computed fields are still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
 
 ## Summary
 
@@ -40,23 +40,32 @@ The inventory below comes from a real GSAK database (`PRAGMA user_version = 27`,
 | HasCorrected, HasUserNote, HasTravelBug, FoundCount | `user_notes`, `trackable_count`, `found_log_count` | FoundCount is a 0/1 "found by me" flag, not a community count |
 | LatOriginal, LonOriginal | `latitude`, `longitude` | OpenSAK always keeps the posted position; the correction lives in `user_notes` |
 
-**Exists in OpenSAK, but the GSAK value is thrown away:**
+**Exists in OpenSAK; the GSAK value is kept on import (#1139, previously replaced by the import time):**
 
-| GSAK | OpenSAK | Today | Should be |
-| --- | --- | --- | --- |
-| Created | `imported_at` | Time of the OpenSAK import | GSAK's date, so "first seen" survives the migration |
-| LastGPXDate | `last_gpx_update` | Time of the OpenSAK import | GSAK's date, so "not refreshed by a PQ since …" filters keep working |
-| UserNoteDate | `user_notes.updated_at` | Time of the OpenSAK import | GSAK's date |
+| GSAK | OpenSAK | Note |
+| --- | --- | --- |
+| Created | `imported_at` | "First seen" survives the migration. On a re-import the earlier of GSAK's date and the existing value is kept |
+| LastGPXDate | `last_gpx_update` | "Not refreshed by a PQ since …" filters keep working. Falls back to the import time when GSAK has no date |
+| UserNoteDate | `user_notes.updated_at` | |
 
-**Missing:**
+**Timestamps are stored in UTC (#1097).** Every timestamp OpenSAK records itself (`imported_at`, `last_gpx_update`, `last_user_update`, `user_notes.updated_at`) is naive UTC, so a database means the same on any computer and in any time zone. GSAK writes these dates in the computer's local time; the importer converts them to UTC, and a date without a time is taken as local midnight. The cache list and the date filters convert back to local time (`opensak/utils/timestamps.py`). Listing-side dates (placed, found, the listing's "changed" date, log dates) are calendar dates and are not converted.
+
+**Added in #1139 (migration 27), filled by the GSAK importer:**
+
+| GSAK | Used | OpenSAK |
+| --- | --- | --- |
+| LastUserDate | 12,600 | `last_user_update` (datetime, UTC). GSAK's "last changed by the user" date. Settles #821 item 6\*: kept separate from `last_updated` (the listing-side change date) rather than merging the two |
+| MacroFlag | 96 | `macro_flag` (boolean, default false). GSAK macros' own working flag, separate from the user flag. Needed by ported macros |
+| MacroSort | 2,240 | `macro_sort` (text). Same, for sorting |
+| IsOwner | 28 | `is_owner` (boolean, default false). Still to do: set from the account name on GPX import, and replace the owner-name workaround in the filter importer |
+| Symbol | 12,600 | `symbol` (text). Mostly "Geocache" / "Geocache Found" but user-editable in GSAK. Still to do: fill from GPX `<sym>` |
+
+All of these, like the other personal fields, are updated even for a locked cache. OpenSAK does not yet set `last_user_update` itself when the user edits a field; that, and the GPX side above, is the follow-up step (2b).
+
+**Not added:**
 
 | GSAK | Used | Proposal |
 | --- | --- | --- |
-| LastUserDate | 12,600 | New column `last_user_update`. GSAK's "last changed by the user" date. Settles #821 item 6\*: keep it separate from `last_updated` (the listing-side change date) rather than merging the two |
-| MacroFlag | 96 | New column `macro_flag` (boolean). GSAK macros' own working flag, separate from the user flag. Needed by ported macros |
-| MacroSort | 2,240 | New column `macro_sort` (text). Same, for sorting |
-| IsOwner | 28 | New column `is_owner` (boolean), set from GSAK on import and from the account name on GPX import. Removes the owner-name workaround in the filter importer |
-| Symbol | 12,600 | New column `symbol` (text) from GPX `<sym>` and GSAK. Mostly "Geocache" / "Geocache Found" but user-editable in GSAK |
 | Source | 12,600 | Low priority (only "GC" here). Leave out unless a user shows other values |
 | SmartName, SmartOverride | 0 | GSAK's short names for GPS units. Out for now; revisit with GPS export |
 | ChildLoad, LinkedTo, GetPolyFlag | 0 / 0 / 15 | GSAK-internal. Left out |
@@ -65,7 +74,7 @@ The inventory below comes from a real GSAK database (`PRAGMA user_version = 27`,
 
 Coordinates are mapped. Not mapped:
 
-- **kType** — how the correction was made: `gui` 61, `macro` 37, `api` 3. Proposal: `user_notes.corrected_source` (`user` / `macro` / `import`), set by OpenSAK itself as well, so a macro can find and undo its own corrections.
+- **kType** — how the correction was made: `gui` 61, `macro` 37, `api` 3. Imported into `user_notes.corrected_source` (#1139): `gui` → `user`, `macro` → `macro`, `api` → `import`, anything else → NULL. Corrections that existed before migration 27 stay NULL ("unknown"), so a macro never mistakes an old user correction for one of its own. Still to do (step 2b): set it from OpenSAK itself when the user or a macro corrects coordinates.
 - **kBeforeState/County, kAfterState/County** — the region before and after correction. Probably covered by OpenSAK's own reverse geocoding (`location_basis`); verify before adding anything.
 
 ### Other tables
@@ -214,7 +223,9 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 ## Sub-issues and order of work
 
 1. **Agree this design** — storage model agreed with nagisml on #1028 (15 Oct 2026); global-field location answered by nagisml (`gsak.db3`). Still open: macro API shape and computed fields (see Questions).
-2. **Small columns** — one migration: `last_user_update`, `macro_flag`, `macro_sort`, `is_owner`, `symbol`, `user_notes.corrected_source`; the GSAK importer fills them and stops stamping `imported_at`, `last_gpx_update` and `user_notes.updated_at` with the import time. OpenSAK sets `last_user_update` whenever the user changes a user-owned field.
+2. **Small columns** — **done in #1139** (migration 27): `last_user_update`, `macro_flag`, `macro_sort`, `is_owner`, `symbol`, `user_notes.corrected_source`; the GSAK importer fills them and keeps GSAK's `imported_at`, `last_gpx_update` and `user_notes.updated_at`, all as UTC (#1097).
+   - **2b.** OpenSAK fills the columns itself: `symbol` and `is_owner` on GPX import; `last_user_update` whenever the user changes a user-owned field (user flag, user sort, user data 1–4, personal note, corrected coordinates, lock); `corrected_source` when the user or a macro corrects coordinates; the GSAK filter importer and the Dates tab use the new columns (#821 item 6\*).
+   - **2c.** Macro access to the new columns (@nagisml).
 3. **Custom fields: storage and GSAK import** — `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, import of local and global definitions and values, import report.
 4. **Custom fields: UI** — column chooser, detail panel, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer.
 5. **Custom fields: macro API** — read, write, define.

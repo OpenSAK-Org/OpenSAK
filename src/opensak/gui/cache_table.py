@@ -26,6 +26,7 @@ from opensak.lang import tr
 from opensak.utils.types import GcCode, TEXT_SIZE_MAP, TextSize
 from opensak.utils.utils import normalize_geocacher_name
 from opensak.utils.constants import FOUND_LOG_TYPES
+from opensak.utils.timestamps import utc_to_local
 from opensak.gui.icon_provider import (
     get_cache_type_icon,
     get_flag_icon,
@@ -1178,7 +1179,8 @@ class CacheTableModel(QAbstractTableModel):
         if col == "changed_date":
             return _format_date(cache.last_updated) if cache.last_updated else ""
         if col == "creation_date":
-            return _format_date(cache.imported_at) if cache.imported_at else ""
+            # #1097: a recorded timestamp, stored as UTC — show the local day.
+            return _format_date(utc_to_local(cache.imported_at)) if cache.imported_at else ""
         if col == "elevation":
             if cache.elevation is None:
                 return ""
@@ -1210,7 +1212,8 @@ class CacheTableModel(QAbstractTableModel):
         if col == "last_found_date":
             return _format_date(cache.last_found_date) if cache.last_found_date else ""
         if col == "last_gpx_update":
-            return _format_date(cache.last_gpx_update) if cache.last_gpx_update else ""
+            # #1097: a recorded timestamp, stored as UTC — show the local day.
+            return _format_date(utc_to_local(cache.last_gpx_update)) if cache.last_gpx_update else ""
         if col == "last_four_logs":
             # Issue #716 (follow-up): drawn by LastFourLogsDelegate as 4
             # GSAK-style colored squares — no cell text, same as the other

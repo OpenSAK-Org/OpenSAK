@@ -266,6 +266,24 @@ class Cache(Base):
     # import from the same merged log set as last_log_date.
     last_four_logs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── Issue #1139 (#1028 step 2): GSAK's small columns ────────────────────
+    # When the user last changed one of their own fields on this cache
+    # (GSAK's LastUserDate). Naive UTC, like the other recorded timestamps
+    # (#1097). Kept separate from last_updated, the listing-side change date.
+    last_user_update: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # GSAK macros' own working flag and sort value (MacroFlag / MacroSort),
+    # separate from the user's user_flag / user_sort.
+    macro_flag: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
+    macro_sort: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # The user owns this cache (GSAK's IsOwner).
+    is_owner: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=_SQL_FALSE, nullable=False
+    )
+    # Waypoint symbol (GSAK's Symbol / GPX <sym>), e.g. "Geocache Found".
+    symbol: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
     # Relationships
     waypoints: Mapped[List["Waypoint"]] = relationship(
         "Waypoint", back_populates="cache", cascade="all, delete-orphan"
@@ -453,6 +471,10 @@ class UserNote(Base):
     corrected_lat: Mapped[Optional[float]] = mapped_column(Float)
     corrected_lon: Mapped[Optional[float]] = mapped_column(Float)
     is_corrected: Mapped[bool] = mapped_column(Boolean, default=False, server_default=_SQL_FALSE)
+    # How the correction was made (#1139, GSAK's Corrected.kType): "user",
+    # "macro" or "import". NULL for corrections made before this was
+    # recorded, so a macro never mistakes one of those for its own.
+    corrected_source: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, server_default=_SQL_NOW, onupdate=_utcnow

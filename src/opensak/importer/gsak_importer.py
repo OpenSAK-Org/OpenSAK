@@ -66,6 +66,19 @@ SQLAlchemy models, without going via GPX.
       any Trackables a cache already had from an earlier *GPX* import with
       whatever GSAK currently has for that cache.
 
+── Issue #1139 (#1028 step 2) ────────────────────────────────────────────────
+    - Caches.LastUserDate/MacroFlag/MacroSort/IsOwner/Symbol -> the new
+      Cache.last_user_update/macro_flag/macro_sort/is_owner/symbol columns.
+    - Corrected.kType -> UserNote.corrected_source (gui -> "user",
+      macro -> "macro", api -> "import").
+    - GSAK's own dates are kept instead of the time of this import:
+      Created -> imported_at, LastGPXDate -> last_gpx_update, UserNoteDate
+      -> UserNote.updated_at. GSAK writes them in the computer's local time;
+      they are stored as naive UTC like every timestamp OpenSAK records
+      (#1097), and a date without a time is taken as local midnight.
+    All of these columns are read only when present, so a GSAK database
+    (or test fixture) without them imports as before.
+
 Deliberately NOT imported yet (later sessions per #469 plan):
     - Custom/CustomLocal, Ignore (out of scope / #473)
     - Cache.find_count (issue #517 prep column) — GSAK's own FoundCount
@@ -105,6 +118,7 @@ from opensak.importer import (
 from opensak.utils.constants import ATTRIBUTES
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.lang import tr
+from opensak.utils.timestamps import local_to_utc, utc_now
 
 
 # ── GSAK CacheType single-letter code -> OpenSAK cache_type string ──────────
@@ -327,6 +341,22 @@ def _d(value) -> Optional[datetime]:
         except ValueError:
             continue
     return None
+
+
+def _col(row: sqlite3.Row, name: str):
+    """Value of column *name*, or None when this GSAK database has no such
+    column (older or partial databases, and the test fixtures)."""
+    return row[name] if name in row.keys() else None
+
+
+def _utc(value) -> Optional[datetime]:
+    """A GSAK date/time (local time on the user's computer) as naive UTC."""
+    return local_to_utc(_d(value))
+
+
+# GSAK's Corrected.kType -> UserNote.corrected_source (#1139). Anything else
+# (blank, or a value a later GSAK version adds) stays None, "unknown".
+_CORRECTED_SOURCE_MAP = {"gui": "user", "macro": "macro", "api": "import"}
 
 
 def _attribute_name_lookup() -> dict[int, str]:
@@ -755,15 +785,23 @@ def _load_corrected_by_code(conn: sqlite3.Connection) -> dict[str, dict]:
     matched the cache's own GSAK-exported GPX for the same cache), so the
     Corrected table is the more reliable source.
     """
-    cur = conn.execute("""
-        SELECT kCode, kBeforeLat, kBeforeLon, kAfterLat, kAfterLon FROM Corrected
+    # Issue #1139: kType (how the correction was made) is read when present.
+    has_ktype = any(
+        r[1] == "kType" for r in conn.execute("PRAGMA table_info(Corrected)")
+    )
+    cur = conn.execute(f"""
+        SELECT kCode, kBeforeLat, kBeforeLon, kAfterLat, kAfterLon
+               {", kType" if has_ktype else ""}
+        FROM Corrected
     """)
     by_code: dict[str, dict] = {}
     for row in cur.fetchall():
         after_lat, after_lon = _f(row["kAfterLat"]), _f(row["kAfterLon"])
         if after_lat is None or after_lon is None:
             continue
-        entry = {"corrected_lat": after_lat, "corrected_lon": after_lon}
+        entry: dict = {"corrected_lat": after_lat, "corrected_lon": after_lon}
+        ktype = (_s(row["kType"]) or "").lower() if has_ktype else ""
+        entry["corrected_source"] = _CORRECTED_SOURCE_MAP.get(ktype)
         before_lat, before_lon = _f(row["kBeforeLat"]), _f(row["kBeforeLon"])
         if before_lat is not None and before_lon is not None:
             entry["original_lat"] = before_lat
@@ -904,6 +942,17 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
 
         # ── Issue #538 ────────────────────────────────────────────────────
         "trackables": trackables,
+
+        # ── Issue #1139 (#1028 step 2): small columns ──────────────────────
+        "last_user_update": _utc(_col(row, "LastUserDate")),
+        "macro_flag":       _b(_col(row, "MacroFlag")),
+        "macro_sort":       _s(_col(row, "MacroSort")),
+        "is_owner":         _b(_col(row, "IsOwner")),
+        "symbol":           _s(_col(row, "Symbol")),
+        # GSAK's own dates, used instead of the time of this import.
+        "_gsak_created":        _utc(_col(row, "Created")),
+        "_gsak_last_gpx":       _utc(_col(row, "LastGPXDate")),
+        "_gsak_user_note_date": _utc(_col(row, "UserNoteDate")),
     }
 
 
@@ -990,10 +1039,21 @@ def _upsert_cache_from_gsak(
         "user_flag", "user_sort", "premium_only",
         "user_data_1", "user_data_2", "user_data_3", "user_data_4",
         "favorite_points",
+        # Issue #1139: also the user's / their macros' own data.
+        "last_user_update", "macro_flag", "macro_sort", "is_owner", "symbol",
     ):
         setattr(cache, field, data.get(field))
 
     cache.source_file = source_file
+
+    # ── Issue #1139: GSAK's Created is when the cache was first seen. Keep
+    # the earlier of it and an existing imported_at, so a cache that was
+    # already in OpenSAK before never looks newer than it is. ─────────────
+    gsak_created = data.get("_gsak_created")
+    if gsak_created is not None:
+        current = cache.imported_at.replace(tzinfo=None) if cache.imported_at else None
+        if current is None or gsak_created < current:
+            cache.imported_at = gsak_created
 
     # Attributes
     for a in attr_rows:
@@ -1127,10 +1187,12 @@ def _upsert_cache_from_gsak(
         for lg in _recent
     ) or None
 
-    # ── Issue #716: last_gpx_update — local timestamp of this import pass,
-    # set unconditionally (even for locked caches — it reflects import
-    # activity, not listing content, same as source_file above) ───────────
-    cache.last_gpx_update = datetime.now()
+    # ── Issue #716: last_gpx_update — set unconditionally (even for locked
+    # caches — it reflects import activity, not listing content, same as
+    # source_file above). Issue #1139: GSAK's own LastGPXDate when it has
+    # one, so "not refreshed since …" keeps meaning the last real refresh;
+    # otherwise the time of this import. Naive UTC either way (#1097). ────
+    cache.last_gpx_update = data.get("_gsak_last_gpx") or utc_now()
 
     # ── Issue #552: cached count of the user's own found-type logs ──────────
     # GSAK databases hold the full log history (unlike a PQ's 5-log window),
@@ -1159,6 +1221,11 @@ def _upsert_cache_from_gsak(
             note.corrected_lat = corrected["corrected_lat"]
             note.corrected_lon = corrected["corrected_lon"]
             note.is_corrected = True
+            note.corrected_source = corrected.get("corrected_source")
+        # Issue #1139: GSAK's UserNoteDate instead of the time of this
+        # import (set explicitly, so the column's onupdate doesn't fire).
+        if data.get("_gsak_user_note_date") is not None:
+            note.updated_at = data["_gsak_user_note_date"]
         if note_text is not None:
             note.note = note_text
             if data.get("note_images_replaced"):

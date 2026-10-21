@@ -2018,6 +2018,10 @@ DATE_FILTER_FIELDS: dict[str, str] = {
 # Fields whose DateFilter bounds may carry a time of day (to the minute) —
 # timestamps OpenSAK records itself, where the time is meaningful.
 DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "changed_date")
+# Fields holding a timestamp OpenSAK records itself, stored as naive UTC
+# (#1097). Bounds the user types are local time, so these are compared in
+# local time: the stored value is converted, or the bounds are (in SQL).
+UTC_DATE_FILTER_FIELDS = ("creation_date", "last_gpx_update")
 DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
             "during", "not_during", "compare")
 DATE_UNITS = ("days", "weeks", "months", "years")
@@ -2145,16 +2149,20 @@ def _date_op_range(
     return _shift_back(today, amount, unit), today
 
 
-def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date]):
+def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date], utc: bool = False):
     """SQL form of _date_in_range() on datetime column *col*. Compares the raw
-    column against day (or minute) boundaries, so an index on it stays usable."""
+    column against day (or minute) boundaries, so an index on it stays usable.
+    With *utc* the column holds naive UTC and the (local) boundaries are
+    converted to UTC first (#1097)."""
     from sqlalchemy import and_, not_, or_
+    from opensak.utils.timestamps import local_to_utc
     conditions = [col.is_not(None)]
     if lo is not None:
-        conditions.append(col >= _bound_start(lo))
+        start = _bound_start(lo)
+        conditions.append(col >= (local_to_utc(start) if utc else start))
     end = _bound_end(hi) if hi is not None else None
     if end is not None:
-        conditions.append(col < end)
+        conditions.append(col < (local_to_utc(end) if utc else end))
     inside = and_(*conditions)
     if op == "not_during":
         return or_(col.is_(None), not_(inside))
@@ -2247,20 +2255,38 @@ class DateFilter(BaseFilter):
         # date()/julianday() so both sides are reduced to calendar dates.
         from sqlalchemy import func
         col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
+        utc = self.field in UTC_DATE_FILTER_FIELDS
         if self.op == "compare":
             other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
-            diff = func.julianday(func.date(col)) - func.julianday(func.date(other))
+
+            def _day(c, field: str):
+                # #1097: a UTC timestamp's calendar day is its local day.
+                if field in UTC_DATE_FILTER_FIELDS:
+                    return func.date(c, "localtime")
+                return func.date(c)
+
+            diff = (func.julianday(_day(col, self.field))
+                    - func.julianday(_day(other, self.other_field)))
             return query.filter(
                 col.is_not(None), other.is_not(None),
                 _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
             )
-        return query.filter(_date_range_sql(col, self.op, *self._range()))
+        return query.filter(_date_range_sql(col, self.op, *self._range(), utc=utc))
+
+    @staticmethod
+    def _value(cache: Cache, field: str):
+        """The cache's value for *field*; UTC timestamps as local time (#1097)."""
+        raw = getattr(cache, DATE_FILTER_FIELDS[field], None)
+        if field in UTC_DATE_FILTER_FIELDS and isinstance(raw, datetime):
+            from opensak.utils.timestamps import utc_to_local
+            return utc_to_local(raw)
+        return raw
 
     def matches(self, cache: Cache) -> bool:
-        raw = getattr(cache, DATE_FILTER_FIELDS[self.field], None)
+        raw = self._value(cache, self.field)
         value = _to_date(raw)
         if self.op == "compare":
-            other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
+            other = _to_date(self._value(cache, self.other_field))
             if value is None or other is None:
                 return False
             return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
