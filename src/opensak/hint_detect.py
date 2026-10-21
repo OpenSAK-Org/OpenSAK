@@ -59,7 +59,7 @@ _LINEBREAK_RE = re.compile(r"\[br\]", re.IGNORECASE)
 # rører almindelige ASCII-bogstaver (samme som hidtil).
 _VOWELS = set(
     "aeiouyAEIOUY"
-    "æøåÆØÅ"
+    "æøåÆØÅ"  # i18n: ignore — vowel set, not text
     "äöüÄÖÜß"
     "àâéèêëîïôùûÿçÀÂÉÈÊËÎÏÔÙÛŸÇ"
     "áéíóúñÁÉÍÓÚÑ"

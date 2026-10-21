@@ -6508,7 +6508,7 @@ API: tuple[ApiFunction, ...] = (
         name="text.upper",
         description="Upper case for all letters, not only ASCII: "
                     "`string.upper` and `s:upper()` leave ä, é, ø … as they "
-                    "are. ß becomes SS.",
+                    "are. ß becomes SS.",  # i18n: ignore — API docs example letters
         example='print(opensak.text.upper("zürich"))  -- ZÜRICH; ("zürich"):upper() gives ZüRICH',
         since=3,
         bind=lambda rt, lua: helpers.upper,

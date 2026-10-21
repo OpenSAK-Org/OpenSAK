@@ -150,11 +150,11 @@ class ProjectionDialog(QDialog):
 
         maps_row = QHBoxLayout()
         maps_row.addWidget(QLabel(tr("coord_conv_open_in")))
-        self._osm_btn = QPushButton("OpenStreetMap")
+        self._osm_btn = QPushButton("OpenStreetMap")  # i18n: ignore — product name
         self._osm_btn.setEnabled(False)
         self._osm_btn.clicked.connect(self._open_osm)
         maps_row.addWidget(self._osm_btn)
-        self._gmaps_btn = QPushButton("Google Maps")
+        self._gmaps_btn = QPushButton("Google Maps")  # i18n: ignore — product name
         self._gmaps_btn.setEnabled(False)
         self._gmaps_btn.clicked.connect(self._open_gmaps)
         maps_row.addWidget(self._gmaps_btn)

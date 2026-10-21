@@ -948,7 +948,7 @@ class MainWindow(QMainWindow):
         row.addWidget(gc_lbl)
 
         self._search_gc = QLineEdit()
-        self._search_gc.setPlaceholderText("GC12345")
+        self._search_gc.setPlaceholderText("GC12345")  # i18n: ignore — GC code example
         self._search_gc.setFixedWidth(110)
         self._search_gc.setClearButtonEnabled(True)
         self._search_gc.textChanged.connect(self._on_search_changed)

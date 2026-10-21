@@ -3499,7 +3499,7 @@ def show_where_info(parent: Optional[QWidget] = None) -> None:
     content.setTextFormat(Qt.TextFormat.RichText)
     content.setWordWrap(True)
     content.setContentsMargins(8, 8, 8, 8)
-    content.setText(
+    content.setText(  # i18n: ignore — SQL column names and types
         f"<b>{tr('filter_where_help_heading')}</b><br><br>"
         f"{tr('filter_where_help_intro')}<br><br>"
         "<table cellspacing='4'>"

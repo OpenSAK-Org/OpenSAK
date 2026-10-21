@@ -45,7 +45,7 @@ _FILLER_WORDS = {
     "der", "die", "das", "dem", "den", "des", "ein", "eine", "und", "im", "am",
     "le", "la", "les", "de", "du", "et", "en",
 }
-_VOWELS = set("aeiouyäöüåæøéèêàáíóú")
+_VOWELS = set("aeiouyäöüåæøéèêàáíóú")  # i18n: ignore — vowel set, not text
 
 
 def smart_name(text: str, length: int) -> str:

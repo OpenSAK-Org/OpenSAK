@@ -373,7 +373,7 @@ class WaypointDialog(QDialog):
 
         # Tomt felt = ukendt højde (None) — 0 m er en gyldig højde
         self._elevation = QLineEdit()
-        self._elevation.setPlaceholderText("m")
+        self._elevation.setPlaceholderText("m")  # i18n: ignore — unit symbol
         self._elevation.setMaximumWidth(120)
         form.addRow(_label("col_elevation"), self._elevation)
 

@@ -159,7 +159,7 @@ def _page_gc_profile() -> tuple[QWidget, QLineEdit, QLineEdit]:
     lay.addSpacing(8)
     lay.addWidget(QLabel(tr("wizard_gc_home_label")))
     home_edit = QLineEdit()
-    home_edit.setPlaceholderText("N55 47.123 E012 25.456")
+    home_edit.setPlaceholderText("N55 47.123 E012 25.456")  # i18n: ignore — coordinate example
     lay.addWidget(home_edit)
 
     hint = QLabel(tr("wizard_gc_skip_hint"))

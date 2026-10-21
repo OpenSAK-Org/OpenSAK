@@ -271,9 +271,9 @@ class SettingsDialog(QDialog):
         coord_fmt_row = QHBoxLayout()
         coord_fmt_row.addWidget(QLabel(tr("settings_coord_format_label")))
         self._coord_format = QComboBox()
-        self._coord_format.addItem("DMM  —  N55 47.250 E012 25.000", CoordFormat.DMM)
-        self._coord_format.addItem("DMS  —  N55° 47' 15\" E012° 25' 00\"", CoordFormat.DMS)
-        self._coord_format.addItem("DD   —  55.78750, 12.41667", CoordFormat.DD)
+        self._coord_format.addItem("DMM  —  N55 47.250 E012 25.000", CoordFormat.DMM)  # i18n: ignore — coordinate format sample
+        self._coord_format.addItem("DMS  —  N55° 47' 15\" E012° 25' 00\"", CoordFormat.DMS)  # i18n: ignore — coordinate format sample
+        self._coord_format.addItem("DD   —  55.78750, 12.41667", CoordFormat.DD)  # i18n: ignore — coordinate format sample
         coord_fmt_row.addWidget(self._coord_format)
         coord_fmt_row.addStretch()
         disp_layout.addLayout(coord_fmt_row)
@@ -282,9 +282,9 @@ class SettingsDialog(QDialog):
         date_fmt_row.addWidget(QLabel(tr("settings_date_format_label")))
         self._date_format = QComboBox()
         self._date_format.addItem(tr("settings_date_format_locale"), DateFormat.LOCALE)
-        self._date_format.addItem("dd.mm.yyyy", DateFormat.DMY)
-        self._date_format.addItem("mm/dd/yyyy", DateFormat.MDY)
-        self._date_format.addItem("yyyy-mm-dd", DateFormat.YMD)
+        self._date_format.addItem("dd.mm.yyyy", DateFormat.DMY)  # i18n: ignore — date format pattern
+        self._date_format.addItem("mm/dd/yyyy", DateFormat.MDY)  # i18n: ignore — date format pattern
+        self._date_format.addItem("yyyy-mm-dd", DateFormat.YMD)  # i18n: ignore — date format pattern
         date_fmt_row.addWidget(self._date_format)
         date_fmt_row.addStretch()
         disp_layout.addLayout(date_fmt_row)
@@ -1296,7 +1296,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(form_group)
 
         self._pq_email_host = QLineEdit()
-        self._pq_email_host.setPlaceholderText("imap.example.com")
+        self._pq_email_host.setPlaceholderText("imap.example.com")  # i18n: ignore — host name example
         form.addRow(tr("pq_email_host_label"), self._pq_email_host)
 
         self._pq_email_port = QSpinBox()

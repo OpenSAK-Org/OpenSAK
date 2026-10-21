@@ -1,6 +1,9 @@
 from collections import Counter
 import importlib.util
+import io
 import pathlib
+import re
+import tokenize
 import pytest
 import ast
 
@@ -169,4 +172,213 @@ def test_no_unused_keys():
         "used as string literals in the application source.  Either add a tr() call "
         "or remove the key from every language file:\n"
         + "\n".join(f"  {k!r}" for k in sorted(unused))
+    )
+
+
+# ── i18n guards (#1134) ──────────────────────────────────────────────────────
+# test_no_missing_keys only checks that the language files agree with each
+# other, so nothing else notices code that bypasses tr(). These three tests
+# keep the sweep from #1127/#1128 from slowly coming undone.
+#
+# A literal or call that legitimately holds untranslated text (a product
+# name, a format sample, a vowel set) is marked with an inline comment
+# "# i18n: ignore — <reason>" on any line it spans, so the reason sits next
+# to the code rather than in a central list here.
+
+IGNORE_MARKER = "i18n: ignore"
+DANISH_LETTERS = frozenset("æøåÆØÅ")
+
+# Qt calls whose first positional argument is user-facing text.
+_TEXT_METHODS = frozenset({
+    "setText", "setToolTip", "setWindowTitle", "setPlaceholderText",
+    "setTitle", "showMessage", "setStatusTip", "setWhatsThis",
+    "setTabText", "setLabelText", "addItem", "insertItem",
+})
+# QMessageBox.<x>(parent, title, text, ...): title and text.
+_MESSAGE_BOX_METHODS = frozenset({"information", "warning", "critical", "question", "about"})
+# QFileDialog.<x>(parent, caption, ...): caption.
+_FILE_DIALOG_METHODS = frozenset({
+    "getSaveFileName", "getOpenFileName", "getOpenFileNames", "getExistingDirectory",
+})
+# Widget constructors whose first positional argument is their text.
+_TEXT_CONSTRUCTORS = frozenset({
+    "QLabel", "QPushButton", "QCheckBox", "QGroupBox", "QRadioButton",
+    "QAction", "QToolButton", "QMenu",
+})
+# Receivers that are loggers: log.warning(...) is not QMessageBox.warning(...).
+_LOGGER_NAMES = frozenset({"log", "logger", "_log", "_logger", "LOG", "logging"})
+
+_HTML_CODE = re.compile(r"<code>.*?</code>", re.DOTALL)
+_HTML_TAG = re.compile(r"<[^>]*>")
+_FILE_EXTENSION = re.compile(r"^\s*\.[A-Za-z0-9]+\s*$")
+_LETTER = re.compile(r"[^\W\d_]")
+
+
+def _app_source_files() -> list[pathlib.Path]:
+    """Every .py file under src/opensak/ except the lang/ package."""
+    return [
+        f for f in sorted(SRC_DIR.rglob("*.py"))
+        if f.relative_to(SRC_DIR).parts[0] != "lang"
+    ]
+
+
+def _ignored_lines(source: str) -> set[int]:
+    """Line numbers carrying a '# i18n: ignore' comment. tokenize is used so
+    that the marker inside a string literal does not count."""
+    lines: set[int] = set()
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT and IGNORE_MARKER in tok.string:
+            lines.add(tok.start[0])
+    return lines
+
+
+def _is_ignored(node: ast.AST, ignored: set[int]) -> bool:
+    start = getattr(node, "lineno", 0)
+    end = getattr(node, "end_lineno", None) or start
+    return any(line in ignored for line in range(start, end + 1))
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """id() of every docstring Constant node in *tree*."""
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            if (body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                ids.add(id(body[0].value))
+    return ids
+
+
+def _parsed_sources():
+    """(path, tree, ignored line numbers) for every application source file."""
+    for f in _app_source_files():
+        source = f.read_text(encoding="utf-8")
+        yield f, ast.parse(source), _ignored_lines(source)
+
+
+def _visible_text(node: ast.AST) -> str | None:
+    """The text a reader would see from a str literal or f-string: the
+    constant parts with HTML tags and <code> spans removed. None when the
+    node is not a literal (a tr() call, a variable, ...) or holds no
+    visible text (an HTML wrapper, a file extension like '.gpx')."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        text = node.value
+    elif isinstance(node, ast.JoinedStr):
+        text = "".join(
+            v.value for v in node.values
+            if isinstance(v, ast.Constant) and isinstance(v.value, str)
+        )
+    else:
+        return None
+    text = _HTML_TAG.sub("", _HTML_CODE.sub("", text))
+    if _FILE_EXTENSION.match(text) or not _LETTER.search(text):
+        return None
+    return text
+
+
+def _receiver_name(func: ast.Attribute) -> str | None:
+    value = func.value
+    if isinstance(value, ast.Name):
+        return value.id
+    if isinstance(value, ast.Attribute):
+        return value.attr
+    return None
+
+
+def _ui_text_args(call: ast.Call) -> list[ast.expr]:
+    """The arguments of *call* that end up as visible UI text."""
+    func = call.func
+    if isinstance(func, ast.Name):
+        return list(call.args[:1]) if func.id in _TEXT_CONSTRUCTORS else []
+    if not isinstance(func, ast.Attribute):
+        return []
+    receiver = _receiver_name(func)
+    if receiver in _LOGGER_NAMES:
+        return []
+    if func.attr in _MESSAGE_BOX_METHODS:
+        return list(call.args[1:3]) if receiver == "QMessageBox" else []
+    if func.attr in _FILE_DIALOG_METHODS:
+        return list(call.args[1:2]) if receiver == "QFileDialog" else []
+    if func.attr == "addTab":
+        # addTab(widget, label): only the label. The second argument of
+        # addItem(text, data) is userData, so only the first is checked.
+        return list(call.args[1:2])
+    if func.attr in _TEXT_METHODS:
+        return list(call.args[:1])
+    return []
+
+
+def test_no_danish_in_source_literals():
+    """No string literal in the application source (outside lang/ and
+    docstrings) contains æ, ø or å. Comments are not AST nodes, so Danish
+    comments are fine; this catches Danish UI text and Danish log/print
+    messages alike. Danish words without æ/ø/å ("Gem", "Ingen") slip
+    through here; test_ui_text_goes_through_tr covers those in the UI."""
+    offending = []
+    for path, tree, ignored in _parsed_sources():
+        docstrings = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and id(node) not in docstrings
+                    and DANISH_LETTERS.intersection(node.value)
+                    and not _is_ignored(node, ignored)):
+                offending.append(f"  {path}:{node.lineno}: {node.value[:60]!r}")
+    assert not offending, (
+        "Danish text in string literals — put UI text through tr() and write "
+        "log messages in English, or mark a legitimate literal with "
+        f"'# {IGNORE_MARKER} — <reason>':\n" + "\n".join(offending)
+    )
+
+
+def test_ui_text_goes_through_tr():
+    """Text passed straight to a text-setting Qt call (setText, setToolTip,
+    QMessageBox.warning, QLabel(...), ...) must come from tr(), not a
+    literal. Known blind spot: text built in a non-GUI module and passed
+    around before it reaches a widget is not seen here (it is caught by
+    test_no_danish_in_source_literals if it is Danish)."""
+    offending = []
+    for path, tree, ignored in _parsed_sources():
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _is_ignored(node, ignored):
+                continue
+            for arg in _ui_text_args(node):
+                text = _visible_text(arg)
+                if text is not None:
+                    offending.append(f"  {path}:{arg.lineno}: {text[:60]!r}")
+    assert not offending, (
+        "UI text that bypasses tr() — add a translation key, or mark a "
+        "product name / format sample with "
+        f"'# {IGNORE_MARKER} — <reason>':\n" + "\n".join(offending)
+    )
+
+
+def _tr_names(tree: ast.AST) -> set[str]:
+    """'tr' plus any alias it is imported under (from opensak.lang import tr as _tr)."""
+    names = {"tr"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "opensak.lang":
+            for alias in node.names:
+                if alias.name == "tr" and alias.asname:
+                    names.add(alias.asname)
+    return names
+
+
+def test_tr_keys_exist():
+    """Every tr("literal_key", ...) call must name a key in en.py — the
+    reverse of test_no_unused_keys. A typo in a key otherwise shows the raw
+    key in the UI. Calls with a computed key are not checked."""
+    missing = []
+    for path, tree, _ignored in _parsed_sources():
+        names = _tr_names(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in names and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                    and node.args[0].value not in ref_keys):
+                missing.append(f"  {path}:{node.lineno}: {node.args[0].value!r}")
+    assert not missing, (
+        f"tr() keys that do not exist in {REFERENCE_LANG}.py:\n" + "\n".join(missing)
     )

@@ -882,7 +882,7 @@ function updateCacheMarker(c) {
 </script>
 </body>
 </html>
-"""
+"""  # i18n: ignore — Danish JS comments in the template, not shown to users
 
 
 # ── Map widget ────────────────────────────────────────────────────────────────
@@ -956,7 +956,7 @@ class MapWidget(QWidget):
             self._bridge.draw_clicked.connect(self._show_draw_menu)
             self._bridge.shape_changed.connect(self._on_shape_changed)
             self._ready = False
-            layout.addWidget(QLabel("Map disabled (headless test mode)"))
+            layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
 
         # Brug en isoleret off-the-record profil til kortet så TileInterceptor
