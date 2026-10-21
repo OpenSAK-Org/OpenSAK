@@ -372,6 +372,7 @@ STRINGS: dict[str, str] = {
     "import_running_file":          "A importar {name}…",
     "import_progress":              "A processar caches: {count}…",
     "import_saving":               "A guardar na base de dados…",
+    "recalculating_distances":     "A recalcular distâncias…",
     "import_table_loaded":         "✓ {count} caches carregadas — clique numa cache para ver o mapa",
     "import_log_placeholder":       "Os resultados da importação aparecerão aqui…",
     "import_all_done":            "✓ Todos os {count} ficheiros foram processados.",

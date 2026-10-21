@@ -372,6 +372,7 @@ STRINGS: dict[str, str] = {
     "import_running_file":          "Importerer {name}…",
     "import_progress":              "Behandler caches: {count}…",
     "import_saving":               "Gemmer til database…",
+    "recalculating_distances":     "Genberegner afstande…",
     "import_table_loaded":         "✓ {count} caches indlæst — klik på en cache for at se kortet",
     "import_log_placeholder":       "Import-resultat vises her…",
     "import_all_done":            "✓ Alle {count} filer er behandlet.",
