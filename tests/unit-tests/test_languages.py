@@ -3,6 +3,7 @@ import importlib.util
 import io
 import pathlib
 import re
+import string
 import tokenize
 import pytest
 import ast
@@ -381,4 +382,95 @@ def test_tr_keys_exist():
                 missing.append(f"  {path}:{node.lineno}: {node.args[0].value!r}")
     assert not missing, (
         f"tr() keys that do not exist in {REFERENCE_LANG}.py:\n" + "\n".join(missing)
+    )
+
+
+# ── Placeholder guards ───────────────────────────────────────────────────────
+# tr() swallows the KeyError/ValueError from str.format(), so a wrong
+# placeholder never crashes — the user just sees the raw "{name}" template.
+# These tests make that mistake visible in CI instead.
+
+def _placeholders(text: str) -> set[str]:
+    """The {field} names in *text*, reduced to their root name ("x" for
+    "{x.attr}" or "{x[0]}"). Raises ValueError on unbalanced braces."""
+    return {
+        re.split(r"[.\[]", field, maxsplit=1)[0]
+        for _literal, field, _spec, _conv in string.Formatter().parse(text)
+        if field is not None
+    }
+
+
+@pytest.mark.parametrize("lang_file", [ref_file] + lang_files, ids=[REFERENCE_LANG] + lang_ids)
+def test_placeholders_match_reference(lang_file):
+    """Every translation must use exactly the {placeholders} of the en.py
+    string, and its braces must be balanced. A renamed or dropped placeholder
+    ("{nom}" for "{name}") makes format() fail and shows the raw template."""
+    strings = load_strings(lang_file)
+    offending = []
+    for key, value in strings.items():
+        if not isinstance(value, str) or key not in ref_strings:
+            continue
+        try:
+            fields = _placeholders(value)
+        except ValueError as e:
+            offending.append(f"  {key}: unbalanced braces ({e})")
+            continue
+        try:
+            expected = _placeholders(ref_strings[key])
+        except ValueError:
+            continue  # reported when the reference file itself is checked
+        if fields != expected:
+            offending.append(
+                f"  {key}: {sorted(fields)} != {REFERENCE_LANG} {sorted(expected)}"
+            )
+    assert not offending, (
+        f"{lang_file.stem} has placeholders that do not match "
+        f"{REFERENCE_LANG}.py:\n" + "\n".join(offending)
+    )
+
+
+def test_tr_kwargs_match_placeholders():
+    """A tr("literal_key", a=..., b=...) call must pass exactly the
+    placeholders of that key in en.py. One missing kwarg makes format() fail,
+    so none of the others are filled in either. Calls without kwargs (help
+    texts that show "{date}" to the user on purpose) and calls with **kwargs
+    are not checked."""
+    offending = []
+    for path, tree, _ignored in _parsed_sources():
+        names = _tr_names(tree)
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and node.func.id in names and node.args and node.keywords
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value in ref_keys):
+                continue
+            if any(kw.arg is None for kw in node.keywords):
+                continue
+            key = node.args[0].value
+            kwargs = {kw.arg for kw in node.keywords if kw.arg is not None}
+            expected = _placeholders(ref_strings[key])
+            if kwargs != expected:
+                details = []
+                if expected - kwargs:
+                    details.append(f"missing {sorted(expected - kwargs)}")
+                if kwargs - expected:
+                    details.append(f"unused {sorted(kwargs - expected)}")
+                offending.append(f"  {path}:{node.lineno}: {key!r} {', '.join(details)}")
+    assert not offending, (
+        f"tr() kwargs that do not match the placeholders in {REFERENCE_LANG}.py:\n"
+        + "\n".join(offending)
+    )
+
+
+def test_available_languages_match_files():
+    """AVAILABLE_LANGUAGES and the lang/*.py files must agree: an unregistered
+    file never shows up in Settings, and a registered code without a file
+    silently falls back to Danish."""
+    from opensak.lang import AVAILABLE_LANGUAGES
+
+    files = {f.stem for f in LANG_DIR.glob("*.py") if f.stem != "__init__"}
+    registered = set(AVAILABLE_LANGUAGES)
+    assert files == registered, (
+        f"Language files without an AVAILABLE_LANGUAGES entry: {sorted(files - registered)}; "
+        f"AVAILABLE_LANGUAGES entries without a file: {sorted(registered - files)}"
     )

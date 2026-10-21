@@ -532,7 +532,7 @@ class DatabaseManager:
                         side.rename(Path(str(new_path) + suffix))
             except OSError as e:
                 raise ValueError(
-                    tr("db_err_rename_failed", name=old_name) + f"\n{e}"
+                    tr("db_err_rename_failed", name=old_name, error=e)
                 )
 
             db_info.path = new_path
