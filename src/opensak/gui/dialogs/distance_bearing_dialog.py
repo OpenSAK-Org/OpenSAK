@@ -27,6 +27,10 @@ from opensak.lang import tr
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.utils.constants import EARTH_RADIUS_M
 
+# English 8-point compass, clockwise from north; used when the
+# "bearing_dirs" translation can't be used (see _compass()).
+_COMPASS_FALLBACK = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Return distance in metres between two points (decimal degrees)."""
@@ -175,7 +179,15 @@ class DistanceBearingDialog(QDialog):
 
     @staticmethod
     def _compass(deg: float) -> str:
-        """Return an 8-point compass direction for a bearing in degrees."""
+        """Return an 8-point compass direction for a bearing in degrees.
+
+        Falls back to the English points when "bearing_dirs" doesn't give
+        exactly eight: before a language is loaded tr() returns the key
+        itself, and a translation with a missing point would otherwise
+        raise IndexError for some bearings.
+        """
         dirs = tr("bearing_dirs").split()
+        if len(dirs) != len(_COMPASS_FALLBACK):
+            dirs = list(_COMPASS_FALLBACK)
         idx = round(deg / 45) % 8
         return dirs[idx]
