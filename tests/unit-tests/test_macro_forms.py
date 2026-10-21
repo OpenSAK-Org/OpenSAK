@@ -986,3 +986,206 @@ def test_corrected_coords_form_example(tmp_db):
     assert _run(host, source) == ["GCCC1: corrected coordinates removed"]
     assert host.shown[0].values[host.shown[0].field("coords")].startswith("N47 01.000")
     assert host.shown[0].state[("coords", "enabled")] is False
+
+
+class PuzzleHost(UIHost):
+    """The selected cache is *code*; writes are allowed."""
+
+    def __init__(self, code, user):
+        super().__init__(user)
+        self.code = code
+
+    def current_code(self):
+        return self.code
+
+    def caches_changed(self, codes, added):
+        pass
+
+
+def test_puzzle_helper_example(tmp_db):
+    """puzzle_helper.lua: one form whose buttons write their results into the
+    output box — solving a formula, saving it as a waypoint, the coordinates
+    from the listing and the tools."""
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    with get_session() as s:
+        s.add(Cache(gc_code="GCPH1", name="Puzzle", cache_type="Unknown Cache",
+                    latitude=47.0, longitude=8.0, encoded_hints="haqre gur fgbar",
+                    long_description="<p>Start: N47° 00.500' E008° 00.500'</p>"
+                                     "<p>Final: N47 0A.BCD O008 00.EFG</p>"
+                                     "<p>Year 1987, check with GeoCheck</p>",
+                    long_desc_html=True))
+        s.commit()
+
+    shown: dict[str, str] = {}
+
+    def user(c: Scripted) -> None:
+        def press(button: str, as_: Optional[str] = None) -> None:
+            c.click(button)
+            shown[as_ or button] = c.values[c.field("output")]
+
+        shown["intro"] = c.values[c.field("output")]
+        assert c.values[c.field("letters")] == "A=, B=, C=, D=, E=, F=, G="
+        c.change("letters", "A=1, b = ab, C=4, D=5, E=1, F=2")
+        press("solve", "missing")
+        c.change("letters", "A=1, b = ab, C=4, D=5, E=1, F=2, G=3")
+        press("solve")
+        c.change("wpname", "Final")
+        press("save")
+        press("show")
+        c.change("input", "1987")
+        press("digit")
+        c.change("input", "Geo cache")
+        press("word")
+        press("rot13")
+        press("numbers")
+        press("hint")
+        c.change("result", "nonsense")
+        press("save", "bad save")
+        c.click("close")
+
+    host = PuzzleHost("GCPH1", user)
+    out = _run(host, (EXAMPLES / "puzzle_helper.lua").read_text(encoding="utf-8"))
+    assert host.shown[0].closer is None                     # Close cancels the form
+    assert out == ["GCPH1: waypoint FN (Final Location) saved at N47 01.345  E008 00.123"]
+    assert shown["intro"].startswith("1 coordinate and 1 formula found in the listing.\n"
+                                     "The listing mentions GeoCheck: test your result there.")
+    assert shown["missing"].endswith("Still missing: G")
+    assert shown["solve"].startswith(
+        "── Formula ──\n\nN 47 0A.BCD E 008 00.EFG\nA = 1\nB = 3   (word value of ab)\nC = 4\n")
+    assert "= N 47 01.345 E 008 00.123\n\nN47 01.345  E008 00.123\n" in shown["solve"]
+    assert "2.50 km from the posted coordinates, bearing 4°" in shown["solve"]
+    assert shown["save"].endswith("saved at N47 01.345  E008 00.123\n"
+                                  "N 47 0A.BCD E 008 00.EFG with A=1, B=3, C=4, D=5, E=1, F=2, G=3")
+    assert shown["show"].startswith("── From the listing ──\n\nN 47° 00.500 E 008° 00.500\n\n")
+    assert shown["digit"].endswith("Digit sum: 25\nRepeated:  25 → 7")
+    assert shown["word"].endswith("Total                  47   (digit sum 11)")
+    assert shown["rot13"].endswith("Trb pnpur")
+    assert "        1987   digit sum 25" in shown["numbers"]
+    assert shown["hint"].endswith("under the stone")
+    assert shown["bad save"].endswith("into the Coordinates field first.")
+
+    out = _run(PuzzleHost("GCPH1", None),
+               'for _, w in ipairs(opensak.waypoints("GCPH1")) do '
+               'print(w.prefix, w.type, w.name, w.comment) end')
+    assert out == ["FN\tFinal Location\tFinal\tPuzzle helper: N 47 0A.BCD E 008 00.EFG with "
+                   "A=1, B=3, C=4, D=5, E=1, F=2, G=3"]
+
+
+def test_puzzle_helper_finds_hidden_coordinates(tmp_db):
+    """Coordinates in white or CSS-hidden text, HTML comments, attributes
+    (URL-encoded too) and <script> blocks are listed once each, with where
+    they were hidden; a hidden formula is offered as well."""
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    with get_session() as s:
+        s.add(Cache(gc_code="GCPH2", name="Hidden", cache_type="Unknown Cache",
+                    latitude=47.0, longitude=8.0, long_desc_html=True, long_description=(
+                        '<p style="color:#fff">N47 01.000 E008 01.000</p>'
+                        '<span style="display:none">N47 02.000 E008 02.000</span>'
+                        '<!-- N47 03.000 E008 03.000 -->'
+                        '<img alt="N47 04.000 E008 04.000" src="x.png">'
+                        '<a href="https://example.com/?q=N47%2005.000%20E008%2005.000">map</a>'
+                        '<script>var f = "N47 0A.BCD E008 0E.FGH";</script>'
+                        '<!-- N47 01.000 E008 01.000 -->')))   # listed already
+        s.commit()
+
+    def user(c: Scripted) -> None:
+        c.change("found", "N 47 03.000 E 008 03.000  (in an HTML comment)")
+        c.click("show")
+        c.click("close")
+
+    host = PuzzleHost("GCPH2", user)
+    _run(host, (EXAMPLES / "puzzle_helper.lua").read_text(encoding="utf-8"))
+    form = host.shown[0]
+    assert form.field("found").options == [
+        "N 47 01.000 E 008 01.000",
+        "N 47 02.000 E 008 02.000",
+        "N 47 03.000 E 008 03.000  (in an HTML comment)",
+        "N 47 04.000 E 008 04.000  (in the alt of a tag)",
+        "N 47 05.000 E 008 05.000  (in the href of a tag)",
+    ]
+    assert form.field("formula").options == ["N 47 0A.BCD E 008 0E.FGH  (in a <script> block)"]
+    assert form.values[form.field("result")] == "N47 03.000  E008 03.000"
+
+
+def test_puzzle_helper_without_coordinates_or_hint(tmp_db):
+    """Without coordinates, formulas or hint the choices are greyed out and
+    the buttons still answer in the output box."""
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    with get_session() as s:
+        s.add(Cache(gc_code="GCPH3", name="Plain", cache_type="Unknown Cache",
+                    latitude=47.0, longitude=8.0, long_description="No numbers here."))
+        s.commit()
+
+    def user(c: Scripted) -> None:
+        assert c.values[c.field("output")].startswith("0 coordinates and 0 formulas")
+        c.click("hint")
+        assert c.values[c.field("output")].endswith("This cache has no hint.")
+        c.click("numbers")
+        assert c.values[c.field("output")].endswith("The listing contains no numbers.")
+        c.click("close")
+
+    host = PuzzleHost("GCPH3", user)
+    _run(host, (EXAMPLES / "puzzle_helper.lua").read_text(encoding="utf-8"))
+    form = host.shown[0]
+    assert form.field("found").options == ["(none found)"]
+    assert form.field("found").get("enabled") is False
+    assert form.field("solve").get("enabled") is False
+
+
+class ReportHost(DbUIHost):
+    """Allows the writes to the temp folder that _run's empty folder
+    permissions would refuse."""
+
+    def approve_folder(self, target, folder, write):
+        return FolderApproval.ONCE
+
+
+def test_sql_report_example(tmp_db, tmp_path, monkeypatch):
+    """sql_report.lua: the result in query column order, a typing error shown
+    without ending the macro, and one report file per loop value."""
+    import tempfile
+
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    with get_session() as s:
+        for code, country, found in [("GCR1", "Denmark", True), ("GCR2", "Denmark", False),
+                                     ("GCR3", "Sweden", False), ("GCR4", None, False)]:
+            s.add(Cache(gc_code=code, name=f"Cache {code}", cache_type="Traditional Cache",
+                        country=country, found=found, latitude=55.0, longitude=12.0))
+        s.commit()
+
+    steps = iter([
+        lambda c: c.click("run"),                     # the example query
+        lambda c: c.click("edit"),
+        lambda c: (c.change("query", "SELEKT 1"), c.click("run")),
+        lambda c: (c.change("query", "SELECT name, gc_code FROM caches "
+                                     "WHERE country = :value ORDER BY gc_code;"),
+                   c.change("loop", "SELECT DISTINCT country FROM caches ORDER BY 1"),
+                   c.click("run")),
+        lambda c: c.click("close"),
+    ])
+    host = ReportHost(lambda c: next(steps)(c))
+    out = _run(host, (EXAMPLES / "sql_report.lua").read_text(encoding="utf-8"),
+               settings_dir=tmp_path / "s", macro_path=tmp_path / "m.lua")
+
+    first = host.shown[1].form.fields[0].get("html")
+    assert first.index("country") < first.index("caches") < first.index("found")
+    assert '<td>Denmark</td><td class="num">2</td><td class="num">1</td>' in first
+    assert host.messages == [('SQL error: near "1": syntax error', "SQL report")]
+    loop = host.shown[4].form.fields[0].get("html")
+    assert loop.index("<h2>Denmark</h2>") < loop.index("GCR2") < loop.index("<h2>Sweden</h2>")
+    assert loop.index("name") < loop.index("gc_code")
+    assert out[0].startswith("Report: ") and "(empty): skipped" in out   # no country: NULL
+    files = {line.split(": ", 1)[0]: Path(line.split(": ", 1)[1]) for line in out}
+    assert files["Denmark"].parent == tmp_path / "opensak"
+    assert len(set(files.values())) == len(files)                        # each its own file
+    assert "GCR3" in files["Sweden"].read_text(encoding="utf-8")
+    assert "GCR3" not in files["Denmark"].read_text(encoding="utf-8")
