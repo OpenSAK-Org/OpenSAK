@@ -3,8 +3,9 @@ src/opensak/stats/html.py — small HTML building blocks for reports (Qt-free).
 
 Every value is escaped; only the strings a macro passes as page body or as
 the parts of html.columns() are put in as they are (they are HTML the macro
-built, e.g. with these functions). page() brings a stylesheet with a light
-and a dark theme, so a report needs no CSS of its own.
+built, e.g. with these functions or opensak.chart.*). page() brings a
+stylesheet with a light and a dark theme, so a report needs no CSS of its
+own.
 """
 
 from __future__ import annotations
@@ -15,16 +16,20 @@ from typing import Any, Mapping, Optional, Sequence
 
 # The accent colour (light, dark): links and the bars of html.table{ bars = }.
 ACCENT_COLORS = ("#2a78d6", "#3987e5")
+# Stacked series 2-8 of opensak.chart.* in the dark theme (the light steps
+# are charts.SERIES_COLORS; series 1 is the accent colour).
+DARK_SERIES = ("#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767")
 # html.table{ bars = }: inline styles only, so the HTML also works where no
 # stylesheet is kept.
 BAR_WIDTH = 120
 
 PAGE_CSS = """\
 :root { --bg: #fcfcfb; --fg: #0b0b0b; --muted: #52514e; --line: #e4e3df;
-        --accent: %(light)s; color-scheme: light; }
+        --accent: %(light)s; --chart-color: %(light)s; color-scheme: light; }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #1a1a19; --fg: #f0efec; --muted: #c3c2b7; --line: #3a3a37;
-          --accent: %(dark)s; color-scheme: dark; }
+          --accent: %(dark)s; --chart-color: %(dark)s; color-scheme: dark;
+          %(series)s }
 }
 body { background: var(--bg); color: var(--fg); margin: 0 auto; max-width: 960px;
        padding: 24px 16px; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -44,7 +49,8 @@ th { color: var(--muted); font-weight: 600; }
 td.num, th.num { text-align: right; }
 svg { display: block; margin: 8px 0; }
 footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
-""" % {"light": ACCENT_COLORS[0], "dark": ACCENT_COLORS[1]}
+""" % {"light": ACCENT_COLORS[0], "dark": ACCENT_COLORS[1],
+       "series": " ".join(f"--chart-color-{i + 2}: {c};" for i, c in enumerate(DARK_SERIES))}
 
 
 class HtmlError(ValueError):

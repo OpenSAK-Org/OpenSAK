@@ -3819,6 +3819,12 @@ class MainWindow(QMainWindow):
             self._macro_pending_select = gc_code
         return found
 
+    def open_file(self, path) -> bool:
+        """MacroHost: opensak.open() — the file in its default app."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
     def refresh(self) -> None:
         """MacroHost: opensak.refresh() — apply the deferred refreshes and
         reload the list, waiting (up to _MACRO_REFRESH_WAIT_S) until the new
