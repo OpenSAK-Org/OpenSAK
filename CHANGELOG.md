@@ -55,6 +55,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   you have found a cache in, and the nearest cache still to find in each
   missing one). Each lists its known limitations in its header.
   Contributed by nagisml.
+- **Statistics of the caches you own (#813)** — the example macro
+  *owned_statistics* writes FindStatGen's owner part: the finds your
+  caches received per year and month, records (northernmost, most finds,
+  most favourite points, longest lifetime, …), finds and favourites per
+  cache, your top finders, your caches per type, size, difficulty and
+  terrain, the hide-date calendar and a map. It lists its known
+  limitations in its header. Contributed by nagisml.
 - **More example macros** — *sql_report* (#810) runs your own SQL query
   and shows the result as an HTML table, optionally once per value of a
   loop query, like GSAK's SqlToHtml macro. *puzzle_helper* finds the
