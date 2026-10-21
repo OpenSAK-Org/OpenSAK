@@ -1204,6 +1204,8 @@ STRINGS: dict[str, str] = {
     "col_last_found_date":   "Dernière trouvaille",
     "col_last_gpx_update":   "Dernière mise à jour GPX",
     "col_last_gpx_update_short": "Dernier GPX",
+    "col_last_user_update":  "Dernière modification utilisateur",
+    "col_symbol":            "Symbole GPX",
     "col_last_four_logs":    "Quatre derniers logs",
     "col_last_four_logs_short": "L4",
 

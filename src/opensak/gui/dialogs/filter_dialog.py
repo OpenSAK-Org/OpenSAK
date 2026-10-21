@@ -463,6 +463,7 @@ _DATE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
     ("dnf_date",        "col_dnf_date"),
     ("creation_date",   "col_creation_date"),
     ("last_gpx_update", "col_last_gpx_update"),
+    ("last_user_update", "col_last_user_update"),   # #1141
     ("last_log_date",   "filter_log_date_group"),
     ("changed_date",    "col_changed_date"),
 )

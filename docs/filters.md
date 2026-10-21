@@ -41,7 +41,7 @@ The filter dialog is split across ten tabs:
 | Tab | What's on it |
 |---|---|
 | **General** | Cache type, container, D/T, found status, availability, premium, trackables, corrected coordinates |
-| **Dates** | Hidden date, found by me date, DNF date, last log date |
+| **Dates** | Last found date, hidden date, found by me date, DNF date, record created date, last GPX update, last user update, last log date, last changed date |
 | **Other** | Country / State / County, user data 1–4, GC.com note, personal note, user flag, DNF, FTF, favourite points, elevation, locked — plus one block with a shared **centre point** for distance, direction, and distance corrected ↔ posted |
 | **Logs** | Caches by their logs — log date, log type, who logged, how many |
 | **Line/Polygon** | Caches along a route, inside an area, or near a list of points |
@@ -393,6 +393,12 @@ Filter by the date a Did Not Find was recorded.
 
 Filter by the date of the most recent log entry for the cache.
 
+### Last user update
+
+Filter by when you last changed one of your own fields on the cache: the user flag, user sort, user data 1–4, lock, personal note or corrected coordinates. OpenSAK records this itself whenever one of them changes — from the cache list, the detail panel, the edit dialog or a macro. For caches imported from GSAK it starts as GSAK's own *LastUserDate*. It is separate from *Last changed date*, which is the listing's change date on geocaching.com.
+
+Like *Record created date* and *Last GPX update*, it is a time OpenSAK records, so it can be filtered to the minute and is compared in your local time zone.
+
 ---
 
 ## Line / polygon filter
@@ -525,7 +531,7 @@ The third case is why the Where tab of an imported filter often opens with a blo
 
 The comments always come first and the executable SQL last, so the clause stays valid whatever you delete. Where a whole GSAK `WHERE` clause could not be translated, the translation-so-far is included in the comment, ready to be fixed up and uncommented — it is deliberately never left live, because SQL that fails to run would silently make the filter match nothing.
 
-The things that cannot be migrated are, in practice: GSAK's user-defined columns (OpenSAK has no custom columns, and the cache import does not carry them over), the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId, the GPX symbol name).
+The things that cannot be migrated are, in practice: GSAK's user-defined columns (OpenSAK has no custom columns, and the cache import does not carry them over), the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId). GSAK's *IsOwner*, *MacroFlag*, *MacroSort*, *Symbol* and *LastUserDate* migrate to OpenSAK's own columns of the same meaning.
 
 Two conditions come across with a small difference, which the import reports list:
 

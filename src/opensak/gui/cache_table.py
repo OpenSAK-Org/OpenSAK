@@ -141,6 +141,9 @@ def get_column_defs() -> dict:
         "last_found_date": (tr("col_last_found_date"),    90),
         "last_gpx_update": (tr("col_last_gpx_update"),    90),
         "last_four_logs":  (tr("col_last_four_logs"),     70),
+        # ── Issue #1141: columns stored since #1139 ─────────────────────────
+        "last_user_update": (tr("col_last_user_update"),  90),
+        "symbol":          (tr("col_symbol"),            110),
     }
 
 
@@ -902,6 +905,8 @@ class CacheTableModel(QAbstractTableModel):
                        "elevation", "find_count", "owner_id", "watch",
                        # Issue #716
                        "last_found_date", "last_gpx_update", "last_four_logs",
+                       # Issue #1141
+                       "last_user_update",
                        # Issue #603: Country/Region(state)/County were missed
                        # by #431's sweep of "similar short-value columns" —
                        # left-aligned while Placed By (same kind of short
@@ -1214,6 +1219,13 @@ class CacheTableModel(QAbstractTableModel):
         if col == "last_gpx_update":
             # #1097: a recorded timestamp, stored as UTC — show the local day.
             return _format_date(utc_to_local(cache.last_gpx_update)) if cache.last_gpx_update else ""
+        # ── Issue #1141: columns stored since #1139 ─────────────────────────
+        if col == "last_user_update":
+            # A recorded timestamp, stored as UTC (#1097) — show the local day.
+            user_update = getattr(cache, "last_user_update", None)
+            return _format_date(utc_to_local(user_update)) if user_update else ""
+        if col == "symbol":
+            return getattr(cache, "symbol", None) or ""
         if col == "last_four_logs":
             # Issue #716 (follow-up): drawn by LastFourLogsDelegate as 4
             # GSAK-style colored squares — no cell text, same as the other
@@ -1339,6 +1351,11 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: c.last_found_date or datetime.min, reverse=reverse)
         elif col == "last_gpx_update":
             self._caches.sort(key=lambda c: c.last_gpx_update or datetime.min, reverse=reverse)
+        elif col == "last_user_update":
+            self._caches.sort(
+                key=lambda c: getattr(c, "last_user_update", None) or datetime.min,
+                reverse=reverse,
+            )
         else:
             self._caches.sort(
                 key=lambda c: (getattr(c, col) or "").lower()

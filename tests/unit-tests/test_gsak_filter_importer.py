@@ -364,14 +364,18 @@ class TestNewNativeRows:
         c = _convert({"cbxFound": "6", "cbxFoundComp": "5", "cbxFoundComp2": "1"})
         assert _statuses(c) == {"Last found date": COMMENT}
 
-    def test_date_compared_with_last_user_update_is_commented(self):
+    def test_date_compared_with_last_user_update(self):
+        # #1141: Last user update is a real date field since #1139.
         c = _convert({"cbxPlaced": "6", "cbxPlacedComp": "0", "cbxPlacedComp2": "6"})
-        assert _statuses(c) == {"Hidden date": COMMENT}
+        assert _statuses(c) == {"Hidden date": NATIVE}
+        assert c.filters[0].other_field == "last_user_update"
 
-    def test_last_user_update_compared_is_commented(self):
+    def test_last_user_update_compared(self):
         c = _convert({"cbxLastUser": "6", "cbxLastUserComp": "0",
                       "cbxLastUserComp2": "1"})
-        assert _statuses(c) == {"Last user update": COMMENT}
+        assert _statuses(c) == {"Last user update": NATIVE}
+        f = c.filters[0]
+        assert (f.field, f.other_field) == ("last_user_update", "hidden_date")
 
     def test_date_compared_unknown_index_is_commented(self):
         c = _convert({"cbxPlaced": "6", "cbxPlacedComp": "9", "cbxPlacedComp2": "0"})

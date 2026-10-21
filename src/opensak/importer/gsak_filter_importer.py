@@ -267,7 +267,7 @@ DATE_COMPARE_FIELD_BY_INDEX: tuple[tuple[str, Optional[str]], ...] = (
     ("My found date", "found_date"),
     ("Record created date", "creation_date"),
     ("Last GPX update", "last_gpx_update"),
-    ("Last user update", None),
+    ("Last user update", "last_user_update"),
     ("Last log date", "last_log_date"),
     ("Last changed date", "changed_date"),
 )
@@ -408,7 +408,11 @@ WHERE_COLUMN_MAP: dict[str, str] = {
     "usernote":      "coalesce((SELECT note FROM user_notes WHERE user_notes.cache_id = caches.id), '')",
     "userlat":       "(SELECT corrected_lat FROM user_notes WHERE user_notes.cache_id = caches.id)",
     "userlon":       "(SELECT corrected_lon FROM user_notes WHERE user_notes.cache_id = caches.id)",
-    "lastuserdate":  "(SELECT updated_at FROM user_notes WHERE user_notes.cache_id = caches.id)",
+    "lastuserdate":  "last_user_update",
+    # #1141: stored since #1139 (migration 27).
+    "isowner":       "is_owner",
+    "macroflag":     "macro_flag",
+    "macrosort":     "macro_sort",
     # Identical names, listed so they are not reported as unknown identifiers.
     "name":          "name",
     "container":     "container",
@@ -489,15 +493,19 @@ WHERE_INVERTED: dict[str, str] = {
 # "verified"), but the difference is recorded in the profile's _gsak.notes.
 WHERE_SOFT_NOTES: dict[str, str] = {
     "lastgpxdate": "GSAK's LastGPXDate (last GPX/API refresh) became OpenSAK's last_gpx_update — "
-                   "the timestamp of the last import pass that touched the cache, which is the "
-                   "same idea but is stamped locally, not taken from the source file",
+                   "GSAK's own date for caches imported from GSAK, the time of the import pass "
+                   "for caches OpenSAK imported itself; stored in UTC",
     "changed": "GSAK's Changed (the GC.com-side listing change date) became OpenSAK's "
                "last_updated, which the GSAK importer fills from exactly that column",
-    "created": "GSAK's Created (record-creation date) became OpenSAK's imported_at, which is "
-               "when THIS OpenSAK database first saw the cache — not when GSAK first saw it",
+    "created": "GSAK's Created (record-creation date) became OpenSAK's imported_at — GSAK's own "
+               "date for caches imported from GSAK, otherwise when this OpenSAK database first "
+               "saw the cache; stored in UTC",
     "foundbymedate": "GSAK's FoundByMeDate became OpenSAK's found_date",
-    "lastuserdate": "GSAK's LastUserDate became a sub-select on OpenSAK's user_notes.updated_at "
-                    "(NULL for caches that have no personal note or corrected coordinates)",
+    "lastuserdate": "GSAK's LastUserDate became OpenSAK's last_user_update — GSAK's own date "
+                    "for caches imported from GSAK, stamped by OpenSAK when you change a user "
+                    "field after that; stored in UTC",
+    "isowner": "GSAK's IsOwner became OpenSAK's is_owner, which follows the geocaching.com "
+               "account set in Settings (GSAK's own value when no account is set)",
     "userdata": "GSAK's UserData became OpenSAK's user_data_1",
     "tbcount": "GSAK's tbCount became OpenSAK's trackable_count (filled in on import)",
     "numlogs": "GSAK's NumLogs became OpenSAK's cached log_count column",
@@ -531,8 +539,6 @@ WHERE_SOFT_NOTES["clon"] = WHERE_SOFT_NOTES["clat"]
 # translated clause "unverified", which keeps it out of the executable SQL and
 # puts it in the Where tab as a comment instead.
 WHERE_UNMAPPABLE: dict[str, str] = {
-    "isowner":   "GSAK's isOwner has no OpenSAK column — set your geocaching.com account name "
-                 "in Settings to have it translated to an owner_name test",
     "ltime":     "GSAK's logs.lTime is a separate time-of-day column; OpenSAK folds date and "
                  "time into logs.log_date, so compare against that instead",
     "kbeforelat": "GSAK's Corrected.kBeforeLat/kBeforeLon (the posted position of a solved "
@@ -548,7 +554,6 @@ WHERE_UNMAPPABLE: dict[str, str] = {
                   "trackable_count",
     "favperc":   "GSAK's FavPerc (favourite percentage) is not stored by OpenSAK",
     "labid":     "GSAK's LabId is not stored by OpenSAK",
-    "symbol":    "GSAK's Symbol (GPX symbol name) is not stored by OpenSAK",
 }
 WHERE_UNMAPPABLE["kbeforelon"] = WHERE_UNMAPPABLE["kbeforelat"]
 
@@ -680,7 +685,8 @@ _OSAK_COLUMNS: set[str] = (
         "parent_gc_code", "locked", "location_source", "location_basis",
         "location_updated", "location_dataset", "imported_at", "source_file",
         "last_found_date", "last_gpx_update", "last_four_logs", "last_updated",
-        "is_corrected", "corrected_lat", "corrected_lon", "updated_at", "note",
+        "last_user_update", "macro_flag", "macro_sort", "is_owner", "symbol",
+        "corrected_source", "is_corrected", "corrected_lat", "corrected_lon", "updated_at", "note",
         "wp_type", "wp_code", "wp_date", "wp_flag", "prefix", "comment",
         "description", "created_by_user", "log_id", "log_type", "log_date",
         "finder", "finder_id", "text_encoded", "logged_by_owner",
@@ -909,8 +915,9 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
 
     *custom_columns* are the user-defined GSAK column names of the same filter
     (from its ``*custom*`` section); they are reported by name rather than as
-    anonymous unknown identifiers. *me* is the user's geocaching.com account
-    name, used to translate GSAK's ``isOwner``.
+    anonymous unknown identifiers. *me* (the user's geocaching.com account
+    name) is no longer needed since ``isOwner`` maps to OpenSAK's is_owner
+    column (#1141); it is still accepted so callers need not change.
 
     Returns (translated_sql, warnings, notes, verified). ``verified`` is False
     when anything was left untranslated; ``notes`` are inexact-but-usable
@@ -962,15 +969,6 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
                     f"where: '{word}' is a GSAK macro variable resolved at run time — "
                     f"substitute a literal value"
                 )
-                return prefix + word
-            if low == "isowner":
-                if me:
-                    notes.append(
-                        f"where: GSAK's isOwner was translated to an owner_name test against "
-                        f"your account name ({me})"
-                    )
-                    return f"lower(coalesce(owner_name, '')) = '{_escape_sql(me.lower())}'"
-                warnings.append(f"where: {WHERE_UNMAPPABLE['isowner']}")
                 return prefix + word
             if low in WHERE_INVERTED:
                 warnings.append(
@@ -1841,19 +1839,14 @@ _DATE_FIELDS: tuple[tuple[str, str, str, str, str, str, Optional[str], str,
      "Last found date", "last_found_date", "last_found_date", DATE_OP, ""),
     ("cbxPlaced", "edtDateP", "edtDateP2", "edtPlacedDuring", "cbxPlacedDuring",
      "Hidden date", "hidden_date", "hidden_date", DATE_OP, ""),
+    # #1139: imported_at / last_gpx_update / last_user_update hold GSAK's own
+    # dates for caches imported from GSAK, so these map without a caveat.
     ("cbxCreate", "edtCreateF", "edtCreateT", "edtCreatedDuring", "cbxCreatedDuring",
-     "Record created date", "creation_date", "imported_at", DATE_OP,
-     "Record created date: OpenSAK's creation date is when THIS database first saw the "
-     "cache, not when GSAK first saw it"),
+     "Record created date", "creation_date", "imported_at", DATE_OP, ""),
     ("cbxLastUpdate", "edtLastUpdateF", "edtLastUpdateT", "edtLastUpdateDuring",
-     "cbxLastUpdateDuring", "Last GPX update", "last_gpx_update", "last_gpx_update", DATE_OP,
-     "Last GPX update: OpenSAK stamps this locally on every import pass, where GSAK's "
-     "LastGPXDate came from the source file"),
+     "cbxLastUpdateDuring", "Last GPX update", "last_gpx_update", "last_gpx_update", DATE_OP, ""),
     ("cbxLastUser", "edtLastUserF", "edtLastUserT", "edtLastUserDuring", "cbxLastUserDuring",
-     "Last user update", None,
-     "(SELECT updated_at FROM user_notes WHERE user_notes.cache_id = caches.id)", DATE_OP,
-     "Last user update: a cache with no personal note and no corrected coordinates has no "
-     "user_notes row at all, so it can never match"),
+     "Last user update", "last_user_update", "last_user_update", DATE_OP, ""),
     ("cbxChange", "edtChangeF", "edtChangeT", "edtChangeDuring", "cbxChangeDuring",
      "Last changed date", "changed_date", "last_updated", DATE_OP, ""),
 )
@@ -2229,11 +2222,10 @@ def _convert_misc(gf: GsakFilter, c: Conversion) -> None:
     _text_criterion(gf, c, "cbxSource", "edtSource", "Source", column="source_file")
     _trackable_name_criterion(gf, c)
 
-    if gf.text("edtSymbol"):
-        c.comment("Symbol name", (
-            f"GSAK matched the GPX symbol name (\"{gf.text('edtSymbol')}\"), which OpenSAK "
-            f"does not store"
-        ))
+    # #1141: the GPX symbol name is stored since #1139. GSAK's dialog has no
+    # comparison combo for it that we know of, so "cbxSymbol" is normally
+    # absent and the criterion is "contains", like any text box left at 0.
+    _text_criterion(gf, c, "cbxSymbol", "edtSymbol", "Symbol name", column="symbol")
 
     _convert_bearing(gf, c)
     _convert_quadrants(gf, c)

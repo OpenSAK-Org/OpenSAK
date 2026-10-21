@@ -1,6 +1,6 @@
 # Full GSAK Field Compatibility — Design (Epic #1028)
 
-*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, and 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140). The custom-field storage model (runtime-built model, local and global fields, field ids) is now agreed in principle; the macro API shape and computed fields are still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
+*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, and 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141). The custom-field storage model (runtime-built model, local and global fields, field ids) is now agreed in principle; the macro API shape and computed fields are still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
 
 ## Summary
 
@@ -57,7 +57,7 @@ The inventory below comes from a real GSAK database (`PRAGMA user_version = 27`,
 | LastUserDate | 12,600 | `last_user_update` (datetime, UTC). GSAK's "last changed by the user" date. Settles #821 item 6\*: kept separate from `last_updated` (the listing-side change date) rather than merging the two |
 | MacroFlag | 96 | `macro_flag` (boolean, default false). GSAK macros' own working flag, separate from the user flag. Needed by ported macros |
 | MacroSort | 2,240 | `macro_sort` (text). Same, for sorting |
-| IsOwner | 28 | `is_owner` (boolean, default false). Also set by the GPX import and recalculated when the account changes (#1140, below). Still to do (2b-2): replace the owner-name workaround in the filter importer |
+| IsOwner | 28 | `is_owner` (boolean, default false). Also set by the GPX import and recalculated when the account changes (#1140, below). The GSAK filter importer maps `IsOwner` to it (#1141) |
 | Symbol | 12,600 | `symbol` (text). Mostly "Geocache" / "Geocache Found" but user-editable in GSAK. Also taken from GPX `<sym>` (#1140); a source without one (a `.loc` file) leaves it as it is |
 
 All of these, like the other personal fields, are updated even for a locked cache.
@@ -232,7 +232,7 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 1. **Agree this design** — storage model agreed with nagisml on #1028 (15 Oct 2026); global-field location answered by nagisml (`gsak.db3`). Still open: macro API shape and computed fields (see Questions).
 2. **Small columns** — **done in #1139** (migration 27): `last_user_update`, `macro_flag`, `macro_sort`, `is_owner`, `symbol`, `user_notes.corrected_source`; the GSAK importer fills them and keeps GSAK's `imported_at`, `last_gpx_update` and `user_notes.updated_at`, all as UTC (#1097).
    - **2b-1.** **Done in #1140** (migration 28): OpenSAK fills the columns itself — `last_user_update` via triggers, `is_owner` from the account, `symbol` from GPX, `corrected_source` from the GUI and macros.
-   - **2b-2.** The GSAK filter importer and the Dates tab use the new columns (#821 item 6\*).
+   - **2b-2.** **Done in #1141**: the Dates tab has *Last user update* (`last_user_update`, compared in local time; settles #821 item 6\*), the column chooser has *Last user update* and *GPX symbol*, and the GSAK filter importer maps LastUserDate, IsOwner, MacroFlag, MacroSort and Symbol to the new columns.
    - **2c.** Macro access to the new columns (@nagisml).
 3. **Custom fields: storage and GSAK import** — `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, import of local and global definitions and values, import report.
 4. **Custom fields: UI** — column chooser, detail panel, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer.

@@ -27,7 +27,9 @@ def gsak_db(tmp_path) -> Path:
         ("Not found", _blob({"chkFound": "False", "chkNotFound": "True"})),
         ("Watched", _blob({"chkFound": "False", "chkNotFound": "True",
                            "chkWatchYes": "True", "chkWatchNo": "False",
-                           "edtSymbol": "Geocache Found"})),
+                           # A regex on the PQ source file: OpenSAK has no GUI
+                           # row for it and SQLite no REGEXP, so it stays behind.
+                           "cbxSource": "7", "edtSource": "^PQ"})),
     ])
     conn.commit()
     conn.close()
@@ -95,10 +97,10 @@ class TestGsakFilterImportE2E:
         assert types == ["not_found", "where_clause"]
 
         # …and the Where clause holds the watch-list SQL plus a comment about
-        # the GPX symbol name, which OpenSAK does not store.
+        # the source-file regex, which cannot run as SQL.
         sql = profile.filterset._filters[1].sql
         assert "coalesce(watch, 0) = 1" in sql
-        assert "Symbol name" in sql
+        assert "Source" in sql
         assert sql.splitlines()[-1].startswith("(")     # ends on runnable SQL
 
     def test_results_log_reports_the_migration_coverage(
@@ -110,8 +112,8 @@ class TestGsakFilterImportE2E:
         qtbot.waitUntil(lambda: dlg._worker is None, timeout=10_000)
 
         log = dlg._log.toPlainText()
-        # 4 conditions in total (not-found ×2, watch list, symbol name), of
-        # which the symbol name could not be migrated.
+        # 4 conditions in total (not-found ×2, watch list, source regex), of
+        # which the source regex could not be migrated.
         assert "75.0 %" in log
         assert "Watched" in log        # listed as incomplete
         assert "Not found" not in log.split("Watched")[-1]   # it was complete

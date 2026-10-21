@@ -1203,6 +1203,8 @@ STRINGS: dict[str, str] = {
     "col_last_found_date":   "Senast hittad",
     "col_last_gpx_update":   "Senaste GPX-uppdatering",
     "col_last_gpx_update_short": "Senaste GPX",
+    "col_last_user_update":  "Senaste användarändring",
+    "col_symbol":            "GPX-symbol",
     "col_last_four_logs":    "Senaste fyra loggarna",
     "col_last_four_logs_short": "L4",
 

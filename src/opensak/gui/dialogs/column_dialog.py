@@ -87,6 +87,9 @@ _ALL_COLUMNS_DEF = [
     ("last_found_date", "col_last_found_date", 90, False),
     ("last_gpx_update", "col_last_gpx_update", 90, False),
     ("last_four_logs",  "col_last_four_logs", 70, False),
+    # ── Issue #1141: columns stored since #1139 ────────────────────────────
+    ("last_user_update", "col_last_user_update", 90, False),
+    ("symbol",          "col_symbol",        110, False),
 ]
 
 def get_all_columns():

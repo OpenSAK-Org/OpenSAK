@@ -2012,16 +2012,17 @@ DATE_FILTER_FIELDS: dict[str, str] = {
     "dnf_date":        "dnf_date",
     "creation_date":   "imported_at",
     "last_gpx_update": "last_gpx_update",
+    "last_user_update": "last_user_update",   # #1141, GSAK's LastUserDate
     "last_log_date":   "last_log_date",
     "changed_date":    "last_updated",
 }
 # Fields whose DateFilter bounds may carry a time of day (to the minute) —
 # timestamps OpenSAK records itself, where the time is meaningful.
-DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "changed_date")
+DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "last_user_update", "changed_date")
 # Fields holding a timestamp OpenSAK records itself, stored as naive UTC
 # (#1097). Bounds the user types are local time, so these are compared in
 # local time: the stored value is converted, or the bounds are (in SQL).
-UTC_DATE_FILTER_FIELDS = ("creation_date", "last_gpx_update")
+UTC_DATE_FILTER_FIELDS = ("creation_date", "last_gpx_update", "last_user_update")
 DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
             "during", "not_during", "compare")
 DATE_UNITS = ("days", "weeks", "months", "years")
@@ -3513,6 +3514,9 @@ SORT_FIELDS: dict[str, Any] = {
     "last_found_date": lambda c: 0,
     "last_gpx_update": lambda c: 0,
     "last_four_logs":  lambda c: 0,
+    # ── Issue #1141: columns stored since #1139 ──────────────────────────
+    "last_user_update": lambda c: 0,
+    "symbol":          lambda c: 0,
 }
 
 
@@ -4025,6 +4029,9 @@ _LIGHTWEIGHT_COLUMNS = [
     Cache.source_file,
     # Issue #716
     Cache.last_found_date, Cache.last_gpx_update, Cache.last_four_logs,
+    # Issue #1139/#1141
+    Cache.last_user_update, Cache.macro_flag, Cache.macro_sort, Cache.is_owner,
+    Cache.symbol,
 ]
 
 
