@@ -257,7 +257,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.caches" func="yes">
-			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without arguments: the caches of the active filter, in grid order. With filter&#x0a;keys (see Filter keys): the caches matching them, sorted by name; the view and&#x0a;the active filter stay unchanged. `database` reads another database, without&#x0a;switching: its caches matching the filter keys, or all of them, sorted by name.&#x0a;`fields` limits the fields loaded (`code` is always included), which makes loops&#x0a;over many caches faster. Caches are loaded in chunks, so large databases do not&#x0a;hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
+			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without arguments: the caches of the active filter, in grid order. With filter&#x0a;keys (see Filter keys): the caches matching them, sorted by name; the view and&#x0a;the active filter stay unchanged. `all = true`: every cache of the database,&#x0a;sorted by name, whatever the active filter shows. `database` reads another&#x0a;database, without switching: its caches matching the filter keys, or all of&#x0a;them, sorted by name. `fields` limits the fields loaded (`code` is always&#x0a;included), which makes loops over many caches faster. Caches are loaded in&#x0a;chunks, so large databases do not hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
 				<Param name="[spec: opensak.CachesSpec]" />
 			</Overload>
 		</KeyWord>
@@ -267,6 +267,43 @@
 		</KeyWord>
 		<KeyWord name="opensak.centers" func="yes">
 			<Overload retVal="{name: string, lat: number, lon: number, active: boolean}[]" descr="The saved centre points (Settings → User locations, with ★ Home from your&#x0a;geocaching.com home location first), as in the centre drop-down. `filter{ near =&#x0a;{ point = name, km = … } }` filters by one.&#x0a;Returns {name: string, lat: number, lon: number, active: boolean}[] — One table&#x0a;per saved centre point.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart" />
+		<KeyWord name="opensak.chart.bar" func="yes">
+			<Overload retVal="string" descr="A bar chart of *rows* as an SVG string, for an HTML page (opensak.html.page,&#x0a;opensak.write_text) or a .svg file. Each row is a table; `x` names its category&#x0a;field (default &quot;key&quot;) and `y` its value field (default &quot;count&quot;), nil counts as&#x0a;0. `horizontal = true` draws the bars from the left, for long category names.&#x0a;Text and grid lines take the colour of the surrounding page; the bars use the&#x0a;CSS variable --chart-color, else `color`. Each bar shows its value as tooltip;&#x0a;`labels` also writes it on the bar (default: up to 16 bars). With a list of&#x0a;fields as `y`, the bars are stacked, one segment per field, with a legend&#x0a;(`names` instead of the field names; at most 8); a matrix from&#x0a;opensak.stats.pivot gives one stacked bar per matrix row, e.g. finds per year&#x0a;and cache type. At most 5000 rows.&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]|opensak.Matrix" />
+				<Param name="[options: {x?: string, y?: string|string[], title?: string, width?: number, height?: number, color?: string, horizontal?: boolean, labels?: boolean, names?: string[]}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.heatmap" func="yes">
+			<Overload retVal="string" descr="A grid chart of a matrix (see opensak.stats.pivot) as an SVG string: one cell&#x0a;per row × column value, the darker the larger, e.g. finds per difficulty ×&#x0a;terrain. `labels = false` leaves the numbers out of the cells; `row_title` and&#x0a;`col_title` name the two fields.&#x0a;Returns string — The chart as SVG.">
+				<Param name="matrix: opensak.Matrix" />
+				<Param name="[options: {title?: string, width?: number, color?: string, labels?: boolean, row_title?: string, col_title?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.line" func="yes">
+			<Overload retVal="string" descr="A line chart of *rows* in their order as an SVG string, like opensak.chart.bar:&#x0a;`x` the label on the x axis (evenly spaced, e.g. months), `y` the value. `area =&#x0a;true` fills below the line. The value of the last point is written next to it&#x0a;unless `labels = false`. Each point shows its value as tooltip.&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {x?: string, y?: string, title?: string, width?: number, height?: number, color?: string, area?: boolean, labels?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.map" func="yes">
+			<Overload retVal="string" descr="A map of countries, states or counties as an SVG string, each region coloured by&#x0a;a value — e.g. finds per country from opensak.stats.group. `key` names the field&#x0a;with the region name (default &quot;key&quot;), `value` the number (default &quot;count&quot;),&#x0a;`layer` the kind of region: &quot;country&quot; (default), &quot;state&quot; or &quot;county&quot;. `within`&#x0a;(a country name or a list) limits a state or county map to those countries;&#x0a;without it the countries the regions are in are shown. `extent = &quot;all&quot;` shows&#x0a;every region of the layer instead of zooming to the ones with a value. Names are&#x0a;matched ignoring case, accents and punctuation; those that match no region are&#x0a;listed below the map. The outlines are those of Update location (offline, no&#x0a;internet needed; county outlines are downloaded per country on first use, like&#x0a;there). Without the boundary data the map is a short note instead.&#x0a;Returns string — The map as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {key?: string, value?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, extent?: string, legend?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.points" func="yes">
+			<Overload retVal="string" descr="A dot map as an SVG string: one dot per row at its coordinates (fields `lat` and&#x0a;`lon`), over the outlines of `layer` (&quot;country&quot;, &quot;state&quot; or &quot;county&quot;), zoomed to&#x0a;the dots or to the `within` countries. `label` names the field shown as tooltip.&#x0a;At most 50000 rows; dots on the same pixel are drawn once.&#x0a;Returns string — The map as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {lat?: string, lon?: string, label?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, radius?: number}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.rose" func="yes">
+			<Overload retVal="string" descr="A rose (polar area) chart of *rows* as an SVG string: one sector per row, in row&#x0a;order clockwise from the top, e.g. finds per compass direction (N, NE, E, …).&#x0a;The area of a sector grows with its value; `x` names the label field, `y` the&#x0a;value (as for opensak.chart.bar).&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {x?: string, y?: string, title?: string, width?: number, color?: string, labels?: boolean}]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.choose" func="yes">
@@ -574,6 +611,19 @@
 				<Param name="spec: opensak.FormSpec" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.geo" />
+		<KeyWord name="opensak.geo.outlines" func="yes">
+			<Overload retVal="table?, string[]?" descr="The outlines of countries, states or counties (`layer`) as a GeoJSON&#x0a;FeatureCollection (a table), e.g. for a map drawn by the macro itself or for&#x0a;another program. Like opensak.chart.map, `rows` puts the value (field `value`,&#x0a;default &quot;count&quot;) of each row into the properties of the region its field `key`&#x0a;(default &quot;key&quot;) names — matched ignoring case, accents and punctuation —&#x0a;`within` limits the countries and `extent = &quot;all&quot;` shows all regions instead of&#x0a;zooming to the ones with a value. `around` (rows with `lat`/`lon`) zooms to&#x0a;those points instead, `box` (`{min_lon, min_lat, max_lon, max_lat}`, e.g. the&#x0a;`bbox` of another collection) to an area. The outlines are clipped to the area&#x0a;and simplified for a map about `detail` pixels wide (default 800). Every feature&#x0a;has `properties.name` (and `country` for states and counties). The second value&#x0a;lists the names that match no region. nil if the boundary data is not installed.&#x0a;Returns table?, string[]? — The FeatureCollection and the names without a&#x0a;region.">
+				<Param name="[layer: string]" />
+				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string, extent?: string, around?: table[], lat?: string, lon?: string, box?: number[], detail?: number}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.geo.regions" func="yes">
+			<Overload retVal="{name: string, country?: string}[]?, string[]?" descr="The regions of a layer (&quot;country&quot;, &quot;state&quot; or &quot;county&quot;) in the boundary data&#x0a;used by Update location and opensak.chart.map, one row per name: `{name =}`, for&#x0a;states and counties also `country`. `within` limits them to one country or a&#x0a;list. With `rows` (e.g. finds per state from opensak.stats.group) the rows are&#x0a;matched to the regions like opensak.chart.map does — the field `key` (default&#x0a;&quot;key&quot;) names the region, ignoring case, accents and punctuation — and a region&#x0a;named by rows gets the sum of their field `value` (default &quot;count&quot;); the second&#x0a;value then lists the names that match no region. With it a macro can say &quot;18 of&#x0a;26 cantons&quot;. nil if the boundary data is not installed.&#x0a;Returns {name: string, country?: string}[]?, string[]? — The regions, sorted&#x0a;(with `rows`: and the names that match none).">
+				<Param name="[layer: string]" />
+				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string}]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.html" />
 		<KeyWord name="opensak.html.columns" func="yes">
 			<Overload retVal="string" descr="Put HTML parts (e.g. two tables) side by side; on a narrow window they go one&#x0a;below the other.&#x0a;Returns string — HTML.">
@@ -701,6 +751,11 @@
 				<Param name="source: string" />
 				<Param name="target: string" />
 				<Param name="[options: {if_exists?: &quot;overwrite&quot;|&quot;skip&quot;}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.open" func="yes">
+			<Overload descr="Open a file in its default app, e.g. an HTML report in the browser, so a report&#x0a;macro can end by showing its result. A relative path is resolved against the&#x0a;macro file's folder. A file this run wrote (opensak.write_text,&#x0a;opensak.export_*, opensak.copy_file / move_file) or one in opensak.temp_dir()&#x0a;opens directly; for any other file the user is asked first. Only these file&#x0a;types: .html .htm .svg .txt .csv .tsv .md .json .gpx .kml .pdf — never a&#x0a;program, script or shortcut — and no URLs. At most 5 files per run. Needs the&#x0a;user interface.">
+				<Param name="path: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.profiles" func="yes">
