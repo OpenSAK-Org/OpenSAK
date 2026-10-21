@@ -97,6 +97,21 @@ def recalculate_is_owner_everywhere(
     return result
 
 
+def account_change_needs_recalc(old_finder_id: Optional[str],
+                                old_username: Optional[str]) -> bool:
+    """True when account_changed() would recalculate is_owner: the account in
+    Settings differs from the old one and is set. Lets the GUI show a busy
+    indicator only when the (multi-database) recalculation will actually run."""
+    from opensak.gui.settings import get_settings
+
+    s = get_settings()
+    same = (
+        (old_finder_id or "").strip() == (s.gc_finder_id or "").strip()
+        and normalize_geocacher_name(old_username) == normalize_geocacher_name(s.gc_username)
+    )
+    return not same and account_configured(s.gc_finder_id, s.gc_username)
+
+
 def account_changed(old_finder_id: Optional[str], old_username: Optional[str]) -> dict[Path, int]:
     """Call after the account in Settings may have changed: when it did,
     recalculate is_owner in every registered database. Returns the changes
@@ -105,11 +120,7 @@ def account_changed(old_finder_id: Optional[str], old_username: Optional[str]) -
     from opensak.gui.settings import get_settings
 
     s = get_settings()
-    same = (
-        (old_finder_id or "").strip() == (s.gc_finder_id or "").strip()
-        and normalize_geocacher_name(old_username) == normalize_geocacher_name(s.gc_username)
-    )
-    if same:
+    if not account_change_needs_recalc(old_finder_id, old_username):
         return {}
     # Never let this stop Settings from saving: the next GPX import still
     # sets is_owner per cache, and migration 28 covers unmigrated databases.

@@ -2295,9 +2295,12 @@ class MainWindow(QMainWindow):
             # touch the centre point or the distance method.
             s = get_settings()
             if s.home_lat and s.home_lon:
-                from opensak.db.database import distances_up_to_date
+                from opensak.db.database import recalculate_distances, distances_up_to_date
                 if not distances_up_to_date(s.home_lat, s.home_lon):
-                    self._recalculate_distances_with_progress(s.home_lat, s.home_lon)
+                    from opensak.gui.dialogs.widgets import busy_box
+                    with busy_box(self, tr("recalculating_distances"),
+                                  tr("settings_dialog_title")):
+                        recalculate_distances(s.home_lat, s.home_lon)
             self._update_map_visibility()
             if s.map_enabled:
                 # No point reloading the map page (tiles/JS) if it's not
@@ -2310,24 +2313,6 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
             else:
                 self._detail_panel.refresh_sizes()
-
-    def _recalculate_distances_with_progress(self, lat: float, lon: float) -> None:
-        """recalculate_distances() behind a modal busy box and wait cursor, so
-        the seconds it takes on a large database don't look like a freeze."""
-        from opensak.db.database import recalculate_distances
-        progress = QProgressDialog(tr("recalculating_distances"), "", 0, 0, self)
-        progress.setWindowTitle(tr("settings_dialog_title"))
-        progress.setCancelButton(None)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.show()
-        QApplication.processEvents()
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            recalculate_distances(lat, lon)
-        finally:
-            QApplication.restoreOverrideCursor()
-            progress.close()
 
     # ── Tastaturgenveje ────────────────────────────────────────────────────────
 

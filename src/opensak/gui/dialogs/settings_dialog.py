@@ -1816,8 +1816,12 @@ class SettingsDialog(QDialog):
         old_account = (s.gc_finder_id, s.gc_username)
         s.gc_username       = self._gc_username.text()
         # #1140: a new account changes which caches are the user's own.
-        from opensak.db.ownership import account_changed
-        account_changed(*old_account)
+        # That rewrites every registered database, so show it's working.
+        from opensak.db.ownership import account_changed, account_change_needs_recalc
+        if account_change_needs_recalc(*old_account):
+            from opensak.gui.dialogs.widgets import busy_box
+            with busy_box(self, tr("updating_own_caches"), tr("settings_dialog_title")):
+                account_changed(*old_account)
         # Home Location gemmes via knappen, men vi gemmer også ved OK
         # (hvis brugeren har tastet uden at trykke Gem)
         home_text = self._gc_home_location.text().strip()

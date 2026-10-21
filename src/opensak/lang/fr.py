@@ -373,6 +373,7 @@ STRINGS: dict[str, str] = {
     "import_progress":              "Nombre de caches traitées : {count}…",
     "import_saving":               "Enregistrement dans la base de données…",
     "recalculating_distances":     "Recalcul des distances…",
+    "updating_own_caches":         "Mise à jour de vos propres caches…",
     "import_table_loaded":         "✓ {count} caches chargées — cliquez sur une cache pour voir la carte",
     "import_log_placeholder":       "Les résultats d'importation s'afficheront ici…",
     "import_all_done":            "✓ Les {count} fichiers ont été traités.",

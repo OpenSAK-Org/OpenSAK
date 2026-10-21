@@ -7,14 +7,15 @@ implementeres og vedligeholdes ét sted.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QPushButton,
-    QSizePolicy, QWidget,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QProgressDialog,
+    QPushButton, QSizePolicy, QWidget,
 )
 
 from opensak.lang import tr
@@ -220,3 +221,23 @@ class DirRow(QWidget):
     def set_path(self, path: Path) -> None:
         """Opdater den viste sti programmatisk (fx ved annullering/reset)."""
         self._edit.setText(str(path))
+
+
+@contextmanager
+def busy_box(parent: QWidget | None, text: str, title: str) -> Iterator[None]:
+    """Modal "please wait" box plus wait cursor around blocking work in the
+    GUI thread, so a step that takes seconds doesn't look like a frozen
+    window. The bar is indeterminate and has no cancel button."""
+    progress = QProgressDialog(text, "", 0, 0, parent)
+    progress.setWindowTitle(title)
+    progress.setCancelButton(None)
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setMinimumDuration(0)
+    progress.show()
+    QApplication.processEvents()
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+        yield
+    finally:
+        QApplication.restoreOverrideCursor()
+        progress.close()

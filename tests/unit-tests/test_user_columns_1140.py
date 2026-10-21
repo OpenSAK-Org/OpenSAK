@@ -12,6 +12,7 @@ from sqlalchemy import text
 from opensak.db.database import SCHEMA_VERSION, _run_migrations, get_engine, init_db, session_for
 from opensak.db.models import Cache, UserNote
 from opensak.db.ownership import (
+    account_change_needs_recalc,
     account_changed,
     owner_matches,
     recalculate_is_owner,
@@ -377,6 +378,17 @@ class TestIsOwner:
         s.gc_username = "NewName"
         assert account_changed("", "newname ") == {}          # same account
         assert account_changed("", "OldName") == {path: 1}     # changed
+
+    def test_account_change_needs_recalc(self):
+        # Decides whether Settings shows the busy box around account_changed().
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        s.gc_finder_id = ""
+        s.gc_username = "NewName"
+        assert account_change_needs_recalc("", "OldName")
+        assert not account_change_needs_recalc("", "newname ")  # same account
+        s.gc_username = ""
+        assert not account_change_needs_recalc("", "OldName")   # no account left
 
     def test_migration_28_backfills(self, tmp_path):
         from opensak.gui.settings import get_settings
