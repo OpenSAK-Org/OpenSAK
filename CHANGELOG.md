@@ -4,6 +4,104 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.7] — 2026-10-21
+
+> Headline: **OpenSAK now speaks your language everywhere** — the splash
+> screen, compass directions, import errors and more no longer show
+> Danish or English regardless of your choice — and **every dialog fits
+> on small, high-DPI screens**. Beta testers get macros that **draw
+> charts and maps of your statistics**, **import GPX files** and
+> **copy, move and delete files**.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Changed
+
+- **Text follows the selected language everywhere (#1127)** — the
+  startup splash screen, the found-status updater, the compass directions
+  in Distance & bearing, the GPS and trip save dialogs, an attribute
+  tooltip, the KML export description, GPX/LOC/ZIP/GSAK import errors,
+  self-update errors and the Geocaching.com login page showed Danish or
+  English whatever language was chosen. They now use your language. Only
+  the very first splash message, "Loading language...", stays English,
+  because it appears before the language is loaded. Contributed by
+  nagisml.
+- **The log is in English (#1127)** — about 90 log and console messages
+  were in Danish. They are now English, so a log attached to a bug report
+  can be read by everyone. Contributed by nagisml.
+
+### Fixed
+
+- **Dialogs no longer run off small screens (#816)** — the last 13
+  dialogs (coordinate converter, midpoint, projection, distance & bearing,
+  checksum, corrected coordinates, mark found, found-status updater,
+  move/copy caches, file and KML export, keyboard shortcuts and the
+  boundary data dialogs) are now limited to the screen height, like the
+  others since #811. The coordinate converter is taller than that on a
+  1280×800 screen at 200 % scaling, so its content now scrolls while the
+  Close button stays in view.
+
+### In beta builds only
+
+- **Charts and maps in macro reports** — `opensak.chart.bar`, `line`,
+  `heatmap` and `rose` draw plain SVG charts, and `opensak.chart.map` /
+  `points` draw region and dot maps from the offline boundary data of
+  Update location. Charts follow the report page's light/dark theme. No
+  JavaScript and nothing leaves your computer. Contributed by nagisml.
+- **Statistics example macros** — *find_statistics* (key figures,
+  charts and maps of your finds), *database_statistics* (the same for all
+  caches in a database) and *region_coverage* (the states or countries
+  you have found a cache in, and the nearest cache still to find in each
+  missing one). Each lists its known limitations in its header.
+  Contributed by nagisml.
+- **More example macros** — *sql_report* (#810) runs your own SQL query
+  and shows the result as an HTML table, optionally once per value of a
+  loop query, like GSAK's SqlToHtml macro. *puzzle_helper* finds the
+  coordinates and formulas in a mystery listing (also those hidden in
+  the HTML), solves a formula from the letters you type, has digit sum,
+  word value and ROT13, and can save the result as a waypoint.
+  Contributed by nagisml.
+- **Open a report from a macro** — `opensak.open()` opens a file the
+  macro wrote, e.g. an HTML report in the browser. Only document types
+  (HTML, SVG, text, CSV, PDF, GPX, KML and similar), no web addresses,
+  at most 5 per run; a file the macro didn't write itself is shown to
+  you first. Contributed by nagisml.
+- **Import GPX and Pocket Query files from a macro (#937)** —
+  `opensak.import_gpx()` loads GPX files and PQ zips without any
+  questions, alongside `import_gsak()` from beta.6. Contributed by
+  nagisml.
+- **Macros can copy, move and delete files** — and create and delete
+  folders, through the same folder approval as other macro writes.
+  Links are refused, only empty folders can be deleted, and never a
+  drive or a folder from *Settings → Folder permissions*. Contributed by
+  nagisml.
+- **More GSAK-style macro functions** — centre points (`center()`,
+  `centers()`, `set_center()`, like GSAK's Centre), cache and waypoint
+  type lookups (GSAK's CacheType / ChildType), GC code ↔ number
+  (GsCodeToNum / NumToGsCode), and upper/lower case for all letters, not
+  only ASCII (#1015). The GSAK comparison in the macro docs is updated.
+  Contributed by nagisml.
+
+### For developers
+
+- **i18n guard tests (#1134)** — three new tests in `test_languages.py`
+  keep #1127 from slowly coming undone: no æ/ø/å in string literals
+  outside `lang/`, text passed to text-setting Qt calls (`setText`,
+  `QMessageBox.*`, `QLabel(...)`, …) must come from `tr()`, and every
+  `tr("key")` must exist in `en.py`. A legitimate untranslated literal
+  (a product name, a format sample) is marked inline with
+  `# i18n: ignore — <reason>`.
+- **Dialog height policy is complete (#816)** — `KNOWN_UNPROTECTED` in
+  `test_dialog_height_policy.py` is now empty, and a test keeps it that
+  way.
+- **Compass fallback** — `test_e2e_tools.py` failed when run on its own:
+  without a loaded language the compass translation gave one point
+  instead of eight. The compass now falls back to the English points,
+  and a new test checks that every language file has exactly eight.
+
+---
+
 ## [1.22.0-beta.6] — 2026-10-20
 
 > Headline: **draw a line, polygon or points on the map and filter by
