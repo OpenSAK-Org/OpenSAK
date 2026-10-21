@@ -109,7 +109,7 @@ def fetch_latest_release() -> dict | None:
 
     Returnerer dict med keys 'tag_name', 'html_url', 'name' eller None ved fejl.
     """
-    log.debug("Henter seneste release fra %s", GITHUB_API_URL)
+    log.debug("Fetching latest release from %s", GITHUB_API_URL)
     try:
         req = urllib.request.Request(
             GITHUB_API_URL,
@@ -123,10 +123,10 @@ def fetch_latest_release() -> dict | None:
             "html_url": data.get("html_url", RELEASES_PAGE),
             "name":     data.get("name", ""),
         }
-        log.debug("Seneste release: %s", release["tag_name"])
+        log.debug("Latest release: %s", release["tag_name"])
         return release
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
-        log.debug("Kunne ikke hente seneste release: %s", exc)
+        log.debug("Could not fetch latest release: %s", exc)
         return None
 
 
@@ -150,7 +150,7 @@ def fetch_latest_prerelease() -> dict | None:
     Returnerer dict med keys 'tag_name', 'html_url', 'name' eller None ved
     fejl eller hvis ingen pre-release findes blandt de seneste releases.
     """
-    log.debug("Henter alle releases fra %s for at finde seneste beta", GITHUB_API_ALL_URL)
+    log.debug("Fetching all releases from %s to find the latest beta", GITHUB_API_ALL_URL)
     try:
         req = urllib.request.Request(
             f"{GITHUB_API_ALL_URL}?per_page={MAX_RELEASES_TO_SCAN}",
@@ -178,12 +178,12 @@ def fetch_latest_prerelease() -> dict | None:
                 }
 
         if best_release:
-            log.debug("Seneste beta-release: %s", best_release["tag_name"])
+            log.debug("Latest beta release: %s", best_release["tag_name"])
         else:
-            log.debug("Ingen pre-release fundet blandt de seneste %d releases", MAX_RELEASES_TO_SCAN)
+            log.debug("No pre-release found among the latest %d releases", MAX_RELEASES_TO_SCAN)
         return best_release
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
-        log.debug("Kunne ikke hente beta-releases: %s", exc)
+        log.debug("Could not fetch beta releases: %s", exc)
         return None
 
 
@@ -216,7 +216,7 @@ class UpdateCheckWorker(QThread):
         self._include_prereleases = include_prereleases
 
     def run(self) -> None:
-        log.debug("Starter version-tjek (nuværende: %s)", self._current)
+        log.debug("Starting version check (current: %s)", self._current)
         try:
             running_prerelease = _is_prerelease_tag(self._current)
             if running_prerelease or self._include_prereleases:
@@ -231,7 +231,7 @@ class UpdateCheckWorker(QThread):
                 # include_prereleases udvider dette til også at gælde
                 # main-brugere der eksplicit har bedt om at høre om betas
                 # (Settings → "Notify me about beta releases").
-                log.debug("Tjekker for nyere beta og nyere stabil release")
+                log.debug("Checking for a newer beta and a newer stable release")
                 candidates = [
                     r for r in (fetch_latest_release(), fetch_latest_prerelease())
                     if r is not None
@@ -246,11 +246,11 @@ class UpdateCheckWorker(QThread):
                 latest_tag = release["tag_name"]
                 if _parse_version(latest_tag) > _parse_version(self._current):
                     is_pre = _is_prerelease_tag(latest_tag)
-                    log.debug("Ny version fundet: %s > %s (pre-release: %s)",
+                    log.debug("New version found: %s > %s (pre-release: %s)",
                               latest_tag, self._current, is_pre)
                     self.update_available.emit(latest_tag, release["html_url"], is_pre)
                 else:
-                    log.debug("Ingen ny version (%s <= %s)", latest_tag, self._current)
+                    log.debug("No new version (%s <= %s)", latest_tag, self._current)
         finally:
             self.check_done.emit()
 
@@ -289,7 +289,7 @@ def fetch_release_by_tag(tag: str) -> dict | None:
     brugere der aldrig får brug for det.
     """
     url = GITHUB_API_RELEASE_BY_TAG_URL.format(tag=tag)
-    log.debug("Henter release-detaljer for tag %s", tag)
+    log.debug("Fetching release details for tag %s", tag)
     try:
         req = urllib.request.Request(
             url,
@@ -303,7 +303,7 @@ def fetch_release_by_tag(tag: str) -> dict | None:
             "assets": data.get("assets", []) or [],
         }
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
-        log.debug("Kunne ikke hente release-detaljer for %s: %s", tag, exc)
+        log.debug("Could not fetch release details for %s: %s", tag, exc)
         return None
 
 
@@ -325,7 +325,7 @@ def find_linux_appimage_asset_url(tag: str) -> str | None:
     for asset in release["assets"]:
         if asset.get("name") == expected_name:
             return asset.get("browser_download_url")
-    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    log.debug("No asset named %s found in release %s", expected_name, tag)
     return None
 
 
@@ -362,7 +362,7 @@ def find_windows_asset_url(tag: str) -> str | None:
     for asset in release["assets"]:
         if asset.get("name") == expected_name:
             return asset.get("browser_download_url")
-    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    log.debug("No asset named %s found in release %s", expected_name, tag)
     return None
 
 
@@ -402,7 +402,7 @@ def find_macos_asset_url(tag: str) -> str | None:
     for asset in release["assets"]:
         if asset.get("name") == expected_name:
             return asset.get("browser_download_url")
-    log.debug("Intet asset ved navn %s fundet i release %s", expected_name, tag)
+    log.debug("No asset named %s found in release %s", expected_name, tag)
     return None
 
 
@@ -429,7 +429,7 @@ def fetch_checksums(tag: str) -> dict[str, str] | None:
             checksums_url = asset.get("browser_download_url")
             break
     if checksums_url is None:
-        log.debug("Ingen %s fundet i release %s", SHA256SUMS_ASSET_NAME, tag)
+        log.debug("No %s found in release %s", SHA256SUMS_ASSET_NAME, tag)
         return None
 
     try:
@@ -439,7 +439,7 @@ def fetch_checksums(tag: str) -> dict[str, str] | None:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
             text = resp.read().decode("utf-8")
     except (URLError, OSError, UnicodeDecodeError) as exc:
-        log.debug("Kunne ikke hente/læse %s for %s: %s", SHA256SUMS_ASSET_NAME, tag, exc)
+        log.debug("Could not fetch/read %s for %s: %s", SHA256SUMS_ASSET_NAME, tag, exc)
         return None
 
     checksums: dict[str, str] = {}
@@ -551,8 +551,8 @@ def _hdiutil_detach(mount_point: Path) -> None:
             subprocess.run(args, capture_output=True, check=True, timeout=60)
             return
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            log.debug("hdiutil detach fejlede (%s): %s", args, exc)
-    log.warning("Kunne ikke afmontere %s", mount_point)
+            log.debug("hdiutil detach failed (%s): %s", args, exc)
+    log.warning("Could not unmount %s", mount_point)
 
 
 def _find_app_in_volume(mount_point: Path) -> Path:
@@ -720,7 +720,7 @@ class SelfUpdateWorker(QThread):
         tmp_dir = Path(tempfile.mkdtemp(prefix="opensak-update-"))
         downloaded_path = tmp_dir / asset_name
         try:
-            log.debug("Downloader selv-opdatering fra %s", download_url)
+            log.debug("Downloading self-update from %s", download_url)
             req = urllib.request.Request(
                 download_url, headers={"User-Agent": "OpenSAK-self-update"}
             )
@@ -739,7 +739,7 @@ class SelfUpdateWorker(QThread):
             actual_digest = _sha256_of_file(downloaded_path)
             if actual_digest.lower() != expected_digest.lower():
                 log.warning(
-                    "Checksum-mismatch for %s: forventede %s, fik %s",
+                    "Checksum mismatch for %s: expected %s, got %s",
                     asset_name, expected_digest, actual_digest,
                 )
                 self.finished_error.emit("checksum_mismatch")
@@ -750,11 +750,11 @@ class SelfUpdateWorker(QThread):
                 return
 
             self._reveal(downloaded_path)
-            log.debug("Selv-opdatering downloadet og åbnet: %s", downloaded_path)
+            log.debug("Self-update downloaded and opened: %s", downloaded_path)
             self.finished_ok.emit(str(downloaded_path))
 
         except (URLError, OSError) as exc:
-            log.warning("Selv-opdatering fejlede: %s", exc)
+            log.warning("Self-update failed: %s", exc)
             self.finished_error.emit(str(exc))
 
     def _finish_macos(self, dmg: Path, tmp_dir: Path) -> None:
@@ -769,14 +769,14 @@ class SelfUpdateWorker(QThread):
             installed_at = install_macos_update(dmg, target)
         except (MacInstallError, OSError,
                 subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            log.warning("Automatisk macOS-installation til %s fejlede: %s", target, exc)
+            log.warning("Automatic macOS installation to %s failed: %s", target, exc)
             saved = _move_to_downloads(dmg)
             shutil.rmtree(tmp_dir, ignore_errors=True)
             self._reveal(saved)
             self.finished_ok.emit(str(saved))
             return
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        log.debug("Selv-opdatering installeret: %s", installed_at)
+        log.debug("Self-update installed: %s", installed_at)
         self.installed.emit(str(installed_at))
 
     def _reveal(self, path: Path) -> None:
@@ -841,7 +841,7 @@ class AppImageUpdateWorker(QThread):
             os.close(fd)
             tmp_path = Path(tmp_name)
 
-            log.debug("Downloader AppImage-opdatering fra %s", download_url)
+            log.debug("Downloading AppImage update from %s", download_url)
             req = urllib.request.Request(
                 download_url, headers={"User-Agent": "OpenSAK-self-update"}
             )
@@ -852,7 +852,7 @@ class AppImageUpdateWorker(QThread):
             with open(tmp_path, "rb") as f:
                 magic = f.read(4)
             if magic != _ELF_MAGIC:
-                log.warning("Downloadet fil har ikke ELF-magic-bytes — forkastes")
+                log.warning("Downloaded file lacks ELF magic bytes — discarding")
                 self.finished_error.emit("invalid_download")
                 return
 
@@ -861,11 +861,11 @@ class AppImageUpdateWorker(QThread):
 
             os.replace(tmp_path, target)
             tmp_path = None  # allerede flyttet — skal ikke ryddes op i finally
-            log.debug("AppImage opdateret til %s", target)
+            log.debug("AppImage updated to %s", target)
             self.finished_ok.emit(str(target))
 
         except (URLError, OSError) as exc:
-            log.warning("AppImage-selvopdatering fejlede: %s", exc)
+            log.warning("AppImage self-update failed: %s", exc)
             self.finished_error.emit(str(exc))
         finally:
             if tmp_path is not None:

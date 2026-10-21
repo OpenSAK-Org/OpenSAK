@@ -104,6 +104,7 @@ from opensak.importer import (
 )
 from opensak.utils.constants import ATTRIBUTES
 from opensak.utils.constants import FOUND_LOG_TYPES
+from opensak.lang import tr
 
 
 # ── GSAK CacheType single-letter code -> OpenSAK cache_type string ──────────
@@ -1078,7 +1079,7 @@ def _upsert_cache_from_gsak(
         log_id = lg["log_id"]
         if log_id in seen_log_ids:
             if warnings is not None:
-                warnings.append(f"{gc_code}: dropped duplicate log id {log_id!r}")
+                warnings.append(tr("gsak_warn_duplicate_log", gc_code=gc_code, log_id=log_id))
             continue
         seen_log_ids.add(log_id)
         log_mappings.append({
@@ -1251,7 +1252,8 @@ def _flush_gsak_batch_isolated(
             result.note_images_replaced += data.get("note_images_replaced", 0)
         except Exception as e:
             cell.rollback()
-            result.errors.append(f"DB error for {data.get('gc_code', '?')} in {source}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
 
@@ -1280,14 +1282,14 @@ def import_gsak_db(
     db_path = Path(db_path)
 
     if not db_path.exists():
-        result.errors.append(f"GSAK database not found: {db_path}")
+        result.errors.append(tr("gsak_err_db_not_found", path=db_path))
         return result
 
     try:
         fallback_counter = [0]
         conn = _open_readonly(db_path, fallback_counter)
     except sqlite3.Error as e:
-        result.errors.append(f"Could not open GSAK database: {e}")
+        result.errors.append(tr("gsak_err_cannot_open", error=e))
         return result
 
     try:
@@ -1311,7 +1313,7 @@ def import_gsak_db(
             done += 1
             if data is None:
                 result.skipped += 1
-                result.warnings.append(f"Skipped row with missing code/coords near row {done}")
+                result.warnings.append(tr("gsak_warn_skipped_row", row=done))
             else:
                 gc_code = data["gc_code"]
                 batch.append((

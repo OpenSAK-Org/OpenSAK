@@ -73,7 +73,7 @@ def confirm_and_uninstall(parent: QWidget | None) -> bool:
         macos_uninstall.move_bundle_to_trash(bundle)
     except OSError as exc:
         # Bundlen er urørt, så det er sikkert at vise en fejldialog.
-        log.warning("Kunne ikke flytte OpenSAK til papirkurven: %s", exc)
+        log.warning("Could not move OpenSAK to the Trash: %s", exc)
         QMessageBox.warning(
             parent,
             tr("appimage_uninstall_error_title"),
@@ -82,5 +82,5 @@ def confirm_and_uninstall(parent: QWidget | None) -> bool:
         # Er data allerede slettet, skal appen lukke alligevel.
         return purge
 
-    log.debug("OpenSAK afinstalleret på macOS (purge=%s)", purge)
+    log.debug("OpenSAK uninstalled on macOS (purge=%s)", purge)
     return True

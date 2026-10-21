@@ -37,7 +37,7 @@ def confirm_and_uninstall(parent: QWidget | None) -> bool:
 
     result = appimage.uninstall_appimage(purge_data=purge)
     if not result.success:
-        log.warning("Afinstallation fejlede fra dialog: %s", result.error)
+        log.warning("Uninstall from dialog failed: %s", result.error)
         QMessageBox.warning(
             parent,
             tr("appimage_uninstall_error_title"),

@@ -174,6 +174,6 @@ class DistanceBearingDialog(QDialog):
     @staticmethod
     def _compass(deg: float) -> str:
         """Return an 8-point compass direction for a bearing in degrees."""
-        dirs = ["N", "NØ", "Ø", "SØ", "S", "SV", "V", "NV"]
+        dirs = tr("bearing_dirs").split()
         idx = round(deg / 45) % 8
         return dirs[idx]

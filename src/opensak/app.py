@@ -102,7 +102,7 @@ def _migrate_legacy_db() -> None:
     if legacy.exists() and not default.exists():
         # Simpel migration
         legacy.rename(default)
-        print(f"Migrerede {legacy.name} → {default.name}")
+        print(f"Migrated {legacy.name} → {default.name}")
 
     elif legacy.exists() and default.exists():
         # Begge eksisterer — tjek hvilken der er størst (har data)
@@ -117,7 +117,7 @@ def _migrate_legacy_db() -> None:
                 if p.exists():
                     p.unlink()
             legacy.rename(default)
-            print(f"Migrerede {legacy.name} → {default.name} (erstattede tom Default.db)")
+            print(f"Migrated {legacy.name} → {default.name} (replaced empty Default.db)")
         else:
             # Default.db har data — slet den tomme opensak.db
             legacy.unlink()
@@ -125,7 +125,7 @@ def _migrate_legacy_db() -> None:
                 p = app_dir / f"opensak{ext}"
                 if p.exists():
                     p.unlink()
-            print(f"Slettede tom {legacy.name}")
+            print(f"Deleted empty {legacy.name}")
 
 
 def _make_splash(app) -> "QSplashScreen":
@@ -344,7 +344,8 @@ def main() -> None:
         app.processEvents()
 
     # Indlæs sprog FØR noget UI oprettes
-    splash_msg("Indlæser sprog...")
+    # Not translated: the language is not loaded yet.
+    splash_msg("Loading language...")
     # Kør én-gangs migration fra QSettings → opensak.json (issue #209)
     did_migrate = migrate_from_qsettings(get_store())
     # Reparér evt. boolean-værdier korrumperet af en tidligere bug i
@@ -355,7 +356,7 @@ def main() -> None:
     if did_migrate:
         mark_wizard_completed()
     from opensak.config import get_language
-    from opensak.lang import load_language
+    from opensak.lang import load_language, tr as _tr
     load_language(get_language())
     _install_qt_translator(app, get_language())
 
@@ -371,16 +372,15 @@ def main() -> None:
         app.processEvents()
 
     # Migrer gammel database hvis nødvendigt
-    splash_msg("Kontrollerer database...")
+    splash_msg(_tr("splash_checking_db"))
     logger.info("startup: checking legacy db (+%.2fs)", time.monotonic() - _startup_t0)
     _migrate_legacy_db()
 
     # Initialiser database manager — åbner samme DB som sidst
-    splash_msg("Indlæser database...")
+    splash_msg(_tr("splash_loading_db"))
     logger.info("startup: loading database (+%.2fs)", time.monotonic() - _startup_t0)
     from opensak.db.manager import get_db_manager
     from opensak.db.database import set_progress_callback
-    from opensak.lang import tr as _tr
     manager = get_db_manager()
     # #1033: a schema update (and the VACUUM after it) can take a while on a
     # large database — say so on the splash screen.
@@ -442,7 +442,7 @@ def main() -> None:
                            exc_info=True)
 
     # Opret hovedvindue
-    splash_msg("Starter OpenSAK...")
+    splash_msg(_tr("splash_starting"))
     logger.info("startup: building main window (+%.2fs)", time.monotonic() - _startup_t0)
     try:
         from opensak.gui.mainwindow import MainWindow

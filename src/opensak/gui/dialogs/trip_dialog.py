@@ -274,8 +274,8 @@ class _PreviewMixin(_PreviewMixinBase):
         path, _ = QFileDialog.getSaveFileName(
             self,
             tr("trip_save_dialog_title"),
-            str(Path.home() / "tur.gpx"),
-            "GPX filer (*.gpx)"
+            str(Path.home() / tr("trip_default_file")),
+            tr("gps_file_filter", fmt="GPX", ext="gpx"),
         )
         if not path:
             return

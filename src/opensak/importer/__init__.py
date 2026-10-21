@@ -760,6 +760,7 @@ from opensak.utils.constants import KNOWN_PREFIXES as _KNOWN_PREFIXES
 from opensak.utils.constants import KNOWN_SINGLE_PREFIXES as _KNOWN_SINGLE_PREFIXES
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.constants import FTF_TAG_PATTERN
+from opensak.lang import tr
 
 
 def _parse_extra_wpt(wpt_el) -> Optional[dict]:
@@ -1537,7 +1538,8 @@ def _flush_cache_batch_isolated(
                 result.updated += 1
         except Exception as e:
             cell.rollback()
-            result.errors.append(f"DB error for {data.get('gc_code', '?')} in {source}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
 
@@ -1694,13 +1696,13 @@ def _parse_gpx_to_data(
                         if extra is not None:
                             extra_wpts.append(extra)
                 except Exception as e:
-                    errors.append(f"Parse error in {gpx_path.name}: {e}")
+                    errors.append(tr("import_err_parse", file=gpx_path.name, error=e))
                 finally:
                     elem.clear()
                     while elem.getprevious() is not None:
                         del elem.getparent()[0]
     except Exception as e:
-        errors.append(f"Fatal parse error in {gpx_path.name}: {e}")
+        errors.append(tr("import_err_fatal_parse", file=gpx_path.name, error=e))
 
     # Parse companion waypoints file
     companion_data = None
@@ -1709,7 +1711,7 @@ def _parse_gpx_to_data(
             wpts_tree = _parse_xml(wpts_path)
             companion_data = _parse_extra_waypoints(wpts_tree)
         except Exception as e:
-            errors.append(f"Waypoints file error: {e}")
+            errors.append(tr("import_err_waypoints", file=wpts_path.name, error=e))
 
     return caches, extra_wpts, companion_data, errors
 
@@ -1781,7 +1783,7 @@ def import_gpx(
                         else:
                             result.skipped += 1
                 except Exception as e:
-                    result.errors.append(f"Error in {source}: {e}")
+                    result.errors.append(tr("import_err_parse", file=source, error=e))
                     result.skipped += 1
                 finally:
                     # CRITICAL: Clear the element and its preceding siblings from memory
@@ -1822,11 +1824,11 @@ def import_gpx(
                 result.waypoints += _link_extra_waypoints(db_session, extra_data)
                 db_session.commit()
             except Exception as e:
-                result.errors.append(f"Waypoints file error: {e}")
+                result.errors.append(tr("import_err_waypoints", file=wpts_path.name, error=e))
 
     except Exception as e:
         db_session.rollback()
-        result.errors.append(f"Fatal error importing {source}: {e}")
+        result.errors.append(tr("import_err_fatal", file=source, error=e))
     finally:
         _exit_bulk_import_pragmas(db_session)
         db_session.close()
@@ -1848,7 +1850,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
     overall_result = ImportResult()
 
     if not zipfile.is_zipfile(zip_path):
-        overall_result.errors.append(f"{zip_path.name} is not a valid zip file")
+        overall_result.errors.append(tr("import_err_bad_zip", file=zip_path.name))
         return overall_result
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1862,7 +1864,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
         gpx_files  = [f for f in all_gpx if f not in set(companions)]
 
         if not gpx_files:
-            overall_result.errors.append("No .gpx file found in zip")
+            overall_result.errors.append(tr("import_err_no_gpx"))
             return overall_result
 
         # Step 1: Parse all main GPX files in parallel (pure CPU, no DB).
@@ -1917,7 +1919,8 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
                     db_session.commit()
                 except Exception as e:
-                    overall_result.errors.append(f"Waypoints file error ({companion_path.name}): {e}")
+                    overall_result.errors.append(
+                        tr("import_err_waypoints", file=companion_path.name, error=e))
 
         except Exception:
             db_session.rollback()
@@ -1938,15 +1941,12 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
     result = ImportResult()
     source = loc_path.name
 
-    result.warnings.append(
-        ".loc filer indeholder kun koordinater og navn — "
-        "importér en GPX fil for at få fuld cacheinformation"
-    )
+    result.warnings.append(tr("import_loc_warning"))
 
     try:
         tree = _parse_xml(loc_path)
     except etree.XMLSyntaxError as e:
-        result.errors.append(f"XML parse error i {loc_path.name}: {e}")
+        result.errors.append(tr("import_err_fatal_parse", file=loc_path.name, error=e))
         return result
 
     root = tree.getroot()
@@ -1955,7 +1955,7 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
         try:
             data = _parse_loc_waypoint(wpt_el)
         except Exception as e:
-            result.errors.append(f"Parse error: {e}")
+            result.errors.append(tr("import_err_parse", file=source, error=e))
             result.skipped += 1
             continue
 
@@ -1970,7 +1970,8 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
             else:
                 result.updated += 1
         except Exception as e:
-            result.errors.append(f"DB fejl for {data.get('gc_code', '?')}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
     return result

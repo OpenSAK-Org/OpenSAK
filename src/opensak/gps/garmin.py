@@ -549,7 +549,7 @@ def debug_scan() -> str:
         is_g = _is_garmin(m)
         lines.append(f"  {'✓ GARMIN' if is_g else '○'} {m}")
 
-    lines.append(f"\nGarmin enheder: {find_garmin_devices() or 'ingen fundet'}")
+    lines.append(f"\nGarmin devices: {find_garmin_devices() or 'none found'}")
     return "\n".join(lines)
 
 
