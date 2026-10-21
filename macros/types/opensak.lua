@@ -48,8 +48,9 @@
 ---@field mode? "AND"|"OR" How the criteria are combined (default AND).
 ---@field label? string Shown in the toolbar (optional, default "Macro").
 
----Filter keys plus `fields` and `database`, understood by `opensak.caches{}`.
+---Filter keys plus `fields`, `all` and `database`, understood by `opensak.caches{}`.
 ---@class opensak.CachesSpec: opensak.FilterSpec
+---@field all? boolean Every cache of the database, whatever the active filter shows.
 ---@field fields? string[] Cache fields to load (`code` is always included).
 ---@field database? string Read this database instead of the active one.
 
@@ -579,9 +580,9 @@ function opensak.profiles() end
 ---@return opensak.Cache? # The cache, or nil if it is not in the database.
 function opensak.cache(code, options) end
 
----Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+---Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: added `all`.
 ---
 ---```lua
 ---for c in opensak.caches() do print(c.code, c.name) end
@@ -593,7 +594,7 @@ function opensak.cache(code, options) end
 ---    print(c.code, c.corrected and c.corrected.lat)
 ---end
 ---```
----@param spec? opensak.CachesSpec Filter keys, `database` and/or `fields`; nothing = the active filter.
+---@param spec? opensak.CachesSpec Filter keys, `all`, `database` and/or `fields`; nothing = the active filter.
 ---@return fun(): opensak.Cache? # Iterator for a generic `for`.
 function opensak.caches(spec) end
 
@@ -1330,6 +1331,18 @@ function opensak.read_csv(path, sep) end
 ---@param options? {append?: boolean} `append`: add *text* at the end of an existing file.
 ---@return string # The file written (full path).
 function opensak.write_text(path, text, options) end
+
+---Open a file in its default app, e.g. an HTML report in the browser, so a report macro can end by showing its result. A relative path is resolved against the macro file's folder. A file this run wrote (opensak.write_text, opensak.export_*, opensak.copy_file / move_file) or one in opensak.temp_dir() opens directly; for any other file the user is asked first. Only these file types: .html .htm .svg .txt .csv .tsv .md .json .gpx .kml .pdf — never a program, script or shortcut — and no URLs. At most 5 files per run. Needs the user interface.
+---
+---Since API version 3.
+---
+---```lua
+---local path = opensak.write_text(opensak.temp_dir() .. "/report.html",
+---  opensak.html.page{ title = "Report", opensak.html.table(rows) })
+---opensak.open(path)
+---```
+---@param path string The file to open.
+function opensak.open(path) end
 
 ---Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
 ---
@@ -2184,6 +2197,146 @@ function opensak.text.gc_to_id(code) end
 ---@param prefix? string Two letters instead of "GC", e.g. "TB".
 ---@return string # The code.
 function opensak.text.id_to_gc(id, prefix) end
+
+opensak.chart = {}
+
+---A bar chart of *rows* as an SVG string, for an HTML page (opensak.html.page, opensak.write_text) or a .svg file. Each row is a table; `x` names its category field (default "key") and `y` its value field (default "count"), nil counts as 0. `horizontal = true` draws the bars from the left, for long category names. Text and grid lines take the colour of the surrounding page; the bars use the CSS variable --chart-color, else `color`. Each bar shows its value as tooltip; `labels` also writes it on the bar (default: up to 16 bars). With a list of fields as `y`, the bars are stacked, one segment per field, with a legend (`names` instead of the field names; at most 8); a matrix from opensak.stats.pivot gives one stacked bar per matrix row, e.g. finds per year and cache type. At most 5000 rows.
+---
+---Since API version 3.
+---
+---```lua
+---local rows = opensak.sql([[SELECT strftime('%Y', found_date) AS year,
+---  COUNT(*) AS finds FROM caches WHERE found GROUP BY year ORDER BY year]])
+---local svg = opensak.chart.bar(rows, { x = "year", y = "finds", title = "Finds per year" })
+---opensak.write_text(opensak.temp_dir() .. "/finds.svg", svg)
+----- stacked: finds per year and type
+---local by_type = opensak.stats.pivot(finds, "year", "type")
+---local svg2 = opensak.chart.bar(by_type, { title = "Finds per year and type" })
+---```
+---@param rows table[]|opensak.Matrix The rows, e.g. the result of opensak.sql(), or a matrix.
+---@param options? {x?: string, y?: string|string[], title?: string, width?: number, height?: number, color?: string, horizontal?: boolean, labels?: boolean, names?: string[]} Fields to draw, title, size in pixels (default 640 × 280), colour (name or "#rrggbb").
+---@return string # The chart as SVG.
+function opensak.chart.bar(rows, options) end
+
+---A line chart of *rows* in their order as an SVG string, like opensak.chart.bar: `x` the label on the x axis (evenly spaced, e.g. months), `y` the value. `area = true` fills below the line. The value of the last point is written next to it unless `labels = false`. Each point shows its value as tooltip.
+---
+---Since API version 3.
+---
+---```lua
+---local rows, total = {}, 0
+---for _, r in ipairs(opensak.sql([[SELECT strftime('%Y-%m', found_date) AS month,
+---    COUNT(*) AS n FROM caches WHERE found GROUP BY month ORDER BY month]])) do
+---  total = total + r.n
+---  rows[#rows + 1] = { key = r.month, count = total }
+---end
+---local svg = opensak.chart.line(rows, { title = "Total finds", area = true })
+---```
+---@param rows table[] The rows, in the order to draw.
+---@param options? {x?: string, y?: string, title?: string, width?: number, height?: number, color?: string, area?: boolean, labels?: boolean} As for opensak.chart.bar, plus `area`.
+---@return string # The chart as SVG.
+function opensak.chart.line(rows, options) end
+
+---A grid chart of a matrix (see opensak.stats.pivot) as an SVG string: one cell per row × column value, the darker the larger, e.g. finds per difficulty × terrain. `labels = false` leaves the numbers out of the cells; `row_title` and `col_title` name the two fields.
+---
+---Since API version 3.
+---
+---```lua
+---local dt = opensak.stats.pivot(finds, "difficulty", "terrain",
+---  { rows = {1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}, cols = {1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5} })
+---local svg = opensak.chart.heatmap(dt, { row_title = "D", col_title = "T" })
+---```
+---@param matrix opensak.Matrix The result of opensak.stats.pivot().
+---@param options? {title?: string, width?: number, color?: string, labels?: boolean, row_title?: string, col_title?: string} As for opensak.chart.bar, plus the field titles.
+---@return string # The chart as SVG.
+function opensak.chart.heatmap(matrix, options) end
+
+---A rose (polar area) chart of *rows* as an SVG string: one sector per row, in row order clockwise from the top, e.g. finds per compass direction (N, NE, E, …). The area of a sector grows with its value; `x` names the label field, `y` the value (as for opensak.chart.bar).
+---
+---Since API version 3.
+---
+---```lua
+---local DIRS = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }
+---for _, c in ipairs(finds) do
+---  c.dir = DIRS[math.floor((opensak.coords.bearing(HOME_LAT, HOME_LON, c.lat, c.lon) + 22.5) / 45) % 8 + 1]
+---end
+---local rows = {}
+---for _, g in ipairs(opensak.stats.group(finds, "dir")) do rows[g.key] = g.count end
+---local sectors = {}
+---for i, d in ipairs(DIRS) do sectors[i] = { key = d, count = rows[d] or 0 } end
+---local svg = opensak.chart.rose(sectors, { title = "Finds by direction" })
+---```
+---@param rows table[] One row per sector, clockwise from north.
+---@param options? {x?: string, y?: string, title?: string, width?: number, color?: string, labels?: boolean} As for opensak.chart.bar; `width` is also the height.
+---@return string # The chart as SVG.
+function opensak.chart.rose(rows, options) end
+
+---A map of countries, states or counties as an SVG string, each region coloured by a value — e.g. finds per country from opensak.stats.group. `key` names the field with the region name (default "key"), `value` the number (default "count"), `layer` the kind of region: "country" (default), "state" or "county". `within` (a country name or a list) limits a state or county map to those countries; without it the countries the regions are in are shown. `extent = "all"` shows every region of the layer instead of zooming to the ones with a value. Names are matched ignoring case, accents and punctuation; those that match no region are listed below the map. The outlines are those of Update location (offline, no internet needed; county outlines are downloaded per country on first use, like there). Without the boundary data the map is a short note instead.
+---
+---Since API version 3.
+---
+---```lua
+---local countries = opensak.stats.group(finds, "country")
+---local map = opensak.chart.map(countries, { title = "Finds per country" })
+---local cantons = opensak.stats.group(finds, "state")
+---local map2 = opensak.chart.map(cantons, { layer = "state", within = "Switzerland" })
+---```
+---@param rows table[] One row per region with its value.
+---@param options? {key?: string, value?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, extent?: string, legend?: boolean} See above. The height follows the shape of the area unless given.
+---@return string # The map as SVG.
+function opensak.chart.map(rows, options) end
+
+---A dot map as an SVG string: one dot per row at its coordinates (fields `lat` and `lon`), over the outlines of `layer` ("country", "state" or "county"), zoomed to the dots or to the `within` countries. `label` names the field shown as tooltip. At most 50000 rows; dots on the same pixel are drawn once.
+---
+---Since API version 3.
+---
+---```lua
+---local svg = opensak.chart.points(finds, { label = "name", title = "My finds" })
+---```
+---@param rows table[] The rows, e.g. caches from opensak.caches().
+---@param options? {lat?: string, lon?: string, label?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, radius?: number} See above; `radius` of the dots in pixels (default 2.5).
+---@return string # The map as SVG.
+function opensak.chart.points(rows, options) end
+
+opensak.geo = {}
+
+---The outlines of countries, states or counties (`layer`) as a GeoJSON FeatureCollection (a table), e.g. for a map drawn by the macro itself or for another program. Like opensak.chart.map, `rows` puts the value (field `value`, default "count") of each row into the properties of the region its field `key` (default "key") names — matched ignoring case, accents and punctuation — `within` limits the countries and `extent = "all"` shows all regions instead of zooming to the ones with a value. `around` (rows with `lat`/`lon`) zooms to those points instead, `box` (`{min_lon, min_lat, max_lon, max_lat}`, e.g. the `bbox` of another collection) to an area. The outlines are clipped to the area and simplified for a map about `detail` pixels wide (default 800). Every feature has `properties.name` (and `country` for states and counties). The second value lists the names that match no region. nil if the boundary data is not installed.
+---
+---Since API version 3.
+---
+---```lua
+---local outlines, unmatched = opensak.geo.outlines("country",
+---  { rows = opensak.stats.group(finds, "country") })
+---if outlines then
+---  for _, f in ipairs(outlines.features) do
+---    print(f.properties.name, f.properties.count or 0)
+---  end
+---end
+---```
+---@param layer? string "country" (default), "state" or "county".
+---@param options? {within?: string|string[], rows?: table[], key?: string, value?: string, extent?: string, around?: table[], lat?: string, lon?: string, box?: number[], detail?: number} See above.
+---@return table? # The FeatureCollection and the names without a region.
+---@return string[]?
+function opensak.geo.outlines(layer, options) end
+
+---The regions of a layer ("country", "state" or "county") in the boundary data used by Update location and opensak.chart.map, one row per name: `{name =}`, for states and counties also `country`. `within` limits them to one country or a list. With `rows` (e.g. finds per state from opensak.stats.group) the rows are matched to the regions like opensak.chart.map does — the field `key` (default "key") names the region, ignoring case, accents and punctuation — and a region named by rows gets the sum of their field `value` (default "count"); the second value then lists the names that match no region. With it a macro can say "18 of 26 cantons". nil if the boundary data is not installed.
+---
+---Since API version 3.
+---
+---```lua
+---local cantons = opensak.geo.regions("state", { within = "Switzerland" })
+---if cantons then print(#cantons .. " cantons") end
+----- the cantons you have found a cache in
+---local all, unmatched = opensak.geo.regions("state",
+---  { within = "Switzerland", rows = opensak.stats.group(finds, "state") })
+---local n = 0
+---for _, r in ipairs(all or {}) do if r.count then n = n + 1 end end
+---print(n .. " of " .. #(all or {}) .. " cantons")
+---```
+---@param layer? string "country" (default), "state" or "county".
+---@param options? {within?: string|string[], rows?: table[], key?: string, value?: string} See above.
+---@return {name: string, country?: string}[]? # The regions, sorted (with `rows`: and the names that match none).
+---@return string[]?
+function opensak.geo.regions(layer, options) end
 
 opensak.stats = {}
 
