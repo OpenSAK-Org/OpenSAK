@@ -15,12 +15,15 @@ from opensak.utils.types import GcCode
 
 
 def set_corrected_coords(
-    gc_code: GcCode, lat: Optional[float], lon: Optional[float]
+    gc_code: GcCode, lat: Optional[float], lon: Optional[float],
+    source: str = "user",
 ) -> bool:
-    """Sæt (eller ryd, med lat/lon = None) korrigerede koordinater for gc_code.
+    """Set (or clear, with lat/lon = None) corrected coordinates for gc_code.
 
-    Opretter UserNote-rækken hvis den mangler. is_corrected sættes kun når
-    både lat og lon er angivet. Returnerer False hvis cachen ikke findes.
+    Creates the UserNote row if it is missing. is_corrected is only set when
+    both lat and lon are given. *source* is recorded in corrected_source
+    (#1140): "user" for the GUI, "macro" when a macro corrects; clearing
+    the correction clears it. Returns False if the cache doesn't exist.
     """
     with get_session() as session:
         cache_row = session.query(Cache).filter_by(gc_code=gc_code).first()
@@ -33,4 +36,5 @@ def set_corrected_coords(
         note.corrected_lat = lat
         note.corrected_lon = lon
         note.is_corrected = lat is not None and lon is not None
+        note.corrected_source = source if note.is_corrected else None
     return True

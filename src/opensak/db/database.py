@@ -81,7 +81,7 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 # Steps of opening a database that can take a while, for set_progress_callback().
 PROGRESS_MIGRATING = "migrating"
@@ -1099,6 +1099,30 @@ def _run_migrations(engine: Engine) -> None:
             conn.commit()
             logger.info(f"Migration: added {', '.join(added_27)}")
 
+        # ── Migration 28: last_user_update triggers + is_owner (#1140) ───────
+        logger.debug("[migrations] entering migration 28 (+%.2fs)", time.monotonic() - _mig_t0)
+        # The database stamps caches.last_user_update itself whenever a user
+        # field changes, whatever wrote it (GUI, macros, raw SQL). IF NOT
+        # EXISTS makes this safe to run again, and also creates them on new
+        # databases. NB: a migration that rebuilds caches or user_notes
+        # (DROP TABLE) drops their triggers too and must call this again.
+        create_user_update_triggers(conn)
+        # is_owner from the account in Settings, for existing databases; from
+        # now on the GPX import and a change of account keep it current. Safe
+        # to run again: it only follows the current account (and does nothing
+        # without one, keeping what the GSAK import brought in).
+        from opensak.db.ownership import recalculate_is_owner
+        from opensak.gui.settings import get_settings
+        _sett_28 = get_settings()
+        changed_28 = recalculate_is_owner(
+            conn,
+            getattr(_sett_28, "gc_finder_id", ""),
+            getattr(_sett_28, "gc_username", ""),
+        )
+        if changed_28:
+            logger.info(f"Migration: set caches.is_owner on {changed_28} caches")
+        conn.commit()
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1175,6 +1199,57 @@ def _add_missing_columns(conn: Connection, columns_by_table: dict[str, list[tupl
     return added
 
 
+# ── last_user_update triggers (#1140) ────────────────────────────────────────
+# Current UTC time in SQLAlchemy's DateTime storage format (as models._SQL_NOW).
+_TRIGGER_NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000')"
+# The user's own fields on caches. Text fields compare with NULL and '' as
+# equal, so a dialog that saves an untouched empty field doesn't count.
+_USER_FIELDS_TEXT = ("user_data_1", "user_data_2", "user_data_3", "user_data_4")
+_USER_FIELDS_VALUE = ("user_flag", "user_sort", "locked")
+
+
+def _changed(cols_text: tuple[str, ...], cols_value: tuple[str, ...]) -> str:
+    parts = [f"IFNULL(NEW.{c}, '') IS NOT IFNULL(OLD.{c}, '')" for c in cols_text]
+    parts += [f"NEW.{c} IS NOT OLD.{c}" for c in cols_value]
+    return " OR ".join(parts)
+
+
+_USER_UPDATE_TRIGGERS: dict[str, str] = {
+    # A user field really changed, and the statement didn't set
+    # last_user_update itself (an import bringing its own date, e.g. GSAK's
+    # LastUserDate, wins). Updating last_user_update doesn't fire this again:
+    # it is not in the OF list.
+    "trg_caches_last_user_update": (
+        "AFTER UPDATE OF " + ", ".join(_USER_FIELDS_VALUE + _USER_FIELDS_TEXT)
+        + " ON caches FOR EACH ROW WHEN NEW.last_user_update IS OLD.last_user_update AND ("
+        + _changed(_USER_FIELDS_TEXT, _USER_FIELDS_VALUE) + ") "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.id; END"
+    ),
+    # A personal note or a correction was added …
+    "trg_user_notes_insert_last_user_update": (
+        "AFTER INSERT ON user_notes FOR EACH ROW "
+        "WHEN IFNULL(NEW.note, '') <> '' OR NEW.is_corrected "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.cache_id; END"
+    ),
+    # … or changed. Deleting a note row is not covered: OpenSAK clears a note
+    # or a correction by updating the row, and only deletes it along with
+    # its cache — where a trigger touching the cache row being deleted would
+    # be undefined behaviour in SQLite.
+    "trg_user_notes_update_last_user_update": (
+        "AFTER UPDATE OF note, corrected_lat, corrected_lon, is_corrected ON user_notes "
+        "FOR EACH ROW WHEN "
+        + _changed(("note",), ("corrected_lat", "corrected_lon", "is_corrected")) + " "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.cache_id; END"
+    ),
+}
+
+
+def create_user_update_triggers(conn: Connection) -> None:
+    """Create the last_user_update triggers (#1140) where they are missing."""
+    for name, body in _USER_UPDATE_TRIGGERS.items():
+        conn.execute(text(f"CREATE TRIGGER IF NOT EXISTS {name} {body}"))
+
+
 # A column type as SQLAlchemy writes it: BOOLEAN, VARCHAR(16), NUMERIC(10, 2).
 _SQL_TYPE = r"\w+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?"
 
@@ -1208,8 +1283,18 @@ def _add_column_defaults(conn: Connection, defaults_by_table: dict[str, dict[str
         fk_before = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
         # One transaction for all tables, so a failure leaves the old schema.
         conn.exec_driver_sql("BEGIN")
+        # Triggers (#1140) go first and come back afterwards: DROP TABLE takes
+        # a table's own triggers with it, and the rename back to the old name
+        # fails while another table's trigger refers to the dropped table.
+        triggers = conn.execute(text(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL"
+        )).fetchall()
+        for name, _sql in triggers:
+            conn.exec_driver_sql(f'DROP TRIGGER "{name}"')
         for table, missing in plans.items():
             _rebuild_with_defaults(conn, table, missing)
+        for _name, sql in triggers:
+            conn.exec_driver_sql(sql)
         fk_new = set(conn.execute(text("PRAGMA foreign_key_check")).fetchall()) - set(fk_before)
         if fk_new:
             raise RuntimeError(f"migration 26: foreign key check failed: {sorted(fk_new)[:5]}")

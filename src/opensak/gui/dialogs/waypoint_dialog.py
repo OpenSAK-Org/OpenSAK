@@ -922,9 +922,15 @@ class WaypointDialog(QDialog):
             note = UserNote(cache_id=cache_row.id)
             session.add(note)
         note.note = data["note"]
+        # #1140: the correction is the user's own once they change it here;
+        # saving the dialog without touching it keeps the recorded source.
+        if (note.corrected_lat, note.corrected_lon) != (data["corrected_lat"], data["corrected_lon"]):
+            note.corrected_source = "user"
         note.corrected_lat = data["corrected_lat"]
         note.corrected_lon = data["corrected_lon"]
         note.is_corrected = data["corrected_lat"] is not None and data["corrected_lon"] is not None
+        if not note.is_corrected:
+            note.corrected_source = None
 
     @staticmethod
     def _save_waypoints(session, cache_row: Cache, waypoints: list[dict]) -> None:

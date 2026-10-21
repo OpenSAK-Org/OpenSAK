@@ -82,6 +82,11 @@ def _make_v26_db(path: Path) -> None:
             "INSERT INTO user_notes (cache_id, corrected_lat, corrected_lon, is_corrected) "
             "VALUES (1, 55.1, 12.1, 1)"
         ))
+        # Migration 28's triggers (#1140) refer to the columns; a v26
+        # database didn't have them.
+        for (name,) in c.execute(text(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'")).fetchall():
+            c.execute(text(f"DROP TRIGGER {name}"))
         for col in _NEW_CACHE_COLUMNS:
             c.execute(text(f"ALTER TABLE caches DROP COLUMN {col}"))
         c.execute(text("ALTER TABLE user_notes DROP COLUMN corrected_source"))

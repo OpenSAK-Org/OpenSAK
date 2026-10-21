@@ -310,6 +310,8 @@ def _apply(session, cache: Cache, values: dict[str, Any]) -> None:
             else:
                 note.corrected_lat, note.corrected_lon = value or (None, None)
                 note.is_corrected = value is not None
+                # #1140: so a macro can find (and undo) its own corrections.
+                note.corrected_source = "macro" if value is not None else None
 
 
 def update_cache(session, code: str, values: dict[str, Any], refresh: bool = True) -> bool:

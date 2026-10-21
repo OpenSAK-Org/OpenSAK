@@ -105,7 +105,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, update
 from sqlalchemy.orm import Session
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
@@ -1238,6 +1238,24 @@ def _upsert_cache_from_gsak(
     return cache, created
 
 
+def _restore_last_user_update(session: Session, caches: list[tuple[Cache, dict]]) -> None:
+    """Put GSAK's LastUserDate back after the batch is flushed (#1140).
+
+    Writing the user fields and notes fires the database's last_user_update
+    triggers, which stamp "now" — right for an edit, wrong for an import
+    that carries the user's own date (or none). Set explicitly afterwards;
+    last_user_update is not a column the triggers watch, so this sticks."""
+    if not caches:
+        return
+    session.flush()
+    # ORM bulk UPDATE by primary key: one executemany, no unit of work.
+    session.execute(
+        update(Cache),
+        [{"id": cache.id, "last_user_update": data.get("last_user_update")}
+         for cache, data in caches],
+    )
+
+
 def _flush_gsak_batch(
     session: Session,
     batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]],
@@ -1263,6 +1281,9 @@ def _flush_gsak_batch(
                 cache, created, len(attr_rows), corrected is not None,
                 data.get("note_text") is not None, data.get("note_images_replaced", 0),
             ))
+        _restore_last_user_update(
+            session, [(p[0], d[0]) for p, d in zip(pending, batch)]
+        )
         sp.commit()
     except Exception:
         sp.rollback()
@@ -1302,6 +1323,7 @@ def _flush_gsak_batch_isolated(
                 session, data, attr_rows, wpt_rows, log_rows, corrected,
                 attr_names, source, existing_ids, result.warnings,
             )
+            _restore_last_user_update(session, [(cache, data)])
             cell.commit()
             if created:
                 result.created += 1

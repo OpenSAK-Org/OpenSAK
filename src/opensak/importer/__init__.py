@@ -751,6 +751,8 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_fav_points":   gsak_fav_points,
         "gsak_user_note":    gsak_user_note,
         "found_by_me":       found_by_me,
+        # Issue #1140: the waypoint symbol as given (GSAK's Symbol column).
+        "symbol":            sym_raw.strip() if sym_raw and sym_raw.strip() else None,
     }
 
 
@@ -1118,6 +1120,22 @@ def _upsert_cache(
     # source that doesn't carry it (.loc files, some GPX variants).
     if data.get("gc_cache_id"):
         cache.gc_cache_id = data["gc_cache_id"]
+
+    # ── Issue #1140: symbol and is_owner ─────────────────────────────────
+    # <sym> only when the source has one (a .loc file doesn't), so an empty
+    # source never wipes a value from an earlier GPX or GSAK import.
+    if data.get("symbol"):
+        cache.symbol = data["symbol"]
+    # is_owner follows the account in Settings — from the cache's current
+    # owner, so a locked cache is judged by the owner it kept. Without an
+    # account there is nothing to compare against: leave what is there.
+    from opensak.db.ownership import account_configured, owner_matches
+    from opensak.gui.settings import get_settings
+    _acct = get_settings()
+    if account_configured(_acct.gc_finder_id, _acct.gc_username):
+        cache.is_owner = owner_matches(
+            cache.owner_id, cache.owner_name, _acct.gc_finder_id, _acct.gc_username
+        )
 
     cache.source_file = source_file
 

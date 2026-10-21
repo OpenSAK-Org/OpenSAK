@@ -3661,7 +3661,7 @@ class MainWindow(QMainWindow):
         importing a large CSV would otherwise reload the table row, map pin
         and detail panel for every single row."""
         from opensak.db.corrected_coords import set_corrected_coords
-        if not set_corrected_coords(gc_code, lat, lon):
+        if not set_corrected_coords(gc_code, lat, lon, source="macro"):
             return False
         self._macro_changed_codes.add(gc_code)
         return True

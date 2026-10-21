@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import update
+
 # What to do when a cache already exists in the target database.
 IF_EXISTS = ("replace", "skip", "newer")
 # Caches per step — each step is loaded, written to the target and (when
@@ -122,6 +124,14 @@ def _insert_snapshot(session, snap: dict) -> None:
 
     if snap["_user_note"]:
         session.add(UserNote(cache_id=new_cache.id, **snap["_user_note"]))
+        # #1140: inserting the note fires the last_user_update trigger, which
+        # stamps "now" — a copy keeps the source's date instead.
+        session.flush()
+        session.execute(
+            update(Cache).where(Cache.id == new_cache.id)
+            .values(last_user_update=snap.get("last_user_update"))
+            .execution_options(synchronize_session=False)
+        )
 
 
 def _import_time(last_gpx_update: Optional[datetime], imported_at: Optional[datetime]):

@@ -516,7 +516,11 @@ class WelcomeWizard(QDialog):
             s = get_settings()
             username = self._username_edit.text().strip()
             if username:
+                old_account = (s.gc_finder_id, s.gc_username)
                 s.gc_username = username
+                # #1140: a new account changes which caches are the user's own.
+                from opensak.db.ownership import account_changed
+                account_changed(*old_account)
             home = self._home_edit.text().strip()
             if home:
                 from opensak.coords import parse_coords
