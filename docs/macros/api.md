@@ -4329,8 +4329,10 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`find_with_form.lua`](../../macros/examples/find_with_form.lua) — Pick search options in a form, then step through the matches
 - [`import_gsak_appdata.lua`](../../macros/examples/import_gsak_appdata.lua) — Import every GSAK database, filter and location
 - [`new_since_last_run.lua`](../../macros/examples/new_since_last_run.lua) — Show the unfound caches updated since the last run
+- [`puzzle_helper.lua`](../../macros/examples/puzzle_helper.lua) — Coordinates, formulas and numbers from a mystery listing; ROT13, digit sum, word value
 - [`refile_by_country.lua`](../../macros/examples/refile_by_country.lua) — Move caches to a database per country or state
 - [`region_coverage.lua`](../../macros/examples/region_coverage.lua) — Write an HTML page of the states (or countries) you have found a cache in, and where to go next
+- [`sql_report.lua`](../../macros/examples/sql_report.lua) — Run an SQL query and show its result as an HTML table (GSAK's SqlToHtml)
 
 ## Macro header
 
