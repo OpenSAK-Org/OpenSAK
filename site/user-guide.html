@@ -516,6 +516,9 @@
   <a href="#midpoint">Midpoint</a>
   <a href="#dist-bearing">Distance &amp; Bearing</a>
 
+  <div class="nav-section-heading">Automation</div>
+  <a href="#macros">Macros (beta)</a>
+
   <div class="nav-section-heading">Settings</div>
   <a href="#settings">Settings</a>
   <a href="#columns">Columns</a>
@@ -561,6 +564,7 @@
       <li><a href="#file-export">File Export</a></li>
       <li><a href="#trip-planner">Trip Planner</a></li>
       <li><a href="#coord-converter">Geocaching Tools</a></li>
+      <li><a href="#macros">Macros (beta)</a></li>
       <li><a href="#settings">Settings</a></li>
       <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
     </ol>
@@ -1398,8 +1402,81 @@ python run.py</code></pre>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
+  <section id="macros">
+    <h2><span class="section-num">29</span>Macros (beta)</h2>
+    <div class="callout warn"><div class="callout-icon">⚠️</div><div><strong>Draft — beta builds only.</strong> Lua macros are still being built, and this section describes them as they are in the current beta. The <strong>Macros</strong> menu only appears in beta builds of OpenSAK; stable releases don't have it yet. Functions, menus and dialogs may still change before macros reach a stable release.</div></div>
+    <p>Macros let you automate OpenSAK: filter, change and export caches, build reports, or run a whole routine with one click. They are OpenSAK's successor to the GSAK macro language. Macros are written in <a href="https://www.lua.org/">Lua</a>, a small, widely used scripting language, with an <code>opensak.*</code> library for everything geocaching. GSAK macros don't run unchanged; they are ported to Lua.</p>
+
+    <h3>The Macros menu</h3>
+    <table>
+      <thead><tr><th>Menu item</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Run macro (Lua)…</strong></td><td>Opens the macro editor, where you open, write, save and run a macro.</td></tr>
+        <tr><td><strong>Macro manager…</strong></td><td>Lists the macros in your macros folder, to run them, edit them or give them a keyboard shortcut.</td></tr>
+        <tr><td><strong>Open example</strong></td><td>Copies one of the example macros that come with OpenSAK into your macros folder and opens it in the editor.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>The macro editor</h3>
+    <p>The editor has the usual <strong>File</strong> and <strong>Edit</strong> menus (New, Open recent, Save as…, Find and Replace, Go to line, Comment / uncomment). <strong>▶ Run</strong> runs the macro; <strong>Save &amp; Run</strong> saves it first. What the macro prints, and any error with its line number, is shown below the code.</p>
+    <ul>
+      <li><strong>Help → Lua API reference</strong> lists every <code>opensak.*</code> function with examples, and a comparison with GSAK's macro commands.</li>
+      <li><strong>Tools → Form designer…</strong> builds a dialog for your macro (input fields, lists, check boxes) and writes the Lua code for it.</li>
+      <li><strong>File → Open macros folder</strong> opens the folder in your file manager. <kbd>F5</kbd> runs the macro, <kbd>Ctrl+F5</kbd> saves and runs it, and <kbd>F1</kbd> opens the API reference.</li>
+    </ul>
+
+    <h3>The Macro manager</h3>
+    <p>The Macro manager shows each macro's name, description, version, author and the macro API version it needs, read from a short header at the top of the file:</p>
+    <pre><code>-- OpenSAK Macro
+-- Name: Find statistics
+-- Author: Your name
+-- Version: 1.0
+-- Requires-API: 3
+-- Description: Key figures, charts and maps of your finds</code></pre>
+    <p>Search the list, run or edit a macro, or click <strong>Shortcut…</strong> to run it from the main window with a key such as <kbd>Ctrl+Alt+F</kbd>. Use Ctrl, Alt or a function key, so that typing in the cache list doesn't start a macro. The output of macros run from here or by shortcut is shown in the Macro manager.</p>
+
+    <h3>Example macros</h3>
+    <table>
+      <thead><tr><th>Example</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>find_statistics</td><td>Key figures, charts and maps of your finds, as an HTML report</td></tr>
+        <tr><td>database_statistics</td><td>The same for all caches in a database</td></tr>
+        <tr><td>region_coverage</td><td>The states or countries you have found a cache in, and the nearest cache to find in each missing one</td></tr>
+        <tr><td>refile_by_country</td><td>Sorts the caches of a database into one database per country or state, with a dry run first</td></tr>
+        <tr><td>export_filters_to_gpx</td><td>Exports one GPX file per saved filter</td></tr>
+        <tr><td>sql_report</td><td>Runs your own SQL query and shows the result as a table</td></tr>
+        <tr><td>puzzle_helper</td><td>Finds coordinates and formulas in a mystery listing, with digit sum, word value and ROT13</td></tr>
+        <tr><td>import_gsak_appdata</td><td>Imports your GSAK databases without questions</td></tr>
+      </tbody>
+    </table>
+    <p>If you change an example and OpenSAK later ships a newer version of it, you are asked whether to keep your copy or restore the original; your copy is kept as a <code>.bak</code> file.</p>
+
+    <h3>Safety: what a macro may do</h3>
+    <p>Macros run in a protected environment: they can't start programs, use the internet or reach files on their own. You decide what each macro may touch.</p>
+    <ul>
+      <li><strong>Files and folders.</strong> By default a macro may read your macros folder and use OpenSAK's own temp folder. The first time a macro wants to read or write anywhere else, OpenSAK asks: <em>This time only</em>, <em>Always</em> or <em>Deny</em>. <em>Always</em> adds the folder to <strong>Settings → Folder permissions</strong>, where you can see and remove it again.</li>
+      <li><strong>Changing your caches.</strong> Before a macro's first change to your caches, OpenSAK asks whether <em>this macro</em> may change your databases: <em>Deny</em>, <em>Until OpenSAK closes</em> or <em>Always</em>. A macro only ever changes the active database. Macros you allowed always are listed under <strong>Settings → Folder permissions</strong>.</li>
+      <li><strong>Runaway macros.</strong> A macro that runs far too long is stopped automatically, and changes it makes inside a transaction are undone if it fails.</li>
+    </ul>
+    <div class="callout tip"><div class="callout-icon">💡</div><div>Macros you get from other users (forum, Facebook group, GitHub) are plain text files: open them in the editor and have a look before you run them. Take a backup before running a macro that changes many caches.</div></div>
+
+    <h3>Where macros are kept</h3>
+    <p>Your macros live in the <code>macros</code> folder inside OpenSAK's data folder, so they survive updates. <strong>Open macros folder</strong> in the macro editor's File menu or in the Macro manager opens it; <strong>Help → OpenSAK File Locations…</strong> shows where the data folder is on your computer.</p>
+
+    <h3>Writing your own macros</h3>
+    <p>A first macro can be as short as this:</p>
+    <pre><code>local n = 0
+for cache in opensak.caches() do
+  if not cache.found then n = n + 1 end
+end
+print(n .. " caches in the current filter are not found yet")</code></pre>
+    <p>The full reference is in the editor under <strong>Help → Lua API reference</strong>, and on GitHub as <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/beta/docs/macros/api.md">docs/macros/api.md</a>. If you prefer your own editor (VS Code, Notepad++, UltraEdit, …), OpenSAK ships autocomplete definitions for it, and <code>opensak --run-macro file.lua</code> runs a macro in the open OpenSAK window from there — see <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/beta/docs/macros/run-from-editor.md">Running macros from an editor</a>.</p>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Ideas, GSAK macros you'd like to see ported, and feedback on this draft are very welcome in the <a href="https://github.com/OpenSAK-Org/OpenSAK/issues/938">macro tracking issue (#938)</a> or in the Facebook group.</div></div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
   <section id="settings">
-    <h2><span class="section-num">29</span>Settings</h2>
+    <h2><span class="section-num">30</span>Settings</h2>
     <p>Open with <strong>Settings → Settings…</strong> (<kbd>Ctrl+,</kbd>) or the ⚙ button in the toolbar.</p>
 
     <figure class="screenshot">
@@ -1476,7 +1553,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="columns">
-    <h2><span class="section-num">30</span>Choosing Columns</h2>
+    <h2><span class="section-num">31</span>Choosing Columns</h2>
     <p>Go to <strong>View → Choose columns…</strong> to select which columns appear in the cache list and in what order. Drag rows to reorder, check/uncheck to show or hide.</p>
 
     <figure class="screenshot">
@@ -1489,7 +1566,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="language">
-    <h2><span class="section-num">31</span>Language</h2>
+    <h2><span class="section-num">32</span>Language</h2>
     <p>Go to <strong>Settings → Settings… → General tab → Language</strong>. Select your language and click OK. The new language takes effect the next time OpenSAK is started.</p>
 
     <p>Currently supported languages:</p>
@@ -1512,7 +1589,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="theme">
-    <h2><span class="section-num">32</span>Theme</h2>
+    <h2><span class="section-num">33</span>Theme</h2>
     <p>Go to <strong>Settings → Settings… → General tab → Theme</strong>:</p>
     <ul>
       <li><strong>Automatic</strong> — follows your operating system's light/dark preference</li>
@@ -1524,7 +1601,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="updates">
-    <h2><span class="section-num">33</span>Updates</h2>
+    <h2><span class="section-num">34</span>Updates</h2>
     <p>How OpenSAK is updated depends on how you installed it:</p>
     <table>
       <thead><tr><th>Installed from</th><th>How updates work</th></tr></thead>
@@ -1551,7 +1628,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="shortcuts">
-    <h2><span class="section-num">34</span>Keyboard Shortcuts</h2>
+    <h2><span class="section-num">35</span>Keyboard Shortcuts</h2>
     <p>This reference is also available inside the app — go to <strong>Help → Keyboard Shortcuts…</strong> to see and customize every binding in an editable table, with a "Reset all" button to restore the defaults. Overrides are remembered across restarts.</p>
 
     <h3>File &amp; Database</h3>
@@ -1612,7 +1689,7 @@ python run.py</code></pre>
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="help">
-    <h2><span class="section-num">35</span>Getting Help</h2>
+    <h2><span class="section-num">36</span>Getting Help</h2>
 
     <h3>Debug Log</h3>
     <p>If something isn't working as expected, go to <strong>Help → Open log file</strong> to find the application log. Including it with a bug report makes the problem much easier to track down. If OpenSAK crashed or hung, <strong>Help → Open log from last restart</strong> shows the log from the previous session.</p>
