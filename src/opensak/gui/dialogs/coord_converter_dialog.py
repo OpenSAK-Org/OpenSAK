@@ -13,7 +13,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QPushButton, QGroupBox, QComboBox,
-    QDialogButtonBox, QApplication, QFrame, QSizePolicy
+    QDialogButtonBox, QApplication, QFrame, QSizePolicy, QScrollArea, QWidget
 )
 from PySide6.QtGui import QFont, QFontMetrics
 
@@ -21,6 +21,7 @@ from opensak.coord_formats import INPUT_KEYS, SYSTEMS, in_area, parse_any
 from opensak.coords import format_coords
 from opensak.utils.types import CoordFormat
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 
 # Widest string any format can produce (DMS at extreme lat/lon values).
@@ -45,6 +46,7 @@ class CoordConverterDialog(QDialog):
 
     def __init__(self, lat: float | None = None, lon: float | None = None, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("coord_conv_title"))
         self.setMinimumWidth(480)
         self.setWindowFlags(
@@ -60,8 +62,20 @@ class CoordConverterDialog(QDialog):
             self._update_outputs(lat, lon)
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        # The content scrolls, the Close button stays put: the dialog is
+        # capped to the screen height (#816), and on a short screen (e.g.
+        # 1280x800 at 200 %) the content is taller than that cap.
+        outer = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         # ── Input ─────────────────────────────────────────────────────────────
         in_group = QGroupBox(tr("coord_conv_input_group"))
@@ -147,7 +161,15 @@ class CoordConverterDialog(QDialog):
         # ── Close button ──────────────────────────────────────────────────────
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        outer.addWidget(buttons)
+
+        # A scroll area asks for little height of its own, so open the
+        # dialog tall enough to show all content where the screen allows.
+        scroll.setMinimumWidth(content.sizeHint().width())
+        margins = outer.contentsMargins()
+        wanted = (content.sizeHint().height() + buttons.sizeHint().height()
+                  + outer.spacing() + margins.top() + margins.bottom())
+        self.resize(self.sizeHint().width(), min(wanted, self.maximumHeight()))
 
     def _make_output_row(self, font: QFont) -> tuple:
         """Return (container_widget, line_edit, copy_button)."""

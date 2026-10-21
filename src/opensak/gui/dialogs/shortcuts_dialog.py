@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -38,6 +39,7 @@ class ShortcutsDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("shortcuts_dialog_title"))
         self.setMinimumWidth(400)
         self._registry = registry

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ class BoundaryDownloadDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("boundary_dl_title"))
         self.setMinimumWidth(400)
         self._worker: _DownloadAllWorker | None = None
@@ -155,6 +157,7 @@ class BoundaryCheckDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("boundary_check_title"))
         self.setMinimumWidth(380)
         self._worker: _CheckUpdateWorker | None = None

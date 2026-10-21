@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.dialogs import make_progress_cb
 from opensak.export.file_export_settings import (
@@ -243,6 +244,7 @@ class FileExportDialog(SavedSettingsDialog):
     def __init__(self, caches: list, parent=None, filter_name: str = "",
                  center_name: str = ""):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("file_export_dialog_title"))
         self.setMinimumWidth(480)
         self._caches = caches

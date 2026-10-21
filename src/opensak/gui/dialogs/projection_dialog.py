@@ -23,6 +23,7 @@ from opensak.coords import format_coords, parse_coords
 from opensak.utils.types import CoordFormat
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 from opensak.utils.constants import EARTH_RADIUS_M
 
@@ -58,6 +59,7 @@ class ProjectionDialog(QDialog):
 
     def __init__(self, lat: float | None = None, lon: float | None = None, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("proj_title"))
         self.setMinimumWidth(500)
         self.setWindowFlags(

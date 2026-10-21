@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from opensak.db.transfer import transfer_caches
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 
 class _MoveWorker(QThread):
@@ -70,6 +71,7 @@ class MoveCachesDialog(QDialog):
         copy_only: bool = False,
     ):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self._copy_only = copy_only
         self._title_key = "copy_caches_title" if copy_only else "move_caches_title"
         self.setWindowTitle(tr(self._title_key))

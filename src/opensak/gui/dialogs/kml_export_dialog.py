@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from ...export.kml import export_kml
 from ...gui.icon import OpenSAKMessageBox as QMessageBox
 from ...lang import tr
+from .widgets import clamp_dialog_height_to_screen
 from . import make_progress_cb
 
 
@@ -66,6 +67,7 @@ class _ExportWorker(QThread):
 class KmlExportDialog(QDialog):
     def __init__(self, caches: list, parent=None) -> None:
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self._caches = caches
         self._worker: _ExportWorker | None = None
 

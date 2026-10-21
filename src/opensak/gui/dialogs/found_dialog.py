@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from opensak.db.manager import get_db_manager
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 
 
@@ -48,6 +49,7 @@ class FoundUpdaterDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("found_dialog_title"))
         self.setMinimumWidth(520)
         self._worker: UpdateWorker | None = None

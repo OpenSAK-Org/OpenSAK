@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.coords import format_coords, parse_coords
 from opensak.filters.engine import (
     DIRECTIONS, _bearing_deg, bearing_direction, distance_km,
@@ -46,6 +47,7 @@ class CorrectedCoordsDialog(QDialog):
         parent=None,
     ):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self._gc_code = gc_code
         self._orig_lat = orig_lat
         self._orig_lon = orig_lon
