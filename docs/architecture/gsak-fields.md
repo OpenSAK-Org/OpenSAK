@@ -69,6 +69,8 @@ All of these, like the other personal fields, are updated even for a locked cach
 - **`symbol`** is taken from GPX `<sym>` when present.
 - **`corrected_source`** is `user` for corrections made in the GUI and `macro` for macros (`set_corrected_coords(source=…)`, macro `update()`); clearing a correction clears it. The edit dialog only marks a correction as the user's when its coordinates actually change. Raw `sql_write` leaves it as it is.
 
+**Macro access (step 2c):** `opensak.cache()` / `caches()` return `owned` (`is_owner`), `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update` (UTC, like `last_gpx_update`). `update()` and `insert{}` can write `macro_flag`, `macro_sort` and `symbol`; `owned`, `last_user_update` and `corrected_source` are maintained by OpenSAK and refused. `sql_write` refuses `is_owner` and `last_user_update` as well (the database's own triggers may still stamp `last_user_update`), and recalculates `is_owner` when a macro changes `owner_id` / `owner_name` or inserts a cache, as `update()` and `insert{}` do. `filter{}` has a `last_user_update` date key.
+
 **Not added:**
 
 | GSAK | Used | Proposal |
@@ -233,7 +235,7 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 2. **Small columns** — **done in #1139** (migration 27): `last_user_update`, `macro_flag`, `macro_sort`, `is_owner`, `symbol`, `user_notes.corrected_source`; the GSAK importer fills them and keeps GSAK's `imported_at`, `last_gpx_update` and `user_notes.updated_at`, all as UTC (#1097).
    - **2b-1.** **Done in #1140** (migration 28): OpenSAK fills the columns itself — `last_user_update` via triggers, `is_owner` from the account, `symbol` from GPX, `corrected_source` from the GUI and macros.
    - **2b-2.** **Done in #1141**: the Dates tab has *Last user update* (`last_user_update`, compared in local time; settles #821 item 6\*), the column chooser has *Last user update* and *GPX symbol*, and the GSAK filter importer maps LastUserDate, IsOwner, MacroFlag, MacroSort and Symbol to the new columns.
-   - **2c.** Macro access to the new columns (@nagisml).
+   - **2c.** Macro access to the new columns (@nagisml): read all of them, write `macro_flag`, `macro_sort` and `symbol` (see above).
 3. **Custom fields: storage and GSAK import** — `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, import of local and global definitions and values, import report.
 4. **Custom fields: UI** — column chooser, detail panel, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer.
 5. **Custom fields: macro API** — read, write, define.

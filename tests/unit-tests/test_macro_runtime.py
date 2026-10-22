@@ -1041,6 +1041,24 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
     ]
 
 
+def test_cache_returns_the_gsak_columns(full_cache):
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GCACC1").one()
+        cache.is_owner, cache.macro_flag, cache.macro_sort = True, True, "b"
+        cache.symbol = "Geocache Found"
+        cache.user_note.corrected_source = "import"
+    with get_session() as s:     # after the trigger stamped the correction
+        s.query(Cache).filter_by(gc_code="GCACC1").one().last_user_update =             datetime(2026, 10, 1, 7, 8, 9)
+    _, out = _run("""
+        local c = opensak.cache("GCACC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source, c.last_user_update)
+        c = opensak.cache("GCMAC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source)
+    """)
+    assert out == ["true	true	b	Geocache Found	import	2026-10-01T07:08:09",
+                   "false	false	nil	nil	nil"]
+
+
 def test_every_cache_field_is_loaded(full_cache):
     with get_session() as s:
         (record,) = cache_data.load_records(s, ["GCACC1"])
@@ -1483,6 +1501,12 @@ def test_date_keys():
     assert (found.op, str(found.date1)) == ("on_or_after", "2026-01-01")
     assert (gpx.field, gpx.op, gpx.date1) == ("last_gpx_update", "on_or_before",
                                                datetime(2026, 9, 1, 18, 30))
+
+
+def test_last_user_update_date_key():
+    (date,) = _filters('last_user_update = {"2026-10-01T08:00", nil}')._filters
+    assert (date.field, date.op, date.date1) == ("last_user_update", "on_or_after",
+                                                 datetime(2026, 10, 1, 8, 0))
 
 
 def test_text_keys_attributes_codes_and_mode():

@@ -1243,6 +1243,10 @@ _USER_UPDATE_TRIGGERS: dict[str, str] = {
     ),
 }
 
+# Their names; opensak.sql_write() lets them write last_user_update, which a
+# macro cannot.
+USER_UPDATE_TRIGGER_NAMES = frozenset(_USER_UPDATE_TRIGGERS)
+
 
 def create_user_update_triggers(conn: Connection) -> None:
     """Create the last_user_update triggers (#1140) where they are missing."""

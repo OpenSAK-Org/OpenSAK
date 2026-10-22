@@ -394,6 +394,7 @@ _DATE_FILTERS = {
     "hidden": "hidden_date",
     "found_date": "found_date",
     "last_gpx_update": "last_gpx_update",
+    "last_user_update": "last_user_update",
 }
 FILTER_KEYS = sorted(
     {
@@ -508,8 +509,8 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
     FilterKeyDoc(tuple(_DATE_FILTERS), "string[]",
                  '{"2020-01-01", "2020-12-31"} | {nil, "2026-09-01"}',
                  'Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil '
-                 "leaves a side open. `last_gpx_update` also takes a time, "
-                 '"2026-09-01T18:00".'),
+                 "leaves a side open. `last_gpx_update` and `last_user_update` "
+                 'also take a time, "2026-09-01T18:00", in local time.'),
     FilterKeyDoc(("attributes",), "string|string[]",
                  '"Dogs" | {"Dogs", "-Night cache", 13}',
                  "Attributes the cache must have (all of them): English "
@@ -4799,6 +4800,7 @@ API: tuple[ApiFunction, ...] = (
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
                 'print("Easy unfound traditionals: " .. n)',
         since=1,
+        changed=((3, "added the key `last_user_update`"),),
         bind=lambda rt, lua: rt._filter,
         params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
         returns=("integer", "Number of matching caches (0 = view unchanged)."),
@@ -4902,6 +4904,8 @@ API: tuple[ApiFunction, ...] = (
                 'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end\n'
                 'local found = opensak.cache("GC12345", { database = "Found" })',
         since=2,
+        changed=((3, "added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, "
+                     "`corrected_source` and `last_user_update`"),),
         bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
         params=(_CODE, _READ_OPTIONS),
         returns=("opensak.Cache?", "The cache, or nil if it is not in the database."),
@@ -4929,7 +4933,8 @@ API: tuple[ApiFunction, ...] = (
                 'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
                 "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
-        changed=((3, "added `all`"),),
+        changed=((3, "added `all` and the fields `owned`, `macro_flag`, `macro_sort`, "
+                     "`symbol`, `corrected_source` and `last_user_update`"),),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
                       "Filter keys, `all`, `database` and/or `fields`; nothing = the "

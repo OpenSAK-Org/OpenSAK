@@ -45,10 +45,10 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GetPolygon | ✅ | `coords.inside()`, `filter{polygon=}` |
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
-| IsOwner | ✅ partial | `filter{owned=true}`; no `owned` cache field, no log-owner check |
+| IsOwner | ✅ partial | `owned` cache field, `filter{owned=true}`; no log-owner check |
 | Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
 | MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
-| MacroFlag | ❌ | workaround: `filter{codes=}` or a table in `macro_db()` |
+| MacroFlag | ✅ β | read `macro_flag`; write `update(code, {macro_flag=})`, `sql_write`; filter with `filter{where="macro_flag = 1"}` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
@@ -203,5 +203,5 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) and an `owned` field are missing. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) are missing. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
 """

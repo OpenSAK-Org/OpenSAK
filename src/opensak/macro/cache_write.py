@@ -7,7 +7,9 @@ cache, change a few keys and write them back. Only the fields in
 WRITABLE_FIELDS can be written. The others are either the cache's identity
 (`code`) or maintained by OpenSAK itself: distance and bearing follow from
 the coordinates and the centre point, the counts and log dates from the
-logs, waypoints and trackables, and last_gpx_update from imports. Writing
+logs, waypoints and trackables, last_gpx_update from imports, `owned` from
+the owner and the account in Settings, last_user_update and corrected_source
+when user fields or the correction change. Writing
 one of them is an error rather than being ignored, so a macro never thinks
 it changed something it did not.
 
@@ -225,10 +227,13 @@ WRITABLE_FIELDS: tuple[WritableField, ...] = (
     WritableField("color", "string|false", _color, "color"),
     WritableField("locked", "boolean", _bool, "locked"),
     WritableField("watch", "boolean", _bool, "watch"),
+    WritableField("macro_flag", "boolean", _bool, "macro_flag"),
+    WritableField("macro_sort", "string|false", _text, "macro_sort"),
     WritableField("note", "string|false", _text),
     WritableField("gc_note", "string|false", _text, "gc_note"),
     WritableField("hint", "string|false", _text, "encoded_hints"),
     WritableField("url", "string|false", _text, "url"),
+    WritableField("symbol", "string|false", _text, "symbol"),
     WritableField("corrected", "{lat: number, lon: number}|string|false", _corrected),
 )
 
@@ -245,6 +250,9 @@ PROTECTED_FIELDS: dict[str, str] = {
     "trackable_count": "OpenSAK counts the trackables",
     "last_log_date": "OpenSAK takes it from the logs",
     "last_gpx_update": "it records when an import last touched the cache",
+    "owned": "OpenSAK compares the owner with your account in Settings",
+    "last_user_update": "OpenSAK records it when a user field changes",
+    "corrected_source": "OpenSAK sets it when `corrected` is written",
 }
 
 # Fields opensak.insert{} needs (besides `code`).
@@ -324,8 +332,10 @@ def update_cache(session, code: str, values: dict[str, Any], refresh: bool = Tru
         return False
     _apply(session, cache, values)
     session.flush()
-    if refresh and ("lat" in values or "lon" in values):
-        refresh_derived(_session_executor(session), {cache.id: {"coords"}})
+    kinds = {kind for key, kind in (("lat", "coords"), ("lon", "coords"), ("owner", "owner"))
+             if key in values}
+    if refresh and kinds:
+        refresh_derived(_session_executor(session), {cache.id: kinds})
     return True
 
 
@@ -352,7 +362,7 @@ def insert_cache(session, values: dict[str, Any], refresh: bool = True) -> str:
     _apply(session, cache, values)
     session.flush()
     if refresh:
-        refresh_derived(_session_executor(session), {cache.id: {"coords"}})
+        refresh_derived(_session_executor(session), {cache.id: {"coords", "owner"}})
     return code
 
 
@@ -397,14 +407,15 @@ def refresh_derived(execute: Executor, kinds_by_id: dict[int, set[str]]) -> None
     """Recalculate the derived columns of the given caches.
 
     *kinds_by_id* maps a cache id to what changed: "coords" (distance and
-    bearing), "logs", "waypoints", "trackables", or "insert" (a new row:
-    all of them, plus the import columns).
+    bearing), "owner" (is_owner), "logs", "waypoints", "trackables", or
+    "insert" (a new row: all of them, plus the import columns).
     """
     def ids(kind: str) -> set[int]:
         return {i for i, kinds in kinds_by_id.items() if kind in kinds or "insert" in kinds}
 
     normalize_inserted(execute, {i for i, kinds in kinds_by_id.items() if "insert" in kinds})
     _refresh_distances(execute, ids("coords"))
+    _refresh_owned(execute, ids("owner"))
     _refresh_logs(execute, ids("logs"))
     for marks, params in _chunks(ids("waypoints")):
         execute(
@@ -469,6 +480,29 @@ def _refresh_distances(execute: Executor, ids: set[int]) -> None:
             execute(
                 "UPDATE caches SET distance = :d, bearing = :b WHERE id = :id",
                 {"d": float(dist), "b": geodesy.bearing(lat0, lon0, row[1], row[2]), "id": row[0]},
+            )
+
+
+def _refresh_owned(execute: Executor, ids: set[int]) -> None:
+    """is_owner from the owner and the account, as the GPX importer sets it.
+    Without an account in Settings it stays as it is (#1140)."""
+    if not ids:
+        return
+    from opensak.db.ownership import account_configured, owner_matches
+    from opensak.gui.settings import get_settings
+
+    settings = get_settings()
+    if not account_configured(settings.gc_finder_id, settings.gc_username):
+        return
+    for marks, params in _chunks(ids):
+        for cache_id, owner_id, owner_name in execute(
+            f"SELECT id, owner_id, owner_name FROM caches WHERE id IN ({marks})", params
+        ):
+            execute(
+                "UPDATE caches SET is_owner = :v WHERE id = :id",
+                {"v": owner_matches(owner_id, owner_name, settings.gc_finder_id,
+                                    settings.gc_username),
+                 "id": cache_id},
             )
 
 
