@@ -14,6 +14,7 @@ class TestLoad:
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
+            "companion-db": False,
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -30,6 +31,7 @@ class TestLoad:
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
+            "companion-db": False,
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):

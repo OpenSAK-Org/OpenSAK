@@ -45,6 +45,9 @@ _RELEASE_DEFAULTS: dict[str, bool] = {
     # transaction, ...): beta-only on their own, so the rest of the macro
     # system can go stable while the write API is still settling.
     "lua-macro-write": _is_prerelease(__version__),
+    # Companion database per cache database (#1034): off in release builds
+    # until macros and custom fields use it.
+    "companion-db": False,
 }
 
 
@@ -89,3 +92,4 @@ reverse_geocoding: bool    = _flags["reverse-geocoding"]
 map_popout: bool           = _flags["map-popout"]
 lua_macros: bool           = _flags["lua-macros"]
 lua_macro_write: bool      = _flags["lua-macro-write"]
+companion_db: bool         = _flags["companion-db"]

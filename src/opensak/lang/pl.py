@@ -920,6 +920,7 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Nie udało się przełączyć bazy danych",
     "db_err_switch_failed":         "Nie udało się przełączyć na „{name}”:\n{error}\n\nZapisano szczegółowy dziennik — zobacz Pomoc > Otwórz plik dziennika.",
     "db_err_file_not_found":        "Nie znaleziono pliku bazy danych:\n{path}",
+    "db_err_companion_file":        "Ten plik jest bazą towarzyszącą innej bazy danych, a nie osobną bazą danych. Otwórz zamiast niego {name}:\n{path}",
     "db_unavailable_title":         "Baza danych niedostępna",
     "db_unavailable_fallback_msg":  "Nie znaleziono bazy danych \"{name}\":\n{path}\n\nDysk, na którym się znajduje, może być odłączony. OpenSAK otworzył zamiast niej \"{fallback}\".\n\n\"{name}\" pozostaje na liście baz danych i można ją ponownie otworzyć po podłączeniu dysku.",
     "db_err_remove_active":         "Nie można usunąć aktywnej bazy danych z listy.",

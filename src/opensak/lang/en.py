@@ -918,6 +918,7 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Could not switch database",
     "db_err_switch_failed":         "Could not switch to '{name}':\n{error}\n\nA detailed log has been saved — see Help > Open log file.",
     "db_err_file_not_found":        "Database file not found:\n{path}",
+    "db_err_companion_file":        "This file is the companion database of another database, not a database of its own. Open {name} instead:\n{path}",
     "db_unavailable_title":         "Database unavailable",
     "db_unavailable_fallback_msg":  "The database \"{name}\" could not be found:\n{path}\n\nThe drive it is on may be disconnected. OpenSAK has opened \"{fallback}\" instead.\n\n\"{name}\" is still in the database list and can be opened again once the drive is back.",
     "db_err_remove_active":         "Cannot remove the active database from the list.",

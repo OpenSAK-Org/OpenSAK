@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from opensak.backup.snapshot import SnapshotError, snapshot_database
+from opensak.db import companion
 from opensak.lang import tr
 from opensak.settings_store import get_store
 
@@ -57,6 +58,24 @@ def _is_valid_sqlite_file(path: Path) -> bool:
     except OSError:
         return False
     return header == _SQLITE_MAGIC
+
+
+def _rename_companion(old_db: Path, new_db: Path) -> None:
+    """Rename *old_db*'s companion database and its sidecars to go with
+    *new_db* (#1034). Nothing if it has none."""
+    old_companion = companion.companion_path(old_db)
+    new_companion = companion.companion_path(new_db)
+    for src in companion.files(old_db):
+        src.rename(Path(str(new_companion) + src.name[len(old_companion.name):]))
+
+
+def _remove_with_sidecars(path: Path) -> None:
+    """Best-effort removal of *path* and its SQLite sidecars."""
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        try:
+            Path(str(path) + suffix).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 class DatabaseInfo:
@@ -417,6 +436,11 @@ class DatabaseManager:
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(tr("db_err_file_not_found", path=path))
+        # #1034: opening a companion database as a database would give it
+        # OpenSAK's whole schema.
+        if companion.is_companion_file(path):
+            main = path.name[: -len(companion.SUFFIX)] + ".db"
+            raise ValueError(tr("db_err_companion_file", name=main, path=path))
 
         existing = self._find_by_path(path)
         if existing:
@@ -511,10 +535,11 @@ class DatabaseManager:
         new_path = old_path.parent / f"{safe_name}.db"
 
         if new_path != old_path:
-            if new_path.exists():
-                raise ValueError(
-                    tr("db_err_target_path_exists", name=new_name, path=str(new_path))
-                )
+            for taken in (new_path, companion.companion_path(new_path)):
+                if taken.exists():
+                    raise ValueError(
+                        tr("db_err_target_path_exists", name=new_name, path=str(taken))
+                    )
 
             # Luk engine FØR filoperationer — undgår låste filer på Windows
             # (samme mønster som delete_database/move_databases_to).
@@ -525,7 +550,15 @@ class DatabaseManager:
             time.sleep(0.05)
 
             try:
-                old_path.rename(new_path)
+                # #1034: the companion database keeps its name in step.
+                # Renamed first: if the database itself then can't be, the
+                # companion is renamed back and nothing has changed.
+                _rename_companion(old_path, new_path)
+                try:
+                    old_path.rename(new_path)
+                except OSError:
+                    _rename_companion(new_path, old_path)
+                    raise
                 for suffix in ("-shm", "-wal"):
                     side = Path(str(old_path) + suffix)
                     if side.exists():
@@ -536,6 +569,7 @@ class DatabaseManager:
                 )
 
             db_info.path = new_path
+            companion.forget(old_path)
 
             if was_active:
                 # Genåbn på den nye sti så aktiv-tilstanden forbliver konsistent.
@@ -594,6 +628,11 @@ class DatabaseManager:
             raise ValueError(
                 tr("db_err_target_path_exists", name=new_name, path=str(new_path))
             )
+        new_companion = companion.companion_path(new_path)
+        if new_companion.exists():
+            raise ValueError(
+                tr("db_err_target_path_exists", name=new_name, path=str(new_companion))
+            )
 
         # Issue #659: make sure the source's settings are inside the file
         # (imported from opensak.json if it hasn't been opened since), so
@@ -607,7 +646,11 @@ class DatabaseManager:
         # write happened mid-copy.
         try:
             snapshot_database(db_info.path, new_path)
+            # #1034: the companion database is part of the copy.
+            if companion.exists(db_info.path):
+                snapshot_database(companion.companion_path(db_info.path), new_companion)
         except SnapshotError as exc:
+            _remove_with_sidecars(new_path)
             raise SnapshotError(
                 tr("db_err_copy_failed", name=db_info.name, error=str(exc))
             ) from exc
@@ -616,7 +659,9 @@ class DatabaseManager:
         # gets its own identity. Best-effort — the copy itself succeeded.
         try:
             from opensak.db.db_settings import assign_new_uuid
-            assign_new_uuid(new_path)
+            new_uuid = assign_new_uuid(new_path)
+            # Its companion belongs to the copy, not to the original.
+            companion.set_main_uuid(new_path, new_uuid)
         except Exception:
             logger.warning(
                 "Could not give the copy %s a new database id", new_path,
@@ -707,6 +752,11 @@ class DatabaseManager:
             raise ValueError(
                 tr("db_err_move_target_exists", name=db_info.name, path=str(new_path))
             )
+        new_companion = companion.companion_path(new_path)
+        if new_companion.exists():
+            raise ValueError(
+                tr("db_err_move_target_exists", name=db_info.name, path=str(new_companion))
+            )
 
         # Issue #828: validate BEFORE touching the engine — a corrupt
         # source must never be copied on, and there is no reason to close
@@ -727,19 +777,28 @@ class DatabaseManager:
         gc.collect()
         time.sleep(0.05)
 
+        # #1034: the companion database (and its sidecars) moves along.
+        old_companion = companion.companion_path(old_path)
+        pairs = [
+            (Path(str(old_path) + suffix), Path(str(new_path) + suffix))
+            for suffix in ("", "-shm", "-wal")
+        ] + [
+            (src, Path(str(new_companion) + src.name[len(old_companion.name):]))
+            for src in companion.files(old_path)
+        ]
         copied: list[Path] = []
         try:
-            for suffix in ("", "-shm", "-wal"):
-                src = Path(str(old_path) + suffix)
-                if suffix and not src.exists():
+            for src, dst in pairs:
+                if src != old_path and not src.exists():
                     continue  # SQLite WAL sidecars only exist while in use
-                dst = Path(str(new_path) + suffix)
                 copied.append(dst)  # before copying: a failed copy can leave a partial file
                 shutil.copy2(src, dst)
                 if dst.stat().st_size != src.stat().st_size:
                     raise OSError(f"size mismatch after copying {src.name}")
             if not _is_valid_sqlite_file(new_path):
                 raise OSError("the copy is not a valid SQLite database")
+            if new_companion in copied and not _is_valid_sqlite_file(new_companion):
+                raise OSError("the copy of the companion database is not a valid SQLite database")
         except OSError as exc:
             for f in copied:
                 try:
@@ -751,8 +810,7 @@ class DatabaseManager:
             ) from exc
 
         if delete_original:
-            for suffix in ("", "-shm", "-wal"):
-                f = Path(str(old_path) + suffix)
+            for f, _dst in pairs:
                 try:
                     if f.exists():
                         f.unlink()
@@ -760,7 +818,8 @@ class DatabaseManager:
                     pass  # reported below via old_path.exists()
 
         db_info.path = new_path
-        return not (delete_original and old_path.exists())
+        companion.forget(old_path)
+        return not (delete_original and (old_path.exists() or old_companion.exists()))
 
     def move_databases_to(
         self, new_dir: Path, delete_originals: bool
@@ -888,9 +947,11 @@ class DatabaseManager:
         db_path = db_info.path
         folder = db_path.parent
 
-        # Slet hovedfilen + WAL/SHM sidekick-filer
-        for suffix in ("", "-shm", "-wal"):
-            f = Path(str(db_path) + suffix)
+        # Slet hovedfilen + WAL/SHM sidekick-filer, and the companion
+        # database (#1034) with its own.
+        companion.forget(db_path)
+        targets = [Path(str(db_path) + suffix) for suffix in ("", "-shm", "-wal")]
+        for f in [*targets, *companion.files(db_path)]:
             if f.exists():
                 try:
                     f.unlink()

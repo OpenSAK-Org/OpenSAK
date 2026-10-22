@@ -919,6 +919,7 @@ STRINGS: dict[str, str] = {
     "db_err_switch_failed_title":   "Kunne ikke skifte database",
     "db_err_switch_failed":         "Kunne ikke skifte til '{name}':\n{error}\n\nEn detaljeret log er gemt — se Hjælp > Åbn logfil.",
     "db_err_file_not_found":        "Databasefilen blev ikke fundet:\n{path}",
+    "db_err_companion_file":        "Denne fil er ledsagerdatabasen til en anden database, ikke en database i sig selv. Åbn {name} i stedet:\n{path}",
     "db_unavailable_title":         "Database ikke tilgængelig",
     "db_unavailable_fallback_msg":  "Databasen \"{name}\" blev ikke fundet:\n{path}\n\nDrevet den ligger på er måske ikke tilsluttet. OpenSAK har åbnet \"{fallback}\" i stedet.\n\n\"{name}\" står stadig i databaselisten og kan åbnes igen, når drevet er tilbage.",
     "db_err_remove_active":         "Kan ikke fjerne den aktive database fra listen.",
