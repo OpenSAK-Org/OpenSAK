@@ -1483,6 +1483,58 @@ class LockedFilter(BaseFilter):
         return cls(locked=data["locked"])
 
 
+class IsOwnerFilter(BaseFilter):
+    """Keep caches owned (or not owned) by the user: is_owner, which follows
+    the account in Settings (#1140, GSAK's IsOwner)."""
+    filter_type = "is_owner"
+
+    def __init__(self, owned: bool):
+        self.owned = owned
+
+    def apply_to_query(self, query):
+        # NOT NULL DEFAULT 0, but same NULL-as-falsy mirror as UserFlagFilter.
+        from sqlalchemy import or_
+        if self.owned:
+            return query.filter(Cache.is_owner == True)  # noqa: E712
+        return query.filter(or_(Cache.is_owner == False, Cache.is_owner.is_(None)))  # noqa: E712
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.is_owner) == self.owned
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "owned": self.owned}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "IsOwnerFilter":
+        return cls(owned=data["owned"])
+
+
+class MacroFlagFilter(BaseFilter):
+    """Keep caches based on macro_flag, the macros' own flag (GSAK's
+    MacroFlag, #1139). Only macros set it: opensak.filter{macro_flag = ..}."""
+    filter_type = "macro_flag"
+
+    def __init__(self, flagged: bool):
+        self.flagged = flagged
+
+    def apply_to_query(self, query):
+        # NOT NULL DEFAULT 0, but same NULL-as-falsy mirror as UserFlagFilter.
+        from sqlalchemy import or_
+        if self.flagged:
+            return query.filter(Cache.macro_flag == True)  # noqa: E712
+        return query.filter(or_(Cache.macro_flag == False, Cache.macro_flag.is_(None)))  # noqa: E712
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.macro_flag) == self.flagged
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "flagged": self.flagged}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MacroFlagFilter":
+        return cls(flagged=data["flagged"])
+
+
 class DnfFilter(BaseFilter):
     """Keep caches based on DNF (Did Not Find) flag."""
     filter_type = "dnf"
@@ -3314,6 +3366,8 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
     "locked":             LockedFilter,
+    "macro_flag":         MacroFlagFilter,
+    "is_owner":           IsOwnerFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
     "user_note":          UserNoteFilter,
@@ -3488,6 +3542,9 @@ SORT_FIELDS: dict[str, Any] = {
     "user_data_2":     lambda c: (c.user_data_2 or "").lower(),
     "user_data_3":     lambda c: (c.user_data_3 or "").lower(),
     "user_data_4":     lambda c: (c.user_data_4 or "").lower(),
+    # Macros' own sort text (GSAK's MacroSort, #1139): opensak.sort("macro_sort").
+    # Text, so sorted in Python like user_data (see _sql_order_expr).
+    "macro_sort":      lambda c: (c.macro_sort or "").lower(),
     # ── Issue #658: additional GSAK-compatible columns — placeholders, same
     # reasoning as log_count/last_log/corrected above: real sorting happens
     # in CacheTableModel.sort() when the user clicks the column header.

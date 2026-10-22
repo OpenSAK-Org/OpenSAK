@@ -366,6 +366,34 @@ def insert_cache(session, values: dict[str, Any], refresh: bool = True) -> str:
     return code
 
 
+# opensak.macro_flag(): the new value per action, and which rows it changes.
+MACRO_FLAG_ACTIONS: dict[str, tuple[str, str]] = {
+    "set": ("1", "macro_flag IS NOT 1"),
+    "clear": ("0", "macro_flag IS NOT 0"),
+    "swap": ("CASE WHEN macro_flag THEN 0 ELSE 1 END", "1"),
+}
+
+
+def set_macro_flag(session, action: str, codes: Optional[list[str]]) -> list[str]:
+    """Set, clear or swap macro_flag on the caches *codes*, or on all caches
+    for None (GSAK's MACROFLAG). Returns the codes of the caches changed."""
+    from sqlalchemy import text
+
+    value, changes = MACRO_FLAG_ACTIONS[action]
+    sql = f"UPDATE caches SET macro_flag = {value} WHERE {changes}"
+    if codes is None:
+        return [r[0] for r in session.execute(text(sql + " RETURNING gc_code"))]
+    changed: list[str] = []
+    for start in range(0, len(codes), CHUNK_SIZE):
+        chunk = codes[start:start + CHUNK_SIZE]
+        names = [f"c{n}" for n in range(len(chunk))]
+        marks = ", ".join(f":{n}" for n in names)
+        changed += [r[0] for r in session.execute(
+            text(f"{sql} AND gc_code IN ({marks}) RETURNING gc_code"), dict(zip(names, chunk))
+        )]
+    return changed
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 

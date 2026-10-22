@@ -552,3 +552,92 @@ def test_sql_write_of_a_user_field_still_stamps_last_user_update():
     c = _cache("GCG9")
     assert (c.user_flag, c.macro_flag, c.symbol) == (True, True, "Geocache")
     assert c.last_user_update is not None
+
+
+# ── opensak.macro_flag() and sorting by macro_sort ───────────────────────────
+
+class FilterHost(Host):
+    """A Host whose active filter shows *codes*."""
+
+    def __init__(self, codes, answer=WriteApproval.SESSION):
+        super().__init__(answer)
+        self.codes = codes
+
+    def filtered_caches(self):
+        return [Cache(gc_code=c) for c in self.codes]
+
+
+def _macro_flags(*codes) -> list[bool]:
+    return [_cache(c).macro_flag for c in codes]
+
+
+def test_macro_flag_set_clear_and_swap():
+    for code in ("GCMF1", "GCMF2", "GCMF3"):
+        _add_cache(code)
+    host, out = _run("""
+        print(opensak.macro_flag("set", {"gcmf1", "GCMF2"}))
+        print(opensak.macro_flag("SET", "GCMF1"))         -- already set: no change
+        print(opensak.macro_flag("swap", {"GCMF2", "GCMF3"}))
+        print(opensak.macro_flag("clear", "GCMF1"), opensak.macro_flag("set", {}))
+    """)
+    assert out == ["2", "0", "2", "1	0"]
+    assert _macro_flags("GCMF1", "GCMF2", "GCMF3") == [False, False, True]
+    assert host.changed == [(["GCMF1", "GCMF2"], False), (["GCMF2", "GCMF3"], False),
+                            (["GCMF1"], False)]
+    assert _cache("GCMF3").last_user_update is None      # not a user field
+
+
+def test_macro_flag_defaults_to_the_active_filter_and_all_takes_every_cache():
+    for code in ("GCMF4", "GCMF5"):
+        _add_cache(code)
+    _, out = _run('print(opensak.macro_flag("set"))', FilterHost(["GCMF4"]))
+    assert out == ["1"] and _macro_flags("GCMF4", "GCMF5") == [True, False]
+    _, out = _run('print(opensak.macro_flag("set", { all = true }) > 0)')
+    assert out == ["true"]
+    with get_session() as s:
+        assert s.query(Cache).filter(Cache.macro_flag == False).count() == 0  # noqa: E712
+    _run('opensak.macro_flag("clear", { all = true })')
+    with get_session() as s:
+        assert s.query(Cache).filter(Cache.macro_flag == True).count() == 0  # noqa: E712
+
+
+def test_macro_flag_inside_a_transaction_is_undone_with_it():
+    _add_cache("GCMF6")
+    _run("""
+        pcall(opensak.transaction, function()
+            opensak.macro_flag("set", "GCMF6")
+            error("undo")
+        end)
+    """)
+    assert _macro_flags("GCMF6") == [False]
+
+
+@pytest.mark.parametrize("call, msg", [
+    ('opensak.macro_flag("toggle", "GCW4")', 'must be "set", "clear" or "swap"'),
+    ("opensak.macro_flag()", 'must be "set", "clear" or "swap"'),
+    ('opensak.macro_flag("set", 5)', "expects a GC code, a list of codes"),
+    ('opensak.macro_flag("set", { all = 1 })', "all must be true"),
+])
+def test_macro_flag_rejects_bad_input_without_asking(call, msg):
+    host = Host()
+    with pytest.raises(MacroError, match=msg):
+        _run(call, host)
+    assert host.asked == []
+
+
+def test_macro_flag_needs_approval():
+    _add_cache("GCMF7")
+    with pytest.raises(MacroError, match="did not allow"):
+        _run('opensak.macro_flag("set", "GCMF7")', Host(WriteApproval.DENY))
+    assert _macro_flags("GCMF7") == [False]
+
+
+def test_sort_by_macro_sort_orders_the_caches():
+    from opensak.filters.engine import FilterSet, GcCodeFilter, SortSpec, apply_filters
+    for code, key in (("GCMS1", "b"), ("GCMS2", None), ("GCMS3", "A")):
+        _add_cache(code, macro_sort=key)
+    fs = FilterSet().add(GcCodeFilter("GCMS1;GCMS2;GCMS3", op="in_list"))
+    with get_session() as s:
+        codes = [c.gc_code for c in apply_filters(s, fs, SortSpec("macro_sort"))]
+    assert codes == ["GCMS2", "GCMS3", "GCMS1"]          # empty first, then case-insensitive
+

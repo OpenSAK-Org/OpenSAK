@@ -79,7 +79,9 @@ from opensak.filters.engine import (
     HasCorrectedFilter,
     HasTrackableFilter,
     LinePolygonFilter,
+    IsOwnerFilter,
     LockedFilter,
+    MacroFlagFilter,
     NameFilter,
     NoCorrectedFilter,
     NonPremiumFilter,
@@ -140,9 +142,11 @@ from opensak.macro.cache_data import (
 )
 from opensak.macro import db_access
 from opensak.macro.cache_write import (
+    MACRO_FLAG_ACTIONS,
     CacheWriteError,
     insert_cache,
     parse_values,
+    set_macro_flag,
     update_cache,
 )
 from opensak.macro.child_write import (
@@ -382,6 +386,9 @@ _FLAG_FILTERS: dict[str, tuple[Callable[[], Any], Callable[[], Any]]] = {
     "corrected": (HasCorrectedFilter, NoCorrectedFilter),
     "user_flag": (lambda: UserFlagFilter(True), lambda: UserFlagFilter(False)),
     "locked": (lambda: LockedFilter(True), lambda: LockedFilter(False)),
+    "macro_flag": (lambda: MacroFlagFilter(True), lambda: MacroFlagFilter(False)),
+    # The `owned` cache field (is_owner), not a match on the owner name.
+    "owned": (lambda: IsOwnerFilter(True), lambda: IsOwnerFilter(False)),
     "dnf": (lambda: DnfFilter(True), lambda: DnfFilter(False)),
     "ftf": (lambda: FtfFilter(True), lambda: FtfFilter(False)),
     "premium": (PremiumFilter, NonPremiumFilter),
@@ -407,7 +414,6 @@ FILTER_KEYS = sorted(
         "near",
         "distance",
         "bearing",
-        "owned",
         "attributes",
         "favorites",
         "elevation",
@@ -453,6 +459,7 @@ SORT_KEYS = {
     "user_data2": "user_data_2",
     "user_data3": "user_data_3",
     "user_data4": "user_data_4",
+    "macro_sort": "macro_sort",
 }
 
 
@@ -486,13 +493,13 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
                  "Only archived caches, or only caches that are not archived."),
     FilterKeyDoc(("corrected",), "boolean", "true | false",
                  "With or without corrected coordinates."),
-    FilterKeyDoc(("user_flag", "locked", "dnf", "ftf", "premium"), "boolean",
+    FilterKeyDoc(("user_flag", "locked", "macro_flag", "dnf", "ftf", "premium"), "boolean",
                  "true | false", "That flag set, or not set."),
     FilterKeyDoc(("has_trackables",), "boolean", "true | false",
                  "With or without trackables in the cache."),
     FilterKeyDoc(("owned",), "boolean", "true | false",
-                 "Owned by you (owner = your geocaching.com username in "
-                 "Settings), or not."),
+                 "Owned by you, or not: the `owned` cache field (owner ID = "
+                 "your finder ID, or owner name = your username in Settings)."),
     FilterKeyDoc(("near",), "table",
                  '{lat = 47.37, lon = 8.54, km = 10} | {point = "Home", km = 10}',
                  "Within `km` of a coordinate or of a saved centre point."),
@@ -1108,14 +1115,6 @@ def _parse_saved_filter(saved: Any) -> tuple[FilterSet, str]:
         raise bad from None
 
 
-def _owned_filter(value: Any) -> OwnerFilter:
-    from opensak.gui.settings import get_settings
-    username = get_settings().gc_username.strip()
-    if not username:
-        raise MacroError("owned: set your geocaching.com username in Settings first")
-    return OwnerFilter(username, op="equals" if _bool_value("owned", value) else "not_equals")
-
-
 def build_filterset(
     spec: dict, polygon: Optional[Callable[[Any], list[tuple[float, float]]]] = None
 ) -> tuple[FilterSet, str]:
@@ -1153,8 +1152,6 @@ def build_filterset(
     for key, (on, off) in _FLAG_FILTERS.items():
         if key in spec:
             fs.add(on() if _bool_value(key, spec[key]) else off())
-    if "owned" in spec:
-        fs.add(_owned_filter(spec["owned"]))
     if "near" in spec:
         fs.add(_near_filter(spec["near"]))
     if "distance" in spec:
@@ -1683,6 +1680,34 @@ class MacroRuntime:
         if found:
             self._host.caches_changed([gc_code], False)
         return found
+
+    def _macro_flag(self, action=None, target=None) -> int:
+        func = "opensak.macro_flag"
+        if not isinstance(action, str) or action.lower() not in MACRO_FLAG_ACTIONS:
+            raise MacroError(f'{func}: action must be "set", "clear" or "swap", got {action!r}')
+        codes: Optional[list[str]]
+        if target is None:
+            codes = self._active_codes()
+        elif isinstance(target, str):
+            codes = [_gc_code(target, func)]
+        elif hasattr(target, "items") and dict(target.items()).keys() == {"all"}:
+            if dict(target.items())["all"] is not True:
+                raise MacroError(f"{func}: all must be true")
+            codes = None
+        elif hasattr(target, "values"):
+            codes = [_gc_code(c, func) for c in _as_list(target)]
+        else:
+            raise MacroError(
+                f"{func} expects a GC code, a list of codes or {{ all = true }}, got {target!r}"
+            )
+        if codes == []:
+            return 0
+        self._require_write(func)
+        with self._active_session() as session:
+            changed = set_macro_flag(session, action.lower(), codes)
+        if changed:
+            self._host.caches_changed(sorted(changed), False)
+        return len(changed)
 
     def _update_in_transaction(self, gc_code: str, parsed: dict[str, Any]) -> bool:
         with self._active_session() as session:
@@ -4800,7 +4825,8 @@ API: tuple[ApiFunction, ...] = (
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
                 'print("Easy unfound traditionals: " .. n)',
         since=1,
-        changed=((3, "added the key `last_user_update`"),),
+        changed=((3, "added the keys `last_user_update` and `macro_flag`; `owned` "
+                     "uses the `owned` cache field"),),
         bind=lambda rt, lua: rt._filter,
         params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
         returns=("integer", "Number of matching caches (0 = view unchanged)."),
@@ -4821,9 +4847,13 @@ API: tuple[ApiFunction, ...] = (
         description="Sort the cache list, like a click on a column header. "
                     "opensak.caches() and opensak.codes() then return the "
                     "caches in this order. Fields: "
-                    + ", ".join(f"`{k}`" for k in SORT_KEYS) + ".",
+                    + ", ".join(f"`{k}`" for k in SORT_KEYS) + ". "
+                    "`macro_sort` has no column in the cache list, so no "
+                    "column header shows the sort; it compares as text, so "
+                    'pad numbers ("0042").',
         example='opensak.sort("difficulty", "desc")',
         since=2,
+        changed=((3, "added `macro_sort`"),),
         bind=lambda rt, lua: rt._sort,
         params=(
             Param("field", "string", "A cache field, e.g. \"difficulty\"."),
@@ -5445,6 +5475,29 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._update,
         params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
         returns=("boolean", "false if the cache is not in the database."),
+        write=True,
+    ),
+    ApiFunction(
+        name="macro_flag",
+        description="Set, clear or swap the macro flag (field `macro_flag`) of "
+                    "many caches at once, like GSAK's MACROFLAG: the caches of "
+                    "the active filter, the given GC code(s), or `{ all = true }` "
+                    "for every cache of the active database. The macro flag is "
+                    "the macros' own, separate from the user flag; filter with "
+                    "`filter{ macro_flag = true }`. Needs the user's permission "
+                    "like opensak.update().",
+        example='opensak.macro_flag("clear", { all = true })\n'
+                'for c in opensak.caches{ fields = {"difficulty"} } do\n'
+                '    if c.difficulty and c.difficulty >= 4 then opensak.macro_flag("set", c.code) end\n'
+                "end\n"
+                "opensak.filter{ macro_flag = true }",
+        since=3,
+        bind=lambda rt, lua: rt._macro_flag,
+        params=(Param("action", '"set"|"clear"|"swap"', "What to do with the flag."),
+                Param("caches", "string|string[]|{all: true}",
+                      "A GC code, a list of codes or { all = true }; default: the "
+                      "caches of the active filter.", optional=True)),
+        returns=("integer", "The number of caches whose flag changed."),
         write=True,
     ),
     ApiFunction(

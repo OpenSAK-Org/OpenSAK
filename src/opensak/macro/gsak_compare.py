@@ -45,10 +45,10 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GetPolygon | ✅ | `coords.inside()`, `filter{polygon=}` |
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
-| IsOwner | ✅ partial | `owned` cache field, `filter{owned=true}`; no log-owner check |
+| IsOwner | ✅ partial | `owned` cache field and `filter{owned=true}` (both follow the account in Settings); no log-owner check |
 | Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
 | MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
-| MacroFlag | ✅ β | read `macro_flag`; write `update(code, {macro_flag=})`, `sql_write`; filter with `filter{where="macro_flag = 1"}` |
+| MacroFlag | ✅ β | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
