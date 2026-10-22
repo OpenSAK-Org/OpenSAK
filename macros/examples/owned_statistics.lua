@@ -447,7 +447,9 @@ local page = html.page{
     html.table(received, { columns = { { "key", "Log type" }, { "count", "Logs" } }, bars = { "count" } }),
 
     "<h2>Where your caches are</h2>",
-    chart.points(caches, { label = "name", width = 900 }),
+    -- States, not countries: caches in one small area would otherwise show
+    -- no border at all.
+    chart.points(caches, { label = "name", layer = "state", width = 900 }),
 }
 
 local path = opensak.write_text(FILE, page)
