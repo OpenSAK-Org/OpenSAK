@@ -1134,13 +1134,39 @@ class MainWindow(QMainWindow):
         # Issue #549: opening the database may just have migrated it.
         self.show_premigration_backup_notices()
 
+    def show_companion_notices(self) -> None:
+        """
+        Tell the user about companion databases (#1034) that opening a
+        database could not use: a damaged one (moved aside), one of another
+        database, or one from a newer OpenSAK. A no-op when there are none.
+        """
+        from opensak.db import companion
+        notices = companion.take_notices()
+        if not notices:
+            return
+        keys = {
+            companion.NOTICE_CORRUPT: "companion_corrupt_msg",
+            companion.NOTICE_FOREIGN: "companion_foreign_msg",
+            companion.NOTICE_NEWER: "companion_newer_msg",
+        }
+        text = "\n\n".join(
+            tr(keys[n.kind], file=n.db_path.name, path=str(n.path))
+            for n in notices if n.kind in keys
+        )
+        if text:
+            QMessageBox.warning(self, tr("companion_notice_title"), text)
+
     def show_premigration_backup_notices(self) -> None:
         """
         Tell the user about databases that were backed up before a schema
         migration (issue #549), so the backup isn't a silent background
         action they never find out about. Called after startup and after
         switching databases; a no-op when no backup was made.
+
+        Also shows what opening the database found about its companion
+        database (#1034, show_companion_notices()).
         """
+        self.show_companion_notices()
         from opensak.backup.premigration import take_notices
         notices = take_notices()
         if not notices:
