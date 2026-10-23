@@ -343,8 +343,79 @@ _BETA = ("Beta: only available while the `lua-macro-write` feature flag "
          "is on, as it is in beta builds; check with `if opensak.attach then`.")
 
 
+# Appended to those that need the companion-db feature flag
+_COMPANION_BETA = ("Beta: only available while the `companion-db` feature flag "
+                   "is on (not yet in release builds); check with "
+                   "`if opensak.companion then`.")
+
+
 def _beta_note(func: ApiFunction) -> str | None:
+    if func.companion:
+        return _COMPANION_BETA
     return _WRITE_BETA if func.write else _BETA if func.beta else None
+
+
+def _companion_section() -> list[str]:
+    return [
+        "",
+        "## The companion database",
+        "",
+        "Beta: only available while the `companion-db` feature flag is on.",
+        "",
+        "Every OpenSAK database can have a companion database next to it "
+        "(`Found.db` → `Found.companion.db3`) for data that doesn't fit the "
+        "cache tables: per-cache data a macro collects (FTF information, "
+        "solver notes, lookups), or tables one macro fills and others use. "
+        "Unlike `opensak.macro_db()`, which is private to one macro, it "
+        "belongs to the database and is shared by all macros. "
+        "`opensak.companion()` creates it; from then on it is attached to "
+        "every macro run as schema `companion`.",
+        "",
+        "| | `opensak.macro_db()` | companion database |",
+        "|---|---|---|",
+        "| One per | macro (`foo.lua` → `foo.db3`) | database |",
+        "| Read | the macro | every macro |",
+        "| Write | the macro | the owner of the table: the macro that created it |",
+        "| Rows follow their caches | no | yes, in tables with a `gc_code` column |",
+        "| Follows its database on copy, move, rename, delete, backup | no | yes |",
+        "",
+        "A macro creates its tables, indexes and views with plain SQL "
+        "(`CREATE TABLE companion.<name> …`) through `opensak.sql()`, "
+        "`opensak.sql_each()` or `opensak.sql_write()`, and OpenSAK records "
+        "the macro's file as their owner. Only the owner can change, alter "
+        "or drop them; every other macro can read them. A moved or renamed "
+        "macro file is a new owner. Tables starting with `opensak_` belong "
+        "to OpenSAK (`opensak_tables` lists the tables with their owners) "
+        "and are read-only. Triggers can't be created there.",
+        "",
+        "A table with a `gc_code` column is *cache-linked*: its rows belong "
+        "to the cache with that code. When caches are deleted, their rows "
+        "are deleted; when they are copied or moved to another database, "
+        "their rows go along, and the table is created there if needed. Rows "
+        "whose cache is gone (after a crash) are removed when the database "
+        "is opened. `opensak.companion_table{ name = ..., linked = false }` "
+        "turns that off for a table; `code_column` names another column.",
+        "",
+        *_code(
+            "-- ftf.lua: collects FTF information\n"
+            "opensak.companion()\n"
+            'opensak.sql("CREATE TABLE IF NOT EXISTS companion.ftf_info "\n'
+            '    .. "(gc_code TEXT PRIMARY KEY, ftf_date TEXT, ftf_by TEXT)")\n'
+            'opensak.sql("INSERT INTO companion.ftf_info VALUES (?, ?, ?) "\n'
+            '    .. "ON CONFLICT (gc_code) DO UPDATE SET ftf_date = excluded.ftf_date, "\n'
+            '    .. "ftf_by = excluded.ftf_by", { "GC12345", "2024-05-01", "someone" })\n'
+            'opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
+            "\n"
+            "-- any other macro: reads it\n"
+            'for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name, f.ftf_date "\n'
+            '        .. "FROM caches c JOIN companion.ftf_info f USING (gc_code)")) do\n'
+            "    print(r.gc_code, r.name, r.ftf_date)\n"
+            "end"
+        ),
+        "",
+        "`opensak.attach()` attaches a database's companion along with it, "
+        "read-only, as `<schema>_companion`.",
+    ]
 
 
 def _attach_section() -> list[str]:
@@ -643,6 +714,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "database with the active one in one statement, see "
         "[Several databases in one query](#several-databases-in-one-query).",
         *_attach_section(),
+        *_companion_section(),
         "",
         *_forms_section(),
         "## Cache fields",
@@ -742,6 +814,25 @@ def render_lua_stub() -> str:
         "---Options of the read functions (`opensak.cache()`, `opensak.sql()`, ...).",
         "---@class opensak.ReadOptions",
         "---@field database? string Read this database instead of the active one.",
+        "",
+        "---The table of `opensak.companion_table{}`.",
+        "---@class opensak.CompanionTableSpec",
+        "---@field name string A table or view of the running macro in the companion database.",
+        "---@field linked? boolean Cache-linked: its rows follow their caches.",
+        "---@field code_column? string The column with the GC code (default `gc_code`); implies `linked`.",
+        "---@field description? string Shown with the table in OpenSAK.",
+        "",
+        "---A table or view in the companion database, from `opensak.companion_tables()`.",
+        "---@class opensak.CompanionTable",
+        "---@field name string Table or view name, used as `companion.<name>`.",
+        '---@field type "table"|"view"',
+        "---@field owner? string The owner's key: the macro file's path, or `opensak`; nil without an owner.",
+        "---@field owner_name? string The owner's name, for display.",
+        "---@field mine boolean The running macro owns it, so it can change it.",
+        '---@field kind "cache"|"free" `cache`: cache-linked, its rows follow their caches.',
+        "---@field code_column? string For a cache-linked table: the column with the GC code.",
+        "---@field description? string",
+        "---@field rows? integer Number of rows (tables only).",
         "",
         "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
         "---@class opensak.TransferOptions",
