@@ -17,6 +17,7 @@ import logging
 import re
 import sqlite3
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Generator, Iterable, Iterator, cast
@@ -26,7 +27,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
-from opensak.db import companion, maintenance
+from opensak.db import companion, custom_fields, maintenance
 from opensak.db.models import Base
 from opensak.utils import flags
 
@@ -69,6 +70,11 @@ def _attach_companion_on_checkout(engine: Engine, db_path: Path) -> None:
     engine is open is attached by the next session without reopening the
     database. A connection never has a transaction open at checkout, which
     ATTACH needs.
+
+    It also keeps the ``caches_all`` TEMP view (custom fields, #1028) of
+    each connection up to date (db/custom_fields.py), once _open_engine()
+    is done with the schema: a TEMP view on ``caches`` makes SQLite refuse
+    the table rebuilds of the migrations.
     """
     if not flags.companion_db:
         return
@@ -76,12 +82,18 @@ def _attach_companion_on_checkout(engine: Engine, db_path: Path) -> None:
 
     @event.listens_for(engine, "checkout")
     def _attach(dbapi_connection, connection_record, _proxy) -> None:
-        if connection_record.info.get("companion_attached"):
-            return
-        if companion.status_for_key(key) is not companion.Status.OK:
-            return
-        if companion.attach(dbapi_connection, db_path):
-            connection_record.info["companion_attached"] = True
+        info = connection_record.info
+        if (not info.get("companion_attached")
+                and companion.status_for_key(key) is companion.Status.OK
+                and companion.attach(dbapi_connection, db_path)):
+            info["companion_attached"] = True
+        if engine in _schema_ready:
+            custom_fields.ensure_view(
+                dbapi_connection, db_path, info, bool(info.get("companion_attached")))
+
+
+# Engines whose schema _open_engine() has brought up to date.
+_schema_ready: "weakref.WeakSet[Engine]" = weakref.WeakSet()
 
 
 @event.listens_for(Engine, "connect")
@@ -218,6 +230,9 @@ def _open_engine(db_path: Path) -> Engine:
         # schema, so the connections can attach it. Never raises.
         if flags.companion_db:
             companion.prepare(db_path)
+            # Custom fields (#1028): add or rename columns as the
+            # definitions say. Never raises.
+            custom_fields.on_open(db_path)
 
         # Create all tables that don't exist yet (safe to call multiple times).
         logger.info("open_db: opening %s", db_path)
@@ -229,6 +244,7 @@ def _open_engine(db_path: Path) -> Engine:
         if db_path not in _migrated_paths:
             _run_migrations(new_engine)
             _migrated_paths.add(db_path)
+        _schema_ready.add(new_engine)
     except Exception:
         new_engine.dispose()
         raise
@@ -1385,6 +1401,10 @@ def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]
         "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=:t "
         "AND sql IS NOT NULL"
     ), {"t": table}).scalars().all()
+
+    # A TEMP view on the table (caches_all, custom fields) makes SQLite
+    # refuse the RENAME below; it is made again on the next checkout.
+    custom_fields.drop_view(conn)
 
     # Raw SQL from sqlite_master: exec_driver_sql, so nothing in it is taken
     # for a bind parameter.

@@ -99,11 +99,12 @@ same as the GPX importer's ``_upsert_cache``.
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import inspect, update
 from sqlalchemy.orm import Session
@@ -118,7 +119,13 @@ from opensak.importer import (
 from opensak.utils.constants import ATTRIBUTES
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.lang import tr
+from opensak.utils import flags
 from opensak.utils.timestamps import local_to_utc, utc_now
+
+if TYPE_CHECKING:
+    from opensak.importer.gsak_custom_fields import CustomFieldImportResult
+
+logger = logging.getLogger(__name__)
 
 
 # ── GSAK CacheType single-letter code -> OpenSAK cache_type string ──────────
@@ -390,6 +397,8 @@ class GsakImportResult(ImportResult):
         self.note_images_replaced: int = 0
         self.trackables: int = 0
         self.encoding_fallbacks: int = 0
+        # Custom fields (#1028), when the companion database is on; else None.
+        self.custom_fields: Optional["CustomFieldImportResult"] = None
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -1351,6 +1360,7 @@ def import_gsak_db(
     session: Session,
     progress_cb=None,
     batch_size: int = 200,
+    settings_db: Optional[Path] = None,
 ) -> GsakImportResult:
     """
     Import a GSAK ``sqlite.db3`` file directly into OpenSAK (scope:
@@ -1366,6 +1376,10 @@ def import_gsak_db(
         Called as ``progress_cb(done, total)`` after each batch.
     batch_size : int
         Caches per SAVEPOINT batch (see :func:`_flush_gsak_batch`).
+    settings_db : Path, optional
+        GSAK's ``gsak.db3``, for the definitions of global custom fields.
+        Custom fields are imported only while the ``companion-db`` feature
+        flag is on (importer/gsak_custom_fields.py).
     """
     result = GsakImportResult()
     db_path = Path(db_path)
@@ -1393,6 +1407,7 @@ def import_gsak_db(
         _enter_bulk_import_pragmas(session)
 
         batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]] = []
+        codes: list[str] = []
         done = 0
         source = str(db_path)
 
@@ -1405,6 +1420,7 @@ def import_gsak_db(
                 result.warnings.append(tr("gsak_warn_skipped_row", row=done))
             else:
                 gc_code = data["gc_code"]
+                codes.append(gc_code)
                 batch.append((
                     data,
                     attrs_by_code.get(gc_code, []),
@@ -1424,9 +1440,32 @@ def import_gsak_db(
             _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result)
             session.commit()
 
+        if flags.companion_db:
+            _import_custom_fields(conn, session, codes, settings_db, result)
+
     finally:
         _exit_bulk_import_pragmas(session)
         conn.close()
 
     result.encoding_fallbacks = fallback_counter[0]
     return result
+
+
+def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: list[str],
+                          settings_db: Optional[Path], result: GsakImportResult) -> None:
+    """Custom fields into the target's companion database, after the caches
+    are committed. A failure is reported; the caches stay imported."""
+    from opensak.db.companion import CompanionError
+    from opensak.db.custom_fields import CustomFieldError
+    from opensak.importer.gsak_custom_fields import import_custom_fields
+
+    target = session.get_bind().engine.url.database
+    if not target:
+        return
+    try:
+        result.custom_fields = import_custom_fields(conn, Path(target), codes, settings_db)
+    except (sqlite3.Error, OSError, CompanionError, CustomFieldError) as exc:
+        logger.warning("GSAK import: custom fields not imported", exc_info=True)
+        result.errors.append(f"Custom fields not imported: {exc}")
+        return
+    result.warnings.extend(result.custom_fields.messages)

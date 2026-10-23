@@ -579,6 +579,16 @@ def copy_rows(source_db: Path, target_db: Path, codes: Iterable[str]) -> int:
         return 0
     try:
         conn.execute(f"ATTACH DATABASE ? AS {_SOURCE_ALIAS}", (str(source),))
+        # Custom fields (#1028): the target needs the fields before their
+        # values, or columns it lacks would be left out below.
+        from opensak.db import custom_fields
+        try:
+            with conn:
+                custom_fields.copy_definitions(conn, _SOURCE_ALIAS)
+            custom_fields.changed(target_db)
+        except sqlite3.Error as exc:
+            logger.warning("companion: custom field definitions not copied to %s: %s",
+                           target, exc)
         for name, column in tables:
             try:
                 with conn:

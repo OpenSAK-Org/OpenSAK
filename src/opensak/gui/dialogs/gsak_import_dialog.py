@@ -47,6 +47,7 @@ from opensak.importer.gsak_import_service import (  # noqa: F401 — re-exported
     TARGET_BLOCKED, TARGET_EXISTING, TARGET_NEW, TARGET_ORPHAN,
 )
 from opensak.lang import tr
+from opensak.utils import flags
 from opensak.gui.theme import hint_style
 
 logger = logging.getLogger(__name__)
@@ -90,9 +91,11 @@ class GsakImportWorker(QThread):
     # from inside run() itself).
 
     def __init__(self, db3_path: Path, target_db_path: Path | None = None,
-                 replace: bool = False, update_distances: bool = True):
+                 replace: bool = False, update_distances: bool = True,
+                 settings_db: Path | None = None):
         super().__init__()
         self.db3_path = db3_path
+        self.settings_db = settings_db        # gsak.db3: global custom fields
         self.target_db_path = target_db_path  # None → use currently active DB
         self.replace = replace                # empty the target DB first
         # False when a later job of the same run imports into the same
@@ -124,6 +127,7 @@ class GsakImportWorker(QThread):
                 result = import_gsak_db(
                     self.db3_path, session,
                     progress_cb=lambda done, total: self.progress.emit(done, total),
+                    settings_db=self.settings_db,
                 )
             self.result_ready.emit(result)
             if self.update_distances:
@@ -220,6 +224,10 @@ class GsakImportDialog(QDialog):
         self._wants_filters = False             # migrate gsak.db3's filters at the end
         self._wants_locations = False           # migrate gsak.db3's user locations at the end
         self._stage_settings = False            # the running extraction is gsak.db3
+        # gsak.db3 on disk once known: unpacked before the databases when
+        # their custom fields need its global definitions (#1028).
+        self._settings_db: Optional[Path] = None
+        self._stage_settings_first = False      # ... and that extraction is running
         self._images_confirmed = False          # #472 warning answered with Continue
         self._changed = False                   # any cache created/updated this run
         self._setup_ui()
@@ -622,6 +630,14 @@ class GsakImportDialog(QDialog):
         self._set_busy(True)
         if self._contents.is_zip:
             self._temp_dir = Path(tempfile.mkdtemp(prefix="gsak_import_"))
+        self._settings_db = self._contents.settings_path
+        if (flags.companion_db and jobs and self._contents.settings_member is not None
+                and self._temp_dir is not None):
+            # The global custom fields are defined in gsak.db3 (#1028).
+            self._stage_settings_first = True
+            self._start_extract(self._contents.settings_member,
+                                self._temp_dir / "settings", 0)
+            return
         self._run_next_job()
 
     def _current_job(self) -> Optional[GsakImportJob]:
@@ -682,6 +698,12 @@ class GsakImportDialog(QDialog):
         path = (self._extracted or {}).get("file")
         self._extracted = None
 
+        if self._stage_settings_first:
+            self._stage_settings_first = False
+            self._settings_db = path          # None: unpacking failed (logged)
+            self._run_next_job()
+            return
+
         if self._stage_settings:
             self._stage_settings = False
             if path is not None:
@@ -724,6 +746,7 @@ class GsakImportDialog(QDialog):
         worker = GsakImportWorker(
             job.db3_path, target_db_path=job.target_path, replace=job.replace,
             update_distances=all(j.target_name != job.target_name for j in later),
+            settings_db=self._settings_db,
         )
         worker.progress.connect(self._on_progress)
         worker.cleared.connect(
@@ -837,6 +860,10 @@ class GsakImportDialog(QDialog):
         if not (self._wants_filters or self._wants_locations) or contents is None:
             self._finish()
             return
+        if self._settings_db is not None:
+            self._run_settings_imports(self._settings_db)
+            self._finish()
+            return
         if contents.settings_member is not None and self._temp_dir is not None:
             self._stage_settings = True
             self._start_extract(contents.settings_member, self._temp_dir / "settings", 0)
@@ -882,6 +909,9 @@ class GsakImportDialog(QDialog):
             f"  {tr('corrected_dialog_corrected'):<28} {result.corrected}",
             f"  {tr('import_skipped'):<28} {result.skipped}",
         ]
+        if result.custom_fields is not None and result.custom_fields.fields:
+            lines.insert(-1, f"  {tr('gsak_import_custom_fields'):<28} "
+                             f"{result.custom_fields.fields}")
         if result.warnings:
             lines.append(tr("gsak_import_warnings_header", count=len(result.warnings)))
             for w in result.warnings[:10]:

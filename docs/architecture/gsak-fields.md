@@ -1,6 +1,6 @@
 # Full GSAK Field Compatibility — Design (Epic #1028)
 
-*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, and 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141). The custom-field storage model (runtime-built model, local and global fields, field ids) is now agreed in principle; the macro API shape and computed fields are still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
+*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141), and 23 October 2026 when custom fields moved to the companion database (#1034, epic #1149) and their storage and GSAK import were implemented (step 3). The macro API shape is still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
 
 ## Summary
 
@@ -131,36 +131,44 @@ Copy GSAK's shape rather than a generic name/value (EAV) table. Agreed with nagi
 
 #### Storage
 
+Custom fields live in the database's **companion database** (`Found.db` → `Found.companion.db3`, `db/companion.py`, #1034), not in the main file, owned by OpenSAK. Code: `db/custom_fields.py`.
+
 ```
-custom_fields                       -- definitions, one row per field (normal ORM model in models.py)
+custom_fields                       -- definitions, one row per field (registry kind 'free')
   field_id    TEXT PRIMARY KEY      -- stable UUID; schema changes match on this, never on name
   name        TEXT UNIQUE           -- case-insensitive, validated identifier
   type        TEXT                  -- string | integer | real | date | boolean
   position    INTEGER               -- display order
-  default     TEXT
-  expression  TEXT NULL             -- set → computed field, no stored column
+  default_value TEXT                -- as text, as GSAK stores it
+  expression  TEXT NULL             -- GSAK's fexpression, kept; not evaluated yet (see Computed fields)
   control     TEXT, height INTEGER  -- kept for round-trip, UI may ignore at first
   scope       TEXT                  -- 'local' | 'global'
   origin      TEXT                  -- 'gsak' | 'opensak' (where the definition came from)
   orphaned    BOOLEAN               -- column kept after its field was deleted, see below
 
-custom_values                       -- one row per cache, built at runtime
-  cache_id    INTEGER PRIMARY KEY REFERENCES caches(id) ON DELETE CASCADE
-  <field>     <type> NOT NULL DEFAULT <default>   -- one real column per stored field
+custom_values                       -- at most one row per cache (registry kind 'cache')
+  gc_code     TEXT PRIMARY KEY      -- not cache_id: a foreign key can't point into another file
+  <field>     <type>                -- one real column per stored field, nullable, no default
 ```
 
-- A trigger creates the `custom_values` row for every new cache, and the columns are `NOT NULL DEFAULT …`. That way a GSAK clause like `Angel = 0` also matches caches nobody has touched — the same behaviour as GSAK's `Custom` trigger.
-- **Local fields** are stored only in the database file.
-- **Global fields** have their master definition in the app settings (next to the other app-wide settings handled by `settings_store`). Each database also keeps a copy of the definition (`scope = 'global'`), so a backup or a copied database stays self-contained and can be opened on another machine without the global master.
+- **Keyed by GC code**, the same in every database (GSAK's `Custom.cCode` too). OpenSAK does the cascade itself: the companion's housekeeping deletes the rows with their caches, copies them on move/copy and removes orphans when the database is opened (#1034).
+- **No row is needed for an untouched cache, and the columns are nullable.** A trigger in the main database can't write into another file, so instead the `caches_all` view (below) shows `COALESCE(value, default)`. A GSAK clause like `Angel = 0` still matches caches nobody has touched, and changing a default is only a change of the definition.
+- **Local fields** are stored only in the database's companion.
+- **Global fields** have their master definition in the app settings (`custom_fields.global`, `settings_store`; deleted ids in `custom_fields.global_deleted`). Each database also keeps a copy of the definition (`scope = 'global'`), so a backup or a copied database stays self-contained and can be opened on another machine without the global master.
+- **Lazy:** a database gets its companion only when something is stored. A global field alone doesn't create one; until the database stores a value, `caches_all` shows the field's default as a constant. The first value written stores the definition and adds the column.
+
+#### The `caches_all` view
+
+SQLite doesn't let a view in one file refer to another, so `caches_all` is a **TEMP view**, created on each connection of the database engines (the active database and `session_for()`) when it is checked out: `caches.*` plus one column per field (local and global), `COALESCE(cv.<field>, <default>)`, from `caches LEFT JOIN companion.custom_values`. It is rebuilt when the definitions change. Ported GSAK SQL using `CachesAll` can use it.
 
 #### Model built at runtime
 
 Custom fields are defined by the user, not at build time, so `custom_values` cannot be a normal declarative model.
 
 - `custom_values` is mapped at runtime from the global and local definitions with `registry.map_imperatively`, using its **own `MetaData`** so `create_all` never touches it.
-- One model per open database, cached by database path and schema version, and **rebuilt after every definition change**.
-- It works in the same session and transaction as `Cache`, so the edit dialog, `transfer.py` and macros use normal ORM objects. Bulk paths (GSAK import, the cache list's column load) use SQLAlchemy Core.
-- Prototyped by nagisml on SQLAlchemy 2.1 (inside the `sqlalchemy>=2.0,<2.2` range in `pyproject.toml`). The foreign key must point at `Cache.__table__.c.id` — a string reference doesn't resolve across `MetaData` objects.
+- One model per open database (`custom_fields.values_model()`), cached by database path and a definition generation, and **rebuilt after every definition change**. The table is in the `companion` schema, so it works in sessions of the engines that attach the companion, next to `Cache`.
+- Bulk paths (GSAK import, move/copy) write on the companion's own connection (`write_values()`, `companion.copy_rows()`), after the caches are committed (main database first).
+- Prototyped by nagisml on SQLAlchemy 2.1 (inside the `sqlalchemy>=2.0,<2.2` range in `pyproject.toml`). There is no foreign key: `gc_code` links the row to its cache.
 
 #### Applying definitions to a database
 
@@ -170,8 +178,9 @@ Runs when a database is opened and after each definition edit. Fields are matche
 | --- | --- |
 | Field defined, no column yet (e.g. a global field created while this database was closed) | `ADD COLUMN`, automatically |
 | Same id, new name | `RENAME COLUMN`, automatically and without data loss |
-| Column without a definition (field deleted) | Keep the column and its data, mark it orphaned, offer cleanup. **Never drop automatically** |
-| Type or default changed | Rebuild the table, only after the user confirms |
+| Column without a definition (field deleted, also a global field deleted from the master) | Keep the column and its data, mark it orphaned, offer cleanup. **Never drop automatically** (`drop_field()` on request) |
+| Default, position, expression changed in the master | Copied into the database's definition (no column change) |
+| Type changed | Reported as pending; the column is converted only after the user confirms (`change_type()`) |
 
 **Why not `create_all` or Alembic's comparison** (both tested by nagisml):
 
@@ -179,18 +188,19 @@ Runs when a database is opened and after each definition edit. Fields are matche
 - Alembic's `compare_metadata` reports a rename as drop + add, which loses all values.
 - A ~50-line comparison using `PRAGMA table_info` plus the field ids handles the safe cases and leaves destructive changes as explicit user actions.
 
-This is separate from OpenSAK's numbered migrations in `db/database.py` (`PRAGMA user_version`): those change the fixed schema, this only ever touches `custom_values`.
+This is separate from OpenSAK's numbered migrations in `db/database.py` and the companion's own (`PRAGMA user_version`): those change fixed schemas, this only ever touches `custom_values`. It only runs for a database whose companion exists (lazy, see Storage).
 
 #### What it costs
 
-- Opening a database can now change its schema, but only by adding or renaming columns in `custom_values`. Anything destructive needs the user's confirmation.
+- Opening a database can now change its companion's schema, but only by adding or renaming columns in `custom_values`. Anything destructive needs the user's confirmation.
+- No atomic commit across the two files: values are written after the caches, so a crash leaves at most orphan rows (removed on open), never a cache that lost its values.
 - A global field couples databases together. The per-database copy of the definition limits that: a database never depends on the global master to open or to be read.
 - Dropping or renaming a column needs SQLite 3.35 / 3.25. Python 3.12's bundled SQLite is newer, but check what the PyInstaller and MSIX builds actually ship.
 - Names must not collide with `caches` columns or SQL keywords; the importer renames on collision and records it in the import report. All DDL uses quoted, validated names.
 
 #### Computed fields
 
-The expression is SQL and may use GSAK functions (`g_…`). Import the definition, translate the expression with the existing GSAK filter translator, and mark it inactive (definition kept, not evaluated) when it can't be translated. Expressions are only ever evaluated inside a read-only SELECT — the same rule as `opensak.sql` and the known limitation in the macro concept §9b. Computed fields have no column in `custom_values` and are read-only for macros.
+**Settled 23 Oct 2026 from real data:** in GSAK a field with an `fexpression` still has its column and stored value; the expression is a *display* transform of that value (`nullif(GCFinds,-1)` refers to the field itself). So every field keeps its column, `caches_all` shows the stored value (as GSAK's `CachesAll` does, so filters behave the same), and the expression is imported verbatim into `expression`. Translating it (GSAK functions `g_…`, the filter translator) and using it for display comes with the UI (step 4); an expression that can't be translated stays inactive. Expressions are only ever evaluated inside a read-only SELECT — the same rule as `opensak.sql` and the known limitation in the macro concept §9b.
 
 Examples from the sample database:
 
@@ -201,10 +211,13 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 
 #### GSAK import
 
-- Local definitions come from `CustomLocal` in the GSAK database. Global definitions come from `CustomGlobal` in `gsak.db3`; `CustomDefs` maps each field to `Global` or to a local database.
-- Values come from `Custom`, which holds the columns for both local and global fields.
-- Imported global fields become OpenSAK global fields (`scope = 'global'`, `origin = 'gsak'`). If `gsak.db3` isn't available (a single database imported without its settings file), they are imported as local fields and the import report says so.
-- Names that collide with `caches` columns or SQL keywords are renamed and reported.
+Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` after the caches are committed (only with the `companion-db` feature flag). The import dialog and `run_gsak_import()` unpack `gsak.db3` before the databases, so the global definitions are there.
+
+- Local definitions come from `CustomLocal` in the GSAK database. Global definitions come from `CustomGlobal` in `gsak.db3`: every field there is global, so `CustomDefs` isn't needed (it is also stale in real data).
+- Values come from `Custom`, which holds the columns for both local and global fields, for the imported caches that are in the target database.
+- Imported global fields become OpenSAK global fields (`scope = 'global'`, `origin = 'gsak'`). If `gsak.db3` isn't available (a single database imported without its settings file), the columns without a local definition are imported as local fields, defined from the column's type and default, and the import report says so.
+- Names that collide with `caches` columns or SQL keywords get `_custom` appended (`Name` → `Name_custom`) and are reported.
+- A field that exists already (same name) is reused; with another type the existing definition is kept and values are converted where possible. GSAK's type names are taken case-insensitively (`string`, `Boolean`).
 
 ### Where custom fields show up
 
@@ -216,8 +229,8 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 | Filter dialog | The Custom tab (#821 item 5): pick a field, operator by type (the text operators from #850 for strings, ranges for numbers and dates, yes/no for booleans) |
 | Where tab / GSAK filter importer | Custom fields usable by name; `WHERE_UNMAPPABLE['custom']` goes away |
 | Macro API | Read, write and define fields, following the general field-write support nagisml is adding to the macro API. Exact shape (`cache.custom.<name>`, `opensak.set_custom(...)` or other) still open — nagisml will prototype it. `macro_flag` and `macro_sort` are exposed to macros from the start |
-| Move / copy caches | Values travel with the cache; a local field missing in the target database is created there, with a line in the result. Global fields already exist in every database |
-| Backup / restore | Values and a copy of every definition (local and global) are in the database file. The global master in the app settings belongs with the app-settings part of backup (#942) |
+| Move / copy caches | Values travel with the cache; a field missing in the target database is created there first (logged) |
+| Backup / restore | Values and a copy of every stored definition (local and global) are in the companion, which backup sets include (#1034). The global master in the app settings belongs with the app-settings part of backup (#942) |
 | GPX export | Out of scope for now |
 
 ## Edge cases and risks
@@ -236,7 +249,7 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
    - **2b-1.** **Done in #1140** (migration 28): OpenSAK fills the columns itself — `last_user_update` via triggers, `is_owner` from the account, `symbol` from GPX, `corrected_source` from the GUI and macros.
    - **2b-2.** **Done in #1141**: the Dates tab has *Last user update* (`last_user_update`, compared in local time; settles #821 item 6\*), the column chooser has *Last user update* and *GPX symbol*, and the GSAK filter importer maps LastUserDate, IsOwner, MacroFlag, MacroSort and Symbol to the new columns.
    - **2c.** Macro access to the new columns (@nagisml): read all of them, write `macro_flag`, `macro_sort` and `symbol` (see above).
-3. **Custom fields: storage and GSAK import** — `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, import of local and global definitions and values, import report.
+3. **Custom fields: storage and GSAK import** — implemented in the companion database (#1149 phase 4, behind the `companion-db` flag): `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, the `caches_all` TEMP view, import of local and global definitions and values, import report.
 4. **Custom fields: UI** — column chooser, detail panel, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer.
 5. **Custom fields: macro API** — read, write, define.
 6. **Ignore list** — #473.
@@ -247,7 +260,6 @@ Steps 2 and 3 stop the data loss; everything after builds on stored data and can
 ## Questions
 
 - **Macro API shape** for custom fields — `cache.custom.<name>`, `opensak.set_custom(...)` or something else. nagisml will prototype it once general field writes are in.
-- **Computed fields** — confirm with nagisml from real examples that importing the expression, translating it and keeping it inactive when it can't be translated is fine from the macro side.
 - Does GSAK export custom fields in its GPX extension at all? If so, the GPX importer should read them too.
 - `kBeforeState/County` and `kAfterState/County`: is OpenSAK's `location_basis` enough, or do users rely on GSAK's before/after values?
 

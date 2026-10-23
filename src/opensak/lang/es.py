@@ -395,6 +395,7 @@ STRINGS: dict[str, str] = {
     "gsak_import_notes":            "Notas:",
     "gsak_import_note_images":      "Imágenes en notas → marcadores de posición:",
     "gsak_import_trackables":       "Trackables:",
+    "gsak_import_custom_fields":    "Campos personalizados:",
     "gsak_import_warnings_header":  "Advertencias ({count}):",
     "gsak_import_no_db3_found":     "No se encontró ningún archivo sqlite.db3 dentro de {name}",
     "gsak_import_done":             "✓ Importación finalizada.",

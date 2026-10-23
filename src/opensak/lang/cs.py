@@ -393,6 +393,7 @@ STRINGS: dict[str, str] = {
     "gsak_import_notes":            "Poznámky:",
     "gsak_import_note_images":      "Obrázky v poznámkách → zástupné texty:",
     "gsak_import_trackables":       "Trackables:",
+    "gsak_import_custom_fields":    "Vlastní pole:",
     "gsak_import_warnings_header":  "Upozornění ({count}):",
     "gsak_import_no_db3_found":     "V souboru {name} nebyl nalezen žádný sqlite.db3",
     "gsak_import_done":             "✓ Import dokončen.",
