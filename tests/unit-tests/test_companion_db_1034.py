@@ -10,6 +10,7 @@ DatabaseManager (isolated per test by the root conftest).
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -515,8 +516,13 @@ class TestExitState:
         es.record_backup_state()
         assert not es.has_changes_since_backup()
 
-        conn = sqlite3.connect(str(companion.companion_path(db)))
+        path = companion.companion_path(db)
+        conn = sqlite3.connect(str(path))
         conn.execute("INSERT INTO notes VALUES ('GC99', 'new')")
         conn.commit()
         conn.close()
+        # The insert fits the file's pages (same size); make the rewrite
+        # visible on coarse clocks, as test_backup_exit_state_959 does.
+        st = path.stat()
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 * 1_000_000_000))
         assert es.has_changes_since_backup()
