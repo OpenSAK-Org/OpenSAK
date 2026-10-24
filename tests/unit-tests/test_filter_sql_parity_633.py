@@ -21,6 +21,7 @@ from opensak.filters.engine import (
     DATE_COMPARE_OPS, DATE_FILTER_FIELDS, DateFilter,
     DnfDateFilter, DnfFilter, FavoritePointsFilter, FilterSet, FoundByMeDateFilter,
     FtfFilter, HasCorrectedFilter, HiddenDateFilter, LastLogDateFilter, LockedFilter,
+    IsOwnerFilter, MacroFlagFilter,
     NoCorrectedFilter, UserFlagFilter, apply_filters,
 )
 
@@ -34,7 +35,7 @@ def seed_633_data(tmp_db):
         Cache(gc_code="GC6330001", name="AllTrue", cache_type="Traditional Cache",
               latitude=55.0, longitude=12.0,
               user_flag=True, locked=True, dnf=True, first_to_find=True,
-              favorite_points=10),
+              favorite_points=10, macro_flag=True, is_owner=True),
         Cache(gc_code="GC6330002", name="AllFalse", cache_type="Traditional Cache",
               latitude=55.1, longitude=12.1,
               user_flag=False, locked=False, dnf=False, first_to_find=False,
@@ -121,6 +122,17 @@ class TestBooleanFlagFilters:
     @pytest.mark.parametrize("locked", [True, False])
     def test_locked_filter(self, locked):
         assert_parity(FilterSet().add(LockedFilter(locked)))
+
+    @pytest.mark.parametrize("flagged", [True, False])
+    def test_macro_flag_filter(self, flagged):
+        # NOT NULL DEFAULT 0: only AllTrue has it set.
+        codes = assert_parity(FilterSet().add(MacroFlagFilter(flagged)))
+        assert ("GC6330001" in codes) is flagged
+
+    @pytest.mark.parametrize("owned", [True, False])
+    def test_is_owner_filter(self, owned):
+        codes = assert_parity(FilterSet().add(IsOwnerFilter(owned)))
+        assert ("GC6330001" in codes) is owned
 
     @pytest.mark.parametrize("has_dnf", [True, False])
     def test_dnf_filter(self, has_dnf):

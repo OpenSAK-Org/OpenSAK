@@ -903,11 +903,15 @@ class WaypointDialog(QDialog):
         return [dict(wp) for wp in self._waypoints]
 
     def save_related(self, session, cache_row: Cache) -> None:
-        """Write UserNote and child waypoints for cache_row within session.
+        """Write UserNote and child waypoints for cache_row within session,
+        and recalculate its is_owner from the owner in the dialog.
 
         cache_row must be persistent (flushed) so it has an id. Its
         user_note and waypoints relationships are loaded lazily on access.
         """
+        # The owner may have been typed in: is_owner follows it (#1140).
+        from opensak.db.ownership import update_is_owner
+        update_is_owner(cache_row)
         self._save_user_note(session, cache_row)
         waypoints = self.get_waypoints_data()
         if waypoints is not None:

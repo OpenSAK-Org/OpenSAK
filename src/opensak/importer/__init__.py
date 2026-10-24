@@ -1127,15 +1127,9 @@ def _upsert_cache(
     if data.get("symbol"):
         cache.symbol = data["symbol"]
     # is_owner follows the account in Settings — from the cache's current
-    # owner, so a locked cache is judged by the owner it kept. Without an
-    # account there is nothing to compare against: leave what is there.
-    from opensak.db.ownership import account_configured, owner_matches
-    from opensak.gui.settings import get_settings
-    _acct = get_settings()
-    if account_configured(_acct.gc_finder_id, _acct.gc_username):
-        cache.is_owner = owner_matches(
-            cache.owner_id, cache.owner_name, _acct.gc_finder_id, _acct.gc_username
-        )
+    # owner, so a locked cache is judged by the owner it kept.
+    from opensak.db.ownership import update_is_owner
+    update_is_owner(cache)
 
     cache.source_file = source_file
 

@@ -478,6 +478,7 @@ PROTECTED_COLUMNS: dict[str, frozenset[str]] = {
         "last_log_date", "last_found_date", "last_four_logs",
         "imported_at", "last_gpx_update", "source_file",
         "location_source", "location_basis", "location_updated", "location_dataset",
+        "is_owner", "last_user_update",
     }),
     "user_notes": frozenset({"id", "cache_id"}),
     "waypoints": frozenset({"id", "cache_id", "parent_gc_code"}),
@@ -525,11 +526,15 @@ _TRACKED = (
 def _write_authorizer(main_names: frozenset[str]):
     """The authorizer of opensak.sql_write(): that of opensak.sql(), plus
     INSERT, UPDATE and DELETE on the cache tables."""
+    from opensak.db.database import USER_UPDATE_TRIGGER_NAMES
+
     read = _read_authorizer(main_names)
 
     def authorize(action, arg1, arg2, db_name, trigger) -> int:
-        # Our own temporary triggers (the user cannot create triggers).
-        if trigger and str(trigger).startswith(_RESERVED_PREFIX):
+        # Our own temporary triggers (the user cannot create triggers), and
+        # the database's, which stamp last_user_update (#1140).
+        if trigger and (str(trigger).startswith(_RESERVED_PREFIX)
+                        or trigger in USER_UPDATE_TRIGGER_NAMES):
             return sqlite3.SQLITE_OK
         if read(action, arg1, arg2, db_name, trigger) == sqlite3.SQLITE_OK:
             return sqlite3.SQLITE_OK
@@ -729,6 +734,11 @@ class WritableDatabase:
             f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_coords "
             "AFTER UPDATE OF latitude, longitude ON main.caches "
             f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'coords'); END"
+        )
+        conn.execute(
+            f"CREATE TEMP TRIGGER {_RESERVED_PREFIX}caches_owner "
+            "AFTER UPDATE OF owner_id, owner_name ON main.caches "
+            f"BEGIN INSERT OR IGNORE INTO {_TOUCHED} VALUES (NEW.id, 'owner'); END"
         )
 
     def _check_deadline(self) -> int:

@@ -7,7 +7,9 @@ name equals ``gc_username`` (normalised the same way as everywhere else, see
 normalize_geocacher_name()). Either signal is enough — the same rule
 count_own_found_logs() uses for the user's own logs.
 
-The GPX importer sets is_owner per cache as it imports. When the account
+The GPX importer sets is_owner per cache as it imports, the edit dialog
+when a cache is added or edited, and macro writes when they change the
+owner (macro/cache_write.py). When the account
 changes in Settings, recalculate_is_owner_everywhere() brings every
 registered database in line, replacing earlier values — including the ones
 the GSAK importer took from GSAK's own IsOwner — so the column always
@@ -46,6 +48,19 @@ def owner_matches(
 
 def account_configured(gc_finder_id: Optional[str], gc_username: Optional[str]) -> bool:
     return bool((gc_finder_id or "").strip() or normalize_geocacher_name(gc_username))
+
+
+def update_is_owner(cache) -> None:
+    """Set *cache*.is_owner from its current owner and the account in
+    Settings (GPX import, the edit dialog). Without an account there is
+    nothing to compare against: leave what is there."""
+    from opensak.gui.settings import get_settings
+
+    settings = get_settings()
+    if account_configured(settings.gc_finder_id, settings.gc_username):
+        cache.is_owner = owner_matches(
+            cache.owner_id, cache.owner_name, settings.gc_finder_id, settings.gc_username
+        )
 
 
 def recalculate_is_owner(conn: Connection, gc_finder_id: Optional[str],

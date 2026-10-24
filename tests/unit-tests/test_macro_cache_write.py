@@ -129,6 +129,11 @@ def test_update_of_coordinates_recalculates_distance():
     ("{ distance = 1 }", "distance cannot be changed"),
     ("{ log_count = 1 }", "log_count cannot be changed"),
     ("{ last_gpx_update = '2025-01-01' }", "last_gpx_update cannot be changed"),
+    ("{ owned = true }", "owned cannot be changed"),
+    ("{ last_user_update = '2025-01-01' }", "last_user_update cannot be changed"),
+    ("{ corrected_source = 'user' }", "corrected_source cannot be changed"),
+    ("{ macro_flag = 1 }", "true or false"),
+    ("{ macro_sort = 3 }", "must be a string"),
     ("{ nonsense = 1 }", "unknown field 'nonsense'"),
     ("{ difficulty = 6 }", "between 1 and 5"),
     ("{ difficulty = 2.3 }", "steps of 0.5"),
@@ -344,6 +349,8 @@ def test_sql_write_updates_and_reports_changed_caches():
     "UPDATE caches SET id = 999 WHERE gc_code = 'GCSQL3'",
     "UPDATE caches SET distance = 1 WHERE gc_code = 'GCSQL3'",
     "UPDATE caches SET log_count = 5 WHERE gc_code = 'GCSQL3'",
+    "UPDATE caches SET is_owner = 1 WHERE gc_code = 'GCSQL3'",
+    "UPDATE caches SET last_user_update = '2020-01-01' WHERE gc_code = 'GCSQL3'",
     "UPDATE user_notes SET cache_id = 1",
     "UPDATE logs SET cache_id = 1",
     "DELETE FROM db_settings",
@@ -437,3 +444,200 @@ def test_sql_write_needs_approval():
     with pytest.raises(MacroError, match="did not allow"):
         _run("opensak.sql_write([[UPDATE caches SET name = 'x' WHERE gc_code = 'GCSQL3']])", host)
     assert _cache("GCSQL3").name == "GCSQL3"
+
+
+# ── The #1139 columns (#1028 step 2c) ────────────────────────────────────────
+
+def _set_account(monkeypatch, username: str) -> None:
+    """The geocaching.com account in Settings, as _refresh_owned() reads it."""
+    import opensak.gui.settings as settings_module
+    real = settings_module.get_settings()
+
+    class Account:
+        gc_finder_id = ""
+        gc_username = username
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    monkeypatch.setattr(settings_module, "get_settings", lambda: Account())
+
+
+@pytest.fixture
+def account(monkeypatch):
+    _set_account(monkeypatch, "Me")
+
+
+def _add_cache(code, **columns) -> None:
+    with get_session() as s:
+        s.add(Cache(gc_code=code, name=code, cache_type="Traditional Cache",
+                    latitude=47.0, longitude=8.0, **columns))
+
+
+def test_update_writes_the_macro_columns_and_reads_them_back():
+    _add_cache("GCG1")
+    _, out = _run("""
+        opensak.update("GCG1", { macro_flag = true, macro_sort = "0042", symbol = "Geocache Found" })
+        local c = opensak.cache("GCG1")
+        print(c.macro_flag, c.macro_sort, c.symbol, c.owned, c.corrected_source)
+        opensak.update("GCG1", { macro_sort = false, symbol = "" })
+        c = opensak.cache("GCG1")
+        print(c.macro_flag, c.macro_sort, c.symbol)
+    """)
+    assert out == ["true	0042	Geocache Found	false	nil", "true	nil	nil"]
+    c = _cache("GCG1")
+    assert (c.macro_flag, c.macro_sort, c.symbol) == (True, None, None)
+
+
+def test_macro_columns_do_not_count_as_a_user_update():
+    _add_cache("GCG2")
+    _run('opensak.update("GCG2", { macro_flag = true, macro_sort = "x" })')
+    assert _cache("GCG2").last_user_update is None
+    _, out = _run("""
+        opensak.update("GCG2", { user_flag = true })
+        local c = opensak.cache("GCG2")
+        print(opensak.date.parse(c.last_user_update) ~= nil)
+    """)
+    assert out == ["true"]
+    assert _cache("GCG2").last_user_update is not None
+
+
+def test_corrected_source_is_macro_after_a_macro_correction():
+    _add_cache("GCG3")
+    _, out = _run("""
+        opensak.update("GCG3", { corrected = { lat = 47.1, lon = 8.1 } })
+        print(opensak.cache("GCG3").corrected_source)
+        opensak.update("GCG3", { corrected = false })
+        print(opensak.cache("GCG3").corrected_source)
+    """)
+    assert out == ["macro", "nil"]
+
+
+def test_owner_change_and_insert_recalculate_owned(account):
+    _add_cache("GCG4", owner_name="Someone")
+    _, out = _run("""
+        opensak.update("GCG4", { owner = "me" })
+        print(opensak.cache("GCG4").owned)
+        opensak.insert{ code = "GCG5", name = "x", type = "Traditional", lat = 1, lon = 1,
+                        owner = "Me" }
+        print(opensak.cache("GCG5").owned)
+        opensak.transaction(function()
+            opensak.update("GCG4", { owner = "Someone" })
+        end)
+        print(opensak.cache("GCG4").owned)
+    """)
+    assert out == ["true", "true", "false"]
+
+
+def test_owned_stays_without_an_account(monkeypatch):
+    _set_account(monkeypatch, "")
+    _add_cache("GCG6", owner_name="Someone", is_owner=True)    # e.g. from GSAK
+    _run('opensak.update("GCG6", { owner = "Someone else" })')
+    assert _cache("GCG6").is_owner is True
+
+
+def test_sql_write_owner_change_recalculates_is_owner(account):
+    _add_cache("GCG7", owner_name="Someone")
+    _run("opensak.sql_write([[UPDATE caches SET owner_name = 'ME' WHERE gc_code = 'GCG7']])")
+    assert _cache("GCG7").is_owner is True
+    insert = _insert_cache_sql("INSERT", "GCG8", owner_name="'Me'", is_owner="0")
+    _run(f"opensak.sql_write([[{insert}]])")
+    assert _cache("GCG8").is_owner is True
+
+
+def test_sql_write_of_a_user_field_still_stamps_last_user_update():
+    _add_cache("GCG9")
+    _run("opensak.sql_write([[UPDATE caches SET user_flag = 1, macro_flag = 1, "
+         "symbol = 'Geocache' WHERE gc_code = 'GCG9']])")
+    c = _cache("GCG9")
+    assert (c.user_flag, c.macro_flag, c.symbol) == (True, True, "Geocache")
+    assert c.last_user_update is not None
+
+
+# ── opensak.macro_flag() and sorting by macro_sort ───────────────────────────
+
+class FilterHost(Host):
+    """A Host whose active filter shows *codes*."""
+
+    def __init__(self, codes, answer=WriteApproval.SESSION):
+        super().__init__(answer)
+        self.codes = codes
+
+    def filtered_caches(self):
+        return [Cache(gc_code=c) for c in self.codes]
+
+
+def _macro_flags(*codes) -> list[bool]:
+    return [_cache(c).macro_flag for c in codes]
+
+
+def test_macro_flag_set_clear_and_swap():
+    for code in ("GCMF1", "GCMF2", "GCMF3"):
+        _add_cache(code)
+    host, out = _run("""
+        print(opensak.macro_flag("set", {"gcmf1", "GCMF2"}))
+        print(opensak.macro_flag("SET", "GCMF1"))         -- already set: no change
+        print(opensak.macro_flag("swap", {"GCMF2", "GCMF3"}))
+        print(opensak.macro_flag("clear", "GCMF1"), opensak.macro_flag("set", {}))
+    """)
+    assert out == ["2", "0", "2", "1	0"]
+    assert _macro_flags("GCMF1", "GCMF2", "GCMF3") == [False, False, True]
+    assert host.changed == [(["GCMF1", "GCMF2"], False), (["GCMF2", "GCMF3"], False),
+                            (["GCMF1"], False)]
+    assert _cache("GCMF3").last_user_update is None      # not a user field
+
+
+def test_macro_flag_defaults_to_the_active_filter_and_all_takes_every_cache():
+    for code in ("GCMF4", "GCMF5"):
+        _add_cache(code)
+    _, out = _run('print(opensak.macro_flag("set"))', FilterHost(["GCMF4"]))
+    assert out == ["1"] and _macro_flags("GCMF4", "GCMF5") == [True, False]
+    _, out = _run('print(opensak.macro_flag("set", { all = true }) > 0)')
+    assert out == ["true"]
+    with get_session() as s:
+        assert s.query(Cache).filter(Cache.macro_flag == False).count() == 0  # noqa: E712
+    _run('opensak.macro_flag("clear", { all = true })')
+    with get_session() as s:
+        assert s.query(Cache).filter(Cache.macro_flag == True).count() == 0  # noqa: E712
+
+
+def test_macro_flag_inside_a_transaction_is_undone_with_it():
+    _add_cache("GCMF6")
+    _run("""
+        pcall(opensak.transaction, function()
+            opensak.macro_flag("set", "GCMF6")
+            error("undo")
+        end)
+    """)
+    assert _macro_flags("GCMF6") == [False]
+
+
+@pytest.mark.parametrize("call, msg", [
+    ('opensak.macro_flag("toggle", "GCW4")', 'must be "set", "clear" or "swap"'),
+    ("opensak.macro_flag()", 'must be "set", "clear" or "swap"'),
+    ('opensak.macro_flag("set", 5)', "expects a GC code, a list of codes"),
+    ('opensak.macro_flag("set", { all = 1 })', "all must be true"),
+])
+def test_macro_flag_rejects_bad_input_without_asking(call, msg):
+    host = Host()
+    with pytest.raises(MacroError, match=msg):
+        _run(call, host)
+    assert host.asked == []
+
+
+def test_macro_flag_needs_approval():
+    _add_cache("GCMF7")
+    with pytest.raises(MacroError, match="did not allow"):
+        _run('opensak.macro_flag("set", "GCMF7")', Host(WriteApproval.DENY))
+    assert _macro_flags("GCMF7") == [False]
+
+
+def test_sort_by_macro_sort_orders_the_caches():
+    from opensak.filters.engine import FilterSet, GcCodeFilter, SortSpec, apply_filters
+    for code, key in (("GCMS1", "b"), ("GCMS2", None), ("GCMS3", "A")):
+        _add_cache(code, macro_sort=key)
+    fs = FilterSet().add(GcCodeFilter("GCMS1;GCMS2;GCMS3", op="in_list"))
+    with get_session() as s:
+        codes = [c.gc_code for c in apply_filters(s, fs, SortSpec("macro_sort"))]
+    assert codes == ["GCMS2", "GCMS3", "GCMS1"]          # empty first, then case-insensitive
+

@@ -1041,6 +1041,24 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
     ]
 
 
+def test_cache_returns_the_gsak_columns(full_cache):
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GCACC1").one()
+        cache.is_owner, cache.macro_flag, cache.macro_sort = True, True, "b"
+        cache.symbol = "Geocache Found"
+        cache.user_note.corrected_source = "import"
+    with get_session() as s:     # after the trigger stamped the correction
+        s.query(Cache).filter_by(gc_code="GCACC1").one().last_user_update =             datetime(2026, 10, 1, 7, 8, 9)
+    _, out = _run("""
+        local c = opensak.cache("GCACC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source, c.last_user_update)
+        c = opensak.cache("GCMAC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source)
+    """)
+    assert out == ["true	true	b	Geocache Found	import	2026-10-01T07:08:09",
+                   "false	false	nil	nil	nil"]
+
+
 def test_every_cache_field_is_loaded(full_cache):
     with get_session() as s:
         (record,) = cache_data.load_records(s, ["GCACC1"])
@@ -1485,6 +1503,19 @@ def test_date_keys():
                                                datetime(2026, 9, 1, 18, 30))
 
 
+def test_macro_flag_key():
+    from opensak.filters.engine import MacroFlagFilter
+    (on,) = _filters("macro_flag = true")._filters
+    (off,) = _filters("macro_flag = false")._filters
+    assert isinstance(on, MacroFlagFilter) and (on.flagged, off.flagged) == (True, False)
+
+
+def test_last_user_update_date_key():
+    (date,) = _filters('last_user_update = {"2026-10-01T08:00", nil}')._filters
+    assert (date.field, date.op, date.date1) == ("last_user_update", "on_or_after",
+                                                 datetime(2026, 10, 1, 8, 0))
+
+
 def test_text_keys_attributes_codes_and_mode():
     fs = _filters('user_data2 = "solved", note = "x", placed_by = "P", text = "Brücke", '
                   'attributes = {"Dogs", "-night cache", 13}, codes = {"gc1", "GC2"}, mode = "or"')
@@ -1500,10 +1531,12 @@ def test_near_point_and_owned():
     from opensak.gui.settings import HomePoint, get_settings
     settings = get_settings()
     settings.home_points = [HomePoint("Cabin", 46.5, 7.5)]
-    settings.gc_username = "Me"
+    from opensak.filters.engine import IsOwnerFilter
     owned, near = _filters('near = { point = "Cabin", km = 3 }, owned = true')._filters
     assert (near.lat, near.lon, near.op, near.dist1_km) == (46.5, 7.5, "at_most", 3.0)
-    assert (owned.text, owned.op) == ("Me", "equals")
+    assert isinstance(owned, IsOwnerFilter) and owned.owned is True
+    (not_owned,) = _filters("owned = false")._filters
+    assert not_owned.owned is False
     (near,) = _filters("near = { lat = 47, lon = 8, km = 1 }")._filters
     assert (near.lat, near.lon) == (47.0, 8.0)
 
@@ -1517,7 +1550,7 @@ def test_near_point_and_owned():
     ('attributes = "Unicorns"', "unknown attribute 'Unicorns'"),
     ('near = { point = "Nowhere", km = 1 }', "no centre point named 'Nowhere'"),
     ("near = { lat = 47, lon = 8 }", "near needs km"),
-    ("owned = true", "username in Settings"),
+    ("owned = 1", "owned must be true or false"),
     ('mode = "XOR", found = true', 'mode must be "AND" or "OR"'),
     ('polygon = "missing.kml"', "macro is not allowed|cannot read"),
 ])
@@ -1560,6 +1593,8 @@ def test_sort_reaches_host():
     assert (host.sort.field, host.sort.ascending) == ("difficulty", False)
     host, _ = _run('opensak.sort("hidden")')
     assert (host.sort.field, host.sort.ascending) == ("hidden_date", True)
+    host, _ = _run('opensak.sort("macro_sort", "desc")')
+    assert (host.sort.field, host.sort.ascending) == ("macro_sort", False)
 
 
 @pytest.mark.parametrize("call, msg", [

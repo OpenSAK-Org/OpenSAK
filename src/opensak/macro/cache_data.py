@@ -86,6 +86,9 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("owner", "string?", "Owner name.", (Cache.owner_name,)),
     CacheField("placed_by", "string?", "Placed-by name as shown on the listing.",
                (Cache.placed_by,)),
+    CacheField("owned", "boolean",
+               "Owned by you: the owner matches your geocaching.com account in "
+               "Settings (GSAK's IsOwner).", (Cache.is_owner,), _bool),
     CacheField("hidden", "string?", 'Hidden date, "YYYY-MM-DD".', (Cache.hidden_date,), _date),
     CacheField("found", "boolean", "Found by you.", (Cache.found,), _bool),
     CacheField("found_date", "string?", 'Your find date, "YYYY-MM-DD".',
@@ -117,14 +120,25 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("color", "string?", 'Colour tag, e.g. "#FF5733".', (Cache.color,)),
     CacheField("locked", "boolean", "Locked against import changes.", (Cache.locked,), _bool),
     CacheField("watch", "boolean", "On the watchlist.", (Cache.watch,), _bool),
+    CacheField("macro_flag", "boolean",
+               "Flag for macros' own use, separate from the user flag (GSAK's MacroFlag).",
+               (Cache.macro_flag,), _bool),
+    CacheField("macro_sort", "string?",
+               "Text for macros' own use, e.g. to sort by (GSAK's MacroSort).",
+               (Cache.macro_sort,)),
     CacheField("note", "string?", "Your local note.", (UserNote.note,)),
     CacheField("gc_note", "string?", "Personal note from geocaching.com.", (Cache.gc_note,)),
     CacheField("hint", "string?", "Hint text as imported.", (Cache.encoded_hints,)),
     CacheField("url", "string?", "Listing URL.", (Cache.url,)),
+    CacheField("symbol", "string?", 'GPX waypoint symbol, e.g. "Geocache Found" (GSAK\'s Symbol).',
+               (Cache.symbol,)),
     CacheField("corrected", "{lat: number, lon: number}?",
                "Corrected coordinates; nil if the cache is not solved.",
                (UserNote.is_corrected, UserNote.corrected_lat, UserNote.corrected_lon),
                _corrected),
+    CacheField("corrected_source", "string?",
+               'Who corrected the coordinates: "user", "macro" or "import" (from GSAK); '
+               "nil if not corrected or not known.", (UserNote.corrected_source,)),
     CacheField("waypoint_count", "integer", "Number of additional waypoints.",
                (Cache.waypoint_count,)),
     CacheField("log_count", "integer", "Number of logs stored.", (Cache.log_count,)),
@@ -133,9 +147,13 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("last_log_date", "string?", 'Date of the latest log, "YYYY-MM-DD".',
                (Cache.last_log_date,), _date),
     CacheField("last_gpx_update", "string?",
-               'When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; '
+               'When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; '
                "finds caches the latest Pocket Query did not refresh.",
                (Cache.last_gpx_update,), _datetime),
+    CacheField("last_user_update", "string?",
+               "When a user field (user flag, user sort, user data, lock, note or "
+               'correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK\'s LastUserDate).',
+               (Cache.last_user_update,), _datetime),
 )
 
 _BY_NAME = {f.name: f for f in CACHE_FIELDS}
