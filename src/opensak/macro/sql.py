@@ -27,6 +27,13 @@ The macro's own database file (opensak.macro_db()) is attached to that
 connection as MACRO_SCHEMA; there the authorizer allows everything that
 stays inside the file (see _MACRO_ACTIONS). Macros themselves cannot ATTACH.
 
+The active database's companion database (db/companion.py, #1034) is
+attached to it as COMPANION_SCHEMA, shared by all macros: every macro reads
+every table there, but creates, changes and drops only its own tables,
+indexes and views, which OpenSAK records as it creates them
+(CompanionAccess). Deleting caches deletes their rows in the companion's
+cache-linked tables in the same transaction.
+
 Other OpenSAK databases can be attached to it read-only (opensak.attach(),
 #1074), so one statement can join them with the active database. Read-only
 is enforced twice: the file is attached with `mode=ro`, and the authorizers
@@ -79,7 +86,10 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
+
+from opensak.db import companion as companion_db
+from opensak.db.companion import COMPANION_SCHEMA
 
 # Per statement (and per fetched chunk of opensak.sql_each()).
 QUERY_TIMEOUT_S = 60.0
@@ -148,7 +158,7 @@ _MACRO_PRAGMAS = frozenset({"user_version", "application_id", "integrity_check",
 
 # Schema names an attached database (opensak.attach()) may not take: SQLite's
 # own, the macro database's, and names kept for OpenSAK's later use.
-_RESERVED_SCHEMAS = frozenset({"main", "temp", MACRO_SCHEMA, "companion"})
+_RESERVED_SCHEMAS = frozenset({"main", "temp", MACRO_SCHEMA, COMPANION_SCHEMA})
 _RESERVED_SCHEMA_PREFIX = "opensak_"
 _SCHEMA_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 # The first bytes of every SQLite database file.
@@ -168,8 +178,161 @@ def _main_names(conn: sqlite3.Connection) -> frozenset[str]:
     return frozenset(n.lower() for (n,) in conn.execute("SELECT name FROM main.sqlite_master"))
 
 
-def _read_authorizer(main_names: frozenset[str]):
-    """The authorizer of opensak.sql(): reading, and the temp database."""
+# ── The companion database (#1034) ───────────────────────────────────────────
+
+# Tables SQLite writes itself while a table is created, altered or dropped.
+# Macros can't write sqlite_master (SQLite refuses it); sqlite_sequence,
+# the AUTOINCREMENT counters, they can, which at worst reuses an id.
+_SQLITE_BOOKKEEPING = frozenset({"sqlite_master", "sqlite_schema", "sqlite_sequence"})
+_CHANGE_ACTIONS = frozenset({sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE})
+
+
+def _owner_label(owner: str) -> str:
+    """An owner key (registry column `owner`) for messages: the macro's file name."""
+    return "OpenSAK" if owner == companion_db.OWNER_OPENSAK else Path(owner).name
+
+
+class CompanionAccess:
+    """
+    What a macro may do in the companion database, attached to the active
+    database's macro connection as COMPANION_SCHEMA (db/companion.py,
+    #1034). Every macro reads every table. A macro creates tables, indexes
+    and views, and changes, alters and drops only the tables and views it
+    owns. Owner = the running macro's key (db_access.macro_key(), its
+    file's path), asked from *owner_key* at each statement, so a macro
+    started with opensak.run_macro() is an owner of its own; None (a macro
+    without a file) only reads. opensak_* tables belong to OpenSAK, and a
+    table without a registry row (made by hand) has no owner: both are
+    read-only for macros. Triggers are refused: OpenSAK's own housekeeping
+    (deleting and copying cache-linked rows) would run them unchecked.
+
+    The authorizer may not query the connection, so before each statement
+    load() reads the registry when it may have changed, and after the
+    statement record() registers the tables and views it created, follows
+    a rename and forgets the dropped ones — in the statement's transaction
+    on the write connection; on the reading one, right after it.
+    """
+
+    def __init__(self, owner_key: Callable[[], Optional[str]],
+                 owner_name: Callable[[], str]):
+        self._owner_key = owner_key
+        self._owner_name = owner_name
+        self.attached = False
+        self._key: Optional[str] = None
+        # Registry by lower-case name: (owner, its file name); the tables and views
+        # that existed then; PRAGMA data_version when read (None: read again).
+        self._owners: dict[str, tuple[str, str]] = {}
+        self._objects: set[str] = set()
+        self._version: Any = None
+        self._ddl = False
+        # Why the last statement was refused, for the error message
+        self.denied: Optional[str] = None
+
+    def owner(self) -> Optional[str]:
+        """The running macro's owner key; None for a macro without a file."""
+        return self._owner_key()
+
+    def invalidate(self) -> None:
+        """Read the registry again before the next statement (a rollback
+        may have undone a registration)."""
+        self._version = None
+
+    def load(self, conn: sqlite3.Connection) -> None:
+        """Before a macro statement: who runs it, and the registry if
+        another connection changed it or invalidate() was called."""
+        self.denied = None
+        self._ddl = False
+        self._key = self.owner()
+        version = conn.execute(f"PRAGMA {COMPANION_SCHEMA}.data_version").fetchone()[0]
+        if self._version is None or version != self._version:
+            self._owners = {
+                key: (row["owner"], _owner_label(row["owner"]))
+                for key, row in companion_db.registry(conn).items()
+            }
+            self._objects = set(companion_db.objects(conn))
+            self._version = version
+
+    def authorize(self, action: int, arg1: Any, arg2: Any) -> int:
+        if action in _CHANGE_ACTIONS and str(arg1).lower() in _SQLITE_BOOKKEEPING:
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_CREATE_TABLE and str(arg1).lower() == "sqlite_sequence":
+            return sqlite3.SQLITE_OK        # by the first AUTOINCREMENT table
+        if action == sqlite3.SQLITE_REINDEX:
+            return sqlite3.SQLITE_OK        # part of CREATE INDEX; changes no data
+        if action in (sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_CREATE_VIEW):
+            return self._may_change(arg1, create=True)
+        if action in (sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_DROP_VIEW):
+            return self._may_change(arg1, schema_change=True)
+        if action in _CHANGE_ACTIONS:
+            return self._may_change(arg1)
+        if action in (sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_DROP_INDEX):
+            return self._may_change(arg2)
+        if action == sqlite3.SQLITE_ALTER_TABLE:     # arg1 is the schema
+            return self._may_change(arg2, schema_change=True)
+        if action in (sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_DROP_TRIGGER):
+            return self._deny("triggers can't be created in the companion database")
+        return self._deny(None)
+
+    def _may_change(self, name: Any, create: bool = False, schema_change: bool = False) -> int:
+        name = str(name)
+        if companion_db.is_internal(name):
+            return self._deny(f"{COMPANION_SCHEMA}.{name} belongs to OpenSAK; macros can only read it")
+        if self._key is None:
+            return self._deny(
+                f"{COMPANION_SCHEMA}.{name}: a macro without a file can only read the "
+                "companion database — save it first"
+            )
+        entry = self._owners.get(name.lower())
+        if entry is not None and entry[0] != self._key:
+            return self._deny(
+                f"{COMPANION_SCHEMA}.{name} belongs to {entry[1]}; only that macro can change it"
+            )
+        if entry is None and not create and name.lower() in self._objects:
+            return self._deny(f"{COMPANION_SCHEMA}.{name} has no owner; macros can only read it")
+        if create or schema_change:
+            self._ddl = True
+        return sqlite3.SQLITE_OK
+
+    def _deny(self, reason: Optional[str]) -> int:
+        if reason is not None and self.denied is None:
+            self.denied = reason
+        return sqlite3.SQLITE_DENY
+
+    def record(self, conn: sqlite3.Connection) -> None:
+        """After a statement that created, altered or dropped a table or
+        view: bring the registry up to date. A statement renames at most one
+        table, which shows as one gone and one new name."""
+        if not self._ddl:
+            return
+        self._ddl = False
+        self._version = None
+        now = companion_db.objects(conn)
+        gone = [key for key, (owner, _) in self._owners.items()
+                if owner == self._key and key in self._objects and key not in now]
+        new = [key for key in now if key not in self._objects and key not in self._owners]
+        if len(gone) == 1 and len(new) == 1:
+            companion_db.rename_registered(conn, gone[0], now[new[0]][0])
+            return
+        for key in gone:
+            companion_db.unregister(conn, key)
+        for key in new:
+            name, type_ = now[key]
+            linked = type_ == "table" and any(
+                str(row[1]).lower() == companion_db.DEFAULT_CODE_COLUMN
+                for row in conn.execute(
+                    f'PRAGMA {COMPANION_SCHEMA}.table_info("{name.replace(chr(34), chr(34) * 2)}")'
+                )
+            )
+            companion_db.register(
+                conn, name, self._key or "", self._owner_name(),
+                companion_db.KIND_CACHE if linked else companion_db.KIND_FREE,
+                companion_db.DEFAULT_CODE_COLUMN if linked else None,
+            )
+
+
+def _read_authorizer(main_names: frozenset[str], companion: Optional[CompanionAccess] = None):
+    """The authorizer of opensak.sql(): reading, the temp database, and
+    what *companion* allows in the companion database."""
 
     def authorize(action, arg1, arg2, db_name, _trigger) -> int:
         if _reserved(arg1) or _reserved(arg2):
@@ -182,6 +345,12 @@ def _read_authorizer(main_names: frozenset[str]):
         if (action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() == "user_version"
                 and arg2 is None and db_name not in (None, "main", "temp")):
             return sqlite3.SQLITE_OK
+        # ALTER TABLE names the schema in arg1, not in db_name.
+        if companion is not None and companion.attached and (
+            db_name == COMPANION_SCHEMA
+            or (action == sqlite3.SQLITE_ALTER_TABLE and arg1 == COMPANION_SCHEMA)
+        ):
+            return companion.authorize(action, arg1, arg2)
         if db_name == MACRO_SCHEMA and (
             action in _MACRO_ACTIONS
             or (action == sqlite3.SQLITE_PRAGMA and str(arg1).lower() in _MACRO_PRAGMAS)
@@ -276,17 +445,20 @@ class ReadOnlyDatabase:
     connection instead, so a macro sees its own uncommitted changes inside
     opensak.transaction(). That connection is shared with the writes, so
     the authorizer and the timeout are only in place while one of our
-    statements runs, and close() leaves it open.
+    statements runs, and close() leaves it open. *companion* is that
+    connection's access to the companion database, if attached.
     """
 
     def __init__(
         self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S,
         connection: Optional[sqlite3.Connection] = None,
+        companion: Optional[CompanionAccess] = None,
     ):
         self._db_path = Path(db_path)
         self._timeout_s = timeout_s
         self._conn: Optional[sqlite3.Connection] = connection
         self._borrowed = connection
+        self._companion = companion
         self._authorizer: Any = None
         self._deadline = 0.0
 
@@ -307,7 +479,7 @@ class ReadOnlyDatabase:
             self._conn = conn
         elif self._authorizer is None:
             try:
-                self._authorizer = _read_authorizer(_main_names(self._conn))
+                self._authorizer = _read_authorizer(_main_names(self._conn), self._companion)
             except sqlite3.Error as exc:
                 raise SqlError(f"SQL error: {exc}") from None
         return self._conn
@@ -332,31 +504,45 @@ class ReadOnlyDatabase:
         read_only = _read_only_macro_db(self._conn, exc)
         if read_only is not None:
             return read_only
+        if self._companion is not None and self._companion.denied:
+            return SqlError(f"{self._companion.denied}: {exc}")
         if "not authorized" in str(exc) or "readonly" in str(exc):
             return SqlError(
                 "SQL in opensak.sql is read-only, except for TEMP tables not "
-                f"named like a table of the database: {exc}"
+                "named like a table of the database, and the macro's own tables "
+                f"in `macro` and `companion`: {exc}"
             )
         return SqlError(f"SQL error: {exc}")
+
+    def _companion_attached(self) -> bool:
+        return self._borrowed is not None and self._companion is not None and self._companion.attached
 
     def _execute(self, query: str, params: Any) -> sqlite3.Cursor:
         params = _params(params)
         conn = self._connection()
         self._start_clock()
-        if self._borrowed is not None:
-            # Consulted while the statement is prepared, i.e. in execute().
-            conn.set_authorizer(self._authorizer)
         try:
-            return conn.execute(query, params)
+            if self._companion_attached():
+                assert self._companion is not None
+                self._companion.load(conn)
+            if self._borrowed is not None:
+                # Consulted while the statement is prepared, i.e. in execute().
+                conn.set_authorizer(self._authorizer)
+            try:
+                cursor = conn.execute(query, params)
+            finally:
+                if self._borrowed is not None:
+                    conn.set_authorizer(None)
+            if self._companion_attached():
+                assert self._companion is not None
+                self._companion.record(conn)
+            return cursor
         except sqlite3.Error as exc:
             self._stop_clock()
             raise self._error(exc) from None
         except (ValueError, OverflowError) as exc:  # e.g. integer too large
             self._stop_clock()
             raise SqlError(f"SQL error: {exc}") from None
-        finally:
-            if self._borrowed is not None:
-                conn.set_authorizer(None)
 
     @staticmethod
     def _names(cursor: sqlite3.Cursor) -> list[str]:
@@ -523,12 +709,12 @@ _TRACKED = (
 )
 
 
-def _write_authorizer(main_names: frozenset[str]):
+def _write_authorizer(main_names: frozenset[str], companion: Optional[CompanionAccess] = None):
     """The authorizer of opensak.sql_write(): that of opensak.sql(), plus
     INSERT, UPDATE and DELETE on the cache tables."""
     from opensak.db.database import USER_UPDATE_TRIGGER_NAMES
 
-    read = _read_authorizer(main_names)
+    read = _read_authorizer(main_names, companion)
 
     def authorize(action, arg1, arg2, db_name, trigger) -> int:
         # Our own temporary triggers (the user cannot create triggers), and
@@ -569,11 +755,20 @@ class WritableDatabase:
     connection could neither write while this one holds the write lock nor
     see the uncommitted changes. opensak.sql() reads through it outside a
     transaction as well, so the macro's TEMP tables are the same everywhere.
+
+    The active database's companion is attached as COMPANION_SCHEMA by
+    attach_companion(); *companion_owner* and *companion_owner_name* name
+    the running macro for CompanionAccess.
     """
 
-    def __init__(self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S):
+    def __init__(
+        self, db_path: Path, timeout_s: float = QUERY_TIMEOUT_S,
+        companion_owner: Callable[[], Optional[str]] = lambda: None,
+        companion_owner_name: Callable[[], str] = lambda: "",
+    ):
         self._db_path = Path(db_path)
         self._timeout_s = timeout_s
+        self._companion = CompanionAccess(companion_owner, companion_owner_name)
         self._conn: Optional[sqlite3.Connection] = None
         self._authorizer: Any = None
         self._deadline = 0.0
@@ -616,6 +811,115 @@ class WritableDatabase:
             raise SqlError(f"cannot close the macro database {self._macro_db}: {exc}") from None
         self._macro_db = None
 
+    @property
+    def companion_attached(self) -> bool:
+        return self._companion.attached
+
+    def attach_companion(self, path: Path) -> None:
+        """ATTACH the active database's companion (db/companion.py) at
+        *path* as COMPANION_SCHEMA; nothing if it is attached already."""
+        if self._companion.attached:
+            return
+        if self._depth:
+            raise SqlError("cannot attach a database inside opensak.transaction()")
+        conn = self._connection()
+        try:
+            # Our own statements: no authorizer is set outside the macro's.
+            conn.execute(f"ATTACH DATABASE ? AS {COMPANION_SCHEMA}", (str(path),))
+            conn.execute(f"PRAGMA {COMPANION_SCHEMA}.journal_mode = WAL")
+        except sqlite3.Error as exc:
+            try:
+                conn.execute(f"DETACH DATABASE {COMPANION_SCHEMA}")
+            except sqlite3.Error:
+                pass
+            raise SqlError(f"cannot open the companion database {path}: {exc}") from None
+        self._companion.attached = True
+        self._companion.invalidate()
+
+    def companion_tables(self) -> list[dict[str, Any]]:
+        """The companion's tables and views with their registry entries,
+        sorted by name ([] if it isn't attached): name, type, owner,
+        owner_name, mine, kind (as treated: KIND_CACHE or KIND_FREE),
+        code_column, description, rows (tables only)."""
+        if not self._companion.attached:
+            return []
+        conn = self._connection()
+        mine = self._companion.owner()
+        try:
+            registry = companion_db.registry(conn)
+            linked = dict(companion_db.cache_linked_tables(conn, COMPANION_SCHEMA))
+            result = []
+            for key, (name, type_) in sorted(companion_db.objects(conn).items()):
+                entry = registry.get(key, {})
+                info: dict[str, Any] = {
+                    "name": name, "type": type_,
+                    "owner": entry.get("owner"), "owner_name": entry.get("owner_name"),
+                    "mine": mine is not None and entry.get("owner") == mine,
+                    "kind": companion_db.KIND_CACHE if name in linked else companion_db.KIND_FREE,
+                    "code_column": linked.get(name),
+                    "description": entry.get("description"),
+                }
+                if type_ == "table":
+                    quoted = name.replace('"', '""')
+                    info["rows"] = conn.execute(
+                        f'SELECT count(*) FROM {COMPANION_SCHEMA}."{quoted}"'
+                    ).fetchone()[0]
+                result.append({k: v for k, v in info.items() if v is not None})
+            return result
+        except sqlite3.Error as exc:
+            raise self._error(exc) from None
+
+    def declare_companion_table(
+        self, name: str, linked: Optional[bool], code_column: Optional[str],
+        description: Optional[str],
+    ) -> None:
+        """opensak.companion_table{}: set the registry entry of the running
+        macro's table or view *name* — cache-linked or not (None: leave
+        it), its code column, its description. Raises SqlError if it isn't
+        the macro's own."""
+        if not self._companion.attached:
+            raise SqlError("the companion database is not attached")
+        conn = self._connection()
+        owner = self._companion.owner()
+        try:
+            found = companion_db.objects(conn).get(name.lower())
+            entry = companion_db.registry(conn).get(name.lower())
+        except sqlite3.Error as exc:
+            raise self._error(exc) from None
+        if companion_db.is_internal(name):
+            raise SqlError(f"{COMPANION_SCHEMA}.{name} belongs to OpenSAK")
+        if found is None:
+            raise SqlError(f"{COMPANION_SCHEMA}.{name} doesn't exist; create it first")
+        name, type_ = found
+        if owner is None:
+            raise SqlError("a macro without a file has no tables of its own — save it first")
+        if entry is None:
+            raise SqlError(f"{COMPANION_SCHEMA}.{name} has no owner; macros can only read it")
+        if entry["owner"] != owner:
+            raise SqlError(f"{COMPANION_SCHEMA}.{name} belongs to {_owner_label(entry['owner'])}; "
+                           "only that macro can change it")
+        values: dict[str, Any] = {}
+        if code_column is not None and linked is None:
+            linked = True
+        if linked is not None:
+            if linked and type_ != "table":
+                raise SqlError(f"{COMPANION_SCHEMA}.{name} is a view; only tables can be cache-linked")
+            column = code_column or companion_db.DEFAULT_CODE_COLUMN
+            quoted = name.replace('"', '""')
+            columns = {str(row[1]).lower(): str(row[1]) for row in conn.execute(
+                f'PRAGMA {COMPANION_SCHEMA}.table_info("{quoted}")')}
+            if linked and column.lower() not in columns:
+                raise SqlError(f"{COMPANION_SCHEMA}.{name} has no column {column!r} for the GC code")
+            values["kind"] = companion_db.KIND_CACHE if linked else companion_db.KIND_FREE
+            values["code_column"] = columns[column.lower()] if linked else None
+        if description is not None:
+            values["description"] = description
+        try:
+            companion_db.update_registered(conn, name, **values)
+        except sqlite3.Error as exc:
+            raise self._error(exc) from None
+        self._companion.invalidate()
+
     # opensak.attach(): further databases, read-only. The runtime decides
     # which databases a macro may attach; this refuses what would break
     # the connection or that SQLite would explain badly.
@@ -647,10 +951,12 @@ class WritableDatabase:
             raise SqlError(f"{path} is not an SQLite database")
         conn = self._connection()
         limit = conn.getlimit(sqlite3.SQLITE_LIMIT_ATTACHED)
-        if len(self._attached) + (self._macro_db is not None) >= limit:
+        in_use = len(self._attached) + (self._macro_db is not None) + self._companion.attached
+        if in_use >= limit:
             raise SqlError(
                 f"at most {limit} databases can be attached at once, the macro "
-                "database (opensak.macro_db()) included; detach one first"
+                "database (opensak.macro_db()) and the companion database "
+                "included; detach one first"
             )
         try:
             # Our own statement: no authorizer is set outside the macro's.
@@ -687,7 +993,7 @@ class WritableDatabase:
                 )
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA recursive_triggers = ON")
-                self._authorizer = _write_authorizer(_main_names(conn))
+                self._authorizer = _write_authorizer(_main_names(conn), self._companion)
                 self._create_triggers(conn)
             except sqlite3.Error as exc:
                 raise SqlError(f"cannot open the database for writing: {exc}") from None
@@ -750,6 +1056,8 @@ class WritableDatabase:
         read_only = _read_only_macro_db(self._conn, exc)
         if read_only is not None:
             return read_only
+        if self._companion.denied:
+            return SqlError(f"{self._companion.denied}: {exc}")
         if "not authorized" in str(exc) or "prohibited" in str(exc):
             return SqlError(
                 "opensak.sql_write may only INSERT into, UPDATE and DELETE from the cache tables "
@@ -808,6 +1116,7 @@ class WritableDatabase:
                 name = f"opensak_tx{self._depth}"
                 if not commit:
                     conn.execute(f"ROLLBACK TO {name}")
+                    self._companion.invalidate()
                 conn.execute(f"RELEASE {name}")
                 return
             trans, self._sa_trans = self._sa_trans, None
@@ -817,10 +1126,12 @@ class WritableDatabase:
                     self._refresh_pending(conn)
                 except BaseException:
                     trans.rollback()
+                    self._companion.invalidate()
                     raise
                 trans.commit()
             else:
                 trans.rollback()
+                self._companion.invalidate()
                 self._clear_pending(conn)
         except sqlite3.Error as exc:
             raise self._error(exc) from None
@@ -905,7 +1216,8 @@ class WritableDatabase:
         open transaction's changes and the macro's TEMP tables."""
         if self._reader is None:
             self._reader = ReadOnlyDatabase(
-                self._db_path, self._timeout_s, connection=self._connection()
+                self._db_path, self._timeout_s, connection=self._connection(),
+                companion=self._companion,
             )
         return self._reader
 
@@ -943,6 +1255,8 @@ class WritableDatabase:
             # Also left over from ORM deletes of the transaction, which
             # report their caches themselves.
             conn.execute(f"DELETE FROM temp.{_REMOVED}")
+            if self._companion.attached:
+                self._companion.load(conn)
             self._deadline = time.monotonic() + self._timeout_s
             conn.set_progress_handler(self._check_deadline, _PROGRESS_STEPS)
             conn.set_authorizer(self._authorizer)
@@ -953,6 +1267,8 @@ class WritableDatabase:
             finally:
                 conn.set_authorizer(None)
             rows = conn.execute("SELECT changes()").fetchone()[0]
+            if self._companion.attached:
+                self._companion.record(conn)
 
             kinds_by_id: dict[int, set[str]] = {}
             for cache_id, kind in conn.execute(f"SELECT cache_id, kind FROM temp.{_TOUCHED}"):
@@ -976,6 +1292,9 @@ class WritableDatabase:
                 )
             ]
             conn.execute(f"DELETE FROM temp.{_REMOVED}")
+            if removed and self._companion.attached:
+                # Their cache-linked rows, in the same transaction.
+                companion_db.delete_rows_in(conn, removed)
             if nested:
                 self._stash(conn)
             else:
@@ -992,6 +1311,7 @@ class WritableDatabase:
                     conn.execute(f"DELETE FROM temp.{_TOUCHED}")
             except sqlite3.Error:
                 pass
+            self._companion.invalidate()
             if isinstance(exc, sqlite3.Error):
                 raise self._error(exc) from None
             if isinstance(exc, (ValueError, OverflowError)):
@@ -1022,3 +1342,5 @@ class WritableDatabase:
             self._conn = None
         self._macro_db = None
         self._attached = {}
+        self._companion.attached = False
+        self._companion.invalidate()

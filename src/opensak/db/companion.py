@@ -45,6 +45,14 @@ leaves rows without a cache in the companion, never a cache that lost its
 rows — provided writes go to the main database first and the companion
 second, as everything here does.
 
+Macros
+------
+The macros' SQL connection attaches it as COMPANION_SCHEMA as well
+(macro/sql.py, CompanionAccess). Every macro reads every table; a macro
+creates tables, indexes and views, and changes only those it owns. The
+registry names each table's owner: OWNER_OPENSAK or the macro file's path
+(macro/db_access.py macro_key()), recorded when the macro creates it.
+
 This module has no UI and doesn't depend on SQLAlchemy.
 """
 
@@ -430,6 +438,94 @@ def is_attached(conn: Any) -> bool:
     return any(row[1] == COMPANION_SCHEMA for row in conn.execute("PRAGMA database_list"))
 
 
+def peek(db_path: Path) -> Status:
+    """
+    What the companion of *db_path* is, without changing anything: no
+    quick_check, migration or orphan cleanup, and the file is opened
+    read-only. For reading another database's companion (the macros'
+    opensak.attach()); an older schema counts as OK.
+    """
+    path = companion_path(db_path)
+    if not path.is_file():
+        return Status.MISSING
+    try:
+        conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            if conn.execute("PRAGMA user_version").fetchone()[0] > SCHEMA_VERSION:
+                return Status.NEWER
+            if not _has_table(conn, META_TABLE) or not _has_table(conn, REGISTRY_TABLE):
+                return Status.BROKEN
+            recorded = _read_meta(conn).get(MAIN_UUID_KEY)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return Status.BROKEN
+    actual = _main_uuid(db_path)
+    return Status.FOREIGN if recorded and actual and recorded != actual else Status.OK
+
+
+# ── The registry ──────────────────────────────────────────────────────────────
+# One row per table (or view) in REGISTRY_TABLE, naming its owner. Macros
+# get theirs recorded by macro/sql.py when they create one; these work on
+# the companion open on *conn* as *schema*, inside the caller's transaction.
+
+def register(
+    conn: Any, name: str, owner: str, owner_name: Optional[str], kind: str,
+    code_column: Optional[str] = None, description: Optional[str] = None,
+    schema: str = COMPANION_SCHEMA,
+) -> None:
+    """Add *name* to the registry (replacing a row of that name)."""
+    conn.execute(
+        f"INSERT OR REPLACE INTO {_q(schema)}.{REGISTRY_TABLE} (name, owner, owner_name, "
+        "kind, code_column, description, created_at, created_by_version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (name, owner, owner_name, kind, code_column, description, _now(), _version()),
+    )
+
+
+def unregister(conn: Any, name: str, schema: str = COMPANION_SCHEMA) -> None:
+    conn.execute(f"DELETE FROM {_q(schema)}.{REGISTRY_TABLE} WHERE name = ?", (name,))
+
+
+def rename_registered(conn: Any, old: str, new: str, schema: str = COMPANION_SCHEMA) -> None:
+    conn.execute(f"UPDATE {_q(schema)}.{REGISTRY_TABLE} SET name = ? WHERE name = ?", (new, old))
+
+
+def update_registered(conn: Any, name: str, schema: str = COMPANION_SCHEMA, **values: Any) -> None:
+    """Set the registry columns *values* (kind, code_column, description, ...) of *name*."""
+    if values:
+        assignments = ", ".join(f"{_q(column)} = ?" for column in values)
+        conn.execute(
+            f"UPDATE {_q(schema)}.{REGISTRY_TABLE} SET {assignments} WHERE name = ?",
+            (*values.values(), name),
+        )
+
+
+def registry(conn: Any, schema: str = COMPANION_SCHEMA) -> dict[str, dict[str, Any]]:
+    """The registry rows by lower-case name, as dicts of their columns."""
+    cursor = conn.execute(f"SELECT * FROM {_q(schema)}.{REGISTRY_TABLE}")
+    columns = [d[0] for d in cursor.description]
+    return {str(row[0]).lower(): dict(zip(columns, row)) for row in cursor.fetchall()}
+
+
+def objects(conn: Any, schema: str = COMPANION_SCHEMA) -> dict[str, tuple[str, str]]:
+    """The companion's tables and views by lower-case name: (name, type).
+    OpenSAK's and SQLite's own tables are left out."""
+    return {
+        str(name).lower(): (str(name), str(type_))
+        for name, type_ in conn.execute(
+            f"SELECT name, type FROM {_q(schema)}.sqlite_master WHERE type IN ('table', 'view')"
+        )
+        if not _is_internal(name)
+    }
+
+
+def is_internal(name: str) -> bool:
+    """True for the names of OpenSAK's (opensak_*) and SQLite's (sqlite_*)
+    own tables in a companion."""
+    return _is_internal(name)
+
+
 def set_main_uuid(db_path: Path, value: Optional[str]) -> None:
     """Record *value* as the db_uuid of the main database in the companion of
     *db_path* (after a copy got a new id). Nothing if it has no companion."""
@@ -741,8 +837,8 @@ class CheckResult:
     foreign_key_problems: int = 0
     uuid_mismatch: bool = False
     orphans: dict[str, int] = field(default_factory=dict)   # table → orphan rows
-    unregistered: tuple[str, ...] = ()      # tables without a registry row
-    missing: tuple[str, ...] = ()           # registry rows without a table
+    unregistered: tuple[str, ...] = ()      # tables and views without a registry row
+    missing: tuple[str, ...] = ()           # registry rows without a table or view
 
     @property
     def ok(self) -> bool:
@@ -815,11 +911,8 @@ def check(db_path: Path, thorough: bool = False) -> Optional[CheckResult]:
         fk = len(conn.execute("PRAGMA foreign_key_check").fetchall())
         recorded = _read_meta(conn).get(MAIN_UUID_KEY)
         actual = _main_uuid(db_path)
-        tables = {
-            name.lower(): name for (name,) in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ) if not _is_internal(name)
-        }
+        # Views are registered too (macros own the views they create).
+        tables = {key: name for key, (name, _type) in objects(conn, "main").items()}
         registered = {
             str(name).lower(): name
             for (name,) in conn.execute(f"SELECT name FROM {REGISTRY_TABLE}")
