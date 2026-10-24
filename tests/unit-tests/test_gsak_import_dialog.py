@@ -26,6 +26,7 @@ def _result(created=1, updated=0, waypoints=0, attributes=0, logs=0, notes=0,
         logs=logs, notes=notes, note_images_replaced=note_images_replaced,
         trackables=trackables,
         corrected=corrected, skipped=skipped, warnings=warnings or [], errors=errors or [],
+        custom_fields=None,
     )
 
 
@@ -50,7 +51,7 @@ class TestGsakImportWorker:
         self._patch_common(monkeypatch)
         monkeypatch.setattr(
             "opensak.importer.gsak_importer.import_gsak_db",
-            lambda path, session, progress_cb=None: _result(created=48),
+            lambda path, session, progress_cb=None, **_kw: _result(created=48),
         )
         w = GsakImportWorker(Path("/gsak.db3"))
         got = []
@@ -61,7 +62,7 @@ class TestGsakImportWorker:
     def test_run_reports_progress(self, monkeypatch):
         self._patch_common(monkeypatch)
 
-        def fake_import(path, session, progress_cb=None):
+        def fake_import(path, session, progress_cb=None, **_kw):
             progress_cb(5, 10)
             return _result()
 
@@ -90,7 +91,7 @@ class TestGsakImportWorker:
         # is never swapped from the worker thread.
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         inits, opened = [], []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
         monkeypatch.setattr("opensak.db.database.get_session",
@@ -105,7 +106,7 @@ class TestGsakImportWorker:
     def test_run_active_target_uses_active_session(self, monkeypatch):
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         inits = []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
         monkeypatch.setattr("opensak.db.database.session_for",
@@ -120,7 +121,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
                             lambda session: calls.append("clear") or 7)
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: calls.append("import") or _result())
+                            lambda path, session, progress_cb=None, **_kw: calls.append("import") or _result())
         w = GsakImportWorker(Path("/gsak.db3"), replace=True)
         cleared = []
         w.cleared.connect(cleared.append)
@@ -131,7 +132,7 @@ class TestGsakImportWorker:
     def test_run_updates_distances_of_target(self, monkeypatch):
         updated = self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         monkeypatch.setattr("opensak.db.database.session_for", lambda p: _fake_session())
         GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db")).run()
         GsakImportWorker(Path("/gsak.db3")).run()  # no target → the active DB
@@ -143,7 +144,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr(GsakImportWorker, "_invalidate_distances",
                             staticmethod(invalidated.append))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         monkeypatch.setattr("opensak.db.database.session_for", lambda p: _fake_session())
         w = GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db"),
                              update_distances=False)
@@ -175,7 +176,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
                             lambda session: calls.append("clear") or 0)
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         GsakImportWorker(Path("/gsak.db3")).run()
         assert calls == []
 

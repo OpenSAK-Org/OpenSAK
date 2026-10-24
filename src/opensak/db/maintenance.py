@@ -289,3 +289,26 @@ def vacuum_file(db_path: Path, **kwargs) -> VacuumResult:
         return vacuum(conn, db_path, **kwargs)
     finally:
         conn.close()
+
+
+def vacuum_with_companion(
+    db_path: Path, **kwargs
+) -> tuple[VacuumResult, Optional[VacuumResult]]:
+    """
+    Compact (#1048) the database *db_path* and then its companion database
+    (#1034), each on its own connection and each only when it pays off and
+    there is room (or with ``force``). Returns both results; the second is
+    None when the database has no companion.
+
+    Same rule as vacuum_file(): the caller makes sure neither file is open
+    elsewhere — disposing the database's engine releases the companion as
+    well, since it is attached to the same connections. A companion that
+    fails or is skipped never changes the database's result. Never raises.
+    """
+    from opensak.db import companion
+
+    main = vacuum_file(db_path, **kwargs)
+    path = companion.companion_path(Path(db_path))
+    if not path.is_file():
+        return main, None
+    return main, vacuum_file(path, **kwargs)

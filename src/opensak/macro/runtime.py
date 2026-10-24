@@ -1535,6 +1535,10 @@ class MacroRuntime:
         # (_tx_deleted) and only kept when it commits.
         self._deleted: dict[str, int] = {}
         self._tx_deleted: list[dict[str, int]] = []
+        # GC codes deleted inside opensak.transaction(), per level: their
+        # rows in the companion database (#1034) are deleted once the
+        # outermost transaction commits (_purge_companion()).
+        self._tx_removed: list[list[str]] = []
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1797,7 +1801,7 @@ class MacroRuntime:
         self._require_write(func)
         with self._active_session() as session:
             deleted = delete_caches(session, gc_codes)
-        self._caches_deleted(len(deleted))
+        self._caches_deleted(deleted)
         return bool(deleted) if single else len(deleted)
 
     def _delete_child(self, table: ChildTable, row_id=None) -> bool:
@@ -1811,20 +1815,41 @@ class MacroRuntime:
         self._host.caches_changed([code], False)
         return True
 
-    def _caches_deleted(self, count: int) -> None:
-        """Tell the host, and count *count* deleted caches for the report
-        at the end of the run."""
+    def _caches_deleted(self, codes: list[str]) -> None:
+        """Tell the host, count the deleted caches *codes* for the report at
+        the end of the run, and delete their rows in the companion database
+        once that is committed."""
+        count = len(codes)
         if not count:
             return
+        if self._tx_removed:
+            self._tx_removed[-1].extend(codes)
+        else:
+            self._purge_companion(codes)
         self._host.caches_removed()
         counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
         name = self._host.database_name()
         counts[name] = counts.get(name, 0) + count
 
+    def _purge_companion(self, codes: list[str]) -> None:
+        """Delete the rows of the deleted caches *codes* from the active
+        database's companion (#1034). The macro's write connection doesn't
+        attach it, so this runs on its own connection after the commit; a
+        delete through get_session() has done it already. Never raises: a
+        row left behind is removed the next time the database is opened."""
+        if not flags.companion_db or not codes:
+            return
+        try:
+            from opensak.db import companion
+            companion.delete_rows(Path(get_engine().url.database or ""), codes)
+        except Exception:
+            logger.warning("macro: companion rows of deleted caches not removed", exc_info=True)
+
     def _report_deleted(self) -> None:
         """One line per database in the macro output, so deletes never go
         unnoticed. What a transaction left open (rolled back) is dropped."""
         self._tx_deleted = []
+        self._tx_removed = []
         for name, count in self._deleted.items():
             caches = "1 cache" if count == 1 else f"{count} caches"
             self._output(f"opensak: {caches} deleted from database {name!r}")
@@ -1982,7 +2007,7 @@ class MacroRuntime:
             raise MacroError(str(exc)) from None
         if result.codes:
             self._host.caches_changed(result.codes, result.added)
-        self._caches_deleted(len(result.removed))
+        self._caches_deleted(result.removed)
         return result.rows
 
     def _close_sql_write(self) -> None:
@@ -2006,9 +2031,11 @@ class MacroRuntime:
         except SqlError as exc:
             raise MacroError(f"opensak.transaction: {exc}") from None
         self._tx_deleted.append({})
+        self._tx_removed.append([])
 
     def _tx_end(self, commit=None) -> None:
         deleted = self._tx_deleted.pop() if self._tx_deleted else {}
+        removed = self._tx_removed.pop() if self._tx_removed else []
         try:
             self._writable_db().end(bool(commit))
         except SqlError as exc:
@@ -2017,6 +2044,10 @@ class MacroRuntime:
             counts = self._tx_deleted[-1] if self._tx_deleted else self._deleted
             for name, count in deleted.items():
                 counts[name] = counts.get(name, 0) + count
+            if self._tx_removed:
+                self._tx_removed[-1].extend(removed)
+            else:
+                self._purge_companion(removed)
 
     def _resync(self) -> int:
         if not self._in_transaction():
@@ -4310,6 +4341,7 @@ class MacroRuntime:
         self._write_denied = set()
         self._deleted = {}
         self._tx_deleted = []
+        self._tx_removed = []
         self._picked = set()
         self._written = set()
         self._opened = 0
