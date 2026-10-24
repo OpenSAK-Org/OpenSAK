@@ -4,6 +4,73 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.8] — 2026-10-24
+
+> Headline: **found dates survive a round trip to GSAK** — a GPX export
+> now carries your found date, so GSAK no longer shows it blank — and
+> **GSAK's own dates and small fields are kept on import**. Settings
+> saves instantly again on large databases.
+
+### Changed
+
+- **GSAK's dates and small fields are kept (#1139, #1140, #1141)** — the
+  GSAK import keeps GSAK's Created, Last GPX date and user note date
+  instead of replacing them with the import time, and stores GSAK's Last
+  user update, MacroFlag, MacroSort, IsOwner and GPX symbol. OpenSAK keeps
+  them current itself: *Last user update* is set whenever you change a
+  user field (flag, sort, user data, lock, note or corrected
+  coordinates), and *owned* follows the geocaching.com account in
+  Settings. The Dates tab of the Filter dialog and the column chooser
+  have *Last user update*, the column chooser has *GPX symbol*, and the
+  GSAK filter importer understands these fields. Dates are stored in UTC
+  with seconds (#1097).
+- **"Map app" is now "External map viewer" (#1143)** — the setting only
+  chooses the website for "Open in …" in the cache list's right-click
+  menu and for clicked coordinates. A note under it now says so, and that
+  the built-in map always uses OpenStreetMap.
+- **More of your user locations are visible (#1146)** — the list in
+  Settings shows 6 to 10 locations before it scrolls, also with a larger
+  system font, instead of as few as 2.
+
+### Fixed
+
+- **GPX export keeps your found date (#1145)** — GSAK showed a blank
+  Found date for caches exported from OpenSAK whenever your own found log
+  wasn't in the file. The export now writes the date the way GSAK does
+  (`gsak:UserFound`), and OpenSAK reads it back too, so the date survives
+  GSAK → OpenSAK → GSAK. Reported by McMellow on the GSAK forum.
+- **Settings OK no longer freezes on large databases (#1148)** — OK
+  recalculated every cache's distance even when nothing that affects it
+  had changed (about 11 seconds on 42,000 caches). It now does so only
+  when the centre point or distance method changed, and shows a "please
+  wait" box for the steps that can still take a moment. Contributed by
+  nagisml.
+- **Renaming a database showed `{error}` (#1147)** — the error message
+  now shows the actual reason. Found by new tests that check every
+  translation's placeholders. Contributed by nagisml.
+
+### In beta builds only
+
+- **Macros can use GSAK's small fields (#1150)** — `opensak.cache()` and
+  `caches()` return `owned`, `macro_flag`, `macro_sort`, `symbol`,
+  `corrected_source` and `last_user_update`; macros can write
+  `macro_flag`, `macro_sort` and `symbol`. `opensak.macro_flag()` is
+  GSAK's MACROFLAG, and `filter{}` has `macro_flag` and
+  `last_user_update` keys. `filter{ owned = }` now uses the *owned* field,
+  so it can match more caches than before (e.g. with only a member ID in
+  Settings). Contributed by nagisml.
+- **Statistics of the caches you own (#813)** — the example macro
+  *owned_statistics* writes FindStatGen's owner part: the finds your
+  caches received per year and month, records (northernmost, most finds,
+  most favourite points, longest lifetime, …), finds and favourites per
+  cache, your top finders, your caches per type, size, difficulty and
+  terrain, the hide-date calendar and a map. It lists its known
+  limitations in its header. Contributed by nagisml.
+- **User Guide: Macros (beta) section** — a first draft describing the
+  Macros menu, the Macro Manager, folder permissions and write approval.
+
+---
+
 ## [1.22.0-beta.7] — 2026-10-21
 
 > Headline: **OpenSAK now speaks your language everywhere** — the splash
@@ -55,13 +122,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   you have found a cache in, and the nearest cache still to find in each
   missing one). Each lists its known limitations in its header.
   Contributed by nagisml.
-- **Statistics of the caches you own (#813)** — the example macro
-  *owned_statistics* writes FindStatGen's owner part: the finds your
-  caches received per year and month, records (northernmost, most finds,
-  most favourite points, longest lifetime, …), finds and favourites per
-  cache, your top finders, your caches per type, size, difficulty and
-  terrain, the hide-date calendar and a map. It lists its known
-  limitations in its header. Contributed by nagisml.
 - **More example macros** — *sql_report* (#810) runs your own SQL query
   and shows the result as an HTML table, optionally once per value of a
   loop query, like GSAK's SqlToHtml macro. *puzzle_helper* finds the
