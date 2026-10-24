@@ -799,7 +799,7 @@ function opensak.database() end
 ---@return boolean # true if it exists.
 function opensak.database_exists(name) end
 
----Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists.
+---Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists. The macro needs permission to change databases.
 ---
 ---Since API version 2.
 ---
@@ -861,7 +861,7 @@ function opensak.set_center(name) end
 ---@param name string Database name.
 function opensak.switch_database(name) end
 
----Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database.
+---Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database. The macro needs permission to change databases.
 ---
 ---Since API version 2.
 ---
