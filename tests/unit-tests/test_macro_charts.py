@@ -572,7 +572,7 @@ def _example(name):
 
 
 @pytest.mark.parametrize("name", ["find_statistics.lua", "database_statistics.lua",
-                                  "region_coverage.lua"])
+                                  "region_coverage.lua", "owned_statistics.lua"])
 def test_statistics_examples_state_their_limitations(name):
     head = _example(name).split("\nlocal ", 1)[0]
     assert "-- Known limitations:" in head
@@ -821,3 +821,125 @@ def test_examples_measure_from_the_active_centre(finds_db, boundaries):
     _run(_example("region_coverage.lua"), EmptyFilterHost())
     page = (temp_dir() / "region_coverage.html").read_text(encoding="utf-8")
     assert re.search(r'<td>South Ä</td><td class="num">0</td>', page)
+
+
+# ── Example macro owned_statistics.lua ──────────────────────────────────────
+
+def _hide(s, code, hidden, cache_type="Traditional Cache", logs=(), **values):
+    """A cache of the user's (unless *values* say otherwise) with its logs:
+    (type, date, finder, finder_id, text[, by_owner])."""
+    values = {"latitude": 47.0, "longitude": 8.0, "is_owner": True, "owner_name": "Vyrembi",
+              **values}
+    cache = Cache(gc_code=code, name=f"Hide {code}", cache_type=cache_type,
+                  hidden_date=hidden, url=f"https://coord.info/{code}", **values)
+    s.add(cache)
+    s.flush()
+    for log_type, when, finder, finder_id, log_text, *by_owner in logs:
+        s.add(Log(cache_id=cache.id, log_type=log_type, log_date=when, finder=finder,
+                  finder_id=finder_id, text=log_text, logged_by_owner=bool(by_owner)))
+
+
+@pytest.fixture
+def hides_db():
+    manager = get_db_manager()
+    db = manager.new_database("Hides")
+    manager.switch_to(db)
+    with session_for(db.path) as s:
+        _hide(s, "GCH1", datetime(2020, 1, 15), latitude=47.5, difficulty=1.5, terrain=2.0,
+              container="Small", favorite_points=5, elevation=400.0, logs=[
+                  ("Found it", datetime(2020, 1, 20), "Alice", "1", "TFTC"),
+                  ("Found it", datetime(2020, 1, 20), "Bob", None, "Nice one, thanks"),
+                  ("Found it", datetime(2021, 6, 1), "Carl", None, "one two three four five six"),
+                  ("Write note", datetime(2021, 7, 1), "Alice", "1", "x"),
+                  ("Owner Maintenance", datetime(2021, 7, 2), "Vyrembi", "9", "ok", True),
+              ])
+        # Renamed finder: the same id, counted once under the newer name.
+        # The find count of the import (40) wins over the one find log.
+        _hide(s, "GCH2", datetime(2021, 3, 1), "Multi-cache", latitude=46.9, longitude=8.5,
+              difficulty=3.0, terrain=2.0, container="Micro", favorite_points=1, find_count=40,
+              elevation=1500.0, archived=True, last_log_date=datetime(2022, 3, 1), logs=[
+                  ("Found it", datetime(2021, 3, 2), "Alice2", "1", "TFTC"),
+                  ("Archive", datetime(2022, 3, 1), "Vyrembi", "9", "bye", True),
+              ])
+        _hide(s, "GCE", datetime(2021, 3, 1), "Event Cache", latitude=47.2, longitude=9.0,
+              difficulty=1.0, terrain=1.0, container="Other", logs=[
+                  ("Attended", datetime(2021, 3, 1), "Bob", None, "Great event"),
+                  ("Attended", datetime(2021, 3, 1), "Dora", None, "Fun"),
+              ])
+        # Not the user's: left out unless OWNER names its owner.
+        _hide(s, "GCX", datetime(2019, 5, 5), is_owner=False, owner_name="Zürich Team",
+              logs=[("Found it", datetime(2019, 6, 1), "Alice", "1", "TFTC")])
+    return db
+
+
+def _record(page, label):
+    m = re.search(r"<tr><td>" + re.escape(label) + r"</td><td>([^<]*)</td>"
+                  r'<td>(?:<a href="https://coord.info/(GC\w+)">)?', page)
+    return m and m.groups()
+
+
+def test_owned_statistics_example(hides_db):
+    host = EmptyFilterHost()
+    out = _run(_example("owned_statistics.lua"), host)
+    target = temp_dir() / "owned_statistics.html"
+    assert out == [f"3 caches, 45 finds → {target}"]
+    assert host.opened == [target]
+    page = target.read_text(encoding="utf-8")
+
+    assert _tile(page, "caches") == "3"
+    assert (_tile(page, "active"), _tile(page, "disabled"), _tile(page, "archived")) == ("2", "0", "1")
+    assert _tile(page, "events hosted") == "1"
+    assert _tile(page, "attendees of your events") == "2"
+    assert _tile(page, "finds received") == "45"          # 3 + 40 + 2
+    assert _tile(page, "different finders") == "4"        # Alice(2), Bob, Carl, Dora
+    assert _tile(page, "favourite points") == "6"
+    assert _tile(page, "FP h-index") == "1"
+    assert _tile(page, "D/T combinations") == "3 / 81"
+    assert _tile(page, "D or T 3 or more") == "1 (33.3 %)"
+    assert "GCX" not in page and "Owner Maintenance" not in page
+    # Per year from the find logs: 2020 two finds on one day, 2021 four on three.
+    assert re.search(r'<td>2020</td><td class="num">2</td>.*?<td class="num">1</td><td>2.00</td>', page)
+    assert re.search(r'<td>2021</td><td class="num">4</td>.*?<td class="num">3</td><td>1.33</td>', page)
+    assert "<title>2021-06: 6</title>" in page
+    assert "<title>2021 · Archived: 1 (total 2)</title>" in page
+
+    assert _record(page, "Northernmost")[1] == "GCH1"
+    assert _record(page, "Highest") == ("1500 m", "GCH2")
+    assert _record(page, "Lowest") == ("400 m", "GCH1")
+    assert _record(page, "Most finds") == ("40", "GCH2")
+    assert _record(page, "Most finds on one day")[0] == "2 on 2021-03-01"
+    assert _record(page, "Day with the most finds") == ("2 on 2020-01-20", None)
+    assert _record(page, "Most favourite points") == ("5", "GCH1")
+    assert _record(page, "Found most often") == ("every 9.1 days", "GCH2")   # 365 / 40
+    assert _record(page, "Active cache found the longest ago")[1] == "GCH1"
+    assert _record(page, "Event with the most attendees") == ("2", "GCE")
+    assert _record(page, "Lifetime of archived caches") == (
+        "365 days on average; longest 365 days", "GCH2")
+    assert _record(page, "Longest find log") == ("6 words", "GCH1")
+    # Top finders: by the number of caches, the renamed one under the new name.
+    finders = re.findall(r'<tr><td class="num">(\d+)</td><td>([^<]+)</td><td class="num">(\d+)</td>',
+                         page)
+    assert finders[:4] == [("1", "Alice2", "2"), ("2", "Bob", "2"), ("3", "Carl", "1"),
+                           ("4", "Dora", "1")]
+    assert "2 of 366 days of the year" in page
+    assert '<td>Found it</td><td class="num">4</td>' in page
+    assert '<td>Attended</td><td class="num">2</td>' in page
+    assert "<script" not in page
+
+
+def test_owned_statistics_example_owner_setting(hides_db):
+    source = _example("owned_statistics.lua").replace(
+        "local OWNER = nil", 'local OWNER = "ZÜRICH TEAM "')
+    out = _run(source, EmptyFilterHost())
+    assert out[0].startswith("1 caches, 1 finds → ")
+    page = (temp_dir() / "owned_statistics.html").read_text(encoding="utf-8")
+    assert "GCX" in page and "GCH1" not in page
+    assert "ZÜRICH TEAM  · Hides" in page
+
+
+def test_owned_statistics_example_without_owned_caches(finds_db):
+    host = OpenHost()
+    assert _run(_example("owned_statistics.lua"), host) == [
+        "No caches owned by you in Finds. Set your geocaching.com username in Settings, "
+        "or OWNER in the macro."]
+    assert host.opened == []
