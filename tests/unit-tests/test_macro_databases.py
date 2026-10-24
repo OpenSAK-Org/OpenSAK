@@ -1,7 +1,9 @@
 """tests/unit-tests/test_macro_databases.py — Lua macro database functions
 (opensak.databases, database, database_exists, create_database,
 switch_database, move_caches, copy_caches) against real database files in
-an isolated DatabaseManager (conftest's _isolated_app_paths)."""
+an isolated DatabaseManager (conftest's _isolated_app_paths). Creating
+a database and moving or copying caches needs the macro's permission to
+change databases."""
 
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +15,7 @@ from opensak.db.manager import get_db_manager
 from opensak.db.models import Cache, Log, UserNote
 from opensak.export.file_export import active_database_name
 from opensak.filters.engine import FilterSet, apply_filters_auto
-from opensak.macro import MacroError, MacroRuntime
+from opensak.macro import MacroError, MacroRuntime, WriteApproval
 
 OLD, NEW = datetime(2024, 1, 1), datetime(2025, 1, 1)
 
@@ -21,11 +23,13 @@ OLD, NEW = datetime(2024, 1, 1), datetime(2025, 1, 1)
 class Host:
     """MacroHost on the real DatabaseManager and the active database."""
 
-    def __init__(self):
+    def __init__(self, answer=WriteApproval.SESSION):
         self.filterset, self.label = FilterSet(), ""
         self.switched: list[str] = []
         self.list_changed = 0
         self.removed = 0
+        self.answer = answer
+        self.asked = 0
 
     def apply_filter(self, filterset, label):
         with get_session() as s:
@@ -58,6 +62,10 @@ class Host:
 
     def caches_removed(self):
         self.removed += 1
+
+    def approve_macro_write(self, macro):
+        self.asked += 1
+        return self.answer
 
     def end_macro(self):
         pass
@@ -205,6 +213,31 @@ def test_if_exists(dbs, if_exists, target_imported, written):
 def test_transfer_rejects_bad_input(dbs, call, msg):
     with pytest.raises(MacroError, match=msg):
         _run(call)
+
+
+@pytest.mark.parametrize("call", [
+    'opensak.create_database("CH_Zurich")',
+    'opensak.copy_caches("Target")',
+    'opensak.move_caches("Target", { codes = {"GCDB1"} })',
+])
+def test_write_denied_changes_nothing(dbs, call):
+    source, target = dbs
+    host = Host(WriteApproval.DENY)
+    with pytest.raises(MacroError, match="did not allow"):
+        _run(call, host)
+    assert host.asked == 1
+    assert [d.name for d in get_db_manager().databases] == ["Default", "Source", "Target"]
+    assert _codes(target.path) == {}
+    assert set(_codes(source.path)) == {"GCDB1", "GCDB2", "GCDB3"}
+
+
+def test_bad_input_asks_nothing(dbs):
+    host = Host()
+    with pytest.raises(MacroError, match="if_exists must be one of"):
+        _run('opensak.copy_caches("Target", { if_exists = "always" })', host)
+    with pytest.raises(MacroError, match="exists already"):
+        _run('opensak.create_database("Target")', host)
+    assert host.asked == 0
 
 
 def test_transfer_refuses_missing_target_file(dbs):

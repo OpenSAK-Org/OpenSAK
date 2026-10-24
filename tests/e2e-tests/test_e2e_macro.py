@@ -91,6 +91,11 @@ def test_macro_moves_caches_and_switches_database(seeded_window, monkeypatch):
     manager.switch_to(active)
     monkeypatch.setattr(mgr_module, "_manager", manager)
     window = seeded_window
+    # create_database and move_caches ask before changing databases.
+    from opensak.macro import WriteApproval
+    asked: list = []
+    monkeypatch.setattr(window, "approve_macro_write",
+                        lambda macro: asked.append(macro) or WriteApproval.SESSION)
     total = window._cache_table.row_count()
     code = window._cache_table._model.cache_at(0).gc_code
 
@@ -104,6 +109,7 @@ def test_macro_moves_caches_and_switches_database(seeded_window, monkeypatch):
     wait_for_refresh(window)
 
     assert out.splitlines()[:2] == [f"1\t{total - 1}", f"Archive\t1\t{code}"]
+    assert asked == [None]  # asked once for the run (an unsaved macro)
     assert manager.active.name == "Archive"
     assert window._db_combo.currentText() == "Archive"
     assert window._cache_table.row_count() == 1
