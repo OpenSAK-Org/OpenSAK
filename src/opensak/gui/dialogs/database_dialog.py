@@ -353,6 +353,12 @@ class DatabaseManagerDialog(QDialog):
         self._btn_rename.clicked.connect(self._rename_database)
         btn_layout.addWidget(self._btn_rename)
 
+        # #1048: Info, Check, Optimize, Compact … (and the companion's data)
+        self._btn_maintenance = QPushButton(tr("maint_btn"))
+        self._btn_maintenance.setEnabled(False)
+        self._btn_maintenance.clicked.connect(self._open_maintenance)
+        btn_layout.addWidget(self._btn_maintenance)
+
         btn_layout.addSpacing(8)
 
         self._btn_remove = QPushButton(tr("db_remove_btn"))
@@ -438,6 +444,7 @@ class DatabaseManagerDialog(QDialog):
         self._btn_copy.setEnabled(db is not None and db.exists)
         self._btn_move.setEnabled(db is not None and db.exists)
         self._btn_rename.setEnabled(db is not None)
+        self._btn_maintenance.setEnabled(db is not None and db.exists)
         self._btn_remove.setEnabled(db is not None and not is_active)
         # Delete requires: something selected, not active, and file exists on disk
         self._btn_delete.setEnabled(db is not None and not is_active and db.exists)
@@ -603,6 +610,15 @@ class DatabaseManagerDialog(QDialog):
                 self, tr("db_moved_title"),
                 tr("db_moved_msg", name=db.name, path=str(db.path)),
             )
+
+    def _open_maintenance(self) -> None:
+        db = self._selected_db()
+        if not db:
+            return
+        from opensak.gui.dialogs.database_maintenance_dialog import DatabaseMaintenanceDialog
+        DatabaseMaintenanceDialog(db, self).exec()
+        # Compact changes the size shown in the details.
+        self._refresh_list(select_db=db)
 
     def _rename_database(self) -> None:
         db = self._selected_db()

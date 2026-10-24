@@ -193,7 +193,10 @@ def init_db(db_path: Path | None = None) -> Engine:
     _engine = new_engine
     _SessionLocal = _session_factory(new_engine)
     if old_engine is not None and old_engine is not new_engine:
+        optimize_database(_engine_path(old_engine))
         old_engine.dispose()
+    # #1048: statistics for the query planner, created the first time.
+    optimize_database(db_path)
     logger.info("init_db: ready (+%.2fs total)", time.monotonic() - t0)
     return _engine
 
@@ -1192,6 +1195,13 @@ def _run_migrations(engine: Engine) -> None:
                 progress=lambda: _report_progress(PROGRESS_COMPACTING),
             )
 
+        # #1048: a table rebuild drops the planner's statistics, and new
+        # columns and indexes have none yet. Never raises.
+        try:
+            maintenance.optimize(cast(sqlite3.Connection, conn.connection.driver_connection))
+        except sqlite3.Error as exc:
+            logger.warning("migrations: optimize failed: %s", exc)
+
 
 # Migration 26 (#1033): the defaults models.py has as server_default, frozen
 # here so later model changes don't alter what this migration does.
@@ -1417,6 +1427,61 @@ def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]
         conn.exec_driver_sql(index_sql)
 
 
+def optimize_database(db_path: Path | None = None) -> None:
+    """
+    Refresh the query planner's statistics (#1048) of *db_path* (default:
+    the active database) and of its companion database. Cheap when nothing
+    changed much; the first time it creates them (0.15 s for 1.4 GB).
+
+    Called when a database is opened, closed or switched, and after imports,
+    deletes and moves. Runs on its own connection, waits at most a few
+    seconds for a writer, and never raises: without fresh statistics the
+    queries are only slower.
+    """
+    try:
+        if db_path is None:
+            if _engine is None:
+                return
+            db_path = _engine_path(_engine)
+        db_path = Path(db_path)
+        if not db_path.is_file():
+            return
+        maintenance.optimize_file(db_path, timeout=_OPTIMIZE_TIMEOUT)
+        if flags.companion_db and companion.exists(db_path):
+            companion.optimize(db_path, timeout=_OPTIMIZE_TIMEOUT)
+    except Exception:
+        logger.warning("optimize %s failed", db_path, exc_info=True)
+
+
+# Seconds optimize_database() waits for another connection's write.
+_OPTIMIZE_TIMEOUT = 5
+
+
+def _engine_path(engine: Engine) -> Path:
+    return Path(engine.url.database or "")
+
+
+def release_connections(db_path: Path) -> bool:
+    """
+    Close the pooled connections of the active engine if it points at
+    *db_path* — and with them the companion attached to them — so a
+    maintenance step can have the files to itself (VACUUM, moving a damaged
+    companion aside, #1048). Unlike dispose_engine() the engine stays: the
+    next session simply opens a new connection, so nothing on the GUI
+    thread finds the database closed meanwhile. True if it was the active
+    database.
+    """
+    if _engine is None:
+        return False
+    try:
+        if _engine_path(_engine).resolve() != Path(db_path).resolve():
+            return False
+    except OSError:
+        return False
+    _engine.dispose()
+    return True
+
+
 def dispose_engine(db_path: Path | None = None) -> None:
     """
     Luk og frigiv SQLAlchemy connection pool for en given database-sti.
@@ -1445,6 +1510,8 @@ def dispose_engine(db_path: Path | None = None) -> None:
         if engine_path != target_path:
             return  # Denne engine peger ikke på den ønskede database
 
+    # #1048: the database is closed (switch, exit, move, rename …).
+    optimize_database(_engine_path(_engine))
     _engine.dispose()
     _engine = None
     _SessionLocal = None

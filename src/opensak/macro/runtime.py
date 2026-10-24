@@ -131,7 +131,7 @@ from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
 from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
-from opensak.db.database import get_session
+from opensak.db.database import get_session, optimize_database
 from opensak.macro.cache_data import (
     CACHE_FIELDS,
     CacheField,
@@ -1808,6 +1808,8 @@ class MacroRuntime:
         self._require_write(func)
         with self._active_session() as session:
             deleted = delete_caches(session, gc_codes)
+        if deleted and not self._in_transaction():
+            optimize_database()   # #1048
         self._caches_deleted(deleted)
         return bool(deleted) if single else len(deleted)
 
@@ -2744,6 +2746,9 @@ class MacroRuntime:
 
         def total(key: str) -> int:
             return sum(r.get(key, 0) for r in rows)
+
+        if total("created") or total("updated"):
+            optimize_database(db.path)   # #1048
 
         errors = sum(len(r["errors"]) if "errors" in r else 1 for r in rows)
         if not other_db and (total("created") or total("updated")):
