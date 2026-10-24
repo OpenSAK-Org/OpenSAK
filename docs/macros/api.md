@@ -13,16 +13,16 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | Function | Since |
 |---|---|
 | [`opensak.api_version`](#opensakapiversion) | 1 |
-| [`opensak.filter`](#opensakfilter) | 1 |
+| [`opensak.filter`](#opensakfilter) | 1, changed in 3 |
 | [`opensak.filter_name`](#opensakfiltername) | 2 |
-| [`opensak.sort`](#opensaksort) | 2 |
+| [`opensak.sort`](#opensaksort) | 2, changed in 3 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.save_filter`](#opensaksavefilter) | 3 |
 | [`opensak.restore_filter`](#opensakrestorefilter) | 3 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
-| [`opensak.cache`](#opensakcache) | 2 |
+| [`opensak.cache`](#opensakcache) | 2, changed in 3 |
 | [`opensak.caches`](#opensakcaches) | 2, changed in 3 |
 | [`opensak.current`](#opensakcurrent) | 2 |
 | [`opensak.selected`](#opensakselected) | 2 |
@@ -51,6 +51,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
 | [`opensak.update`](#opensakupdate) | 3 |
+| [`opensak.macro_flag`](#opensakmacroflag) | 3 |
 | [`opensak.insert`](#opensakinsert) | 3 |
 | [`opensak.delete`](#opensakdelete) | 3 |
 | [`opensak.logs`](#opensaklogs) | 3 |
@@ -205,7 +206,7 @@ Parameters:
 
 Returns `integer` — Number of matching caches (0 = view unchanged).
 
-Since API version 1.
+Since API version 1. Changed in API version 3: added the keys `last_user_update` and `macro_flag`; `owned` uses the `owned` cache field.
 
 Example:
 
@@ -238,14 +239,14 @@ print("Filter: " .. opensak.filter_name())
 opensak.sort(field [, direction])
 ```
 
-Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`, `macro_sort`. `macro_sort` has no column in the cache list, so no column header shows the sort; it compares as text, so pad numbers ("0042").
 
 Parameters:
 
 - `field` (`string`) — A cache field, e.g. "difficulty".
 - `direction` (`"asc"|"desc"`, optional) — "asc" if omitted.
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added `macro_sort`.
 
 Example:
 
@@ -389,7 +390,7 @@ Parameters:
 
 Returns `opensak.Cache?` — The cache, or nil if it is not in the database.
 
-Since API version 2.
+Since API version 2. Changed in API version 3: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 
 Example:
 
@@ -413,7 +414,7 @@ Parameters:
 
 Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
 
-Since API version 2. Changed in API version 3: added `all`.
+Since API version 2. Changed in API version 3: added `all` and the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 
 Example:
 
@@ -1055,6 +1056,35 @@ opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })
 for c in opensak.caches{ found = true, fields = {"color"} } do
     if not c.color then opensak.update(c.code, { color = "#00AA00" }) end
 end
+```
+
+### opensak.macro_flag
+
+```lua
+opensak.macro_flag(action [, caches])
+```
+
+Set, clear or swap the macro flag (field `macro_flag`) of many caches at once, like GSAK's MACROFLAG: the caches of the active filter, the given GC code(s), or `{ all = true }` for every cache of the active database. The macro flag is the macros' own, separate from the user flag; filter with `filter{ macro_flag = true }`. Needs the user's permission like opensak.update().
+
+Parameters:
+
+- `action` (`"set"|"clear"|"swap"`) — What to do with the flag.
+- `caches` (`string|string[]|{all: true}`, optional) — A GC code, a list of codes or { all = true }; default: the caches of the active filter.
+
+Returns `integer` — The number of caches whose flag changed.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+
+Example:
+
+```lua
+opensak.macro_flag("clear", { all = true })
+for c in opensak.caches{ fields = {"difficulty"} } do
+    if c.difficulty and c.difficulty >= 4 then opensak.macro_flag("set", c.code) end
+end
+opensak.filter{ macro_flag = true }
 ```
 
 ### opensak.insert
@@ -3998,14 +4028,14 @@ Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 | `available` | `true` | Only available caches (not disabled or archived). |
 | `archived` | `true \| false` | Only archived caches, or only caches that are not archived. |
 | `corrected` | `true \| false` | With or without corrected coordinates. |
-| `user_flag`, `locked`, `dnf`, `ftf`, `premium` | `true \| false` | That flag set, or not set. |
+| `user_flag`, `locked`, `macro_flag`, `dnf`, `ftf`, `premium` | `true \| false` | That flag set, or not set. |
 | `has_trackables` | `true \| false` | With or without trackables in the cache. |
-| `owned` | `true \| false` | Owned by you (owner = your geocaching.com username in Settings), or not. |
+| `owned` | `true \| false` | Owned by you, or not: the `owned` cache field (owner ID = your finder ID, or owner name = your username in Settings). |
 | `near` | `{lat = 47.37, lon = 8.54, km = 10} \| {point = "Home", km = 10}` | Within `km` of a coordinate or of a saved centre point. |
 | `distance` | `25 \| {5, 25} \| {10, nil}` | Km from the active centre point: at most a number, or {min, max} where nil leaves a side open. |
 | `bearing` | `{45, 135} \| {315, 45}` | Bearing from the active centre point, clockwise from the first to the second value. |
 | `favorites`, `elevation` | `10 \| {10, nil} \| {nil, 500}` | Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open. |
-| `hidden`, `found_date`, `last_gpx_update` | `{"2020-01-01", "2020-12-31"} \| {nil, "2026-09-01"}` | Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00". |
+| `hidden`, `found_date`, `last_gpx_update`, `last_user_update` | `{"2020-01-01", "2020-12-31"} \| {nil, "2026-09-01"}` | Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` and `last_user_update` also take a time, "2026-09-01T18:00", in local time. |
 | `attributes` | `"Dogs" \| {"Dogs", "-Night cache", 13}` | Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed). |
 | `name`, `code`, `owner`, `placed_by`, `country`, `state`, `county`, `user_data1`, `user_data2`, `user_data3`, `user_data4`, `gc_note`, `note` | `"text"` | "Contains" match on that field (`note` = your local note). |
 | `text` | `"Brücke"` | Full-text search in description, logs and notes. |
@@ -4185,6 +4215,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `terrain` | `number?` | Terrain 1–5. |
 | `owner` | `string?` | Owner name. |
 | `placed_by` | `string?` | Placed-by name as shown on the listing. |
+| `owned` | `boolean` | Owned by you: the owner matches your geocaching.com account in Settings (GSAK's IsOwner). |
 | `hidden` | `string?` | Hidden date, "YYYY-MM-DD". |
 | `found` | `boolean` | Found by you. |
 | `found_date` | `string?` | Your find date, "YYYY-MM-DD". |
@@ -4208,16 +4239,21 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `color` | `string?` | Colour tag, e.g. "#FF5733". |
 | `locked` | `boolean` | Locked against import changes. |
 | `watch` | `boolean` | On the watchlist. |
+| `macro_flag` | `boolean` | Flag for macros' own use, separate from the user flag (GSAK's MacroFlag). |
+| `macro_sort` | `string?` | Text for macros' own use, e.g. to sort by (GSAK's MacroSort). |
 | `note` | `string?` | Your local note. |
 | `gc_note` | `string?` | Personal note from geocaching.com. |
 | `hint` | `string?` | Hint text as imported. |
 | `url` | `string?` | Listing URL. |
+| `symbol` | `string?` | GPX waypoint symbol, e.g. "Geocache Found" (GSAK's Symbol). |
 | `corrected` | `{lat: number, lon: number}?` | Corrected coordinates; nil if the cache is not solved. |
+| `corrected_source` | `string?` | Who corrected the coordinates: "user", "macro" or "import" (from GSAK); nil if not corrected or not known. |
 | `waypoint_count` | `integer` | Number of additional waypoints. |
 | `log_count` | `integer` | Number of logs stored. |
 | `trackable_count` | `integer` | Number of trackables in the cache. |
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
-| `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh. |
+| `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh. |
+| `last_user_update` | `string?` | When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate). |
 
 ## Changing caches
 
@@ -4236,7 +4272,7 @@ Which function to use:
 
 Start with the dedicated functions: they take Lua values, check each field (type, range, date format) with a clear error message, and need no knowledge of the database schema. `opensak.sql_write()` only refuses protected columns and what SQLite itself rejects, and its column names follow the schema, which may change between versions.
 
-Writable cache fields: `name`, `type`, `container`, `lat`, `lon`, `difficulty`, `terrain`, `owner`, `placed_by`, `hidden`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `available`, `archived`, `premium`, `country`, `state`, `county`, `elevation`, `favorite_points`, `find_count`, `user_flag`, `user_sort`, `user_data`, `color`, `locked`, `watch`, `note`, `gc_note`, `hint`, `url`, `corrected`. `false` clears a field that is not a boolean, and "" clears a text field. `user_data` takes the slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes `{ lat = .., lon = .. }` or a coordinate string. Dates are `"YYYY-MM-DD"`. `opensak.insert{}` also needs `code`, and `name`, `type`, `lat`, `lon`.
+Writable cache fields: `name`, `type`, `container`, `lat`, `lon`, `difficulty`, `terrain`, `owner`, `placed_by`, `hidden`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `available`, `archived`, `premium`, `country`, `state`, `county`, `elevation`, `favorite_points`, `find_count`, `user_flag`, `user_sort`, `user_data`, `color`, `locked`, `watch`, `macro_flag`, `macro_sort`, `note`, `gc_note`, `hint`, `url`, `symbol`, `corrected`. `false` clears a field that is not a boolean, and "" clears a text field. `user_data` takes the slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes `{ lat = .., lon = .. }` or a coordinate string. Dates are `"YYYY-MM-DD"`. `opensak.insert{}` also needs `code`, and `name`, `type`, `lat`, `lon`.
 
 These fields cannot be written:
 
@@ -4248,6 +4284,9 @@ These fields cannot be written:
 - `trackable_count` — OpenSAK counts the trackables
 - `last_log_date` — OpenSAK takes it from the logs
 - `last_gpx_update` — it records when an import last touched the cache
+- `owned` — OpenSAK compares the owner with your account in Settings
+- `last_user_update` — OpenSAK records it when a user field changes
+- `corrected_source` — OpenSAK sets it when `corrected` is written
 
 Each change is committed on its own. To keep several changes together, or undo them all on an error, run them inside `opensak.transaction(function() ... end)`, which is also faster for many changes. SQL `BEGIN`/`COMMIT` is refused.
 
@@ -4260,7 +4299,7 @@ OpenSAK recalculates the columns it maintains (distance, bearing, counts, log da
 | Table | Required for INSERT | Protected columns |
 |---|---|---|
 | `attributes` | `cache_id`, `attribute_id` | `cache_id`, `id` |
-| `caches` | `gc_code`, `name`, `cache_type`, `latitude`, `longitude` | `bearing`, `distance`, `found_log_count`, `gc_cache_id`, `gc_code`, `guid`, `id`, `imported_at`, `last_found_date`, `last_four_logs`, `last_gpx_update`, `last_log_date`, `location_basis`, `location_dataset`, `location_source`, `location_updated`, `log_count`, `source_file`, `trackable_count`, `waypoint_count` |
+| `caches` | `gc_code`, `name`, `cache_type`, `latitude`, `longitude` | `bearing`, `distance`, `found_log_count`, `gc_cache_id`, `gc_code`, `guid`, `id`, `imported_at`, `is_owner`, `last_found_date`, `last_four_logs`, `last_gpx_update`, `last_log_date`, `last_user_update`, `location_basis`, `location_dataset`, `location_source`, `location_updated`, `log_count`, `source_file`, `trackable_count`, `waypoint_count` |
 | `logs` | `cache_id`, `log_type` | `cache_id`, `id`, `log_id` |
 | `trackables` | `cache_id` | `cache_id`, `id` |
 | `user_notes` | `cache_id` | `cache_id`, `id` |
@@ -4456,10 +4495,10 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GetPolygon | ✅ | `coords.inside()`, `filter{polygon=}` |
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
-| IsOwner | ✅ partial | `filter{owned=true}`; no `owned` cache field, no log-owner check |
+| IsOwner | ✅ partial | `owned` cache field and `filter{owned=true}` (both follow the account in Settings); no log-owner check |
 | Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
 | MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
-| MacroFlag | ❌ | workaround: `filter{codes=}` or a table in `macro_db()` |
+| MacroFlag | ✅ β | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
 | PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
@@ -4614,4 +4653,4 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) and an `owned` field are missing. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) are missing. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.

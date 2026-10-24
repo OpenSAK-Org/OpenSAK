@@ -14,19 +14,21 @@
 ---@field corrected? boolean With or without corrected coordinates.
 ---@field user_flag? boolean That flag set, or not set.
 ---@field locked? boolean That flag set, or not set.
+---@field macro_flag? boolean That flag set, or not set.
 ---@field dnf? boolean That flag set, or not set.
 ---@field ftf? boolean That flag set, or not set.
 ---@field premium? boolean That flag set, or not set.
 ---@field has_trackables? boolean With or without trackables in the cache.
----@field owned? boolean Owned by you (owner = your geocaching.com username in Settings), or not.
+---@field owned? boolean Owned by you, or not: the `owned` cache field (owner ID = your finder ID, or owner name = your username in Settings).
 ---@field near? table Within `km` of a coordinate or of a saved centre point.
 ---@field distance? number|number[] Km from the active centre point: at most a number, or {min, max} where nil leaves a side open.
 ---@field bearing? number[] Bearing from the active centre point, clockwise from the first to the second value.
 ---@field favorites? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
 ---@field elevation? number|number[] Favourite points / elevation in metres: exact value, or {min, max} where nil leaves a side open.
----@field hidden? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
----@field found_date? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
----@field last_gpx_update? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` also takes a time, "2026-09-01T18:00".
+---@field hidden? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` and `last_user_update` also take a time, "2026-09-01T18:00", in local time.
+---@field found_date? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` and `last_user_update` also take a time, "2026-09-01T18:00", in local time.
+---@field last_gpx_update? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` and `last_user_update` also take a time, "2026-09-01T18:00", in local time.
+---@field last_user_update? string[] Date range {from, to}, both inclusive, "YYYY-MM-DD"; nil leaves a side open. `last_gpx_update` and `last_user_update` also take a time, "2026-09-01T18:00", in local time.
 ---@field attributes? string|string[] Attributes the cache must have (all of them): English name or Groundspeak id; a leading `-` means the attribute's "no" form (e.g. "-Dogs" = no dogs allowed).
 ---@field name? string "Contains" match on that field (`note` = your local note).
 ---@field code? string "Contains" match on that field (`note` = your local note).
@@ -273,6 +275,7 @@
 ---@field terrain number? Terrain 1–5.
 ---@field owner string? Owner name.
 ---@field placed_by string? Placed-by name as shown on the listing.
+---@field owned boolean Owned by you: the owner matches your geocaching.com account in Settings (GSAK's IsOwner).
 ---@field hidden string? Hidden date, "YYYY-MM-DD".
 ---@field found boolean Found by you.
 ---@field found_date string? Your find date, "YYYY-MM-DD".
@@ -296,16 +299,21 @@
 ---@field color string? Colour tag, e.g. "#FF5733".
 ---@field locked boolean Locked against import changes.
 ---@field watch boolean On the watchlist.
+---@field macro_flag boolean Flag for macros' own use, separate from the user flag (GSAK's MacroFlag).
+---@field macro_sort string? Text for macros' own use, e.g. to sort by (GSAK's MacroSort).
 ---@field note string? Your local note.
 ---@field gc_note string? Personal note from geocaching.com.
 ---@field hint string? Hint text as imported.
 ---@field url string? Listing URL.
+---@field symbol string? GPX waypoint symbol, e.g. "Geocache Found" (GSAK's Symbol).
 ---@field corrected {lat: number, lon: number}? Corrected coordinates; nil if the cache is not solved.
+---@field corrected_source string? Who corrected the coordinates: "user", "macro" or "import" (from GSAK); nil if not corrected or not known.
 ---@field waypoint_count integer Number of additional waypoints.
 ---@field log_count integer Number of logs stored.
 ---@field trackable_count integer Number of trackables in the cache.
 ---@field last_log_date string? Date of the latest log, "YYYY-MM-DD".
----@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; finds caches the latest Pocket Query did not refresh.
+---@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh.
+---@field last_user_update string? When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate).
 ---@field [string] any
 
 ---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.
@@ -340,10 +348,13 @@
 ---@field color? string|false Colour tag, e.g. "#FF5733".
 ---@field locked? boolean Locked against import changes.
 ---@field watch? boolean On the watchlist.
+---@field macro_flag? boolean Flag for macros' own use, separate from the user flag (GSAK's MacroFlag).
+---@field macro_sort? string|false Text for macros' own use, e.g. to sort by (GSAK's MacroSort).
 ---@field note? string|false Your local note.
 ---@field gc_note? string|false Personal note from geocaching.com.
 ---@field hint? string|false Hint text as imported.
 ---@field url? string|false Listing URL.
+---@field symbol? string|false GPX waypoint symbol, e.g. "Geocache Found" (GSAK's Symbol).
 ---@field corrected? {lat: number, lon: number}|string|false Corrected coordinates; nil if the cache is not solved.
 
 ---A new cache for `opensak.insert{}`.
@@ -467,7 +478,7 @@ function opensak.api_version() end
 
 ---Build a filter from the given keys (see Filter keys; combined with AND unless `mode = "OR"`) and apply it. Usually called with table syntax: `opensak.filter{ ... }`. When nothing matches, the view is left unchanged.
 ---
----Since API version 1.
+---Since API version 1. Changed in API version 3: added the keys `last_user_update` and `macro_flag`; `owned` uses the `owned` cache field.
 ---
 ---```lua
 ---local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }
@@ -487,9 +498,9 @@ function opensak.filter(spec) end
 ---@return string # The filter name; "" for none.
 function opensak.filter_name() end
 
----Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`.
+---Sort the cache list, like a click on a column header. opensak.caches() and opensak.codes() then return the caches in this order. Fields: `name`, `code`, `type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`, `state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`, `premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`, `user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`, `user_data4`, `macro_sort`. `macro_sort` has no column in the cache list, so no column header shows the sort; it compares as text, so pad numbers ("0042").
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: added `macro_sort`.
 ---
 ---```lua
 ---opensak.sort("difficulty", "desc")
@@ -568,7 +579,7 @@ function opensak.profiles() end
 
 ---One cache as a table (see Cache fields). It is a snapshot: changing it changes nothing in the database.
 ---
----Since API version 2.
+---Since API version 2. Changed in API version 3: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 ---
 ---```lua
 ---local c = opensak.cache("GC12345")
@@ -582,7 +593,7 @@ function opensak.cache(code, options) end
 
 ---Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 ---
----Since API version 2. Changed in API version 3: added `all`.
+---Since API version 2. Changed in API version 3: added `all` and the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 ---
 ---```lua
 ---for c in opensak.caches() do print(c.code, c.name) end
@@ -954,6 +965,24 @@ function opensak.clear_corrected(code) end
 ---@param fields opensak.CacheUpdate The fields to change.
 ---@return boolean # false if the cache is not in the database.
 function opensak.update(code, fields) end
+
+---Set, clear or swap the macro flag (field `macro_flag`) of many caches at once, like GSAK's MACROFLAG: the caches of the active filter, the given GC code(s), or `{ all = true }` for every cache of the active database. The macro flag is the macros' own, separate from the user flag; filter with `filter{ macro_flag = true }`. Needs the user's permission like opensak.update().
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
+---
+---```lua
+---opensak.macro_flag("clear", { all = true })
+---for c in opensak.caches{ fields = {"difficulty"} } do
+---    if c.difficulty and c.difficulty >= 4 then opensak.macro_flag("set", c.code) end
+---end
+---opensak.filter{ macro_flag = true }
+---```
+---@param action "set"|"clear"|"swap" What to do with the flag.
+---@param caches? string|string[]|{all: true} A GC code, a list of codes or { all = true }; default: the caches of the active filter.
+---@return integer # The number of caches whose flag changed.
+function opensak.macro_flag(action, caches) end
 
 ---Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon` are required; any other writable field may be given too (see Changing caches). Fails if the code is already in the database. Needs the user's permission like opensak.update().
 ---
