@@ -14,7 +14,7 @@ class TestLoad:
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
-            "companion-db": False,
+            "companion-db": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -31,7 +31,7 @@ class TestLoad:
             "map-popout": True,
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
-            "companion-db": False,
+            "companion-db": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):
@@ -85,6 +85,16 @@ class TestLuaMacroWrite:
         patch_features_file({"lua-macros": True, "lua-macro-write": False})
         assert flags_module.lua_macros is True
         assert flags_module.lua_macro_write is False
+
+
+class TestCompanionDb:
+    def test_default_follows_version(self, no_features_file):
+        # on in beta builds, off in stable ones, like lua-macro-write (#1034)
+        assert flags_module.companion_db is ("-" in opensak.__version__)
+
+    def test_file_overrides_default(self, patch_features_file):
+        patch_features_file({"companion-db": False})
+        assert flags_module.companion_db is False
 
 
 # ── _parse_argv() ─────────────────────────────────────────────────────────────

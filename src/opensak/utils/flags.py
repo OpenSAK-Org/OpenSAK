@@ -45,9 +45,9 @@ _RELEASE_DEFAULTS: dict[str, bool] = {
     # transaction, ...): beta-only on their own, so the rest of the macro
     # system can go stable while the write API is still settling.
     "lua-macro-write": _is_prerelease(__version__),
-    # Companion database per cache database (#1034): off in release builds
-    # until macros and custom fields use it.
-    "companion-db": False,
+    # Companion database per cache database (#1034): on in beta builds only,
+    # so it can be tested there before macros and custom fields go stable.
+    "companion-db": _is_prerelease(__version__),
 }
 
 
