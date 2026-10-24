@@ -531,7 +531,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Display",
 
 
-    "settings_map_label":           "Map app:",
+    "settings_map_label":           "External map viewer:",
+    "settings_map_external_note": "Used by “Open in …” in the cache list’s right-click menu and when you click the coordinates in the detail panel. The built-in map always uses OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Coordinate format:",

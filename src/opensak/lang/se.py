@@ -531,7 +531,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Visa",
 
 
-    "settings_map_label":           "Kart app:",
+    "settings_map_label":           "Extern kartvisare:",
+    "settings_map_external_note": "Används av ”Öppna i …” i cachelistans högerklicksmeny och när du klickar på koordinaterna i detaljpanelen. Den inbyggda kartan använder alltid OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Koordinatformat:",

@@ -533,7 +533,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Wyświetlanie",
 
 
-    "settings_map_label":           "Aplikacja mapowa:",
+    "settings_map_label":           "Zewnętrzna przeglądarka map:",
+    "settings_map_external_note": "Używana przez „Otwórz w …” w menu kontekstowym listy skrzynek oraz po kliknięciu współrzędnych w panelu szczegółów. Wbudowana mapa zawsze używa OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Format współrzędnych:",

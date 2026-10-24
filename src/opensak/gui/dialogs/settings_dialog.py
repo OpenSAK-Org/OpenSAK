@@ -267,6 +267,12 @@ class SettingsDialog(QDialog):
         map_row.addWidget(self._map_provider)
         map_row.addStretch()
         disp_layout.addLayout(map_row)
+        # #1143: the setting only picks the website for "Open in …" links;
+        # say so, since it reads as if it switched the built-in map.
+        map_note = QLabel(tr("settings_map_external_note"))
+        map_note.setWordWrap(True)
+        map_note.setStyleSheet(hint_style())
+        disp_layout.addWidget(map_note)
 
         coord_fmt_row = QHBoxLayout()
         coord_fmt_row.addWidget(QLabel(tr("settings_coord_format_label")))

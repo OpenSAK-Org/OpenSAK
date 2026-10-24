@@ -531,7 +531,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Zobrazení",
 
 
-    "settings_map_label":           "Mapová aplikace:",
+    "settings_map_label":           "Externí prohlížeč map:",
+    "settings_map_external_note": "Používá se pro „Otevřít v …“ v kontextové nabídce seznamu keší a při kliknutí na souřadnice v panelu detailů. Vestavěná mapa vždy používá OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Formát souřadnic:",

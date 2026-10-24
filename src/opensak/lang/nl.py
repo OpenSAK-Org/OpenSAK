@@ -534,7 +534,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Weergave",
 
 
-    "settings_map_label":           "Kaartapp:",
+    "settings_map_label":           "Externe kaartviewer:",
+    "settings_map_external_note": "Gebruikt door ‘Openen in …’ in het rechtsklikmenu van de cachelijst en wanneer je op de coördinaten in het detailpaneel klikt. De ingebouwde kaart gebruikt altijd OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Coördinaatformaat:",

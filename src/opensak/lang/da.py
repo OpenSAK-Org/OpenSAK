@@ -531,7 +531,8 @@ STRINGS: dict[str, str] = {
     "settings_group_display":       "Visning",
 
 
-    "settings_map_label":           "Kortapp:",
+    "settings_map_label":           "Eksternt kortprogram:",
+    "settings_map_external_note": "Bruges af “Åbn i …” i cachelistens højreklikmenu, og når du klikker på koordinaterne i detaljepanelet. Det indbyggede kort bruger altid OpenStreetMap.",
     "settings_map_google":          "Google Maps",
     "settings_map_osm":             "OpenStreetMap",
     "settings_coord_format_label":  "Koordinatformat:",
