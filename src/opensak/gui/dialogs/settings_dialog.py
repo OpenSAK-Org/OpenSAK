@@ -186,8 +186,7 @@ class SettingsDialog(QDialog):
         self._points_table.verticalHeader().setVisible(False)
         self._points_table.setShowGrid(False)
         self._points_table.setAlternatingRowColors(True)
-        self._points_table.verticalHeader().setDefaultSectionSize(24)
-        self._points_table.setMaximumHeight(160)
+        self._fit_points_table_height()
         self._points_table.itemSelectionChanged.connect(self._on_point_selected)
         loc_layout.addWidget(self._points_table)
 
@@ -1518,6 +1517,24 @@ class SettingsDialog(QDialog):
             self._update_gc_ui_logged_out()
 
     # ── Hjemmepunkter — hjælpefunktioner ──────────────────────────────────────
+
+    # #1146: how many locations the table shows before it scrolls.
+    POINTS_TABLE_MIN_ROWS = 6
+    POINTS_TABLE_MAX_ROWS = 10
+
+    def _fit_points_table_height(self) -> None:
+        """Size the User locations table in rows, not pixels. A fixed pixel
+        cap left room for only 2–3 rows with a larger system font (Windows
+        text size / scaling), and the tab's scroll area shrank it further.
+        The minimum keeps it from being squeezed; the maximum keeps a long
+        list from pushing the rest of the tab down."""
+        table = self._points_table
+        row_h = max(24, table.fontMetrics().height() + 8)
+        table.verticalHeader().setDefaultSectionSize(row_h)
+        frame = 2 * table.frameWidth()
+        header = table.horizontalHeader().sizeHint().height()
+        table.setMinimumHeight(header + frame + self.POINTS_TABLE_MIN_ROWS * row_h)
+        table.setMaximumHeight(header + frame + self.POINTS_TABLE_MAX_ROWS * row_h)
 
     def _reload_points_table(self) -> None:
         s = get_settings()
