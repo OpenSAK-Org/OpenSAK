@@ -26,8 +26,9 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
-from opensak.db import maintenance
+from opensak.db import companion, maintenance
 from opensak.db.models import Base
+from opensak.utils import flags
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,31 @@ def _make_engine(db_path: Path) -> Engine:
         future=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+    _attach_companion_on_checkout(engine, db_path)
     return engine
+
+
+def _attach_companion_on_checkout(engine: Engine, db_path: Path) -> None:
+    """
+    Attach *db_path*'s companion database (db/companion.py) to each of
+    *engine*'s connections, as ``companion``, once it is usable. Checked on
+    checkout rather than on connect, so a companion created while the
+    engine is open is attached by the next session without reopening the
+    database. A connection never has a transaction open at checkout, which
+    ATTACH needs.
+    """
+    if not flags.companion_db:
+        return
+    key = companion.status_key(db_path)
+
+    @event.listens_for(engine, "checkout")
+    def _attach(dbapi_connection, connection_record, _proxy) -> None:
+        if connection_record.info.get("companion_attached"):
+            return
+        if companion.status_for_key(key) is not companion.Status.OK:
+            return
+        if companion.attach(dbapi_connection, db_path):
+            connection_record.info["companion_attached"] = True
 
 
 @event.listens_for(Engine, "connect")
@@ -188,6 +213,11 @@ def _open_engine(db_path: Path) -> Engine:
         # blocks the migration.
         if db_path not in _migrated_paths:
             backup_before_migration(db_path, SCHEMA_VERSION)
+
+        # The companion database (#1034): check it and update its own
+        # schema, so the connections can attach it. Never raises.
+        if flags.companion_db:
+            companion.prepare(db_path)
 
         # Create all tables that don't exist yet (safe to call multiple times).
         logger.info("open_db: opening %s", db_path)

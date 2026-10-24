@@ -222,7 +222,21 @@ def _database_fingerprint(path: Path) -> dict[str, Any]:
     ``{"db": [size, mtime_ns] | None, "wal": [size, mtime_ns] | None}``.
     An empty or missing ``-wal`` is None: it holds nothing, and SQLite
     creates and removes it as connections open and close.
+
+    A database with a companion database (#1034) also has
+    ``"companion": {"db": ..., "wal": ...}``, the same for that file. Only
+    then, so the state of every database without one stays as it was.
     """
+    from opensak.db import companion
+
+    fingerprint = _file_fingerprint(path)
+    companion_file = companion.companion_path(path)
+    if companion_file.is_file():
+        fingerprint["companion"] = _file_fingerprint(companion_file)
+    return fingerprint
+
+
+def _file_fingerprint(path: Path) -> dict[str, Any]:
     wal = _file_stat(path.with_name(path.name + "-wal"))
     if wal is not None and wal[0] == 0:
         wal = None

@@ -588,7 +588,10 @@ class WelcomeWizard(QDialog):
             øverste undermappe for registrerede databaser dybere nede,
           - alle *.db(-shm/-wal)-filer, hvis databasemappen ER
             installationsmappen (standard-layoutet) — også uregistrerede.
+        Companion databases (#1034, *.companion.db3 with their -shm/-wal)
+        count as part of their database in both cases.
         """
+        from opensak.db import companion
         from opensak.settings_store import get_store
 
         keep: set[Path] = set()
@@ -616,8 +619,11 @@ class WelcomeWizard(QDialog):
             except OSError:
                 continue
             if db_path.parent == root:
-                for suffix in ("", "-shm", "-wal"):
-                    keep.add(db_path.with_name(db_path.name + suffix))
+                # #1034: the companion database moves with its database.
+                companion_file = companion.companion_path(db_path)
+                for base in (db_path, companion_file):
+                    for suffix in ("", "-shm", "-wal"):
+                        keep.add(base.with_name(base.name + suffix))
             else:
                 top = _top_level(db_path)
                 if top is not None:
@@ -626,7 +632,10 @@ class WelcomeWizard(QDialog):
         if db_dir == root:
             try:
                 for f in root.iterdir():
-                    if f.is_file() and f.name.endswith((".db", ".db-shm", ".db-wal")):
+                    if f.is_file() and f.name.endswith((
+                        ".db", ".db-shm", ".db-wal",
+                        companion.SUFFIX, companion.SUFFIX + "-shm", companion.SUFFIX + "-wal",
+                    )):
                         keep.add(f.resolve())
             except OSError:
                 pass

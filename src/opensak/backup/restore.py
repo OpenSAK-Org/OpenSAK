@@ -31,6 +31,7 @@ from opensak.backup.backupset import (
     DatabaseEntry,
 )
 from opensak.backup.snapshot import SnapshotError, snapshot_database
+from opensak.db import companion
 
 if TYPE_CHECKING:
     from opensak.db.manager import DatabaseInfo, DatabaseManager
@@ -68,7 +69,8 @@ def restore_database(
     The database is copied into the database folder under a new name
     ("<name> (restored YYYY-MM-DD)", made unique if needed), checked with
     ``PRAGMA integrity_check`` before it is moved into place, and added to
-    the database list.
+    the database list. Its companion database (#1034), if the set has one,
+    is restored next to it the same way.
 
     Raises RestoreError if the database can't be restored — missing from
     the set, from a newer OpenSAK, or damaged. *progress* may raise to
@@ -84,7 +86,9 @@ def restore_database(
     base = tr("restore_db_name", name=entry.name, date=today.isoformat())
     name, target = _free_name_and_path(manager, base)
 
-    with _source_file(backup_set, entry, target, progress) as (source, copy_progress):
+    with _source_file(backup_set, entry.file, entry.name, target, progress) as (
+        source, copy_progress,
+    ):
         actual_version = _user_version(source)
         if actual_version is None:
             raise RestoreError(f"{entry.name} is not a readable database")
@@ -100,9 +104,11 @@ def restore_database(
             raise RestoreError(f"{entry.name} could not be restored: {exc}") from exc
 
     try:
+        _restore_companion(backup_set, entry, target)
         info = manager.add_existing(target, name)
     except BaseException:
         _remove_database_file(target)
+        _remove_database_file(companion.companion_path(target))
         raise
     logger.info("restore: %s from %s → %s", entry.name, backup_set.path.name, target)
     return info
@@ -154,10 +160,25 @@ def restore_missing_filter_profiles(backup_set: BackupSet) -> list[str]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _restore_companion(backup_set: BackupSet, entry: DatabaseEntry, target: Path) -> None:
+    """Restore *entry*'s companion database next to the restored database
+    *target* (#1034). Nothing for a database backed up without one."""
+    if not entry.companion:
+        return
+    dest = companion.companion_path(target)
+    label = f"{entry.name} (companion database)"
+    with _source_file(backup_set, entry.companion, label, dest, None) as (source, _progress):
+        try:
+            snapshot_database(source, dest)   # verify=True: integrity
+        except SnapshotError as exc:
+            raise RestoreError(f"{label} could not be restored: {exc}") from exc
+
+
 @contextlib.contextmanager
 def _source_file(
     backup_set: BackupSet,
-    entry: DatabaseEntry,
+    file: str,
+    label: str,
     target: Path,
     progress: Optional[ProgressCallback],
 ) -> Iterator[tuple[Path, Optional[ProgressCallback]]]:
@@ -169,45 +190,45 @@ def _source_file(
     failure or cancel; unpacking and copying then each count for half.
     """
     if not backup_set.compressed:
-        source = _entry_path(backup_set, entry)
+        source = _entry_path(backup_set, file)
         if not source.is_file():
-            raise RestoreError(f"{entry.file} is missing from the backup")
+            raise RestoreError(f"{file} is missing from the backup")
         yield source, progress
         return
 
-    member = _zip_member(entry)
+    member = _zip_member(file)
     unpacked = target.with_name(target.name + ".unpacking")
     try:
         with zipfile.ZipFile(backup_set.path) as zf:
             try:
                 info = zf.getinfo(member)
             except KeyError as exc:
-                raise RestoreError(f"{entry.file} is missing from the backup") from exc
-            _check_room_to_unpack(target.parent, info.file_size, entry)
+                raise RestoreError(f"{file} is missing from the backup") from exc
+            _check_room_to_unpack(target.parent, info.file_size, label)
             _unpack(zf, info, unpacked, progress)
         yield unpacked, _second_half(progress)
     except (OSError, zipfile.BadZipFile) as exc:
-        raise RestoreError(f"{entry.name} could not be unpacked: {exc}") from exc
+        raise RestoreError(f"{label} could not be unpacked: {exc}") from exc
     finally:
         _remove_database_file(unpacked)
 
 
-def _zip_member(entry: DatabaseEntry) -> str:
-    """The member name of *entry* — never anything outside the set's own tree."""
-    member = PurePosixPath(entry.file)
-    if member.is_absolute() or ".." in member.parts or "\\" in entry.file:
-        raise RestoreError(f"Invalid file name in the backup: {entry.file}")
+def _zip_member(file: str) -> str:
+    """The member name of *file* — never anything outside the set's own tree."""
+    member = PurePosixPath(file)
+    if member.is_absolute() or ".." in member.parts or "\\" in file:
+        raise RestoreError(f"Invalid file name in the backup: {file}")
     return str(member)
 
 
-def _check_room_to_unpack(folder: Path, size: int, entry: DatabaseEntry) -> None:
+def _check_room_to_unpack(folder: Path, size: int, label: str) -> None:
     """Unpacked copy plus the restored database must both fit (#989)."""
     folder.mkdir(parents=True, exist_ok=True)
     needed = 2 * size + _EXTRACT_MARGIN
     free = shutil.disk_usage(folder).free
     if free < needed:
         raise RestoreError(
-            f"Not enough free space in {folder} to restore {entry.name}: about "
+            f"Not enough free space in {folder} to restore {label}: about "
             f"{needed // 2**20 + 1} MB needed, {free // 2**20} MB free"
         )
 
@@ -238,12 +259,12 @@ def _second_half(progress: Optional[ProgressCallback]) -> Optional[ProgressCallb
     return _report
 
 
-def _entry_path(backup_set: BackupSet, entry: DatabaseEntry) -> Path:
-    """The database file inside the set — never anywhere outside it."""
+def _entry_path(backup_set: BackupSet, file: str) -> Path:
+    """The file *file* inside the set — never anywhere outside it."""
     root = backup_set.path.resolve()
-    path = (backup_set.path / entry.file).resolve()
+    path = (backup_set.path / file).resolve()
     if not path.is_relative_to(root):
-        raise RestoreError(f"Invalid file name in the backup: {entry.file}")
+        raise RestoreError(f"Invalid file name in the backup: {file}")
     return path
 
 

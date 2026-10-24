@@ -5,6 +5,10 @@ Qt-free, so both the Move/Copy Caches dialog (in a worker thread) and Lua
 macros (opensak.move_caches / copy_caches) use it. Both databases get
 private sessions (session_for): the app-wide engine is never swapped, so
 the GUI keeps reading the active database while a transfer runs.
+
+Rows of the caches in the source's companion database (#1034) go along:
+they are copied to the target's companion after the caches are committed
+there, and (when moving) deleted from the source with the caches.
 """
 
 from __future__ import annotations
@@ -14,6 +18,9 @@ from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import update
+
+from opensak.db import companion
+from opensak.utils import flags
 
 # What to do when a cache already exists in the target database.
 IF_EXISTS = ("replace", "skip", "newer")
@@ -219,6 +226,13 @@ def transfer_caches(
                     continue
                 _insert_snapshot(session, snap)
                 written.append(code)
+
+        # ── 2b. Their rows in the companion database (#1034) ──────────────
+        # After the target's commit, so a crash leaves at most rows missing
+        # in the target, never rows without their cache; the source still
+        # has them until step 3.
+        if written and flags.companion_db:
+            companion.copy_rows(source_db_path, target_db_path, written)
 
         # ── 3. Delete from source DB (move only) ──────────────────────────
         if not copy_only and written:
