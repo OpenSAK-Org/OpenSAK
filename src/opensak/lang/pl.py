@@ -374,6 +374,8 @@ STRINGS: dict[str, str] = {
     "import_running_file":          "Importowanie {name}…",
     "import_progress":              "Przetwarzanie skrytek: {count}…",
     "import_saving":               "Zapisywanie do bazy danych…",
+    "recalculating_distances":     "Ponowne obliczanie odległości…",
+    "updating_own_caches":         "Aktualizowanie własnych skrzynek…",
     "import_table_loaded":         "✓ Wczytano {count} skrytek — kliknij skrytkę, aby zobaczyć na mapie",
     "import_log_placeholder":       "Tutaj pojawią się wyniki importu…",
     "import_all_done":            "✓ Przetworzono wszystkie pliki ({count}).",

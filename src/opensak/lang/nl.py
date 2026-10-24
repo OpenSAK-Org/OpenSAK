@@ -375,6 +375,8 @@ STRINGS: dict[str, str] = {
     "import_running_file":          "{name} importeren…",
     "import_progress":              "Caches verwerken: {count}…",
     "import_saving":                "Opslaan in database…",
+    "recalculating_distances":      "Afstanden opnieuw berekenen…",
+    "updating_own_caches":          "Eigen caches bijwerken…",
     "import_table_loaded":          "✓ {count} caches geladen — klik op een cache om op de kaart te zien",
     "import_log_placeholder":       "Importresultaten verschijnen hier…",
     "import_all_done":              "✓ Alle {count} bestanden verwerkt.",

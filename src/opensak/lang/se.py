@@ -372,6 +372,8 @@ STRINGS: dict[str, str] = {
     "import_running_file":          "Importerar {name}…",
     "import_progress":              "Processerar cacher: {count}…",
     "import_saving":               "Sparar till databasen…",
+    "recalculating_distances":     "Beräknar om avstånd…",
+    "updating_own_caches":         "Uppdaterar egna cacher…",
     "import_table_loaded":         "✓ {count} cacher laddade — klicka på en cache för att se den på kartan",
     "import_log_placeholder":       "Resultatet av importen visas här…",
     "import_all_done":            "✓ Alla {count} filer har bearbetats.",

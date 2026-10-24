@@ -2290,10 +2290,17 @@ class MainWindow(QMainWindow):
             # goes through _on_home_changed() — so distances must be
             # recalculated explicitly here, or the persisted Cache.distance
             # column stays stale until the next manual home-point switch.
+            # Only when something actually changed, though: a full pass takes
+            # seconds on a large database, and most Settings changes don't
+            # touch the centre point or the distance method.
             s = get_settings()
             if s.home_lat and s.home_lon:
-                from opensak.db.database import recalculate_distances
-                recalculate_distances(s.home_lat, s.home_lon)
+                from opensak.db.database import recalculate_distances, distances_up_to_date
+                if not distances_up_to_date(s.home_lat, s.home_lon):
+                    from opensak.gui.dialogs.widgets import busy_box
+                    with busy_box(self, tr("recalculating_distances"),
+                                  tr("settings_dialog_title")):
+                        recalculate_distances(s.home_lat, s.home_lon)
             self._update_map_visibility()
             if s.map_enabled:
                 # No point reloading the map page (tiles/JS) if it's not
