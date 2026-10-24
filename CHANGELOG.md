@@ -4,7 +4,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.22.0-beta.8] — 2026-10-24
+## [1.22.0-beta.9] — 2026-10-24
+
+_1.22.0-beta.8 was tagged without its version bump and never released;
+its changes are part of this beta._
 
 > Headline: **found dates survive a round trip to GSAK** — a GPX export
 > now carries your found date, so GSAK no longer shows it blank — and
@@ -66,6 +69,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   cache, your top finders, your caches per type, size, difficulty and
   terrain, the hide-date calendar and a map. It lists its known
   limitations in its header. Contributed by nagisml.
+- **Macros declare their permissions (#938, #1079)** — the macro header
+  takes two new lines: `-- Permissions: write, read-files, write-files,
+  open, run-macros` (or `none`) and `-- Network:` with the web sites the
+  macro contacts. The Macro manager shows them in a new *Permissions*
+  column, with what each one means, and marks unknown words, entries
+  that are not host names and sites macros may never contact
+  (Geocaching.com, coord.info). This is information only: OpenSAK still
+  asks before every write, folder and web site access. The example
+  macros and the new-macro template declare theirs. Contributed by
+  nagisml.
+- **Macros ask before creating databases or moving caches (#1160)** —
+  `opensak.create_database()`, `move_caches()` and `copy_caches()`
+  changed databases without asking for the macro's write approval, unlike
+  the rest of the write API. They now ask first, and bad arguments fail
+  before the prompt. Contributed by nagisml.
 - **User Guide: Macros (beta) section** — a first draft describing the
   Macros menu, the Macro Manager, folder permissions and write approval.
 
@@ -149,16 +167,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (GsCodeToNum / NumToGsCode), and upper/lower case for all letters, not
   only ASCII (#1015). The GSAK comparison in the macro docs is updated.
   Contributed by nagisml.
-- **Macros declare their permissions (#938, #1079)** — the macro header
-  takes two new lines: `-- Permissions: write, read-files, write-files,
-  open, run-macros` (or `none`) and `-- Network:` with the web sites the
-  macro contacts. The Macro manager shows them in a new *Permissions*
-  column, with what each one means, and marks unknown words, entries
-  that are not host names and sites macros may never contact
-  (Geocaching.com, coord.info). This is information only: OpenSAK still
-  asks before every write, folder and web site access. The example
-  macros and the new-macro template declare theirs. Contributed by
-  nagisml.
 
 ### For developers
 
