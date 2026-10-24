@@ -455,7 +455,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.create_database" func="yes">
-			<Overload retVal="string" descr="Create a new, empty database in the default database folder and add it to the&#x0a;list. The active database does not change. Fails if the name is taken or its&#x0a;file already exists.&#x0a;Returns string — The name actually used (surrounding spaces removed).">
+			<Overload retVal="string" descr="Create a new, empty database in the default database folder and add it to the&#x0a;list. The active database does not change. Fails if the name is taken or its&#x0a;file already exists. The macro needs permission to change databases.&#x0a;Returns string — The name actually used (surrounding spaces removed).">
 				<Param name="name: string" />
 			</Overload>
 		</KeyWord>
@@ -747,7 +747,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.move_caches" func="yes">
-			<Overload retVal="integer" descr="Move caches from the active database to another one, with all logs, waypoints,&#x0a;attributes, trackables and notes (like Database → Move caches). By default the&#x0a;caches of the active filter. When a cache already exists in the target,&#x0a;`if_exists` decides: `&quot;newer&quot;` (default) replaces it only if the active&#x0a;database's copy was imported later, `&quot;replace&quot;` always, `&quot;skip&quot;` never. A cache&#x0a;not written to the target stays in the active database.&#x0a;Returns integer — Number of caches moved.">
+			<Overload retVal="integer" descr="Move caches from the active database to another one, with all logs, waypoints,&#x0a;attributes, trackables and notes (like Database → Move caches). By default the&#x0a;caches of the active filter. When a cache already exists in the target,&#x0a;`if_exists` decides: `&quot;newer&quot;` (default) replaces it only if the active&#x0a;database's copy was imported later, `&quot;replace&quot;` always, `&quot;skip&quot;` never. A cache&#x0a;not written to the target stays in the active database. The macro needs&#x0a;permission to change databases.&#x0a;Returns integer — Number of caches moved.">
 				<Param name="target: string" />
 				<Param name="[options: opensak.TransferOptions]" />
 			</Overload>

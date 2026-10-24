@@ -768,7 +768,7 @@ end
 opensak.create_database(name)
 ```
 
-Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists.
+Create a new, empty database in the default database folder and add it to the list. The active database does not change. Fails if the name is taken or its file already exists. The macro needs permission to change databases.
 
 Parameters:
 
@@ -881,7 +881,7 @@ print(opensak.count() .. " caches in " .. opensak.database())
 opensak.move_caches(target [, options])
 ```
 
-Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database.
+Move caches from the active database to another one, with all logs, waypoints, attributes, trackables and notes (like Database → Move caches). By default the caches of the active filter. When a cache already exists in the target, `if_exists` decides: `"newer"` (default) replaces it only if the active database's copy was imported later, `"replace"` always, `"skip"` never. A cache not written to the target stays in the active database. The macro needs permission to change databases.
 
 Parameters:
 
