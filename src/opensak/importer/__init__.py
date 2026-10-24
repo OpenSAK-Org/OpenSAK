@@ -83,6 +83,20 @@ def _bool_attr(element, xpath: str, ns: dict = NS) -> bool:
     return False
 
 
+def _parse_gsak_date(raw: Optional[str]) -> Optional[datetime]:
+    """Parse a GSAK extension date such as <gsak:UserFound>2026-06-04</...>
+    (date only, GSAK's own calendar date). Returned as a naive midnight
+    datetime, as the GSAK database importer stores FoundByMeDate. Empty or
+    unparseable text gives None."""
+    raw = (raw or "").strip()
+    if len(raw) < 10:
+        return None
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
     """Parse ISO 8601 datetime strings from GPX files into UTC datetimes.
 
@@ -496,9 +510,11 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     # sym-is-absent guard below (which exists to protect OpenSAK's own
     # re-exports) wrongly blocks the log-based fallback.
     #
-    # OpenSAK's own export (garmin.py) only ever writes <gsak:UserNote>
-    # inside <gsak:wptExtension> — never any of GSAK's other per-cache
-    # fields. So the presence of any of those OTHER fields (already parsed
+    # OpenSAK's own export (garmin.py) only ever writes <gsak:UserNote> and
+    # <gsak:UserFound> (#1145) inside <gsak:wptExtension> — never any of
+    # GSAK's other per-cache fields. Keep both OUT of _GSAK_ONLY_TAGS, or
+    # OpenSAK's own re-exports would be taken for GSAK files. So the
+    # presence of any of those OTHER fields (already parsed
     # a little further down for issue #269/#521/#129/#73) is a reliable
     # fingerprint that this wpt genuinely came from GSAK itself, as opposed
     # to OpenSAK's own re-export or a raw geocaching.com Pocket Query
@@ -600,6 +616,9 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_user_data_4: Optional[str] = None
     gsak_fav_points: Optional[int] = None
     gsak_user_note: Optional[str] = None
+    # Issue #1145: GSAK's found-by-me date (<gsak:UserFound>, "YYYY-MM-DD").
+    # Written by GSAK and by OpenSAK's own export (garmin.py).
+    gsak_user_found: Optional[datetime] = None
 
     # Issue #521: the official Groundspeak GPX schema has no <county> element
     # at all (only country/state) — GSAK adds its own <gsak:County> inside
@@ -667,6 +686,10 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             note_el = gsak_ext.find(f"{{{gsak_uri}}}UserNote")
             if note_el is not None and note_el.text and note_el.text.strip():
                 gsak_user_note = note_el.text.strip()
+
+            gsak_user_found = _parse_gsak_date(
+                gsak_ext.findtext(f"{{{gsak_uri}}}UserFound")
+            )
 
             county_el = gsak_ext.find(f"{{{gsak_uri}}}County")
             if county_el is not None and county_el.text and county_el.text.strip():
@@ -750,6 +773,7 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_user_data_4":  gsak_user_data_4,
         "gsak_fav_points":   gsak_fav_points,
         "gsak_user_note":    gsak_user_note,
+        "gsak_user_found":   gsak_user_found,
         "found_by_me":       found_by_me,
         # Issue #1140: the waypoint symbol as given (GSAK's Symbol column).
         "symbol":            sym_raw.strip() if sym_raw and sym_raw.strip() else None,
@@ -1337,8 +1361,16 @@ def _upsert_cache(
             if found_logs:
                 found_log = min(found_logs, key=lambda lg: lg["log_date"])
 
-        if found_log and found_log.get("log_date"):
-            cache.found_date = found_log["log_date"]
+        # Issue #1145: GSAK's <gsak:UserFound> (also written by OpenSAK's own
+        # export) is the found date as the user set it, so it wins over the
+        # log-based guess. The user's own found log is still used when it
+        # is from the same day, since it also carries the time.
+        user_found = data.get("gsak_user_found")
+        log_date = found_log.get("log_date") if found_log else None
+        if user_found and not (log_date and log_date.date() == user_found.date()):
+            cache.found_date = user_found
+        elif log_date:
+            cache.found_date = log_date
 
     # ── Derive dnf_date, first_to_find from logs (issue #33, #58, #114) ────────
     # These are only set/updated when a fresh import brings logs in.

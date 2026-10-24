@@ -877,10 +877,20 @@ def _gpx_chunks(
         # of custom-waypoint status.
         note = getattr(cache, "user_note", None)
         note_text = getattr(note, "note", None) if note else None
-        if note_text:
+        # Issue #1145: the found-by-me date, as GSAK writes it
+        # (<gsak:UserFound>2026-06-04</gsak:UserFound>, date only). Without
+        # it GSAK re-imports a found cache with a blank Found date whenever
+        # the user's own found log isn't in the file (logs trimmed, or the
+        # cache was marked found by hand). Only for found caches: unmarking
+        # clears found_date, but a stale one must never mark a cache found.
+        found_date = getattr(cache, "found_date", None) if getattr(cache, "found", False) else None
+        if note_text or found_date:
             gsak_ext = SubElement(wpt, "gsak:wptExtension")
-            gsak_note = SubElement(gsak_ext, "gsak:UserNote")
-            gsak_note.text = note_text
+            if found_date:
+                SubElement(gsak_ext, "gsak:UserFound").text = found_date.strftime("%Y-%m-%d")
+            if note_text:
+                gsak_note = SubElement(gsak_ext, "gsak:UserNote")
+                gsak_note.text = note_text
 
         yield "\n  ", None
         yield _xml_chunk(wpt, 1), cache
