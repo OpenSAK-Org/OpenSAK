@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Write an HTML page with statistics of the caches you own and the finds they received
+-- Permissions: open
 --
 -- Known limitations:
 -- - This is a template macro: copy it and adapt the statistics, texts and

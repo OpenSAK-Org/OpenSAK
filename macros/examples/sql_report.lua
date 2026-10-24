@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Run an SQL query and show its result as an HTML table (GSAK's SqlToHtml)
+-- Permissions: none
 --
 -- Type a query, press Run, and the result is shown as a table — the
 -- three-line GSAK macro "SQLite() into SqlToHtml", with a window to edit

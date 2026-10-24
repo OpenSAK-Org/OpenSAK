@@ -3,10 +3,13 @@ src/opensak/gui/dialogs/macro_manager.py — the Macro manager (#938 Phase 3).
 
 Lists the macros in the user's macros folder and its subfolders with what
 their metadata header says (see opensak.macro.metadata): name, description,
-version, author, required API version, and the keyboard shortcut the user
-gave them here. A macro that cannot be read, or asks for a newer macro API
-than this OpenSAK has, is marked in the list. The search box (Ctrl+F)
-narrows the list to the macros containing every word typed.
+version, author, required API version, declared permissions, and the
+keyboard shortcut the user gave them here. A macro that cannot be read,
+asks for a newer macro API than this OpenSAK has, or declares permissions
+this OpenSAK does not know (or a site macros may never contact), is marked
+in the list. The permissions are only shown: OpenSAK asks for every write,
+folder and web site approval whatever the header says. The search box
+(Ctrl+F) narrows the list to the macros containing every word typed.
 
 Run runs the selected macro and shows its output and errors in the pane
 below; a double-click or Enter in the list asks first, so a stray click
@@ -37,11 +40,12 @@ from PySide6.QtWidgets import (
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import MacroError, MacroHost, MacroRuntime
-from opensak.macro.metadata import MacroInfo, discover_macros, read_metadata
+from opensak.macro.metadata import NO_PERMISSIONS, MacroInfo, discover_macros, read_metadata
 from opensak.macro.runtime import API_VERSION
 
 # Columns of the macro list.
-COL_NAME, COL_DESCRIPTION, COL_VERSION, COL_AUTHOR, COL_API, COL_SHORTCUT, COL_FOLDER = range(7)
+(COL_NAME, COL_DESCRIPTION, COL_VERSION, COL_AUTHOR, COL_API, COL_PERMISSIONS, COL_SHORTCUT,
+ COL_FOLDER) = range(8)
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 
@@ -115,7 +119,8 @@ class MacroManagerDialog(QDialog):
         self._tree.setHeaderLabels([
             tr("col_name"), tr("detail_tab_desc"),
             tr("macro_mgr_col_version"), tr("macro_mgr_col_author"),
-            tr("macro_mgr_col_api"), tr("shortcuts_col_shortcut"),
+            tr("macro_mgr_col_api"), tr("macro_mgr_col_permissions"),
+            tr("shortcuts_col_shortcut"),
             tr("settings_folder_perm_col_folder"),
         ])
         self._tree.setSortingEnabled(True)
@@ -210,8 +215,8 @@ class MacroManagerDialog(QDialog):
             folder = info.path.parent.relative_to(root).as_posix()
             item = QTreeWidgetItem([
                 info.name, info.error or info.description, info.version, info.author,
-                info.requires_api, _native(macro_shortcut(info.path)),
-                "" if folder == "." else folder,
+                info.requires_api, permissions_text(info),
+                _native(macro_shortcut(info.path)), "" if folder == "." else folder,
             ])
             item.setData(COL_NAME, _PATH_ROLE, str(info.path))
             item.setToolTip(COL_NAME, str(info.path))
@@ -223,6 +228,10 @@ class MacroManagerDialog(QDialog):
                 item.setIcon(COL_API, warn)
                 item.setToolTip(COL_API, tr("macro_mgr_api_newer", needed=info.requires_api,
                                             have=API_VERSION))
+            if not info.error:
+                item.setToolTip(COL_PERMISSIONS, permissions_tooltip(info))
+                if info.unknown_permissions or info.invalid_hosts or info.blocked_hosts:
+                    item.setIcon(COL_PERMISSIONS, warn)
             self._tree.addTopLevelItem(item)
             if selected is not None and info.path == selected:
                 item.setSelected(True)
@@ -449,6 +458,47 @@ class MacroShortcutDialog(QDialog):
         self._problem.setText(problem)
         self._problem.setVisible(bool(problem))
         self._buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(not problem)
+
+
+# The tooltip line of each permission (metadata.PERMISSIONS).
+_PERMISSION_KEYS = {
+    "write": "macro_mgr_perm_write",
+    "read-files": "macro_mgr_perm_read_files",
+    "write-files": "macro_mgr_perm_write_files",
+    "open": "macro_mgr_perm_open",
+    "run-macros": "macro_mgr_perm_run_macros",
+}
+
+
+def permissions_text(info: MacroInfo) -> str:
+    """The Permissions column: the declared words and hosts as written in
+    the header ("write, open, network: api.example.com"), "none" if the
+    macro declares none, "" if it does not declare its permissions."""
+    parts = [*info.permissions, *info.unknown_permissions]
+    hosts = info.network + info.invalid_hosts
+    if hosts:
+        parts.append("network: " + ", ".join(hosts))
+    if not parts:
+        return NO_PERMISSIONS if info.permissions_declared else ""
+    return ", ".join(parts)
+
+
+def permissions_tooltip(info: MacroInfo) -> str:
+    """What each declared permission means, and the problems of the
+    declaration, one per line."""
+    lines = [tr(_PERMISSION_KEYS[p]) for p in info.permissions]
+    if info.network:
+        lines.append(tr("macro_mgr_perm_network", hosts=", ".join(info.network)))
+    if info.unknown_permissions:
+        lines.append(tr("macro_mgr_perm_unknown", names=", ".join(info.unknown_permissions)))
+    if info.invalid_hosts:
+        lines.append(tr("macro_mgr_perm_invalid_hosts", hosts=", ".join(info.invalid_hosts)))
+    if info.blocked_hosts:
+        lines.append(tr("macro_mgr_perm_blocked", hosts=", ".join(info.blocked_hosts)))
+    if not lines:
+        lines.append(tr("macro_mgr_perm_none" if info.permissions_declared
+                        else "macro_mgr_perm_undeclared"))
+    return "\n".join([*lines, "", tr("macro_mgr_perm_info")])
 
 
 def _native(sequence: str) -> str:

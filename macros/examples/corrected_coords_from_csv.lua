@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 2
 -- Description: Set corrected coordinates from a CSV file
+-- Permissions: write
 --
 -- Reads corrected_coords.csv (next to this macro) and stores the solved
 -- coordinates of each listed cache as its corrected coordinates.

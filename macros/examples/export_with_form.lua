@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Choose export options in a GSAK-style form, then export the list
+-- Permissions: write-files
 --
 -- Shows a form in the absolute layout, as GSAK's form designer builds it:
 -- every control has its own position, grouped in frames, with the form's

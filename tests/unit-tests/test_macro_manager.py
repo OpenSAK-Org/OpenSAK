@@ -23,6 +23,7 @@ HEADER = """\
 -- Version: 1.2
 -- Requires-API: 2
 -- Description: Filters for unfound traditional caches.
+-- Permissions: write, open
 --
 -- Name: a later key is ignored
 print(1)
@@ -58,6 +59,7 @@ def test_header_fields():
         "Filters for unfound traditional caches.",
     )
     assert info.requires_api_number == 2
+    assert info.permissions == ("write", "open")
     assert not info.error
 
 
@@ -106,6 +108,104 @@ def test_requires_api(value, number, newer):
     assert info.needs_newer_api(API_VERSION) is newer
 
 
+def _perms(header: str):
+    return parse_header(header + "print(1)\n", Path("m.lua"))
+
+
+def test_permissions_in_canonical_order_case_insensitive():
+    info = _perms("-- Permissions: Open,write  READ-FILES, write\n")
+    assert info.permissions == ("write", "read-files", "open")
+    assert info.permissions_declared
+    assert info.unknown_permissions == ()
+
+
+def test_permissions_none_differs_from_undeclared():
+    none = _perms("-- Permissions: none\n")
+    assert (none.permissions, none.permissions_declared) == ((), True)
+    missing = _perms("-- Name: A\n")
+    assert (missing.permissions, missing.permissions_declared) == ((), False)
+    # An empty value counts as not set, as for the other keys.
+    assert not _perms("-- Permissions:\n").permissions_declared
+
+
+def test_permissions_unknown_words_are_kept():
+    info = _perms("-- Permissions: write, telepathy, none, Telepathy\n")
+    assert info.permissions == ("write",)
+    assert info.unknown_permissions == ("telepathy",)
+
+
+def test_permissions_and_network_lines_add_up():
+    info = _perms("-- Permissions: write\n-- Name: A\n-- Permissions: open\n"
+                  "-- Network: a.example.com\n-- Network: b.example.com, a.example.com\n")
+    assert info.permissions == ("write", "open")
+    assert info.network == ("a.example.com", "b.example.com")
+
+
+@pytest.mark.parametrize("entry, host", [
+    ("API.Example.com", "api.example.com"),
+    ("example.com.", "example.com"),
+    ("bücher.example", "xn--bcher-kva.example"),
+    ("192.168.1.10", "192.168.1.10"),
+    ("[::1]", "::1"),
+    ("https://example.com", None),
+    ("example.com/path", None),
+    ("example.com:8080", None),
+    ("user@example.com", None),
+    ("*.example.com", None),
+    ("localhost", None),
+    ("10.1.2", None),
+    ("-bad.example.com", None),
+])
+def test_network_hosts(entry, host):
+    from opensak.macro.metadata import normalize_host
+    assert normalize_host(entry) == host
+    info = _perms(f"-- Network: {entry}\n")
+    assert info.network == ((host,) if host else ())
+    assert info.invalid_hosts == (() if host else (entry,))
+
+
+def test_network_alone_does_not_declare_permissions():
+    info = _perms("-- Network: api.example.com\n")
+    assert info.network == ("api.example.com",)
+    assert not info.permissions_declared
+
+
+@pytest.mark.parametrize("host, blocked", [
+    ("geocaching.com", True), ("www.geocaching.com", True), ("coord.info", True),
+    ("api.groundspeak.example", False), ("notgeocaching.com", False),
+])
+def test_blocked_hosts(host, blocked):
+    info = _perms(f"-- Network: {host}\n")
+    assert info.blocked_hosts == ((host,) if blocked else ())
+
+
+def test_added_permissions():
+    from opensak.macro.metadata import added_permissions
+    v1 = _perms("-- Permissions: write\n-- Network: a.example.com\n")
+    assert added_permissions(v1, v1) == ()
+    fewer = _perms("-- Permissions: none\n")
+    assert added_permissions(v1, fewer) == ()
+    more = _perms("-- Permissions: write, open, magic\n"
+                  "-- Network: a.example.com, b.example.com, http://bad\n")
+    assert added_permissions(v1, more) == (
+        "open", "magic", "network:b.example.com", "network:http://bad")
+    # The old version declared nothing: everything the new one declares is new.
+    assert added_permissions(_perms("-- Name: A\n"), v1) == ("write", "network:a.example.com")
+
+
+def test_permissions_column_and_tooltip():
+    from opensak.gui.dialogs.macro_manager import permissions_text, permissions_tooltip
+    info = _perms("-- Permissions: write, magic\n-- Network: a.example.com, geocaching.com\n")
+    assert permissions_text(info) == "write, magic, network: a.example.com, geocaching.com"
+    tip = permissions_tooltip(info)
+    assert "changes data in a database" in tip
+    assert "magic" in tip and "geocaching.com" in tip
+    assert "still asks" in tip
+    assert permissions_text(_perms("-- Permissions: none\n")) == "none"
+    assert permissions_text(_perms("-- Name: A\n")) == ""
+    assert "does not declare" in permissions_tooltip(_perms("-- Name: A\n"))
+
+
 def test_unreadable_macro_has_error(tmp_path):
     path = tmp_path / "bad.lua"
     path.write_bytes(b"-- Name: \xff\xfe\n")
@@ -130,6 +230,7 @@ def test_examples_have_a_header(name):
     assert info.description and info.version and info.author
     assert info.requires_api_number is not None
     assert not info.needs_newer_api(API_VERSION)
+    assert info.permissions_declared and not info.unknown_permissions
 
 
 def test_editor_templates_have_a_header():
@@ -211,12 +312,13 @@ def test_lists_macros_with_metadata(make_manager, macros_dir):
     rows = _rows(d)
     assert rows[0][:mm.COL_SHORTCUT] == ["Find easy traditionals",
                                          "Filters for unfound traditional caches.",
-                                         "1.2", "Jane Doe", "2"]
+                                         "1.2", "Jane Doe", "2", "write, open"]
     assert rows[0][mm.COL_SHORTCUT]                     # native text of Ctrl+Alt+F
     assert rows[0][mm.COL_FOLDER] == ""
     assert rows[1][mm.COL_NAME] == "plain"
     assert rows[1][mm.COL_DESCRIPTION] == "no header"
     assert rows[1][mm.COL_FOLDER] == "examples"
+    assert rows[1][mm.COL_PERMISSIONS] == ""
     assert d._tree.isVisibleTo(d) and not d._empty.isVisibleTo(d)
 
 
@@ -293,6 +395,21 @@ def test_newer_api_is_marked(make_manager, macros_dir):
     item = d._tree.topLevelItem(0)
     assert not item.icon(mm.COL_API).isNull()
     assert str(API_VERSION + 1) in item.toolTip(mm.COL_API)
+
+
+@pytest.mark.parametrize("header, marked", [
+    ("-- Permissions: write, open\n", False),
+    ("-- Network: api.example.com\n", False),
+    ("-- Permissions: magic\n", True),
+    ("-- Network: https://api.example.com\n", True),
+    ("-- Network: www.geocaching.com\n", True),
+])
+def test_permission_problems_are_marked(make_manager, macros_dir, header, marked):
+    _lua(macros_dir / "m.lua", header + "print(1)\n")
+    d = make_manager()
+    item = d._tree.topLevelItem(0)
+    assert item.icon(mm.COL_PERMISSIONS).isNull() is not marked
+    assert "still asks" in item.toolTip(mm.COL_PERMISSIONS)
 
 
 def test_run_shows_output(make_manager, macros_dir):
