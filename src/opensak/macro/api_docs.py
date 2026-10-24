@@ -46,7 +46,7 @@ from opensak.macro.forms import (
 )
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
-from opensak.macro.metadata import read_metadata
+from opensak.macro.metadata import BLOCKED_DOMAINS, NO_PERMISSIONS, PERMISSIONS, read_metadata
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
@@ -150,7 +150,8 @@ def _header_section() -> list[str]:
             "-- Author: Jane Doe\n"
             "-- Version: 1.0\n"
             f"-- Requires-API: {API_VERSION}\n"
-            "-- Description: Filters for unfound traditional caches with low difficulty."
+            "-- Description: Filters for unfound traditional caches with low difficulty.\n"
+            "-- Permissions: none"
         ),
         "",
         "Every line is optional, and the keys are not case-sensitive. Without a "
@@ -162,6 +163,53 @@ def _header_section() -> list[str]:
         "From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, "
         "or a function key) that runs it from the main window. The output then "
         "goes to the manager's output pane.",
+        *_permissions_section(),
+    ]
+
+
+def _permissions_section() -> list[str]:
+    blocked = " and ".join(f"`{d}`" for d in BLOCKED_DOMAINS)
+    return [
+        "",
+        "### Permissions and Network",
+        "",
+        "`Permissions` says what the macro does that a user should know before "
+        "running it, and `Network` which web sites it contacts:",
+        "",
+        *_code(
+            "-- Permissions: write, read-files, open\n"
+            "-- Network: api.example.com, data.example.org"
+        ),
+        "",
+        "Both are **information only**: a declaration never approves anything. "
+        "OpenSAK asks for every write, folder and web site approval as before, "
+        "whether the macro declares it or not. The manager shows the "
+        "declaration in its *Permissions* column, and the community macro "
+        "repository can use it to review an update that asks for more.",
+        "",
+        "`Permissions` takes these words, separated by commas or spaces:",
+        "",
+        "| Permission | The macro … |",
+        "|---|---|",
+        *(f"| `{name}` | {text} |" for name, text in PERMISSIONS.items()),
+        f"| `{NO_PERMISSIONS}` | needs none of these |",
+        "",
+        f"Write `Permissions: {NO_PERMISSIONS}` for a macro that needs none of "
+        "them: a macro without a `Permissions` line has not declared anything, "
+        "which is not the same. A word OpenSAK does not know is shown as "
+        "unknown, not dropped.",
+        "",
+        "`Network` lists every host the macro contacts (for the planned "
+        "`opensak.get_url()`), as a host name or IP address: no `https://`, "
+        "port, path or `user@`, and no wildcards, since web sites are approved "
+        "one host at a time. `Network` alone covers network access; there is "
+        f"no `network` permission word. {blocked} (with their subdomains) can "
+        "never be contacted by a macro and are marked when listed.",
+        "",
+        "Both lines may be repeated, their values add up. A new version of a "
+        "macro asks for more when it declares a permission or host the "
+        "previous version did not, or when the previous version had no "
+        "`Permissions` line.",
     ]
 
 

@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Import every GSAK database, filter and location
+-- Permissions: write, read-files
 --
 -- Reads GSAK's own folder (%APPDATA%\gsak on Windows: gsak.db3 plus
 -- data\<name>\sqlite.db3) and imports, without asking anything. Set

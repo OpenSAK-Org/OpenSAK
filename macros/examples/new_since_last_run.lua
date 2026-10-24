@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Show the unfound caches updated since the last run
+-- Permissions: none
 --
 -- Remembers when it last ran (opensak.settings), and filters the caches
 -- that a GPX or pocket query import has added or updated since then — the

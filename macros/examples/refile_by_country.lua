@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 2
 -- Description: Move caches to a database per country or state
+-- Permissions: write
 --
 -- Sorts the caches of the active database into one database per region
 -- (issue #808): for each country / state found in the active database,

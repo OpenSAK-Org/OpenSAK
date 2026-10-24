@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Coordinates, formulas and numbers from a mystery listing; ROT13, digit sum, word value
+-- Permissions: write
 --
 -- Select a cache in the list, then run the macro. It reads the listing
 -- and opens one window; every button shows its result in the box in the

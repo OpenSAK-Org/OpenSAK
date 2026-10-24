@@ -50,6 +50,7 @@ EXAMPLE_MACRO = """\
 -- Version: 1.0
 -- Requires-API: 1
 -- Description: Filter for unfound traditional and multi-caches up to difficulty 2.5
+-- Permissions: none
 --
 -- F1 opens the API reference, F5 runs the macro.
 
@@ -75,6 +76,7 @@ NEW_MACRO = f"""\
 -- Version: 1.0
 -- Requires-API: {API_VERSION}
 -- Description:
+-- Permissions:
 --
 -- F1 opens the API reference, F5 runs the macro.
 

@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 2
 -- Description: One GPX file per filter
+-- Permissions: none
 --
 -- Applies each filter in FILTERS in turn and exports the caches it shows
 -- to <label>.gpx in OpenSAK's temp folder (opensak.temp_dir(), write

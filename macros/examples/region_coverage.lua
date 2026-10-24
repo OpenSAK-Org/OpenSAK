@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Write an HTML page of the states (or countries) you have found a cache in, and where to go next
+-- Permissions: open
 --
 -- Known limitations:
 -- - This is a template macro: copy it and adapt the statistics, texts and

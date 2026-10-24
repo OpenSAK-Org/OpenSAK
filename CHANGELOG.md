@@ -149,6 +149,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (GsCodeToNum / NumToGsCode), and upper/lower case for all letters, not
   only ASCII (#1015). The GSAK comparison in the macro docs is updated.
   Contributed by nagisml.
+- **Macros declare their permissions (#938, #1079)** — the macro header
+  takes two new lines: `-- Permissions: write, read-files, write-files,
+  open, run-macros` (or `none`) and `-- Network:` with the web sites the
+  macro contacts. The Macro manager shows them in a new *Permissions*
+  column, with what each one means, and marks unknown words, entries
+  that are not host names and sites macros may never contact
+  (Geocaching.com, coord.info). This is information only: OpenSAK still
+  asks before every write, folder and web site access. The example
+  macros and the new-macro template declare theirs. Contributed by
+  nagisml.
 
 ### For developers
 

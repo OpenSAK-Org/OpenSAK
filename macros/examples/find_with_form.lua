@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Pick search options in a form, then step through the matches
+-- Permissions: none
 --
 -- Shows the user-interface functions: a form (opensak.form{}) whose fields
 -- react to each other while it is open, remembers its values for the next
