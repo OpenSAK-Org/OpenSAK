@@ -5018,7 +5018,7 @@ API: tuple[ApiFunction, ...] = (
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
                 'print("Easy unfound traditionals: " .. n)',
         since=1,
-        changed=((3, "added the keys `last_user_update` and `macro_flag`; `owned` "
+        changed=((4, "added the keys `last_user_update` and `macro_flag`; `owned` "
                      "uses the `owned` cache field"),),
         bind=lambda rt, lua: rt._filter,
         params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
@@ -5046,7 +5046,7 @@ API: tuple[ApiFunction, ...] = (
                     'pad numbers ("0042").',
         example='opensak.sort("difficulty", "desc")',
         since=2,
-        changed=((3, "added `macro_sort`"),),
+        changed=((4, "added `macro_sort`"),),
         bind=lambda rt, lua: rt._sort,
         params=(
             Param("field", "string", "A cache field, e.g. \"difficulty\"."),
@@ -5127,7 +5127,7 @@ API: tuple[ApiFunction, ...] = (
                 'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end\n'
                 'local found = opensak.cache("GC12345", { database = "Found" })',
         since=2,
-        changed=((3, "added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, "
+        changed=((4, "added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, "
                      "`corrected_source` and `last_user_update`"),),
         bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
         params=(_CODE, _READ_OPTIONS),
@@ -5156,8 +5156,9 @@ API: tuple[ApiFunction, ...] = (
                 'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
                 "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
-        changed=((3, "added `all` and the fields `owned`, `macro_flag`, `macro_sort`, "
-                     "`symbol`, `corrected_source` and `last_user_update`"),),
+        changed=((3, "added `all`"),
+                 (4, "added the fields `owned`, `macro_flag`, `macro_sort`, "
+                     "`symbol`, `corrected_source` and `last_user_update`")),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
                       "Filter keys, `all`, `database` and/or `fields`; nothing = the "
@@ -5764,7 +5765,7 @@ API: tuple[ApiFunction, ...] = (
                 '    if c.difficulty and c.difficulty >= 4 then opensak.macro_flag("set", c.code) end\n'
                 "end\n"
                 "opensak.filter{ macro_flag = true }",
-        since=3,
+        since=4,
         bind=lambda rt, lua: rt._macro_flag,
         params=(Param("action", '"set"|"clear"|"swap"', "What to do with the flag."),
                 Param("caches", "string|string[]|{all: true}",
