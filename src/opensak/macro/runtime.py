@@ -1644,9 +1644,10 @@ class MacroRuntime:
         (_macro_path is the called macro's). A refusal holds for the rest
         of the run.
 
-        Without the lua-macro-write flag only set_corrected/clear_corrected
-        get here (the other writing functions are not registered); they
-        change the database without asking, as before the write API."""
+        Without the lua-macro-write flag only set_corrected/clear_corrected,
+        create_database and move_caches/copy_caches get here (the other
+        writing functions are not registered); they change the databases
+        without asking, as before the write API."""
         if not flags.lua_macro_write:
             return
         macro = self._macro_path
@@ -2260,6 +2261,7 @@ class MacroRuntime:
         name = _db_name(name, "opensak.create_database")
         if self._find_database(name):
             raise MacroError(f"opensak.create_database: a database named {name!r} exists already")
+        self._require_write("opensak.create_database")
         try:
             db = get_db_manager().new_database(name)
         except ValueError as exc:
@@ -2370,6 +2372,7 @@ class MacroRuntime:
         if_exists = opts.get("if_exists", "newer")
         if if_exists not in IF_EXISTS:
             raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, got {if_exists!r}")
+        self._require_write(func)
         try:
             count = transfer_caches(codes, active.path, db.path, copy_only=copy_only,
                                     if_exists=if_exists)
@@ -5239,7 +5242,8 @@ API: tuple[ApiFunction, ...] = (
         description="Create a new, empty database in the default database "
                     "folder and add it to the list. The active database does "
                     "not change. Fails if the name is taken or its file "
-                    "already exists.",
+                    "already exists. The macro needs permission to change "
+                    "databases.",
         example='local name = opensak.create_database("CH_Zurich")',
         since=2,
         bind=lambda rt, lua: rt._create_database,
@@ -5320,7 +5324,8 @@ API: tuple[ApiFunction, ...] = (
                     "(default) replaces it only if the active database's copy "
                     "was imported later, `\"replace\"` always, `\"skip\"` "
                     "never. A cache not written to the target stays in the "
-                    "active database.",
+                    "active database. The macro needs permission to change "
+                    "databases.",
         example='local n = opensak.move_caches("CH_Zurich")\n'
                 'print(n .. " caches moved")',
         since=2,
