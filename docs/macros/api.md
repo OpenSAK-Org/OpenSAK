@@ -4385,11 +4385,40 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 -- Version: 1.0
 -- Requires-API: 3
 -- Description: Filters for unfound traditional caches with low difficulty.
+-- Permissions: none
 ```
 
 Every line is optional, and the keys are not case-sensitive. Without a `Name` the file name is shown. `Requires-API` is the lowest `opensak.api_version()` the macro works with: the manager marks a macro that needs a newer one and asks before running it. Only the comment lines before the first line of code are read.
 
 From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, or a function key) that runs it from the main window. The output then goes to the manager's output pane.
+
+### Permissions and Network
+
+`Permissions` says what the macro does that a user should know before running it, and `Network` which web sites it contacts:
+
+```lua
+-- Permissions: write, read-files, open
+-- Network: api.example.com, data.example.org
+```
+
+Both are **information only**: a declaration never approves anything. OpenSAK asks for every write, folder and web site approval as before, whether the macro declares it or not. The manager shows the declaration in its *Permissions* column, and the community macro repository can use it to review an update that asks for more.
+
+`Permissions` takes these words, separated by commas or spaces:
+
+| Permission | The macro … |
+|---|---|
+| `write` | changes data in a database: the write API (asks for write approval), create_database(), copy_caches() and move_caches() |
+| `read-files` | reads files or folders outside the macros folder and OpenSAK's temp folder (asks for folder approval); a file the user picks in choose_file() does not count |
+| `write-files` | writes, copies, moves or deletes files or folders outside OpenSAK's temp folder, exports included (asks for folder approval) |
+| `open` | opens files in their default app with opensak.open() |
+| `run-macros` | runs other macro files with opensak.run_macro(); what those do is not covered by this macro's declaration |
+| `none` | needs none of these |
+
+Write `Permissions: none` for a macro that needs none of them: a macro without a `Permissions` line has not declared anything, which is not the same. A word OpenSAK does not know is shown as unknown, not dropped.
+
+`Network` lists every host the macro contacts (for the planned `opensak.get_url()`), as a host name or IP address: no `https://`, port, path or `user@`, and no wildcards, since web sites are approved one host at a time. `Network` alone covers network access; there is no `network` permission word. `geocaching.com` and `coord.info` (with their subdomains) can never be contacted by a macro and are marked when listed.
+
+Both lines may be repeated, their values add up. A new version of a macro asks for more when it declares a permission or host the previous version did not, or when the previous version had no `Permissions` line.
 
 ## Editor support
 
