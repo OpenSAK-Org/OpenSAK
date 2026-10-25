@@ -186,6 +186,7 @@ class TestMainDatabase:
     def test_optimize_limits_the_first_analyze(self, tmp_path, monkeypatch, version, analyze):
         # The first full ANALYZE of a large database froze the GUI; without
         # a limit, optimize=0x10002 reads every index in full, too.
+        real_version = sqlite3.sqlite_version_info
         monkeypatch.setattr(sqlite3, "sqlite_version_info", version)
         db = _database(tmp_path / "Found.db", with_companion=False)
         _drop_stats(db)
@@ -198,7 +199,10 @@ class TestMainDatabase:
         finally:
             conn.close()
         assert statements.index("PRAGMA analysis_limit=1000") < statements.index(analyze)
-        assert _has_stats(db)
+        # A real SQLite < 3.46 (Ubuntu 24.04) ignores the 0x10000 flag and
+        # writes no statistics for a faked 3.46.
+        if real_version >= version:
+            assert _has_stats(db)
 
     def test_checkpoint_empties_the_wal(self, tmp_path):
         db = _database(tmp_path / "Found.db", with_companion=False)
