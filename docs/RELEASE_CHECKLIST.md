@@ -136,6 +136,12 @@ merge in §3, so they ship with the release.
 
 - [ ] On `main`: `git tag vX.Y.0 && git push origin vX.Y.0` — pushing the tag
       is what triggers `build.yml`, `screenshots.yml` and `deploy-site.yml`
+- [ ] Before tagging, `python scripts/bump_version.py --check-tag vX.Y.0`
+      passes locally. `build.yml` (job `version-check`) and
+      `deploy-site.yml` run the same check and stop within seconds, with no
+      artifacts and no release, if the tag doesn't match `__version__` or
+      the User Guide is stale (#1168). If it fails after pushing: don't move
+      the tag — bump, commit and tag a new version
 - [ ] `build.yml` attached all five files to the GitHub Release:
       `OpenSAK-vX.Y.0-Windows.zip`, `OpenSAK-vX.Y.0-Linux-x86_64.AppImage`,
       `OpenSAK-vX.Y.0-macOS-arm64.dmg`, `OpenSAK-vX.Y.0-macOS-x86_64.dmg`,

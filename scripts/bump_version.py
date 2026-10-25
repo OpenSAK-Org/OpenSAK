@@ -21,6 +21,9 @@ Usage:
     python scripts/bump_version.py 1.14.0-beta.18
     python scripts/bump_version.py v1.14.0-beta.18      # leading 'v' is fine
     python scripts/bump_version.py --check              # verify consistency, change nothing
+    python scripts/bump_version.py --check-tag v1.14.0-beta.18
+        # CI release gate (#1168): the tag must match __version__, and
+        # --check must pass. Changes nothing.
 
 It does NOT touch CHANGELOG.md — that needs an actual prose entry describing
 what changed in the release, which stays a manual (or Claude-drafted) step.
@@ -100,11 +103,42 @@ def find_stale_user_guide_version(current: str) -> str | None:
     return stale[0] if len(stale) == 1 else None
 
 
+def check_tag(tag: str) -> bool:
+    """Release gate for build.yml / deploy-site.yml (#1168).
+
+    Returns True only if `tag` (leading 'v' optional) equals __version__ in
+    src/opensak/__init__.py AND check_consistency() passes. Prints a clear
+    message either way. Does not modify anything.
+
+    Why: v1.22.0-beta.8 was tagged before this script had been run, so
+    __init__.py still said beta.7. build.yml happily started building a
+    "beta.8" release whose app reported itself as beta.7 — had it been
+    published, the update check would have offered beta.8 to beta.7 users,
+    and after installing it the app would still say beta.7 and offer the
+    same update again (an update loop, also for the AppImage's
+    "Upgrade now").
+    """
+    tag_version = tag.strip().removeprefix("refs/tags/").lstrip("v")
+    current = get_init_version()
+
+    if tag_version != current:
+        print(f"ERROR: Tag {tag} doesn't match __version__ {current} — "
+              f"run scripts/bump_version.py {tag_version} first, commit, "
+              f"and tag a new version (never move a pushed tag).")
+        return False
+
+    print(f"Tag {tag} matches __version__ {current}")
+    return check_consistency()
+
+
 def main() -> None:
     args = sys.argv[1:]
 
     if args == ["--check"]:
         sys.exit(0 if check_consistency() else 1)
+
+    if len(args) == 2 and args[0] == "--check-tag":
+        sys.exit(0 if check_tag(args[1]) else 1)
 
     if len(args) != 1:
         print(__doc__)
