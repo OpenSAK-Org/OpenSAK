@@ -33,6 +33,24 @@
                                 package, e.g. "OpenSAK\opensak.exe"
                                 (matches the dist/OpenSAK/ folder layout
                                 produced by opensak.spec's COLLECT step)
+    __CLI_EXE_RELATIVE_PATH__   the same for the console program,
+                                e.g. "OpenSAK\opensak-cli.exe" (#937)
+    __CLI_ALIAS__               the command name of the App Execution
+                                Alias: "opensak.exe" for a stable release,
+                                "opensak-beta.exe" for a beta, so both can
+                                be installed side by side — see README.md
+                                "Command line (App Execution Alias)"
+
+  Two applications: "OpenSAK" is the Start Menu app (the windowed
+  opensak.exe). "OpenSAKCLI" is the console opensak-cli.exe for scripts and
+  the Task Scheduler (#937): no Start Menu entry (AppListEntry="none"), only
+  the alias, which puts __CLI_ALIAS__ on the user's PATH
+  (%LOCALAPPDATA%\Microsoft\WindowsApps). desktop4:Subsystem="console"
+  makes a shell wait for it and keep its output and exit code; an alias to
+  the windowed exe would start it but not wait. Its DisplayName is the
+  package's own on purpose: Partner Center rejects display names that are
+  not reserved (README.md "Known Partner Center quirks"). Windows shows it
+  only in Settings → Apps → App execution aliases, next to the alias.
 
   Capabilities: only `runFullTrust` (required for any Desktop Bridge app)
   and `internetClient` (OpenSAK's update checker, Leaflet/OSM tile
@@ -46,8 +64,10 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
   xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-  IgnorableNamespaces="uap rescap desktop6">
+  IgnorableNamespaces="uap rescap uap5 desktop4 desktop6">
 
   <Identity
     Name="__IDENTITY_NAME__"
@@ -85,6 +105,23 @@
         Square44x44Logo="assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="assets\Wide310x150Logo.png" Square71x71Logo="assets\Square71x71Logo.png" />
       </uap:VisualElements>
+    </Application>
+    <Application Id="OpenSAKCLI" Executable="__CLI_EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements
+        DisplayName="__DISPLAY_NAME__"
+        Description="OpenSAK on the command line, for scripts and scheduled runs."
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="__CLI_EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="__CLI_ALIAS__" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
 </Package>

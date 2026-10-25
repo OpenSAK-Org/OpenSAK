@@ -16,6 +16,11 @@ display, never initialises QtWebEngine and shows no Dock icon on macOS. It
 uses the same settings, database list, language and log file as the GUI
 (opensak.bootstrap).
 
+On Windows, opensak.exe is a windowed program: a shell doesn't wait for it,
+and its exit code is lost. The build therefore also has opensak-cli.exe,
+the same program as a console program (opensak.spec); the MSIX package
+puts it on the PATH as `opensak` / `opensak-beta` (App Execution Alias).
+
 Exit codes are those of `opensak --run-macro` (opensak.utils.run_macro):
 0 success, 1 the import failed or had errors, 2 bad arguments or a missing
 source, 5 database not found, 6 database in use (open in OpenSAK, or

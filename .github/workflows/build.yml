@@ -97,6 +97,23 @@ jobs:
             exit 1
           }
           Write-Host "OK: no compiled SQLAlchemy modules in the Windows bundle"
+      # Issue #937: opensak-cli.exe is the console twin of opensak.exe, for
+      # scripts and the Task Scheduler (exit code and output in a shell).
+      - name: Verify both executables are bundled (issue #937)
+        shell: pwsh
+        run: |
+          foreach ($exe in "opensak.exe", "opensak-cli.exe") {
+            if (-not (Test-Path "dist/OpenSAK/$exe")) {
+              Write-Host "::error::dist/OpenSAK/$exe is missing"
+              exit 1
+            }
+          }
+          & dist/OpenSAK/opensak-cli.exe import --help
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::opensak-cli.exe import --help exited with $LASTEXITCODE"
+            exit 1
+          }
+          Get-ChildItem dist/OpenSAK -Filter "opensak*.exe" | ForEach-Object { Write-Host ("{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
       - name: Create ZIP
         shell: powershell
         run: Compress-Archive -Path dist/OpenSAK -DestinationPath dist/OpenSAK-${{ github.ref_name }}-Windows.zip
