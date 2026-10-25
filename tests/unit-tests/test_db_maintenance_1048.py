@@ -179,6 +179,22 @@ class TestMainDatabase:
         assert _has_stats(db)
         assert not maintenance.optimize_file(tmp_path / "None.db")
 
+    def test_optimize_before_3_46_limits_the_first_analyze(self, tmp_path, monkeypatch):
+        # The first full ANALYZE of a large database froze the GUI.
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 45, 3))
+        db = _database(tmp_path / "Found.db", with_companion=False)
+        _drop_stats(db)
+        conn = sqlite3.connect(str(db))
+        try:
+            statements: list[str] = []
+            conn.set_trace_callback(statements.append)
+            maintenance.optimize(conn)
+            assert conn.execute("PRAGMA analysis_limit").fetchone()[0] == 1000
+        finally:
+            conn.close()
+        assert statements.index("PRAGMA analysis_limit=1000") < statements.index("ANALYZE")
+        assert _has_stats(db)
+
     def test_checkpoint_empties_the_wal(self, tmp_path):
         db = _database(tmp_path / "Found.db", with_companion=False)
         init_db(db_path=db)
