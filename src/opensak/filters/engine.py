@@ -137,18 +137,49 @@ def vincenty_km_batch(lat0: float, lon0: float, lats, lons):
     return [_vincenty_km(lat0, lon0, la, lo) for la, lo in zip(lats, lons)]
 
 
-def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Scalar distance (km) dispatched by the user's distance_method setting."""
+DISTANCE_METHODS = ("haversine", "vincenty")
+
+
+def distance_method_setting() -> str:
+    """The user's distance_method setting.
+
+    Issue #1096: this is the only place in filters/engine.py that reaches
+    into opensak.gui. Core and headless callers (Lua macros, #938) should
+    read it once and pass ``method=`` to distance_km() / distance_km_batch()
+    instead of relying on the fallback, so the method is visible in the call
+    rather than hidden global state.
+    """
     from opensak.gui.settings import get_settings
-    if get_settings().distance_method == "vincenty":
+    return get_settings().distance_method
+
+
+def _resolve_distance_method(method: str | None) -> str:
+    """None → the user's setting (any unknown stored value means haversine,
+    as before). An explicit method must be one of DISTANCE_METHODS."""
+    if method is None:
+        return distance_method_setting()
+    if method not in DISTANCE_METHODS:
+        raise ValueError(
+            f"Unknown distance method {method!r}; expected one of {DISTANCE_METHODS}"
+        )
+    return method
+
+
+def distance_km(
+    lat1: float, lon1: float, lat2: float, lon2: float,
+    method: str | None = None,
+) -> float:
+    """Scalar distance (km) using *method* ("haversine" or "vincenty").
+    When *method* is None, the user's distance_method setting decides."""
+    if _resolve_distance_method(method) == "vincenty":
         return _vincenty_km(lat1, lon1, lat2, lon2)
     return _haversine_km(lat1, lon1, lat2, lon2)
 
 
-def distance_km_batch(lat0: float, lon0: float, lats, lons):
-    """Batch distance (km) dispatched by the user's distance_method setting."""
-    from opensak.gui.settings import get_settings
-    if get_settings().distance_method == "vincenty":
+def distance_km_batch(lat0: float, lon0: float, lats, lons, method: str | None = None):
+    """Batch distance (km) using *method* ("haversine" or "vincenty").
+    When *method* is None, the user's distance_method setting decides."""
+    if _resolve_distance_method(method) == "vincenty":
         return vincenty_km_batch(lat0, lon0, lats, lons)
     return haversine_km_batch(lat0, lon0, lats, lons)
 
@@ -4504,6 +4535,7 @@ def get_nearby_caches(
         lat, lon,
         [ec[0] for ec in eff],
         [ec[1] for ec in eff],
+        method=distance_method_setting(),  # read once, passed down (#1096)
     )
     within_radius = [
         (c, d) for c, d, (elat, elon) in zip(candidates, dists, eff)
