@@ -35,7 +35,7 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.asked.append(macro)
         return self.answer
 
@@ -209,7 +209,7 @@ def test_session_approval_lasts_until_reset():
 def test_approval_belongs_to_the_macro_file(tmp_path):
     host = Host(WriteApproval.SESSION)
     first, second = tmp_path / "first.lua", tmp_path / "second.lua"
-    _run('opensak.update("GCW4", { user_sort = 10 })', host, first)
+    _run('opensak.update("GCW4", { user_sort = 11 })', host, first)
     _run('opensak.update("GCW4", { user_sort = 11 })', host, first)
     assert host.asked == [first]
     host.answer = WriteApproval.DENY
@@ -223,16 +223,17 @@ def test_approval_belongs_to_the_macro_file(tmp_path):
 def test_always_approval_is_stored_by_macro_path_and_removable(tmp_path):
     host = Host(WriteApproval.ALWAYS)
     macro = tmp_path / "always.lua"
-    _run('opensak.update("GCW4", { user_sort = 4 })', host, macro)
+    source = 'opensak.update("GCW4", { user_sort = opensak.count() + 4 })'
+    _run(source, host, macro)
     assert db_access.always_approved() == [str(macro.resolve())]
     db_access.reset_session()
-    _run('opensak.update("GCW4", { user_sort = 5 })', host, macro)
+    _run(source, host, macro)
     assert len(host.asked) == 1
     # Removed in Settings: asked again, even before a restart.
     db_access.save_always_approved([])
     host.answer = WriteApproval.DENY
     with pytest.raises(MacroError, match="did not allow"):
-        _run('opensak.update("GCW4", { user_sort = 6 })', host, macro)
+        _run(source, host, macro)
     assert len(host.asked) == 2
 
 
@@ -258,7 +259,8 @@ def test_called_macro_needs_its_own_approval(tmp_path):
     assert host.asked == [caller, tmp_path / "helper.lua"]
     # An approved helper does not approve its caller.
     db_access.reset_session()
-    db_access.approve(tmp_path / "helper.lua", WriteApproval.SESSION)
+    db_access.approve(tmp_path / "helper.lua", WriteApproval.SESSION,
+                      db_access.source_hash('opensak.update("GCW4", { user_sort = 20 })'))
     host.answer = WriteApproval.DENY
     with pytest.raises(MacroError, match="did not allow macro 'caller.lua'"):
         _run('opensak.run_macro("helper.lua") opensak.update("GCW4", { user_sort = 21 })',

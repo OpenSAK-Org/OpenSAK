@@ -63,7 +63,7 @@ class Host:
     def caches_removed(self):
         self.removed += 1
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.asked += 1
         return self.answer
 

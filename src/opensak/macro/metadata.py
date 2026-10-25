@@ -150,7 +150,16 @@ def added_permissions(old: MacroInfo, new: MacroInfo) -> tuple[str, ...]:
     """What *new* declares that *old* did not (see MacroInfo.declared);
     empty if the update asks for nothing more. If *old* has no Permissions
     key, what it did is not known, so everything *new* declares counts."""
-    before = set(old.declared) if old.permissions_declared else set()
+    return added_declarations(old.declared, old.permissions_declared, new)
+
+
+def added_declarations(
+    old_declared: tuple[str, ...], old_permissions_declared: bool, new: MacroInfo
+) -> tuple[str, ...]:
+    """added_permissions() for an old version known only by its
+    MacroInfo.declared and permissions_declared (e.g. as stored with an
+    approval)."""
+    before = set(old_declared) if old_permissions_declared else set()
     return tuple(d for d in new.declared if d not in before)
 
 

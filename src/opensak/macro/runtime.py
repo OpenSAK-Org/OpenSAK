@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional, Protocol
+from typing import Any, Callable, Iterable, Iterator, Optional, Protocol
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -165,8 +165,13 @@ from opensak.macro.child_write import (
     parse_child_values,
     update_child,
 )
-from opensak.macro.db_access import WriteApproval
-from opensak.macro.metadata import read_metadata
+from opensak.macro.db_access import (
+    WriteApproval,
+    WriteChange,
+    read_macro_source,
+    source_hash,
+)
+from opensak.macro.metadata import parse_header, read_metadata
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -776,14 +781,20 @@ class MacroHost(Protocol):
     def confirm(self, message: str) -> bool:
         """Ask the user a Yes/No question; True on Yes."""
 
-    def approve_macro_write(self, macro: Optional[Path]) -> WriteApproval:
+    def approve_macro_write(
+        self, macro: Optional[Path], change: Optional[WriteChange] = None,
+        editing: bool = False,
+    ) -> WriteApproval:
         """Ask the user whether the macro file *macro* may change the
         OpenSAK databases: never, until OpenSAK closes, or always. *macro*
         is None for an unsaved macro, which cannot be allowed always.
 
         Asked before the first write of a macro that is not approved yet.
-        Must be OpenSAK's own dialog. Anything but SESSION or ALWAYS counts
-        as DENY.
+        *change* is set when the macro was approved before but its code
+        has changed since (db_access.py). *editing*: the run comes from an
+        external editor (`opensak --run-macro`), so EDITING may be offered
+        as well. Must be OpenSAK's own dialog. Anything but SESSION, ALWAYS
+        or (with *editing*) EDITING counts as DENY.
         """
 
     def caches_changed(self, codes: list[str], added: bool) -> None:
@@ -1473,6 +1484,7 @@ class MacroRuntime:
         memory_limit: int = DEFAULT_MEMORY_LIMIT,
         folder_permissions: Optional[list[FolderPermission]] = None,
         settings_dir: Optional[Path] = None,
+        external_editor: bool = False,
     ):
         """*folder_permissions* limits which folders file functions may
         touch; None means the list saved in Settings, read at every run so
@@ -1480,6 +1492,8 @@ class MacroRuntime:
         approves during a run are added to a copy of the list for that run.
         *settings_dir* holds the macros' saved settings (opensak.settings);
         None means the settings/ folder of the macros folder.
+        *external_editor*: the macros come from an external editor
+        (`opensak --run-macro`), so "while I edit it" may approve them.
 
         print() goes to *output*; opensak.log() to *log* (default: *output*)
         and to OpenSAK's log file."""
@@ -1499,6 +1513,14 @@ class MacroRuntime:
         # per-macro state (saved settings, #983) belongs to the called macro,
         # not its caller. None for an unsaved macro.
         self._macro_path: Optional[Path] = None
+        # Its code, for the write approval (db_access.py): the source and
+        # its hash, the hashes of versions OpenSAK's editor had of it, and
+        # whether "while I edit it" applies. Switched with _macro_path.
+        self._macro_source = ""
+        self._macro_hash = ""
+        self._edited_from: frozenset[str] = frozenset()
+        self._external_editor = external_editor
+        self._editing = False
         self._chunk_name = "macro"
         # opensak.macro_db(): the file attached during this run
         self._macro_db_path: Optional[Path] = None
@@ -1659,7 +1681,9 @@ class MacroRuntime:
         asking (host.approve_macro_write) if that was not decided yet. A
         macro started with opensak.run_macro() is asked about on its own
         (_macro_path is the called macro's). A refusal holds for the rest
-        of the run.
+        of the run. The approval belongs to the macro's code as well
+        (db_access.py): a macro changed since it was approved is asked
+        about again, with what changed.
 
         Without the lua-macro-write flag only set_corrected/clear_corrected,
         create_database and move_caches/copy_caches get here (the other
@@ -1668,12 +1692,18 @@ class MacroRuntime:
         if not flags.lua_macro_write:
             return
         macro = self._macro_path
-        if db_access.is_approved(macro):
+        if db_access.is_approved(macro, self._macro_hash, self._edited_from, self._editing):
             return
         if macro not in self._write_denied:
-            answer = self._host.approve_macro_write(macro)
-            if answer in (WriteApproval.SESSION, WriteApproval.ALWAYS):
-                db_access.approve(macro, answer)
+            info = parse_header(self._macro_source, macro or Path("macro.lua"))
+            before = db_access.stored_approval(macro)
+            change = db_access.change_since(before, info) if before is not None else None
+            answer = self._host.approve_macro_write(macro, change=change, editing=self._editing)
+            allowed = [WriteApproval.SESSION, WriteApproval.ALWAYS]
+            if self._editing:
+                allowed.append(WriteApproval.EDITING)
+            if answer in allowed:
+                db_access.approve(macro, answer, self._macro_hash, info)
                 return
             self._write_denied.add(macro)
         name = macro.name if macro is not None else "(unsaved)"
@@ -3898,7 +3928,7 @@ class MacroRuntime:
                 raise MacroError(
                     f"{file.name} is larger than {MAX_MACRO_BYTES // (1024 * 1024)} MB"
                 )
-            source = file.read_text(encoding="utf-8-sig")
+            source = read_macro_source(file)
         except FileNotFoundError:
             raise MacroError(f"macro not found: {file}") from None
         except (OSError, UnicodeDecodeError) as exc:
@@ -3908,9 +3938,13 @@ class MacroRuntime:
             raise MacroError(str(error))
         # Relative paths in the called macro are its own folder's, and its
         # per-macro state is its own file's.
-        previous = self._base_dir, self._macro_path
+        previous = (self._base_dir, self._macro_path, self._macro_source,
+                    self._macro_hash, self._edited_from, self._editing)
         caller_dbs = self._macro_db_path, dict(self._attachments)
         self._base_dir, self._macro_path = file.parent, file
+        # Its own code: only the file as read now counts for its approval.
+        self._macro_source, self._macro_hash = source, source_hash(source)
+        self._edited_from, self._editing = frozenset(), False
         self._macro_depth += 1
         try:
             result = fn(*args)
@@ -3922,7 +3956,8 @@ class MacroRuntime:
 
     def _end_called_macro(self, previous, caller_dbs, failed: bool) -> None:
         self._macro_depth -= 1
-        self._base_dir, self._macro_path = previous
+        (self._base_dir, self._macro_path, self._macro_source,
+         self._macro_hash, self._edited_from, self._editing) = previous
         # The called macro may have switched `macro` to its own file, and
         # attached or detached databases.
         caller_db, caller_attachments = caller_dbs
@@ -4580,7 +4615,7 @@ class MacroRuntime:
 
     def run(
         self, source: str, chunk_name: str = "macro", base_dir: Optional[Path] = None,
-        macro_path: Optional[Path] = None,
+        macro_path: Optional[Path] = None, edited_from: Iterable[str] = (),
     ) -> int:
         """Execute *source* and return its exit code: the one passed to
         opensak.exit(), 0 otherwise. Raises MacroError on any failure, and
@@ -4590,21 +4625,28 @@ class MacroRuntime:
         given to opensak.read_csv() are looked up; the macros folder
         otherwise. *macro_path* is the macro's file, which opensak.settings
         keys its saved settings by; without it the macro has none.
+        *edited_from*: from OpenSAK's macro editor, the hashes
+        (db_access.source_hash) of the versions of *source* it loaded,
+        saved or ran, so an approval of those still counts.
         """
         if not _RUN_LOCK.acquire(blocking=False):
             raise MacroBusy("another macro is still running")
         try:
             with _c_locale():
-                return self._run(source, chunk_name, base_dir, macro_path)
+                return self._run(source, chunk_name, base_dir, macro_path, edited_from)
         finally:
             _RUN_LOCK.release()
 
     def _run(
         self, source: str, chunk_name: str, base_dir: Optional[Path],
-        macro_path: Optional[Path] = None,
+        macro_path: Optional[Path] = None, edited_from: Iterable[str] = (),
     ) -> int:
         self._base_dir = base_dir
         self._macro_path = macro_path
+        self._macro_source = source
+        self._macro_hash = source_hash(source)
+        self._edited_from = frozenset(edited_from)
+        self._editing = self._external_editor
         self._chunk_name = chunk_name
         self._macro_db_path = None
         self._attachments = {}

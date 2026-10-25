@@ -38,6 +38,8 @@ from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
+from opensak.macro.db_access import WriteChange, carry_over, source_hash
+from opensak.macro.metadata import parse_header
 from opensak.macro.runtime import API_VERSION
 
 if TYPE_CHECKING:
@@ -107,6 +109,10 @@ class MacroDialog(QDialog):
         # The file's text as last read or written; None when there is no
         # file, or after the user kept the text of a file deleted on disk.
         self._disk_text: str | None = None
+        # Hashes of the versions of the file this editor loaded, saved or
+        # ran: its text is an edit of those, so a write approval of one of
+        # them still counts (db_access.py). Reset when the file is (re)read.
+        self._edited_from: set[str] = set()
         self._checking_disk = False
         self._watcher = QFileSystemWatcher(self)
         # Editors often save by writing a temp file and renaming it, which
@@ -283,6 +289,7 @@ class MacroDialog(QDialog):
         self._editor.document().setModified(False)
         self._output.clear()
         self._disk_text = text if path else None
+        self._edited_from = {source_hash(text)} if path else set()
         self._set_path(path)
 
     def _set_path(self, path: Path | None) -> None:
@@ -365,14 +372,22 @@ class MacroDialog(QDialog):
 
     def _write(self, path: Path) -> bool:
         from opensak.macro.recent import add_recent_macro
+        text = self._editor.toPlainText()
         try:
-            path.write_text(self._editor.toPlainText(), encoding="utf-8", newline="\n")
+            path.write_text(text, encoding="utf-8", newline="\n")
         except OSError as exc:
             QMessageBox.warning(self, tr("macro_title"),
                                 tr("macro_save_error", path=str(path), msg=str(exc)))
             return False
         self._editor.document().setModified(False)
-        self._disk_text = self._editor.toPlainText()
+        self._disk_text = text
+        saved = source_hash(text)
+        if self._path is not None and self._path.resolve() == path.resolve():
+            # An edit made here keeps the macro's write approval.
+            carry_over(path, self._edited_from, saved, parse_header(text, path))
+            self._edited_from.add(saved)
+        else:
+            self._edited_from = {saved}     # another file: nothing carries over
         self._set_path(path)
         add_recent_macro(path)
         self._status.showMessage(tr("macro_saved", path=path.name), 3000)
@@ -472,6 +487,7 @@ class MacroDialog(QDialog):
         cursor.insertText(text)
         self._editor.document().setModified(False)
         self._disk_text = text
+        self._edited_from = {source_hash(text)}     # changed outside the editor
         block = self._editor.document().findBlockByNumber(
             min(line, self._editor.blockCount() - 1))
         self._editor.setTextCursor(QTextCursor(block))
@@ -527,12 +543,16 @@ class MacroDialog(QDialog):
         self._editor.clear_error_line()
         self._act_run.setEnabled(False)
         self._act_save_run.setEnabled(False)
+        text = self._editor.toPlainText()
+        if self._path is not None:
+            self._edited_from.add(source_hash(text))
         try:
             code = self._runtime.run(
-                self._editor.toPlainText(),
+                text,
                 chunk_name=self._chunk_name(),
                 base_dir=self._path.parent if self._path else None,
                 macro_path=self._path,
+                edited_from=self._edited_from,
             )
             self._append_output(tr("macro_done_code", code=code) if code else tr("macro_done"))
         except MacroError as exc:
@@ -721,10 +741,15 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
 
 
 
-def ask_macro_write_approval(parent, macro: Path | None) -> WriteApproval:
+def ask_macro_write_approval(
+    parent, macro: Path | None, change: WriteChange | None = None, editing: bool = False,
+) -> WriteApproval:
     """OpenSAK's question before the macro file *macro* first changes a
     database: deny (the default, also on Escape), allow until OpenSAK
-    closes, or always. An unsaved macro (None) cannot be allowed always."""
+    closes, or always. An unsaved macro (None) cannot be allowed always.
+    With *change*, the macro was allowed before and its code has changed
+    since; with *editing* (a run from an external editor), "while I edit
+    it" is offered too."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle(tr("macro_write_title"))
@@ -732,9 +757,28 @@ def ask_macro_write_approval(parent, macro: Path | None) -> WriteApproval:
     if macro is None:
         box.setText(tr("macro_write_msg_unsaved"))
         box.setInformativeText(tr("macro_write_hint_unsaved"))
+    elif change is not None:
+        box.setText(tr("macro_write_msg_changed", name=macro.name, path=str(macro)))
+        lines = []
+        if change.old_version != change.new_version:
+            lines.append(tr("macro_write_changed_version",
+                            old=change.old_version or "–", new=change.new_version or "–"))
+        if change.added:
+            lines.append(tr("macro_write_changed_added", added=", ".join(change.added)))
+        lines.append(tr("macro_write_hint_changed"))
+        if editing:
+            lines.append(tr("macro_write_hint_editing"))
+        box.setInformativeText("\n\n".join(lines))
     else:
         box.setText(tr("macro_write_msg", name=macro.name, path=str(macro)))
-        box.setInformativeText(tr("macro_write_hint"))
+        hint = tr("macro_write_hint")
+        if editing:
+            hint += "\n\n" + tr("macro_write_hint_editing")
+        box.setInformativeText(hint)
+    btn_editing = (
+        box.addButton(tr("macro_write_editing"), QMessageBox.ButtonRole.AcceptRole)
+        if editing and macro is not None else None
+    )
     btn_session = box.addButton(tr("macro_write_session"), QMessageBox.ButtonRole.AcceptRole)
     btn_always = (
         box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
@@ -745,11 +789,14 @@ def ask_macro_write_approval(parent, macro: Path | None) -> WriteApproval:
     box.setEscapeButton(btn_deny)
     box.exec()
     clicked = box.clickedButton()
+    if btn_editing is not None and clicked is btn_editing:
+        return WriteApproval.EDITING
     if clicked is btn_session:
         return WriteApproval.SESSION
     if btn_always is not None and clicked is btn_always:
         return WriteApproval.ALWAYS
     return WriteApproval.DENY
+
 
 def choose_file_for_macro(
     parent, title: str, file_filter: str, save: bool, start_dir: Path

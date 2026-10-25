@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import MacroError, MacroHost, MacroRuntime
+from opensak.macro.db_access import read_macro_source
 from opensak.macro.metadata import NO_PERMISSIONS, MacroInfo, discover_macros, read_metadata
 from opensak.macro.runtime import API_VERSION
 
@@ -353,7 +354,7 @@ class MacroManagerDialog(QDialog):
         self._append_output(tr("macro_mgr_running", name=info.name, path=str(path)))
         self._btn_run.setEnabled(False)
         try:
-            source = path.read_text(encoding="utf-8")
+            source = read_macro_source(path)
             code = self._runtime.run(source, chunk_name=path.name, base_dir=path.parent,
                                      macro_path=path)
         except (OSError, UnicodeDecodeError) as exc:

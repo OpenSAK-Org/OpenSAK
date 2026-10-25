@@ -679,8 +679,10 @@ def test_approved_macros_listed_by_name_and_removable(qtbot, monkeypatch, tmp_pa
     monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
     monkeypatch.setattr(flags, "lua_macros", True)
     monkeypatch.setattr(flags, "lua_macro_write", True)
-    first, second = str(tmp_path / "a" / "first.lua"), str(tmp_path / "second.lua")
-    db_access.save_always_approved([first, second])
+    first = str((tmp_path / "a" / "first.lua").resolve())
+    second = str((tmp_path / "second.lua").resolve())
+    for path in (first, second):
+        db_access.approve(path, db_access.WriteApproval.ALWAYS, db_access.source_hash(""))
     d = sd.SettingsDialog()
     qtbot.addWidget(d)
     items = [d._db_write_list.item(i) for i in range(d._db_write_list.count())]

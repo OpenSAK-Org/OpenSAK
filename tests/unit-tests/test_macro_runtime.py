@@ -91,7 +91,7 @@ class FakeHost:
 
     write_answer = WriteApproval.SESSION
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.write_asked = getattr(self, "write_asked", [])
         self.write_asked.append(macro)
         return self.write_answer

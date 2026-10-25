@@ -9,7 +9,10 @@ user's own account, elsewhere the socket file is mode 0600.
 
 A request runs the macro on the GUI thread like the Run button in the macro
 window, with the same host, so its dialogs and folder prompts are the same;
-they come up in front of the OpenSAK window while the caller waits. A
+they come up in front of the OpenSAK window while the caller waits. The
+question whether the macro may change databases also offers "While I edit
+it": the author's own editor changes the file all the time, which would
+otherwise be asked about after every save (db_access.py). A
 request is refused while a dialog is open or another macro runs — a macro
 starting under an open dialog could not be seen or answered properly.
 
@@ -31,6 +34,7 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from opensak.macro import MacroBusy, MacroError, MacroHost, MacroRuntime, macro_running
+from opensak.macro.db_access import read_macro_source
 from opensak.utils.run_macro import (
     EXIT_BUSY, EXIT_MACRO_ERROR, EXIT_USAGE, decode_lines, encode, format_error,
     server_name,
@@ -184,7 +188,7 @@ class _Session(QObject):
             self._finish(EXIT_BUSY)
             return
         try:
-            source = path.read_text(encoding="utf-8")
+            source = read_macro_source(path)
         except (OSError, UnicodeDecodeError) as exc:
             self._err(f"{path}: cannot read the macro: {exc}")
             self._finish(EXIT_USAGE)
@@ -195,6 +199,7 @@ class _Session(QObject):
             self._host,
             output=lambda text: self._send({"op": "out", "text": text}),
             log=self._err,
+            external_editor=True,
         )
         try:
             code = self._runtime.run(

@@ -3835,13 +3835,17 @@ class MainWindow(QMainWindow):
         if added:
             self._macro_caches_added = True
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing: bool = False):
         """MacroHost: ask whether the macro file *macro* (None: unsaved) may
         change the databases (OpenSAK's own dialog, on top of the macro
-        dialog)."""
+        dialog). A run from an external editor (*editing*) brings OpenSAK to
+        the front first, as the user is working in the other editor."""
         from opensak.gui.dialogs.macro_dialog import ask_macro_write_approval
-        parent = getattr(self, "_macro_dialog", None) or self
-        return ask_macro_write_approval(parent, macro)
+        if editing:
+            parent = self._macro_dialog_parent()
+        else:
+            parent = getattr(self, "_macro_dialog", None) or self
+        return ask_macro_write_approval(parent, macro, change, editing)
 
     def approve_folder(self, target, folder, write: bool):
         """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
