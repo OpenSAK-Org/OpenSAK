@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 4
 -- Description: Filter the unfound caches with several DNFs since their last find, from dnf_stats.lua's data
+-- Permissions: none
 --
 -- Builds on another macro's data: dnf_stats.lua stores DNF counts per cache
 -- in the companion database (companion.dnf_stats). This macro only reads
