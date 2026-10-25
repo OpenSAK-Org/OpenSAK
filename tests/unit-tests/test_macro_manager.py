@@ -98,6 +98,18 @@ def test_no_header_falls_back_to_file_name_and_legacy_summary():
     assert parse_header("print(1)\n", Path("x.lua")).description == ""
 
 
+def test_header_keys_lists_only_what_is_written():
+    from opensak.macro.metadata import header_keys
+    assert header_keys(HEADER) == (
+        "name", "author", "version", "requires-api", "description", "permissions")
+    # No defaults: parse_header() falls back to the file name and the
+    # legacy summary, header_keys() does not.
+    assert header_keys("-- tool.lua — does a thing\n--\nprint(1)\n") == ()
+    text = ("﻿-- NAME: A\n-- Version:\n-- Note: prose\n-- Permissions: write\n"
+            "-- Permissions: open\nprint(1)\n-- Author: too late\n")
+    assert header_keys(text) == ("name", "note", "permissions")
+
+
 @pytest.mark.parametrize("value, number, newer", [
     ("3", 3, False), ("3.1", 3, False), (str(API_VERSION + 1), API_VERSION + 1, True),
     ("", None, False), ("soon", None, False),
