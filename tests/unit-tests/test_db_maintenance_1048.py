@@ -179,9 +179,14 @@ class TestMainDatabase:
         assert _has_stats(db)
         assert not maintenance.optimize_file(tmp_path / "None.db")
 
-    def test_optimize_before_3_46_limits_the_first_analyze(self, tmp_path, monkeypatch):
-        # The first full ANALYZE of a large database froze the GUI.
-        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 45, 3))
+    @pytest.mark.parametrize("version, analyze", [
+        ((3, 45, 3), "ANALYZE"),
+        ((3, 46, 0), "PRAGMA optimize=0x10002"),
+    ])
+    def test_optimize_limits_the_first_analyze(self, tmp_path, monkeypatch, version, analyze):
+        # The first full ANALYZE of a large database froze the GUI; without
+        # a limit, optimize=0x10002 reads every index in full, too.
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", version)
         db = _database(tmp_path / "Found.db", with_companion=False)
         _drop_stats(db)
         conn = sqlite3.connect(str(db))
@@ -192,7 +197,7 @@ class TestMainDatabase:
             assert conn.execute("PRAGMA analysis_limit").fetchone()[0] == 1000
         finally:
             conn.close()
-        assert statements.index("PRAGMA analysis_limit=1000") < statements.index("ANALYZE")
+        assert statements.index("PRAGMA analysis_limit=1000") < statements.index(analyze)
         assert _has_stats(db)
 
     def test_checkpoint_empties_the_wal(self, tmp_path):
