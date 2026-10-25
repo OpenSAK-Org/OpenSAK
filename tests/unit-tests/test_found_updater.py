@@ -240,6 +240,122 @@ class TestUpdateFoundFromReference:
         assert result.not_found == 2
 
 
+# ── Chunked bulk update (#1095) ───────────────────────────────────────────────
+#
+# update_found_from_reference() no longer loads every cache. These pin the
+# semantics a naive bulk rewrite gets wrong, and the chunk boundaries.
+
+def _setup_ref_db_with_dates(ref_path: Path, dates: dict, make_cache) -> None:
+    # dates: {gc_code: datetime or None}; None = no found log in the ref DB.
+    init_db(db_path=ref_path)
+    with get_session() as s:
+        for gc, d in dates.items():
+            c = make_cache(gc)
+            if d is not None:
+                c.logs.append(Log(log_type="Found it", log_date=d))
+            s.add(c)
+
+
+class TestChunkedBulkUpdate:
+    def test_already_found_ref_date_overwrites_ref_null_does_not(self, tmp_path, make_cache):
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+        _setup_ref_db_with_dates(ref_path, {
+            "GC00001": datetime(2018, 3, 4, 12, 0),
+            "GC00002": None,
+        }, make_cache)
+        _setup_active_db(active_path, [
+            {"gc_code": "GC00001", "found": True, "found_date": datetime(2020, 1, 1)},
+            {"gc_code": "GC00002", "found": True, "found_date": datetime(2021, 6, 7)},
+        ], make_cache)
+
+        result = update_found_from_reference(ref_path)
+
+        assert (result.updated, result.already, result.not_found) == (0, 2, 0)
+        with get_session() as s:
+            c1 = s.query(Cache).filter_by(gc_code="GC00001").one()
+            c2 = s.query(Cache).filter_by(gc_code="GC00002").one()
+            assert c1.found_date == datetime(2018, 3, 4, 12, 0)   # overwritten
+            assert c2.found_date == datetime(2021, 6, 7)          # kept
+
+    def test_not_yet_found_with_null_ref_date_is_marked_found_without_date(
+            self, tmp_path, make_cache):
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+        _setup_ref_db_with_dates(ref_path, {"GC00001": None}, make_cache)
+        _setup_active_db(active_path, [
+            {"gc_code": "GC00001", "found": False, "found_date": datetime(2019, 1, 1)},
+        ], make_cache)
+
+        result = update_found_from_reference(ref_path)
+
+        assert result.updated == 1
+        with get_session() as s:
+            c = s.query(Cache).filter_by(gc_code="GC00001").one()
+            assert c.found is True
+            assert c.found_date is None   # set to the ref date, which is NULL
+
+    def test_found_date_stored_in_sqlalchemy_datetime_format(self, tmp_path, make_cache):
+        # The bulk UPDATE must store dates exactly as the ORM does — no
+        # "T" separator and no "+00:00" from the tz-aware ref dates.
+        from sqlalchemy import text as sa_text
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+        _setup_ref_db_with_dates(ref_path, {"GC00001": datetime(2018, 3, 4, 19, 5, 6)},
+                                 make_cache)
+        _setup_active_db(active_path, [{"gc_code": "GC00001", "found": False}], make_cache)
+
+        update_found_from_reference(ref_path)
+
+        with get_session() as s:
+            raw = s.execute(sa_text(
+                "SELECT found_date FROM caches WHERE gc_code = 'GC00001'")).scalar()
+        assert raw == "2018-03-04 19:05:06.000000"
+
+    def test_counts_and_updates_span_chunk_boundaries(self, tmp_path, make_cache, monkeypatch):
+        import opensak.db.found_updater as fu
+        monkeypatch.setattr(fu, "_CHUNK_SIZE", 3)
+
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+        ref_codes = [f"GC{n:05d}" for n in range(1, 11)]          # 10 codes, 4 chunks
+        _setup_ref_db_with_dates(
+            ref_path, {gc: datetime(2017, 1, 1) for gc in ref_codes}, make_cache)
+        # Active: 1–4 not found, 5–7 already found, 8–10 missing, plus an
+        # unrelated cache that must stay untouched.
+        _setup_active_db(active_path,
+            [{"gc_code": gc, "found": False} for gc in ref_codes[:4]]
+            + [{"gc_code": gc, "found": True} for gc in ref_codes[4:7]]
+            + [{"gc_code": "GC99999", "found": False}],
+            make_cache)
+
+        result = update_found_from_reference(ref_path)
+
+        assert (result.updated, result.already, result.not_found) == (4, 3, 3)
+        with get_session() as s:
+            found = {c.gc_code: (c.found, c.found_date) for c in s.query(Cache).all()}
+        for gc in ref_codes[:7]:
+            assert found[gc] == (True, datetime(2017, 1, 1))
+        assert found["GC99999"] == (False, None)
+
+    def test_does_not_load_caches_as_orm_objects(self, tmp_path, make_cache, monkeypatch):
+        # The old implementation called session.query(Cache).all().
+        from sqlalchemy.orm import Session
+        ref_path = tmp_path / "ref.db"
+        active_path = tmp_path / "active.db"
+        _setup_ref_db(ref_path, ["GC00001"], make_cache)
+        _setup_active_db(active_path, [{"gc_code": "GC00001", "found": False}], make_cache)
+
+        def _no_query(self, *args, **kwargs):
+            raise AssertionError("session.query() must not be used (#1095)")
+
+        monkeypatch.setattr(Session, "query", _no_query)
+        result = update_found_from_reference(ref_path)
+        monkeypatch.undo()
+
+        assert result.updated == 1
+
+
 # ── UpdateResult dataclass ────────────────────────────────────────────────────
 
 class TestUpdateResult:
