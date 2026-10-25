@@ -946,7 +946,7 @@ python run.py</code></pre>
     <p>All filters default to <strong>AND</strong> mode — a cache must pass every active filter to appear. Switch the group to <strong>OR</strong> to show caches matching <em>any</em> filter. Groups can be nested for complex conditions.</p>
 
     <h3>Filter Tabs</h3>
-    <p>The filter dialog has ten tabs, modelled on GSAK's filter dialog:</p>
+    <p>The filter dialog has ten tabs (eleven with custom fields), modelled on GSAK's filter dialog:</p>
     <ul>
       <li><strong>General</strong> — name, GC code, placed by, owner, type, container, difficulty, terrain, found/not found, availability, premium, corrected coords</li>
       <li><strong>Dates</strong> — eight date fields (see <a href="#filter-types">All Filter Types</a>), each with its own condition</li>
@@ -957,7 +957,8 @@ python run.py</code></pre>
       <li><strong>Trackables</strong> — has / has no trackables, and filter by trackable name, tracking code and count</li>
       <li><strong>Attributes</strong> — all ~70 standard Groundspeak attributes, with Yes/No/Any per attribute, a search box, and AND/OR matching</li>
       <li><strong>Text Search</strong> — search descriptions, logs, and personal notes with the full set of text operators, including RegEx</li>
-      <li><strong>Where</strong> — raw SQL WHERE clause against the caches table (advanced)</li>
+      <li><strong>Custom</strong> (beta) — one row per <a href="#custom-fields">custom field</a> of the database, with conditions to fit its type</li>
+      <li><strong>Where</strong> — raw SQL WHERE clause against the caches table (advanced); custom fields can be used by name</li>
     </ul>
 
     <h3>Seeing What a Filter Restricts</h3>
@@ -1161,6 +1162,17 @@ python run.py</code></pre>
     <p>Select a cache and use <strong>Waypoint → Edit cache…</strong> (<kbd>Ctrl+E</kbd>), or right-click → <strong>Edit cache…</strong></p>
     <p>Besides name, type, coordinates and descriptions, you can edit owner name, hidden / found / DNF dates, county, elevation, and whether the descriptions contain HTML. Unticking <em>Found</em> or <em>DNF</em> also clears the matching date. The <strong>Personal</strong> tab holds the user flag, user data 1–4, GC note, watch, your personal note, and corrected coordinates.</p>
     <p>The <strong>Waypoints</strong> tab lets you <strong>add, edit and delete child waypoints</strong>, including prefix, code, date, comment and flag. A prefix is required, and a waypoint code already used by another waypoint of the same cache is rejected. The detail panel and map update as soon as you save.</p>
+
+    <h3 id="custom-fields">Custom Fields (beta)</h3>
+    <p>Custom fields are your own fields per cache, as in GSAK: a <em>Yes/No</em> flag such as <em>Angel</em>, a number such as <em>GCFinds</em>, a text, or a date. They are part of the beta builds (the <code>companion-db</code> feature flag) and are stored in the database's companion file, which goes along with the database when you copy, move or back it up.</p>
+    <ul>
+      <li><strong>Tools → Custom fields…</strong> lists the fields of the active database and adds, edits and deletes them. A <em>local</em> field belongs to this database, a <em>global</em> one to every database. You choose this when you add a field and can't change it later: to move a field from local to global or back, add a new field with the other scope, copy the values (e.g. with a macro), and delete the old one. Renaming keeps the values; changing the type converts them, and values that don't fit the new type are lost (OpenSAK asks first). A deleted field keeps its values, shown greyed, until you click <strong>Remove data…</strong>.</li>
+      <li>The <strong>GSAK import</strong> brings GSAK's local and global custom fields and their values along, and the GSAK filter import converts the <em>Custom</em> tab of your saved filters.</li>
+      <li>Each field can be a column in the cache list (<strong>View → Choose columns…</strong>), shows on the detail panel's <strong>Custom</strong> tab, and is edited on the <strong>Custom fields</strong> tab of <strong>Edit cache</strong>.</li>
+      <li>The Filter dialog's <strong>Custom</strong> tab filters on them, and Where clauses use them by name, e.g. <code>Angel = 1 AND GCFinds &gt; 100</code>. A cache nobody set a field for has the field's default.</li>
+      <li>A field can have a <strong>display expression</strong>: SQL the cache list and the detail panel show instead of the stored value, using the field by name, such as <code>nullif(GCFinds,-1)</code> (hide the -1 for "not fetched") or <code>printf('%.1f%%', PMFav)</code>. Enter it in <strong>Add…</strong> or <strong>Edit…</strong>; OpenSAK checks it when you save. Fields imported from GSAK bring theirs along. Filters, sorting and macros use the stored value, as in GSAK.</li>
+      <li>Macros read them as <code>cache.custom</code> and change them with <code>opensak.update()</code>; see the macro API documentation.</li>
+    </ul>
 
     <h3>Deleting a Cache</h3>
     <p>Select a cache and press <kbd>Delete</kbd>, or go to <strong>Waypoint → Delete cache…</strong> A confirmation dialog prevents accidental deletion.</p>

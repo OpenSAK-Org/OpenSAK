@@ -1,6 +1,6 @@
 # Full GSAK Field Compatibility — Design (Epic #1028)
 
-*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141), and 23 October 2026 when custom fields moved to the companion database (#1034, epic #1149) and their storage and GSAK import were implemented (step 3). The macro API shape is still open — see Questions. Update this file in the same commit when a sub-issue changes the design.*
+*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141), 23 October 2026 when custom fields moved to the companion database (#1034, epic #1149) and their storage and GSAK import were implemented (step 3), and 24 October 2026 when their UI and macro API were implemented (steps 4–5, #1149 phase 6). Update this file in the same commit when a sub-issue changes the design.*
 
 ## Summary
 
@@ -200,7 +200,7 @@ This is separate from OpenSAK's numbered migrations in `db/database.py` and the 
 
 #### Computed fields
 
-**Settled 23 Oct 2026 from real data:** in GSAK a field with an `fexpression` still has its column and stored value; the expression is a *display* transform of that value (`nullif(GCFinds,-1)` refers to the field itself). So every field keeps its column, `caches_all` shows the stored value (as GSAK's `CachesAll` does, so filters behave the same), and the expression is imported verbatim into `expression`. Translating it (GSAK functions `g_…`, the filter translator) and using it for display comes with the UI (step 4); an expression that can't be translated stays inactive. Expressions are only ever evaluated inside a read-only SELECT — the same rule as `opensak.sql` and the known limitation in the macro concept §9b.
+**Settled 23 Oct 2026 from real data:** in GSAK a field with an `fexpression` still has its column and stored value; the expression is a *display* transform of that value (`nullif(GCFinds,-1)` refers to the field itself). So every field keeps its column, `caches_all` shows the stored value (as GSAK's `CachesAll` does, so filters behave the same), and the expression is imported verbatim into `expression`. The cache list and the detail panel show it (step 4, `custom_fields.display_expression()` and `load_values()`): a GSAK expression goes through the GSAK filter translator, which knows the database's field names; one that can't be translated (GSAK functions `g_…`) or fails to run stays inactive and the stored value is shown. Filters and sorting always use the stored value, as GSAK's do. The expression runs in the SELECT under an authorizer that allows only reading (`custom_fields.read_only()`). Expressions are only ever evaluated inside a read-only SELECT — the same rule as `opensak.sql` and the known limitation in the macro concept §9b.
 
 Examples from the sample database:
 
@@ -224,11 +224,14 @@ Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` af
 | Place | What |
 | --- | --- |
 | GSAK import | Local definitions from `CustomLocal`, global definitions from `CustomGlobal` / `CustomDefs` in `gsak.db3`, values from `Custom` |
-| Cache list | Available as columns in the column chooser |
-| Cache detail | A Custom section listing the fields with their values |
-| Filter dialog | The Custom tab (#821 item 5): pick a field, operator by type (the text operators from #850 for strings, ranges for numbers and dates, yes/no for booleans) |
-| Where tab / GSAK filter importer | Custom fields usable by name; `WHERE_UNMAPPABLE['custom']` goes away |
-| Macro API | Read, write and define fields, following the general field-write support nagisml is adding to the macro API. Exact shape (`cache.custom.<name>`, `opensak.set_custom(...)` or other) still open — nagisml will prototype it. `macro_flag` and `macro_sort` are exposed to macros from the start |
+| Define | *Tools → Custom fields…* (`gui/dialogs/custom_fields_dialog.py`): add, rename, change the type (after confirmation; values that don't convert are lost), change the default and the display expression (checked on save with `check_expression()`; a GSAK field's is still read as GSAK SQL), delete (orphaned, values kept) and *Remove data…* (`drop_field()`), local or global |
+| Cache list | One column per field in the column chooser (`custom:<name>`, per database like the other columns; a rename moves the column along). `RefreshWorker` loads the visible fields from `caches_all` off the GUI thread (`load_values()`); display value as above, sorting by the stored value |
+| Cache detail | A read-only *Custom* tab, hidden while the database has no fields |
+| Edit cache | A *Custom fields* tab, one input per field by type; only changed fields are written, after the cache is committed |
+| Filter dialog | The Custom tab (#821 item 5): one row per field, operator by type (yes/no; the text operators from #850; the number operators; the date operators without *compare*). `CustomFieldFilter` (by name, with its type) runs on `caches_all`, so untouched caches have the default. A profile's filter on a field the database lacks is kept and matches nothing |
+| Where tab | Runs on `caches_all AS caches` while the view exists, so fields are used by name and `caches.id` sub-selects keep working |
+| GSAK filter importer | The `*custom*` lines (`name;type;operator label;value1;value2`, the label in GSAK's UI language — English and German mapped) become native `CustomFieldFilter`s; where clauses use the active database's fields by name (renamed ones as `<name>_custom`), and `Custom` / `CachesAll` become `caches_all` (`Custom.cCode` → `gc_code`) |
+| Macro API | `cache.custom` (name → value; booleans as true/false, defaults for untouched caches), `opensak.update/insert(…, { custom = { … } })` with the write approval (inside `opensak.transaction()` written after the outermost commit), `opensak.custom_fields()`, `opensak.define_custom_field{}` (idempotent for the same name and type), `opensak.delete_custom_field()`. SQL can read `companion.custom_values` but not change it (owner `opensak`). `macro_flag` and `macro_sort` are exposed to macros from the start |
 | Move / copy caches | Values travel with the cache; a field missing in the target database is created there first (logged) |
 | Backup / restore | Values and a copy of every stored definition (local and global) are in the companion, which backup sets include (#1034). The global master in the app settings belongs with the app-settings part of backup (#942) |
 | GPX export | Out of scope for now |
@@ -250,8 +253,8 @@ Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` af
    - **2b-2.** **Done in #1141**: the Dates tab has *Last user update* (`last_user_update`, compared in local time; settles #821 item 6\*), the column chooser has *Last user update* and *GPX symbol*, and the GSAK filter importer maps LastUserDate, IsOwner, MacroFlag, MacroSort and Symbol to the new columns.
    - **2c.** Macro access to the new columns (@nagisml): read all of them, write `macro_flag`, `macro_sort` and `symbol` (see above).
 3. **Custom fields: storage and GSAK import** — implemented in the companion database (#1149 phase 4, behind the `companion-db` flag): `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, the `caches_all` TEMP view, import of local and global definitions and values, import report.
-4. **Custom fields: UI** — column chooser, detail panel, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer.
-5. **Custom fields: macro API** — read, write, define.
+4. **Custom fields: UI** — implemented (#1149 phase 6, behind the `companion-db` flag): define dialog, column chooser, detail panel, Edit cache, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer, display expressions.
+5. **Custom fields: macro API** — implemented with step 4: read, write, define.
 6. **Ignore list** — #473.
 7. **Cache and log images** — import the image metadata (URL, name, description). Lowest priority.
 
@@ -259,7 +262,6 @@ Steps 2 and 3 stop the data loss; everything after builds on stored data and can
 
 ## Questions
 
-- **Macro API shape** for custom fields — `cache.custom.<name>`, `opensak.set_custom(...)` or something else. nagisml will prototype it once general field writes are in.
 - Does GSAK export custom fields in its GPX extension at all? If so, the GPX importer should read them too.
 - `kBeforeState/County` and `kAfterState/County`: is OpenSAK's `location_basis` enough, or do users rely on GSAK's before/after values?
 

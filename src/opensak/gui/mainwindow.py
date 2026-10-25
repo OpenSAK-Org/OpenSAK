@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.refresh_worker import RefreshWorker
+from opensak.db import custom_fields
 from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
@@ -618,6 +619,14 @@ class MainWindow(QMainWindow):
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
 
+        # #1028: define the active database's custom fields
+        self._custom_fields_sep = gc_tools_menu.addSeparator()
+        self._custom_fields_sep.setVisible(flags.companion_db)
+        self._act_custom_fields = QAction(tr("action_custom_fields"), self)
+        self._act_custom_fields.triggered.connect(self._open_custom_fields)
+        self._act_custom_fields.setVisible(flags.companion_db)
+        gc_tools_menu.addAction(self._act_custom_fields)
+
         # ── Macros (Lua, proof of concept) ────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
         # Beta-only until the macro API is settled (#938 step 4).
@@ -1060,6 +1069,39 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+
+    def _open_custom_fields(self) -> None:
+        """Tools → Custom fields… (#1028): define the active database's fields."""
+        from opensak.db.manager import get_db_manager
+        from opensak.gui.dialogs.custom_fields_dialog import CustomFieldsDialog
+        active = get_db_manager().active
+        if active is None:
+            return
+        dlg = CustomFieldsDialog(active.path, active.name, self)
+        dlg.fields_changed.connect(self._on_custom_fields_changed)
+        dlg.exec()
+
+    def _on_custom_fields_changed(self, renames: list) -> None:
+        """Fields were defined, changed or deleted: renamed fields keep their
+        column in the cache list, and the list shows the new definitions."""
+        from opensak.gui.dialogs.column_dialog import (
+            custom_column_id, get_column_widths, get_visible_columns,
+            set_column_widths, set_visible_columns,
+        )
+        if renames:
+            visible, widths = list(get_visible_columns()), dict(get_column_widths())
+            for old, new in renames:
+                old_id, new_id = custom_column_id(old), custom_column_id(new)
+                visible = [new_id if c == old_id else c for c in visible]
+                if old_id in widths:
+                    widths[new_id] = widths.pop(old_id)
+            set_visible_columns(visible)
+            set_column_widths(widths)
+        self._cache_table.reload_columns()
+        self._cache_table._model.reload_custom()
+        current = self._cache_table.selected_cache()
+        if current is not None:
+            self._on_found_status_changed(current.gc_code)
 
     def _open_backup_dialog(self) -> None:
         """File → Back up now… (issue #953)."""
@@ -1672,6 +1714,7 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_result(
         self, generation: int, table_caches: list, map_caches: list,
+        custom_values: object = None,
     ) -> None:
         """GUI-thread continuation of _refresh_cache_list() — see RefreshWorker."""
         QApplication.restoreOverrideCursor()
@@ -1684,7 +1727,10 @@ class MainWindow(QMainWindow):
             len(table_caches), time.monotonic() - _t0,
         )
 
-        self._cache_table.load_caches(table_caches)
+        self._cache_table.load_caches(
+            table_caches,
+            custom_values if isinstance(custom_values, custom_fields.Values) else None,
+        )
         if self._macro_pending_select:
             code, self._macro_pending_select = self._macro_pending_select, None
             self._cache_table.select_by_gc_code(code)
@@ -2626,6 +2672,8 @@ class MainWindow(QMainWindow):
                 session.add(cache)
                 session.flush()   # save_related() har brug for cache.id
                 dlg.save_related(session, cache)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662: a newly added cache/custom waypoint had no
             # distance/bearing computed, so it sorted to the bottom of the
             # list (as if distance were unset) until the user switched the
@@ -2643,6 +2691,11 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(
                 tr("status_cache_added", gc_code=data["gc_code"]), 3000
             )
+
+    def _report_custom_save(self, error: Optional[str]) -> None:
+        """Show why the Edit cache dialog's custom fields weren't saved."""
+        if error:
+            QMessageBox.warning(self, tr("warning"), error)
 
     def _edit_waypoint(self) -> None:
         cache = self._cache_table.selected_cache()
@@ -2679,6 +2732,8 @@ class MainWindow(QMainWindow):
                             setattr(c, field, value)
                     # UserNote (note + korrigerede koordinater) og child-waypoints
                     dlg.save_related(session, c)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662 follow-up: same stale-distance issue as adding a
             # new cache — editing coordinates left Cache.distance/bearing
             # unchanged until the center/home point was switched away and

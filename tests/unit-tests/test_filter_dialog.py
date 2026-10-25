@@ -124,7 +124,9 @@ class TestHelperWidgets:
 
 class TestConstruction:
     def test_ten_tabs(self, dlg):
-        assert dlg._tabs.count() == 10
+        # An eleventh, Custom, with custom fields (#1028, companion-db flag)
+        from opensak.utils import flags
+        assert dlg._tabs.count() == (11 if flags.companion_db else 10)
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")

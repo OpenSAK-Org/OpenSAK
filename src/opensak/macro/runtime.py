@@ -40,6 +40,7 @@ import json
 import locale
 import logging
 import os
+import sqlite3
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -105,7 +106,10 @@ from opensak.filters.engine import (
 from opensak import __version__, geodesy
 from opensak.coord_formats import INPUT_KEYS, parse_any
 from opensak.db import companion as companion_db
+from opensak.db import custom_fields
 from opensak.db.cache_delete import delete_caches
+from opensak.db.models import Cache
+from opensak.macro import custom_data
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
 from opensak.db.transfer import IF_EXISTS, transfer_caches
@@ -133,7 +137,6 @@ from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
 from opensak.db.database import get_session, optimize_database
 from opensak.macro.cache_data import (
-    CACHE_FIELDS,
     CacheField,
     UnknownField,
     iter_records,
@@ -1546,6 +1549,9 @@ class MacroRuntime:
         # rows in the companion database (#1034) are deleted once the
         # outermost transaction commits (_purge_companion()).
         self._tx_removed: list[list[str]] = []
+        # Custom fields written inside opensak.transaction(), per level
+        # ((code, values)): written once the outermost one commits (#1028).
+        self._tx_custom: list[list[tuple[str, dict[str, Any]]]] = []
         # Databases other than the active one, read with the `database`
         # option: opened read-only on first use, closed after the run.
         self._other_sql: dict[Path, ReadOnlyDatabase] = {}
@@ -1681,16 +1687,101 @@ class MacroRuntime:
             raise MacroError(str(exc)) from None
 
     def _update(self, code=None, values=None) -> bool:
-        gc_code = _gc_code(code, "opensak.update")
-        parsed = self._field_values("opensak.update", values, insert=False)
-        self._require_write("opensak.update")
+        func = "opensak.update"
+        gc_code = _gc_code(code, func)
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ user_flag = true }}")
+        table = _lua_to_python(values)
+        custom = self._custom_update(func, table.pop("custom")) if "custom" in table else {}
+        parsed = self._field_values(func, table, insert=False) if table or not custom else {}
+        self._require_write(func)
         if self._in_transaction():
-            return self._update_in_transaction(gc_code, parsed)
-        with get_session() as session:
-            found = update_cache(session, gc_code, parsed)
+            if parsed:
+                found = self._update_in_transaction(gc_code, parsed)
+            else:
+                found = self._cache_exists(gc_code)
+            if found and custom:
+                # Written once the outermost transaction commits (_tx_end()).
+                self._tx_custom[-1].append((gc_code, custom))
+                self._host.caches_changed([gc_code], False)
+            return found
+        if parsed:
+            with get_session() as session:
+                found = update_cache(session, gc_code, parsed)
+        else:
+            found = self._cache_exists(gc_code)
+        if found and custom:
+            self._write_custom(func, [(gc_code, custom)])
         if found:
             self._host.caches_changed([gc_code], False)
         return found
+
+    # Custom fields (#1028, macro/custom_data.py): in the companion database,
+    # written on its own connection after the main database (main first).
+
+    def _custom_update(self, func: str, values: Any) -> dict[str, Any]:
+        """The `custom` table of opensak.update(), checked and converted."""
+        if not flags.companion_db:
+            raise MacroError(f"{func}: custom fields need the companion-db feature flag")
+        try:
+            return custom_data.parse_custom(func, self._db_file(None), values)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+
+    def _cache_exists(self, gc_code: str) -> bool:
+        with self._active_session() as session:
+            return session.query(Cache.id).filter_by(gc_code=gc_code).first() is not None
+
+    def _write_custom(self, func: str, rows: list[tuple[str, dict[str, Any]]]) -> None:
+        if not rows:
+            return
+        try:
+            custom_fields.write_values(self._db_file(None), rows)
+        except (custom_fields.CustomFieldError, companion_db.CompanionError,
+                sqlite3.Error, OSError) as exc:
+            raise MacroError(f"{func}: custom fields not saved: {exc}") from None
+
+    def _custom_fields(self, lua, options=None):
+        func = "opensak.custom_fields"
+        db = self._read_options(func, options)
+        try:
+            fields = custom_fields.fields(self._db_file(db))
+        except (sqlite3.Error, OSError) as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return lua.table_from([lua.table_from(custom_data.definition(f)) for f in fields])
+
+    def _define_custom_field(self, lua, spec=None):
+        func = "opensak.define_custom_field"
+        if spec is None or not hasattr(spec, "items"):
+            raise MacroError(f'{func} expects a table, e.g. {{ name = "Parking", type = "string" }}')
+        values = _lua_to_python(spec)
+        self._require_write(func)
+        try:
+            field, created = custom_data.define(func, self._db_file(None), values)
+        except CacheWriteError as exc:
+            raise MacroError(str(exc)) from None
+        if created:
+            self._output(f"{func}: defined the {field.scope} custom field {field.name} ({field.type})")
+        return lua.table_from(custom_data.definition(field))
+
+    def _delete_custom_field(self, name=None) -> bool:
+        func = "opensak.delete_custom_field"
+        if not isinstance(name, str) or not name.strip():
+            raise MacroError(f"{func} expects the field's name")
+        path = self._db_file(None)
+        field = next((f for f in custom_fields.fields(path)
+                      if f.name.lower() == name.strip().lower()), None)
+        if field is None:
+            return False
+        self._require_write(func)
+        try:
+            custom_fields.delete_field(path, field.field_id)
+        except (custom_fields.CustomFieldError, companion_db.CompanionError,
+                sqlite3.Error, OSError) as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        self._output(f"{func}: deleted the custom field {field.name}; its values are kept "
+                     "until it is removed in Tools → Custom fields")
+        return True
 
     def _macro_flag(self, action=None, target=None) -> int:
         func = "opensak.macro_flag"
@@ -1728,13 +1819,23 @@ class MacroRuntime:
         return found
 
     def _insert(self, values=None) -> str:
-        parsed = self._field_values("opensak.insert", values, insert=True)
-        self._require_write("opensak.insert")
+        func = "opensak.insert"
+        if values is None or not hasattr(values, "items"):
+            raise MacroError(f"{func} expects a table of fields, e.g. {{ user_flag = true }}")
+        table = _lua_to_python(values)
+        custom = self._custom_update(func, table.pop("custom")) if "custom" in table else {}
+        parsed = self._field_values(func, table, insert=True)
+        self._require_write(func)
         try:
             with self._active_session() as session:
                 code = insert_cache(session, parsed, refresh=not self._in_transaction())
         except CacheWriteError as exc:
             raise MacroError(str(exc)) from None
+        if custom:
+            if self._in_transaction():
+                self._tx_custom[-1].append((code, custom))
+            else:
+                self._write_custom(func, [(code, custom)])
         self._host.caches_changed([code], True)
         return code
 
@@ -2191,10 +2292,12 @@ class MacroRuntime:
             raise MacroError(f"opensak.transaction: {exc}") from None
         self._tx_deleted.append({})
         self._tx_removed.append([])
+        self._tx_custom.append([])
 
     def _tx_end(self, commit=None) -> None:
         deleted = self._tx_deleted.pop() if self._tx_deleted else {}
         removed = self._tx_removed.pop() if self._tx_removed else []
+        custom = self._tx_custom.pop() if self._tx_custom else []
         try:
             self._writable_db().end(bool(commit))
         except SqlError as exc:
@@ -2207,6 +2310,10 @@ class MacroRuntime:
                 self._tx_removed[-1].extend(removed)
             else:
                 self._purge_companion(removed)
+            if self._tx_custom:
+                self._tx_custom[-1].extend(custom)
+            else:
+                self._write_custom("opensak.transaction", custom)
 
     def _resync(self) -> int:
         if not self._in_transaction():
@@ -2288,11 +2395,15 @@ class MacroRuntime:
     def _active_codes(self) -> list[str]:
         return [c.gc_code for c in self._host.filtered_caches()]
 
+    def _db_file(self, db: Optional[DatabaseInfo]) -> Path:
+        """The file of *db*, or of the active database for None."""
+        return db.path if db is not None else Path(get_engine().url.database or "")
+
     def _cache(self, lua, code=None, options=None):
         gc_code = _gc_code(code, "opensak.cache")
         db = self._read_options("opensak.cache", options)
         with self._session_factory(db, "opensak.cache")() as session:
-            records = load_records(session, [gc_code])
+            records = load_records(session, [gc_code], resolve_fields(None), self._db_file(db))
         return lua.table_from(records[0], recursive=True) if records else None
 
     def _caches(self, lua, spec=None):
@@ -2302,7 +2413,7 @@ class MacroRuntime:
                 'opensak.caches{ found = true, fields = {"code", "name"} }'
             )
         spec = dict(spec.items()) if spec is not None else {}
-        fields = CACHE_FIELDS
+        fields = resolve_fields(None)
         if "fields" in spec:
             fields = _cache_fields(spec.pop("fields"))
         every = spec.pop("all", False)
@@ -2319,7 +2430,7 @@ class MacroRuntime:
                 codes = [c.gc_code for c in apply_filters_auto(session, filterset)]
         else:
             codes = self._active_codes()
-        records = iter_records(session_factory, codes, fields)
+        records = iter_records(session_factory, codes, fields, self._db_file(db))
 
         def step(*_):
             record = next(records, None)
@@ -4124,7 +4235,7 @@ class MacroRuntime:
         names: dict[str, str] = {}
         descriptions: dict[str, str] = {}
         codes = [c.gc_code for c in caches]
-        for record in iter_records(get_session, codes):
+        for record in iter_records(get_session, codes, resolve_fields(None), self._db_file(None)):
             table = lua.table_from(record, recursive=True)
             for fn, key, result in ((rename, "rename", names),
                                     (describe, "description", descriptions)):
@@ -4504,6 +4615,7 @@ class MacroRuntime:
         self._deleted = {}
         self._tx_deleted = []
         self._tx_removed = []
+        self._tx_custom = []
         self._picked = set()
         self._written = set()
         self._opened = 0
@@ -5485,6 +5597,65 @@ API: tuple[ApiFunction, ...] = (
         companion=True,
     ),
     ApiFunction(
+        name="custom_fields",
+        description="The custom fields of the active database (or of "
+                    "`database`), by position: user-defined fields per cache, "
+                    "as in GSAK, with `name`, `type` (\"string\", \"integer\", "
+                    "\"real\", \"date\" or \"boolean\"), `default`, `scope` "
+                    "(\"local\": this database; \"global\": every database), "
+                    "`origin` (\"gsak\" when imported from GSAK, else "
+                    "\"opensak\") and `expression` (GSAK's display "
+                    "expression, if any). Their values are the `custom` field "
+                    "of a cache. See Custom fields.",
+        example='for _, f in ipairs(opensak.custom_fields()) do\n'
+                '    print(f.name, f.type, f.default, f.scope)\nend',
+        since=4,
+        bind=lambda rt, lua: lambda *a: rt._custom_fields(lua, *a),
+        params=(_READ_OPTIONS,),
+        returns=("opensak.CustomField[]", "One table per field; empty while there are none."),
+        companion=True,
+    ),
+    ApiFunction(
+        name="define_custom_field",
+        description="Define a custom field in the active database: `name` "
+                    "(letters, digits and `_`, not a cache column or an SQL "
+                    "keyword), `type`, optionally `default` (shown for every "
+                    "cache nobody set), `scope` (\"local\", the default, "
+                    "or \"global\" for every database) and `expression`: SQL "
+                    "the cache list shows instead of the value, e.g. "
+                    "`nullif(Finds, -1)` (filters and macros keep using the "
+                    "value). A field of that name "
+                    "and type already there is returned unchanged, so a macro "
+                    "can define its fields on every run; another type is an "
+                    "error. Needs the user's permission like opensak.update(). "
+                    "See Custom fields.",
+        example='opensak.define_custom_field{ name = "Parking", type = "string" }\n'
+                'opensak.define_custom_field{ name = "Angel", type = "boolean", default = false }\n'
+                'opensak.update("GC12345", { custom = { Parking = "Lot A", Angel = true } })',
+        since=4,
+        bind=lambda rt, lua: lambda *a: rt._define_custom_field(lua, *a),
+        params=(Param("field", "opensak.CustomFieldDefinition", "The field."),),
+        returns=("opensak.CustomField", "The field, as opensak.custom_fields() lists it."),
+        write=True,
+        companion=True,
+    ),
+    ApiFunction(
+        name="delete_custom_field",
+        description="Delete a custom field of the active database; a global "
+                    "one is deleted from every database. Its values are kept "
+                    "until the user removes them in Tools → Custom fields, so "
+                    "defining it again (same name and type) does not bring "
+                    "them back. Needs the user's permission like "
+                    "opensak.update().",
+        example='opensak.delete_custom_field("Parking")',
+        since=4,
+        bind=lambda rt, lua: rt._delete_custom_field,
+        params=(Param("name", "string", "The field's name (any case)."),),
+        returns=("boolean", "false if there is no such field."),
+        write=True,
+        companion=True,
+    ),
+    ApiFunction(
         name="databases",
         description="All databases in OpenSAK's database list, sorted by name.",
         example="for _, db in ipairs(opensak.databases()) do\n"
@@ -5744,7 +5915,8 @@ API: tuple[ApiFunction, ...] = (
                     "not a boolean. Fields OpenSAK maintains itself, such as "
                     "`code`, `distance` or `log_count`, cannot be written. "
                     "Locked caches can be changed too: the lock only protects "
-                    "from imports. "
+                    "from imports. `custom` changes custom fields: a table "
+                    "of field name → value (see Custom fields). "
                     "Before a macro's first change, OpenSAK asks the user to "
                     "allow that macro (see Changing caches).",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
@@ -5755,6 +5927,7 @@ API: tuple[ApiFunction, ...] = (
         params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
         returns=("boolean", "false if the cache is not in the database."),
         write=True,
+        changed=((4, "`custom` changes custom fields"),),
     ),
     ApiFunction(
         name="macro_flag",
@@ -5783,7 +5956,8 @@ API: tuple[ApiFunction, ...] = (
         name="insert",
         description="Add a new cache to the active database. `code`, `name`, "
                     "`type`, `lat` and `lon` are required; any other writable "
-                    "field may be given too (see Changing caches). Fails if "
+                    "field may be given too (see Changing caches), and "
+                    "`custom` for custom fields. Fails if "
                     "the code is already in the database. Needs the user's "
                     "permission like opensak.update().",
         example='opensak.insert{ code = "GC12345", name = "My bonus", type = "Unknown",\n'
@@ -5793,6 +5967,7 @@ API: tuple[ApiFunction, ...] = (
         params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
         returns=("string", "The cache code as stored (upper case)."),
         write=True,
+        changed=((4, "`custom` sets custom fields"),),
     ),
     ApiFunction(
         name="delete",
