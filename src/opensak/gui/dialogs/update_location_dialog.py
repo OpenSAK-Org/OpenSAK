@@ -11,9 +11,6 @@ Always opened as the same dialog; entry point controls the default scope:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
@@ -23,212 +20,50 @@ from PySide6.QtWidgets import (
 
 from opensak.lang import tr
 from opensak.logger import get_logger
+# The geocoding itself is shared with the GPX import and the headless
+# import (#937); _CacheRow / UpdateLocationResult keep their old names here.
+from opensak.geo.reverse_geocode import (
+    CacheRow as _CacheRow,
+    UpdateLocationResult,
+    reverse_geocode,
+)
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 log = get_logger("gui.update_location_dialog")
 
 
-# ── Data types ────────────────────────────────────────────────────────────────
-
-class _CacheRow:
-    __slots__ = ("gc_code", "lat", "lon", "basis")
-
-    def __init__(self, gc_code: str, lat: float, lon: float, basis: str = "posted") -> None:
-        self.gc_code = gc_code
-        self.lat = lat
-        self.lon = lon
-        self.basis = basis
-
-
-@dataclass
-class UpdateLocationResult:
-    updated: int = 0
-    skipped: int = 0
-    errors:  int = 0
-    error_msgs: list[str] = field(default_factory=list)
-
-
 # ── Worker ────────────────────────────────────────────────────────────────────
 
 class ReverseGeocodeWorker(QThread):
-    """Offline geocoding via the boundary polygon engine.
+    """Offline geocoding via the boundary polygon engine, on a QThread.
 
-    Resolves country / state / county for each row and writes all four
-    provenance columns (location_source, location_basis, location_updated,
-    location_dataset).  No network, no rate limit.
-
-    Two-phase execution:
-      1. Parallel resolve — ThreadPoolExecutor, one BoundaryStore per thread.
-      2. Bulk write — single IN query loads all caches; one transaction commits all.
+    Runs opensak.geo.reverse_geocode.reverse_geocode(), which resolves
+    country / state / county for each row and writes all four provenance
+    columns (location_source, location_basis, location_updated,
+    location_dataset), into *db_path* (default: the active database).
+    No network, no rate limit.
     """
 
     row_done  = Signal(str, str)  # (gc_code, log_line)
     all_done  = Signal(object)    # UpdateLocationResult
     cancelled = Signal(object)    # UpdateLocationResult
 
-    def __init__(self, rows: list[_CacheRow], *, parent=None):
+    def __init__(self, rows: list[_CacheRow], *, parent=None, db_path=None):
         super().__init__(parent)
         self._rows = rows
+        self._db_path = db_path
         self._cancel = False
 
     def request_cancel(self) -> None:
         self._cancel = True
 
     def run(self) -> None:
-        import os
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from opensak.geo.store import BoundaryStore, ensure_baseline_seeded
-        from opensak.geo.boundaries import TerritoryResolver
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache
-
-        result = UpdateLocationResult()
-
-        if self._cancel:
-            self.cancelled.emit(result)
-            return
-
-        # First-run baseline seed (copy from the PyInstaller bundle, or
-        # download from OpenSAK-Data if nothing's bundled) happens here rather
-        # than at app startup — this already runs on a QThread, per this
-        # feature's own "long work never blocks the main thread" rule, and
-        # the fallback download path can take a while over the network.
-        ensure_baseline_seeded()
-
-        check = BoundaryStore()
-        if not check.available():
-            result.errors += 1
-            self.row_done.emit("", tr("update_loc_no_boundaries"))
-            self.all_done.emit(result)
-            return
-
-        dataset = check.dataset_version()
-        check.close()
-        now = datetime.now(timezone.utc)
-
-        # Phase 0 — pre-fetch phase (#722): collect every distinct county
-        # pack this batch will need (via the same R-Tree bbox candidates the
-        # resolver itself uses) and download them all in parallel, with real
-        # progress, before the per-row resolve starts. Without this, a
-        # county pack missing locally but needed by many caches in the
-        # batch would otherwise retry a slow on-demand fetch (up to
-        # packs.DOWNLOAD_TIMEOUT seconds) inside _resolve_layer for every
-        # single cache that needs it — the original #722 hang. This is a
-        # best-effort optimization: any failure here just falls back to the
-        # existing on-demand fetch in store.py, so it's wrapped defensively
-        # rather than aborting the whole geocode run over it.
-        try:
-            from opensak.geo import packs as _packs_mod
-
-            probe = BoundaryStore()
-            needed_packs: set[str] = set()
-            for row in self._rows:
-                if self._cancel:
-                    break
-                for region_id in probe.candidates("county", row.lat, row.lon):
-                    region = probe.region("county", region_id)
-                    if region is not None:
-                        needed_packs.add(region.pack)
-            counties_dir = probe.data_dir / "counties"
-            probe.close()
-
-            if needed_packs and not self._cancel:
-                def _prefetch_progress(done: int, total: int) -> None:
-                    if total:
-                        self.row_done.emit("", tr(
-                            "update_loc_prefetch_progress", done=done, total=total
-                        ))
-
-                _packs_mod.fetch_packs(
-                    sorted(needed_packs), counties_dir, progress_cb=_prefetch_progress
-                )
-        except Exception as exc:
-            log.debug("county pre-fetch phase failed, falling back to on-demand fetch: %s", exc)
-
-        if self._cancel:
-            self.cancelled.emit(result)
-            return
-
-        # Phase 1 — parallel resolve.
-        # _shared_packs is injected into every thread's BoundaryStore so GeoJSON
-        # packs are loaded from disk at most once across all threads. Each thread
-        # still gets its own SQLite connection (not thread-safe to share). Dict
-        # writes under the GIL are atomic; the only race is two threads loading
-        # the same missing pack simultaneously — harmless, second write wins.
-        import threading
-        _shared_packs: dict = {}
-        _tls = threading.local()
-
-        def _resolve_one(row: _CacheRow):
-            if self._cancel:
-                return None
-            if not hasattr(_tls, "resolver"):
-                s = BoundaryStore()
-                s._packs = _shared_packs
-                _tls.store = s
-                _tls.resolver = TerritoryResolver(s)
-            loc = _tls.resolver.resolve(row.lat, row.lon)
-            return row, loc
-
-        workers = min(4, os.cpu_count() or 1)
-        resolved = []
-        cancelled = False
-
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(_resolve_one, row): row for row in self._rows}
-            for future in as_completed(futures):
-                if self._cancel:
-                    cancelled = True
-                    break
-                pair = future.result()
-                if pair is None:
-                    continue
-                row, loc = pair
-                self.row_done.emit(row.gc_code, tr(
-                    "update_loc_row",
-                    gc_code=row.gc_code,
-                    country=loc.country or "–",
-                    state=loc.state or "–",
-                    county=loc.county or "–",
-                ))
-                resolved.append((row, loc))
-
-        if cancelled or self._cancel:
-            self.cancelled.emit(result)
-            return
-
-        # Phase 2 — bulk write in one transaction, no per-row SELECT. The IN query
-        # is chunked to stay under SQLite's bound-parameter limit (large DBs).
-        resolved_map = {row.gc_code: (row, loc) for row, loc in resolved}
-        gc_codes = list(resolved_map)
-        try:
-            with get_session() as session:
-                for i in range(0, len(gc_codes), 500):
-                    chunk = gc_codes[i:i + 500]
-                    caches = (
-                        session.query(Cache)
-                        .filter(Cache.gc_code.in_(chunk))
-                        .all()
-                    )
-                    for cache in caches:
-                        row, loc = resolved_map[cache.gc_code]
-                        cache.country          = loc.country
-                        cache.state            = loc.state
-                        cache.county           = loc.county
-                        cache.location_source  = "boundary"
-                        cache.location_basis   = row.basis
-                        cache.location_updated = now
-                        cache.location_dataset = dataset
-                        result.updated += 1
-        except Exception as exc:
-            result.errors += 1
-            self.row_done.emit("", tr("update_loc_row_error", gc_code="batch", msg=str(exc)))
-
-        if self._cancel:
-            self.cancelled.emit(result)
-            return
-
-        self.all_done.emit(result)
+        result = reverse_geocode(
+            self._rows, self._db_path,
+            on_row=self.row_done.emit,
+            is_cancelled=lambda: self._cancel,
+        )
+        (self.cancelled if result.cancelled else self.all_done).emit(result)
 
 
 # ── Dialog ────────────────────────────────────────────────────────────────────

@@ -46,6 +46,9 @@ EXIT_MACRO_ERROR = 1        # Lua error, or the macro was cancelled
 EXIT_USAGE = 2              # bad arguments, macro file missing or unreadable
 EXIT_NOT_RUNNING = 3        # no OpenSAK instance to talk to
 EXIT_BUSY = 4               # a dialog is open or another macro is running
+# Headless commands (`opensak import …`, #937) use the codes above as well.
+EXIT_DB_NOT_FOUND = 5       # the database named with --db is not there
+EXIT_DB_LOCKED = 6          # the database is open in OpenSAK or another run
 EXIT_TIMEOUT = 124          # --timeout reached (like coreutils `timeout`)
 EXIT_INTERRUPTED = 130      # Ctrl+C
 
@@ -139,7 +142,7 @@ def parse_args(argv: list[str]) -> Optional[tuple[str, Optional[float]]]:
     return path, seconds
 
 
-def _attach_windows_stdio() -> None:
+def attach_windows_stdio() -> None:
     """The Windows release build is a GUI program, so Python starts it
     without sys.stdout/sys.stderr. Use the handles the caller passed (an
     editor capturing the output), else the console of the shell it was
@@ -175,6 +178,28 @@ def _attach_windows_stdio() -> None:
                     stream = None
         if stream is not None:
             setattr(sys, attr, stream)
+
+
+def open_stdio() -> tuple[TextIO, TextIO]:
+    """(stdout, stderr) for a command-line run: attached to the caller's
+    handles or console in the windowed Windows build (os.devnull when there
+    is none), and writing UTF-8 into a pipe. Also used by the headless
+    commands (opensak.cli)."""
+    attach_windows_stdio()
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+    # Editors read the output through a pipe and expect UTF-8 (Python would
+    # use the ANSI code page there on Windows); a console gets Unicode anyway.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            if stream.isatty():
+                reconfigure(errors="replace")
+            else:
+                reconfigure(encoding="utf-8", errors="replace")
+    return sys.stdout, sys.stderr
 
 
 def _allow_foreground(pid: Any) -> None:
@@ -254,24 +279,13 @@ def main(argv: list[str]) -> Optional[int]:
     try:
         parsed = parse_args(argv)
     except ValueError as exc:
-        _attach_windows_stdio()
+        attach_windows_stdio()
         if sys.stderr is not None:
             sys.stderr.write(f"opensak: {exc}\n{USAGE}\n")
         return EXIT_USAGE
     if parsed is None:
         return None
-    _attach_windows_stdio()
-    out = sys.stdout or open(os.devnull, "w")
-    err = sys.stderr or open(os.devnull, "w")
-    # Editors read the output through a pipe and expect UTF-8 (Python would
-    # use the ANSI code page there on Windows); a console gets Unicode anyway.
-    for stream in (out, err):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            if stream.isatty():
-                reconfigure(errors="replace")
-            else:
-                reconfigure(encoding="utf-8", errors="replace")
+    out, err = open_stdio()
     raw_path, timeout = parsed
     path = Path(raw_path).expanduser().resolve()
     if not path.is_file():

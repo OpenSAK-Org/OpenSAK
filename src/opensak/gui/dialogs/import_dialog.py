@@ -129,6 +129,8 @@ class ImportDialog(SavedSettingsDialog):
         clamp_dialog_height_to_screen(self, parent)
         self._worker: ImportWorker | None = None
         self._geo_worker: ReverseGeocodeWorker | None = None
+        # Database of the running import (None = the active one).
+        self._target_db_path: Path | None = None
         self._selected_paths: list[Path] = []
         self._folders: set[Path] = set()
         self._run_paths: list[Path] = []
@@ -431,6 +433,7 @@ class ImportDialog(SavedSettingsDialog):
             if self._db_combo is not None and self._db_combo.count() > 0
             else None
         )
+        self._target_db_path = target_db_path
         try:
             GpxImportProfile.save_last_used(self._collect_settings())
         except OSError:
@@ -529,33 +532,13 @@ class ImportDialog(SavedSettingsDialog):
             self._close_btn.setEnabled(True)
 
     def _start_geocoding(self) -> None:
-        from opensak.gui.dialogs.update_location_dialog import (
-            ReverseGeocodeWorker, _CacheRow
-        )
-        from opensak.db.database import get_session
-        from opensak.db.models import Cache
-        from sqlalchemy.orm import joinedload
+        from opensak.gui.dialogs.update_location_dialog import ReverseGeocodeWorker
+        from opensak.geo.reverse_geocode import rows_missing_location
 
         self._append_log(tr("import_geocode_running"))
 
-        rows = []
-        with get_session() as session:
-            query = session.query(Cache).options(joinedload(Cache.user_note)).filter(
-                (Cache.country == None) | (Cache.country == "") |
-                (Cache.state   == None) | (Cache.state   == "") |
-                (Cache.county  == None) | (Cache.county  == "")
-            )
-            for cache in query.all():
-                lat, lon = cache.latitude, cache.longitude
-                basis = "posted"
-                if cache.user_note and cache.user_note.is_corrected:
-                    clat = cache.user_note.corrected_lat
-                    clon = cache.user_note.corrected_lon
-                    if clat is not None and clon is not None:
-                        lat, lon = clat, clon
-                        basis = "corrected"
-                if lat is not None and lon is not None:
-                    rows.append(_CacheRow(gc_code=cache.gc_code, lat=lat, lon=lon, basis=basis))
+        # The database imported into — not necessarily the active one.
+        rows = rows_missing_location(self._target_db_path)
 
         if not rows:
             self._finish_geocoding()
@@ -576,7 +559,9 @@ class ImportDialog(SavedSettingsDialog):
         # update_location_dialog.py): keeps the C++ object owned by the
         # dialog, so Python refcounting can never delete a running thread
         # on its own.
-        self._geo_worker = ReverseGeocodeWorker(rows, parent=self)
+        self._geo_worker = ReverseGeocodeWorker(
+            rows, parent=self, db_path=self._target_db_path
+        )
         self._geo_worker.all_done.connect(self._on_geocode_done)
         self._geo_worker.cancelled.connect(self._on_geocode_done)
         self._geo_worker.finished.connect(self._on_geo_worker_finished)

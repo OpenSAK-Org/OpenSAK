@@ -14,11 +14,14 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from opensak.backup.snapshot import SnapshotError, snapshot_database
 from opensak.lang import tr
 from opensak.settings_store import get_store
+
+if TYPE_CHECKING:
+    from opensak.db.lock import DatabaseLock
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +110,10 @@ class DatabaseManager:
         # Issue #1045: (unavailable database, database used instead) when
         # ensure_active_initialised() had to fall back at startup.
         self._startup_fallback: Optional[tuple[DatabaseInfo, DatabaseInfo]] = None
+        # #937: the lock of the active database, while the GUI holds it
+        # (hold_active_lock); a headless run never does.
+        self._hold_lock = False
+        self._active_lock: Optional["DatabaseLock"] = None
         self._load_from_settings()
 
     # ── Interne helpers ───────────────────────────────────────────────────────
@@ -231,6 +238,45 @@ class DatabaseManager:
             "databases.list": [db.to_dict() for db in self._databases],
             "databases.active": str(self._active.path) if self._active else "",
         })
+        # Every change of the active database (switch, rename, move) passes here.
+        self._sync_active_lock()
+
+    def hold_active_lock(self) -> None:
+        """#937: from now on hold the lock of the active database, and move
+        it along when the active database changes — so a headless
+        `opensak import` refuses to write to the database open in the GUI.
+        Called by the GUI at startup."""
+        self._hold_lock = True
+        self._sync_active_lock()
+
+    def release_active_lock(self) -> None:
+        """Let go of the active database's lock (on exit)."""
+        self._hold_lock = False
+        self._sync_active_lock()
+
+    def _sync_active_lock(self) -> None:
+        path = self._active.path if (self._hold_lock and self._active) else None
+        if self._active_lock is not None and self._active_lock.db_path == path:
+            return
+        if self._active_lock is not None:
+            self._active_lock.release()
+            self._active_lock = None
+        if path is None:
+            return
+        from opensak.db.lock import DatabaseLock
+        lock = DatabaseLock(path)
+        try:
+            acquired = lock.acquire()
+        except OSError:
+            logger.warning("database lock: could not lock %s", path, exc_info=True)
+            return
+        if acquired:
+            self._active_lock = lock
+        else:
+            # Never keep the user out of their database: a headless run
+            # (or a second OpenSAK) has it — say so in the log and go on.
+            logger.warning("database lock: %s is in use by %s", path,
+                           lock.holder() or "another process")
 
     def _find_by_path(self, path: Path) -> Optional[DatabaseInfo]:
         for db in self._databases:

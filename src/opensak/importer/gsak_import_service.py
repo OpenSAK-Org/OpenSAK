@@ -133,6 +133,17 @@ def target_state(name: str):
     return TARGET_NEW, path
 
 
+def _database_at(path: Path):
+    """The listed database at *path*, or an unlisted one named after the
+    file."""
+    from opensak.db.manager import DatabaseInfo, get_db_manager
+
+    for db in get_db_manager().databases:
+        if db.path == path:
+            return db
+    return DatabaseInfo(path.stem, path)
+
+
 def free_name(name: str) -> str:
     """*name*, or ``name-2``, ``name-3``, … when a stray file blocks it."""
     candidate, n = name, 2
@@ -234,6 +245,9 @@ class GsakImportOptions:
     target: Optional[str] = None
     # GSAK name → OpenSAK database, ahead of *target*
     targets: dict[str, str] = field(default_factory=dict)
+    # One existing database file for all of them, ahead of *target* and
+    # *targets* — also one that isn't in OpenSAK's list (it is not added)
+    target_path: Optional[Path] = None
     # An existing target database: one of IF_EXISTS
     if_exists: str = "skip"
     # Create a missing target database (False: that database fails)
@@ -370,13 +384,17 @@ def _plan(contents: GsakBackupContents, opts: GsakImportOptions) -> list[_Job]:
     for entry in contents.databases:
         if entry.name.lower() not in wanted:
             continue
-        name = (targets.get(entry.name.lower()) or opts.target or "").strip()
-        if not name:
-            name = free_name(entry.name)
+        if opts.target_path is not None:
+            state, where = TARGET_EXISTING, _database_at(opts.target_path)
+            name = where.name
+        else:
+            name = (targets.get(entry.name.lower()) or opts.target or "").strip()
+            if not name:
+                name = free_name(entry.name)
+            state, where = target_state(name)
         rep = DatabaseReport(entry.name, name)
         job = _Job(entry, rep)
         jobs.append(job)
-        state, where = target_state(name)
         if name.lower() in created:
             # An earlier job of this run creates it: this one adds to it.
             rep.action = ACTION_MERGED

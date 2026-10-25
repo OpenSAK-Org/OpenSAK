@@ -310,7 +310,7 @@ class TestImportDialog:
         started = []
 
         class FakeGeo:
-            def __init__(self, rows, parent=None):
+            def __init__(self, rows, parent=None, db_path=None):
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
                 self.finished = MagicMock()
@@ -325,6 +325,29 @@ class TestImportDialog:
         )
         dlg._start_geocoding()
         assert started == [True]
+
+    def test_geocoding_works_on_the_database_imported_into(self, dlg, monkeypatch):
+        # #937: the import target, not the active database.
+        import opensak.geo.reverse_geocode as geo
+        target = Path("/other.db")
+        seen = []
+        monkeypatch.setattr(geo, "rows_missing_location",
+                            lambda db_path: seen.append(db_path) or ["row"])
+
+        class FakeGeo:
+            def __init__(self, rows, parent=None, db_path=None):
+                seen.append(db_path)
+                self.all_done = self.cancelled = self.finished = MagicMock()
+                self.deleteLater = MagicMock()
+                self.isRunning = MagicMock(return_value=False)
+            def start(self):
+                pass
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.update_location_dialog.ReverseGeocodeWorker", FakeGeo
+        )
+        dlg._target_db_path = target
+        dlg._start_geocoding()
+        assert seen == [target, target]
 
     def test_on_geocode_done(self, dlg):
         fired = []
@@ -381,7 +404,7 @@ class TestImportDialog:
         dlg._close_btn.setEnabled(False)
 
         class FakeGeo:
-            def __init__(self, rows, parent=None):
+            def __init__(self, rows, parent=None, db_path=None):
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
                 self.finished = MagicMock()
