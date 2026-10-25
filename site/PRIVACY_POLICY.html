@@ -50,7 +50,7 @@
 <main>
   <p class="doc-label">// Legal</p>
   <h1>Privacy Policy</h1>
-  <p class="effective">Effective date: October 18, 2026</p>
+  <p class="effective">Effective date: October 25, 2026</p>
 
   <h2>1. Overview</h2>
   <p>OpenSAK is a free, open source desktop application for managing geocaching data locally on your own computer. It runs on Windows, Linux, and macOS.</p>
@@ -121,6 +121,8 @@
   <p>Unless you turn it off (<strong>Settings → Advanced → Check for updates automatically</strong>), OpenSAK asks GitHub's public API at startup which release is the newest — no personal data beyond what any web request includes, such as your IP address. The Microsoft Store version skips this check. <strong>Download &amp; Install</strong> and <strong>Upgrade now</strong> download the new version and its checksum file from OpenSAK's release page on GitHub. See <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</p>
   <h3>5.4 Boundary data (OpenSAK-Data)</h3>
   <p>Country, state and county lookup works offline. Only when you download boundary packs or check for boundary data updates does OpenSAK fetch files from the OpenSAK-Data release page on GitHub.</p>
+  <h3>5.5 Lua macros contacting web sites (beta)</h3>
+  <p>In beta builds, a Lua macro can download web pages or files. It only contacts a web site after you allowed that site for that macro, when OpenSAK asks. The request goes directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in <strong>Settings → Folder permissions</strong>, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com).</p>
 
   <hr class="rule">
 

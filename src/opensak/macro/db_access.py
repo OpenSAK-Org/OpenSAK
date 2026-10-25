@@ -1,7 +1,7 @@
 """
 src/opensak/macro/db_access.py — what the user allowed an individual Lua
-macro: changing OpenSAK's databases (#1034) and using folders, keyed on the
-macro's file and code (#1091).
+macro: changing OpenSAK's databases (#1034), using folders and contacting
+web sites (#1079), keyed on the macro's file and code (#1091).
 
 Reading a database needs no approval. Before a macro's first write
 (opensak.update/insert/sql_write, set_corrected, clear_corrected) the
@@ -19,7 +19,9 @@ macro, whether *this macro* may change the OpenSAK databases:
 A folder a macro is allowed "always" (permissions.py asks for folders that
 no listed folder grants) is stored in the same record, so it belongs to
 that macro only. The folders listed in Settings by hand, and the built-in
-defaults, stay shared by all macros (permissions.py).
+defaults, stay shared by all macros (permissions.py). A web site allowed
+"always" (net_access.py) is stored there too; there is no shared list of
+web sites.
 
 An approval belongs to the macro file's path *and* its code: the SHA-256
 of the source that runs (source_hash()). A file changed in any other way —
@@ -47,8 +49,8 @@ Moving or renaming the file needs a new approval. Writing covers every
 database, but a macro still only ever writes the active one. An unsaved
 macro (an editor buffer without a file) can only be approved until
 OpenSAK closes; that approval is shared by all unsaved macros, whatever
-their code (they can only be typed in OpenSAK's editor), and a folder can
-be allowed to it for one run only. A macro started with
+their code (they can only be typed in OpenSAK's editor), and a folder or
+web site can be allowed to it for one run only. A macro started with
 opensak.run_macro() needs its own approvals.
 
 Each record also keeps the macro's Version and declared permissions, so a
@@ -68,6 +70,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from opensak.macro.metadata import MacroInfo, added_declarations, parse_header
+from opensak.macro.net_access import HostPermission, with_host
 from opensak.macro.permissions import FolderPermission, with_grant
 
 STORE_KEY = "macros.approvals"
@@ -90,8 +93,8 @@ class WriteApproval(Enum):
 @dataclass(frozen=True)
 class Approval:
     """What the user allowed the macro file *path* with the code that
-    hashes to *sha256*: changing databases (*write*) and *folders*, and
-    what its header said then."""
+    hashes to *sha256*: changing databases (*write*), *folders* and web
+    sites (*hosts*), and what its header said then."""
 
     path: str
     sha256: str
@@ -100,6 +103,12 @@ class Approval:
     declared: tuple[str, ...] = ()
     write: bool = True
     folders: tuple[FolderPermission, ...] = ()
+    hosts: tuple[HostPermission, ...] = ()
+
+    @property
+    def anything(self) -> bool:
+        """True if the record allows anything at all."""
+        return self.write or bool(self.folders) or bool(self.hosts)
 
     def to_dict(self) -> dict:
         return {
@@ -110,6 +119,7 @@ class Approval:
             "declared": list(self.declared),
             "write": self.write,
             "folders": [f.to_dict() for f in self.folders],
+            "hosts": [h.to_dict() for h in self.hosts],
         }
 
     @classmethod
@@ -119,6 +129,11 @@ class Approval:
             return None
         declared = data.get("declared")
         folders = data.get("folders")
+        hosts = data.get("hosts")
+        parsed_hosts = (
+            HostPermission.from_dict(h) for h in (hosts if isinstance(hosts, list) else [])
+            if isinstance(h, dict)
+        )
         return cls(
             path=path,
             sha256=sha,
@@ -131,20 +146,22 @@ class Approval:
                 for f in (folders if isinstance(folders, list) else [])
                 if isinstance(f, dict) and f.get("path")
             ),
+            hosts=tuple(h for h in parsed_hosts if h is not None),
         )
 
 
 @dataclass(frozen=True)
 class MacroChange:
     """How a macro differs from what was approved: the Version before and
-    now, and what it declares now that it did not then; *write* and
-    *folders* are what it was allowed."""
+    now, and what it declares now that it did not then; *write*,
+    *folders* and *hosts* are what it was allowed."""
 
     old_version: str = ""
     new_version: str = ""
     added: tuple[str, ...] = ()
     write: bool = False
     folders: tuple[FolderPermission, ...] = ()
+    hosts: tuple[HostPermission, ...] = ()
 
 
 # Approvals to write "until OpenSAK closes" (keys from macro_key()), and the
@@ -227,7 +244,7 @@ def approvals() -> list[Approval]:
     if not isinstance(raw, list):
         return []
     parsed = [Approval.from_dict(e) for e in raw if isinstance(e, dict)]
-    return [a for a in parsed if a is not None and (a.write or a.folders)]
+    return [a for a in parsed if a is not None and a.anything]
 
 
 def _save(records: Iterable[Approval]) -> None:
@@ -324,6 +341,15 @@ def approved_folders(
     return list(record.folders) if record is not None else []
 
 
+def approved_hosts(
+    macro: Optional[str | Path], sha: str, edited_from: Iterable[str] = (),
+    editing: bool = False,
+) -> list[HostPermission]:
+    """The web sites allowed always to the macro at *macro* with this code."""
+    record = current_approval(macro, sha, edited_from, editing)
+    return list(record.hosts) if record is not None else []
+
+
 def is_approved(
     macro: Optional[str | Path], sha: str, edited_from: Iterable[str] = (),
     editing: bool = False,
@@ -360,6 +386,7 @@ def change_since(approval: Approval, info: MacroInfo) -> MacroChange:
         added=added_declarations(approval.declared, approval.permissions_declared, info),
         write=approval.write,
         folders=approval.folders,
+        hosts=approval.hosts,
     )
 
 
@@ -404,6 +431,20 @@ def grant_folder(
         record = _approval(macro, sha, info, write=False)
     folders = tuple(with_grant(record.folders, folder, write))
     _put(replace(record, folders=folders))
+
+
+def grant_host(
+    macro: str | Path, host: str, local: bool, sha: str,
+    info: Optional[MacroInfo] = None, edited_from: Iterable[str] = (),
+    editing: bool = False,
+) -> None:
+    """Allow the macro at *macro*, whose source hashes to *sha*, to contact
+    the web site *host* always (with *local*, also on the local network),
+    like grant_folder()."""
+    record = current_approval(macro, sha, edited_from, editing)
+    if record is None:
+        record = _approval(macro, sha, info, write=False)
+    _put(replace(record, hosts=tuple(with_host(record.hosts, host, local))))
 
 
 def renew(

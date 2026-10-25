@@ -15,6 +15,7 @@ class TestLoad:
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
             "companion-db": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-net": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_present_file_overrides_defaults(self, patch_features_file):
@@ -32,6 +33,7 @@ class TestLoad:
             "lua-macros": flags_module._is_prerelease(opensak.__version__),
             "lua-macro-write": flags_module._is_prerelease(opensak.__version__),
             "companion-db": flags_module._is_prerelease(opensak.__version__),
+            "lua-macro-net": flags_module._is_prerelease(opensak.__version__),
         }
 
     def test_unknown_keys_in_file_are_ignored(self, patch_features_file):
@@ -95,6 +97,17 @@ class TestCompanionDb:
     def test_file_overrides_default(self, patch_features_file):
         patch_features_file({"companion-db": False})
         assert flags_module.companion_db is False
+
+
+class TestLuaMacroNet:
+    def test_default_follows_version(self, no_features_file):
+        # beta-only on its own (#1079)
+        assert flags_module.lua_macro_net is ("-" in opensak.__version__)
+
+    def test_independent_of_lua_macro_write(self, patch_features_file):
+        patch_features_file({"lua-macro-write": True, "lua-macro-net": False})
+        assert flags_module.lua_macro_write is True
+        assert flags_module.lua_macro_net is False
 
 
 # ── _parse_argv() ─────────────────────────────────────────────────────────────

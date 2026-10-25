@@ -26,8 +26,9 @@ runtime.API_VERSION) by its leading number, so "3" and "3.0" are the same.
 Permissions and Network declare what the macro does that a user (or a
 reviewer of the community macro repository) should know before running
 it. They are informational only: a declaration never approves anything,
-and the runtime still asks for every write, folder and (later) web site
-approval, whether it is declared or not.
+and the runtime still asks for every write, folder and web site approval,
+whether it is declared or not (the web site question only says whether
+the host is declared).
 
 Permissions lists words from PERMISSIONS, separated by commas and/or
 spaces, case-insensitively; "none" says the macro needs none of them, so
@@ -88,8 +89,21 @@ NO_PERMISSIONS = "none"
 
 # Sites macros may never contact, whatever the user approves (#1079): the
 # terms of use of Geocaching.com don't allow automated access outside
-# their API. A domain covers its subdomains.
-BLOCKED_DOMAINS = ("geocaching.com", "coord.info")
+# their API, so none of Groundspeak's sites can be contacted. A domain
+# covers its subdomains. Checked on 2026-10-25: each one uses Groundspeak's
+# name server (ns1.groundspeak.net), or the mail servers and content of
+# geocaching.com (waymarking.com, wherigo.com, geocachinghq.com). Not
+# Groundspeak's, so not listed: geocaching.co.uk (Geocaching UK),
+# geocaching.com.au (Geocaching Australia), geocaching.de, geocaching.ca,
+# groundspeak.de, benchmarking.com and adventurelab.app.
+BLOCKED_DOMAINS = (
+    "geocaching.com", "coord.info", "geocachinghq.com",
+    "groundspeak.com", "groundspeak.net", "groundspeak.org", "groundspeak.info",
+    "geocaching.net", "geocaching.org", "geocaching.us", "geocaching.eu",
+    "geocaching.co", "geocaching.mobi",
+    "waymarking.com", "waymarking.net", "waymarking.org",
+    "wherigo.com", "wherigo.net", "wherigo.org",
+)
 
 _LIST_KEYS = ("permissions", "network")
 _LIST_SEPARATOR = re.compile(r"[\s,]+")

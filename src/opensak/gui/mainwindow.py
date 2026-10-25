@@ -3854,6 +3854,14 @@ class MainWindow(QMainWindow):
         parent = self._macro_dialog_parent()
         return ask_folder_approval(parent, target, folder, write, macro)
 
+    def approve_host(self, host, macro=None, local: bool = False, secure: bool = True,
+                     declared: bool = False):
+        """MacroHost: ask whether the macro file *macro* may contact the web
+        site *host* (OpenSAK's own dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_host_approval
+        parent = self._macro_dialog_parent()
+        return ask_host_approval(parent, host, macro, local, secure, declared)
+
     def approve_macro_change(self, macro, change, editing: bool = False):
         """MacroHost: ask whether the changed macro file *macro* may have
         again what it was allowed (OpenSAK's own dialog, on top of the

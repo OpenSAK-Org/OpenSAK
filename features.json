@@ -3,5 +3,6 @@
   "map-popout": true,
   "lua-macros": true,
   "lua-macro-write": true,
-  "companion-db": true
+  "companion-db": true,
+  "lua-macro-net": true
 }

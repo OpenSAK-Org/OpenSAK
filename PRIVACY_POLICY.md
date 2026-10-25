@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: October 18, 2026*
+*Effective date: October 25, 2026*
 
 ---
 
@@ -138,6 +138,10 @@ https://docs.github.com/site-policy/privacy-policies/github-general-privacy-stat
 ### 5.4 Boundary data (OpenSAK-Data)
 
 Country, state and county lookup works offline. Only when you choose to download boundary packs or check for boundary data updates does OpenSAK fetch files from the OpenSAK-Data release page on GitHub.
+
+### 5.5 Lua macros contacting web sites (beta)
+
+In beta builds, a Lua macro can download web pages or files (`opensak.get_url()`). A macro only contacts a web site after you allowed that site for that macro, when OpenSAK asks. Such a request goes from your device directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in **Settings → Folder permissions**, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com).
 
 ---
 

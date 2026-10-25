@@ -42,6 +42,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -145,6 +146,7 @@ from opensak.macro.cache_data import (
     resolve_fields,
 )
 from opensak.macro import db_access
+from opensak.macro import net_access
 from opensak.macro.cache_write import (
     MACRO_FLAG_ACTIONS,
     CacheWriteError,
@@ -282,6 +284,9 @@ COPY_IF_EXISTS = ("overwrite", "skip")
 OPEN_SUFFIXES = (".html", ".htm", ".svg", ".txt", ".csv", ".tsv", ".md", ".json",
                  ".gpx", ".kml", ".pdf")
 MAX_OPENS_PER_RUN = 5
+# opensak.get_url(): the keys of its options table (Lua name → Python name)
+GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
+                   "max_bytes": "max_bytes"}
 
 # opensak.html.*: the keys of their option tables (Lua name → Python keyword).
 HTML_OPTIONS = {
@@ -814,6 +819,23 @@ class MacroHost(Protocol):
         Must be OpenSAK's own dialog showing the full path — never anything
         the macro can word or answer itself. Read and write are asked
         separately. Anything but ONCE or ALWAYS counts as DENY.
+        """
+
+    def approve_host(
+        self, host: str, macro: Optional[Path] = None, local: bool = False,
+        secure: bool = True, declared: bool = False,
+    ) -> FolderApproval:
+        """Ask the user whether the macro file *macro* may contact the web
+        site *host* (opensak.get_url, #1079): for this run only or always
+        (for this macro). *macro* is None for an unsaved macro, which
+        cannot be allowed always. *local*: the host is on the local
+        network; *secure*: the request uses https, not http; *declared*:
+        the macro's Network header lists the host.
+
+        Must be OpenSAK's own dialog showing the host name — never anything
+        the macro can word or answer itself. Optional: without it (e.g. a
+        headless run) a host that is not approved fails. Anything but ONCE
+        or ALWAYS counts as DENY.
         """
 
     def approve_macro_change(
@@ -1556,6 +1578,15 @@ class MacroRuntime:
         self._reconfirmed: dict[str, bool] = {}
         # (macro, folder, write) the user denied during this run — not asked again
         self._denied: set[tuple[str, Path, bool]] = set()
+        # opensak.get_url(): web sites allowed this time only and (macro,
+        # host) denied, per macro (db_access.macro_key); how many hosts the
+        # user was asked about, how many requests were made, and when each
+        # host was last contacted (time.monotonic()).
+        self._hosts_once: dict[str, list[net_access.HostPermission]] = {}
+        self._hosts_denied: set[tuple[str, str]] = set()
+        self._host_questions = 0
+        self._requests = 0
+        self._last_request: dict[str, float] = {}
         # (file, write) picked by the user in opensak.choose_file() — usable
         # for the rest of this run only, whatever the folder list says
         self._picked: set[tuple[Path, bool]] = set()
@@ -3264,6 +3295,143 @@ class MacroRuntime:
         if not open_file(target):
             raise MacroError(f"{func}: no app could open {target}")
 
+    # ── opensak.get_url (#1079) ───────────────────────────────────────────
+    # Only with the lua-macro-net flag. Each web site needs the user's
+    # approval, which belongs to the running macro like its folders
+    # (net_access.py, db_access.py).
+
+    def _get_url(self, lua, url=None, options=None):
+        func = "opensak.get_url"
+        if not isinstance(url, str) or not url.strip():
+            raise MacroError(f'{func} expects a URL, e.g. "https://example.com/data.csv"')
+        opts = self._options(func, GET_URL_OPTIONS, options)
+        timeout = self._number_option(func, opts, "timeout", net_access.DEFAULT_TIMEOUT_S,
+                                      1, net_access.MAX_TIMEOUT_S)
+        max_bytes = int(self._number_option(func, opts, "max_bytes",
+                                            net_access.DEFAULT_MAX_BYTES, 1,
+                                            net_access.MAX_MAX_BYTES))
+        binary = opts.get("binary", False)
+        if not isinstance(binary, bool):
+            raise MacroError(f"{func}: binary must be true or false")
+        caption = opts.get("caption")
+        if caption is not None:
+            caption = _ui_text(func, "caption", caption)
+        try:
+            target = net_access.check_url(url)
+        except net_access.NetError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        if self._requests >= net_access.MAX_REQUESTS_PER_RUN:
+            raise MacroError(f"{func}: at most {net_access.MAX_REQUESTS_PER_RUN} "
+                             "requests per run")
+        self._requests += 1
+        self._wait_for_host(target.host)
+
+        handle = None
+        if caption is not None:
+            handle = self._ui("progress", func)(caption, 100)
+            self._progress_windows.append(handle)
+
+        def progress(done: int, total: Optional[int]) -> None:
+            self._check_cancelled()
+            if handle is None:
+                return
+            percent = done * 100 // total if total else None
+            if not handle.update(percent, f"{done // 1024} KB"):
+                raise MacroError(f"{func}: cancelled by the user: {target.url}")
+
+        try:
+            response = net_access.fetch(
+                target.url, lambda t, local: self._require_host(func, t, local),
+                timeout=timeout, max_bytes=max_bytes, progress=progress,
+            )
+        except net_access.NetError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        finally:
+            self._last_request[target.host] = time.monotonic()
+            if handle is not None:
+                handle.close()
+                self._progress_windows.remove(handle)
+        info = lua.table_from({
+            "status": response.status,
+            "content_type": response.content_type,
+            "url": response.url,
+        })
+        return (response.body if binary else response.text()), info
+
+    @staticmethod
+    def _number_option(func: str, opts: dict, key: str, default: float,
+                       low: float, high: float) -> float:
+        value = opts.get(key, default)
+        number = _number(value)
+        if number is None or isinstance(value, bool) or not low <= number <= high:
+            raise MacroError(f"{func}: {key} must be a number from {low:g} to {high:g}, "
+                             f"got {helpers.lua_tostring(value)}")
+        return number
+
+    def _wait_for_host(self, host: str) -> None:
+        """Keep at least MIN_INTERVAL_S between two requests to *host*, so
+        a loop cannot hammer a site."""
+        last = self._last_request.get(host)
+        if last is None:
+            return
+        wait = net_access.MIN_INTERVAL_S - (time.monotonic() - last)
+        if wait > 0 and self._cancelled.wait(wait):
+            raise MacroError("macro cancelled")
+
+    def _host_list(self) -> list[net_access.HostPermission]:
+        """The web sites the running macro may contact: those allowed this
+        time only and those allowed always to its code (db_access.py) —
+        not those of a macro that called it."""
+        macro = self._macro_path
+        return [
+            *self._hosts_once.get(db_access.macro_key(macro), ()),
+            *db_access.approved_hosts(macro, self._macro_hash, self._edited_from,
+                                      self._editing),
+        ]
+
+    def _require_host(self, func: str, target: net_access.Target, local: bool) -> None:
+        """Raise unless the running macro may contact target.host (on the
+        local network if *local*), asking the user (host.approve_host) if
+        it is not approved. A macro changed since it was allowed the host
+        always is first asked about as a whole (_reconfirm). A host denied
+        is not asked about again during this run, and after
+        MAX_HOST_QUESTIONS_PER_RUN questions the run asks no more."""
+        host = target.host
+        if net_access.covers(self._host_list(), host, local):
+            return
+        macro = self._macro_path
+        key = db_access.macro_key(macro)
+        denied = (key, host)
+        if denied not in self._hosts_denied:
+            renewed = self._reconfirm(lambda r: net_access.covers(r.hosts, host, local))
+            if renewed is False:
+                self._hosts_denied.add(denied)
+            elif renewed and net_access.covers(self._host_list(), host, local):
+                return
+        if denied in self._hosts_denied:
+            raise MacroError(f"{func}: the user did not allow contacting {host}")
+        if self._host_questions >= net_access.MAX_HOST_QUESTIONS_PER_RUN:
+            raise MacroError(
+                f"{func}: {host} is not approved, and this run has asked about "
+                f"{net_access.MAX_HOST_QUESTIONS_PER_RUN} web sites already")
+        approve = getattr(self._host, "approve_host", None)
+        if approve is None:
+            raise MacroError(f"{func}: {host} is not approved, and this run has no "
+                             "user interface to ask")
+        self._host_questions += 1
+        info = self._macro_info()
+        answer = approve(host, macro=macro, local=local, secure=target.secure,
+                         declared=host in info.network)
+        if answer is FolderApproval.ALWAYS and macro is not None:
+            db_access.grant_host(macro, host, local, self._macro_hash, info,
+                                 self._edited_from, self._editing)
+        elif answer in (FolderApproval.ONCE, FolderApproval.ALWAYS):
+            self._hosts_once[key] = net_access.with_host(self._hosts_once.get(key, []),
+                                                         host, local)
+        else:
+            self._hosts_denied.add(denied)
+            raise MacroError(f"{func}: the user did not allow contacting {host}")
+
     # ── opensak.stats.* / opensak.html.* ─────────────────────────────────
     # The rows are Lua tables; only the fields a function needs are read,
     # which keeps a list of 20 000 finds fast.
@@ -4768,6 +4936,11 @@ class MacroRuntime:
         self._once = {}
         self._reconfirmed = {}
         self._denied = set()
+        self._hosts_once = {}
+        self._hosts_denied = set()
+        self._host_questions = 0
+        self._requests = 0
+        self._last_request = {}
         self._write_denied = set()
         self._deleted = {}
         self._tx_deleted = []
@@ -4811,6 +4984,8 @@ class MacroRuntime:
             if (func.write or func.beta) and not flags.lua_macro_write:
                 continue
             if func.companion and not flags.companion_db:
+                continue
+            if func.net and not flags.lua_macro_net:
                 continue
             for ns in namespaces:
                 table = table.setdefault(ns, {})
@@ -5117,6 +5292,9 @@ class ApiFunction:
     beta: bool = False
     # Only registered with the companion-db feature flag (opensak.companion)
     companion: bool = False
+    # Contacts web sites: only registered with the lua-macro-net feature
+    # flag (beta builds), see utils/flags.py.
+    net: bool = False
 
     @property
     def signatures(self) -> list[str]:
@@ -6349,6 +6527,57 @@ API: tuple[ApiFunction, ...] = (
         since=3,
         bind=lambda rt, lua: rt._open,
         params=(Param("path", "string", "The file to open."),),
+    ),
+    ApiFunction(
+        name="get_url",
+        description="Download a web page or file (GSAK's GetUrl), e.g. to "
+                    "check a puzzle answer online or fetch a list before "
+                    "working with it. GET only, over http or https; no "
+                    "cookies, no custom headers, and no user name or "
+                    "password in the URL. Before a macro first contacts a "
+                    "web site (host), the user is asked: this time only, "
+                    "always (for this macro, listed in Settings → Folder "
+                    "permissions) or deny. Each redirect (at most "
+                    f"{net_access.MAX_REDIRECTS}) is checked the same way. "
+                    "A host on the local network (a router, a NAS) is asked "
+                    "about separately. geocaching.com, coord.info and "
+                    "Groundspeak's other sites (waymarking.com, wherigo.com, "
+                    "...) can never be contacted: their terms of use don't "
+                    "allow automated access. List the hosts in the macro's "
+                    "`Network:` header so users see them before running it; "
+                    "the header approves nothing by itself. An HTTP error "
+                    "status (404, 500) is no error: check `info.status`. A "
+                    "failed request (no answer, too large, refused) raises "
+                    "an error, which `pcall` catches. At most "
+                    f"{net_access.MAX_REQUESTS_PER_RUN} requests per run, "
+                    f"and at least {net_access.MIN_INTERVAL_S:g} s between "
+                    "two requests to the same host.",
+        example='local ok, body, info = pcall(opensak.get_url,\n'
+                '  "https://example.com/answers.csv", { caption = "Answers" })\n'
+                "if not ok then\n"
+                '  opensak.message("Download failed: " .. body)\n'
+                "elseif info.status == 200 then\n"
+                '  print(#body .. " characters from " .. info.url)\n'
+                "end",
+        since=3,
+        bind=lambda rt, lua: lambda *a: rt._get_url(lua, *a),
+        params=(
+            Param("url", "string", "An http: or https: URL."),
+            Param("options", "opensak.GetUrlOptions",
+                  f"`timeout`: seconds without an answer (1–{net_access.MAX_TIMEOUT_S}, "
+                  f"default {net_access.DEFAULT_TIMEOUT_S}). `caption`: show a progress "
+                  "window with this title. `binary`: return the bytes as they are, "
+                  "without decoding the text. `max_bytes`: the largest body "
+                  f"(default {net_access.DEFAULT_MAX_BYTES // (1024 * 1024)} MB, at most "
+                  f"{net_access.MAX_MAX_BYTES // (1024 * 1024)} MB).",
+                  optional=True),
+        ),
+        returns=("string, opensak.UrlInfo",
+                 "The body, as text decoded with the charset the server names "
+                 "(UTF-8 if none; invalid bytes replaced) or, with `binary`, as "
+                 "bytes; and `{ status, content_type, url }`, `url` being the "
+                 "address after redirects."),
+        net=True,
     ),
     ApiFunction(
         name="read_text",

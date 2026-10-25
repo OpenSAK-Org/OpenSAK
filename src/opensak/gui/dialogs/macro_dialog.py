@@ -39,6 +39,7 @@ from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
 from opensak.macro.db_access import MacroChange, carry_over, source_hash
+from opensak.macro.net_access import HostPermission
 from opensak.macro.permissions import FolderPermission
 from opensak.macro.metadata import parse_header
 from opensak.macro.runtime import API_VERSION
@@ -747,9 +748,57 @@ def ask_folder_approval(
     return FolderApproval.DENY
 
 
-def approval_lines(write: bool, folders: tuple[FolderPermission, ...] | list) -> list[str]:
-    """What a macro was allowed always, one line each: changing databases
-    and every folder with its rights."""
+def ask_host_approval(
+    parent, host: str, macro: Path | None = None, local: bool = False,
+    secure: bool = True, declared: bool = False,
+) -> FolderApproval:
+    """OpenSAK's question when the macro file *macro* first contacts the
+    web site *host* (opensak.get_url): allow it this time only, always (for
+    this macro), or deny (the default, also on Escape). An unsaved macro
+    (None) cannot be allowed always. Says when the host is on the local
+    network, the connection is not encrypted, or the macro's Network
+    header does not list the host. The host comes from the macro, so it is
+    shown as plain text."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("macro_net_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    if macro is None:
+        box.setText(tr("macro_net_msg_unsaved", host=host))
+    else:
+        box.setText(tr("macro_net_msg", name=macro.name, path=str(macro), host=host))
+    lines = []
+    if local:
+        lines.append(tr("macro_net_local"))
+    if not secure:
+        lines.append(tr("macro_net_http"))
+    if not declared:
+        lines.append(tr("macro_net_undeclared"))
+    lines.append(tr("macro_net_hint" if macro else "macro_net_hint_unsaved"))
+    box.setInformativeText("\n\n".join(lines))
+    btn_once = box.addButton(tr("macro_access_once"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = (
+        box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+        if macro is not None else None
+    )
+    btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_deny)
+    box.setEscapeButton(btn_deny)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is btn_once:
+        return FolderApproval.ONCE
+    if btn_always is not None and clicked is btn_always:
+        return FolderApproval.ALWAYS
+    return FolderApproval.DENY
+
+
+def approval_lines(
+    write: bool, folders: tuple[FolderPermission, ...] | list,
+    hosts: tuple[HostPermission, ...] | list = (),
+) -> list[str]:
+    """What a macro was allowed always, one line each: changing databases,
+    every folder with its rights and every web site."""
     lines = [tr("macro_approval_write")] if write else []
     for perm in folders:
         if perm.read and perm.write:
@@ -761,6 +810,9 @@ def approval_lines(write: bool, folders: tuple[FolderPermission, ...] | list) ->
         else:
             continue
         lines.append(tr(key, folder=perm.path))
+    for site in hosts:
+        key = "macro_approval_host_local" if site.local else "macro_approval_host"
+        lines.append(tr(key, host=site.host))
     return lines
 
 
@@ -775,7 +827,8 @@ def ask_macro_change(
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle(tr("macro_change_title"))
     box.setTextFormat(Qt.TextFormat.PlainText)
-    approved = "\n".join(f"• {line}" for line in approval_lines(change.write, change.folders))
+    approved = "\n".join(f"• {line}" for line in approval_lines(
+        change.write, change.folders, change.hosts))
     box.setText(tr("macro_change_msg", name=macro.name, path=str(macro), approved=approved))
     lines = []
     if change.old_version != change.new_version:
