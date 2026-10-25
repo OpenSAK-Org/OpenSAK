@@ -436,18 +436,29 @@ def optimize(conn: sqlite3.Connection) -> None:
     queried, so on a fresh connection it does nothing. SQLite >= 3.46 takes
     0x10000 for "all tables"; it then also creates the statistics of a
     database that never had any (0.15 s for 1.4 GB, #1048). Older versions
-    get a full ANALYZE the first time, then ``PRAGMA optimize``.
+    get an ANALYZE the first time, then ``PRAGMA optimize``.
+
+    That ANALYZE samples at most ``_ANALYSIS_LIMIT`` rows per index (SQLite
+    >= 3.32; older ones ignore the pragma): a full one reads the whole file,
+    and the Linux AppImage and macOS builds bring an SQLite older than 3.46,
+    so the first open of a GSAK database of many GB would freeze the GUI.
     """
     if sqlite3.sqlite_version_info >= (3, 46):
         conn.execute("PRAGMA optimize=0x10002").fetchall()
     elif conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'"
     ).fetchone() is None:
+        conn.execute(f"PRAGMA analysis_limit={_ANALYSIS_LIMIT}").fetchall()
         conn.execute("ANALYZE")
     else:
         conn.execute("PRAGMA optimize").fetchall()
     if conn.in_transaction:
         conn.commit()
+
+
+# Rows per index the first ANALYZE samples on SQLite < 3.46 — good enough
+# statistics for the planner, fast at any database size.
+_ANALYSIS_LIMIT = 1000
 
 
 def optimize_file(db_path: Path, timeout: float = 30) -> bool:
