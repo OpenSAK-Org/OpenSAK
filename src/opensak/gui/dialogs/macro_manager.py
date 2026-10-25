@@ -487,6 +487,12 @@ def permissions_text(info: MacroInfo) -> str:
 def permissions_tooltip(info: MacroInfo) -> str:
     """What each declared permission means, and the problems of the
     declaration, one per line."""
+    return "\n".join([*declaration_lines(info), "", tr("macro_mgr_perm_info")])
+
+
+def declaration_lines(info: MacroInfo) -> list[str]:
+    """What each declared permission means, and the problems of the
+    declaration (or that there is none), one line each."""
     lines = [tr(_PERMISSION_KEYS[p]) for p in info.permissions]
     if info.network:
         lines.append(tr("macro_mgr_perm_network", hosts=", ".join(info.network)))
@@ -499,7 +505,33 @@ def permissions_tooltip(info: MacroInfo) -> str:
     if not lines:
         lines.append(tr("macro_mgr_perm_none" if info.permissions_declared
                         else "macro_mgr_perm_undeclared"))
-    return "\n".join([*lines, "", tr("macro_mgr_perm_info")])
+    return lines
+
+
+def ask_declarations(
+    parent, macro: Path, info: MacroInfo, added: tuple[str, ...], first: bool,
+) -> bool:
+    """OpenSAK's notice before the macro file *macro* first runs with a
+    declaration (declarations.py): what its header says it does, and with
+    *first* False what it declares now that the user has not seen. True
+    to run it (the default), False on Cancel or Escape. The texts come
+    from the macro, so they are shown as plain text."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setWindowTitle(tr("macro_decl_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    lines = "\n".join(f"\u2022 {line}" for line in declaration_lines(info))
+    box.setText(tr("macro_decl_msg" if first else "macro_decl_msg_more",
+                   name=info.name, path=str(macro), lines=lines))
+    hints = [] if first else [tr("macro_write_changed_added", added=", ".join(added))]
+    hints.append(tr("macro_decl_hint"))
+    box.setInformativeText("\n\n".join(hints))
+    btn_run = box.addButton(tr("macro_decl_run"), QMessageBox.ButtonRole.AcceptRole)
+    btn_cancel = box.addButton(tr("cancel"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_run)
+    box.setEscapeButton(btn_cancel)
+    box.exec()
+    return box.clickedButton() is btn_run
 
 
 def _native(sequence: str) -> str:

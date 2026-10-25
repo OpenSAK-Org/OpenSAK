@@ -9,6 +9,7 @@ the CSV next to an example resolve without any extra folder permission.
 
 from __future__ import annotations
 
+import functools
 import shutil
 import sys
 from datetime import datetime
@@ -31,6 +32,21 @@ def list_examples() -> list[str]:
     if not folder.is_dir():
         return []
     return sorted(p.name for p in folder.glob("*.lua"))
+
+
+@functools.lru_cache(maxsize=1)
+def shipped_hashes() -> frozenset[str]:
+    """db_access.source_hash() of every shipped example, as shipped: a
+    copy with one of these hashes is unchanged, wherever it is."""
+    from opensak.macro.db_access import read_macro_source, source_hash
+
+    hashes = set()
+    for name in list_examples():
+        try:
+            hashes.add(source_hash(read_macro_source(bundled_examples_dir() / name)))
+        except (OSError, UnicodeDecodeError):
+            pass
+    return frozenset(hashes)
 
 
 def _installed_dir() -> Path:

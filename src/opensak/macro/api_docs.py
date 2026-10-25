@@ -192,7 +192,12 @@ def _permissions_section() -> list[str]:
         "OpenSAK asks for every write, folder and web site approval as before, "
         "whether the macro declares it or not. The manager shows the "
         "declaration in its *Permissions* column, and the community macro "
-        "repository can use it to review an update that asks for more.",
+        "repository can use it to review an update that asks for more. "
+        "Before a macro file with a declaration first runs, OpenSAK shows "
+        "what it declares, with **Run** and **Cancel**; it shows this again "
+        "only when a later version declares more. Unchanged example macros "
+        "shipped with OpenSAK, unsaved macros and runs without a user "
+        "interface skip it.",
         "",
         "`Permissions` takes these words, separated by commas or spaces:",
         "",

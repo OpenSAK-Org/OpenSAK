@@ -3862,6 +3862,13 @@ class MainWindow(QMainWindow):
         parent = self._macro_dialog_parent()
         return ask_host_approval(parent, host, macro, local, secure, declared)
 
+    def confirm_declarations(self, macro, info, added, first: bool, editing: bool = False):
+        """MacroHost: show what the macro file *macro* declares before it
+        first runs (OpenSAK's own dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_manager import ask_declarations
+        parent = self._macro_dialog_parent()
+        return ask_declarations(parent, macro, info, added, first)
+
     def approve_macro_change(self, macro, change, editing: bool = False):
         """MacroHost: ask whether the changed macro file *macro* may have
         again what it was allowed (OpenSAK's own dialog, on top of the

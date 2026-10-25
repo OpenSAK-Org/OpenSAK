@@ -146,6 +146,7 @@ from opensak.macro.cache_data import (
     resolve_fields,
 )
 from opensak.macro import db_access
+from opensak.macro import declarations
 from opensak.macro import net_access
 from opensak.macro.cache_write import (
     MACRO_FLAG_ACTIONS,
@@ -174,7 +175,8 @@ from opensak.macro.db_access import (
     read_macro_source,
     source_hash,
 )
-from opensak.macro.metadata import parse_header, read_metadata
+from opensak.macro.examples import shipped_hashes
+from opensak.macro.metadata import MacroInfo, parse_header, read_metadata
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -836,6 +838,21 @@ class MacroHost(Protocol):
         the macro can word or answer itself. Optional: without it (e.g. a
         headless run) a host that is not approved fails. Anything but ONCE
         or ALWAYS counts as DENY.
+        """
+
+    def confirm_declarations(
+        self, macro: Path, info: MacroInfo, added: tuple[str, ...], first: bool,
+        editing: bool = False,
+    ) -> bool:
+        """Show what the macro file *macro* declares in its header (*info*:
+        Permissions and Network) before it runs; False to not run it
+        (declarations.py). *added*: what the user has not seen yet;
+        *first*: they have seen nothing of this file before, otherwise it
+        now declares more. *editing*: the run comes from an external
+        editor.
+
+        A notice, not an approval. Must be OpenSAK's own dialog. Optional:
+        without it (e.g. a headless run) the macro runs without it.
         """
 
     def approve_macro_change(
@@ -1774,6 +1791,24 @@ class MacroRuntime:
     def _macro_info(self):
         """The header of the running macro's code."""
         return parse_header(self._macro_source, self._macro_path or Path("macro.lua"))
+
+    def _show_declarations(self) -> None:
+        """Before a macro file first runs with a Permissions or Network
+        declaration, or once it declares more than the user has seen, show
+        the declaration (host.confirm_declarations, declarations.py). Raise
+        MacroError if the user does not want to run it."""
+        macro = self._macro_path
+        confirm = getattr(self._host, "confirm_declarations", None)
+        if macro is None or confirm is None or self._macro_hash in shipped_hashes():
+            return
+        info = self._macro_info()
+        before = declarations.seen(macro)
+        added = declarations.added(before, info)
+        if not added:
+            return
+        if confirm(macro, info, added, before is None, self._editing) is False:
+            raise MacroError(f"macro {macro.name!r} was not run: cancelled by the user")
+        declarations.mark_seen(macro, info)
 
     def _reconfirm(self, needed: Callable[[Approval], bool]) -> Optional[bool]:
         """If the running macro has changed since it was allowed something
@@ -4225,6 +4260,7 @@ class MacroRuntime:
         self._edited_from, self._editing = frozenset(), False
         self._macro_depth += 1
         try:
+            self._show_declarations()
             result = fn(*args)
         except BaseException:
             self._end_called_macro(previous, caller_dbs, failed=True)
@@ -4997,6 +5033,7 @@ class MacroRuntime:
         self._load_macro = make_loader()
 
         try:
+            self._show_declarations()
             fn = lua.compile(source, name=f"={chunk_name}")
             fn()
             self._check_cancelled()
