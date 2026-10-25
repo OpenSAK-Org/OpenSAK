@@ -1431,7 +1431,8 @@ def optimize_database(db_path: Path | None = None) -> None:
     """
     Refresh the query planner's statistics (#1048) of *db_path* (default:
     the active database) and of its companion database. Cheap when nothing
-    changed much; the first time it creates them (0.15 s for 1.4 GB).
+    changed much; the first time it creates them from a sample of each index
+    (about 0.2 s, at any database size).
 
     Called when a database is opened, closed or switched, and after imports,
     deletes and moves. Runs on its own connection, waits at most a few
