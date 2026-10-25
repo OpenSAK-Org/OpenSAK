@@ -65,6 +65,79 @@ def test_make_splash(qapp):
         splash.close()
 
 
+# ── "Using OpenSAK since …" on the splash (#1130) ─────────────────────────────
+
+def _same_image(a, b) -> bool:
+    return a.toImage() == b.toImage()
+
+
+def test_splash_pixmap_without_since_matches_plain_splash(qapp):
+    # No date → the splash looks exactly as before the feature.
+    assert _same_image(appmod._splash_pixmap(), appmod._splash_pixmap(None))
+    assert _same_image(appmod._splash_pixmap(), appmod._splash_pixmap(""))
+
+
+def test_splash_pixmap_with_since_draws_the_extra_line(qapp):
+    plain = appmod._splash_pixmap()
+    with_since = appmod._splash_pixmap("Using OpenSAK since 3 May 2026 — day 175")
+    assert not with_since.isNull()
+    assert (with_since.width(), with_since.height()) == (plain.width(), plain.height())
+    assert not _same_image(plain, with_since)
+
+
+def test_show_using_since_uses_about_text_and_date_format(qapp, monkeypatch):
+    from datetime import date, timedelta
+    import opensak.lang as lang
+
+    seen = {}
+
+    def fake_tr(key, **kw):
+        seen["key"], seen["kw"] = key, kw
+        return f"since {kw['date']} day {kw['day']}"
+
+    monkeypatch.setattr(lang, "tr", fake_tr)
+    drawn = []
+    monkeypatch.setattr(appmod, "_splash_pixmap",
+                        lambda since=None: drawn.append(since) or "PIX")
+    splash = SimpleNamespace(pixmaps=[])
+    splash.setPixmap = splash.pixmaps.append
+
+    first = date.today() - timedelta(days=9)
+    appmod._show_using_since_on_splash(splash, first)
+
+    assert seen["key"] == "about_using_since"
+    assert seen["kw"]["day"] == 10           # first day is day 1
+    assert drawn == [f"since {seen['kw']['date']} day 10"]
+    assert splash.pixmaps == ["PIX"]
+
+
+def test_show_using_since_failure_leaves_splash_unchanged(qapp, monkeypatch):
+    from datetime import date
+    import opensak.lang as lang
+
+    def broken_tr(key, **kw):
+        raise KeyError(key)
+
+    monkeypatch.setattr(lang, "tr", broken_tr)
+    splash = SimpleNamespace(pixmaps=[])
+    splash.setPixmap = splash.pixmaps.append
+
+    appmod._show_using_since_on_splash(splash, date(2026, 5, 3))  # must not raise
+
+    assert splash.pixmaps == []
+
+
+def test_show_using_since_on_real_splash(qapp):
+    from datetime import date
+    splash = appmod._make_splash(qapp)
+    try:
+        before = splash.pixmap().toImage()
+        appmod._show_using_since_on_splash(splash, date(2026, 5, 3))
+        assert splash.pixmap().toImage() != before
+    finally:
+        splash.close()
+
+
 # ── _apply_version_override ───────────────────────────────────────────────────
 
 class TestVersionOverride:

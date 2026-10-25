@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING
 from opensak.gui.icon import get_app_icon
 
 if TYPE_CHECKING:
+    from datetime import date
+
+    from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import QSplashScreen, QApplication
     from PySide6.QtCore import QTranslator
 
@@ -128,14 +131,17 @@ def _migrate_legacy_db() -> None:
             print(f"Deleted empty {legacy.name}")
 
 
-def _make_splash(app) -> "QSplashScreen":
-    """Opret og vis en splash screen med OpenSAK navn og loading tekst."""
-    from PySide6.QtWidgets import QSplashScreen
+def _splash_pixmap(since: str | None = None) -> "QPixmap":
+    """Tegn splash pixmap programmatisk — ingen billedfil nødvendig.
+
+    *since* (#1130) is an optional extra line under the version number,
+    e.g. "Using OpenSAK since 3 May 2026 — day 175". Without it the
+    splash looks exactly as before.
+    """
     from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
     from PySide6.QtCore import Qt
     from opensak import __version__
 
-    # Tegn splash pixmap programmatisk — ingen billedfil nødvendig
     W, H = 420, 220
     pix = QPixmap(W, H)
     pix.fill(QColor("#1e2a3a"))
@@ -166,14 +172,53 @@ def _make_splash(app) -> "QSplashScreen":
     painter.drawText(0, 120, W, 30, Qt.AlignmentFlag.AlignCenter,
                      f"v{__version__}")
 
+    # "Using OpenSAK since … — day N" (#1130), like GSAK's splash
+    if since:
+        font_since = QFont("Sans Serif", 9)
+        font_since.setItalic(True)
+        painter.setFont(font_since)
+        painter.setPen(QColor("#7ab8f5"))
+        painter.drawText(0, 143, W, 24, Qt.AlignmentFlag.AlignCenter, since)
+
     # Loading tekst placeholder (opdateres via showMessage)
     painter.end()
+    return pix
 
-    splash = QSplashScreen(pix, Qt.WindowType.WindowStaysOnTopHint)
+
+def _make_splash(app) -> "QSplashScreen":
+    """Opret og vis en splash screen med OpenSAK navn og loading tekst."""
+    from PySide6.QtWidgets import QSplashScreen
+    from PySide6.QtGui import QFont
+    from PySide6.QtCore import Qt
+
+    splash = QSplashScreen(_splash_pixmap(), Qt.WindowType.WindowStaysOnTopHint)
     splash.setFont(QFont("Sans Serif", 9))
     splash.show()
     app.processEvents()
     return splash
+
+
+def _show_using_since_on_splash(splash, first: "date") -> None:
+    """Issue #1130: redraw the splash with "Using OpenSAK since <date> —
+    day N" under the version number, in the user's language and date
+    format (same text as Help → About, #1050). Any problem just leaves the
+    splash as it is — this is decoration, never a reason to fail startup.
+    """
+    try:
+        from opensak.gui.date_format import format_date
+        from opensak.gui.settings import get_settings
+        from opensak.lang import tr
+        from opensak.usage import day_number
+
+        since = tr(
+            "about_using_since",
+            date=format_date(first, get_settings().date_format),
+            day=day_number(first),
+        )
+        splash.setPixmap(_splash_pixmap(since))
+    except Exception:
+        logger.warning("startup: could not show first-start date on splash",
+                       exc_info=True)
 
 
 def _apply_version_override() -> None:
@@ -426,9 +471,12 @@ def main() -> None:
     # does real work once — later starts just read the stored date.
     from opensak.usage import ensure_first_started
     try:
-        ensure_first_started(db.path for db in manager.databases)
+        first = ensure_first_started(db.path for db in manager.databases)
     except Exception:
         logger.warning("startup: could not record first-start date", exc_info=True)
+    else:
+        # #1130: show it on the splash too, like GSAK.
+        _show_using_since_on_splash(splash, first)
 
     # #1012: keep the LuaLS stub and .luarc.json in the macros folder
     # current, so an external editor completes opensak.* after an update.
