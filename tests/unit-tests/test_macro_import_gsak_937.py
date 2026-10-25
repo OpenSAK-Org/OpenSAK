@@ -301,7 +301,7 @@ class Host:
         self.events.append("write?")
         return self.answer
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         from opensak.macro.runtime import FolderApproval
         self.folders_asked.append(folder)
         return FolderApproval.ONCE

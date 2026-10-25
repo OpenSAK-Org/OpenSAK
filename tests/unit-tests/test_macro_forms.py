@@ -462,7 +462,7 @@ class UIHost(BaseHost):
         self.refreshed = 0
         self.windows: list["Window"] = []
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.DENY
 
     def choose_file(self, title, file_filter, save, start_dir):
@@ -1145,7 +1145,7 @@ class ReportHost(DbUIHost):
     """Allows the writes to the temp folder that _run's empty folder
     permissions would refuse."""
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.ONCE
 
 

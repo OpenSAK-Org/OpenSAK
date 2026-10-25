@@ -166,8 +166,9 @@ from opensak.macro.child_write import (
     update_child,
 )
 from opensak.macro.db_access import (
+    Approval,
+    MacroChange,
     WriteApproval,
-    WriteChange,
     read_macro_source,
     source_hash,
 )
@@ -179,7 +180,6 @@ from opensak.macro.permissions import (
     approvable_folder,
     check_access,
     expand_path,
-    grant_permanently,
     load_permissions,
     macros_dir,
     protected_reason,
@@ -687,7 +687,7 @@ class FolderApproval(Enum):
     """The user's answer when a macro needs a folder that is not permitted."""
 
     ONCE = "once"       # for the rest of this run
-    ALWAYS = "always"   # added to Settings → Folder permissions
+    ALWAYS = "always"   # for this macro, stored with it (db_access.py)
     DENY = "deny"
 
 
@@ -782,7 +782,7 @@ class MacroHost(Protocol):
         """Ask the user a Yes/No question; True on Yes."""
 
     def approve_macro_write(
-        self, macro: Optional[Path], change: Optional[WriteChange] = None,
+        self, macro: Optional[Path], change: Optional[MacroChange] = None,
         editing: bool = False,
     ) -> WriteApproval:
         """Ask the user whether the macro file *macro* may change the
@@ -790,8 +790,8 @@ class MacroHost(Protocol):
         is None for an unsaved macro, which cannot be allowed always.
 
         Asked before the first write of a macro that is not approved yet.
-        *change* is set when the macro was approved before but its code
-        has changed since (db_access.py). *editing*: the run comes from an
+        *change* is set when the macro was approved until OpenSAK closes
+        but its code has changed since (db_access.py). *editing*: the run comes from an
         external editor (`opensak --run-macro`), so EDITING may be offered
         as well. Must be OpenSAK's own dialog. Anything but SESSION, ALWAYS
         or (with *editing*) EDITING counts as DENY.
@@ -803,13 +803,30 @@ class MacroHost(Protocol):
         set_corrected_coords(), the host may defer the refresh to
         end_macro()."""
 
-    def approve_folder(self, target: Path, folder: Path, write: bool) -> FolderApproval:
-        """Ask the user whether the macro may read (or write) *target*, by
-        permitting *folder* for this run only or always.
+    def approve_folder(
+        self, target: Path, folder: Path, write: bool, macro: Optional[Path] = None,
+    ) -> FolderApproval:
+        """Ask the user whether the macro file *macro* may read (or write)
+        *target*, by permitting *folder* for this run only or always (for
+        this macro). *macro* is None for an unsaved macro, which cannot be
+        allowed always.
 
         Must be OpenSAK's own dialog showing the full path — never anything
         the macro can word or answer itself. Read and write are asked
         separately. Anything but ONCE or ALWAYS counts as DENY.
+        """
+
+    def approve_macro_change(
+        self, macro: Path, change: MacroChange, editing: bool = False,
+    ) -> WriteApproval:
+        """Ask the user whether the macro file *macro*, changed since it was
+        allowed what *change* lists, may have all of it again.
+
+        Asked once per run, when the macro first needs any of it. ALWAYS
+        allows it again for the changed code; with *editing* (a run from
+        an external editor) EDITING may be offered as well, until OpenSAK
+        closes. Must be OpenSAK's own dialog. Anything else counts as DENY,
+        for the rest of the run.
         """
 
     def choose_file(
@@ -1530,9 +1547,15 @@ class MacroRuntime:
         # opensak.attach(): schema → (database name, file), attached
         # read-only; kept here so they survive a reopened connection
         self._attachments: dict[str, tuple[str, Path]] = {}
+        # The shared folder list (Settings), plus folders picked in
+        # opensak.choose_folder(); _folder_list() adds the running macro's own.
         self._run_permissions: list[FolderPermission] = []
-        # (folder, write) the user denied during this run — not asked again
-        self._denied: set[tuple[Path, bool]] = set()
+        # Folders allowed "this time only", per macro (db_access.macro_key)
+        self._once: dict[str, list[FolderPermission]] = {}
+        # A changed macro's answer whether it may have its approvals again
+        self._reconfirmed: dict[str, bool] = {}
+        # (macro, folder, write) the user denied during this run — not asked again
+        self._denied: set[tuple[str, Path, bool]] = set()
         # (file, write) picked by the user in opensak.choose_file() — usable
         # for the rest of this run only, whatever the folder list says
         self._picked: set[tuple[Path, bool]] = set()
@@ -1692,22 +1715,60 @@ class MacroRuntime:
         if not flags.lua_macro_write:
             return
         macro = self._macro_path
-        if db_access.is_approved(macro, self._macro_hash, self._edited_from, self._editing):
+        if self._write_approved():
             return
-        if macro not in self._write_denied:
-            info = parse_header(self._macro_source, macro or Path("macro.lua"))
-            before = db_access.stored_approval(macro)
-            change = db_access.change_since(before, info) if before is not None else None
+        if macro not in self._write_denied and self._reconfirm(lambda r: r.write) is not False:
+            if self._write_approved():
+                return
+            info = self._macro_info()
+            before = db_access.session_approval(macro)
+            change = (db_access.change_since(before, info)
+                      if before is not None and before.sha256 != self._macro_hash else None)
             answer = self._host.approve_macro_write(macro, change=change, editing=self._editing)
             allowed = [WriteApproval.SESSION, WriteApproval.ALWAYS]
             if self._editing:
                 allowed.append(WriteApproval.EDITING)
             if answer in allowed:
-                db_access.approve(macro, answer, self._macro_hash, info)
+                db_access.approve(macro, answer, self._macro_hash, info,
+                                  self._edited_from, self._editing)
                 return
-            self._write_denied.add(macro)
+        self._write_denied.add(macro)
         name = macro.name if macro is not None else "(unsaved)"
         raise MacroError(f"{func}: the user did not allow macro {name!r} to change databases")
+
+    def _write_approved(self) -> bool:
+        return db_access.is_approved(
+            self._macro_path, self._macro_hash, self._edited_from, self._editing)
+
+    def _macro_info(self):
+        """The header of the running macro's code."""
+        return parse_header(self._macro_source, self._macro_path or Path("macro.lua"))
+
+    def _reconfirm(self, needed: Callable[[Approval], bool]) -> Optional[bool]:
+        """If the running macro has changed since it was allowed something
+        always that *needed* says this request uses, ask once per run
+        whether it may have all of it again (host.approve_macro_change).
+        True if it may, False if the user declined (now or earlier in this
+        run), None if there was nothing to ask."""
+        macro = self._macro_path
+        if macro is None:
+            return None
+        key = db_access.macro_key(macro)
+        if key in self._reconfirmed:
+            return self._reconfirmed[key]
+        record = db_access.stale_approval(macro, self._macro_hash, self._edited_from,
+                                          self._editing)
+        if record is None or not needed(record):
+            return None
+        info = self._macro_info()
+        answer = self._host.approve_macro_change(
+            macro, db_access.change_since(record, info), editing=self._editing)
+        allowed = [WriteApproval.ALWAYS]
+        if self._editing:
+            allowed.append(WriteApproval.EDITING)
+        ok = answer in allowed and db_access.renew(macro, answer, self._macro_hash, info)
+        self._reconfirmed[key] = ok
+        return ok
 
     def _field_values(self, func: str, values: Any, insert: bool) -> dict[str, Any]:
         if values is None or not hasattr(values, "items"):
@@ -3145,7 +3206,7 @@ class MacroRuntime:
         if reason is not None:
             raise MacroError(f"{func}: macros may not write {file} — {reason}")
         target = self._check_access(file, write=True)
-        permissions = self._run_permissions
+        permissions = self._folder_list()
         if (target, True) in self._picked:
             permissions = with_grant(permissions, target.parent, True)
         try:
@@ -3723,7 +3784,7 @@ class MacroRuntime:
         if reason is not None:
             raise MacroError(f"{func}: macros may not {kind} {file} — {reason}")
         target = self._check_access(file, write=True)
-        permissions = self._run_permissions
+        permissions = self._folder_list()
         if (target, True) in self._picked:
             permissions = with_grant(permissions, target.parent, True)
         return permissions
@@ -3868,7 +3929,7 @@ class MacroRuntime:
         export writes: safe_write_stream() with this run's folder list, plus
         the file the user picked if *target* is one. Raises
         FolderAccessDenied."""
-        permissions = self._run_permissions
+        permissions = self._folder_list()
         if (target, True) in self._picked:
             permissions = with_grant(permissions, target.parent, True)
 
@@ -3879,14 +3940,41 @@ class MacroRuntime:
 
         return save
 
+    def _folder_list(self) -> list[FolderPermission]:
+        """The folders the running macro may use: the shared list of this
+        run, its folders allowed this time only, and those allowed always
+        to its code (db_access.py) — not those of a macro that called it."""
+        macro = self._macro_path
+        permissions = list(self._run_permissions)
+        own = [
+            *self._once.get(db_access.macro_key(macro), ()),
+            *db_access.approved_folders(macro, self._macro_hash, self._edited_from,
+                                        self._editing),
+        ]
+        # Merged with with_grant(), so that the grant extends an entry for
+        # the same folder (e.g. one listed without rights) instead of being
+        # shadowed by it.
+        for perm in own:
+            try:
+                folder = resolve_path(perm.path)
+            except (OSError, RuntimeError):
+                continue
+            for write, granted in ((False, perm.read), (True, perm.write)):
+                if granted:
+                    permissions = with_grant(permissions, folder, write)
+        return permissions
+
     def _check_access(self, path: Path, write: bool, allow_database: bool = False) -> Path:
-        """check_access() against this run's list. A folder that is merely
-        not listed is put to the user (host.approve_folder) instead of
-        failing; protected data and roots fail without asking. A file the
-        user picked in opensak.choose_file() needs no folder permission.
-        *allow_database* only for the macro's own database (macro_db())."""
+        """check_access() against the running macro's folders. A folder
+        that is merely not listed is put to the user (host.approve_folder)
+        instead of failing; protected data and roots fail without asking.
+        A file the user picked in opensak.choose_file() needs no folder
+        permission. A macro changed since it was allowed the folder always
+        is first asked about as a whole (_reconfirm). *allow_database* only
+        for the macro's own database (macro_db())."""
+        macro = self._macro_path
         try:
-            return check_access(path, write=write, permissions=self._run_permissions,
+            return check_access(path, write=write, permissions=self._folder_list(),
                                 allow_database=allow_database)
         except FolderNotApproved as exc:
             if (exc.target, write) in self._picked:
@@ -3894,19 +3982,41 @@ class MacroRuntime:
             folder = approvable_folder(exc.target)
             if folder is None:
                 raise MacroError(str(exc)) from None
-            if (folder, write) not in self._denied:
-                answer = self._host.approve_folder(exc.target, folder, write)
+            denied = (db_access.macro_key(macro), folder, write)
+
+            def granted(record: Approval) -> bool:
+                try:
+                    check_access(path, write=write, permissions=list(record.folders),
+                                 allow_database=allow_database)
+                except FolderAccessDenied:
+                    return False
+                return True
+
+            renewed = self._reconfirm(granted)
+            if renewed is False:
+                self._denied.add(denied)
+            elif renewed:
+                try:
+                    return check_access(path, write=write, permissions=self._folder_list(),
+                                        allow_database=allow_database)
+                except FolderNotApproved:
+                    pass
+            if denied not in self._denied:
+                answer = self._host.approve_folder(exc.target, folder, write, macro=macro)
                 if answer not in (FolderApproval.ONCE, FolderApproval.ALWAYS):
-                    self._denied.add((folder, write))
-            if (folder, write) in self._denied:
+                    self._denied.add(denied)
+            if denied in self._denied:
                 raise MacroError(f"{exc} (denied by the user)") from None
-            if answer is FolderApproval.ALWAYS:
-                grant_permanently(folder, write)
-            self._run_permissions = with_grant(self._run_permissions, folder, write)
+            if answer is FolderApproval.ALWAYS and macro is not None:
+                db_access.grant_folder(macro, folder, write, self._macro_hash,
+                                       self._macro_info(), self._edited_from, self._editing)
+            else:
+                key = db_access.macro_key(macro)
+                self._once[key] = with_grant(self._once.get(key, []), folder, write)
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
         try:
-            return check_access(path, write=write, permissions=self._run_permissions,
+            return check_access(path, write=write, permissions=self._folder_list(),
                                 allow_database=allow_database)
         except FolderAccessDenied as exc:
             raise MacroError(str(exc)) from None
@@ -4655,6 +4765,8 @@ class MacroRuntime:
             if self._folder_permissions is not None
             else load_permissions()
         )
+        self._once = {}
+        self._reconfirmed = {}
         self._denied = set()
         self._write_denied = set()
         self._deleted = {}

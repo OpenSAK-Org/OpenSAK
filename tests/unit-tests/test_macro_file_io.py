@@ -22,7 +22,7 @@ class FakeHost:
     def end_macro(self):
         pass
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         self.asked.append(folder)
         return self.answer
 

@@ -72,7 +72,7 @@ class Host:
         self.events.append("write?")
         return self.answer
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         from opensak.macro.runtime import FolderApproval
         self.folders_asked.append(folder)
         return FolderApproval.ONCE
@@ -205,7 +205,7 @@ def test_refused_folder_of_a_setting_fails_only_that_entry(manager, tmp_path):
     _save_setting(allowed, "S", folders=[str(other), str(allowed)])
 
     class Refusing(Host):
-        def approve_folder(self, target, folder, write):
+        def approve_folder(self, target, folder, write, macro=None):
             from opensak.macro.runtime import FolderApproval
             self.folders_asked.append(folder)
             return FolderApproval.DENY

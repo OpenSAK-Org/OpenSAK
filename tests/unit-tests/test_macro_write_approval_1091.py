@@ -11,7 +11,7 @@ import pytest
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache
-from opensak.macro import MacroError, MacroRuntime, WriteApproval
+from opensak.macro import FolderApproval, FolderPermission, MacroError, MacroRuntime, WriteApproval
 from opensak.macro import db_access
 from opensak.macro.db_access import source_hash
 
@@ -22,7 +22,12 @@ class Host:
 
     def __init__(self, answer=WriteApproval.ALWAYS):
         self.answer = answer
-        self.asked: list[tuple[Path | None, db_access.WriteChange | None, bool]] = []
+        self.asked: list[tuple[Path | None, db_access.MacroChange | None, bool]] = []
+        # Answers and questions of approve_macro_change() / approve_folder()
+        self.change_answer = WriteApproval.ALWAYS
+        self.changes: list[tuple[Path, db_access.MacroChange, bool]] = []
+        self.folder_answer = FolderApproval.ALWAYS
+        self.folders: list[tuple[Path, bool, Path | None]] = []
 
     def database_name(self):
         return "TestDB"
@@ -36,6 +41,14 @@ class Host:
     def approve_macro_write(self, macro, change=None, editing=False):
         self.asked.append((macro, change, editing))
         return self.answer
+
+    def approve_macro_change(self, macro, change, editing=False):
+        self.changes.append((macro, change, editing))
+        return self.change_answer
+
+    def approve_folder(self, target, folder, write, macro=None):
+        self.folders.append((folder, write, macro))
+        return self.folder_answer
 
     def caches_changed(self, codes, added):
         pass
@@ -84,21 +97,22 @@ def test_replaced_file_is_asked_about_again(tmp_path):
 
     # A downloaded update replaces the file: it inherits nothing.
     _write(macro, 2, "-- Version: 1.1\n-- Permissions: write, open\n")
-    host.answer = WriteApproval.DENY
+    host.change_answer = WriteApproval.DENY
     with pytest.raises(MacroError, match="did not allow"):
         _run_file(macro, host)
     assert _sort() == 1
-    _, change, _ = host.asked[1]
-    assert change == db_access.WriteChange("1.0", "1.1", ("write", "open"))
+    [(_, change, _)] = host.changes
+    assert change == db_access.MacroChange("1.0", "1.1", ("write", "open"), write=True)
+    assert len(host.asked) == 1         # declined as a whole: no second question
     # Denied: the stored approval still is the old code's.
     assert db_access.approvals()[0].version == "1.0"
 
     # Allowed again: the new code is approved from now on.
-    host.answer = WriteApproval.ALWAYS
+    host.change_answer = WriteApproval.ALWAYS
     _run_file(macro, host)
     db_access.reset_session()
     _run_file(macro, host)
-    assert len(host.asked) == 3 and _sort() == 2
+    assert len(host.changes) == 2 and len(host.asked) == 1 and _sort() == 2
     assert [a.version for a in db_access.approvals()] == ["1.1"]
 
 
@@ -144,8 +158,10 @@ def test_called_macro_is_checked_against_its_file(tmp_path):
     run()
     assert [a[0] for a in host.asked] == [helper]
     _write(helper, 6)
-    run()
-    assert len(host.asked) == 2 and host.asked[1][1] is not None
+    host.change_answer = WriteApproval.DENY
+    with pytest.raises(MacroError, match="did not allow macro 'helper.lua'"):
+        run()
+    assert [c[0] for c in host.changes] == [helper]
 
 
 # ── OpenSAK's own editor ─────────────────────────────────────────────────────
@@ -178,9 +194,10 @@ def test_editor_save_does_not_approve_a_replaced_file(tmp_path):
     replaced = _write(macro, 10)
     assert not db_access.carry_over(macro, {source_hash(replaced)}, source_hash(replaced))
     host = Host(WriteApproval.DENY)
+    host.change_answer = WriteApproval.DENY
     with pytest.raises(MacroError, match="did not allow"):
         _run_file(macro, host)
-    assert host.asked[0][1] is not None
+    assert len(host.changes) == 1
 
 
 def test_dialog_editor_carries_the_approval_over(qtbot, tmp_path, monkeypatch):
@@ -216,7 +233,7 @@ def test_while_i_edit_it_covers_only_runs_from_an_external_editor(tmp_path):
     for sort in (16, 17):           # saved in the other editor and run again
         _write(macro, sort)
         _run_file(macro, host, external_editor=True)
-    assert len(host.asked) == 1 and _sort() == 17
+    assert len(host.asked) == 1 and _sort() == 17 and host.changes == []
     assert db_access.always_approved() == []
 
     # The Macro manager still checks the code — and never offers EDITING.
@@ -252,3 +269,129 @@ def test_removed_in_settings_ends_every_approval(tmp_path):
     db_access.approve(macro, WriteApproval.EDITING, source_hash(source))
     db_access.save_always_approved([])
     assert not db_access.is_approved(macro, source_hash(source), editing=True)
+
+
+# ── Folders allowed to one macro (phase 2) ───────────────────────────────────
+
+def _reader(path: Path, folder: Path, header: str = "") -> str:
+    (folder / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    source = f'{header}opensak.read_csv("{(folder / "a.csv").as_posix()}")\n'
+    path.write_text(source, encoding="utf-8")
+    return source
+
+
+def _run_reader(path, host, external_editor=False):
+    MacroRuntime(host, output=lambda _t: None, folder_permissions=[],
+                 external_editor=external_editor).run(
+        db_access.read_macro_source(path), chunk_name=path.name, base_dir=path.parent,
+        macro_path=path,
+    )
+
+
+def test_folder_allowed_always_belongs_to_the_macro_and_its_code(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    macro = tmp_path / "reader.lua"
+    _reader(macro, data, "-- Version: 1\n")
+    host = Host()
+    _run_reader(macro, host)
+    _run_reader(macro, host)
+    assert host.folders == [(data.resolve(), False, macro)]
+
+    # Replaced: asked once whether it may have its folder again.
+    _reader(macro, data, "-- Version: 2\n")
+    host.change_answer = WriteApproval.DENY
+    with pytest.raises(MacroError, match="denied by the user"):
+        _run_reader(macro, host)
+    [(_, change, _)] = host.changes
+    assert change.write is False and change.old_version == "1"
+    assert change.folders == (FolderPermission(str(data.resolve()), read=True),)
+    assert len(host.folders) == 1       # declined as a whole: no folder question
+
+    host.change_answer = WriteApproval.ALWAYS
+    _run_reader(macro, host)
+    _run_reader(macro, host)
+    assert len(host.changes) == 2 and len(host.folders) == 1
+    assert db_access.approvals()[0].version == "2"
+
+
+def test_new_grant_for_changed_code_replaces_the_declined_record(tmp_path):
+    data, other = tmp_path / "data", tmp_path / "other"
+    data.mkdir()
+    other.mkdir()
+    macro = tmp_path / "reader.lua"
+    _reader(macro, data)
+    host = Host()
+    _run_reader(macro, host)
+    db_access.approve(macro, WriteApproval.ALWAYS, source_hash(_reader(macro, data)))
+    # Updated to read another folder: nothing of the old record applies.
+    _reader(macro, other)
+    _run_reader(macro, host)
+    assert host.changes == []           # the old folder does not cover it
+    [record] = db_access.approvals()
+    assert not record.write
+    assert record.folders == (FolderPermission(str(other.resolve()), read=True),)
+
+
+def test_called_macro_does_not_inherit_its_callers_folders(tmp_path):
+    data, macros = tmp_path / "data", tmp_path / "macros"
+    data.mkdir()
+    macros.mkdir()
+    helper = macros / "helper.lua"
+    _reader(helper, data)
+    caller = macros / "caller.lua"
+    caller.write_text(
+        f'opensak.read_csv("{(data / "a.csv").as_posix()}")\n'
+        'opensak.run_macro("helper.lua")\n', encoding="utf-8")
+    host = Host()
+    host.folder_answer = FolderApproval.ONCE
+    MacroRuntime(host, output=lambda _t: None,
+                 folder_permissions=[FolderPermission(str(macros), read=True)]).run(
+        db_access.read_macro_source(caller), chunk_name="caller.lua", base_dir=macros,
+        macro_path=caller,
+    )
+    # Allowed to the caller this time only: the helper is asked on its own.
+    assert [(f[0], f[2]) for f in host.folders] == [
+        (data.resolve(), caller), (data.resolve(), helper)]
+
+
+def test_while_i_edit_it_keeps_the_folders(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    macro = tmp_path / "vscode.lua"
+    _reader(macro, data, "-- v1\n")
+    host = Host()
+    _run_reader(macro, host, external_editor=True)
+    _reader(macro, data, "-- v2\n")
+    host.change_answer = WriteApproval.EDITING
+    _run_reader(macro, host, external_editor=True)
+    _reader(macro, data, "-- v3\n")
+    _run_reader(macro, host, external_editor=True)
+    assert len(host.changes) == 1 and host.changes[0][2] is True
+    assert len(host.folders) == 1
+    # Changing databases was never allowed, so it is still asked about.
+    assert not db_access.is_approved(macro, "x", editing=True)
+
+
+def test_settings_list_shows_what_each_macro_may_do(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import Qt
+    from opensak.gui.dialogs import settings_dialog as sd
+    from opensak.utils import flags
+    monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
+    monkeypatch.setattr(flags, "lua_macros", True)
+    monkeypatch.setattr(flags, "lua_macro_write", False)
+    macro = tmp_path / "reader.lua"
+    db_access.grant_folder(macro, tmp_path, False, source_hash(""))
+    db_access.grant_folder(macro, tmp_path, True, source_hash(""))
+    d = sd.SettingsDialog()
+    qtbot.addWidget(d)
+    assert d._db_write_list is not None and d._db_write_list.count() == 1
+    item = d._db_write_list.item(0)
+    # The name, then one line per right (read and write: one folder line)
+    assert len(item.text().splitlines()) == 2
+    assert item.text().splitlines()[0] == "reader.lua"
+    assert item.data(Qt.ItemDataRole.UserRole) == str(macro.resolve())
+    d._db_write_list.setCurrentItem(item)
+    d._on_remove_db_write()
+    d._save()
+    assert db_access.approvals() == []

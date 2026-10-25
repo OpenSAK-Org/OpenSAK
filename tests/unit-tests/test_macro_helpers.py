@@ -19,7 +19,7 @@ class _Host:
         self.approval = approval
         self.approvals: list[tuple[str, bool]] = []
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         self.approvals.append((str(folder), write))
         return self.approval
 

@@ -741,8 +741,12 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "folders listed in Settings → Folder permissions. When a macro needs "
         "a file in another folder, OpenSAK asks the user whether to allow "
         "that folder for this run only or always, or to deny it; reading and "
-        "writing are asked separately. OpenSAK's own settings and database "
-        "files are never accessible.",
+        "writing are asked separately. Both belong to this macro alone: "
+        "another macro, also one started with `opensak.run_macro()`, is "
+        "asked on its own, and a macro changed outside OpenSAK's macro editor "
+        "is asked once whether it may have its folders again. An unsaved "
+        "macro can be allowed a folder for one run only. OpenSAK's own "
+        "settings and database files are never accessible.",
         "",
         "See [Example macros](#example-macros) for complete scripts and "
         "[Editor support](#editor-support) for autocompletion in VS Code, "

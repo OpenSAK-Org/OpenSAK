@@ -38,7 +38,8 @@ from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
-from opensak.macro.db_access import WriteChange, carry_over, source_hash
+from opensak.macro.db_access import MacroChange, carry_over, source_hash
+from opensak.macro.permissions import FolderPermission
 from opensak.macro.metadata import parse_header
 from opensak.macro.runtime import API_VERSION
 
@@ -712,11 +713,14 @@ def _text_index(text: str, position: int) -> int:
     return len(text.encode("utf-16-le")[:position * 2].decode("utf-16-le", errors="ignore"))
 
 
-def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> FolderApproval:
-    """OpenSAK's question when a macro needs *target* outside its permitted
-    folders: allow *folder* this time only, always, or deny (the default,
-    also on Escape). The paths come from the macro, so they are shown as
-    plain text."""
+def ask_folder_approval(
+    parent, target: Path, folder: Path, write: bool, macro: Path | None = None,
+) -> FolderApproval:
+    """OpenSAK's question when the macro file *macro* needs *target* outside
+    its permitted folders: allow *folder* this time only, always (for this
+    macro), or deny (the default, also on Escape). An unsaved macro (None)
+    cannot be allowed always. The paths come from the macro, so they are
+    shown as plain text."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
     box.setWindowTitle(tr("macro_access_title"))
@@ -725,9 +729,12 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
         "macro_access_write" if write else "macro_access_read",
         path=str(target), folder=str(folder),
     ))
-    box.setInformativeText(tr("macro_access_hint"))
+    box.setInformativeText(tr("macro_access_hint" if macro else "macro_access_hint_unsaved"))
     btn_once = box.addButton(tr("macro_access_once"), QMessageBox.ButtonRole.AcceptRole)
-    btn_always = box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+    btn_always = (
+        box.addButton(tr("macro_access_always"), QMessageBox.ButtonRole.AcceptRole)
+        if macro is not None else None
+    )
     btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(btn_deny)
     box.setEscapeButton(btn_deny)
@@ -735,20 +742,77 @@ def ask_folder_approval(parent, target: Path, folder: Path, write: bool) -> Fold
     clicked = box.clickedButton()
     if clicked is btn_once:
         return FolderApproval.ONCE
-    if clicked is btn_always:
+    if btn_always is not None and clicked is btn_always:
         return FolderApproval.ALWAYS
     return FolderApproval.DENY
 
 
+def approval_lines(write: bool, folders: tuple[FolderPermission, ...] | list) -> list[str]:
+    """What a macro was allowed always, one line each: changing databases
+    and every folder with its rights."""
+    lines = [tr("macro_approval_write")] if write else []
+    for perm in folders:
+        if perm.read and perm.write:
+            key = "macro_approval_read_write"
+        elif perm.write:
+            key = "macro_approval_write_folder"
+        elif perm.read:
+            key = "macro_approval_read"
+        else:
+            continue
+        lines.append(tr(key, folder=perm.path))
+    return lines
+
+
+def ask_macro_change(
+    parent, macro: Path, change: MacroChange, editing: bool = False,
+) -> WriteApproval:
+    """OpenSAK's question when the macro file *macro*, changed since it was
+    allowed what *change* lists, first needs any of it: allow it all again
+    (ALWAYS), with *editing* (a run from an external editor) also while I
+    edit it, or deny (the default, also on Escape)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("macro_change_title"))
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    approved = "\n".join(f"• {line}" for line in approval_lines(change.write, change.folders))
+    box.setText(tr("macro_change_msg", name=macro.name, path=str(macro), approved=approved))
+    lines = []
+    if change.old_version != change.new_version:
+        lines.append(tr("macro_write_changed_version",
+                        old=change.old_version or "–", new=change.new_version or "–"))
+    if change.added:
+        lines.append(tr("macro_write_changed_added", added=", ".join(change.added)))
+    lines.append(tr("macro_write_hint_changed"))
+    if editing:
+        lines.append(tr("macro_change_hint_editing"))
+    box.setInformativeText("\n\n".join(lines))
+    btn_editing = (
+        box.addButton(tr("macro_write_editing"), QMessageBox.ButtonRole.AcceptRole)
+        if editing else None
+    )
+    btn_allow = box.addButton(tr("macro_change_allow"), QMessageBox.ButtonRole.AcceptRole)
+    btn_deny = box.addButton(tr("macro_access_deny"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(btn_deny)
+    box.setEscapeButton(btn_deny)
+    box.exec()
+    clicked = box.clickedButton()
+    if btn_editing is not None and clicked is btn_editing:
+        return WriteApproval.EDITING
+    if clicked is btn_allow:
+        return WriteApproval.ALWAYS
+    return WriteApproval.DENY
+
+
 
 def ask_macro_write_approval(
-    parent, macro: Path | None, change: WriteChange | None = None, editing: bool = False,
+    parent, macro: Path | None, change: MacroChange | None = None, editing: bool = False,
 ) -> WriteApproval:
     """OpenSAK's question before the macro file *macro* first changes a
     database: deny (the default, also on Escape), allow until OpenSAK
     closes, or always. An unsaved macro (None) cannot be allowed always.
-    With *change*, the macro was allowed before and its code has changed
-    since; with *editing* (a run from an external editor), "while I edit
+    With *change*, the macro was allowed until OpenSAK closes and its code
+    has changed since; with *editing* (a run from an external editor), "while I edit
     it" is offered too."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)

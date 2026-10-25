@@ -36,7 +36,10 @@ opensak.json (edited by hand) is ignored.
 When no listed folder grants an access, check_access() raises
 FolderNotApproved, and the runtime asks the user (through OpenSAK's own
 dialog, never through the macro) to approve the file's folder for this run
-only or permanently. Protected data and roots are never offered.
+only or permanently. Protected data and roots are never offered. Both
+answers belong to the running macro only: a permanent one is stored with
+it (db_access.py, #1091), so the list here holds just the folders the user
+listed in Settings, shared by all macros, and those older versions added.
 
 OpenSAK's own data can never be read or written by a macro, whatever the
 list says (see protected_reason()): opensak.json, bootstrap.json, the
@@ -489,7 +492,9 @@ def with_grant(
 
 
 def grant_permanently(folder: Path, write: bool) -> None:
-    """Add read (or write) on *folder* to the list saved in Settings."""
+    """Add read (or write) on *folder* to the list saved in Settings, for
+    all macros. (A folder approved while a macro runs is stored with that
+    macro instead, see db_access.grant_folder().)"""
     save_permissions(with_grant(load_permissions(), folder, write))
 
 
