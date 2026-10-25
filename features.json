@@ -2,5 +2,6 @@
   "reverse-geocoding": true,
   "map-popout": true,
   "lua-macros": true,
-  "lua-macro-write": true
+  "lua-macro-write": true,
+  "companion-db": true
 }

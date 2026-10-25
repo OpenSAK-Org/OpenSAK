@@ -17,6 +17,7 @@ import logging
 import re
 import sqlite3
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Generator, Iterable, Iterator, cast
@@ -26,8 +27,9 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
-from opensak.db import maintenance
+from opensak.db import companion, custom_fields, maintenance
 from opensak.db.models import Base
+from opensak.utils import flags
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,42 @@ def _make_engine(db_path: Path) -> Engine:
         future=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+    _attach_companion_on_checkout(engine, db_path)
     return engine
+
+
+def _attach_companion_on_checkout(engine: Engine, db_path: Path) -> None:
+    """
+    Attach *db_path*'s companion database (db/companion.py) to each of
+    *engine*'s connections, as ``companion``, once it is usable. Checked on
+    checkout rather than on connect, so a companion created while the
+    engine is open is attached by the next session without reopening the
+    database. A connection never has a transaction open at checkout, which
+    ATTACH needs.
+
+    It also keeps the ``caches_all`` TEMP view (custom fields, #1028) of
+    each connection up to date (db/custom_fields.py), once _open_engine()
+    is done with the schema: a TEMP view on ``caches`` makes SQLite refuse
+    the table rebuilds of the migrations.
+    """
+    if not flags.companion_db:
+        return
+    key = companion.status_key(db_path)
+
+    @event.listens_for(engine, "checkout")
+    def _attach(dbapi_connection, connection_record, _proxy) -> None:
+        info = connection_record.info
+        if (not info.get("companion_attached")
+                and companion.status_for_key(key) is companion.Status.OK
+                and companion.attach(dbapi_connection, db_path)):
+            info["companion_attached"] = True
+        if engine in _schema_ready:
+            custom_fields.ensure_view(
+                dbapi_connection, db_path, info, bool(info.get("companion_attached")))
+
+
+# Engines whose schema _open_engine() has brought up to date.
+_schema_ready: "weakref.WeakSet[Engine]" = weakref.WeakSet()
 
 
 @event.listens_for(Engine, "connect")
@@ -156,7 +193,10 @@ def init_db(db_path: Path | None = None) -> Engine:
     _engine = new_engine
     _SessionLocal = _session_factory(new_engine)
     if old_engine is not None and old_engine is not new_engine:
+        optimize_database(_engine_path(old_engine))
         old_engine.dispose()
+    # #1048: statistics for the query planner, created the first time.
+    optimize_database(db_path)
     logger.info("init_db: ready (+%.2fs total)", time.monotonic() - t0)
     return _engine
 
@@ -189,6 +229,14 @@ def _open_engine(db_path: Path) -> Engine:
         if db_path not in _migrated_paths:
             backup_before_migration(db_path, SCHEMA_VERSION)
 
+        # The companion database (#1034): check it and update its own
+        # schema, so the connections can attach it. Never raises.
+        if flags.companion_db:
+            companion.prepare(db_path)
+            # Custom fields (#1028): add or rename columns as the
+            # definitions say. Never raises.
+            custom_fields.on_open(db_path)
+
         # Create all tables that don't exist yet (safe to call multiple times).
         logger.info("open_db: opening %s", db_path)
         t0 = time.monotonic()
@@ -199,6 +247,7 @@ def _open_engine(db_path: Path) -> Engine:
         if db_path not in _migrated_paths:
             _run_migrations(new_engine)
             _migrated_paths.add(db_path)
+        _schema_ready.add(new_engine)
     except Exception:
         new_engine.dispose()
         raise
@@ -1146,6 +1195,13 @@ def _run_migrations(engine: Engine) -> None:
                 progress=lambda: _report_progress(PROGRESS_COMPACTING),
             )
 
+        # #1048: a table rebuild drops the planner's statistics, and new
+        # columns and indexes have none yet. Never raises.
+        try:
+            maintenance.optimize(cast(sqlite3.Connection, conn.connection.driver_connection))
+        except sqlite3.Error as exc:
+            logger.warning("migrations: optimize failed: %s", exc)
+
 
 # Migration 26 (#1033): the defaults models.py has as server_default, frozen
 # here so later model changes don't alter what this migration does.
@@ -1356,6 +1412,10 @@ def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]
         "AND sql IS NOT NULL"
     ), {"t": table}).scalars().all()
 
+    # A TEMP view on the table (caches_all, custom fields) makes SQLite
+    # refuse the RENAME below; it is made again on the next checkout.
+    custom_fields.drop_view(conn)
+
     # Raw SQL from sqlite_master: exec_driver_sql, so nothing in it is taken
     # for a bind parameter.
     conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}_new")
@@ -1365,6 +1425,61 @@ def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]
     conn.exec_driver_sql(f"ALTER TABLE {table}_new RENAME TO {table}")
     for index_sql in indexes:
         conn.exec_driver_sql(index_sql)
+
+
+def optimize_database(db_path: Path | None = None) -> None:
+    """
+    Refresh the query planner's statistics (#1048) of *db_path* (default:
+    the active database) and of its companion database. Cheap when nothing
+    changed much; the first time it creates them (0.15 s for 1.4 GB).
+
+    Called when a database is opened, closed or switched, and after imports,
+    deletes and moves. Runs on its own connection, waits at most a few
+    seconds for a writer, and never raises: without fresh statistics the
+    queries are only slower.
+    """
+    try:
+        if db_path is None:
+            if _engine is None:
+                return
+            db_path = _engine_path(_engine)
+        db_path = Path(db_path)
+        if not db_path.is_file():
+            return
+        maintenance.optimize_file(db_path, timeout=_OPTIMIZE_TIMEOUT)
+        if flags.companion_db and companion.exists(db_path):
+            companion.optimize(db_path, timeout=_OPTIMIZE_TIMEOUT)
+    except Exception:
+        logger.warning("optimize %s failed", db_path, exc_info=True)
+
+
+# Seconds optimize_database() waits for another connection's write.
+_OPTIMIZE_TIMEOUT = 5
+
+
+def _engine_path(engine: Engine) -> Path:
+    return Path(engine.url.database or "")
+
+
+def release_connections(db_path: Path) -> bool:
+    """
+    Close the pooled connections of the active engine if it points at
+    *db_path* — and with them the companion attached to them — so a
+    maintenance step can have the files to itself (VACUUM, moving a damaged
+    companion aside, #1048). Unlike dispose_engine() the engine stays: the
+    next session simply opens a new connection, so nothing on the GUI
+    thread finds the database closed meanwhile. True if it was the active
+    database.
+    """
+    if _engine is None:
+        return False
+    try:
+        if _engine_path(_engine).resolve() != Path(db_path).resolve():
+            return False
+    except OSError:
+        return False
+    _engine.dispose()
+    return True
 
 
 def dispose_engine(db_path: Path | None = None) -> None:
@@ -1395,6 +1510,8 @@ def dispose_engine(db_path: Path | None = None) -> None:
         if engine_path != target_path:
             return  # Denne engine peger ikke på den ønskede database
 
+    # #1048: the database is closed (switch, exit, move, rename …).
+    optimize_database(_engine_path(_engine))
     _engine.dispose()
     _engine = None
     _SessionLocal = None

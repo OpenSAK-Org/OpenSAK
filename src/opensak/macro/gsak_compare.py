@@ -20,7 +20,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
-- Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
+- Custom fields: read, write and define them (`CustomGet`, `CustomPut`, `CustomConfig`), but no GSAK-style field properties (control, height) yet.
 
 ### Database / Waypoints
 
@@ -30,7 +30,8 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | CacheMate | 🚫 | Palm-era format |
 | CancelFilter | ✅ | `clear_filter()` |
 | CodeMatch | ✅ | `filter{codes=}`, `sql("… WHERE code IN …")` |
-| CustomConfig / CustomGet / CustomPut | ❌ | custom fields: work not started; `user_data[1..4]` exist today |
+| CustomConfig | ✅ β | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()` (needs the `companion-db` flag too); no control/height properties |
+| CustomGet / CustomPut | ✅ β | the `custom` field of a cache, `update(code, { custom = { … } })` (needs the `companion-db` flag too) |
 | Database | ✅ partial | `database()`, `switch_database`, `create_database`, `databases`; no delete |
 | DatabaseExists | ✅ | `database_exists()` |
 | DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` (β) for tables |
@@ -203,5 +204,5 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) are missing. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
 """

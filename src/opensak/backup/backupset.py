@@ -8,6 +8,7 @@ A *backup set* is one plain folder in the user's backup folder:
     OpenSAK-backup-2026-10-01_1830-auto/
         manifest.json
         databases/      one snapshot (#943) per database
+        companions/     the companion database of a database, if it has one
         macro_databases/ one snapshot per macro_db() file of a Lua macro
         settings/       opensak.json, filters/, column_views/, icons/
 
@@ -67,6 +68,8 @@ ZIP_SUFFIX = ".zip"   # a compressed set: <set name>.zip (#989)
 MANIFEST_NAME = "manifest.json"
 MANIFEST_FORMAT = 1
 DATABASES_DIRNAME = "databases"
+# Companion databases (#1034), named after their database's file in the set.
+COMPANIONS_DIRNAME = "companions"
 MACRO_DATABASES_DIRNAME = "macro_databases"
 SETTINGS_DIRNAME = "settings"
 
@@ -136,6 +139,10 @@ class DatabaseEntry:
     db_uuid: Optional[str]
     schema_version: Optional[int]
     size_bytes: int
+    # Its companion database (#1034), relative to the set folder; None when
+    # it had none (or a set made before companions existed).
+    companion: Optional[str] = None
+    companion_size_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -171,6 +178,9 @@ class BackupResult:
     # Paths of macro databases that could not be copied (unreadable,
     # damaged). Never a reason to fail the backup itself.
     skipped_macro_databases: tuple[str, ...] = ()
+    # Names of databases whose companion database could not be copied
+    # (#1034). The database itself is in the set.
+    skipped_companions: tuple[str, ...] = ()
 
 
 # ── Backup folder ─────────────────────────────────────────────────────────────
@@ -425,7 +435,7 @@ def write_backup_set(
     skipped: list[str] = []
     for db in databases:
         if Path(db.path).is_file():
-            present.append((db, _database_size(Path(db.path))))
+            present.append((db, _database_size(Path(db.path)) + _companion_size(Path(db.path))))
         else:
             skipped.append(db.name)
             logger.warning("backup: database %r skipped — its file is missing", db.name)
@@ -459,21 +469,27 @@ def write_backup_set(
 
     name = _unique_set_name(folder, now, kind)
     macro_skipped: list[str] = []
+    companion_skipped: list[str] = []
     if compress:
         final = _write_compressed_set(
             present, total, folder, name, kind, now, progress,
             staging_root=staging_root,
             macro_present=macro_present, macro_skipped=macro_skipped,
+            companion_skipped=companion_skipped,
         )
         logger.info("backup: wrote %s (compressed, %d skipped)", final, len(skipped_names))
-        return BackupResult(read_backup_set(final), skipped_names, tuple(macro_skipped))
+        return BackupResult(
+            read_backup_set(final), skipped_names, tuple(macro_skipped),
+            tuple(companion_skipped),
+        )
 
     partial = folder / (name + PARTIAL_SUFFIX)
     final = folder / name
 
     try:
         (partial / DATABASES_DIRNAME).mkdir(parents=True)
-        entries = _write_databases(present, total, partial, progress)
+        entries = _write_databases(present, total, partial, progress,
+                                   companion_skipped=companion_skipped)
         macro_entries = _write_macro_databases(
             macro_present, total, sum(size for _db, size in present),
             partial, progress, macro_skipped,
@@ -496,7 +512,10 @@ def write_backup_set(
         "backup: wrote %s (%d database(s), %d macro database(s), %d skipped)",
         final, len(entries), len(macro_entries), len(skipped_names),
     )
-    return BackupResult(read_backup_set(final), skipped_names, tuple(macro_skipped))
+    return BackupResult(
+        read_backup_set(final), skipped_names, tuple(macro_skipped),
+        tuple(companion_skipped),
+    )
 
 
 def _write_compressed_set(
@@ -511,6 +530,7 @@ def _write_compressed_set(
     staging_root: Optional[Path] = None,
     macro_present: Optional[list[tuple[Path, int]]] = None,
     macro_skipped: Optional[list[str]] = None,
+    companion_skipped: Optional[list[str]] = None,
 ) -> Path:
     """
     Write a compressed set (#989): ``<name>.zip`` with the same layout as a
@@ -540,6 +560,7 @@ def _write_compressed_set(
             entries = _write_databases(
                 present, total, staging, progress,
                 snapshot_share=0.5, after_each=_add_database,
+                companion_skipped=companion_skipped,
             )
             macro_entries = _write_macro_databases(
                 macro_present or [], total, sum(size for _db, size in present),
@@ -678,12 +699,18 @@ def _write_databases(
     *,
     snapshot_share: float = 1.0,
     after_each: Optional[Callable[[Path, str, Callable[[float], None]], None]] = None,
+    companion_skipped: Optional[list[str]] = None,
 ) -> list[DatabaseEntry]:
     """
     Snapshot each database into *partial*/databases/. *after_each* (used for
     compressed sets) gets each finished copy, its name inside the set, and a
     progress reporter for its own work; the snapshot then counts for
     *snapshot_share* of that database's progress.
+
+    A database's companion database (#1034) goes into *partial*/companions/,
+    named after the database's file in the set. One that can't be copied is
+    left out, logged and its database's name added to *companion_skipped*:
+    the database itself is still backed up.
     """
     from opensak.db.db_settings import ensure_seeded, read_file
 
@@ -717,22 +744,70 @@ def _write_databases(
             _report((done / pages if pages else 1.0) * snapshot_share)
 
         snapshot_database(src, target, _db_progress)
+        companion_file, companion_size, companion_copy = _write_companion(
+            src, file_name, partial, db.name, companion_skipped,
+        )
         entry = DatabaseEntry(
             name=db.name,
             file=f"{DATABASES_DIRNAME}/{file_name}",
             db_uuid=_str_or_none(read_file(target).get("db_uuid")),
             schema_version=_user_version(target),
             size_bytes=target.stat().st_size,
+            companion=companion_file,
+            companion_size_bytes=companion_size,
         )
         if after_each is not None:
             def _after_report(f: float, *, _report=_report) -> None:
                 _report(snapshot_share + f * (1 - snapshot_share))
 
             after_each(target, entry.file, _after_report)
+            if companion_copy is not None and companion_file is not None:
+                after_each(companion_copy, companion_file, lambda _f: None)
         _report(1.0)
         done_before += size
         entries.append(entry)
     return entries
+
+
+def _write_companion(
+    db_path: Path,
+    file_name: str,
+    partial: Path,
+    name: str,
+    skipped: Optional[list[str]],
+) -> tuple[Optional[str], int, Optional[Path]]:
+    """
+    Snapshot the companion database of *db_path* into *partial*/companions/,
+    named after *file_name* (the database's file in the set). Returns its
+    name inside the set, its size and the copy — (None, 0, None) when the
+    database has none or it can't be copied.
+    """
+    from opensak.db import companion
+
+    src = companion.companion_path(db_path)
+    if not src.is_file():
+        return None, 0, None
+    copy_name = companion.companion_path(Path(file_name)).name
+    target = partial / COMPANIONS_DIRNAME / copy_name
+    try:
+        snapshot_database(src, target)
+    except (SnapshotError, OSError, sqlite3.Error) as exc:
+        logger.warning("backup: companion database of %r skipped — %s", name, exc)
+        if skipped is not None:
+            skipped.append(name)
+        return None, 0, None
+    return f"{COMPANIONS_DIRNAME}/{copy_name}", target.stat().st_size, target
+
+
+def _companion_size(db_path: Path) -> int:
+    """Size of *db_path*'s companion database and its -wal file (0 without one)."""
+    from opensak.db import companion
+
+    path = companion.companion_path(db_path)
+    try:
+        return _database_size(path) if path.is_file() else 0
+    except OSError:
+        return 0
 
 
 def _present_macro_databases(paths: Iterable[Path]) -> list[tuple[Path, int]]:
@@ -840,6 +915,12 @@ def _manifest(
                 "db_uuid": e.db_uuid,
                 "schema_version": e.schema_version,
                 "size_bytes": e.size_bytes,
+                # Companion databases (#1034): only for a database that has
+                # one. Older versions ignore the key, so the format stays 1.
+                **(
+                    {"companion": {"file": e.companion, "size_bytes": e.companion_size_bytes}}
+                    if e.companion else {}
+                ),
             }
             for e in entries
         ],
@@ -894,6 +975,11 @@ def read_backup_set(path: Path) -> BackupSet:
                     if d.get("schema_version") is not None else None
                 ),
                 size_bytes=int(d.get("size_bytes", 0)),
+                companion=_companion_file(d.get("companion")),
+                companion_size_bytes=(
+                    int(d["companion"].get("size_bytes", 0))
+                    if isinstance(d.get("companion"), dict) else 0
+                ),
             )
             for d in data["databases"]
         )
@@ -1112,6 +1198,13 @@ def _resolved(path: Path) -> Path:
 def _same_path(a: Path, b: Path) -> bool:
     """Same file; case-insensitive on Windows, like the file system."""
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
+
+
+def _companion_file(value: Any) -> Optional[str]:
+    """The companion's file from a manifest's database entry, if any."""
+    if not isinstance(value, dict):
+        return None
+    return _str_or_none(value.get("file")) or None
 
 
 def _str_or_none(value: Any) -> Optional[str]:

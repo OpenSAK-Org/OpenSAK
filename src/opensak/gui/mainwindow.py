@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.refresh_worker import RefreshWorker
+from opensak.db import custom_fields
 from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
@@ -618,6 +619,14 @@ class MainWindow(QMainWindow):
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
 
+        # #1028: define the active database's custom fields
+        self._custom_fields_sep = gc_tools_menu.addSeparator()
+        self._custom_fields_sep.setVisible(flags.companion_db)
+        self._act_custom_fields = QAction(tr("action_custom_fields"), self)
+        self._act_custom_fields.triggered.connect(self._open_custom_fields)
+        self._act_custom_fields.setVisible(flags.companion_db)
+        gc_tools_menu.addAction(self._act_custom_fields)
+
         # ── Macros (Lua, proof of concept) ────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
         # Beta-only until the macro API is settled (#938 step 4).
@@ -1061,6 +1070,39 @@ class MainWindow(QMainWindow):
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
 
+    def _open_custom_fields(self) -> None:
+        """Tools → Custom fields… (#1028): define the active database's fields."""
+        from opensak.db.manager import get_db_manager
+        from opensak.gui.dialogs.custom_fields_dialog import CustomFieldsDialog
+        active = get_db_manager().active
+        if active is None:
+            return
+        dlg = CustomFieldsDialog(active.path, active.name, self)
+        dlg.fields_changed.connect(self._on_custom_fields_changed)
+        dlg.exec()
+
+    def _on_custom_fields_changed(self, renames: list) -> None:
+        """Fields were defined, changed or deleted: renamed fields keep their
+        column in the cache list, and the list shows the new definitions."""
+        from opensak.gui.dialogs.column_dialog import (
+            custom_column_id, get_column_widths, get_visible_columns,
+            set_column_widths, set_visible_columns,
+        )
+        if renames:
+            visible, widths = list(get_visible_columns()), dict(get_column_widths())
+            for old, new in renames:
+                old_id, new_id = custom_column_id(old), custom_column_id(new)
+                visible = [new_id if c == old_id else c for c in visible]
+                if old_id in widths:
+                    widths[new_id] = widths.pop(old_id)
+            set_visible_columns(visible)
+            set_column_widths(widths)
+        self._cache_table.reload_columns()
+        self._cache_table._model.reload_custom()
+        current = self._cache_table.selected_cache()
+        if current is not None:
+            self._on_found_status_changed(current.gc_code)
+
     def _open_backup_dialog(self) -> None:
         """File → Back up now… (issue #953)."""
         from opensak.gui.dialogs.backup_dialog import BackupDialog
@@ -1134,13 +1176,39 @@ class MainWindow(QMainWindow):
         # Issue #549: opening the database may just have migrated it.
         self.show_premigration_backup_notices()
 
+    def show_companion_notices(self) -> None:
+        """
+        Tell the user about companion databases (#1034) that opening a
+        database could not use: a damaged one (moved aside), one of another
+        database, or one from a newer OpenSAK. A no-op when there are none.
+        """
+        from opensak.db import companion
+        notices = companion.take_notices()
+        if not notices:
+            return
+        keys = {
+            companion.NOTICE_CORRUPT: "companion_corrupt_msg",
+            companion.NOTICE_FOREIGN: "companion_foreign_msg",
+            companion.NOTICE_NEWER: "companion_newer_msg",
+        }
+        text = "\n\n".join(
+            tr(keys[n.kind], file=n.db_path.name, path=str(n.path))
+            for n in notices if n.kind in keys
+        )
+        if text:
+            QMessageBox.warning(self, tr("companion_notice_title"), text)
+
     def show_premigration_backup_notices(self) -> None:
         """
         Tell the user about databases that were backed up before a schema
         migration (issue #549), so the backup isn't a silent background
         action they never find out about. Called after startup and after
         switching databases; a no-op when no backup was made.
+
+        Also shows what opening the database found about its companion
+        database (#1034, show_companion_notices()).
         """
+        self.show_companion_notices()
         from opensak.backup.premigration import take_notices
         notices = take_notices()
         if not notices:
@@ -1543,6 +1611,11 @@ class MainWindow(QMainWindow):
             if worker.isRunning():
                 worker.quit()
                 worker.wait(500)
+        # #1048: fresh planner statistics for the next start. After the
+        # exit backup; app.py records the backup state only afterwards, so
+        # this doesn't count as a change.
+        from opensak.db.database import optimize_database
+        optimize_database()
         # Tear down the map's WebEngine page before its profile while the event
         # loop is still alive. The map's QWebEngineProfile/QWebEnginePage are
         # parent-less; relying on aboutToQuit (which fires only at app exit) means
@@ -1641,6 +1714,7 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_result(
         self, generation: int, table_caches: list, map_caches: list,
+        custom_values: object = None,
     ) -> None:
         """GUI-thread continuation of _refresh_cache_list() — see RefreshWorker."""
         QApplication.restoreOverrideCursor()
@@ -1653,7 +1727,10 @@ class MainWindow(QMainWindow):
             len(table_caches), time.monotonic() - _t0,
         )
 
-        self._cache_table.load_caches(table_caches)
+        self._cache_table.load_caches(
+            table_caches,
+            custom_values if isinstance(custom_values, custom_fields.Values) else None,
+        )
         if self._macro_pending_select:
             code, self._macro_pending_select = self._macro_pending_select, None
             self._cache_table.select_by_gc_code(code)
@@ -2595,6 +2672,8 @@ class MainWindow(QMainWindow):
                 session.add(cache)
                 session.flush()   # save_related() har brug for cache.id
                 dlg.save_related(session, cache)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662: a newly added cache/custom waypoint had no
             # distance/bearing computed, so it sorted to the bottom of the
             # list (as if distance were unset) until the user switched the
@@ -2612,6 +2691,11 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(
                 tr("status_cache_added", gc_code=data["gc_code"]), 3000
             )
+
+    def _report_custom_save(self, error: Optional[str]) -> None:
+        """Show why the Edit cache dialog's custom fields weren't saved."""
+        if error:
+            QMessageBox.warning(self, tr("warning"), error)
 
     def _edit_waypoint(self) -> None:
         cache = self._cache_table.selected_cache()
@@ -2648,6 +2732,8 @@ class MainWindow(QMainWindow):
                             setattr(c, field, value)
                     # UserNote (note + korrigerede koordinater) og child-waypoints
                     dlg.save_related(session, c)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662 follow-up: same stale-distance issue as adding a
             # new cache — editing coordinates left Cache.distance/bearing
             # unchanged until the center/home point was switched away and
@@ -2762,8 +2848,10 @@ class MainWindow(QMainWindow):
     def _bulk_delete_caches(self, gc_codes: list[str]) -> None:
         """Delete caches and all child records by GC codes (bulk SQL)."""
         from opensak.db.cache_delete import delete_caches
+        from opensak.db.database import optimize_database
         with get_session() as session:
             delete_caches(session, gc_codes)
+        optimize_database()   # #1048
 
     def _set_flag_for_filtered(self, flagged: bool) -> None:
         """Issue #293: set or clear the user flag on every cache in the

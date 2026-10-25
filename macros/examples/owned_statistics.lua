@@ -2,7 +2,7 @@
 -- Name: Owned cache statistics
 -- Author: OpenSAK
 -- Version: 1.0
--- Requires-API: 3
+-- Requires-API: 4
 -- Description: Write an HTML page with statistics of the caches you own and the finds they received
 -- Permissions: open
 --

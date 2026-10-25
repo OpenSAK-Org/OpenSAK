@@ -7,6 +7,11 @@ foreign keys from the child tables to caches.id have no ON DELETE CASCADE,
 so the logs, waypoints, attributes, trackables and user note are deleted
 first. Deletes run in chunks so a large filter never hits SQLite's
 bound-parameter limit (#1041).
+
+Rows of the deleted caches in the companion database (#1034) go too, in the
+same transaction, when the session's connection has it attached. SQLite
+commits the main database first, so a crash can only leave rows without a
+cache behind, which are removed the next time the database is opened.
 """
 
 from __future__ import annotations
@@ -39,4 +44,17 @@ def delete_caches(session: Session, gc_codes: Iterable[str]) -> list[str]:
             ).delete(synchronize_session=False)
         session.query(Cache).filter(Cache.id.in_(cache_ids)).delete(synchronize_session=False)
         deleted.update(row[1] for row in rows)
-    return [c for c in codes if c in deleted]
+    result = [c for c in codes if c in deleted]
+    if result:
+        _delete_companion_rows(session, result)
+    return result
+
+
+def _delete_companion_rows(session: Session, gc_codes: list[str]) -> None:
+    """Delete *gc_codes*' rows from the companion database attached to
+    *session*'s connection, if any (#1034)."""
+    from opensak.db import companion
+
+    dbapi = session.connection().connection.dbapi_connection
+    if dbapi is not None:
+        companion.delete_rows_in(dbapi, gc_codes)

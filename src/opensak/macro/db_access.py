@@ -59,6 +59,12 @@ def _key(macro: Optional[str | Path]) -> str:
     return os.path.normcase(str(resolved))
 
 
+def macro_key(macro: Optional[str | Path]) -> str:
+    """The key of the macro at *macro*, as approvals store it. Also the
+    owner of the tables a macro creates in the companion database."""
+    return _key(macro)
+
+
 def always_approved() -> list[str]:
     """The macro paths approved permanently, as stored."""
     from opensak.settings_store import get_store

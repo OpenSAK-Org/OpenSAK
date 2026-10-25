@@ -101,6 +101,26 @@ its changes are part of this beta._
 > The new texts are machine-translated in all languages except Danish and
 > English — corrections from native speakers are very welcome.
 
+### Added
+
+- **Database maintenance (#1048)** — Manage databases has a new
+  *Maintenance…* button. For the selected database it shows the file and
+  WAL size, how much of the file is free space, the schema and SQLite
+  version and the number of caches, logs and waypoints. *Check* looks for
+  damage (*Thorough* for the full integrity check), *Optimize* refreshes
+  the statistics SQLite uses to plan queries, *Checkpoint* empties the WAL
+  file, and *Compact…* gives free space back to the disk (VACUUM): only
+  when it pays off, after checking the free disk space, and with a backup
+  first, ticked by default above 100 MB. It also works on the database
+  that is open. Contributed by nagisml.
+- **Faster filters and map on large databases (#1048)** — OpenSAK now
+  keeps SQLite's query statistics up to date by itself: when a database
+  is opened, closed or switched, after an update of its schema, and after
+  imports, deletes and moves. Until now no database had any, so SQLite
+  often chose a slow way to run a query; on a 1.4 GB database the map
+  query went from 0.5 s to 0.04 s. The first time takes a fraction of a
+  second. Contributed by nagisml.
+
 ### Changed
 
 - **Text follows the selected language everywhere (#1127)** — the
@@ -134,6 +154,32 @@ its changes are part of this beta._
   `points` draw region and dot maps from the offline boundary data of
   Update location. Charts follow the report page's light/dark theme. No
   JavaScript and nothing leaves your computer. Contributed by nagisml.
+- **Companion data in the Maintenance dialog (#1149)** — with the
+  companion database on, *Maintenance…* also checks, optimizes and
+  compacts the database's companion file, and lists its tables per owner:
+  kind (per cache or free), rows and estimated size. A macro's table can
+  be emptied or dropped, a table whose macro file was moved or renamed
+  can be given to the macro's new file (*Reassign owner…*), and *Clean
+  up* removes rows of caches that are gone. OpenSAK's own tables (custom
+  fields) are shown but not changed there. A damaged companion can be
+  moved aside; the database itself is never touched. Contributed by
+  nagisml.
+- **Custom fields everywhere (#1028, #1149, #126, #821 item 5)** — with
+  the companion database on, your own fields per cache, as in GSAK:
+  *Tools → Custom fields…* adds, renames, retypes and deletes them, local
+  to one database or global for all. Each field can be a column in the
+  cache list (*Choose columns*), shows on the detail panel's *Custom*
+  tab and is edited on the *Custom fields* tab of *Edit cache*. The
+  Filter dialog has a *Custom* tab with the right conditions per type
+  (yes/no, text operators, numbers, dates), and Where clauses use the
+  fields by name. A field can have a display expression, such as
+  `nullif(GCFinds,-1)` (GSAK's are imported, your own are entered in
+  *Add…*/*Edit…* and checked on save), which the cache list shows;
+  filters and sorting use the stored value, as in GSAK. The GSAK filter import now brings over the *Custom* tab and
+  where clauses on custom fields, `Custom` and `CachesAll`. Macros read
+  them as `cache.custom`, change them with `opensak.update(code,
+  { custom = … })` and define them with `opensak.define_custom_field{}`.
+  Contributed by nagisml.
 - **Statistics example macros** — *find_statistics* (key figures,
   charts and maps of your finds), *database_statistics* (the same for all
   caches in a database) and *region_coverage* (the states or countries

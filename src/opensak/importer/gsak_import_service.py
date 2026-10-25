@@ -303,6 +303,10 @@ class GsakImportReport:
                     f"    {r.created} new, {r.updated} updated, {r.skipped} skipped, "
                     f"{r.waypoints} waypoints, {r.logs} logs, {len(r.errors)} errors"
                 )
+                cf = r.custom_fields
+                if cf is not None and cf.fields:
+                    lines.append(f"    {cf.fields} custom fields ({len(cf.created)} new, "
+                                 f"{len(cf.global_fields)} global), values for {cf.values} caches")
                 if r.note_images_replaced:
                     lines.append(f"    {r.note_images_replaced} embedded note images "
                                  "replaced by placeholders")
@@ -412,6 +416,39 @@ def _plan(contents: GsakBackupContents, opts: GsakImportOptions) -> list[_Job]:
 
 # ── Running ─────────────────────────────────────────────────────────────────
 
+class _SettingsDb:
+    """gsak.db3 of a run, unpacked (or checked) once when first needed: the
+    databases need it for their global custom fields, the settings step for
+    locations and filters."""
+
+    def __init__(self, contents: GsakBackupContents, temp_dir: Optional[Path],
+                 check_file: Optional[Callable[[Path], None]]):
+        self._contents = contents
+        self._temp_dir = temp_dir
+        self._check_file = check_file
+        self._path: Optional[Path] = None
+
+    @property
+    def available(self) -> bool:
+        return self._contents.has_settings_db
+
+    def path(self, progress: Callable) -> Path:
+        """The file on disk. Raises if it can't be unpacked or read."""
+        if self._path is None:
+            if self._contents.settings_member is not None:
+                assert self._temp_dir is not None
+                progress(f"{GSAK_SETTINGS_DB_NAME}: unpacking")
+                self._path = extract_gsak_member(self._contents.source,
+                                                 self._contents.settings_member,
+                                                 self._temp_dir / "settings")
+            else:
+                assert self._contents.settings_path is not None
+                if self._check_file is not None:
+                    self._check_file(self._contents.settings_path)
+                self._path = self._contents.settings_path
+        return self._path
+
+
 def run_gsak_import(
     source: Path,
     options: Optional[GsakImportOptions] = None,
@@ -459,6 +496,7 @@ def run_gsak_import(
     try:
         if contents.is_zip:
             temp_dir = Path(tempfile.mkdtemp(prefix="gsak_import_"))
+        settings = _SettingsDb(contents, temp_dir, check_file)
         runnable = [j for j in jobs if j.report.action not in (ACTION_SKIPPED, ACTION_FAILED)]
         for index, job in enumerate(runnable):
             if report.cancelled:
@@ -466,7 +504,8 @@ def run_gsak_import(
                 continue
             later = runnable[index + 1:]
             try:
-                _run_job(job, index, contents, temp_dir, later, report, progress, check_file)
+                _run_job(job, index, contents, temp_dir, later, report, progress, check_file,
+                         settings)
             except _Cancelled:
                 report.cancelled = True
                 if job.report.result is None:   # else only its distances are missing
@@ -481,7 +520,7 @@ def run_gsak_import(
                 _discard_unpacked(job)
         if not report.cancelled:
             try:
-                _run_settings(contents, kind, opts, temp_dir, report, progress, check_file)
+                _run_settings(kind, opts, report, progress, settings)
             except _Cancelled:
                 report.cancelled = True
     finally:
@@ -497,8 +536,10 @@ def run_gsak_import(
 
 def _run_job(job: _Job, index: int, contents: GsakBackupContents,
              temp_dir: Optional[Path], later: list[_Job], report: GsakImportReport,
-             progress: Callable, check_file: Optional[Callable[[Path], None]]) -> None:
-    from opensak.db.database import get_session, session_for
+             progress: Callable, check_file: Optional[Callable[[Path], None]],
+             settings: Optional[_SettingsDb] = None) -> None:
+    from opensak.db.database import get_session, optimize_database, session_for
+    from opensak.utils import flags
     from opensak.db.manager import get_db_manager
 
     rep, entry = job.report, job.entry
@@ -535,6 +576,18 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
             raise GsakImportError(f"OpenSAK database {rep.target!r} was not created")
         rep.target_path = info.path
 
+    # gsak.db3 holds the definitions of GSAK's global custom fields.
+    settings_db: Optional[Path] = None
+    if flags.companion_db and settings is not None and settings.available:
+        try:
+            settings_db = settings.path(progress)
+        except _Cancelled:
+            raise
+        except Exception as exc:
+            logger.warning("GSAK import: %s not readable", GSAK_SETTINGS_DB_NAME, exc_info=True)
+            report.notes.append(f"{GSAK_SETTINGS_DB_NAME} could not be read ({exc}): "
+                                "global custom fields imported as local fields")
+
     active_path = manager.active_path
     rep.active = rep.target_path == active_path
     label = f"{entry.name} → {rep.target}"
@@ -546,7 +599,9 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
         rep.result = import_gsak_db(
             db3_path, session,
             progress_cb=lambda done, total: progress(label, done, total),
+            settings_db=settings_db,
         )
+    optimize_database(rep.target_path)   # #1048
     if all(j.report.target.lower() != rep.target.lower() for j in later):
         progress(f"{rep.target}: distances")
         update_distances(rep.target_path)
@@ -563,13 +618,12 @@ def _discard_unpacked(job: _Job) -> None:
     job.unpacked = False
 
 
-def _run_settings(contents: GsakBackupContents, kind: str, opts: GsakImportOptions,
-                  temp_dir: Optional[Path], report: GsakImportReport,
-                  progress: Callable, check_file: Optional[Callable[[Path], None]]) -> None:
+def _run_settings(kind: str, opts: GsakImportOptions, report: GsakImportReport,
+                  progress: Callable, settings: _SettingsDb) -> None:
     """gsak.db3: user locations, then saved filters — one copy serves both."""
     if opts.filters is None and opts.locations is None:
         return
-    if not contents.has_settings_db:
+    if not settings.available:
         if kind == SOURCE_FILE:
             report.notes.append("user locations and saved filters are only imported "
                                 "from a backup, a GSAK folder or gsak.db3")
@@ -578,16 +632,7 @@ def _run_settings(contents: GsakBackupContents, kind: str, opts: GsakImportOptio
                                 "saved filters not imported")
         return
     try:
-        if contents.settings_member is not None:
-            assert temp_dir is not None
-            progress(f"{GSAK_SETTINGS_DB_NAME}: unpacking")
-            db3 = extract_gsak_member(contents.source, contents.settings_member,
-                                      temp_dir / "settings")
-        else:
-            assert contents.settings_path is not None
-            db3 = contents.settings_path
-            if check_file is not None:
-                check_file(db3)
+        db3 = settings.path(progress)
     except _Cancelled:
         raise
     except Exception as exc:

@@ -36,7 +36,7 @@ shown.
 
 ## Filter tabs
 
-The filter dialog is split across ten tabs:
+The filter dialog is split across ten tabs, eleven with custom fields:
 
 | Tab | What's on it |
 |---|---|
@@ -49,6 +49,7 @@ The filter dialog is split across ten tabs:
 | **Trackables** | Caches by their trackables — name, tracking code, count |
 | **Attributes** | ~70 standard Groundspeak attributes |
 | **Text Search** | Full-text search across description, logs, notes, and (optionally) hint |
+| **Custom** | The database's custom fields, one row each (beta, `companion-db` feature flag) |
 | **Where** | Raw SQL WHERE clause for advanced filtering |
 
 ---
@@ -484,6 +485,25 @@ difficulty > 3 AND terrain > 3
 
 The clause is combined with AND alongside any other active filters.
 
+With custom fields (beta, `companion-db` feature flag), the clause runs on the caches *and* their custom fields, so a field is used by name, as in GSAK: `Angel = 1 AND GCFinds > 100`. A cache nobody set a field for has the field's default. The **ⓘ** button lists the fields of the active database.
+
+---
+
+## Custom tab
+
+Beta: only with the `companion-db` feature flag (on in beta builds).
+
+Custom fields are your own fields per cache, as in GSAK (*Tools → Custom fields…*, or imported from GSAK). The **Custom** tab has one row per field of the active database, with the conditions of its type:
+
+| Type | Condition |
+|---|---|
+| Yes/No | *Yes* / *No* boxes; both ticked = any |
+| Text | The text operators of *Name* (contains, equals, starts/ends with, in list, empty, regex, and their negations) |
+| Whole / decimal number | *Equal*, *Less than*, *At most*, *More than*, *At least*, *Between*, *Not between* |
+| Date | The date operators of the Dates tab, except *compared with* |
+
+A cache nobody set a field for has the field's default, so *Angel = No* also finds the caches you never touched. A filter profile names fields by name: loaded in a database without such a field, the condition is kept unchanged (the tab lists it) and matches no cache there.
+
 ---
 
 ## Saving a filter profile
@@ -513,17 +533,15 @@ Every condition in a GSAK filter lands in one of three places:
 
 | | What it means | Counts as migrated |
 |---|---|---|
-| **A filter** | The condition exists in the tabs above — cache types, D/T, dates (including *compared with* another date), logs (including *exclude*), child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
+| **A filter** | The condition exists in the tabs above — custom fields (the *Custom* tab, with custom fields on), cache types, D/T, dates (including *compared with* another date), logs (including *exclude*), child waypoints, polygons, attributes, text fields with all their operators (user data 1–4 included), personal note, elevation, distance, a bearing in degrees and compass quadrants (both as *Direction*), TB/coin names and "no trackables" (on the *Trackables* tab), and GSAK's *reverse filter* (as *Invert filter*) | yes |
 | **SQL in the Where tab** | OpenSAK stores the data but has no filter row for it — the watch list, user sort, a bearing in degrees next to compass quadrants (the dialog has only one *Direction* row) | yes |
 | **A comment in the Where tab** | Nothing in OpenSAK can express it | no |
 
 The third case is why the Where tab of an imported filter often opens with a block of `--` lines. They do nothing; they are there so you can see exactly what GSAK filtered on and rebuild it yourself. A typical one looks like this:
 
 ```sql
--- NOT MIGRATED from the GSAK filter "Ideas_CH" (2 condition(s)).
+-- NOT MIGRATED from the GSAK filter "Ideas_CH" (1 condition(s)).
 -- Rebuild these by hand, then delete the comment.
---   User-defined GSAK column "Niggae_Ignore": OpenSAK stores no custom columns
---     (only user_data_1-4) … The GSAK criterion was: Niggae_Ignore;bool;…
 --   Cache types "Waymark": GSAK has these cache types but OpenSAK does not …
 -- Watch list
 (coalesce(watch, 0) = 1)
@@ -531,7 +549,9 @@ The third case is why the Where tab of an imported filter often opens with a blo
 
 The comments always come first and the executable SQL last, so the clause stays valid whatever you delete. Where a whole GSAK `WHERE` clause could not be translated, the translation-so-far is included in the comment, ready to be fixed up and uncommented — it is deliberately never left live, because SQL that fails to run would silently make the filter match nothing.
 
-The things that cannot be migrated are, in practice: GSAK's user-defined columns (OpenSAK has no custom columns, and the cache import does not carry them over), the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId). GSAK's *IsOwner*, *MacroFlag*, *MacroSort*, *Symbol* and *LastUserDate* migrate to OpenSAK's own columns of the same meaning.
+With custom fields on, GSAK's *Custom* tab becomes OpenSAK's, and where clauses keep using custom fields by name; GSAK's `Custom` table and `CachesAll` view become OpenSAK's `caches_all`, so `code in (select cCode from custom where Angel = 1)` runs as `gc_code in (select gc_code from caches_all where Angel = 1)`. The operators of GSAK's Custom tab are saved in GSAK's language; English and German are understood, anything else ends up as a comment. A field the active database doesn't have is still converted, with a note.
+
+The things that cannot be migrated are, in practice: GSAK's custom fields while custom fields are off, the Waymark and L&F Celebration cache types (the cache import files them under *Unknown Cache*, where nothing tells them apart), GSAK macro variables inside a saved `WHERE` clause, and columns OpenSAK does not store at all (FavPerc, LabId — unless they are custom fields of the active database). GSAK's *IsOwner*, *MacroFlag*, *MacroSort*, *Symbol* and *LastUserDate* migrate to OpenSAK's own columns of the same meaning.
 
 Two conditions come across with a small difference, which the import reports list:
 
