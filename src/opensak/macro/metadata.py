@@ -42,6 +42,10 @@ contact (BLOCKED_DOMAINS) is kept as well and listed by blocked_hosts.
 
 added_permissions() compares two versions of a macro: an update for which
 it returns anything asks for more than the version the user had.
+
+header_keys() lists the keys a header actually sets, without the
+defaults parse_header() fills in, e.g. for checking that a macro submitted
+to the community repository has a complete header.
 """
 
 from __future__ import annotations
@@ -51,7 +55,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 # Only the top of the file is read: the header is a few lines, and a
 # folder may hold large generated macros.
@@ -195,22 +199,37 @@ def _header_lines(text: str) -> list[str]:
     return lines
 
 
+def _header_items(lines: list[str]) -> Iterator[tuple[str, str]]:
+    """The (lower-cased key, value) of each key line in *lines* (from
+    _header_lines) with a value; a key without one counts as not set."""
+    for line in lines:
+        m = _KEY_LINE.match(line)
+        if m and m.group(2):
+            yield m.group(1).lower(), m.group(2)
+
+
+def header_keys(text: str) -> tuple[str, ...]:
+    """The keys set in the header of macro source *text*, lower-cased, each
+    once, in the order first written. Unlike parse_header() nothing is
+    filled in: a header without Name gives no "name". Keys that are not
+    known (also "Note: ..." prose) are listed too, and a key with an empty
+    value is not."""
+    lines = _header_lines(text.lstrip("﻿"))
+    return tuple(dict.fromkeys(key for key, _ in _header_items(lines)))
+
+
 def parse_header(text: str, path: Path) -> MacroInfo:
     """The metadata in the header of macro source *text* from *path*."""
     fields: dict[str, str] = {}
     lists: dict[str, list[str]] = {}
     lines = _header_lines(text.lstrip("﻿"))
-    for line in lines:
-        m = _KEY_LINE.match(line)
-        if not m:
-            continue
-        key = m.group(1).lower()
+    for key, value in _header_items(lines):
         field = _KEYS.get(key)
-        if field and field not in fields and m.group(2):
-            fields[field] = m.group(2)
-        elif key in _LIST_KEYS and m.group(2):
+        if field and field not in fields:
+            fields[field] = value
+        elif key in _LIST_KEYS:
             lists.setdefault(key, []).extend(
-                w for w in _LIST_SEPARATOR.split(m.group(2)) if w)
+                w for w in _LIST_SEPARATOR.split(value) if w)
     if "description" not in fields and lines:
         m = _LEGACY_SUMMARY.match(lines[0])
         if m:
