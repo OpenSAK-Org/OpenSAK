@@ -4,6 +4,174 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.10] — 2026-10-26
+
+> Headline: **OpenSAK can import without a window** — `opensak import
+> gpx|gsak` lets Task Scheduler, cron or launchd refresh a database
+> overnight — and **Manage databases can check, optimize and compact a
+> database**, which also makes filters and the map much faster on large
+> databases. Beta testers get **custom fields as in GSAK**, imported from
+> GSAK with their values, macros that **download web pages**, and
+> **macro approvals tied to the macro's code**.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
+
+### Added
+
+- **Import from the command line (#937)** — `opensak import gpx <files or
+  folders> --db "My Caches"` and `opensak import gsak <zip, folder or
+  sqlite.db3> --db "My Caches"` import without opening the window, so a
+  scheduled task can refresh a database overnight. They run the same
+  steps as the import dialog (locations and distances included), migrate
+  an older database after the usual backup, and never create a database.
+  `--move-imported-to` moves the files that imported without errors,
+  `--json` or `--quiet` set the output, and `--help` lists every option.
+  A run waits (`--wait`) or stops with its own exit code when the
+  database is open in OpenSAK, and a lock left by a crashed run is taken
+  over. A bare `opensak` starts OpenSAK as before. Contributed by
+  nagisml.
+- **`opensak-cli.exe` on Windows (#937)** — a console twin of
+  `opensak.exe` in the same folder, so cmd and PowerShell wait for it and
+  get its output and exit code, for `opensak import …` and `--run-macro`.
+  The Store package will get a command-line alias for it (`opensak` for
+  stable, `opensak-beta` for beta); this is not tested in a Store build
+  yet. Contributed by nagisml.
+- **Database maintenance (#1048)** — Manage databases has a new
+  *Maintenance…* button. For the selected database it shows the file and
+  WAL size, how much of the file is free space, the schema and SQLite
+  version and the number of caches, logs and waypoints. *Check* looks for
+  damage (*Thorough* for the full integrity check), *Optimize* refreshes
+  the statistics SQLite uses to plan queries, *Checkpoint* empties the WAL
+  file, and *Compact…* gives free space back to the disk (VACUUM): only
+  when it pays off, after checking the free disk space, and with a backup
+  first, ticked by default above 100 MB. It also works on the database
+  that is open. Contributed by nagisml.
+- **Faster filters and map on large databases (#1048)** — OpenSAK now
+  keeps SQLite's query statistics up to date by itself: when a database
+  is opened, closed or switched, after an update of its schema, and after
+  imports, deletes and moves. Until now no database had any, so SQLite
+  often chose a slow way to run a query; on a 1.4 GB database the map
+  query went from 0.5 s to 0.04 s. The first time takes a fraction of a
+  second on most databases, but on a very large one (tens of GB) the
+  first open can take several seconds, or more than 20 seconds from a
+  cold disk, while OpenSAK seems to hang. It is a one-off: after that it
+  takes about 10 ms at any size. Contributed by nagisml.
+
+### Changed
+
+- **Update Found from reference database is lighter (#1095)** — it no
+  longer loads every cache of the active database into memory, but
+  checks the reference database in chunks, with the same results.
+- **The splash screen shows how long you have used OpenSAK (#1130)** —
+  the same "Using OpenSAK since … — day N" line as Help → About. Suggested
+  by CheminerWill.
+
+### Fixed
+
+- **Locations after a GPX import into another database (#937)** — after
+  importing into a database other than the open one, the import dialog
+  filled in country, state and county for the open database instead of
+  the one imported into. Contributed by nagisml.
+- **Swedish translations (#1171)** — the texts for location refinement
+  and distance settings. Translations by hansblom.
+
+### In beta builds only
+
+- **Companion database (#1034, #1149)** — each database can get a
+  companion file next to it (`<name>.companion.db3`), created the first
+  time something is stored in it. It holds the custom fields and the
+  macros' own tables, so the database itself keeps its fixed layout. It
+  moves, copies, is deleted, backed up and restored together with its
+  database, rows for a cache follow that cache when it is deleted, moved
+  or copied, and a damaged companion is moved aside without ever
+  touching the database. On in beta builds (`companion-db`). Contributed
+  by nagisml.
+- **Companion data in the Maintenance dialog (#1149)** — with the
+  companion database on, *Maintenance…* also checks, optimizes and
+  compacts the database's companion file, and lists its tables per owner:
+  kind (per cache or free), rows and estimated size. A macro's table can
+  be emptied or dropped, a table whose macro file was moved or renamed
+  can be given to the macro's new file (*Reassign owner…*), and *Clean
+  up* removes rows of caches that are gone. OpenSAK's own tables (custom
+  fields) are shown but not changed there. A damaged companion can be
+  moved aside; the database itself is never touched. Contributed by
+  nagisml.
+- **Custom fields everywhere (#1028, #1149, #126, #821 item 5)** — with
+  the companion database on, your own fields per cache, as in GSAK:
+  *Tools → Custom fields…* adds, renames, retypes and deletes them, local
+  to one database or global for all. Each field can be a column in the
+  cache list (*Choose columns*), shows on the detail panel's *Custom*
+  tab and is edited on the *Custom fields* tab of *Edit cache*. The
+  Filter dialog has a *Custom* tab with the right conditions per type
+  (yes/no, text operators, numbers, dates), and Where clauses use the
+  fields by name. A field can have a display expression, such as
+  `nullif(GCFinds,-1)` (GSAK's are imported, your own are entered in
+  *Add…*/*Edit…* and checked on save), which the cache list shows;
+  filters and sorting use the stored value, as in GSAK. The GSAK filter import now brings over the *Custom* tab and
+  where clauses on custom fields, `Custom` and `CachesAll`. Macros read
+  them as `cache.custom`, change them with `opensak.update(code,
+  { custom = … })` and define them with `opensak.define_custom_field{}`.
+  Contributed by nagisml.
+- **Custom fields from GSAK (#1028, #1149)** — the GSAK import brings
+  over your custom fields: the definitions of each database and the
+  global ones from `gsak.db3`, the values of every cache, and GSAK's
+  display expressions. Fields are created where they are missing, and a
+  name that clashes with a cache column gets `_custom` appended. Tested
+  with a 2.5 GB GSAK backup of 21 databases and about 818,000 caches.
+  Contributed by nagisml.
+- **Macros share tables in the companion database (#1034)** — every
+  macro can read every table there, and change only the tables it
+  created itself; OpenSAK records which macro owns what. New:
+  `opensak.companion()`, `opensak.companion_table{}` and
+  `opensak.companion_tables()`. The example macros *dnf_stats* and
+  *dnf_alert* show one macro writing a table and another reading it.
+  Contributed by nagisml.
+- **Macro API version 4** — the companion and custom-field functions, and
+  the additions since beta.7 (`macro_flag()`, the new `filter{}`,
+  `sort{}` and cache fields), are API version 4. Macros that use them
+  should declare `Requires-API: 4`.
+- **Approvals belong to the macro's code (#1091)** — an "Always" approval
+  is now stored with the macro's file *and* a fingerprint of its code. A
+  macro replaced or changed outside OpenSAK's own editor is asked again,
+  once per run, with what changed (e.g. `1.0 → 1.1`, "it now also
+  declares: write"). Folder approvals given with "Always" now belong to
+  that macro only, not to every macro, and a macro started with
+  `run_macro()` no longer inherits its caller's folders. Edits in
+  OpenSAK's macro editor keep the approvals. For VS Code and other
+  external editors there is *While I edit it*, valid until OpenSAK
+  closes. Existing approvals are converted on the first start.
+  Contributed by nagisml.
+- **Macros can download web pages (#1079)** — `opensak.get_url()`, like
+  GSAK's GetUrl, e.g. to check a puzzle answer or fetch a data file.
+  OpenSAK asks before a macro first contacts a web site (*This time
+  only*, *Always* or *Deny*), and says when the site is on your local
+  network or the connection isn't encrypted. Only plain GET requests, no
+  cookies, at most 50 MB, and Geocaching.com, coord.info and Groundspeak's
+  other sites can never be contacted. On in beta builds only, on its own
+  flag (`lua-macro-net`). The privacy policy has a new section about it.
+  Contributed by nagisml.
+- **See what a macro declares before it first runs (#1079)** — the
+  `Permissions:` and `Network:` lines of a macro's header are shown
+  before its first run, and again when a new version declares more. This
+  approves nothing; OpenSAK still asks for every write, folder and web
+  site. Contributed by nagisml.
+
+### For developers
+
+- **Release builds check the tag (#1168)** — `build.yml` and
+  `deploy-site.yml` refuse to build when the tag doesn't match
+  `__version__`, via the new `scripts/bump_version.py --check-tag`.
+- **Distance method passed explicitly (#1096)** — `distance_km()` and
+  `distance_km_batch()` take the method as an argument, so
+  `filters/engine.py` no longer reads the GUI settings.
+- **`header_keys()`** in `opensak.macro.metadata` returns the keys a
+  macro header actually sets, for the OpenSAK-Macros checker.
+- **Unit-test timeout 45 minutes** — the Windows runner needs 18–26
+  minutes for the ~7,900 unit tests and hit the 30-minute limit once.
+
+---
+
 ## [1.22.0-beta.9] — 2026-10-24
 
 _1.22.0-beta.8 was tagged without its version bump and never released;
@@ -101,26 +269,6 @@ its changes are part of this beta._
 > The new texts are machine-translated in all languages except Danish and
 > English — corrections from native speakers are very welcome.
 
-### Added
-
-- **Database maintenance (#1048)** — Manage databases has a new
-  *Maintenance…* button. For the selected database it shows the file and
-  WAL size, how much of the file is free space, the schema and SQLite
-  version and the number of caches, logs and waypoints. *Check* looks for
-  damage (*Thorough* for the full integrity check), *Optimize* refreshes
-  the statistics SQLite uses to plan queries, *Checkpoint* empties the WAL
-  file, and *Compact…* gives free space back to the disk (VACUUM): only
-  when it pays off, after checking the free disk space, and with a backup
-  first, ticked by default above 100 MB. It also works on the database
-  that is open. Contributed by nagisml.
-- **Faster filters and map on large databases (#1048)** — OpenSAK now
-  keeps SQLite's query statistics up to date by itself: when a database
-  is opened, closed or switched, after an update of its schema, and after
-  imports, deletes and moves. Until now no database had any, so SQLite
-  often chose a slow way to run a query; on a 1.4 GB database the map
-  query went from 0.5 s to 0.04 s. The first time takes a fraction of a
-  second. Contributed by nagisml.
-
 ### Changed
 
 - **Text follows the selected language everywhere (#1127)** — the
@@ -154,32 +302,6 @@ its changes are part of this beta._
   `points` draw region and dot maps from the offline boundary data of
   Update location. Charts follow the report page's light/dark theme. No
   JavaScript and nothing leaves your computer. Contributed by nagisml.
-- **Companion data in the Maintenance dialog (#1149)** — with the
-  companion database on, *Maintenance…* also checks, optimizes and
-  compacts the database's companion file, and lists its tables per owner:
-  kind (per cache or free), rows and estimated size. A macro's table can
-  be emptied or dropped, a table whose macro file was moved or renamed
-  can be given to the macro's new file (*Reassign owner…*), and *Clean
-  up* removes rows of caches that are gone. OpenSAK's own tables (custom
-  fields) are shown but not changed there. A damaged companion can be
-  moved aside; the database itself is never touched. Contributed by
-  nagisml.
-- **Custom fields everywhere (#1028, #1149, #126, #821 item 5)** — with
-  the companion database on, your own fields per cache, as in GSAK:
-  *Tools → Custom fields…* adds, renames, retypes and deletes them, local
-  to one database or global for all. Each field can be a column in the
-  cache list (*Choose columns*), shows on the detail panel's *Custom*
-  tab and is edited on the *Custom fields* tab of *Edit cache*. The
-  Filter dialog has a *Custom* tab with the right conditions per type
-  (yes/no, text operators, numbers, dates), and Where clauses use the
-  fields by name. A field can have a display expression, such as
-  `nullif(GCFinds,-1)` (GSAK's are imported, your own are entered in
-  *Add…*/*Edit…* and checked on save), which the cache list shows;
-  filters and sorting use the stored value, as in GSAK. The GSAK filter import now brings over the *Custom* tab and
-  where clauses on custom fields, `Custom` and `CachesAll`. Macros read
-  them as `cache.custom`, change them with `opensak.update(code,
-  { custom = … })` and define them with `opensak.define_custom_field{}`.
-  Contributed by nagisml.
 - **Statistics example macros** — *find_statistics* (key figures,
   charts and maps of your finds), *database_statistics* (the same for all
   caches in a database) and *region_coverage* (the states or countries
