@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!-- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand. -->
-<!-- OpenSAK Lua macro API, version 3. Reference: docs/macros/api.md -->
+<!-- OpenSAK Lua macro API, version 4. Reference: docs/macros/api.md -->
 <NotepadPlus>
 	<AutoComplete language="Lua">
 		<Environment ignoreCase="no" startFunc="(" stopFunc=")" paramSeparator="," terminal=";" additionalWordChar="." />
@@ -226,13 +226,13 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.attach" func="yes">
-			<Overload retVal="string" descr="Attach another OpenSAK database read-only to the SQL functions, under a schema&#x0a;name, so one opensak.sql() or sql_write() statement can read it together with&#x0a;the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN&#x0a;found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays&#x0a;refused. Nothing can write to an attached database: the file is opened read-&#x0a;only, and SQL that would change it is refused. Without `schema`, the name is&#x0a;made from the database name: lower case, `_` for anything but letters and digits&#x0a;(&quot;Found 2020&quot; → `found_2020`). The schema name must be letters, digits and `_`;&#x0a;`main`, `temp`, `macro`, `companion` and names starting with `opensak_` are&#x0a;reserved. The active database cannot be attached, and neither can a database&#x0a;twice. Attaching the same database under the same name again does nothing.&#x0a;SQLite allows 10 attached databases at once, opensak.macro_db() included. The&#x0a;database is not updated to the current schema, so one last opened by an older&#x0a;OpenSAK version may lack columns; `opensak.columns(&quot;&lt;schema&gt;.caches&quot;)` shows&#x0a;what is there. Each attach prints a line in the macro output. Cannot be called&#x0a;inside opensak.transaction(). Stays attached after opensak.switch_database(),&#x0a;unless the database becomes the active one. Everything is detached when the&#x0a;macro ends. A macro started with opensak.run_macro() sees its caller's attached&#x0a;databases; what it attaches or detaches is undone when it returns. See Several&#x0a;databases in one query.&#x0a;Returns string — The schema name.">
+			<Overload retVal="string" descr="Attach another OpenSAK database read-only to the SQL functions, under a schema&#x0a;name, so one opensak.sql() or sql_write() statement can read it together with&#x0a;the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN&#x0a;found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays&#x0a;refused. Nothing can write to an attached database: the file is opened read-&#x0a;only, and SQL that would change it is refused. Without `schema`, the name is&#x0a;made from the database name: lower case, `_` for anything but letters and digits&#x0a;(&quot;Found 2020&quot; → `found_2020`). The schema name must be letters, digits and `_`;&#x0a;`main`, `temp`, `macro`, `companion` and names starting with `opensak_` are&#x0a;reserved. The active database cannot be attached, and neither can a database&#x0a;twice. Attaching the same database under the same name again does nothing.&#x0a;SQLite allows 10 attached databases at once, opensak.macro_db() included. The&#x0a;database is not updated to the current schema, so one last opened by an older&#x0a;OpenSAK version may lack columns; `opensak.columns(&quot;&lt;schema&gt;.caches&quot;)` shows&#x0a;what is there. Each attach prints a line in the macro output. Cannot be called&#x0a;inside opensak.transaction(). Stays attached after opensak.switch_database(),&#x0a;unless the database becomes the active one. Everything is detached when the&#x0a;macro ends. A macro started with opensak.run_macro() sees its caller's attached&#x0a;databases; what it attaches or detaches is undone when it returns. While the&#x0a;`companion-db` feature flag is on, the database's companion database&#x0a;(opensak.companion()) is attached with it, read-only, as `&lt;schema&gt;_companion`,&#x0a;if it has one, and detached with it. See Several databases in one query.&#x0a;Returns string — The schema name.">
 				<Param name="name: string" />
 				<Param name="[schema: string]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.attached" func="yes">
-			<Overload retVal="{schema: string, name: string, path: string, opensak: boolean}[]" descr="The databases attached with opensak.attach(), in the order they were attached.&#x0a;`opensak` is always true: only OpenSAK databases can be attached so far.&#x0a;Returns {schema: string, name: string, path: string, opensak: boolean}[] — One&#x0a;table per attached database.">
+			<Overload retVal="{schema: string, name: string, path: string, opensak: boolean, companion: boolean}[]" descr="The databases attached with opensak.attach(), in the order they were attached.&#x0a;`opensak` is always true: only OpenSAK databases can be attached so far.&#x0a;Returns {schema: string, name: string, path: string, opensak: boolean,&#x0a;companion: boolean}[] — One table per attached database. `companion`: it is the&#x0a;companion database of the database attached as `name`.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.attributes" func="yes">
@@ -343,6 +343,19 @@
 			<Overload retVal="{name: string, type: string, required: boolean}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option).&#x0a;Returns {name: string, type: string, required: boolean}[] — Column names and SQL&#x0a;types, in table order; `required`: NOT NULL without a default, so an INSERT must&#x0a;give it.">
 				<Param name="table: string" />
 				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.companion" func="yes">
+			<Overload retVal="string" descr="Make sure the active database has a companion database — a second SQLite file&#x0a;next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to&#x0a;the SQL functions as schema `companion`. It is shared by all macros: every macro&#x0a;reads every table in it, and creates, changes and drops its own tables, indexes&#x0a;and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE&#x0a;companion.&lt;name&gt; …`). Like opensak.macro_db() this needs no approval to change&#x0a;databases, but opensak.sql_write() still asks for it, as it may change caches.&#x0a;OpenSAK records the macro's file as the owner of every table and view it&#x0a;creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables&#x0a;without an owner are read-only. A moved or renamed macro is a new owner. A table&#x0a;with a `gc_code` column is cache-linked: its rows belong to caches, several per&#x0a;cache if needed, and follow them — they are deleted with the cache, and copied&#x0a;or moved with it to another database (opensak.companion_table() changes that).&#x0a;Triggers are refused. The file follows its database when it is renamed, copied,&#x0a;moved, deleted or backed up. Once it exists, every macro run has it attached&#x0a;without this call. The first call creates the file and prints its path in the&#x0a;macro output; it cannot do that inside opensak.transaction(), and the macro must&#x0a;be saved, as its tables belong to its file. See The companion database.&#x0a;Returns string — The path of the companion database file.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.companion_table" func="yes">
+			<Overload retVal="opensak.CompanionTable" descr="Change how OpenSAK treats one of the macro's own tables or views in the&#x0a;companion database (see opensak.companion()). `linked = false`: the rows stay&#x0a;where they are when caches are deleted, copied or moved, even with a `gc_code`&#x0a;column. `linked = true` or `code_column`: the table is cache-linked by that&#x0a;column (default `gc_code`), which must exist. `description` is shown with the&#x0a;table in OpenSAK. Keys left out stay as they are. Create the table first.&#x0a;Returns opensak.CompanionTable — The table, as opensak.companion_tables() lists&#x0a;it.">
+				<Param name="spec: opensak.CompanionTableSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.companion_tables" func="yes">
+			<Overload retVal="opensak.CompanionTable[]" descr="The tables and views in the active database's companion database (see&#x0a;opensak.companion()), sorted by name, with their owner. Empty while it has none.&#x0a;Returns opensak.CompanionTable[] — One table per table or view.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.confirm" func="yes">
@@ -468,6 +481,11 @@
 			<Overload retVal="opensak.Cache?" descr="The cache selected in the grid.&#x0a;Returns opensak.Cache? — The cache, or nil if no row is selected.">
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.custom_fields" func="yes">
+			<Overload retVal="opensak.CustomField[]" descr="The custom fields of the active database (or of `database`), by position: user-&#x0a;defined fields per cache, as in GSAK, with `name`, `type` (&quot;string&quot;, &quot;integer&quot;,&#x0a;&quot;real&quot;, &quot;date&quot; or &quot;boolean&quot;), `default`, `scope` (&quot;local&quot;: this database;&#x0a;&quot;global&quot;: every database), `origin` (&quot;gsak&quot; when imported from GSAK, else&#x0a;&quot;opensak&quot;) and `expression` (GSAK's display expression, if any). Their values&#x0a;are the `custom` field of a cache. See Custom fields.&#x0a;Returns opensak.CustomField[] — One table per field; empty while there are none.">
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.database" func="yes">
 			<Overload retVal="string" descr="The name of the active database.&#x0a;Returns string — Database name.">
 			</Overload>
@@ -506,6 +524,11 @@
 				<Param name="period: string" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.define_custom_field" func="yes">
+			<Overload retVal="opensak.CustomField" descr="Define a custom field in the active database: `name` (letters, digits and `_`,&#x0a;not a cache column or an SQL keyword), `type`, optionally `default` (shown for&#x0a;every cache nobody set), `scope` (&quot;local&quot;, the default, or &quot;global&quot; for every&#x0a;database) and `expression`: SQL the cache list shows instead of the value, e.g.&#x0a;`nullif(Finds, -1)` (filters and macros keep using the value). A field of that&#x0a;name and type already there is returned unchanged, so a macro can define its&#x0a;fields on every run; another type is an error. Needs the user's permission like&#x0a;opensak.update(). See Custom fields.&#x0a;Returns opensak.CustomField — The field, as opensak.custom_fields() lists it.">
+				<Param name="field: opensak.CustomFieldDefinition" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.delete" func="yes">
 			<Overload retVal="boolean|integer" descr="Delete caches from the active database, each with its logs, waypoints,&#x0a;attributes, trackables and user note, like Waypoint → Delete cache. Takes one GC&#x0a;code, or a list of them, e.g. opensak.codes() for the caches of the active&#x0a;filter. Deleted caches cannot be restored from inside OpenSAK (only from a&#x0a;backup); at the end of the run the macro output says how many caches were&#x0a;deleted. The cache list and map drop them after the macro. Locked caches are&#x0a;deleted too: the lock only protects from imports. Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns boolean|integer — For one code: false if the cache is not in the&#x0a;database. For a list: the number of caches deleted.">
 				<Param name="code: string" />
@@ -517,6 +540,11 @@
 		<KeyWord name="opensak.delete_attribute" func="yes">
 			<Overload retVal="boolean" descr="Delete a attribute from the active database. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns boolean — false if there is no attribute with this id.">
 				<Param name="id: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_custom_field" func="yes">
+			<Overload retVal="boolean" descr="Delete a custom field of the active database; a global one is deleted from every&#x0a;database. Its values are kept until the user removes them in Tools → Custom&#x0a;fields, so defining it again (same name and type) does not bring them back.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no such field.">
+				<Param name="name: string" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.delete_file" func="yes">
@@ -681,7 +709,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.insert" func="yes">
-			<Overload retVal="string" descr="Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon`&#x0a;are required; any other writable field may be given too (see Changing caches).&#x0a;Fails if the code is already in the database. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns string — The cache code as stored (upper case).">
+			<Overload retVal="string" descr="Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon`&#x0a;are required; any other writable field may be given too (see Changing caches),&#x0a;and `custom` for custom fields. Fails if the code is already in the database.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns string — The cache code as stored (upper case).">
 				<Param name="fields: opensak.CacheInsert" />
 			</Overload>
 		</KeyWord>
@@ -1096,7 +1124,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.update" func="yes">
-			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. Before a macro's first change, OpenSAK asks the user to&#x0a;allow that macro (see Changing caches).&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). Before a macro's first change, OpenSAK asks the user&#x0a;to allow that macro (see Changing caches).&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.CacheUpdate" />
 			</Overload>
