@@ -97,6 +97,19 @@
 ---@field scope? "local"|"global" Default "local" (this database only).
 ---@field expression? string SQL shown in the cache list instead of the value, e.g. `nullif(Finds, -1)`.
 
+---Options of `opensak.get_url()`.
+---@class opensak.GetUrlOptions
+---@field timeout? number Seconds without an answer, 1-120 (default 30).
+---@field caption? string Show a progress window with this title.
+---@field binary? boolean Return the bytes as they are, without decoding (default false).
+---@field max_bytes? integer The largest body in bytes (default 10 MB, at most 50 MB).
+
+---What `opensak.get_url()` got besides the body.
+---@class opensak.UrlInfo
+---@field status integer The HTTP status, e.g. 200 or 404.
+---@field content_type string The Content-Type header ("" if none).
+---@field url string The URL after redirects.
+
 ---Options of `opensak.move_caches()` and `opensak.copy_caches()`.
 ---@class opensak.TransferOptions
 ---@field codes? string[] GC codes to transfer (default: the caches of the active filter).
@@ -1498,6 +1511,27 @@ function opensak.write_text(path, text, options) end
 ---```
 ---@param path string The file to open.
 function opensak.open(path) end
+
+---Download a web page or file (GSAK's GetUrl), e.g. to check a puzzle answer online or fetch a list before working with it. GET only, over http or https; no cookies, no custom headers, and no user name or password in the URL. Before a macro first contacts a web site (host), the user is asked: this time only, always (for this macro, listed in Settings → Folder permissions) or deny. Each redirect (at most 5) is checked the same way. A host on the local network (a router, a NAS) is asked about separately. geocaching.com, coord.info and Groundspeak's other sites (waymarking.com, wherigo.com, ...) can never be contacted: their terms of use don't allow automated access. List the hosts in the macro's `Network:` header so users see them before running it; the header approves nothing by itself. An HTTP error status (404, 500) is no error: check `info.status`. A failed request (no answer, too large, refused) raises an error, which `pcall` catches. At most 200 requests per run, and at least 1 s between two requests to the same host.
+---
+---Since API version 3.
+---
+---Beta: only available while the `lua-macro-net` feature flag is on, as it is in beta builds; check with `if opensak.get_url then`. Each web site needs the user's approval, given per macro (see Web sites).
+---
+---```lua
+---local ok, body, info = pcall(opensak.get_url,
+---  "https://example.com/answers.csv", { caption = "Answers" })
+---if not ok then
+---  opensak.message("Download failed: " .. body)
+---elseif info.status == 200 then
+---  print(#body .. " characters from " .. info.url)
+---end
+---```
+---@param url string An http: or https: URL.
+---@param options? opensak.GetUrlOptions `timeout`: seconds without an answer (1–120, default 30). `caption`: show a progress window with this title. `binary`: return the bytes as they are, without decoding the text. `max_bytes`: the largest body (default 10 MB, at most 50 MB).
+---@return string # The body, as text decoded with the charset the server names (UTF-8 if none; invalid bytes replaced) or, with `binary`, as bytes; and `{ status, content_type, url }`, `url` being the address after redirects.
+---@return opensak.UrlInfo
+function opensak.get_url(url, options) end
 
 ---Read a whole text file, of any file type. A relative path is resolved against the macro file's folder. The folder needs read permission; for an unapproved one the user is asked first. UTF-8 unless `encoding` says otherwise (`"utf-8"`, `"latin-1"`, `"cp1252"`); a UTF-8 byte order mark is removed and line endings become `"\n"`. At most 10 MB.
 ---

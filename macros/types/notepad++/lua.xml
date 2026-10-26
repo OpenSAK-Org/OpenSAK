@@ -652,6 +652,12 @@
 				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string}]" />
 			</Overload>
 		</KeyWord>
+		<KeyWord name="opensak.get_url" func="yes">
+			<Overload retVal="string, opensak.UrlInfo" descr="Download a web page or file (GSAK's GetUrl), e.g. to check a puzzle answer&#x0a;online or fetch a list before working with it. GET only, over http or https; no&#x0a;cookies, no custom headers, and no user name or password in the URL. Before a&#x0a;macro first contacts a web site (host), the user is asked: this time only,&#x0a;always (for this macro, listed in Settings → Folder permissions) or deny. Each&#x0a;redirect (at most 5) is checked the same way. A host on the local network (a&#x0a;router, a NAS) is asked about separately. geocaching.com, coord.info and&#x0a;Groundspeak's other sites (waymarking.com, wherigo.com, ...) can never be&#x0a;contacted: their terms of use don't allow automated access. List the hosts in&#x0a;the macro's `Network:` header so users see them before running it; the header&#x0a;approves nothing by itself. An HTTP error status (404, 500) is no error: check&#x0a;`info.status`. A failed request (no answer, too large, refused) raises an error,&#x0a;which `pcall` catches. At most 200 requests per run, and at least 1 s between&#x0a;two requests to the same host.&#x0a;Returns string, opensak.UrlInfo — The body, as text decoded with the charset the&#x0a;server names (UTF-8 if none; invalid bytes replaced) or, with `binary`, as&#x0a;bytes; and `{ status, content_type, url }`, `url` being the address after&#x0a;redirects.">
+				<Param name="url: string" />
+				<Param name="[options: opensak.GetUrlOptions]" />
+			</Overload>
+		</KeyWord>
 		<KeyWord name="opensak.html" />
 		<KeyWord name="opensak.html.columns" func="yes">
 			<Overload retVal="string" descr="Put HTML parts (e.g. two tables) side by side; on a narrow window they go one&#x0a;below the other.&#x0a;Returns string — HTML.">
