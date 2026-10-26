@@ -8,9 +8,11 @@ jobs:
   unit-tests:
     runs-on: ${{ matrix.os }}
     # Belt-and-suspenders alongside the apt retry/timeout logic in
-    # setup-qt: caps a stuck job at 30 min instead of GitHub's 360-min
+    # setup-qt: caps a stuck job at 45 min instead of GitHub's 360-min
     # default, so a hang anywhere in the job fails fast and visibly.
-    timeout-minutes: 30
+    # Raised from 30: with ~7900 unit tests the Windows runner needs
+    # 18-26 min, and a slow runner hit the 30-min cap (CI #1835).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
