@@ -108,7 +108,8 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GSAK | Status | Note |
 |---|---|---|
 | GetMail / Pop3 | 🚫 | deprecated in GSAK too |
-| GetUrl / PostUrl | 🚫 | the sandbox has no network access on purpose |
+| GetUrl | ✅ β | `get_url(url [, options])`: GET only, each web site approved by the user; needs the `lua-macro-net` feature flag (see [Web sites](#web-sites)) |
+| PostUrl | 🚫 | GET only for now |
 | Web | ❌ | planned |
 
 ### Macro language

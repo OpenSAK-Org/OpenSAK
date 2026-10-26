@@ -1113,10 +1113,10 @@ class SettingsDialog(QDialog):
 
     def _build_db_write_section(self) -> QWidget:
         """The macros allowed something always (answered "Always" when they
-        first wrote or needed a folder), listed by file name with what they
-        may do, and the full path as tooltip. They can only be removed
-        here, each with all it may; adding happens through those
-        questions."""
+        first wrote, needed a folder or contacted a web site), listed by
+        file name with what they may do, and the full path as tooltip.
+        They can only be removed here, each with all it may; adding happens
+        through those questions."""
         from opensak.gui.dialogs.macro_dialog import approval_lines
         from opensak.macro.db_access import approvals
 
@@ -1136,7 +1136,8 @@ class SettingsDialog(QDialog):
         self._db_write_list = db_write_list
         for record in records:
             lines = [Path(record.path).name]
-            lines += [f"    {line}" for line in approval_lines(record.write, record.folders)]
+            lines += [f"    {line}"
+                      for line in approval_lines(record.write, record.folders, record.hosts)]
             item = QListWidgetItem("\n".join(lines))
             item.setToolTip(record.path)
             item.setData(Qt.ItemDataRole.UserRole, record.path)

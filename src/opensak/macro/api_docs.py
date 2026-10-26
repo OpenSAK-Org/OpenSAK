@@ -46,6 +46,7 @@ from opensak.macro.forms import (
 )
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
+from opensak.macro import net_access
 from opensak.macro.metadata import BLOCKED_DOMAINS, NO_PERMISSIONS, PERMISSIONS, read_metadata
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
@@ -167,8 +168,14 @@ def _header_section() -> list[str]:
     ]
 
 
+def _blocked_domains() -> str:
+    """BLOCKED_DOMAINS as "`a`, `b` and `c`"."""
+    names = [f"`{d}`" for d in BLOCKED_DOMAINS]
+    return ", ".join(names[:-1]) + f" and {names[-1]}" if len(names) > 1 else names[0]
+
+
 def _permissions_section() -> list[str]:
-    blocked = " and ".join(f"`{d}`" for d in BLOCKED_DOMAINS)
+    blocked = _blocked_domains()
     return [
         "",
         "### Permissions and Network",
@@ -185,7 +192,12 @@ def _permissions_section() -> list[str]:
         "OpenSAK asks for every write, folder and web site approval as before, "
         "whether the macro declares it or not. The manager shows the "
         "declaration in its *Permissions* column, and the community macro "
-        "repository can use it to review an update that asks for more.",
+        "repository can use it to review an update that asks for more. "
+        "Before a macro file with a declaration first runs, OpenSAK shows "
+        "what it declares, with **Run** and **Cancel**; it shows this again "
+        "only when a later version declares more. Unchanged example macros "
+        "shipped with OpenSAK, unsaved macros and runs without a user "
+        "interface skip it.",
         "",
         "`Permissions` takes these words, separated by commas or spaces:",
         "",
@@ -199,11 +211,12 @@ def _permissions_section() -> list[str]:
         "which is not the same. A word OpenSAK does not know is shown as "
         "unknown, not dropped.",
         "",
-        "`Network` lists every host the macro contacts (for the planned "
-        "`opensak.get_url()`), as a host name or IP address: no `https://`, "
+        "`Network` lists every host the macro contacts with "
+        "`opensak.get_url()`, as a host name or IP address: no `https://`, "
         "port, path or `user@`, and no wildcards, since web sites are approved "
         "one host at a time. `Network` alone covers network access; there is "
-        f"no `network` permission word. {blocked} (with their subdomains) can "
+        f"no `network` permission word. Groundspeak's sites ({blocked}, with "
+        "their subdomains) can "
         "never be contacted by a macro and are marked when listed.",
         "",
         "Both lines may be repeated, their values add up. A new version of a "
@@ -389,6 +402,11 @@ _WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
 # Appended to those that need the flag but change nothing (opensak.attach)
 _BETA = ("Beta: only available while the `lua-macro-write` feature flag "
          "is on, as it is in beta builds; check with `if opensak.attach then`.")
+# Appended to the functions that need the lua-macro-net feature flag
+_NET_BETA = ("Beta: only available while the `lua-macro-net` feature flag "
+             "is on, as it is in beta builds; check with `if opensak.get_url then`. "
+             "Each web site needs the user's approval, given per macro "
+             "(see Web sites).")
 
 
 # Appended to those that need the companion-db feature flag
@@ -400,6 +418,8 @@ _COMPANION_BETA = ("Beta: only available while the `companion-db` feature flag "
 def _beta_note(func: ApiFunction) -> str | None:
     if func.companion:
         return _COMPANION_BETA
+    if func.net:
+        return _NET_BETA
     return _WRITE_BETA if func.write else _BETA if func.beta else None
 
 
@@ -676,6 +696,44 @@ def _changing_section() -> list[str]:
     return lines + _children_section()
 
 
+def _web_section() -> list[str]:
+    blocked = _blocked_domains()
+    return [
+        "",
+        "## Web sites",
+        "",
+        "Beta: `opensak.get_url()` is only available while the "
+        "`lua-macro-net` feature flag is on, as it is in beta builds.",
+        "",
+        "A macro can read everything in your databases, so a macro that "
+        "contacts a web site could also send your data there. Before a "
+        "macro first contacts a web site (host), OpenSAK therefore asks "
+        "whether this macro may: **This time only** (for this run), "
+        "**Always** or **Deny** (not asked again during this run). The "
+        "question names the host, says when the connection is not "
+        "encrypted (`http:`) and when the macro's `Network:` header does "
+        "not list the host. A host on the local network (your router, a "
+        "NAS) is asked about on its own, also when it was allowed as an "
+        "internet address: OpenSAK checks the address it actually connects "
+        "to. A redirect to another host is asked about like the first one. "
+        f"Groundspeak's sites ({blocked}, with their subdomains) can never be "
+        "contacted: their terms of use don't allow automated access outside "
+        "their API.",
+        "",
+        "Like folders, the answer belongs to this macro and its code: "
+        "web sites allowed always are listed with the macro in "
+        "Settings → Folder permissions, and a macro changed outside "
+        "OpenSAK's macro editor is asked once whether it may have them "
+        "again. A macro started with `opensak.run_macro()` is asked on its "
+        "own. An unsaved macro can be allowed a web site for one run only. "
+        f"A run asks about at most {net_access.MAX_HOST_QUESTIONS_PER_RUN} "
+        "web sites; after that, the ones not allowed fail without asking.",
+        "",
+        "Requests are GET only, with the User-Agent `OpenSAK-Macro/<version>` "
+        "and without cookies. The system's proxy settings apply.",
+    ]
+
+
 def _update_type(field: ChildField) -> str:
     """The type opensak.update_<x>() accepts: `false` clears a nil-able field."""
     return f"{field.type[:-1]}|false" if field.type.endswith("?") else field.type
@@ -831,6 +889,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         lines.append(f"| `{field.name}` | `{type_}` | {field.description} |")
 
     lines += _changing_section()
+    lines += _web_section()
     lines += _examples_section(examples_dir)
     lines += _header_section()
     lines += _editor_section()
@@ -952,6 +1011,19 @@ def render_lua_stub() -> str:
         "---@field default? any Shown for every cache nobody set the field for.",
         '---@field scope? "local"|"global" Default "local" (this database only).',
         "---@field expression? string SQL shown in the cache list instead of the value, e.g. `nullif(Finds, -1)`.",
+        "",
+        "---Options of `opensak.get_url()`.",
+        "---@class opensak.GetUrlOptions",
+        "---@field timeout? number Seconds without an answer, 1-120 (default 30).",
+        "---@field caption? string Show a progress window with this title.",
+        "---@field binary? boolean Return the bytes as they are, without decoding (default false).",
+        "---@field max_bytes? integer The largest body in bytes (default 10 MB, at most 50 MB).",
+        "",
+        "---What `opensak.get_url()` got besides the body.",
+        "---@class opensak.UrlInfo",
+        "---@field status integer The HTTP status, e.g. 200 or 404.",
+        "---@field content_type string The Content-Type header (\"\" if none).",
+        "---@field url string The URL after redirects.",
         "",
         "---Options of `opensak.move_caches()` and `opensak.copy_caches()`.",
         "---@class opensak.TransferOptions",

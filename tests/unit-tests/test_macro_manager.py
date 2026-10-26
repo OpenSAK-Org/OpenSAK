@@ -184,7 +184,11 @@ def test_network_alone_does_not_declare_permissions():
 
 @pytest.mark.parametrize("host, blocked", [
     ("geocaching.com", True), ("www.geocaching.com", True), ("coord.info", True),
+    ("waymarking.com", True), ("www.wherigo.com", True), ("ns1.groundspeak.net", True),
+    ("geocaching.eu", True), ("geocaching.co", True),
     ("api.groundspeak.example", False), ("notgeocaching.com", False),
+    # Community sites that are not Groundspeak's
+    ("geocaching.co.uk", False), ("geocaching.com.au", False), ("geocaching.de", False),
 ])
 def test_blocked_hosts(host, blocked):
     info = _perms(f"-- Network: {host}\n")

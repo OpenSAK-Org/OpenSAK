@@ -48,6 +48,9 @@ _RELEASE_DEFAULTS: dict[str, bool] = {
     # Companion database per cache database (#1034): on in beta builds only,
     # so it can be tested there before macros and custom fields go stable.
     "companion-db": _is_prerelease(__version__),
+    # Macros contacting web sites (opensak.get_url, #1079): beta-only on its
+    # own, so it does not hold up the stable macro release.
+    "lua-macro-net": _is_prerelease(__version__),
 }
 
 
@@ -93,3 +96,4 @@ map_popout: bool           = _flags["map-popout"]
 lua_macros: bool           = _flags["lua-macros"]
 lua_macro_write: bool      = _flags["lua-macro-write"]
 companion_db: bool         = _flags["companion-db"]
+lua_macro_net: bool        = _flags["lua-macro-net"]
