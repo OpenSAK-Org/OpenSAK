@@ -3835,20 +3835,32 @@ class MainWindow(QMainWindow):
         if added:
             self._macro_caches_added = True
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing: bool = False):
         """MacroHost: ask whether the macro file *macro* (None: unsaved) may
         change the databases (OpenSAK's own dialog, on top of the macro
-        dialog)."""
+        dialog). A run from an external editor (*editing*) brings OpenSAK to
+        the front first, as the user is working in the other editor."""
         from opensak.gui.dialogs.macro_dialog import ask_macro_write_approval
-        parent = getattr(self, "_macro_dialog", None) or self
-        return ask_macro_write_approval(parent, macro)
+        if editing:
+            parent = self._macro_dialog_parent()
+        else:
+            parent = getattr(self, "_macro_dialog", None) or self
+        return ask_macro_write_approval(parent, macro, change, editing)
 
-    def approve_folder(self, target, folder, write: bool):
-        """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
-        dialog, on top of the macro dialog)."""
+    def approve_folder(self, target, folder, write: bool, macro=None):
+        """MacroHost: ask whether the macro file *macro* may use *folder*
+        (OpenSAK's own dialog, on top of the macro dialog)."""
         from opensak.gui.dialogs.macro_dialog import ask_folder_approval
         parent = self._macro_dialog_parent()
-        return ask_folder_approval(parent, target, folder, write)
+        return ask_folder_approval(parent, target, folder, write, macro)
+
+    def approve_macro_change(self, macro, change, editing: bool = False):
+        """MacroHost: ask whether the changed macro file *macro* may have
+        again what it was allowed (OpenSAK's own dialog, on top of the
+        macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_macro_change
+        parent = self._macro_dialog_parent()
+        return ask_macro_change(parent, macro, change, editing)
 
     def choose_file(self, title: str, file_filter: str, save: bool, start_dir):
         """MacroHost: file dialog for opensak.choose_file(), on top of the

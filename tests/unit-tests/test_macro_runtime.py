@@ -86,12 +86,12 @@ class FakeHost:
     def end_macro(self):
         self.ended = getattr(self, "ended", 0) + 1
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.DENY
 
     write_answer = WriteApproval.SESSION
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.write_asked = getattr(self, "write_asked", [])
         self.write_asked.append(macro)
         return self.write_answer
@@ -1270,7 +1270,7 @@ def test_export_file_asks_before_writing_to_unapproved_folder(
     asked = []
 
     class Host(DbHost):
-        def approve_folder(self, target, folder, write):
+        def approve_folder(self, target, folder, write, macro=None):
             asked.append((folder, write))
             return answer
 

@@ -30,14 +30,14 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.asked += 1
         return self.answer
 
     def caches_changed(self, codes, added):
         pass
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         self.folders_asked.append((target, folder, write))
         return self.folder_answer
 

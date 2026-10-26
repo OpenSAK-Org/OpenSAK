@@ -95,7 +95,8 @@ def test_macro_moves_caches_and_switches_database(seeded_window, monkeypatch):
     from opensak.macro import WriteApproval
     asked: list = []
     monkeypatch.setattr(window, "approve_macro_write",
-                        lambda macro: asked.append(macro) or WriteApproval.SESSION)
+                        lambda macro, change=None, editing=False:
+                        asked.append(macro) or WriteApproval.SESSION)
     total = window._cache_table.row_count()
     code = window._cache_table._model.cache_at(0).gc_code
 

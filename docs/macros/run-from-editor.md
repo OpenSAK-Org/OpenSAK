@@ -19,6 +19,12 @@ until it has finished:
   the question whether the macro may use a folder) come up in front of the
   OpenSAK window, exactly as when the macro runs in the macro window.
   Folder permissions are the same too.
+- A macro allowed to change your databases is asked about again once its
+  file has changed — which, while you work on it in your own editor, is
+  after every save. For runs from your editor the question therefore also
+  offers **While I edit it**: until OpenSAK closes, the macro may change
+  databases whatever you change in the file. Runs from the Macro manager
+  or the macro window still ask when the file has changed.
 - The exit code is the one the macro passes to `opensak.exit(code)`, `0`
   if it ends normally.
 

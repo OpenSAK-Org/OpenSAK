@@ -133,6 +133,7 @@ class SettingsDialog(QDialog):
         from opensak.utils import flags
         self._perm_table: QTableWidget | None = None
         self._perm_loaded: list = []
+        self._db_write_list: QListWidget | None = None
         if flags.lua_macros:
             self._tabs.addTab(self._build_folder_permissions_tab(),
                               tr("settings_tab_folder_permissions"))
@@ -956,13 +957,10 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        # The macros that may change databases: only with the macro write
-        # API, which has its own beta flag.
-        from opensak.utils import flags
-        self._db_write_list: QListWidget | None = None
-        if flags.lua_macro_write:
-            layout.addSpacing(12)
-            layout.addWidget(self._build_db_write_section())
+        # The macros allowed something always: changing databases (with the
+        # macro write API) and folders of their own (#1091).
+        layout.addSpacing(12)
+        layout.addWidget(self._build_db_write_section())
 
         scroll = QScrollArea()
         scroll.setWidget(tab)
@@ -1114,11 +1112,13 @@ class SettingsDialog(QDialog):
             table.removeRow(row)
 
     def _build_db_write_section(self) -> QWidget:
-        """The macros that may always change databases (answered "Always"
-        when they first wrote), listed by file name with the full path as
-        tooltip. They can only be removed here; adding happens through that
-        question."""
-        from opensak.macro.db_access import always_approved
+        """The macros allowed something always (answered "Always" when they
+        first wrote or needed a folder), listed by file name with what they
+        may do, and the full path as tooltip. They can only be removed
+        here, each with all it may; adding happens through those
+        questions."""
+        from opensak.gui.dialogs.macro_dialog import approval_lines
+        from opensak.macro.db_access import approvals
 
         box = QWidget()
         layout = QVBoxLayout(box)
@@ -1130,15 +1130,18 @@ class SettingsDialog(QDialog):
         intro.setStyleSheet(hint_style())
         layout.addWidget(intro)
 
-        self._db_write_loaded = always_approved()
+        records = approvals()
+        self._db_write_loaded = [a.path for a in records]
         db_write_list = QListWidget()
         self._db_write_list = db_write_list
-        for path in self._db_write_loaded:
-            item = QListWidgetItem(Path(path).name)
-            item.setToolTip(path)
-            item.setData(Qt.ItemDataRole.UserRole, path)
+        for record in records:
+            lines = [Path(record.path).name]
+            lines += [f"    {line}" for line in approval_lines(record.write, record.folders)]
+            item = QListWidgetItem("\n".join(lines))
+            item.setToolTip(record.path)
+            item.setData(Qt.ItemDataRole.UserRole, record.path)
             db_write_list.addItem(item)
-        db_write_list.setMaximumHeight(120)
+        db_write_list.setMaximumHeight(160)
         layout.addWidget(db_write_list)
 
         btn_row = QHBoxLayout()
@@ -1924,7 +1927,7 @@ class SettingsDialog(QDialog):
             permissions = self._collect_permissions()
             if permissions != self._perm_loaded:
                 save_permissions(permissions)
-        if self._perm_table is not None and self._db_write_list is not None:
+        if self._db_write_list is not None:
             from opensak.macro.db_access import save_always_approved
             databases = self._collect_db_write()
             if databases != self._db_write_loaded:

@@ -297,11 +297,11 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.events.append("write?")
         return self.answer
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         from opensak.macro.runtime import FolderApproval
         self.folders_asked.append(folder)
         return FolderApproval.ONCE

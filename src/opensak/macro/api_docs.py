@@ -584,13 +584,20 @@ def _changing_section() -> list[str]:
         "whether this macro may change your OpenSAK databases: **Deny** (the "
         "function fails, and OpenSAK does not ask again during this run), "
         "**Until OpenSAK closes**, or **Always**. The answer belongs to the "
-        "macro file, not to a database: editing the macro keeps it, a moved "
-        "or renamed file is asked about again. Macros allowed always are "
+        "macro file and its code, not to a database: editing the macro in "
+        "OpenSAK's macro editor keeps it, while a file changed in any other "
+        "way (replaced by a downloaded update, edited in another editor) is "
+        "asked about again, saying what changed: the version, and what the "
+        "`Permissions:` and `Network:` header now declares that it did not "
+        "before. A moved or renamed file is asked about again. Macros allowed always are "
         "listed in Settings → Folder permissions, where they can be removed "
         "again. An unsaved macro can only be allowed until OpenSAK closes. "
         "A macro started with `opensak.run_macro()` is asked about on its "
         "own. A run from an external editor (`opensak --run-macro`) asks in "
-        "the OpenSAK window, like any other run.",
+        "the OpenSAK window, like any other run, and also offers **While I "
+        "edit it**: the macro may then change databases after every change "
+        "of the file until OpenSAK closes, but only when run from the "
+        "external editor.",
         "",
         "Locked caches (`locked`) are only protected from being overwritten "
         "by an import. Macros can change and delete them like any other "
@@ -734,8 +741,12 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "folders listed in Settings → Folder permissions. When a macro needs "
         "a file in another folder, OpenSAK asks the user whether to allow "
         "that folder for this run only or always, or to deny it; reading and "
-        "writing are asked separately. OpenSAK's own settings and database "
-        "files are never accessible.",
+        "writing are asked separately. Both belong to this macro alone: "
+        "another macro, also one started with `opensak.run_macro()`, is "
+        "asked on its own, and a macro changed outside OpenSAK's macro editor "
+        "is asked once whether it may have its folders again. An unsaved "
+        "macro can be allowed a folder for one run only. OpenSAK's own "
+        "settings and database files are never accessible.",
         "",
         "See [Example macros](#example-macros) for complete scripts and "
         "[Editor support](#editor-support) for autocompletion in VS Code, "

@@ -49,7 +49,7 @@ class Host:
     def cache_count(self):
         return 0
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         self.asked += 1
         return WriteApproval.SESSION
 

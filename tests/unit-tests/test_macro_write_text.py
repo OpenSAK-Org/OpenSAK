@@ -25,7 +25,7 @@ class FakeHost:
     def end_macro(self):
         pass
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.DENY
 
     def database_name(self):
@@ -135,7 +135,7 @@ def test_write_text_writes_utf8_and_appends():
 
 def test_write_text_relative_path_is_next_to_the_macro(macros_dir):
     host = FakeHost()
-    host.approve_folder = lambda target, folder, write: FolderApproval.ONCE
+    host.approve_folder = lambda target, folder, write, macro=None: FolderApproval.ONCE
     out: list[str] = []
     MacroRuntime(host, output=out.append).run(
         'print(opensak.write_text("out/r.txt", "x"))', macro_path=macros_dir / "m.lua")
@@ -146,7 +146,7 @@ def test_write_text_relative_path_is_next_to_the_macro(macros_dir):
 def test_write_text_refuses_other_file_types_without_asking(name):
     host = FakeHost()
     asked = []
-    host.approve_folder = lambda *a: asked.append(a) or FolderApproval.ONCE
+    host.approve_folder = lambda *a, **kw: asked.append(a) or FolderApproval.ONCE
     with pytest.raises(MacroError, match="only these file types can be written"):
         _run(f'opensak.write_text(opensak.temp_dir() .. "/{name}", "x")', host)
     assert asked == []
@@ -155,7 +155,7 @@ def test_write_text_refuses_other_file_types_without_asking(name):
 
 def test_write_text_needs_write_permission(tmp_path):
     host = FakeHost()
-    host.approve_folder = lambda *a: FolderApproval.DENY
+    host.approve_folder = lambda *a, **kw: FolderApproval.DENY
     with pytest.raises(MacroError, match="denied by the user"):
         _run(f'opensak.write_text("{_lua_path(tmp_path)}/r.html", "x")', host)
     assert not (tmp_path / "r.html").exists()

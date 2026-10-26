@@ -17,7 +17,7 @@ class FakeHost:
     def end_macro(self):
         pass
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.DENY
 
     def __getattr__(self, name):

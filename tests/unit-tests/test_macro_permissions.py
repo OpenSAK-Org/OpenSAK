@@ -491,7 +491,7 @@ def test_approve_once_reads_without_saving(tmp_path):
                tmp_path)
     assert out == ["1", "1"]
     host.approve_folder.assert_called_once_with(
-        resolve_path(tmp_path / "a.csv"), resolve_path(tmp_path), False)
+        resolve_path(tmp_path / "a.csv"), resolve_path(tmp_path), False, macro=None)
     assert get_store().get(STORE_KEY) is None
 
 
@@ -504,18 +504,37 @@ def test_approve_once_lasts_for_one_run_only(tmp_path):
     assert host.approve_folder.call_count == 2
 
 
-def test_approve_always_saves_the_folder(tmp_path):
+def test_approve_always_saves_the_folder_for_this_macro(tmp_path):
+    from opensak.macro import db_access
     (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
     save_permissions([_rw(tmp_path / "other")])
     host = _host(FolderApproval.ALWAYS)
     rt = MacroRuntime(host, output=lambda _: None)        # uses the saved list
-    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
-    assert load_permissions() == [
-        _rw(tmp_path / "other"),
-        FolderPermission(str(resolve_path(tmp_path)), read=True, write=False),
-    ]
-    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    source = 'opensak.read_csv("a.csv")'
+    macro, other = tmp_path / "reader.lua", tmp_path / "other.lua"
+    rt.run(source, base_dir=tmp_path, macro_path=macro)
+    # Stored with the macro (#1091), not in the list shared by all macros.
+    assert load_permissions() == [_rw(tmp_path / "other")]
+    [record] = db_access.approvals()
+    assert record.path == str(macro.resolve()) and not record.write
+    assert record.folders == (
+        FolderPermission(str(resolve_path(tmp_path)), read=True, write=False),)
+    rt.run(source, base_dir=tmp_path, macro_path=macro)
     host.approve_folder.assert_called_once()
+    # Another macro with the same code is asked on its own.
+    rt.run(source, base_dir=tmp_path, macro_path=other)
+    assert host.approve_folder.call_count == 2
+
+
+def test_unsaved_macro_gets_a_folder_for_one_run_only(tmp_path):
+    from opensak.macro import db_access
+    (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    host = _host(FolderApproval.ALWAYS)          # the dialog does not offer it
+    rt = MacroRuntime(host, output=lambda _: None, folder_permissions=[])
+    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    assert host.approve_folder.call_count == 2
+    assert db_access.approvals() == [] and get_store().get(STORE_KEY) is None
 
 
 @pytest.mark.parametrize("answer", [FolderApproval.DENY, None, "always"])
@@ -659,7 +678,8 @@ def test_tab_hidden_without_lua_macros_flag(qtbot, monkeypatch):
     assert d._perm_table is None
 
 
-def test_db_write_list_hidden_without_lua_macro_write_flag(qtbot, monkeypatch):
+def test_macro_list_shown_without_lua_macro_write_flag(qtbot, monkeypatch):
+    """Folders allowed to a single macro (#1091) need the list too."""
     from opensak.gui.dialogs import settings_dialog as sd
     from opensak.utils import flags
     monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
@@ -667,8 +687,8 @@ def test_db_write_list_hidden_without_lua_macro_write_flag(qtbot, monkeypatch):
     monkeypatch.setattr(flags, "lua_macro_write", False)
     d = sd.SettingsDialog()
     qtbot.addWidget(d)
-    assert d._perm_table is not None and d._db_write_list is None
-    d._save()  # no list to store
+    assert d._perm_table is not None and d._db_write_list is not None
+    d._save()  # nothing changed, nothing stored
 
 
 def test_approved_macros_listed_by_name_and_removable(qtbot, monkeypatch, tmp_path):
@@ -679,12 +699,14 @@ def test_approved_macros_listed_by_name_and_removable(qtbot, monkeypatch, tmp_pa
     monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
     monkeypatch.setattr(flags, "lua_macros", True)
     monkeypatch.setattr(flags, "lua_macro_write", True)
-    first, second = str(tmp_path / "a" / "first.lua"), str(tmp_path / "second.lua")
-    db_access.save_always_approved([first, second])
+    first = str((tmp_path / "a" / "first.lua").resolve())
+    second = str((tmp_path / "second.lua").resolve())
+    for path in (first, second):
+        db_access.approve(path, db_access.WriteApproval.ALWAYS, db_access.source_hash(""))
     d = sd.SettingsDialog()
     qtbot.addWidget(d)
     items = [d._db_write_list.item(i) for i in range(d._db_write_list.count())]
-    assert [i.text() for i in items] == ["first.lua", "second.lua"]
+    assert [i.text().splitlines()[0] for i in items] == ["first.lua", "second.lua"]
     assert [i.toolTip() for i in items] == [first, second]
     d._db_write_list.setCurrentItem(items[0])
     assert d._btn_db_write_remove.isEnabled()
@@ -781,7 +803,8 @@ def test_approval_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected)
 
     monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
     target = tmp_path / "<b>a</b>.gpx"
-    assert md.ask_folder_approval(None, target, tmp_path, write=True) is expected
+    macro = tmp_path / "macro.lua"
+    assert md.ask_folder_approval(None, target, tmp_path, write=True, macro=macro) is expected
     assert str(target) in seen["text"] and str(tmp_path) in seen["text"]
     assert seen["plain"] == md.Qt.TextFormat.PlainText
     assert seen["default"] == tr("macro_access_deny")
@@ -885,3 +908,20 @@ def test_choose_file_dialog(monkeypatch, tmp_path, save, title, picked):
                               "macro_choose_save" if save else "macro_choose_open")
     assert (title in caption) and start == str(tmp_path)
     assert file_filter == "macro_choose_all_files"
+
+
+def test_unsaved_macro_cannot_be_allowed_a_folder_always(qtbot, monkeypatch, tmp_path):
+    from opensak.gui.dialogs import macro_dialog as md
+    monkeypatch.setattr(md, "tr", lambda key, **kw: key)
+    seen = {}
+
+    def fake_exec(box):
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        seen["hint"] = box.informativeText()
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    assert md.ask_folder_approval(None, tmp_path / "a.gpx", tmp_path, write=False) \
+        is FolderApproval.DENY
+    assert "macro_access_always" not in seen["buttons"]
+    assert seen["hint"] == "macro_access_hint_unsaved"

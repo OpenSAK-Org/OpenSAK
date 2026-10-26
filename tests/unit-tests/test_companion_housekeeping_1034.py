@@ -164,7 +164,7 @@ class _Host:
     def cache_count(self):
         return 0
 
-    def approve_macro_write(self, macro):
+    def approve_macro_write(self, macro, change=None, editing=False):
         return WriteApproval.SESSION
 
     def caches_changed(self, codes, added):
