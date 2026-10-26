@@ -1109,6 +1109,15 @@ python run.py</code></pre>
     <h3>When a Database Is Unavailable</h3>
     <p>If the database you used last is on a USB stick or network drive that isn't connected when you start OpenSAK, OpenSAK opens another database from your list (or a new <em>Default</em> database) and tells you which one was missing. The missing database stays in the list, marked as not found, so you can switch back to it once the drive is connected again.</p>
 
+    <h3>Database Maintenance</h3>
+    <p>Select a database in the manager and click <strong>Maintenance…</strong>. The dialog shows the size of the file and of its WAL file, how much of the file is free space, the schema and SQLite version, and how many caches, logs and waypoints it holds. It works on the database you are working in, too.</p>
+    <ul>
+      <li><strong>Check</strong> looks for damage in the file. Tick <strong>Thorough</strong> for the full integrity check, which takes longer on large databases. If the database is damaged, restore it from a backup.</li>
+      <li><strong>Optimize</strong> refreshes the statistics SQLite uses to find the fastest way to run a filter or draw the map. OpenSAK also does this by itself when a database is opened, closed or switched, and after imports, deletes and moves, so you rarely need it.</li>
+      <li><strong>Checkpoint</strong> writes the WAL file (<em>.db-wal</em>) back into the database and empties it.</li>
+      <li><strong>Compact…</strong> gives free space inside the file back to the disk. Deleting or moving caches leaves free space behind that the file doesn't release by itself. OpenSAK only compacts when it pays off, shows how much it expects to save, checks there is enough free disk space, and offers to make a backup first (ticked for databases above 100 MB). It takes about as long as copying the file.</li>
+    </ul>
+
     <h3>Backing Up</h3>
     <p>Use <strong>File → Back up now…</strong> to make a backup of your databases together with your settings, filter profiles, column views and custom icons. All databases are selected by default; untick any you want to leave out.</p>
     <p>Backups go into a backup folder, by default <em>Documents/OpenSAK Backups</em>. You choose it in the Welcome Wizard, and can change it under <strong>Settings → Advanced → Folders</strong> or in the same dialog. Existing backups stay where they are when you change the folder. A folder on another disk, an external drive or a synced folder is the safest choice, because it also protects your data if your computer's disk fails. OpenSAK won't use its own data or database folder itself. A folder inside one of them is allowed after a warning: backups there survive a normal uninstall, but are deleted if you choose to remove all OpenSAK data.</p>

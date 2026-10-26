@@ -22,6 +22,20 @@ after the commit and after foreign keys are back on.
 ``vacuum_file()`` opens one for a database file, for a "Maintenance" action
 in the Database Manager (#1048). That caller must make sure the database is
 not open elsewhere first.
+
+The other maintenance functions of #1048 — ``file_info()`` (Info),
+``check_file()`` (Check), ``optimize_file()`` (Optimize) and
+``checkpoint_file()`` (Checkpoint) — each open their own connection too.
+They only read, or change no data, so they also work on the active
+database while it is open. The companion database has the same functions
+in db/companion.py; the Maintenance dialog runs both.
+
+Optimize also runs on its own (db/database.py ``optimize_database()``):
+when a database is opened, closed or switched, after migrations, and after
+imports, deletes and moves. Without statistics (``sqlite_stat1``) the query
+planner often picks an index on a column with two or three values over the
+lat/lon index; on a 1.4 GB database the map query took 517 ms instead of
+35 ms (#1048).
 """
 
 from __future__ import annotations
@@ -312,3 +326,179 @@ def vacuum_with_companion(
     if not path.is_file():
         return main, None
     return main, vacuum_file(path, **kwargs)
+
+
+# ── Info, Check, Optimize, Checkpoint (#1048) ─────────────────────────────────
+
+# Compact from the Maintenance dialog: worth it from this much (and share)
+# free space. Lower than after a migration, since the user asked for it.
+MANUAL_MIN_RECLAIM_BYTES = 10 * 1024 * 1024
+MANUAL_MIN_RECLAIM_FRACTION = 0.05
+
+# Row counts shown by Info.
+COUNTED_TABLES = ("caches", "logs", "waypoints")
+
+
+@dataclass(frozen=True)
+class FileInfo:
+    """Info (#1048) for a database file."""
+
+    path: Path
+    file_bytes: int                 # the .db file on disk
+    wal_bytes: int
+    stats: PageStats
+    schema_version: int             # PRAGMA user_version
+    sqlite_version: str
+    rows: dict[str, int]            # COUNTED_TABLES that exist → row count
+
+    @property
+    def free_fraction(self) -> float:
+        return self.stats.free_bytes / self.stats.file_bytes if self.stats.file_bytes else 0.0
+
+
+@dataclass(frozen=True)
+class CheckReport:
+    """Check (#1048) for a database file. ok when nothing was found."""
+
+    path: Path
+    thorough: bool
+    problems: tuple[str, ...] = ()          # quick_check / integrity_check messages
+    foreign_key_problems: int = 0           # rows foreign_key_check reports
+
+    @property
+    def ok(self) -> bool:
+        return not (self.problems or self.foreign_key_problems)
+
+
+def _connect(db_path: Path, timeout: float = 30) -> sqlite3.Connection:
+    """A connection to the existing file *db_path* — never creates one."""
+    db_path = Path(db_path)
+    if not db_path.is_file():
+        raise sqlite3.OperationalError(f"unable to open database file: {db_path}")
+    return sqlite3.connect(str(db_path), timeout=timeout)
+
+
+def file_info(db_path: Path) -> FileInfo:
+    """Info for the database *db_path*. Raises sqlite3.Error if it can't be
+    read."""
+    db_path = Path(db_path)
+    conn = _connect(db_path)
+    try:
+        stats = page_stats(conn)
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        existing = {
+            name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        rows = {
+            name: conn.execute(f'SELECT count(*) FROM "{name}"').fetchone()[0]
+            for name in COUNTED_TABLES if name in existing
+        }
+    finally:
+        conn.close()
+    return FileInfo(
+        path=db_path,
+        file_bytes=_size_of(db_path),
+        wal_bytes=_size_of(Path(f"{db_path}-wal")),
+        stats=stats,
+        schema_version=version,
+        sqlite_version=sqlite3.sqlite_version,
+        rows=rows,
+    )
+
+
+def check_file(db_path: Path, thorough: bool = False) -> CheckReport:
+    """
+    Check the database *db_path*: ``quick_check`` (or ``integrity_check``
+    when *thorough*) and ``foreign_key_check``. Changes nothing. Raises
+    sqlite3.Error if it can't be read at all.
+    """
+    db_path = Path(db_path)
+    conn = _connect(db_path)
+    try:
+        rows = [str(r[0]) for r in conn.execute(
+            f"PRAGMA {'integrity_check' if thorough else 'quick_check'}").fetchall()]
+        problems = () if rows == ["ok"] else tuple(rows)
+        if problems:
+            # foreign_key_check would read a damaged file; report what we have.
+            return CheckReport(db_path, thorough, problems)
+        fk = len(conn.execute("PRAGMA foreign_key_check").fetchall())
+    finally:
+        conn.close()
+    return CheckReport(db_path, thorough, foreign_key_problems=fk)
+
+
+def optimize(conn: sqlite3.Connection) -> None:
+    """
+    Refresh the query planner's statistics of the database open on *conn*
+    (and of every database attached to it). Raises sqlite3.Error.
+
+    ``PRAGMA optimize`` alone only looks at the tables this connection has
+    queried, so on a fresh connection it does nothing. SQLite >= 3.46 takes
+    0x10000 for "all tables"; it then also creates the statistics of a
+    database that never had any. Older versions get an ANALYZE the first
+    time, then ``PRAGMA optimize``.
+
+    Both sample at most ``_ANALYSIS_LIMIT`` rows per index (SQLite >= 3.32;
+    older ones ignore the pragma). Without it, both read every index in
+    full when a database has no statistics yet, even ``optimize=0x10002`` on
+    SQLite 3.50: the first open of a GSAK database of many GB would freeze
+    the GUI. The limit stays set on *conn*.
+    """
+    conn.execute(f"PRAGMA analysis_limit={_ANALYSIS_LIMIT}").fetchall()
+    if sqlite3.sqlite_version_info >= (3, 46):
+        conn.execute("PRAGMA optimize=0x10002").fetchall()
+    elif conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_stat1'"
+    ).fetchone() is None:
+        conn.execute("ANALYZE")
+    else:
+        conn.execute("PRAGMA optimize").fetchall()
+    if conn.in_transaction:
+        conn.commit()
+
+
+# Rows per index optimize() samples — good enough
+# statistics for the planner, fast at any database size.
+_ANALYSIS_LIMIT = 1000
+
+
+def optimize_file(db_path: Path, timeout: float = 30) -> bool:
+    """optimize() on its own connection to *db_path*. False if it failed
+    (logged); never raises. *timeout*: how long to wait for a writer."""
+    try:
+        conn = _connect(Path(db_path), timeout)
+        try:
+            optimize(conn)
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.warning("optimize %s failed: %s", db_path, exc)
+        return False
+    return True
+
+
+def checkpoint_file(db_path: Path) -> bool:
+    """
+    ``wal_checkpoint(TRUNCATE)`` on *db_path*: write the WAL back into the
+    database and empty the -wal file. False if another connection kept it
+    from finishing (still reading) or it failed (logged); never raises.
+    """
+    try:
+        conn = _connect(Path(db_path))
+        try:
+            busy, _log, _done = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.warning("checkpoint %s failed: %s", db_path, exc)
+        return False
+    if busy:
+        logger.info("checkpoint %s: blocked by another connection", db_path)
+    return not busy
+
+
+def _size_of(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0

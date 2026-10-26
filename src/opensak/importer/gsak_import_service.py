@@ -538,7 +538,7 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
              temp_dir: Optional[Path], later: list[_Job], report: GsakImportReport,
              progress: Callable, check_file: Optional[Callable[[Path], None]],
              settings: Optional[_SettingsDb] = None) -> None:
-    from opensak.db.database import get_session, session_for
+    from opensak.db.database import get_session, optimize_database, session_for
     from opensak.utils import flags
     from opensak.db.manager import get_db_manager
 
@@ -601,6 +601,7 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
             progress_cb=lambda done, total: progress(label, done, total),
             settings_db=settings_db,
         )
+    optimize_database(rep.target_path)   # #1048
     if all(j.report.target.lower() != rep.target.lower() for j in later):
         progress(f"{rep.target}: distances")
         update_distances(rep.target_path)

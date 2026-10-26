@@ -53,7 +53,7 @@ class ImportWorker(QThread):
         self.target_db_path = target_db_path  # None → use currently active DB
 
     def run(self) -> None:
-        from opensak.db.database import get_session, session_for
+        from opensak.db.database import get_session, optimize_database, session_for
         from opensak.db.manager import get_db_manager
         from opensak.importer import _count_wpts
         from opensak.utils.utils import get_import_type, ImportType
@@ -89,6 +89,8 @@ class ImportWorker(QThread):
             except Exception:
                 import traceback
                 self.file_error.emit(i, traceback.format_exc())
+        # #1048: fresh planner statistics after the import.
+        optimize_database(self.target_db_path or active_path)
         # No explicit completion signal — QThread.finished fires automatically
         # once this method returns, and the dialog reacts to that instead.
 

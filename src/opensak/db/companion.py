@@ -807,13 +807,27 @@ class _main_attached:
 
 @dataclass(frozen=True)
 class TableInfo:
-    """One table of a companion, for Info."""
+    """One table (or view) of a companion, for Info and the Maintenance
+    dialog's "Companion data" list."""
 
     name: str
     owner: Optional[str]            # None: not in the registry
     owner_name: Optional[str]
     kind: str                       # KIND_CACHE or KIND_FREE (as treated)
-    rows: int
+    rows: int                       # 0 for a view (not counted)
+    est_bytes: int = 0              # estimated size of the rows (no dbstat, see size_estimate())
+    type: str = "table"             # "table" or "view"
+    description: Optional[str] = None
+
+    @property
+    def owned_by_opensak(self) -> bool:
+        return self.owner == OWNER_OPENSAK
+
+    @property
+    def owner_missing(self) -> bool:
+        """True when a macro owns it and the macro file is gone (moved,
+        renamed or deleted): its owner key is the file's path."""
+        return owner_missing(self.owner)
 
 
 @dataclass(frozen=True)
@@ -858,26 +872,24 @@ def info(db_path: Path) -> Optional[CompanionInfo]:
         page_size = conn.execute("PRAGMA page_size").fetchone()[0]
         free = conn.execute("PRAGMA freelist_count").fetchone()[0] * page_size
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        registry = {
-            str(row[0]).lower(): row for row in conn.execute(
-                f"SELECT name, owner, owner_name, kind FROM {REGISTRY_TABLE}"
-            )
-        }
+        reg = registry(conn, "main")
         linked = {name for name, _column in cache_linked_tables(conn)}
         tables = []
-        for (name,) in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
-        ).fetchall():
-            if _is_internal(name):
-                continue
-            row = registry.get(name.lower())
-            rows = conn.execute(f"SELECT count(*) FROM {_q(name)}").fetchone()[0]
+        for name, type_ in sorted(objects(conn, "main").values(), key=lambda o: o[0].lower()):
+            row = reg.get(name.lower(), {})
+            rows = est = 0
+            if type_ == "table":
+                rows = conn.execute(f"SELECT count(*) FROM {_q(name)}").fetchone()[0]
+                est = size_estimate(conn, name, rows)
             tables.append(TableInfo(
                 name=name,
-                owner=row[1] if row else None,
-                owner_name=row[2] if row else None,
+                owner=row.get("owner"),
+                owner_name=row.get("owner_name"),
                 kind=KIND_CACHE if name in linked else KIND_FREE,
                 rows=rows,
+                est_bytes=est,
+                type=type_,
+                description=row.get("description"),
             ))
     finally:
         conn.close()
@@ -889,6 +901,48 @@ def info(db_path: Path) -> Optional[CompanionInfo]:
         schema_version=version,
         tables=tuple(tables),
     )
+
+
+# Rows read to estimate the average row size of a table.
+_SIZE_SAMPLE = 1000
+
+
+def size_estimate(conn: sqlite3.Connection, name: str, rows: Optional[int] = None) -> int:
+    """
+    The estimated size in bytes of table *name* on *conn* (schema main):
+    *rows* (counted when None) times the average stored size of a sample
+    of rows. The SQLite bundled with Python has no ``dbstat``, so the exact
+    size per table is not available; index pages and page overhead are not
+    included.
+    """
+    if rows is None:
+        rows = conn.execute(f"SELECT count(*) FROM {_q(name)}").fetchone()[0]
+    if not rows:
+        return 0
+    columns = [str(r[1]) for r in conn.execute(f"PRAGMA table_info({_q(name)})")]
+    if not columns:
+        return 0
+    # length() of a BLOB is its size in bytes; numbers count as 8, NULL as 1.
+    per_column = " + ".join(
+        f"CASE WHEN {_q(c)} IS NULL THEN 1 WHEN typeof({_q(c)}) IN ('integer', 'real') THEN 8 "
+        f"ELSE length(CAST({_q(c)} AS BLOB)) END"
+        for c in columns
+    )
+    average = conn.execute(
+        f"SELECT avg({per_column}) FROM (SELECT * FROM {_q(name)} LIMIT {_SIZE_SAMPLE})"
+    ).fetchone()[0] or 0
+    # A few bytes of record header and rowid per row.
+    return int(rows * (average + 2 + len(columns)))
+
+
+def owner_missing(owner: Optional[str]) -> bool:
+    """True when *owner* is a macro whose file doesn't exist any more."""
+    if not owner or owner == OWNER_OPENSAK:
+        return False
+    try:
+        return not Path(owner).is_file()
+    except OSError:
+        return True
 
 
 def check(db_path: Path, thorough: bool = False) -> Optional[CheckResult]:
@@ -939,22 +993,19 @@ def check(db_path: Path, thorough: bool = False) -> Optional[CheckResult]:
     )
 
 
-def optimize(db_path: Path) -> bool:
+def optimize(db_path: Path, timeout: float = 30) -> bool:
     """Optimize (#1048): refresh the companion's query planner statistics.
     False if it has none or it failed (logged). Never raises."""
-    return _pragma(db_path, _optimize_pragma())
+    from opensak.db import maintenance
+
+    path = companion_path(db_path)
+    return path.is_file() and maintenance.optimize_file(path, timeout)
 
 
 def checkpoint(db_path: Path) -> bool:
     """Checkpoint (#1048): write the companion's WAL back and empty the -wal
     file. False if it has none or it failed (logged). Never raises."""
     return _pragma(db_path, "PRAGMA wal_checkpoint(TRUNCATE)")
-
-
-def _optimize_pragma() -> str:
-    # SQLite >= 3.46: 0x10002 also analyzes tables that never had statistics
-    # (as #1048 proposes for the main database).
-    return "PRAGMA optimize=0x10002" if sqlite3.sqlite_version_info >= (3, 46) else "PRAGMA optimize"
 
 
 def _pragma(db_path: Path, statement: str) -> bool:
@@ -971,6 +1022,149 @@ def _pragma(db_path: Path, statement: str) -> bool:
         logger.warning("companion: %s on %s failed: %s", statement, path, exc)
         return False
     return True
+
+
+# ── Companion data (#1149 phase 5) ────────────────────────────────────────────
+# What the "Companion data" section of the Maintenance dialog changes. Each
+# works on the companion file on its own connection, so it also works while
+# the database is open: the engine's and the macros' connections see the
+# schema change on their next statement. OpenSAK's own tables (custom
+# fields) are refused: they are managed through their definitions.
+
+@dataclass(frozen=True)
+class CleanupResult:
+    """What cleanup() removed."""
+
+    orphans: dict[str, int] = field(default_factory=dict)  # table → rows removed
+    registry_rows: tuple[str, ...] = ()     # registry rows without their table or view
+
+    @property
+    def total(self) -> int:
+        return sum(self.orphans.values()) + len(self.registry_rows)
+
+
+def clear_table(db_path: Path, name: str) -> int:
+    """Delete every row of the companion table *name*; the table stays.
+    Returns the number of rows deleted. Raises CompanionError for a table
+    that may not be changed here, sqlite3.Error on failure."""
+    conn = _connect(_existing(db_path))
+    try:
+        real, type_ = _changeable(conn, name)
+        if type_ != "table":
+            raise CompanionError(f"{real} is a view, it has no rows of its own")
+        with conn:
+            return max(conn.execute(f"DELETE FROM {_q(real)}").rowcount, 0)
+    finally:
+        conn.close()
+
+
+def drop_table(db_path: Path, name: str) -> None:
+    """Drop the companion table (or view) *name* and its registry row.
+    Raises CompanionError for one that may not be dropped here,
+    sqlite3.Error on failure."""
+    conn = _connect(_existing(db_path))
+    try:
+        real, type_ = _changeable(conn, name)
+        with conn:
+            conn.execute(f"DROP {'VIEW' if type_ == 'view' else 'TABLE'} {_q(real)}")
+            unregister(conn, real, "main")
+    finally:
+        conn.close()
+    logger.info("companion: dropped %s %s in %s", type_, real, companion_path(db_path))
+
+
+def reassign_owner(db_path: Path, name: str, owner: str, owner_name: Optional[str]) -> None:
+    """
+    Make the macro *owner* (its key, macro/db_access.py macro_key()) the
+    owner of the companion table or view *name*, e.g. after the macro file
+    was moved or renamed. An unregistered table is registered, with the
+    kind it is treated as now. Raises CompanionError for OpenSAK's own
+    tables, sqlite3.Error on failure.
+    """
+    if not owner or owner == OWNER_OPENSAK:
+        raise CompanionError("the new owner must be a macro")
+    conn = _connect(_existing(db_path))
+    try:
+        real, type_ = _changeable(conn, name)
+        with conn:
+            if name.lower() in registry(conn, "main"):
+                update_registered(conn, real, "main", owner=owner, owner_name=owner_name)
+            else:
+                linked = dict(cache_linked_tables(conn))
+                register(conn, real, owner, owner_name,
+                         KIND_CACHE if real in linked else KIND_FREE,
+                         code_column=linked.get(real) if type_ == "table" else None,
+                         schema="main")
+    finally:
+        conn.close()
+
+
+def cleanup(db_path: Path) -> CleanupResult:
+    """
+    Remove what check() reports as left over: rows of cache-linked tables
+    whose cache is no longer in the database (orphans), and registry rows
+    whose table or view is gone. Nothing else is changed. Raises
+    sqlite3.Error on failure.
+    """
+    conn = _connect(_existing(db_path))
+    try:
+        orphans: dict[str, int] = {}
+        with _main_attached(conn, db_path) as attached:
+            if attached:
+                with conn:
+                    for name, column in cache_linked_tables(conn):
+                        removed = conn.execute(
+                            f"DELETE FROM main.{_q(name)} WHERE {_q(column)} IS NOT NULL AND "
+                            f"{_q(column)} NOT IN (SELECT gc_code FROM {_MAIN_ALIAS}.caches)"
+                        ).rowcount
+                        if removed > 0:
+                            orphans[name] = removed
+        present = objects(conn, "main")
+        gone = tuple(sorted(
+            str(row["name"]) for key, row in registry(conn, "main").items() if key not in present
+        ))
+        with conn:
+            for name in gone:
+                unregister(conn, name, "main")
+    finally:
+        conn.close()
+    result = CleanupResult(orphans=orphans, registry_rows=gone)
+    if result.total:
+        logger.info("companion: cleanup of %s removed %d orphan row(s), %d registry row(s)",
+                    companion_path(db_path), sum(orphans.values()), len(gone))
+    return result
+
+
+def move_aside(db_path: Path, reason: str) -> bool:
+    """
+    Move the damaged companion of *db_path* aside (as on open, see
+    prepare()), after a Check found it damaged. The caller must close the
+    connections that have it attached first (Windows keeps open files
+    locked). True if it was moved. Never touches the main database.
+    """
+    if not exists(db_path):
+        return False
+    _damaged(db_path, reason)
+    return not exists(db_path)
+
+
+def _existing(db_path: Path) -> Path:
+    path = companion_path(db_path)
+    if not path.is_file():
+        raise CompanionError(f"{Path(db_path).name} has no companion database")
+    return path
+
+
+def _changeable(conn: sqlite3.Connection, name: str) -> tuple[str, str]:
+    """(name as stored, type) of the table or view *name*, if the Maintenance
+    dialog may change it; else CompanionError."""
+    found = objects(conn, "main").get(str(name).lower())
+    if found is None:
+        raise CompanionError(f"no table {name} in the companion database")
+    row = registry(conn, "main").get(found[0].lower())
+    if row is not None and row.get("owner") == OWNER_OPENSAK:
+        raise CompanionError(f"{found[0]} belongs to OpenSAK")
+    return found
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -174,7 +174,7 @@ def transfer_caches(
     stays where it is. Returns the number of caches written.
     """
     from opensak.db.cache_delete import delete_caches
-    from opensak.db.database import session_for
+    from opensak.db.database import optimize_database, session_for
     from opensak.db.models import Cache
     from sqlalchemy.orm import joinedload, selectinload
 
@@ -240,4 +240,9 @@ def transfer_caches(
                 delete_caches(session, written)
 
         written_total += len(written)
+    if written_total:
+        # #1048: fresh planner statistics after a bulk change.
+        optimize_database(target_db_path)
+        if not copy_only:
+            optimize_database(source_db_path)
     return written_total

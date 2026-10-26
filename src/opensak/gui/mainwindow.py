@@ -1569,6 +1569,11 @@ class MainWindow(QMainWindow):
             if worker.isRunning():
                 worker.quit()
                 worker.wait(500)
+        # #1048: fresh planner statistics for the next start. After the
+        # exit backup; app.py records the backup state only afterwards, so
+        # this doesn't count as a change.
+        from opensak.db.database import optimize_database
+        optimize_database()
         # Tear down the map's WebEngine page before its profile while the event
         # loop is still alive. The map's QWebEngineProfile/QWebEnginePage are
         # parent-less; relying on aboutToQuit (which fires only at app exit) means
@@ -2788,8 +2793,10 @@ class MainWindow(QMainWindow):
     def _bulk_delete_caches(self, gc_codes: list[str]) -> None:
         """Delete caches and all child records by GC codes (bulk SQL)."""
         from opensak.db.cache_delete import delete_caches
+        from opensak.db.database import optimize_database
         with get_session() as session:
             delete_caches(session, gc_codes)
+        optimize_database()   # #1048
 
     def _set_flag_for_filtered(self, flagged: bool) -> None:
         """Issue #293: set or clear the user flag on every cache in the

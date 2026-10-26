@@ -4,6 +4,7 @@
 -- Version: 1.0
 -- Requires-API: 4
 -- Description: Count the DNF logs of every cache into the companion database, for other macros
+-- Permissions: none
 --
 -- Stores, per cache with at least one "Didn't find it" log, how many DNFs
 -- it has, how many since the last find, and the dates of the last DNF and
