@@ -3,7 +3,7 @@ tests/unit-tests/test_companion_macros_1034.py — the companion database
 (#1034), step 3: macros. The companion is attached to the macros' SQL
 connection as `companion`; every macro reads every table, a macro creates,
 changes and drops only its own (owner recorded in opensak_tables), triggers
-are refused; opensak.companion(), companion_table{}, companion_tables();
+are refused; opensak.companion(), set_companion_table{}, companion_tables();
 the companion of a database attached with opensak.attach().
 """
 
@@ -345,7 +345,7 @@ class TestDelete:
         assert _companion_sql(ftf, "SELECT * FROM ftf_info") == []
 
 
-# ── companion_table{} and companion_tables() ─────────────────────────────────
+# ── set_companion_table{} and companion_tables() ─────────────────────────────
 
 class TestRegistryFunctions:
     def test_companion_tables(self, ftf, tmp_path):
@@ -363,9 +363,15 @@ class TestRegistryFunctions:
         assert out == ["0"]
         assert not companion.exists(active)
 
+    def test_old_name_is_gone(self, active, tmp_path):
+        # Renamed before API 4 became stable (#1186), with no alias.
+        _, out = _run("print(opensak.companion_table, opensak.set_companion_table ~= nil)",
+                      tmp_path)
+        assert out == ["nil\ttrue"]
+
     def test_linked_false_keeps_the_rows(self, ftf, tmp_path):
         _, out = _run("""
-            local t = opensak.companion_table{ name = "companion.ftf_info", linked = false,
+            local t = opensak.set_companion_table{ name = "companion.ftf_info", linked = false,
                                                description = "FTF data" }
             print(t.kind, t.description)
         """, tmp_path)
@@ -382,7 +388,7 @@ class TestRegistryFunctions:
     def test_code_column(self, ftf, tmp_path):
         _run("""
             opensak.sql("CREATE TABLE companion.logs (code TEXT, text TEXT)")
-            opensak.companion_table{ name = "logs", code_column = "code" }
+            opensak.set_companion_table{ name = "logs", code_column = "code" }
         """, tmp_path)
         assert _registry(ftf)["logs"][2:4] == ("cache", "code")
 
@@ -395,16 +401,16 @@ class TestRegistryFunctions:
         ('{ name = "opensak_tables" }', "belongs to OpenSAK"),
     ])
     def test_errors(self, ftf, tmp_path, spec, message):
-        assert message in _fails(f"opensak.companion_table{spec}", tmp_path, name="ftf.lua")
+        assert message in _fails(f"opensak.set_companion_table{spec}", tmp_path, name="ftf.lua")
 
     def test_only_the_owner(self, ftf, tmp_path):
         assert "belongs to ftf.lua" in _fails(
-            'opensak.companion_table{ name = "ftf_info", linked = false }', tmp_path)
+            'opensak.set_companion_table{ name = "ftf_info", linked = false }', tmp_path)
 
     def test_views_cannot_be_linked(self, ftf, tmp_path):
         _run('opensak.sql("CREATE VIEW companion.v AS SELECT * FROM ftf_info")', tmp_path)
         assert "only tables can be cache-linked" in _fails(
-            'opensak.companion_table{ name = "v", linked = true }', tmp_path, name="ftf.lua")
+            'opensak.set_companion_table{ name = "v", linked = true }', tmp_path, name="ftf.lua")
 
 
 # ── opensak.attach() ──────────────────────────────────────────────────────────

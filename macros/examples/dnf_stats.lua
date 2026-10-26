@@ -38,7 +38,7 @@ opensak.sql([[
         last_found      TEXT,
         updated         TEXT NOT NULL
     )]])
-opensak.companion_table{
+opensak.set_companion_table{
     name = "dnf_stats",
     description = "DNF counts per cache, from dnf_stats.lua",
 }
