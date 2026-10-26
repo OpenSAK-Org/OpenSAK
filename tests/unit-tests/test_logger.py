@@ -67,6 +67,21 @@ class TestSetupLogging:
         # must still start fresh, same observable behaviour as before.
         assert "first session line" not in second_content
 
+    def test_no_rotation_appends_to_the_current_log(self, tmp_path):
+        # #937: a headless run must not move away the log of an open OpenSAK.
+        log_path = setup_logging()
+        get_logger("updater").warning("gui session line")
+        for h in logging.getLogger("opensak").handlers:
+            h.flush()
+
+        reset_logging()
+        setup_logging(rotate=False)
+        get_logger("updater").warning("headless line")
+        for h in logging.getLogger("opensak").handlers:
+            h.flush()
+        content = log_path.read_text(encoding="utf-8")
+        assert "gui session line" in content and "headless line" in content
+
     def test_uses_rotating_file_handler(self):
         setup_logging()
         root = logging.getLogger("opensak")

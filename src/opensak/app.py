@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
+from opensak import bootstrap
+from opensak.bootstrap import migrate_legacy_db as _migrate_legacy_db
 from opensak.gui.icon import get_app_icon
 
 if TYPE_CHECKING:
@@ -87,49 +89,6 @@ def _install_qt_translator(app: "QApplication", lang_code: str) -> None:
             "standard dialog buttons will show in English",
             lang_code, qt_locale,
         )
-
-def _migrate_legacy_db() -> None:
-    """
-    Migrer gammel opensak.db til Default.db.
-
-    Scenarier:
-    - opensak.db eksisterer, Default.db ikke → omdøb
-    - Begge eksisterer → slet den tomme Default.db, behold opensak.db
-    - Kun Default.db → ingenting at gøre
-    """
-    from opensak.config import get_app_data_dir
-    app_dir = get_app_data_dir()
-    legacy = app_dir / "opensak.db"
-    default = app_dir / "Default.db"
-
-    if legacy.exists() and not default.exists():
-        # Simpel migration
-        legacy.rename(default)
-        print(f"Migrated {legacy.name} → {default.name}")
-
-    elif legacy.exists() and default.exists():
-        # Begge eksisterer — tjek hvilken der er størst (har data)
-        legacy_size = legacy.stat().st_size
-        default_size = default.stat().st_size
-        if legacy_size > default_size:
-            # opensak.db har data, Default.db er tom — erstat
-            default.unlink()
-            # Slet også WAL/SHM filer for Default hvis de findes
-            for ext in [".db-shm", ".db-wal"]:
-                p = app_dir / f"Default{ext}"
-                if p.exists():
-                    p.unlink()
-            legacy.rename(default)
-            print(f"Migrated {legacy.name} → {default.name} (replaced empty Default.db)")
-        else:
-            # Default.db har data — slet den tomme opensak.db
-            legacy.unlink()
-            for ext in [".db-shm", ".db-wal"]:
-                p = app_dir / f"opensak{ext}"
-                if p.exists():
-                    p.unlink()
-            print(f"Deleted empty {legacy.name}")
-
 
 def _splash_pixmap(since: str | None = None) -> "QPixmap":
     """Tegn splash pixmap programmatisk — ingen billedfil nødvendig.
@@ -324,8 +283,7 @@ def main() -> None:
 
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
-    from opensak.logger import setup_logging
-    log_path = setup_logging()
+    log_path = bootstrap.setup_logging()
     logger.info("startup: main() begin, version=%s", _ver)
 
     # Catch crashes from here on: uncaught exceptions get a report dialog
@@ -356,17 +314,13 @@ def main() -> None:
     # hjem-koordinater så ud til at være forsvundet efter opdatering.
     #
     # Ingen effekt på Windows/Linux (funktionen er selv et no-op der).
-    from opensak.settings_store import (
-        get_store, migrate_from_qsettings, migrate_macos_default_paths,
-        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
-    )
-    migrate_macos_default_paths()
+    from opensak.settings_store import is_first_run
+    bootstrap.migrate_paths()
 
     # #987: a settings restore chosen in the last run is applied now, after
     # the path migration and before anything reads the settings (the theme
     # below is the first) — the running app could otherwise overwrite it.
-    from opensak.backup.settings_restore import apply_pending_settings_restore
-    settings_restore_result = apply_pending_settings_restore()
+    settings_restore_result = bootstrap.apply_pending_settings_restore()
 
     # Anvend Fusion stil + platform-tilpasset font + brugertema
     # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
@@ -392,18 +346,10 @@ def main() -> None:
     # Not translated: the language is not loaded yet.
     splash_msg("Loading language...")
     # Kør én-gangs migration fra QSettings → opensak.json (issue #209)
-    did_migrate = migrate_from_qsettings(get_store())
-    # Reparér evt. boolean-værdier korrumperet af en tidligere bug i
-    # _flush() — kører altid, uafhængigt af om migration var nødvendig,
-    # så også brugere af tidligere 1.14.0-beta-builds får det rettet.
-    repair_corrupted_bool_keys(get_store())
-    # Eksisterende installation (migreret fra QSettings) → wizard er ikke nødvendig
-    if did_migrate:
-        mark_wizard_completed()
+    bootstrap.migrate_settings()
     from opensak.config import get_language
     from opensak.lang import load_language, tr as _tr
-    load_language(get_language())
-    _install_qt_translator(app, get_language())
+    _install_qt_translator(app, bootstrap.load_language())
 
     # Vis velkomst-wizard ved første opstart (issue #210)
     if is_first_run():
@@ -466,6 +412,8 @@ def main() -> None:
     finally:
         set_progress_callback(None)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
+    # #937: a headless `opensak import` refuses the database open here.
+    manager.hold_active_lock()
 
     # #1050: record when OpenSAK was first started (for Help → About). Only
     # does real work once — later starts just read the stored date.
@@ -550,6 +498,7 @@ def main() -> None:
 
     window.show()
     exit_code = app.exec()
+    manager.release_active_lock()
     # #959: if the window closed with everything backed up, record the backup
     # state again now that the database has been checkpointed on dispose —
     # otherwise the checkpoint itself would count as a change at the next exit.

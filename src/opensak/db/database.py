@@ -1614,7 +1614,7 @@ def migrate_databases(paths: Iterable[Path]) -> list[tuple[Path, Exception]]:
     return failed
 
 
-def _session_on(db_path: Path | None):
+def session_on(db_path: Path | None):
     """get_session() when *db_path* is None or the database the active
     engine already points at, otherwise session_for(db_path) — so a helper
     given another database's path never reads or writes the active one."""
@@ -1759,7 +1759,7 @@ def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -
                 return (math.degrees(math.atan2(x2, y2)) + 360) % 360
             return [_scalar(la, lo) for la, lo in zip(lats, lons)]
 
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         rows = session.execute(
             text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
         ).fetchall()
@@ -1851,7 +1851,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     # whether it currently has a persisted distance. Checked first (and
     # unconditionally) so an empty/coordinate-less database is always
     # considered up to date — there is nothing to recalculate either way.
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         row = session.execute(
             text(
                 "SELECT latitude, longitude, distance FROM caches "
@@ -1900,7 +1900,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
 
     # Served by the partial index ix_caches_distance_missing (migration 25),
     # so this stays cheap on large databases.
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         missing = session.execute(
             text(
                 "SELECT 1 FROM caches WHERE distance IS NULL "

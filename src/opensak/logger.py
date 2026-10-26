@@ -30,11 +30,16 @@ _BACKUP_COUNT = 1
 _initialized = False
 
 
-def setup_logging() -> Path:
+def setup_logging(rotate: bool = True) -> Path:
     """
     Initialiser logging-systemet. Kaldes én gang ved opstart fra app.py.
 
     Returnerer stien til logfilen.
+
+    *rotate* (default): start a new log and keep the previous session's as
+    opensak.log.previous (#737). A headless run (#937) passes False and
+    appends to the current log, so it never moves away the log of an
+    OpenSAK that is open, or of the session before it.
 
     Idempotent: gentagne kald (fx i tests) gør ikke noget hvis allerede
     initialiseret, og returnerer blot den eksisterende sti.
@@ -56,7 +61,7 @@ def setup_logging() -> Path:
     # (Windows inkl.), i modsætning til rename()/Path.rename() som fejler
     # hvis målfilen allerede findes på Windows.
     try:
-        if log_path.exists():
+        if rotate and log_path.exists():
             log_path.replace(get_previous_log_path())
     except OSError:
         # Best-effort — hvis rotation fejler (fx låst fil), falder vi

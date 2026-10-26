@@ -214,8 +214,13 @@ def test_main_smoke(qapp, monkeypatch):
     monkeypatch.setattr("opensak.gui.theme.apply_theme", lambda app: None)
     monkeypatch.setattr("opensak.config.get_language", lambda: "en")
     monkeypatch.setattr("opensak.lang.load_language", lambda lang: None)
+    lock_calls = []
     monkeypatch.setattr("opensak.db.manager.get_db_manager",
-                        lambda: SimpleNamespace(ensure_active_initialised=lambda: None))
+                        lambda: SimpleNamespace(
+                            ensure_active_initialised=lambda: None,
+                            # #937: the GUI holds the active database's lock
+                            hold_active_lock=lambda: lock_calls.append("hold"),
+                            release_active_lock=lambda: lock_calls.append("release")))
 
     notices = []
 
@@ -253,3 +258,4 @@ def test_main_smoke(qapp, monkeypatch):
     # failing one is reported and doesn't hide the rest.
     assert notices == ["premigration", "fallback", "crash"]
     assert len(reported) == 1 and reported[0].endswith("RuntimeError: broken notice")
+    assert lock_calls == ["hold", "release"]
