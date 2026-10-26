@@ -104,6 +104,7 @@ from opensak.filters.engine import (
 )
 from opensak import __version__, geodesy
 from opensak.coord_formats import INPUT_KEYS, parse_any
+from opensak.db import companion as companion_db
 from opensak.db.cache_delete import delete_caches
 from opensak.db.database import SCHEMA_VERSION, get_engine
 from opensak.db.manager import DatabaseInfo, get_db_manager
@@ -162,6 +163,7 @@ from opensak.macro.child_write import (
     update_child,
 )
 from opensak.macro.db_access import WriteApproval
+from opensak.macro.metadata import read_metadata
 from opensak.macro.permissions import (
     FolderAccessDenied,
     FolderNotApproved,
@@ -234,6 +236,8 @@ SLEEP_BUDGET_S = 60.0
 # largest macro file it reads.
 MAX_MACRO_DEPTH = 10
 MAX_MACRO_BYTES = 1024 * 1024
+# opensak.companion_table{}: the keys of its table.
+_COMPANION_TABLE_KEYS = ("name", "linked", "code_column", "description")
 # opensak.export_gpx{}: the keys of its table, and what to do with an
 # existing file.
 EXPORT_KEYS = frozenset({
@@ -1495,6 +1499,9 @@ class MacroRuntime:
         self._chunk_name = "macro"
         # opensak.macro_db(): the file attached during this run
         self._macro_db_path: Optional[Path] = None
+        # The running macro's file and its owner key in the companion
+        # database (_companion_owner())
+        self._owner_cache: tuple[Optional[Path], Optional[str]] = (None, None)
         # opensak.attach(): schema → (database name, file), attached
         # read-only; kept here so they survive a reopened connection
         self._attachments: dict[str, tuple[str, Path]] = {}
@@ -1834,15 +1841,17 @@ class MacroRuntime:
 
     def _purge_companion(self, codes: list[str]) -> None:
         """Delete the rows of the deleted caches *codes* from the active
-        database's companion (#1034). The macro's write connection doesn't
-        attach it, so this runs on its own connection after the commit; a
-        delete through get_session() has done it already. Never raises: a
-        row left behind is removed the next time the database is opened."""
+        database's companion (#1034), on its own connection after the
+        commit. Usually done already: by get_session()'s and the macro
+        write connection's delete, where the companion is attached; this
+        covers a companion that wasn't. Never raises: a row left behind is
+        removed the next time the database is opened."""
         if not flags.companion_db or not codes:
             return
+        if self._sql_write_db is not None and self._sql_write_db.companion_attached:
+            return
         try:
-            from opensak.db import companion
-            companion.delete_rows(Path(get_engine().url.database or ""), codes)
+            companion_db.delete_rows(Path(get_engine().url.database or ""), codes)
         except Exception:
             logger.warning("macro: companion rows of deleted caches not removed", exc_info=True)
 
@@ -1858,14 +1867,20 @@ class MacroRuntime:
 
     def _writable_db(self) -> WritableDatabase:
         if self._sql_write_db is None:
-            db = WritableDatabase(Path(get_engine().url.database or ""))
+            db = WritableDatabase(
+                Path(get_engine().url.database or ""),
+                companion_owner=self._companion_owner,
+                companion_owner_name=self._companion_owner_name,
+            )
             # Attached again after opensak.switch_database().
             active = self._active_db_path()
             try:
                 if self._macro_db_path is not None:
                     db.attach_macro_db(self._macro_db_path)
+                if flags.companion_db:
+                    self._attach_active_companion(db)
                 for schema, (name, path) in list(self._attachments.items()):
-                    if path == active:
+                    if path in (active, companion_db.companion_path(active)):
                         del self._attachments[schema]
                         self._output(f"opensak.attach: detached {name!r} ({schema}): "
                                      "it is the active database now")
@@ -1907,22 +1922,50 @@ class MacroRuntime:
             raise MacroError(f"{func}: {exc}") from None
         self._attachments[schema] = (db.name, path)
         self._output(f"{func}: attached {db.name!r} read-only as {schema}")
+        if flags.companion_db:
+            self._attach_companion_of(db.name, path, schema)
         return schema
+
+    def _attach_companion_of(self, name: str, path: Path, schema: str) -> None:
+        """opensak.attach(): attach the companion database of *path* too,
+        read-only, as <schema>_companion — if it has a usable one. Nothing
+        is changed in it (companion.peek()). Not attaching it is reported in
+        the macro output, never an error."""
+        if companion_db.peek(path) is not companion_db.Status.OK:
+            return
+        func = "opensak.attach"
+        companion_schema = f"{schema}_{companion_db.COMPANION_SCHEMA}"
+        companion_path = companion_db.companion_path(path)
+        try:
+            self._writable_db().attach_read_only(companion_path, companion_schema)
+        except SqlError as exc:
+            self._output(f"{func}: the companion database of {name!r} is not attached: {exc}")
+            return
+        self._attachments[companion_schema] = (name, companion_path)
+        self._output(f"{func}: attached its companion database read-only as {companion_schema}")
 
     def _detach(self, schema=None) -> None:
         func = "opensak.detach"
         if not isinstance(schema, str) or schema not in self._attachments:
             raise MacroError(f"{func}: no database is attached as {schema!r} — see opensak.attached()")
         self._no_transaction(func)
-        try:
-            self._writable_db().detach(schema)
-        except SqlError as exc:
-            raise MacroError(f"{func}: {exc}") from None
-        del self._attachments[schema]
+        name, path = self._attachments[schema]
+        # The companion attached along with the database goes with it.
+        companion_schema = f"{schema}_{companion_db.COMPANION_SCHEMA}"
+        schemas = [schema]
+        if self._attachments.get(companion_schema) == (name, companion_db.companion_path(path)):
+            schemas.append(companion_schema)
+        for s in schemas:
+            try:
+                self._writable_db().detach(s)
+            except SqlError as exc:
+                raise MacroError(f"{func}: {exc}") from None
+            del self._attachments[s]
 
     def _attached(self, lua):
         return lua.table_from([
-            lua.table_from({"schema": schema, "name": name, "path": str(path), "opensak": True})
+            lua.table_from({"schema": schema, "name": name, "path": str(path), "opensak": True,
+                            "companion": companion_db.is_companion_file(path)})
             for schema, (name, path) in self._attachments.items()
         ])
 
@@ -1948,11 +1991,8 @@ class MacroRuntime:
 
     def _macro_db(self) -> str:
         func = "opensak.macro_db"
-        if self._macro_path is not None:
-            file = self._macro_path
-        elif self._base_dir is not None:
-            file = self._base_dir / self._chunk_name
-        else:
+        file = self._owner_file()
+        if file is None:
             raise MacroError(f"{func}: save the macro first — its database is named after the file")
         path = (file.parent / f"{file.stem}.db3").resolve()
         manager = get_db_manager()
@@ -1998,6 +2038,123 @@ class MacroRuntime:
             if path is not None:
                 self._sql_write_db.attach_macro_db(path)
         self._macro_db_path = path
+
+    def _owner_file(self) -> Optional[Path]:
+        """The running macro's file, as opensak.macro_db() and the
+        companion database's owners know it; None without one."""
+        if self._macro_path is not None:
+            return self._macro_path
+        if self._base_dir is not None:
+            return self._base_dir / self._chunk_name
+        return None
+
+    # The companion database (#1034): the active database's, attached to the
+    # SQL connection as `companion` whenever it exists (companion-db flag).
+    # All macros read it; the running macro owns the tables it creates
+    # there (sql.py CompanionAccess) — a macro started with
+    # opensak.run_macro() its own, as the owner is asked per statement.
+
+    def _companion_owner(self) -> Optional[str]:
+        file = self._owner_file()
+        if file is None:
+            return None
+        if self._owner_cache[0] != file:
+            self._owner_cache = (file, db_access.macro_key(file))
+        return self._owner_cache[1]
+
+    def _companion_owner_name(self) -> str:
+        """The running macro's name (its header's Name, else the file name)."""
+        file = self._owner_file()
+        return read_metadata(file).name if file is not None else ""
+
+    @staticmethod
+    def _attach_active_companion(db: WritableDatabase) -> None:
+        """Attach the active database's companion to *db* if it has a
+        usable one. A problem is logged; the macro runs without it."""
+        path = Path(get_engine().url.database or "")
+        if not companion_db.exists(path):
+            return
+        if companion_db.status(path) is not companion_db.Status.OK:
+            companion_db.prepare(path)
+        if companion_db.status(path) is not companion_db.Status.OK:
+            logger.warning("macro: companion of %s not attached (%s)",
+                           path, companion_db.status(path).value)
+            return
+        try:
+            db.attach_companion(companion_db.companion_path(path))
+        except SqlError as exc:
+            logger.warning("macro: %s", exc)
+
+    def _companion(self) -> str:
+        func = "opensak.companion"
+        db_path = Path(get_engine().url.database or "")
+        existed = companion_db.exists(db_path)
+        if existed and self._writable_db().companion_attached:
+            return str(companion_db.companion_path(db_path))
+        if not existed and self._owner_file() is None:
+            raise MacroError(f"{func}: save the macro first — the tables it creates "
+                             "there belong to its file")
+        self._no_transaction(func)
+        try:
+            path = companion_db.create(db_path)
+        except companion_db.CompanionError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        if not existed:
+            # Shown in the macro output, so a new file never appears silently.
+            self._output(f"{func}: created {path}")
+        try:
+            self._writable_db().attach_companion(path)
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return str(path)
+
+    def _companion_tables_db(self) -> WritableDatabase:
+        """The SQL connection, with the companion attached if it exists."""
+        db = self._writable_db()
+        if not db.companion_attached and not db.in_transaction:
+            self._attach_active_companion(db)
+        return db
+
+    def _companion_table(self, lua, spec=None):
+        func = "opensak.companion_table"
+        if spec is None or not hasattr(spec, "items"):
+            raise MacroError(f'{func} expects a table, e.g. {{ name = "ftf_info", linked = false }}')
+        values = dict(spec.items())
+        unknown = sorted(str(k) for k in values if k not in _COMPANION_TABLE_KEYS)
+        if unknown:
+            raise MacroError(f"{func}: unknown key(s) {', '.join(unknown)} — use "
+                             f"{', '.join(_COMPANION_TABLE_KEYS)}")
+        name = values.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise MacroError(f"{func}: `name` must be the name of a table in the companion database")
+        name = name.strip()
+        prefix = f"{companion_db.COMPANION_SCHEMA}."
+        if name.lower().startswith(prefix):
+            name = name[len(prefix):]
+        linked = values.get("linked")
+        if linked is not None and not isinstance(linked, bool):
+            raise MacroError(f"{func}: `linked` must be true or false, got {linked!r}")
+        for key in ("code_column", "description"):
+            if values.get(key) is not None and not isinstance(values[key], str):
+                raise MacroError(f"{func}: `{key}` must be a string, got {values[key]!r}")
+        db = self._companion_tables_db()
+        if not db.companion_attached:
+            raise MacroError(f"{func}: the active database has no companion database; "
+                             "create the table first (see opensak.companion())")
+        try:
+            db.declare_companion_table(name, linked, values.get("code_column"),
+                                       values.get("description"))
+            table = next(t for t in db.companion_tables() if t["name"].lower() == name.lower())
+        except SqlError as exc:
+            raise MacroError(f"{func}: {exc}") from None
+        return lua.table_from(table)
+
+    def _companion_tables(self, lua):
+        try:
+            tables = self._companion_tables_db().companion_tables()
+        except SqlError as exc:
+            raise MacroError(f"opensak.companion_tables: {exc}") from None
+        return lua.table_from([lua.table_from(t) for t in tables])
 
     def _sql_write(self, query=None, params=None) -> int:
         query, params = _sql_args("opensak.sql_write", query, params)
@@ -4382,6 +4539,8 @@ class MacroRuntime:
             table = api
             if (func.write or func.beta) and not flags.lua_macro_write:
                 continue
+            if func.companion and not flags.companion_db:
+                continue
             for ns in namespaces:
                 table = table.setdefault(ns, {})
             bound = func.bind(self, lua)
@@ -4645,7 +4804,7 @@ class _FormSession:
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
-API_VERSION = 3
+API_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -4685,6 +4844,8 @@ class ApiFunction:
     write: bool = False
     # Only registered with that flag too, but changes nothing (opensak.attach)
     beta: bool = False
+    # Only registered with the companion-db feature flag (opensak.companion)
+    companion: bool = False
 
     @property
     def signatures(self) -> list[str]:
@@ -4860,7 +5021,7 @@ API: tuple[ApiFunction, ...] = (
         example='local n = opensak.filter{ type = "Traditional", difficulty = {1, 2}, found = false }\n'
                 'print("Easy unfound traditionals: " .. n)',
         since=1,
-        changed=((3, "added the keys `last_user_update` and `macro_flag`; `owned` "
+        changed=((4, "added the keys `last_user_update` and `macro_flag`; `owned` "
                      "uses the `owned` cache field"),),
         bind=lambda rt, lua: rt._filter,
         params=(Param("spec", "opensak.FilterSpec", "The filter keys."),),
@@ -4888,7 +5049,7 @@ API: tuple[ApiFunction, ...] = (
                     'pad numbers ("0042").',
         example='opensak.sort("difficulty", "desc")',
         since=2,
-        changed=((3, "added `macro_sort`"),),
+        changed=((4, "added `macro_sort`"),),
         bind=lambda rt, lua: rt._sort,
         params=(
             Param("field", "string", "A cache field, e.g. \"difficulty\"."),
@@ -4969,7 +5130,7 @@ API: tuple[ApiFunction, ...] = (
                 'if c and c.corrected then print(c.name, c.corrected.lat, c.corrected.lon) end\n'
                 'local found = opensak.cache("GC12345", { database = "Found" })',
         since=2,
-        changed=((3, "added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, "
+        changed=((4, "added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, "
                      "`corrected_source` and `last_user_update`"),),
         bind=lambda rt, lua: lambda *a: rt._cache(lua, *a),
         params=(_CODE, _READ_OPTIONS),
@@ -4998,8 +5159,9 @@ API: tuple[ApiFunction, ...] = (
                 'for c in opensak.caches{ database = "Found", fields = {"corrected"} } do\n'
                 "    print(c.code, c.corrected and c.corrected.lat)\nend",
         since=2,
-        changed=((3, "added `all` and the fields `owned`, `macro_flag`, `macro_sort`, "
-                     "`symbol`, `corrected_source` and `last_user_update`"),),
+        changed=((3, "added `all`"),
+                 (4, "added the fields `owned`, `macro_flag`, `macro_sort`, "
+                     "`symbol`, `corrected_source` and `last_user_update`")),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
                       "Filter keys, `all`, `database` and/or `fields`; nothing = the "
@@ -5111,7 +5273,8 @@ API: tuple[ApiFunction, ...] = (
         returns=("string[]", "Table and view names, sorted."),
         changed=((3, "lists the macro's TEMP tables and views, the tables "
                      "of opensak.macro_db() as `macro.<name>` and those of "
-                     "opensak.attach() as `<schema>.<name>`"),),
+                     "opensak.attach() as `<schema>.<name>`"),
+                 (4, "lists the companion database's tables as `companion.<name>`")),
     ),
     ApiFunction(
         name="columns",
@@ -5202,7 +5365,11 @@ API: tuple[ApiFunction, ...] = (
                     "detached when the macro ends. A macro started with "
                     "opensak.run_macro() sees its caller's attached "
                     "databases; what it attaches or detaches is undone when "
-                    "it returns. See Several databases in one query.",
+                    "it returns. While the `companion-db` feature flag is on, "
+                    "the database's companion database (opensak.companion()) "
+                    "is attached with it, read-only, as `<schema>_companion`, "
+                    "if it has one, and detached with it. See Several "
+                    "databases in one query.",
         example='local found = opensak.attach("Found 2020", "found")\n'
                 'for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name FROM caches c "\n'
                 '        .. "JOIN found.caches f ON f.gc_code = c.gc_code")) do\n'
@@ -5215,6 +5382,7 @@ API: tuple[ApiFunction, ...] = (
                   "made from the database name.", optional=True),
         ),
         returns=("string", "The schema name."),
+        changed=((4, "also attaches the database's companion database"),),
         beta=True,
     ),
     ApiFunction(
@@ -5236,9 +5404,83 @@ API: tuple[ApiFunction, ...] = (
         example='for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end',
         since=3,
         bind=lambda rt, lua: lambda: rt._attached(lua),
-        returns=("{schema: string, name: string, path: string, opensak: boolean}[]",
-                 "One table per attached database."),
+        returns=("{schema: string, name: string, path: string, opensak: boolean, companion: boolean}[]",
+                 "One table per attached database. `companion`: it is the "
+                 "companion database of the database attached as `name`."),
+        changed=((4, "added `companion`"),),
         beta=True,
+    ),
+    ApiFunction(
+        name="companion",
+        description="Make sure the active database has a companion database "
+                    "— a second SQLite file next to it, `Found.db` → "
+                    "`Found.companion.db3`, created if missing — attached to "
+                    "the SQL functions as schema `companion`. It is shared by "
+                    "all macros: every macro reads every table in it, and "
+                    "creates, changes and drops its own tables, indexes and "
+                    "views with opensak.sql(), sql_each() and sql_write() "
+                    "(`CREATE TABLE companion.<name> …`). Like "
+                    "opensak.macro_db() this needs no approval to change "
+                    "databases, but opensak.sql_write() still asks for it, as "
+                    "it may change caches. OpenSAK records the macro's file as "
+                    "the owner of every table and view it creates; the tables "
+                    "of other macros, those of OpenSAK (`opensak_*`) and tables "
+                    "without an owner are read-only. A moved or renamed macro "
+                    "is a new owner. A table with a `gc_code` column is "
+                    "cache-linked: its rows belong to caches, several per "
+                    "cache if needed, and follow them — they are deleted with "
+                    "the cache, and copied or moved with it to another "
+                    "database (opensak.companion_table() changes that). "
+                    "Triggers are refused. The file follows its database when "
+                    "it is renamed, copied, moved, deleted or backed up. Once "
+                    "it exists, every macro run has it attached without this "
+                    "call. The first call creates the file and prints its path "
+                    "in the macro output; it cannot do that inside "
+                    "opensak.transaction(), and the macro must be saved, as "
+                    "its tables belong to its file. See The companion "
+                    "database.",
+        example='opensak.companion()\n'
+                'opensak.sql("CREATE TABLE IF NOT EXISTS companion.ftf_info "\n'
+                '    .. "(gc_code TEXT PRIMARY KEY, ftf_date TEXT, ftf_by TEXT)")\n'
+                'opensak.sql("INSERT OR REPLACE INTO companion.ftf_info VALUES (?, ?, ?)",\n'
+                '    { "GC12345", "2024-05-01", "someone" })',
+        since=4,
+        bind=lambda rt, lua: rt._companion,
+        returns=("string", "The path of the companion database file."),
+        companion=True,
+    ),
+    ApiFunction(
+        name="companion_table",
+        description="Change how OpenSAK treats one of the macro's own tables "
+                    "or views in the companion database (see "
+                    "opensak.companion()). `linked = false`: the rows stay "
+                    "where they are when caches are deleted, copied or moved, "
+                    "even with a `gc_code` column. `linked = true` or "
+                    "`code_column`: the table is cache-linked by that column "
+                    "(default `gc_code`), which must exist. `description` is "
+                    "shown with the table in OpenSAK. Keys left out stay as "
+                    "they are. Create the table first.",
+        example='opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
+                'opensak.companion_table{ name = "ftf_options", linked = false }',
+        since=4,
+        bind=lambda rt, lua: lambda *a: rt._companion_table(lua, *a),
+        params=(Param("spec", "opensak.CompanionTableSpec",
+                      "`name` (required, with or without `companion.`), "
+                      "`linked`, `code_column`, `description`."),),
+        returns=("opensak.CompanionTable", "The table, as opensak.companion_tables() lists it."),
+        companion=True,
+    ),
+    ApiFunction(
+        name="companion_tables",
+        description="The tables and views in the active database's companion "
+                    "database (see opensak.companion()), sorted by name, with "
+                    "their owner. Empty while it has none.",
+        example='for _, t in ipairs(opensak.companion_tables()) do\n'
+                '    print(t.name, t.owner_name, t.kind, t.rows, t.mine and "(mine)" or "")\nend',
+        since=4,
+        bind=lambda rt, lua: lambda: rt._companion_tables(lua),
+        returns=("opensak.CompanionTable[]", "One table per table or view."),
+        companion=True,
     ),
     ApiFunction(
         name="databases",
@@ -5528,7 +5770,7 @@ API: tuple[ApiFunction, ...] = (
                 '    if c.difficulty and c.difficulty >= 4 then opensak.macro_flag("set", c.code) end\n'
                 "end\n"
                 "opensak.filter{ macro_flag = true }",
-        since=3,
+        since=4,
         bind=lambda rt, lua: rt._macro_flag,
         params=(Param("action", '"set"|"clear"|"swap"', "What to do with the flag."),
                 Param("caches", "string|string[]|{all: true}",
