@@ -83,6 +83,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.read_csv`](#opensakreadcsv) | 1 |
 | [`opensak.write_text`](#opensakwritetext) | 3 |
 | [`opensak.open`](#opensakopen) | 3 |
+| [`opensak.get_url`](#opensakgeturl) | 3 |
 | [`opensak.read_text`](#opensakreadtext) | 3 |
 | [`opensak.file_exists`](#opensakfileexists) | 3 |
 | [`opensak.folder_exists`](#opensakfolderexists) | 3 |
@@ -1896,6 +1897,37 @@ Example:
 local path = opensak.write_text(opensak.temp_dir() .. "/report.html",
   opensak.html.page{ title = "Report", opensak.html.table(rows) })
 opensak.open(path)
+```
+
+### opensak.get_url
+
+```lua
+opensak.get_url(url [, options])
+```
+
+Download a web page or file (GSAK's GetUrl), e.g. to check a puzzle answer online or fetch a list before working with it. GET only, over http or https; no cookies, no custom headers, and no user name or password in the URL. Before a macro first contacts a web site (host), the user is asked: this time only, always (for this macro, listed in Settings → Folder permissions) or deny. Each redirect (at most 5) is checked the same way. A host on the local network (a router, a NAS) is asked about separately. geocaching.com, coord.info and Groundspeak's other sites (waymarking.com, wherigo.com, ...) can never be contacted: their terms of use don't allow automated access. List the hosts in the macro's `Network:` header so users see them before running it; the header approves nothing by itself. An HTTP error status (404, 500) is no error: check `info.status`. A failed request (no answer, too large, refused) raises an error, which `pcall` catches. At most 200 requests per run, and at least 1 s between two requests to the same host.
+
+Parameters:
+
+- `url` (`string`) — An http: or https: URL.
+- `options` (`opensak.GetUrlOptions`, optional) — `timeout`: seconds without an answer (1–120, default 30). `caption`: show a progress window with this title. `binary`: return the bytes as they are, without decoding the text. `max_bytes`: the largest body (default 10 MB, at most 50 MB).
+
+Returns `string, opensak.UrlInfo` — The body, as text decoded with the charset the server names (UTF-8 if none; invalid bytes replaced) or, with `binary`, as bytes; and `{ status, content_type, url }`, `url` being the address after redirects.
+
+Since API version 3.
+
+Beta: only available while the `lua-macro-net` feature flag is on, as it is in beta builds; check with `if opensak.get_url then`. Each web site needs the user's approval, given per macro (see Web sites).
+
+Example:
+
+```lua
+local ok, body, info = pcall(opensak.get_url,
+  "https://example.com/answers.csv", { caption = "Answers" })
+if not ok then
+  opensak.message("Download failed: " .. body)
+elseif info.status == 200 then
+  print(#body .. " characters from " .. info.url)
+end
 ```
 
 ### opensak.read_text
@@ -4565,6 +4597,16 @@ The rows belonging to a cache are read with `opensak.logs()`, `opensak.waypoints
 | `name` | `string?` | Name. |
 | `tracking_code` | `string?` | Tracking code. |
 
+## Web sites
+
+Beta: `opensak.get_url()` is only available while the `lua-macro-net` feature flag is on, as it is in beta builds.
+
+A macro can read everything in your databases, so a macro that contacts a web site could also send your data there. Before a macro first contacts a web site (host), OpenSAK therefore asks whether this macro may: **This time only** (for this run), **Always** or **Deny** (not asked again during this run). The question names the host, says when the connection is not encrypted (`http:`) and when the macro's `Network:` header does not list the host. A host on the local network (your router, a NAS) is asked about on its own, also when it was allowed as an internet address: OpenSAK checks the address it actually connects to. A redirect to another host is asked about like the first one. Groundspeak's sites (`geocaching.com`, `coord.info`, `geocachinghq.com`, `groundspeak.com`, `groundspeak.net`, `groundspeak.org`, `groundspeak.info`, `geocaching.net`, `geocaching.org`, `geocaching.us`, `geocaching.eu`, `geocaching.co`, `geocaching.mobi`, `waymarking.com`, `waymarking.net`, `waymarking.org`, `wherigo.com`, `wherigo.net` and `wherigo.org`, with their subdomains) can never be contacted: their terms of use don't allow automated access outside their API.
+
+Like folders, the answer belongs to this macro and its code: web sites allowed always are listed with the macro in Settings → Folder permissions, and a macro changed outside OpenSAK's macro editor is asked once whether it may have them again. A macro started with `opensak.run_macro()` is asked on its own. An unsaved macro can be allowed a web site for one run only. A run asks about at most 5 web sites; after that, the ones not allowed fail without asking.
+
+Requests are GET only, with the User-Agent `OpenSAK-Macro/<version>` and without cookies. The system's proxy settings apply.
+
 ## Example macros
 
 Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/examples/). Each one starts with a comment explaining what it does and which files it expects.
@@ -4613,7 +4655,7 @@ From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, or a fu
 -- Network: api.example.com, data.example.org
 ```
 
-Both are **information only**: a declaration never approves anything. OpenSAK asks for every write, folder and web site approval as before, whether the macro declares it or not. The manager shows the declaration in its *Permissions* column, and the community macro repository can use it to review an update that asks for more.
+Both are **information only**: a declaration never approves anything. OpenSAK asks for every write, folder and web site approval as before, whether the macro declares it or not. The manager shows the declaration in its *Permissions* column, and the community macro repository can use it to review an update that asks for more. Before a macro file with a declaration first runs, OpenSAK shows what it declares, with **Run** and **Cancel**; it shows this again only when a later version declares more. Unchanged example macros shipped with OpenSAK, unsaved macros and runs without a user interface skip it.
 
 `Permissions` takes these words, separated by commas or spaces:
 
@@ -4628,7 +4670,7 @@ Both are **information only**: a declaration never approves anything. OpenSAK as
 
 Write `Permissions: none` for a macro that needs none of them: a macro without a `Permissions` line has not declared anything, which is not the same. A word OpenSAK does not know is shown as unknown, not dropped.
 
-`Network` lists every host the macro contacts (for the planned `opensak.get_url()`), as a host name or IP address: no `https://`, port, path or `user@`, and no wildcards, since web sites are approved one host at a time. `Network` alone covers network access; there is no `network` permission word. `geocaching.com` and `coord.info` (with their subdomains) can never be contacted by a macro and are marked when listed.
+`Network` lists every host the macro contacts with `opensak.get_url()`, as a host name or IP address: no `https://`, port, path or `user@`, and no wildcards, since web sites are approved one host at a time. `Network` alone covers network access; there is no `network` permission word. Groundspeak's sites (`geocaching.com`, `coord.info`, `geocachinghq.com`, `groundspeak.com`, `groundspeak.net`, `groundspeak.org`, `groundspeak.info`, `geocaching.net`, `geocaching.org`, `geocaching.us`, `geocaching.eu`, `geocaching.co`, `geocaching.mobi`, `waymarking.com`, `waymarking.net`, `waymarking.org`, `wherigo.com`, `wherigo.net` and `wherigo.org`, with their subdomains) can never be contacted by a macro and are marked when listed.
 
 Both lines may be repeated, their values add up. A new version of a macro asks for more when it declares a permission or host the previous version did not, or when the previous version had no `Permissions` line.
 
@@ -4800,7 +4842,8 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | GSAK | Status | Note |
 |---|---|---|
 | GetMail / Pop3 | 🚫 | deprecated in GSAK too |
-| GetUrl / PostUrl | 🚫 | the sandbox has no network access on purpose |
+| GetUrl | ✅ β | `get_url(url [, options])`: GET only, each web site approved by the user; needs the `lua-macro-net` feature flag (see [Web sites](#web-sites)) |
+| PostUrl | 🚫 | GET only for now |
 | Web | ❌ | planned |
 
 ### Macro language
