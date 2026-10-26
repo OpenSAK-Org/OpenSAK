@@ -175,6 +175,7 @@ from opensak.macro.db_access import (
     read_macro_source,
     source_hash,
 )
+from opensak.macro.deprecation import Deprecated, deprecated_message, removed_message
 from opensak.macro.examples import shipped_hashes
 from opensak.macro.metadata import MacroInfo, parse_header, read_metadata
 from opensak.macro.permissions import (
@@ -572,7 +573,7 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #   * The budget is shared by all threads, so spreading the work over many
 #     coroutines does not multiply it.
 #
-# The chunk returns three functions for the runtime:
+# The chunk returns four functions for the runtime:
 #   * stop(msg) makes the hook sticky with *msg* right away — opensak.exit()
 #     and a cancelled run end the macro this way, so pcall cannot catch it.
 #     This also ends macros started by opensak.run_macro(), since they run
@@ -580,6 +581,8 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #   * where() returns "macro.lua:12: " for the macro line that called the
 #     API function currently running, so API errors name it like Lua's own
 #     errors do (luaL_where; level 3 = where, the API function, its caller).
+#   * line(level) returns the chunk name and line at *level* the same way,
+#     ("macro", 12), or ("", -1) if there is none: for deprecation warnings.
 #   * make_loader() returns the loader opensak.run_macro() compiles other
 #     macros with (see below).
 _SANDBOX_SETUP = """
@@ -650,6 +653,13 @@ local function where()
   end
   return ""
 end
+local function line(level)
+  local info = getinfo(level, "Sl")
+  if info and info.currentline > 0 then
+    return info.short_src, info.currentline
+  end
+  return "", -1
+end
 -- For opensak.run_macro(): called once the opensak table is installed, it
 -- takes a snapshot of the globals and returns a loader that compiles another
 -- macro as text only (never bytecode) in a fresh copy of that snapshot, so
@@ -665,7 +675,7 @@ local function make_loader()
     return fn, err
   end
 end
-return stop, where, make_loader
+return stop, where, line, make_loader
 """
 
 # opensak.transaction(fn), written in Lua: an error raised by fn passes
@@ -686,6 +696,37 @@ return function(fn)
   finish(r[1])
   if not r[1] then error(r[2], 0) end
   return unpack(r, 2, r.n)
+end
+"""
+
+
+# A deprecated function written in Lua (opensak.transaction) gets its
+# warning from a Lua wrapper too, so its errors don't pass through Python.
+# warn is MacroRuntime._deprecated_call for it, wrapped. fn is tail-called,
+# so error levels inside it still point at the macro.
+_DEPRECATED_LUA = """
+local warn, fn = ...
+return function(...)
+  warn()
+  return fn(...)
+end
+"""
+
+# Removed functions (REMOVED): a metatable on the `opensak` table (and on
+# its sub-tables) whose __index notes the removed name read and returns nil,
+# so `if opensak.old_name then` still sees nil. When the macro then fails
+# with "attempt to call a nil value (field 'old_name')", the runtime names
+# the removal instead (MacroRuntime._explain_removed). seen(name) sets
+# MacroRuntime._removed; names maps each key to the full name.
+_REMOVED_LUA = """
+local seen = ...
+local setmetatable = setmetatable
+return function(t, names)
+  setmetatable(t, { __index = function(_, key)
+    local name = names[key]
+    if name then seen(name) end
+    return nil
+  end })
 end
 """
 
@@ -1618,8 +1659,14 @@ class MacroRuntime:
         self._exit_code: Optional[int] = None
         # The sandbox's stop(msg), set while a run is in progress
         self._stop: Optional[Callable[[str], None]] = None
-        # The sandbox's where(), set while a run is in progress
+        # The sandbox's where() and line(), set while a run is in progress
         self._where: Optional[Callable[[], str]] = None
+        self._line: Optional[Callable[[int], tuple[str, int]]] = None
+        # Deprecation warnings printed in this run: (macro file, name), so
+        # each macro gets each one once (#1185)
+        self._warned: set[tuple[Optional[Path], str]] = set()
+        # The removed function (REMOVED) the macro last looked up
+        self._removed: Optional[RemovedFunction] = None
         self._slept = 0.0
         self._polygons: dict[Path, LineShape] = {}
         self._boundaries: Optional[tuple[Any, Any]] = None  # (store, resolver)
@@ -4261,6 +4308,7 @@ class MacroRuntime:
         self._macro_depth += 1
         try:
             self._show_declarations()
+            self._warn_header()
             result = fn(*args)
         except BaseException:
             self._end_called_macro(previous, caller_dbs, failed=True)
@@ -4990,6 +5038,8 @@ class MacroRuntime:
         self._slept = 0.0
         self._polygons = {}
         self._macro_depth = 0
+        self._warned = set()
+        self._removed = None
         try:
             from lupa.lua54 import LuaError, LuaMemoryError, LuaRuntime, lua_type
         except ImportError as exc:
@@ -5006,7 +5056,7 @@ class MacroRuntime:
             # script only gets the plain functions in the opensak table.
             attribute_filter=self._deny_attribute,
         )
-        self._stop, self._where, make_loader = lua.execute(
+        self._stop, self._where, self._line, make_loader = lua.execute(
             _SANDBOX_SETUP, self._instruction_limit
         )
 
@@ -5028,12 +5078,22 @@ class MacroRuntime:
             bound = func.bind(self, lua)
             # A Lua function (opensak.transaction) must not be called through
             # Python: errors passing through lose their value.
-            table[name] = bound if lua_type(bound) == "function" else self._api_function(bound)
+            if lua_type(bound) == "function":
+                if func.deprecated:
+                    bound = lua.execute(_DEPRECATED_LUA, self._wrap(
+                        functools.partial(self._deprecated_call, func, 4)), bound)
+                table[name] = bound
+            else:
+                if func.deprecated:
+                    bound = self._deprecated_function(func, bound)
+                table[name] = self._api_function(bound)
         g.opensak = lua.table_from(api, recursive=True)
+        self._install_removed(lua, g.opensak)
         self._load_macro = make_loader()
 
         try:
             self._show_declarations()
+            self._warn_header()
             fn = lua.compile(source, name=f"={chunk_name}")
             fn()
             self._check_cancelled()
@@ -5052,13 +5112,13 @@ class MacroRuntime:
                     "macro aborted: memory limit reached "
                     f"({self._memory_limit // (1024 * 1024)} MB)"
                 ) from exc
-            raise MacroError(str(exc)) from exc
+            raise MacroError(self._explain_removed(str(exc))) from exc
         except Exception as exc:
             # A Python exception raised inside a callback (e.g. the
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
         finally:
-            self._stop = self._where = None
+            self._stop = self._where = self._line = None
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
@@ -5078,6 +5138,96 @@ class MacroRuntime:
         """*func* as a function for Lua: MacroError becomes a Lua error
         reported at the line of the macro that called it."""
         return self._wrap(func)
+
+    # -- Deprecations (#1185) --------------------------------------------------
+
+    def _warn_deprecated(self, name: str, deprecated: Deprecated, level: int = 3) -> None:
+        """Print deprecated_message() for *name* once per macro and run,
+        naming the macro line at *level* (as for the sandbox's line(): 3 is
+        the caller of the API function currently running)."""
+        key = (self._macro_path, name)
+        if key in self._warned:
+            return
+        self._warned.add(key)
+        where = ""
+        if self._line is not None:
+            chunk, line = self._line(level)
+            if line > 0:
+                # In a macro started with opensak.run_macro(), its file is
+                # named too.
+                where = (f" ({chunk}, line {line})" if self._macro_depth
+                         else f" (line {line})")
+        self._output(deprecated_message(name, deprecated) + where)
+
+    def _deprecated_call(self, func: ApiFunction, level: int = 3) -> None:
+        """The warning for a call of the deprecated *func*."""
+        assert func.deprecated is not None
+        self._warn_deprecated(f"opensak.{func.name}", func.deprecated, level)
+
+    def _deprecated_function(self, func: ApiFunction, bound: Callable) -> Callable:
+        """*bound* (a Python function), warning at its first call."""
+
+        def call(*args):
+            self._deprecated_call(func)
+            return bound(*args)
+
+        return call
+
+    def _deprecated_param(self, func: str, param: str) -> None:
+        """For opensak.<func>, called where it maps the deprecated parameter
+        *param* to the new one: warn once per run. *param* must be one of
+        its Params with `deprecated` set."""
+        api = next(f for f in API if f.name == func)
+        p = next(p for form in (api.params, *api.overloads) for p in form if p.name == param)
+        assert p.deprecated is not None, f"opensak.{func}: {param} is not deprecated"
+        self._warn_deprecated(f"opensak.{func} parameter {param}", p.deprecated)
+
+    def _warn_header(self) -> None:
+        """When the running macro starts: a warning for each deprecated key
+        in its header (metadata.HEADER_KEYS), once per run."""
+        for key in self._macro_info().deprecated_keys:
+            assert key.deprecated is not None
+            name = f"header key {key.name}"
+            if self._macro_depth and self._macro_path is not None:
+                name = f"{self._macro_path.name}: {name}"
+            if (self._macro_path, name) not in self._warned:
+                self._warned.add((self._macro_path, name))
+                self._output(deprecated_message(name, key.deprecated))
+
+    def _install_removed(self, lua, opensak) -> None:
+        """The metatables that turn a call of a REMOVED function into a
+        clear error (_REMOVED_LUA, _explain_removed)."""
+        tables: dict[str, dict[str, str]] = {}
+        for removed in REMOVED:
+            namespace, _, key = removed.name.rpartition(".")
+            tables.setdefault(namespace, {})[key] = removed.name
+        if not tables:
+            return
+        by_name = {r.name: r for r in REMOVED}
+
+        def seen(name):
+            self._removed = by_name.get(name)
+
+        install = lua.execute(_REMOVED_LUA, seen)
+        for namespace, names in tables.items():
+            table = opensak
+            for part in namespace.split(".") if namespace else ():
+                table = table[part] if table is not None else None
+            if table is not None:
+                install(table, lua.table_from(names))
+
+    def _explain_removed(self, message: str) -> str:
+        """*message* with Lua's "attempt to call a nil value (field 'x')"
+        replaced by removed_message() when x is the removed function the
+        macro last looked up."""
+        removed = self._removed
+        if removed is None:
+            return message
+        key = removed.name.rpartition(".")[2]
+        return message.replace(
+            f"attempt to call a nil value (field '{key}')",
+            removed_message(f"opensak.{removed.name}", removed.removed, removed.instead),
+            1)
 
     @staticmethod
     def _deny_attribute(obj, attr_name, is_setting):
@@ -5280,14 +5430,28 @@ class _FormSession:
 # Single source of truth for the `opensak` table. To add a function: add an
 # ApiFunction here (bump API_VERSION and use it as `since` if the release
 # already shipped the current version; for a changed function add the new
-# version to `changed` instead). Don't commit the regenerated docs and
-# Lua Language Server stub — the Macro API docs workflow does that after the
-# merge to beta. Regenerate them locally for editor completion with
+# version to `changed` instead). To rename or remove one: add the
+# replacement, set `deprecated` on the old one (also on a Param), and
+# remove it only once api_baseline.removal_allowed() says so, adding it to
+# REMOVED (deprecation.py; tests/unit-tests/test_macro_deprecation_1185.py
+# compares the API with the released baseline). Don't commit the
+# regenerated docs and Lua Language Server stub — the Macro API docs
+# workflow does that after the merge to beta. Regenerate them locally for
+# editor completion with
 #   python scripts/generate_macro_api_docs.py
 
 # Raised whenever functions are added or changed in a released build, so
 # macros can check opensak.api_version() before using newer functions.
 API_VERSION = 4
+
+# API version → the stable release it first shipped in. Within an API
+# version the API only grows; renaming or removing anything needs a new
+# version and a deprecation (deprecation.py, #1185). Something deprecated in
+# version N may be removed once N is listed here and a later stable release
+# is too (api_baseline.removal_allowed()). Add the API version when a stable
+# release ships it, and update the baseline then:
+#   python scripts/update_macro_api_baseline.py
+API_STABLE: dict[int, str] = {4: "1.22.0"}
 
 
 @dataclass(frozen=True)
@@ -5299,6 +5463,10 @@ class Param:
     type: str
     description: str
     optional: bool = False
+    # (API version, what to use instead) once the parameter is deprecated.
+    # The function still takes it, maps it to the new one and calls
+    # MacroRuntime._deprecated_param() there, which warns once per run.
+    deprecated: Optional[Deprecated] = None
 
 
 @dataclass(frozen=True)
@@ -5332,6 +5500,21 @@ class ApiFunction:
     # Contacts web sites: only registered with the lua-macro-net feature
     # flag (beta builds), see utils/flags.py.
     net: bool = False
+    # (API version, what to use instead) once the function is deprecated;
+    # it is removed no earlier than one stable release later (API_STABLE),
+    # and then goes to REMOVED. Its first call in a run prints a warning.
+    deprecated: Optional[Deprecated] = None
+
+    @property
+    def flag(self) -> Optional[str]:
+        """The feature flag it is only registered with, None if none."""
+        if self.write or self.beta:
+            return "lua-macro-write"
+        if self.companion:
+            return "companion-db"
+        if self.net:
+            return "lua-macro-net"
+        return None
 
     @property
     def signatures(self) -> list[str]:
@@ -8228,3 +8411,22 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._settings_clear,
     ),
 )
+
+
+@dataclass(frozen=True)
+class RemovedFunction:
+    """A function removed from the `opensak` table after its deprecation
+    period. Calling it stops the macro with removed_message() instead of
+    Lua's "attempt to call a nil value", while `if opensak.<name> then`
+    still sees nil."""
+
+    name: str
+    # The API version it was removed in
+    removed: int
+    # What to use instead, e.g. "opensak.new_name()"
+    instead: str
+
+
+# Functions removed from API, kept here for a clear error. Nothing is
+# removed yet.
+REMOVED: tuple[RemovedFunction, ...] = ()

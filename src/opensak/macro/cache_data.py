@@ -22,6 +22,7 @@ from typing import Any, Callable, Iterable, Iterator, Optional
 from sqlalchemy import select
 
 from opensak.db.models import Cache, UserNote
+from opensak.macro.deprecation import Deprecated
 
 # Codes per query — well below SQLite's bound-parameter limit.
 CHUNK_SIZE = 500
@@ -61,6 +62,11 @@ class CacheField:
     columns: tuple
     # columns' values → the Lua value; default: the single column as is
     convert: Optional[Callable[..., Any]] = None
+    # (API version, what to use instead) once the field is deprecated. No
+    # warning at run time — the records are plain tables, and watching
+    # every key read would slow down large loops — only in the docs, the
+    # editor files and metadata.find_deprecated() (deprecation.py).
+    deprecated: Optional[Deprecated] = None
 
     def value(self, row: Any) -> Any:
         values = [row[_label(c)] for c in self.columns]

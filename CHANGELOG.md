@@ -16,6 +16,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   stable yet. Macros that call it need the new name. Contributed by
   nagisml.
 
+### Added
+
+- **Deprecations in the macro API (#1185)** — from API 4, renaming or
+  removing a macro function, parameter, cache field or header key needs a
+  new API version and a deprecation period of at least one stable
+  release. A deprecated function still works, and its first call in a run
+  prints one line naming the macro line and what to use instead; a
+  deprecated header key is printed when the macro starts and marked in the
+  Macro manager. Calling a removed function stops the macro with a clear
+  message instead of "attempt to call a nil value". The API reference, the
+  VS Code stub (calls struck through) and the Notepad++ calltips show
+  deprecations, and the unit tests compare the API with the released one
+  (`tests/fixtures/macro_api_baseline.json`) so nothing is removed by
+  accident. Nothing is deprecated yet. Contributed by nagisml.
+
 ## [1.22.0-beta.10] — 2026-10-26
 
 > Headline: **OpenSAK can import without a window** — `opensak import

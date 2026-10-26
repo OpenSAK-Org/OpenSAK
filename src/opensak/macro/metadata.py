@@ -47,6 +47,12 @@ it returns anything asks for more than the version the user had.
 header_keys() lists the keys a header actually sets, without the
 defaults parse_header() fills in, e.g. for checking that a macro submitted
 to the community repository has a complete header.
+
+A header key can be deprecated (HEADER_KEYS, #1185): MacroInfo lists the
+deprecated keys a macro uses, which the Macro manager shows and the run
+prints. deprecated_names() and find_deprecated() give the community
+repository's CI everything deprecated in the macro API — functions,
+parameters, cache fields and header keys — to warn about.
 """
 
 from __future__ import annotations
@@ -57,6 +63,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
+
+from opensak.macro.deprecation import Deprecated, deprecated_message
 
 # Only the top of the file is read: the header is a few lines, and a
 # folder may hold large generated macros.
@@ -106,6 +114,30 @@ BLOCKED_DOMAINS = (
 )
 
 _LIST_KEYS = ("permissions", "network")
+
+
+@dataclass(frozen=True)
+class HeaderKey:
+    """A key of the macro header, as documented."""
+
+    name: str
+    # (API version, what to use instead) once the key is deprecated; the
+    # old key still works until it is removed (deprecation.py).
+    deprecated: Optional[Deprecated] = None
+
+
+# Every header key, in documentation order. A key renamed later stays here
+# with `deprecated` set, and in _KEYS or _LIST_KEYS, mapped to the field of
+# its new name.
+HEADER_KEYS: tuple[HeaderKey, ...] = (
+    HeaderKey("Name"),
+    HeaderKey("Author"),
+    HeaderKey("Version"),
+    HeaderKey("Requires-API"),
+    HeaderKey("Description"),
+    HeaderKey("Permissions"),
+    HeaderKey("Network"),
+)
 _LIST_SEPARATOR = re.compile(r"[\s,]+")
 _HOST_LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 
@@ -134,7 +166,15 @@ class MacroInfo:
     # that are not hosts, as written.
     network: tuple[str, ...] = ()
     invalid_hosts: tuple[str, ...] = ()
+    # The deprecated HEADER_KEYS the header uses
+    deprecated_keys: tuple[HeaderKey, ...] = ()
     error: str = ""
+
+    @property
+    def deprecation_lines(self) -> tuple[str, ...]:
+        """deprecated_message() for each of deprecated_keys."""
+        return tuple(deprecated_message(f"header key {k.name}", k.deprecated)
+                     for k in self.deprecated_keys if k.deprecated)
 
     @property
     def requires_api_number(self) -> Optional[int]:
@@ -258,6 +298,7 @@ def parse_header(text: str, path: Path) -> MacroInfo:
         if m:
             fields["description"] = m.group(1)
     fields.setdefault("name", path.stem)
+    used = set(header_keys(text))
 
     words = [w.lower() for w in lists.get("permissions", [])]
     hosts: dict[str, None] = {}
@@ -276,6 +317,8 @@ def parse_header(text: str, path: Path) -> MacroInfo:
         permissions_declared="permissions" in lists,
         network=tuple(hosts),
         invalid_hosts=tuple(invalid),
+        deprecated_keys=tuple(k for k in HEADER_KEYS
+                              if k.deprecated and k.name.lower() in used),
         **fields,
     )
 
@@ -309,3 +352,86 @@ def discover_macros(root: Path) -> list[MacroInfo]:
         found += [Path(folder) / f for f in files if f.lower().endswith(".lua")]
     found.sort(key=lambda p: p.relative_to(root).as_posix().casefold())
     return [read_metadata(p) for p in found]
+
+
+@dataclass(frozen=True)
+class DeprecatedName:
+    """Something deprecated in the macro API, for deprecated_names()."""
+
+    # "function", "parameter", "field" or "header"
+    kind: str
+    # "opensak.old_name", "opensak.func parameter old", "old_field" or
+    # "Old-Key"
+    name: str
+    message: str
+
+
+def deprecated_names() -> tuple[DeprecatedName, ...]:
+    """Everything deprecated in this version of the macro API: functions,
+    their parameters, cache fields and header keys, e.g. for the
+    OpenSAK-Macros CI to warn about. Needs OpenSAK installed (it reads the
+    registries of runtime.py and cache_data.py), unlike the rest of this
+    module."""
+    from opensak.macro.cache_data import CACHE_FIELDS
+    from opensak.macro.runtime import API
+
+    names: list[DeprecatedName] = []
+    for func in API:
+        if func.deprecated:
+            name = f"opensak.{func.name}"
+            names.append(DeprecatedName("function", name,
+                                        deprecated_message(name, func.deprecated)))
+        params = {p.name: p for form in (func.params, *func.overloads) for p in form}
+        for p in params.values():
+            if p.deprecated:
+                name = f"opensak.{func.name} parameter {p.name}"
+                names.append(DeprecatedName("parameter", name,
+                                            deprecated_message(name, p.deprecated)))
+    for field in CACHE_FIELDS:
+        if field.deprecated:
+            names.append(DeprecatedName(
+                "field", field.name,
+                deprecated_message(f"cache field {field.name}", field.deprecated)))
+    for key in HEADER_KEYS:
+        if key.deprecated:
+            names.append(DeprecatedName(
+                "header", key.name,
+                deprecated_message(f"header key {key.name}", key.deprecated)))
+    return tuple(names)
+
+
+def find_deprecated(text: str) -> list[tuple[int, str]]:
+    """(line number, message) for each use of something deprecated in
+    macro source *text*, in line order: deprecated header keys, and calls
+    of deprecated functions and reads of deprecated cache fields found by
+    name (`opensak.old_name`, `.old_field`, `["old_field"]`) outside
+    comments. Parameters are positional and can't be found this way. A
+    quick check for CI warnings, not a Lua parser: a name in a string can
+    be reported too."""
+    names = deprecated_names()
+    found: list[tuple[int, str]] = []
+    lines = text.lstrip("\ufeff").splitlines()
+    header = {n.name.lower(): n.message for n in names if n.kind == "header"}
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for n in names:
+        if n.kind == "function":
+            patterns.append((re.compile(re.escape(n.name) + r"(?![\w.])"), n.message))
+        elif n.kind == "field":
+            word = re.escape(n.name)
+            patterns.append((re.compile(rf"\.{word}\b|\[\s*[\"']{word}[\"']\s*\]"),
+                             n.message))
+    in_header = True
+    for number, raw in enumerate(lines, 1):
+        line = raw.strip()
+        if in_header and line.startswith("--") and not line.startswith("--[["):
+            m = _KEY_LINE.match(line[2:].strip())
+            if m and m.group(2) and m.group(1).lower() in header:
+                found.append((number, header[m.group(1).lower()]))
+            continue
+        if line and not line.startswith("#!"):
+            in_header = False
+        code = raw.split("--", 1)[0]
+        for pattern, message in patterns:
+            if pattern.search(code):
+                found.append((number, message))
+    return found

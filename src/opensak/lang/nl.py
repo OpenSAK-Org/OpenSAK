@@ -126,6 +126,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_unknown":       "Onbekende rechten (voor een nieuwere OpenSAK?): {names}",
     "macro_mgr_perm_invalid_hosts": "Geen hostnaam: {hosts}",
     "macro_mgr_perm_blocked":       "Macro's mogen nooit contact maken met {hosts}.",
+    "macro_mgr_deprecated_keys":    "De macroheader gebruikt verouderde sleutels, die in een latere versie worden verwijderd:",
     "macro_mgr_api_newer_run":      "De macro {name} vereist macro-API-versie {needed}, maar deze OpenSAK heeft versie {have}. Hij gebruikt mogelijk functies die deze versie niet heeft.\n\nToch uitvoeren?",
     "macro_mgr_running":            "▶ {name} ({path})",
     "macro_mgr_shortcut_title":     "Sneltoets voor macro",

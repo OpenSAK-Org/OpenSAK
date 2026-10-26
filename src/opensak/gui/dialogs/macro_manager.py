@@ -233,6 +233,12 @@ class MacroManagerDialog(QDialog):
                 item.setToolTip(COL_PERMISSIONS, permissions_tooltip(info))
                 if info.unknown_permissions or info.invalid_hosts or info.blocked_hosts:
                     item.setIcon(COL_PERMISSIONS, warn)
+                if info.deprecation_lines:
+                    # Deprecated header keys (#1185), with the API note if any
+                    item.setIcon(COL_API, warn)
+                    item.setToolTip(COL_API, "\n".join(filter(None, [
+                        item.toolTip(COL_API), tr("macro_mgr_deprecated_keys"),
+                        *info.deprecation_lines])))
             self._tree.addTopLevelItem(item)
             if selected is not None and info.path == selected:
                 item.setSelected(True)
