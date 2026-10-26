@@ -86,6 +86,8 @@ OpenSAK Backups/
     databases/
       Default.db
       Denmark.db
+    companions/         (the companion database of a database that has one, #1034)
+      Denmark.companion.db3
     macro_databases/    (the Lua macros' own opensak.macro_db() files)
       MyMacro.db3
     settings/
@@ -103,12 +105,15 @@ OpenSAK Backups/
 | --- | --- |
 | Every database in the database list whose file exists, also those outside the database folder | Log files |
 | opensak.json, filters/, column_views/, icons/ from the install folder | The Geocaching.com token file and keyring passwords (credentials never go into a backup) |
+| The companion database (`<name>.companion.db3`, #1034) of every database included that has one | |
 | Every macro database (`opensak.macro_db()`, #1034) OpenSAK has opened whose file still exists — not in safety sets | |
 | | bootstrap.json (it only points to the install folder on this machine) |
 
 Databases are written with `snapshot_database()` (#943), so a backup is consistent even for the open database.
 
 **Macro databases:** a macro's own database is `<macro>.db3` next to the macro file, which can be in any folder, so `opensak.macro_db()` records every file it opens in opensak.json under `macros.databases` (resolved paths). Each backup snapshots the recorded files that still exist into `macro_databases/`; a missing file is left out silently (it may be on a drive that isn't connected), and one that can't be copied is left out with a warning in the log — a macro's data never makes the whole backup fail. Restore doesn't offer them yet: copy the file from the set (or the zip) back to the path in the manifest.
+
+**Companion databases:** a database's companion (`db/companion.py`) is snapshotted with it into `companions/`, named after the database's file in the set (`databases/Denmark.db` → `companions/Denmark.companion.db3`), and its size counts with its database for progress and free space. One that can't be copied is left out with a warning in the log and named in `BackupResult.skipped_companions`; the database itself is still backed up. Restore puts it next to the restored database, with the same integrity check; if that fails, nothing is restored. The companion keeps the db_uuid of its database, which a restore keeps too.
 
 **manifest.json** describes the set and is written last:
 
@@ -120,7 +125,10 @@ Databases are written with `snapshot_database()` (#943), so a backup is consiste
   "opensak_version": "1.21.0",
   "databases": [
     {"name": "Default", "file": "databases/Default.db",
-     "db_uuid": "9f2c…", "schema_version": 24, "size_bytes": 52428800}
+     "db_uuid": "9f2c…", "schema_version": 24, "size_bytes": 52428800},
+    {"name": "Denmark", "file": "databases/Denmark.db",
+     "db_uuid": "41aa…", "schema_version": 28, "size_bytes": 10485760,
+     "companion": {"file": "companions/Denmark.companion.db3", "size_bytes": 65536}}
   ],
   "macro_databases": [
     {"file": "macro_databases/FindStat.db3",
@@ -129,6 +137,8 @@ Databases are written with `snapshot_database()` (#943), so a backup is consiste
   "settings": true
 }
 ```
+
+`companion` is only present for a database that has one. Like `macro_databases`, it was added without changing `format`: older versions ignore keys they don't know, so they still read the set (and restore the database without its companion).
 
 **Never half a backup:** the set is built in a folder ending in `.partial` and renamed only when everything, manifest last, is written. A folder without a manifest is ignored by Restore and cleaned up at the next backup.
 
