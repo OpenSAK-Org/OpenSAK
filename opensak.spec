@@ -128,8 +128,37 @@ exe = EXE(
     icon=ICON,
 )
 
+# Issue #937: opensak.exe is a windowed program, so a shell started it
+# without waiting, and the exit code was lost. opensak-cli.exe is the same
+# program as a console program: cmd, PowerShell and wrapper scripts wait for
+# it, get its exit code and its output (headless commands, --run-macro). It
+# sits next to opensak.exe and shares _internal/; only the Python archive
+# (PYZ) is in each exe. The MSIX package calls it through an App Execution
+# Alias (packaging/msix/AppxManifest.xml.template). macOS and Linux need no
+# second program: their executable already behaves this way in a shell.
+executables = [exe]
+if sys.platform == "win32":
+    executables.append(EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name="opensak-cli",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=True,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=ICON,
+    ))
+
 coll = COLLECT(
-    exe,
+    *executables,
     a.binaries,
     a.datas,
     strip=False,

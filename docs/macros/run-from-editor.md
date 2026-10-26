@@ -72,10 +72,24 @@ tell them apart.
 
 ### Windows: the command from a console
 
-The Windows build of OpenSAK is a windowed program. Editors capture its
-output and exit code as usual. In a Command Prompt or PowerShell window,
-however, the prompt returns at once, and the output appears after it. Wait
-for it with:
+`opensak.exe` is a windowed program. Editors capture its output and exit
+code as usual. In a Command Prompt or PowerShell window, however, the
+prompt returns at once, and the output appears after it.
+
+Use `opensak-cli.exe` instead. It is in the same folder and runs the same
+program as a console program, so the prompt waits for the macro, shows its
+output and gets its exit code (`%ERRORLEVEL%`, `$LASTEXITCODE`):
+
+```bat
+"C:\Program Files\OpenSAK\opensak-cli.exe" --run-macro macro.lua
+```
+
+The Microsoft Store version puts this program on your `PATH` as
+`opensak` (`opensak-beta` for OpenSAK Beta), so `opensak --run-macro
+macro.lua` works from any console. It can be turned off under **Settings →
+Apps → Advanced app settings → App execution aliases**.
+
+With an older OpenSAK, which has no `opensak-cli.exe`, wait for it with:
 
 ```bat
 start /wait "" "C:\Program Files\OpenSAK\opensak.exe" --run-macro macro.lua

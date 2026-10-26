@@ -297,6 +297,58 @@ runs). No manual step needed for the common case — publishing a beta
 tag names it "OpenSAK Beta" automatically; publishing a stable tag names
 it plain "OpenSAK" again.
 
+## Command line (App Execution Alias)
+
+Issue #937: scripts and the Task Scheduler call OpenSAK from the command
+line (`opensak import gpx …`, `opensak --run-macro …`). Without help, an
+MSIX app can't be started that way: its folder under `C:\Program
+Files\WindowsApps` is not readable, and starting `opensak.exe` from there
+directly would run it without package identity (other AppData). The
+manifest therefore has a second `<Application>`, `OpenSAKCLI`:
+
+- It runs `opensak-cli.exe`, which `opensak.spec` builds next to
+  `opensak.exe`: the same program as a **console** program. A shell waits
+  for it, shows its output and gets its exit code. An alias to the
+  windowed `opensak.exe` would only start it.
+- `AppListEntry="none"`: no second Start Menu entry.
+- A `uap5:AppExecutionAlias` with `desktop4:Subsystem="console"` puts the
+  command in `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on the
+  user's `PATH`. Users can turn it off under Settings → Apps → Advanced
+  app settings → App execution aliases.
+- **Alias name:** `opensak.exe` for a stable release, `opensak-beta.exe`
+  for a beta, so a beta and a stable install don't claim the same command.
+  `build-msix.yml` derives it from `__version__` in the same way as the
+  display name; `build_msix_local.ps1 -CliAlias` sets it explicitly
+  (default: from `-DisplayName`).
+- A process started through the alias has package identity, so it sees
+  the same virtualized AppData (settings, databases, macro approvals) as
+  the Store GUI. The zip install keeps separate data; `--db <path>` reaches
+  a database file in either.
+- In the Task Scheduler, the program is
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\opensak.exe` (or
+  `opensak-beta.exe`).
+
+### Sideload checklist for the alias
+
+Run together with the Lupa / MSIX check for stable (agreed in #937), on a
+sideloaded build (`build_msix_local.ps1 -InstallAfterBuild`):
+
+- [ ] `opensak --run-macro x.lua` is found through the alias
+- [ ] From cmd / PowerShell: the shell waits, the exit code is correct
+      (`echo %ERRORLEVEL%` / `$LASTEXITCODE`), and output appears
+- [ ] `opensak import gpx <folder> --db <name>` imports, with the summary
+      on stdout and in the log file
+- [ ] From an editor (VS Code task, NppExec): output and the exit code come
+      through when the output is redirected
+- [ ] The CLI started through the alias reaches the macro pipe of the Store
+      GUI (`--run-macro` while the GUI is open)
+- [ ] It sees the same databases and macro approvals as the GUI
+- [ ] Lupa loads from the package
+- [ ] Beta and stable installed side by side: their aliases don't collide
+- [ ] Task Scheduler with the alias path: "Run only when user is logged
+      on" works; check whether "Run whether user is logged on or not"
+      works with a packaged app, and document it as unsupported if not
+
 ## Version numbering
 
 MSIX requires a strict 4-part numeric `Package/Identity/@Version`
