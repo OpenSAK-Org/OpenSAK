@@ -2,7 +2,7 @@
 
 # OpenSAK Lua macro API
 
-API version: **3** (`opensak.api_version()`).
+API version: **4** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. OpenSAK's own settings and database files are never accessible.
 
@@ -13,29 +13,35 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | Function | Since |
 |---|---|
 | [`opensak.api_version`](#opensakapiversion) | 1 |
-| [`opensak.filter`](#opensakfilter) | 1, changed in 3 |
+| [`opensak.filter`](#opensakfilter) | 1, changed in 4 |
 | [`opensak.filter_name`](#opensakfiltername) | 2 |
-| [`opensak.sort`](#opensaksort) | 2, changed in 3 |
+| [`opensak.sort`](#opensaksort) | 2, changed in 4 |
 | [`opensak.filter_profile`](#opensakfilterprofile) | 1 |
 | [`opensak.clear_filter`](#opensakclearfilter) | 1 |
 | [`opensak.save_filter`](#opensaksavefilter) | 3 |
 | [`opensak.restore_filter`](#opensakrestorefilter) | 3 |
 | [`opensak.count`](#opensakcount) | 1 |
 | [`opensak.profiles`](#opensakprofiles) | 1 |
-| [`opensak.cache`](#opensakcache) | 2, changed in 3 |
-| [`opensak.caches`](#opensakcaches) | 2, changed in 3 |
+| [`opensak.cache`](#opensakcache) | 2, changed in 4 |
+| [`opensak.caches`](#opensakcaches) | 2, changed in 3, changed in 4 |
 | [`opensak.current`](#opensakcurrent) | 2 |
 | [`opensak.selected`](#opensakselected) | 2 |
 | [`opensak.codes`](#opensakcodes) | 2 |
 | [`opensak.description`](#opensakdescription) | 2 |
 | [`opensak.sql`](#opensaksql) | 2, changed in 3 |
 | [`opensak.sql_each`](#opensaksqleach) | 2 |
-| [`opensak.tables`](#opensaktables) | 2, changed in 3 |
+| [`opensak.tables`](#opensaktables) | 2, changed in 3, changed in 4 |
 | [`opensak.columns`](#opensakcolumns) | 2, changed in 3 |
 | [`opensak.macro_db`](#opensakmacrodb) | 3 |
-| [`opensak.attach`](#opensakattach) | 3 |
+| [`opensak.attach`](#opensakattach) | 3, changed in 4 |
 | [`opensak.detach`](#opensakdetach) | 3 |
-| [`opensak.attached`](#opensakattached) | 3 |
+| [`opensak.attached`](#opensakattached) | 3, changed in 4 |
+| [`opensak.companion`](#opensakcompanion) | 4 |
+| [`opensak.companion_table`](#opensakcompaniontable) | 4 |
+| [`opensak.companion_tables`](#opensakcompaniontables) | 4 |
+| [`opensak.custom_fields`](#opensakcustomfields) | 4 |
+| [`opensak.define_custom_field`](#opensakdefinecustomfield) | 4 |
+| [`opensak.delete_custom_field`](#opensakdeletecustomfield) | 4 |
 | [`opensak.databases`](#opensakdatabases) | 2 |
 | [`opensak.database`](#opensakdatabase) | 2 |
 | [`opensak.database_exists`](#opensakdatabaseexists) | 2 |
@@ -50,9 +56,9 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.import_gpx`](#opensakimportgpx) | 3 |
 | [`opensak.set_corrected`](#opensaksetcorrected) | 1 |
 | [`opensak.clear_corrected`](#opensakclearcorrected) | 1 |
-| [`opensak.update`](#opensakupdate) | 3 |
-| [`opensak.macro_flag`](#opensakmacroflag) | 3 |
-| [`opensak.insert`](#opensakinsert) | 3 |
+| [`opensak.update`](#opensakupdate) | 3, changed in 4 |
+| [`opensak.macro_flag`](#opensakmacroflag) | 4 |
+| [`opensak.insert`](#opensakinsert) | 3, changed in 4 |
 | [`opensak.delete`](#opensakdelete) | 3 |
 | [`opensak.logs`](#opensaklogs) | 3 |
 | [`opensak.insert_log`](#opensakinsertlog) | 3 |
@@ -206,7 +212,7 @@ Parameters:
 
 Returns `integer` — Number of matching caches (0 = view unchanged).
 
-Since API version 1. Changed in API version 3: added the keys `last_user_update` and `macro_flag`; `owned` uses the `owned` cache field.
+Since API version 1. Changed in API version 4: added the keys `last_user_update` and `macro_flag`; `owned` uses the `owned` cache field.
 
 Example:
 
@@ -246,7 +252,7 @@ Parameters:
 - `field` (`string`) — A cache field, e.g. "difficulty".
 - `direction` (`"asc"|"desc"`, optional) — "asc" if omitted.
 
-Since API version 2. Changed in API version 3: added `macro_sort`.
+Since API version 2. Changed in API version 4: added `macro_sort`.
 
 Example:
 
@@ -390,7 +396,7 @@ Parameters:
 
 Returns `opensak.Cache?` — The cache, or nil if it is not in the database.
 
-Since API version 2. Changed in API version 3: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
+Since API version 2. Changed in API version 4: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 
 Example:
 
@@ -414,7 +420,7 @@ Parameters:
 
 Returns `fun(): opensak.Cache?` — Iterator for a generic `for`.
 
-Since API version 2. Changed in API version 3: added `all` and the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
+Since API version 2. Changed in API version 3: added `all`. Changed in API version 4: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 
 Example:
 
@@ -574,7 +580,7 @@ Parameters:
 
 Returns `string[]` — Table and view names, sorted.
 
-Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, the tables of opensak.macro_db() as `macro.<name>` and those of opensak.attach() as `<schema>.<name>`.
+Since API version 2. Changed in API version 3: lists the macro's TEMP tables and views, the tables of opensak.macro_db() as `macro.<name>` and those of opensak.attach() as `<schema>.<name>`. Changed in API version 4: lists the companion database's tables as `companion.<name>`.
 
 Example:
 
@@ -635,7 +641,7 @@ end
 opensak.attach(name [, schema])
 ```
 
-Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. See Several databases in one query.
+Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. While the `companion-db` feature flag is on, the database's companion database (opensak.companion()) is attached with it, read-only, as `<schema>_companion`, if it has one, and detached with it. See Several databases in one query.
 
 Parameters:
 
@@ -644,7 +650,7 @@ Parameters:
 
 Returns `string` — The schema name.
 
-Since API version 3.
+Since API version 3. Changed in API version 4: also attaches the database's companion database.
 
 Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
 
@@ -688,9 +694,9 @@ opensak.attached()
 
 The databases attached with opensak.attach(), in the order they were attached. `opensak` is always true: only OpenSAK databases can be attached so far.
 
-Returns `{schema: string, name: string, path: string, opensak: boolean}[]` — One table per attached database.
+Returns `{schema: string, name: string, path: string, opensak: boolean, companion: boolean}[]` — One table per attached database. `companion`: it is the companion database of the database attached as `name`.
 
-Since API version 3.
+Since API version 3. Changed in API version 4: added `companion`.
 
 Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
 
@@ -698,6 +704,153 @@ Example:
 
 ```lua
 for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end
+```
+
+### opensak.companion
+
+```lua
+opensak.companion()
+```
+
+Make sure the active database has a companion database — a second SQLite file next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to the SQL functions as schema `companion`. It is shared by all macros: every macro reads every table in it, and creates, changes and drops its own tables, indexes and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE companion.<name> …`). Like opensak.macro_db() this needs no approval to change databases, but opensak.sql_write() still asks for it, as it may change caches. OpenSAK records the macro's file as the owner of every table and view it creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables without an owner are read-only. A moved or renamed macro is a new owner. A table with a `gc_code` column is cache-linked: its rows belong to caches, several per cache if needed, and follow them — they are deleted with the cache, and copied or moved with it to another database (opensak.companion_table() changes that). Triggers are refused. The file follows its database when it is renamed, copied, moved, deleted or backed up. Once it exists, every macro run has it attached without this call. The first call creates the file and prints its path in the macro output; it cannot do that inside opensak.transaction(), and the macro must be saved, as its tables belong to its file. See The companion database.
+
+Returns `string` — The path of the companion database file.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+opensak.companion()
+opensak.sql("CREATE TABLE IF NOT EXISTS companion.ftf_info "
+    .. "(gc_code TEXT PRIMARY KEY, ftf_date TEXT, ftf_by TEXT)")
+opensak.sql("INSERT OR REPLACE INTO companion.ftf_info VALUES (?, ?, ?)",
+    { "GC12345", "2024-05-01", "someone" })
+```
+
+### opensak.companion_table
+
+```lua
+opensak.companion_table(spec)
+```
+
+Change how OpenSAK treats one of the macro's own tables or views in the companion database (see opensak.companion()). `linked = false`: the rows stay where they are when caches are deleted, copied or moved, even with a `gc_code` column. `linked = true` or `code_column`: the table is cache-linked by that column (default `gc_code`), which must exist. `description` is shown with the table in OpenSAK. Keys left out stay as they are. Create the table first.
+
+Parameters:
+
+- `spec` (`opensak.CompanionTableSpec`) — `name` (required, with or without `companion.`), `linked`, `code_column`, `description`.
+
+Returns `opensak.CompanionTable` — The table, as opensak.companion_tables() lists it.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
+opensak.companion_table{ name = "ftf_options", linked = false }
+```
+
+### opensak.companion_tables
+
+```lua
+opensak.companion_tables()
+```
+
+The tables and views in the active database's companion database (see opensak.companion()), sorted by name, with their owner. Empty while it has none.
+
+Returns `opensak.CompanionTable[]` — One table per table or view.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+for _, t in ipairs(opensak.companion_tables()) do
+    print(t.name, t.owner_name, t.kind, t.rows, t.mine and "(mine)" or "")
+end
+```
+
+### opensak.custom_fields
+
+```lua
+opensak.custom_fields([options])
+```
+
+The custom fields of the active database (or of `database`), by position: user-defined fields per cache, as in GSAK, with `name`, `type` ("string", "integer", "real", "date" or "boolean"), `default`, `scope` ("local": this database; "global": every database), `origin` ("gsak" when imported from GSAK, else "opensak") and `expression` (GSAK's display expression, if any). Their values are the `custom` field of a cache. See Custom fields.
+
+Parameters:
+
+- `options` (`opensak.ReadOptions`, optional) — `database`: read another database instead of the active one.
+
+Returns `opensak.CustomField[]` — One table per field; empty while there are none.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+for _, f in ipairs(opensak.custom_fields()) do
+    print(f.name, f.type, f.default, f.scope)
+end
+```
+
+### opensak.define_custom_field
+
+```lua
+opensak.define_custom_field(field)
+```
+
+Define a custom field in the active database: `name` (letters, digits and `_`, not a cache column or an SQL keyword), `type`, optionally `default` (shown for every cache nobody set), `scope` ("local", the default, or "global" for every database) and `expression`: SQL the cache list shows instead of the value, e.g. `nullif(Finds, -1)` (filters and macros keep using the value). A field of that name and type already there is returned unchanged, so a macro can define its fields on every run; another type is an error. Needs the user's permission like opensak.update(). See Custom fields.
+
+Parameters:
+
+- `field` (`opensak.CustomFieldDefinition`) — The field.
+
+Returns `opensak.CustomField` — The field, as opensak.custom_fields() lists it.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+opensak.define_custom_field{ name = "Parking", type = "string" }
+opensak.define_custom_field{ name = "Angel", type = "boolean", default = false }
+opensak.update("GC12345", { custom = { Parking = "Lot A", Angel = true } })
+```
+
+### opensak.delete_custom_field
+
+```lua
+opensak.delete_custom_field(name)
+```
+
+Delete a custom field of the active database; a global one is deleted from every database. Its values are kept until the user removes them in Tools → Custom fields, so defining it again (same name and type) does not bring them back. Needs the user's permission like opensak.update().
+
+Parameters:
+
+- `name` (`string`) — The field's name (any case).
+
+Returns `boolean` — false if there is no such field.
+
+Since API version 4.
+
+Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
+
+Example:
+
+```lua
+opensak.delete_custom_field("Parking")
 ```
 
 ### opensak.databases
@@ -1036,7 +1189,7 @@ opensak.clear_corrected("GC12345")
 opensak.update(code, fields)
 ```
 
-Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
 
 Parameters:
 
@@ -1045,7 +1198,7 @@ Parameters:
 
 Returns `boolean` — false if the cache is not in the database.
 
-Since API version 3.
+Since API version 3. Changed in API version 4: `custom` changes custom fields.
 
 Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
@@ -1073,7 +1226,7 @@ Parameters:
 
 Returns `integer` — The number of caches whose flag changed.
 
-Since API version 3.
+Since API version 4.
 
 Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
@@ -1093,7 +1246,7 @@ opensak.filter{ macro_flag = true }
 opensak.insert(fields)
 ```
 
-Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon` are required; any other writable field may be given too (see Changing caches). Fails if the code is already in the database. Needs the user's permission like opensak.update().
+Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon` are required; any other writable field may be given too (see Changing caches), and `custom` for custom fields. Fails if the code is already in the database. Needs the user's permission like opensak.update().
 
 Parameters:
 
@@ -1101,7 +1254,7 @@ Parameters:
 
 Returns `string` — The cache code as stored (upper case).
 
-Since API version 3.
+Since API version 3. Changed in API version 4: `custom` sets custom fields.
 
 Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
@@ -4085,6 +4238,62 @@ An attached database is not updated to the current schema: one last opened by an
 | `DETACH x` | `opensak.detach("x")`, or nothing: all are detached when the macro ends |
 | own writable database | `opensak.macro_db()` |
 
+## The companion database
+
+Beta: only available while the `companion-db` feature flag is on.
+
+Every OpenSAK database can have a companion database next to it (`Found.db` → `Found.companion.db3`) for data that doesn't fit the cache tables: per-cache data a macro collects (FTF information, solver notes, lookups), or tables one macro fills and others use. Unlike `opensak.macro_db()`, which is private to one macro, it belongs to the database and is shared by all macros. `opensak.companion()` creates it; from then on it is attached to every macro run as schema `companion`.
+
+| | `opensak.macro_db()` | companion database |
+|---|---|---|
+| One per | macro (`foo.lua` → `foo.db3`) | database |
+| Read | the macro | every macro |
+| Write | the macro | the owner of the table: the macro that created it |
+| Rows follow their caches | no | yes, in tables with a `gc_code` column |
+| Follows its database on copy, move, rename, delete, backup | no | yes |
+
+A macro creates its tables, indexes and views with plain SQL (`CREATE TABLE companion.<name> …`) through `opensak.sql()`, `opensak.sql_each()` or `opensak.sql_write()`, and OpenSAK records the macro's file as their owner. Only the owner can change, alter or drop them; every other macro can read them. A moved or renamed macro file is a new owner. Tables starting with `opensak_` belong to OpenSAK (`opensak_tables` lists the tables with their owners) and are read-only. Triggers can't be created there.
+
+A table with a `gc_code` column is *cache-linked*: its rows belong to the cache with that code. When caches are deleted, their rows are deleted; when they are copied or moved to another database, their rows go along, and the table is created there if needed. Rows whose cache is gone (after a crash) are removed when the database is opened. `opensak.companion_table{ name = ..., linked = false }` turns that off for a table; `code_column` names another column.
+
+```lua
+-- ftf.lua: collects FTF information
+opensak.companion()
+opensak.sql("CREATE TABLE IF NOT EXISTS companion.ftf_info "
+    .. "(gc_code TEXT PRIMARY KEY, ftf_date TEXT, ftf_by TEXT)")
+opensak.sql("INSERT INTO companion.ftf_info VALUES (?, ?, ?) "
+    .. "ON CONFLICT (gc_code) DO UPDATE SET ftf_date = excluded.ftf_date, "
+    .. "ftf_by = excluded.ftf_by", { "GC12345", "2024-05-01", "someone" })
+opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
+
+-- any other macro: reads it
+for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name, f.ftf_date "
+        .. "FROM caches c JOIN companion.ftf_info f USING (gc_code)")) do
+    print(r.gc_code, r.name, r.ftf_date)
+end
+```
+
+`opensak.attach()` attaches a database's companion along with it, read-only, as `<schema>_companion`.
+
+## Custom fields
+
+Beta: only available while the `companion-db` feature flag is on.
+
+Custom fields are user-defined fields per cache, as in GSAK: the user defines them in Tools → Custom fields, the GSAK import brings them along, and a macro can define its own with `opensak.define_custom_field{}`. A *local* field belongs to one database, a *global* one to every database. They are shown in the cache list and the detail panel, and the Filter dialog has a Custom tab for them.
+
+The `custom` field of a cache holds them all, name → value: a boolean as `true`/`false`, numbers as numbers, text and dates (`"YYYY-MM-DD"`) as strings. A cache nobody set a field for has the field's default. `opensak.update(code, { custom = { … } })` changes them, with the same permission as any change of a cache; `false` clears a field that is not a boolean, so it shows its default again. Field names are matched in any case.
+
+```lua
+opensak.define_custom_field{ name = "Visited", type = "date" }
+for c in opensak.caches{ found = true, fields = {"found_date", "custom"} } do
+    if c.found_date and not c.custom.Visited then
+        opensak.update(c.code, { custom = { Visited = c.found_date } })
+    end
+end
+```
+
+Inside `opensak.transaction()` custom fields are written when the outermost transaction commits, and not at all when it is rolled back. They live in the companion database, in OpenSAK's table `companion.custom_values` (one row per cache that has values, keyed by `gc_code`, one column per field); SQL can read it, but only `opensak.update()` can change it.
+
 ## Forms
 
 `opensak.form{}` builds a dialog from a table. With the default `layout = "auto"` the fields are stacked top to bottom with their `label` on the left, and a `group` is a framed section with its own `fields`. With `layout = "absolute"` every field is placed at its `x`, `y` (and `w`, `h`) in pixels, like in GSAK's form designer.
@@ -4254,6 +4463,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
 | `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh. |
 | `last_user_update` | `string?` | When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate). |
+| `custom` | `table<string, any>` | The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). Only while the `companion-db` feature flag is on. |
 
 ## Changing caches
 
@@ -4362,6 +4572,8 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 - [`corrected_coords_form.lua`](../../macros/examples/corrected_coords_form.lua) — Enter or remove the corrected coordinates of the selected cache
 - [`corrected_coords_from_csv.lua`](../../macros/examples/corrected_coords_from_csv.lua) — Set corrected coordinates from a CSV file
 - [`database_statistics.lua`](../../macros/examples/database_statistics.lua) — Write an HTML page with statistics and maps of all caches in the database
+- [`dnf_alert.lua`](../../macros/examples/dnf_alert.lua) — Filter the unfound caches with several DNFs since their last find, from dnf_stats.lua's data
+- [`dnf_stats.lua`](../../macros/examples/dnf_stats.lua) — Count the DNF logs of every cache into the companion database, for other macros
 - [`export_filters_to_gpx.lua`](../../macros/examples/export_filters_to_gpx.lua) — One GPX file per filter
 - [`export_with_form.lua`](../../macros/examples/export_with_form.lua) — Choose export options in a GSAK-style form, then export the list
 - [`find_statistics.lua`](../../macros/examples/find_statistics.lua) — Write an HTML page with statistics, charts and maps of your finds
@@ -4383,7 +4595,7 @@ Ready-to-use scripts to copy and adapt are in [`macros/examples/`](../../macros/
 -- Name: Find easy traditionals
 -- Author: Jane Doe
 -- Version: 1.0
--- Requires-API: 3
+-- Requires-API: 4
 -- Description: Filters for unfound traditional caches with low difficulty.
 -- Permissions: none
 ```
@@ -4500,7 +4712,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 ### Main gaps
 
 - Shared code (`Include`; `run_macro()` runs another macro but shares no functions), sorting by several columns (`SQLSort`).
-- Custom fields (`CustomConfig`, `CustomGet`, `CustomPut`): work not started.
+- Custom fields: read, write and define them (`CustomGet`, `CustomPut`, `CustomConfig`), but no GSAK-style field properties (control, height) yet.
 
 ### Database / Waypoints
 
@@ -4510,7 +4722,8 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | CacheMate | 🚫 | Palm-era format |
 | CancelFilter | ✅ | `clear_filter()` |
 | CodeMatch | ✅ | `filter{codes=}`, `sql("… WHERE code IN …")` |
-| CustomConfig / CustomGet / CustomPut | ❌ | custom fields: work not started; `user_data[1..4]` exist today |
+| CustomConfig | ✅ β | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()` (needs the `companion-db` flag too); no control/height properties |
+| CustomGet / CustomPut | ✅ β | the `custom` field of a cache, `update(code, { custom = { … } })` (needs the `companion-db` flag too) |
 | Database | ✅ partial | `database()`, `switch_database`, `create_database`, `databases`; no delete |
 | DatabaseExists | ✅ | `database_exists()` |
 | DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` (β) for tables |
@@ -4683,4 +4896,4 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (work not started) are missing. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
