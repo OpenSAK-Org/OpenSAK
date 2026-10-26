@@ -55,6 +55,9 @@ def fake_dialog(*, exec_result=0, signals=(), data=None, attrs=None):
 
         def save_related(self, session, cache):
             pass
+
+        def save_custom(self, gc_code):
+            return None    # custom fields saved (#1028)
     return _Fake
 
 

@@ -17,11 +17,16 @@ thread, in MainWindow's slot connected to `result`.
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
 from PySide6.QtCore import QThread, Signal
 
-from opensak.db.database import get_session
+from opensak.db import custom_fields
+from opensak.db.database import get_engine, get_session
 from opensak.db.models import Cache
 from opensak.filters.engine import FilterSet, SortSpec, apply_filters_auto
+from opensak.gui.dialogs.column_dialog import custom_column_name
 
 
 class RefreshWorker(QThread):
@@ -35,7 +40,8 @@ class RefreshWorker(QThread):
     MainWindow._refresh_cache_list() / _on_refresh_result().
     """
 
-    result = Signal(int, list, list)   # (generation, table_caches, map_caches)
+    # (generation, table_caches, map_caches, custom values or None — see run())
+    result = Signal(int, list, list, object)
     error  = Signal(int, str)          # (generation, error message)
 
     def __init__(
@@ -79,8 +85,18 @@ class RefreshWorker(QThread):
                         SortSpec("distance", ascending=True),
                         limit=self.map_max_caches, push_limit=True,
                     )
+                custom = self._custom_values(session)
         except Exception as exc:  # noqa: BLE001 — surfaced to the GUI thread, never re-raised here
             logger_msg = f"{type(exc).__name__}: {exc}"
             self.error.emit(self.generation, logger_msg)
             return
-        self.result.emit(self.generation, table_caches, map_caches)
+        self.result.emit(self.generation, table_caches, map_caches, custom)
+
+    def _custom_values(self, session) -> Optional[custom_fields.Values]:
+        """#1028: the values of the visible custom columns, read here so the
+        table doesn't have to on the GUI thread; None without such columns."""
+        names = [n for n in (custom_column_name(c) for c in self.columns) if n is not None]
+        if not names:
+            return None
+        dbapi = session.connection().connection.dbapi_connection
+        return custom_fields.load_values(dbapi, Path(get_engine().url.database or ""), names)

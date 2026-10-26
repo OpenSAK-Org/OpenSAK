@@ -95,7 +95,65 @@ _ALL_COLUMNS_DEF = [
 def get_all_columns():
     """Returner kolonner med oversatte navne."""
     from opensak.lang import tr
-    return [(fid, tr(key), w, default) for fid, key, w, default in _ALL_COLUMNS_DEF]
+    return [(fid, tr(key), w, default) for fid, key, w, default in _ALL_COLUMNS_DEF] + [
+        (fid, tr("column_custom_label", name=name), w, False)
+        for fid, name, w in custom_columns()
+    ]
+
+
+# ── Custom fields (#1028 step 4) ──────────────────────────────────────────────
+# One column per custom field of the active database, after the built-in
+# ones, id "custom:<name>". Like the built-in columns they are chosen per
+# database; a saved Column View may name fields a database doesn't have,
+# which are then simply not shown.
+
+CUSTOM_COLUMN_PREFIX = "custom:"
+
+
+def custom_column_id(name: str) -> str:
+    return f"{CUSTOM_COLUMN_PREFIX}{name}"
+
+
+def custom_column_name(col_id: str) -> Optional[str]:
+    """The field name of a custom column id, None for any other column."""
+    if col_id.startswith(CUSTOM_COLUMN_PREFIX):
+        return col_id[len(CUSTOM_COLUMN_PREFIX):]
+    return None
+
+
+def _custom_width(type_: str) -> int:
+    return {"boolean": 50, "integer": 70, "real": 70, "date": 90}.get(type_, 120)
+
+
+# database key → (definitions' generation, its custom columns): the header
+# asks for the column titles on every paint.
+_custom_columns_cache: dict[str, tuple[Any, list[tuple[str, str, int]]]] = {}
+
+
+def custom_columns() -> list[tuple[str, str, int]]:
+    """(column id, field name, width) per custom field of the active
+    database, by position. Empty without the companion-db feature flag."""
+    from opensak.utils import flags
+    if not flags.companion_db:
+        return []
+    try:
+        from opensak.db import companion, custom_fields
+        from opensak.db.manager import get_db_manager
+        active = get_db_manager().active_path
+        if active is None:
+            return []
+        path = Path(active)
+        key = companion.status_key(path)
+        stamp = (custom_fields.generation(path, key), companion.exists(path))
+        cached = _custom_columns_cache.get(key)
+        if cached is not None and cached[0] == stamp:
+            return list(cached[1])
+        columns = [(custom_column_id(f.name), f.name, _custom_width(f.type))
+                   for f in custom_fields.fields(path)]
+        _custom_columns_cache[key] = (stamp, columns)
+        return list(columns)
+    except Exception:
+        return []
 
 # Bagudkompatibel alias — bruges af column_dialog internt
 ALL_COLUMNS = property(lambda self: get_all_columns()) if False else None  # se get_all_columns()
@@ -630,7 +688,7 @@ class ColumnChooserDialog(QDialog):
         } | ALWAYS_VISIBLE
         old_set = set(old_order)
         visible = [c for c in old_order if c in checked]
-        visible += [fid for fid, *_ in _ALL_COLUMNS_DEF if fid in checked and fid not in old_set]
+        visible += [fid for fid, *_ in get_all_columns() if fid in checked and fid not in old_set]
         return visible
 
     def _save_view(self) -> None:

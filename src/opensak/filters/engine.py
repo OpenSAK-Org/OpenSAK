@@ -3360,6 +3360,227 @@ class LogFilter(BaseFilter):
         return f"<LogFilter {self.to_dict()}>"
 
 
+# ── Custom field filter (#1028 step 4, #821 item 5) ───────────────────────────
+
+# The view of caches plus their custom fields (db/custom_fields.py), a TEMP
+# view on every connection of the database engines.
+CUSTOM_VIEW = "caches_all"
+CUSTOM_FIELD_TYPES = ("string", "integer", "real", "date", "boolean")
+CUSTOM_BOOLEAN_OPS = ("yes", "no")
+# DateFilter's operators, minus compare (a field has only its own date).
+CUSTOM_DATE_OPS = WAYPOINT_DATE_OPS
+
+
+def custom_field_ops(type_: str) -> tuple[str, ...]:
+    """The operators a custom field of *type_* can be filtered with."""
+    if type_ == "boolean":
+        return CUSTOM_BOOLEAN_OPS
+    if type_ == "string":
+        return TEXT_OPS
+    if type_ == "date":
+        return CUSTOM_DATE_OPS
+    return NUMBER_OPS
+
+
+def _custom_date(value) -> Optional[date]:
+    """A stored custom date ("YYYY-MM-DD", maybe with a time) as a date."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip()).date()
+    except ValueError:
+        return None
+
+
+class CustomFieldFilter(BaseFilter):
+    """Keep caches by one of their custom fields (the Filter dialog's Custom
+    tab), by name. *type_* is the field's type, kept with the filter so a
+    profile shows the same row in a database without the field:
+
+      boolean   op yes / no
+      string    the text operators (TextMatchFilter), on *text*
+      integer,  NUMBER_OPS against *value1* (and *value2* for (not) between)
+      real
+      date      DateFilter's operators but compare, on *date1*/*date2* or
+                the last *amount* *unit*s
+
+    The values come from the caches_all view, so an untouched cache has the
+    field's default, as in GSAK. prepare() collects the matching caches in
+    one query on the view; a database without the field (or without the
+    view) matches nothing, like a Where clause that fails.
+    """
+    filter_type = "custom_field"
+
+    def __init__(
+        self,
+        field: str,
+        type_: str,
+        op: str,
+        *,
+        text: str = "",
+        value1: float = 0.0,
+        value2: float = 0.0,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        amount: int = 1,
+        unit: str = "days",
+    ):
+        if type_ not in CUSTOM_FIELD_TYPES:
+            raise ValueError(f"Unknown custom field type {type_!r}")
+        if op not in custom_field_ops(type_):
+            raise ValueError(f"Operator {op!r} doesn't fit a {type_} field")
+        if unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {unit!r}")
+        self.field = field.strip()
+        self.type = type_
+        self.op = op
+        self.text = text.strip()
+        self.value1 = float(value1)
+        self.value2 = float(value2)
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if type_ == "date" and op in ("on_or_before", "on_or_after", "equal", "between") \
+                and self.date1 is None:
+            raise ValueError(f"Date operator {op!r} needs date1")
+        if type_ == "date" and op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.amount = max(0, int(amount))
+        self.unit = unit
+        self._text = TextMatchFilter(self.text, op) if type_ == "string" else None
+        self.sql_exact = self._text is None or (
+            self._text.sql_exact and _TEXT_OP_NEGATIONS.get(op, op) != "regex")
+        # cache ids that match, filled by prepare(); None until then
+        self._ids: Optional[set[int]] = None
+        # False when the database has no such field (or no view)
+        self._available = True
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        return self._text.regex_error if self._text is not None else None
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        return _date_op_range(self.op, self.date1, self.date2, self.amount, self.unit)
+
+    def _column(self):
+        from sqlalchemy import column
+        return column(self.field)
+
+    def _view(self):
+        from sqlalchemy import column, table
+        return table(CUSTOM_VIEW, column("id"), self._column())
+
+    def sql_condition(self, col):
+        """SQL condition on the field's column *col*, or None (regex, and
+        text needing Python's case folding — see TextMatchFilter)."""
+        from sqlalchemy import and_, func, not_, or_
+        if self.type == "boolean":
+            truthy = func.coalesce(col, 0) != 0
+            return truthy if self.op == "yes" else not_(truthy)
+        if self.type == "string":
+            assert self._text is not None
+            return self._text.sql_condition(col)
+        if self.type == "date":
+            day = func.date(col)
+            lo, hi = self._date_range()
+            conditions = [day.is_not(None)]
+            if lo is not None:
+                conditions.append(day >= lo.isoformat())
+            if hi is not None:
+                conditions.append(day <= hi.isoformat())
+            inside = and_(*conditions)
+            return or_(day.is_(None), not_(inside)) if self.op == "not_during" else inside
+        return _op_sql(col, self.op, self.value1, self.value2) & col.is_not(None)
+
+    def match_value(self, value) -> bool:
+        """Whether the field's value *value* passes (the Python side of
+        sql_condition())."""
+        if self.type == "boolean":
+            truthy = value not in (None, 0, "0", "", False)
+            return truthy if self.op == "yes" else not truthy
+        if self.type == "string":
+            assert self._text is not None
+            return self._text.match_value(None if value is None else str(value))
+        if self.type == "date":
+            return _date_in_range(_custom_date(value), self.op, *self._date_range())
+        if value is None or isinstance(value, bool):
+            return False
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return False
+        return _distance_op_ok(self.op, number, self.value1, self.value2, 0)
+
+    def prepare(self, session: Session) -> None:
+        """Collect the matching caches from the view (see the class docstring)."""
+        from sqlalchemy import select, text as _sa_text
+        self._ids = set()
+        try:
+            columns = {str(r[1]).lower() for r in
+                       session.execute(_sa_text(f"PRAGMA temp.table_info({CUSTOM_VIEW})"))}
+        except Exception:
+            columns = set()
+        self._available = self.field.lower() in columns
+        if not self._available:
+            return
+        view, col = self._view(), self._column()
+        cond = self.sql_condition(col) if self.sql_exact else None
+        try:
+            if cond is not None:
+                rows = session.execute(select(view.c.id).where(cond))
+                self._ids = {row[0] for row in rows}
+            else:
+                rows = session.execute(select(view.c.id, col))
+                self._ids = {row[0] for row in rows if self.match_value(row[1])}
+        except Exception:
+            self._ids = set()
+            self._available = False
+
+    def apply_to_query(self, query):
+        from sqlalchemy import false, select
+        if not self._available:
+            return query.filter(false())
+        if not self.sql_exact:
+            return None  # matches() decides, from prepare()'s ids
+        cond = self.sql_condition(self._column())
+        return query.filter(Cache.id.in_(select(self._view().c.id).where(cond)))
+
+    def matches(self, cache: Cache) -> bool:
+        return self._ids is not None and cache.id in self._ids
+
+    def to_dict(self) -> dict:
+        data: dict = {"filter_type": self.filter_type, "field": self.field,
+                      "type": self.type, "op": self.op}
+        if self.type == "string":
+            data["text"] = self.text
+        elif self.type in ("integer", "real"):
+            data.update(value1=self.value1, value2=self.value2)
+        elif self.type == "date":
+            data.update(
+                date1=self.date1.isoformat() if self.date1 else None,
+                date2=self.date2.isoformat() if self.date2 else None,
+                amount=self.amount, unit=self.unit,
+            )
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CustomFieldFilter":
+        return cls(
+            data["field"], data["type"], data["op"],
+            text=data.get("text", ""),
+            value1=data.get("value1", 0.0), value2=data.get("value2", 0.0),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            amount=data.get("amount", 1), unit=data.get("unit", "days"),
+        )
+
+    def __repr__(self) -> str:
+        return f"<CustomFieldFilter {self.to_dict()}>"
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -3415,6 +3636,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "waypoint":           WaypointFilter,
     "trackable":          TrackableFilter,
     "log":                LogFilter,
+    "custom_field":       CustomFieldFilter,
 }
 
 
@@ -3741,15 +3963,15 @@ def _prepare_where_clause_filters(
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
     SQL directly against the database, and every WaypointFilter's waypoint
-    counts, TrackableFilter's trackable counts and LogFilter's log counts
-    (their prepare()). Must run
+    counts, TrackableFilter's trackable counts, LogFilter's log counts and
+    CustomFieldFilter's matching caches (their prepare()). Must run
     before any Python-level matches() call touches one of those filters.
     Mutates the filter objects in place; returns nothing.
     """
     if not filterset:
         return
     for _f in _iter_filters(filterset):
-        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter)):
+        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter, CustomFieldFilter)):
             _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
@@ -3760,6 +3982,7 @@ def _prepare_where_clause_filters(
     if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
         _register_distance_udf(session, distance_from)
         _dist_udf_ready = True
+    _source = where_source(session) if _where_filters else "caches"
 
     for _f in _where_filters:
         try:
@@ -3769,7 +3992,7 @@ def _prepare_where_clause_filters(
                 else _f.sql
             )
             _result = session.execute(
-                _sa_text(f"SELECT id FROM caches WHERE ({_sql})")
+                _sa_text(f"SELECT id FROM {_source} WHERE ({_sql})")
             )
             _f._matching_ids = {row[0] for row in _result}
         except Exception:
@@ -3817,10 +4040,25 @@ def validate_where_sql(session: Session, sql: str) -> Optional[str]:
         if _DISTANCE_RE.search(sql):
             _register_distance_udf(session, None)
             sql = _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", sql)
-        session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
+        session.execute(_sa_text(f"SELECT 1 FROM {where_source(session)} WHERE ({sql}) LIMIT 0"))
         return None
     except Exception as exc:
         return str(exc)
+
+
+def where_source(session: Session) -> str:
+    """What a Where clause runs on: ``caches`` — or, where the connection
+    has the caches_all view (custom fields, #1028), the view under the name
+    ``caches``, so a clause can use custom fields by name (as in GSAK) and
+    sub-selects referring to ``caches.id`` keep working."""
+    from sqlalchemy import text as _sa_text
+    try:
+        has_view = session.execute(_sa_text(
+            "SELECT 1 FROM sqlite_temp_master WHERE type = 'view' AND name = :n"
+        ), {"n": CUSTOM_VIEW}).first() is not None
+    except Exception:
+        has_view = False
+    return f"{CUSTOM_VIEW} AS caches" if has_view else "caches"
 
 
 def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):

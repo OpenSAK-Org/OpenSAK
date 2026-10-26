@@ -39,7 +39,16 @@ from opensak.gui.icon_provider import (
     get_favorite_points_icon,
     get_trackable_icon,
 )
-from opensak.gui.dialogs.column_dialog import get_column_widths, set_column_widths, get_container_display, get_type_display
+from opensak.gui.dialogs.column_dialog import (
+    get_column_widths, set_column_widths, get_container_display, get_type_display,
+    custom_columns, custom_column_name,
+)
+from opensak.db import custom_fields
+from opensak.gui.custom_field_format import (
+    CENTERED_TYPES as CUSTOM_CENTERED_TYPES,
+    format_value as format_custom_value,
+    sort_key as custom_sort_key,
+)
 import math
 
 
@@ -144,6 +153,8 @@ def get_column_defs() -> dict:
         # ── Issue #1141: columns stored since #1139 ─────────────────────────
         "last_user_update": (tr("col_last_user_update"),  90),
         "symbol":          (tr("col_symbol"),            110),
+        # ── #1028 step 4: one column per custom field, header = its name ──
+        **{col_id: (name, width) for col_id, name, width in custom_columns()},
     }
 
 
@@ -715,6 +726,8 @@ class CacheTableModel(QAbstractTableModel):
         # Issue #1000: columns currently showing their short header ("L4")
         # because the full title doesn't fit — set by CacheTableView.
         self._short_headers: set[str] = set()
+        # #1028: the custom fields of the visible custom columns, per cache
+        self._custom: custom_fields.Values = custom_fields.EMPTY_VALUES
 
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
@@ -762,13 +775,59 @@ class CacheTableModel(QAbstractTableModel):
         """Genindlæs kolonnedefinitioner fra indstillinger."""
         self.beginResetModel()
         self._columns = _get_active_columns()
+        # #1028: a custom column just turned on needs its values
+        if self.needs_custom_values():
+            self._custom = self._load_custom()
         self.endResetModel()
 
-    def load(self, caches: list[Cache]) -> None:
+    def load(self, caches: list[Cache],
+             custom: Optional[custom_fields.Values] = None) -> None:
+        """Show *caches*; *custom* holds the values of the visible custom
+        columns (loaded here when None and such a column is visible)."""
         self.beginResetModel()
         self._caches = caches
         self._update_distances()
+        self._custom = custom if custom is not None else self._load_custom()
         self.endResetModel()
+
+    # ── #1028: custom field columns ─────────────────────────────────────────
+
+    def custom_names(self) -> list[str]:
+        """The field names of the visible custom columns."""
+        return [n for n in (custom_column_name(c) for c in self._columns) if n is not None]
+
+    def _load_custom(self, codes: Optional[list[str]] = None) -> custom_fields.Values:
+        names = self.custom_names()
+        if not names:
+            return custom_fields.EMPTY_VALUES
+        try:
+            return custom_fields.active_values(names, codes)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("cache table: custom values not loaded",
+                                                exc_info=True)
+            return custom_fields.EMPTY_VALUES
+
+    def needs_custom_values(self) -> bool:
+        """A visible custom column whose values aren't loaded."""
+        return any(self._custom.field(n) is None for n in self.custom_names())
+
+    def reload_custom(self, codes: Optional[list[str]] = None) -> None:
+        """Reload the custom values — of *codes* only, if given."""
+        if codes is None:
+            self._custom = self._load_custom()
+        else:
+            self._custom = self._custom.merged(self._load_custom(codes))
+        if self._caches:
+            self.dataChanged.emit(self.index(0, 0),
+                                  self.index(len(self._caches) - 1, len(self._columns) - 1))
+
+    def _custom_text(self, cache: Cache, name: str) -> str:
+        f = self._custom.field(name)
+        if f is None:
+            return ""
+        return format_custom_value(f, self._custom.display(cache.gc_code, name),
+                                   self._custom.by_expression(name))
 
     def _update_distances(self) -> None:
         self._distances = {}
@@ -887,6 +946,12 @@ class CacheTableModel(QAbstractTableModel):
             return self._display_value(cache, col)
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
+            custom_name = custom_column_name(col)
+            if custom_name is not None:
+                custom_field = self._custom.field(custom_name)
+                if custom_field is not None and custom_field.type in CUSTOM_CENTERED_TYPES:
+                    return Qt.AlignmentFlag.AlignCenter
+                return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             if col in ("cache_type", "difficulty", "terrain", "container",
                        "distance", "found", "dnf", "premium_only", "archived",
                        "log_count", "corrected", "first_to_find", "user_flag",
@@ -1231,6 +1296,9 @@ class CacheTableModel(QAbstractTableModel):
             # GSAK-style colored squares — no cell text, same as the other
             # icon-only columns (corrected/found/premium_only).
             return ""
+        custom_name = custom_column_name(col)
+        if custom_name is not None:
+            return self._custom_text(cache, custom_name)
         return ""
 
     def sort(self, column: int, order=Qt.SortOrder.AscendingOrder) -> None:
@@ -1356,6 +1424,15 @@ class CacheTableModel(QAbstractTableModel):
                 key=lambda c: getattr(c, "last_user_update", None) or datetime.min,
                 reverse=reverse,
             )
+        elif (custom_name := custom_column_name(col)) is not None:
+            # #1028: by the stored value, as GSAK sorts (not the display text)
+            custom_field = self._custom.field(custom_name)
+            if custom_field is not None:
+                values, field_ = self._custom, custom_field
+                self._caches.sort(
+                    key=lambda c: custom_sort_key(field_, values.raw(c.gc_code, custom_name)),
+                    reverse=reverse,
+                )
         else:
             self._caches.sort(
                 key=lambda c: (getattr(c, col) or "").lower()
@@ -1783,12 +1860,15 @@ class CacheTableView(QTableView):
         self.horizontalHeader().setSortIndicator(col_idx, order)
         self.horizontalHeader().blockSignals(False)
 
-    def load_caches(self, caches: list[Cache]) -> None:
+    def load_caches(self, caches: list[Cache],
+                    custom: Optional[custom_fields.Values] = None) -> None:
+        """*custom*: the values of the visible custom columns, if the caller
+        has them (RefreshWorker loads them off the GUI thread)."""
         # Bloker row-changed signalet under load så første cache ikke
         # auto-selekteres og vises på kortet (Qt sætter current til række 0
         # efter beginResetModel/endResetModel)
         self.selectionModel().blockSignals(True)
-        self._model.load(caches)
+        self._model.load(caches, custom)
         # Genanvend sortering - beginResetModel() nulstiller Qt sort-indikatoren
         self._reapply_last_sort()
         self.clearSelection()
@@ -2181,6 +2261,8 @@ class CacheTableView(QTableView):
         else:
             return  # cachen er ikke i den aktuelle visning — intet at opdatere
 
+        if self._model.custom_names():
+            self._model.reload_custom([gc_code])
         self._reset_model_preserving_selection()
 
     def refresh_visuals(self) -> None:

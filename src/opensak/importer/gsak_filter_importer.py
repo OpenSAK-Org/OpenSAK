@@ -59,6 +59,7 @@ from opensak.filters.engine import (
     ContainerFilter,
     CountryFilter,
     CountyFilter,
+    CustomFieldFilter,
     DateFilter,
     DifficultyFilter,
     DirectionFilter,
@@ -484,6 +485,32 @@ WHERE_TABLE_MAP: dict[str, str] = {
     "corrected": "user_notes",
 }
 
+# With custom fields (#1028): GSAK's CachesAll view (Caches + Custom) and its
+# Custom table both become OpenSAK's caches_all view, which has the cache
+# columns and one column per custom field, with the default for a cache
+# nobody touched — as GSAK's Custom row has. Custom's key cCode becomes Code
+# (_rewrite_custom_code()), i.e. gc_code.
+WHERE_CUSTOM_TABLE_MAP: dict[str, str] = {
+    "cachesall": "caches_all",
+    "custom":    "caches_all",
+}
+_CUSTOM_CCODE_RES = (
+    re.compile(r"\b(select\s+(?:distinct\s+)?)ccode(\s+from\s+custom\b)", re.IGNORECASE),
+    re.compile(r"\bcustom\s*\.\s*ccode\b", re.IGNORECASE),
+)
+
+
+# GSAK's own column and table names, which are never custom fields.
+_GSAK_IDENTIFIERS = (set(WHERE_COLUMN_MAP) | set(WHERE_SUBTABLE_MAP) | set(WHERE_TABLE_MAP)
+                     | set(WHERE_CUSTOM_TABLE_MAP) | {"status", "tempdisabled"})
+
+
+def _rewrite_custom_code(sql: str) -> str:
+    """GSAK's Custom.cCode (the cache code) → Code, before the renames turn
+    it into gc_code — elsewhere cCode is a waypoint's code (wp_code)."""
+    sql = _CUSTOM_CCODE_RES[0].sub(lambda m: f"{m.group(1)}Code{m.group(2)}", sql)
+    return _CUSTOM_CCODE_RES[1].sub("custom.Code", sql)
+
 # GSAK columns whose OpenSAK counterpart carries the opposite meaning.
 WHERE_INVERTED: dict[str, str] = {
     "tempdisabled": "(NOT available)",
@@ -545,11 +572,13 @@ WHERE_UNMAPPABLE: dict[str, str] = {
                   "cache) became OpenSAK's caches.latitude/longitude — they are not columns of "
                   "user_notes, so this sub-select needs a join back to caches",
     "cachememo": "GSAK's CacheMemo table is split across OpenSAK's caches / user_notes columns",
-    "cachesall": "GSAK's CachesAll view (all databases at once) has no OpenSAK counterpart",
-    "custom":    "GSAK's Custom/CustomLocal tables (user-defined columns) have no OpenSAK "
-                 "counterpart — only user_data_1-4 exist",
-    "customlocal": "GSAK's Custom/CustomLocal tables (user-defined columns) have no OpenSAK "
-                   "counterpart — only user_data_1-4 exist",
+    # Mapped to caches_all (WHERE_CUSTOM_TABLE_MAP) while custom fields are on.
+    "cachesall": "GSAK's CachesAll view (caches plus their custom fields) needs OpenSAK's "
+                 "custom fields, which are not available in this build",
+    "custom":    "GSAK's Custom table (the custom field values) needs OpenSAK's custom "
+                 "fields, which are not available in this build",
+    "customlocal": "GSAK's CustomLocal table holds the custom field definitions, which "
+                   "OpenSAK keeps in its own format — test the fields themselves instead",
     "travelbugs": "GSAK's CacheMemo.TravelBugs text maps to OpenSAK's trackables table / "
                   "trackable_count",
     "favperc":   "GSAK's FavPerc (favourite percentage) is not stored by OpenSAK",
@@ -909,26 +938,49 @@ def _table_aliases(sql: str) -> set[str]:
 
 
 def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
-                    me: Optional[str] = None
+                    me: Optional[str] = None,
+                    known_fields: Optional[list[str]] = None,
                     ) -> tuple[str, list[str], list[str], bool]:
     """Best-effort translation of a GSAK where clause into OpenSAK SQL.
 
+    *known_fields* are the custom fields OpenSAK has (the active database's,
+    #1028), or None when custom fields are off. A Where clause runs on the
+    caches_all view then, so such a field is used by name, as in GSAK —
+    under the name the GSAK import gave it (``_custom`` appended to a name
+    that clashes, custom_fields.rename_for_import()) — and GSAK's CachesAll
+    view and Custom table become caches_all.
+
     *custom_columns* are the user-defined GSAK column names of the same filter
-    (from its ``*custom*`` section); they are reported by name rather than as
-    anonymous unknown identifiers. *me* (the user's geocaching.com account
-    name) is no longer needed since ``isOwner`` maps to OpenSAK's is_owner
-    column (#1141); it is still accepted so callers need not change.
+    (from its ``*custom*`` section); those OpenSAK doesn't know are reported
+    by name rather than as anonymous unknown identifiers. *me* (the user's
+    geocaching.com account name) is no longer needed since ``isOwner`` maps
+    to OpenSAK's is_owner column (#1141); it is still accepted so callers
+    need not change.
 
     Returns (translated_sql, warnings, notes, verified). ``verified`` is False
     when anything was left untranslated; ``notes`` are inexact-but-usable
     mappings that do not block verification.
     """
+    from opensak.db.custom_fields import rename_for_import
     warnings: list[str] = []
     notes: list[str] = []
     sql = _expand_cachetype_codes(sql, warnings, notes)
     sql = _expand_status(sql, notes)
+    custom_on = known_fields is not None
+    if custom_on:
+        sql = _rewrite_custom_code(sql)
     aliases = _table_aliases(sql)
     custom = {name.lower() for name in (custom_columns or [])}
+    # GSAK name (lower case) → the OpenSAK field it became
+    fields_by_name = {name.lower(): name for name in (known_fields or [])}
+
+    def _field(word: str) -> Optional[str]:
+        # GSAK's own columns win: a GSAK database can't have a custom field
+        # of that name, only OpenSAK can (Name → Name_custom).
+        if word.lower() in _GSAK_IDENTIFIERS:
+            return None
+        return (fields_by_name.get(word.lower())
+                or fields_by_name.get(rename_for_import(word).lower()))
 
     out: list[str] = []
     for is_literal, chunk in _split_sql_literals(sql):
@@ -938,6 +990,8 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
 
         def _sub_ident(m: re.Match) -> str:
             qual, word = m.group("qual"), m.group("word")
+            if custom_on and qual and qual.lower() in WHERE_CUSTOM_TABLE_MAP:
+                qual = WHERE_CUSTOM_TABLE_MAP[qual.lower()]
             prefix = f"{qual}." if qual else ""
 
             def _keep(mapped: str) -> str:
@@ -956,12 +1010,23 @@ def translate_where(sql: str, custom_columns: Optional[list[str]] = None,
                 return mapped
 
             low = word.lower()
+            # Before the aliases: "custom.Code" makes custom a qualifier too.
+            if custom_on and not qual and low in WHERE_CUSTOM_TABLE_MAP:
+                return WHERE_CUSTOM_TABLE_MAP[low]
             if low in _SQL_WORDS or low in aliases:
                 return prefix + word
+            field_name = _field(word) if custom_on else None
+            if field_name is not None:
+                if field_name.lower() != low:
+                    notes.append(f"where: GSAK's custom field {word} is called "
+                                 f"{field_name} in OpenSAK")
+                return prefix + field_name
             if low in custom:
                 warnings.append(
-                    f"where: '{word}' is a user-defined GSAK column — OpenSAK has no custom "
-                    f"columns (only user_data_1-4)"
+                    f"where: '{word}' is a GSAK custom field the active database doesn't have"
+                    if custom_on else
+                    f"where: '{word}' is a GSAK custom field — custom fields are not "
+                    f"available in this build"
                 )
                 return prefix + word
             if _MACRO_GLOBAL_RE.match(word):
@@ -1106,6 +1171,9 @@ class Options:
     center: Optional[tuple[float, float]] = None   # (lat, lon) for distances
     miles: bool = False                            # GSAK's distances are miles
     me: Optional[str] = None                       # geocaching.com account name
+    # The custom fields OpenSAK has, {name: type} (the active database's,
+    # #1028); None when custom fields are off in this build.
+    custom_fields: Optional[dict[str, str]] = None
 
 
 class Conversion:
@@ -1507,7 +1575,7 @@ def convert(gf: GsakFilter, opts: Optional[Options] = None) -> Conversion:
     _convert_dates(gf, c)
     _convert_attributes(gf, c)
     _convert_area(gf, c, opts)
-    _convert_custom(gf, c)
+    _convert_custom(gf, c, opts)
     _convert_log_tab(gf, c)
     _convert_waypoint_tab(gf, c)
     _convert_misc(gf, c)
@@ -1958,22 +2026,160 @@ def _convert_area(gf: GsakFilter, c: Conversion, opts: Options) -> None:
         c.comment(label, f"{exc} — GSAK's definition was {arc}")
 
 
-def _convert_custom(gf: GsakFilter, c: Conversion) -> None:
-    """User-defined GSAK columns (the Custom / CustomLocal tables).
+# GSAK's Custom tab saves each criterion as "name;type;operator;value1;value2",
+# the operator as the label shown in GSAK's language at the time. A boolean
+# has no operator: value1/value2 are its Yes/No boxes ("1;0" = only true).
+# Operator labels are matched by these words (lower case, umlauts folded),
+# first match wins — English and German, the languages seen in real data.
+_CUSTOM_NUMBER_OPS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("not between", "nicht zwischen"), "not_between"),
+    (("between", "zwischen"), "between"),
+    (("less than or equal", "kleiner oder gleich", "kleiner gleich", "<="), "at_most"),
+    (("greater than or equal", "more than or equal", "grosser oder gleich",
+      "grosser gleich", ">="), "at_least"),
+    (("not equal", "ungleich", "<>", "!="), "not_equal"),
+    (("less", "kleiner", "<"), "less_than"),
+    (("greater", "more", "grosser", ">"), "more_than"),
+    (("equal", "gleich", "="), "equal"),
+)
+_CUSTOM_TEXT_OPS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("not contain", "enthalt nicht"), "not_contains"),
+    (("contain", "enthalt"), "contains"),
+    (("not empty", "nicht leer"), "not_empty"),
+    (("empty", "leer"), "empty"),
+    (("begin", "start", "beginnt"), "starts_with"),
+    (("end", "endet"), "ends_with"),
+    (("not equal", "ungleich"), "not_equals"),
+    (("equal", "gleich", "is"), "equals"),
+)
+_CUSTOM_DATE_OPS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("between", "zwischen"), "between"),
+    (("on or before", "before or", "am oder vor", "vor oder"), "on_or_before"),
+    (("on or after", "after or", "am oder nach", "nach oder"), "on_or_after"),
+    (("before", "vor"), "before"),
+    (("after", "nach"), "after"),
+    (("equal", "gleich", "on", "am"), "equal"),
+)
 
-    OpenSAK has no custom-column storage at all — the GSAK cache importer
-    deliberately skips the Custom table — so there is not even a column for
-    SQL to point at. The raw GSAK criterion is kept so it can be rebuilt on
-    one of user_data_1-4 once the data is moved there.
+
+def _fold_label(label: str) -> str:
+    folded = label.strip().lower()
+    for umlaut, plain in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss")):
+        folded = folded.replace(umlaut, plain)
+    return " ".join(folded.split())
+
+
+def _custom_op(table: tuple[tuple[tuple[str, ...], str], ...], label: str) -> Optional[str]:
+    folded = _fold_label(label)
+    for words, op in table:
+        if any(w in folded for w in words):
+            return op
+    return None
+
+
+def _custom_number(value: str) -> Optional[float]:
+    try:
+        return float(value.strip().replace(",", ".")) if value.strip() else 0.0
+    except ValueError:
+        return None
+
+
+def _custom_date_value(value: str) -> Optional[datetime]:
+    """A GSAK date value: a Delphi serial or an ISO date."""
+    value = value.strip()
+    if not value:
+        return None
+    parsed = delphi_date(value)
+    if parsed is not None:
+        return parsed
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _custom_filter(name: str, type_: str, label: str, v1: str, v2: str
+                   ) -> tuple[Optional[CustomFieldFilter], Optional[str]]:
+    """The filter for one GSAK custom criterion, or (None, why not); (None,
+    None) when the criterion sets nothing (a boolean with both boxes)."""
+    if type_ == "boolean":
+        yes, no = v1.strip() in ("1", "True", "true"), v2.strip() in ("1", "True", "true")
+        if yes == no:
+            return None, None
+        return CustomFieldFilter(name, type_, "yes" if yes else "no"), None
+    if type_ in ("integer", "real"):
+        op = _custom_op(_CUSTOM_NUMBER_OPS, label)
+        a, b = _custom_number(v1), _custom_number(v2)
+        if op is None:
+            return None, f"the operator {label!r} is not known"
+        if a is None or b is None:
+            return None, f"the values {v1!r} / {v2!r} are not numbers"
+        if op == "not_equal":
+            return CustomFieldFilter(name, type_, "not_between", value1=a, value2=a), None
+        return CustomFieldFilter(name, type_, op, value1=a, value2=b), None
+    if type_ == "string":
+        op = _custom_op(_CUSTOM_TEXT_OPS, label)
+        if op is None:
+            return None, f"the operator {label!r} is not known"
+        return CustomFieldFilter(name, type_, op, text=v1), None
+    op = _custom_op(_CUSTOM_DATE_OPS, label)
+    d1, d2 = _custom_date_value(v1), _custom_date_value(v2)
+    if op is None:
+        return None, f"the operator {label!r} is not known"
+    if d1 is None or (op == "between" and d2 is None):
+        return None, f"the dates {v1!r} / {v2!r} could not be read"
+    day1 = d1.date()
+    if op == "before":
+        return CustomFieldFilter(name, type_, "on_or_before", date1=day1 - timedelta(days=1)), None
+    if op == "after":
+        return CustomFieldFilter(name, type_, "on_or_after", date1=day1 + timedelta(days=1)), None
+    return CustomFieldFilter(name, type_, op, date1=day1,
+                             date2=d2.date() if d2 is not None else None), None
+
+
+def _convert_custom(gf: GsakFilter, c: Conversion, opts: Options) -> None:
+    """GSAK's Custom tab: one criterion per custom field.
+
+    With custom fields (#1028) each becomes a native custom-field filter on
+    the field of that name — the name the GSAK import gave it
+    (custom_fields.rename_for_import()). A field the active database doesn't
+    have is still converted, with a note: the profile also serves other
+    databases. Without custom fields the criterion is only documented.
     """
+    from opensak.db.custom_fields import normalize_type, rename_for_import
+    known = {name.lower(): (name, type_) for name, type_ in (opts.custom_fields or {}).items()}
     for line in gf.custom:
-        parts = line.split(";")
-        name = parts[0] if parts else line
-        c.comment(f"User-defined GSAK column \"{name}\"", (
-            f"OpenSAK stores no custom columns (only user_data_1-4), and the GSAK cache "
-            f"import does not carry the Custom table over, so there is no column to test. "
-            f"The GSAK criterion was: {line}"
-        ))
+        parts = (line.split(";") + [""] * 5)[:5]
+        gsak_name, gsak_type, label, v1, v2 = parts
+        label_text = f'Custom field "{gsak_name}"'
+        if opts.custom_fields is None:
+            c.comment(label_text, (
+                f"custom fields are not available in this build, so there is no column "
+                f"to test. The GSAK criterion was: {line}"
+            ))
+            continue
+        name = rename_for_import(gsak_name)
+        field_name, field_type = known.get(gsak_name.lower()) or known.get(name.lower()) or (
+            name, normalize_type(gsak_type) or "")
+        if field_type not in ("string", "integer", "real", "date", "boolean"):
+            c.comment(label_text, f"GSAK's field type {gsak_type!r} is not known. "
+                                  f"The GSAK criterion was: {line}")
+            continue
+        try:
+            f, why = _custom_filter(field_name, field_type, label, v1, v2)
+        except ValueError as exc:
+            f, why = None, str(exc)
+        if f is None and why is None:
+            continue    # sets nothing
+        if f is None:
+            c.comment(label_text, f"{why}. The GSAK criterion was: {line}")
+            continue
+        c.native(label_text, f)
+        if field_name.lower() not in known:
+            c.note(f'Custom field "{field_name}" is not defined in the active database; '
+                   f"the filter matches nothing there")
+        elif field_name != gsak_name:
+            c.note(f"GSAK's custom field {gsak_name} is called {field_name} in OpenSAK")
 
 
 def _convert_log_tab(gf: GsakFilter, c: Conversion) -> None:
@@ -2318,7 +2524,8 @@ def _convert_where(gf: GsakFilter, c: Conversion, opts: Options) -> None:
     if not gf.where:
         return
     custom_columns = [line.split(";")[0] for line in gf.custom if line.split(";")[0]]
-    sql, warnings, notes, verified = translate_where(gf.where, custom_columns, opts.me)
+    known = list(opts.custom_fields) if opts.custom_fields is not None else None
+    sql, warnings, notes, verified = translate_where(gf.where, custom_columns, opts.me, known)
     for note in notes:
         c.note(note)
     if verified:
@@ -2453,7 +2660,24 @@ def default_options(db_path: Optional[Path] = None) -> Options:
     miles = False
     if db_path is not None:
         _, miles = read_gsak_center(Path(db_path).with_name("gsak.ini"))
-    return Options(center=center, miles=miles, me=me)
+    return Options(center=center, miles=miles, me=me, custom_fields=active_custom_fields())
+
+
+def active_custom_fields() -> Optional[dict[str, str]]:
+    """{name: type} of the active database's custom fields (#1028), or None
+    when custom fields are off (the companion-db feature flag)."""
+    from opensak.utils import flags
+    if not flags.companion_db:
+        return None
+    try:
+        from opensak.db import custom_fields
+        from opensak.db.manager import get_db_manager
+        active = get_db_manager().active_path
+        if active is None:
+            return {}
+        return {f.name: f.type for f in custom_fields.fields(Path(active))}
+    except Exception:
+        return {}
 
 
 # ── Writing profiles ─────────────────────────────────────────────────────────

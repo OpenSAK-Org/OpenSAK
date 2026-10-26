@@ -27,8 +27,9 @@ Fields
   matches caches nobody touched. Changing a default is therefore only a
   change of the definition.
 * ``expression`` keeps GSAK's ``fexpression`` as it was. In GSAK it is a
-  display transform of the stored value (``nullif(GCFinds,-1)``); it is not
-  evaluated yet (UI, phase 6).
+  display transform of the stored value (``nullif(GCFinds,-1)``): the cache
+  list and the detail panel show it (display_expression(), load_values()),
+  filters and sorting use the stored value, as in GSAK.
 
 Applying definitions
 --------------------
@@ -56,6 +57,14 @@ changed (changed()).
 Values are written on the companion's own connection (write_values());
 values_model() maps ``custom_values`` for SQLAlchemy sessions whose
 connections have the companion attached.
+
+Display (#1028 step 4)
+----------------------
+load_values() reads the fields of many caches at once from ``caches_all``
+(the cache list, the detail panel), each with its display value: the
+field's expression where it has one that works (display_expression()), else
+the stored value. Expressions only ever run inside a SELECT, with an
+authorizer that allows nothing but reading (read_only()).
 """
 
 from __future__ import annotations
@@ -65,9 +74,10 @@ import re
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
 from opensak.db import companion
 from opensak.db.companion import COMPANION_SCHEMA, CompanionError
@@ -174,7 +184,7 @@ class Field:
     type: str
     position: int = 0
     default: Optional[str] = None       # as text, as GSAK stores it
-    expression: Optional[str] = None    # GSAK's fexpression, not evaluated yet
+    expression: Optional[str] = None    # GSAK's fexpression, for display
     control: Optional[str] = None       # kept for GSAK round trips
     height: Optional[int] = None
     scope: str = SCOPE_LOCAL
@@ -854,6 +864,264 @@ def drop_view(connection: Any) -> None:
     connection.info.pop("caches_all", None)
 
 
+# ── Display: the cache list and the detail panel ──────────────────────────────
+
+# What SQL may do while an expression runs (read_only()).
+_READ_ACTIONS = frozenset({
+    sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION,
+    getattr(sqlite3, "SQLITE_RECURSIVE", 33),
+})
+
+
+@contextmanager
+def read_only(dbapi_connection: Any) -> Iterator[None]:
+    """Let *dbapi_connection* (an sqlite3 connection without an authorizer
+    of its own) only read while the block runs, so a field's expression
+    can't change anything."""
+    def authorizer(action: int, *_args: Any) -> int:
+        return sqlite3.SQLITE_OK if action in _READ_ACTIONS else sqlite3.SQLITE_DENY
+
+    dbapi_connection.set_authorizer(authorizer)
+    try:
+        yield
+    finally:
+        dbapi_connection.set_authorizer(None)
+
+
+_display_sql: dict[tuple[str, str, str], Optional[str]] = {}
+
+
+def display_expression(field_: Field, names: Iterable[str]) -> Optional[str]:
+    """
+    The SQL the cache list shows for *field_* instead of its stored value,
+    or None. A GSAK expression goes through the GSAK filter translator
+    (*names*: the database's field names, which it may use like columns);
+    one that can't be translated is None, so the stored value is shown.
+    Not checked against a database here: load_values() does that.
+    """
+    expr = (field_.expression or "").strip()
+    if not expr or ";" in expr:
+        return None
+    if field_.origin != ORIGIN_GSAK:
+        return expr
+    names = list(names)
+    key = (field_.field_id, expr, ",".join(sorted(n.lower() for n in names)))
+    if key not in _display_sql:
+        from opensak.importer.gsak_filter_importer import translate_where
+        sql, warnings, _notes, verified = translate_where(expr, known_fields=names)
+        _display_sql[key] = sql if verified else None
+        if not verified:
+            logger.info("custom fields: expression of %s not used for display (%s): %s",
+                        field_.name, "; ".join(warnings), expr)
+    return _display_sql[key]
+
+
+@dataclass
+class Values:
+    """Custom values of many caches, from load_values()."""
+
+    fields: tuple[Field, ...]
+    # gc_code → the stored values of `fields`, then their display values
+    rows: dict[str, tuple[Any, ...]]
+    # lower-case names of the fields whose display value is an expression's
+    expressions: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        self._index = {f.name.lower(): i for i, f in enumerate(self.fields)}
+
+    def field(self, name: str) -> Optional[Field]:
+        i = self._index.get(name.lower())
+        return None if i is None else self.fields[i]
+
+    def by_expression(self, name: str) -> bool:
+        """Whether *name*'s display value comes from its expression."""
+        return name.lower() in self.expressions
+
+    def merged(self, other: "Values") -> "Values":
+        """These values with *other*'s rows on top (same fields)."""
+        if other.fields != self.fields:
+            return other
+        return Values(self.fields, {**self.rows, **other.rows}, self.expressions)
+
+    def raw(self, code: str, name: str) -> Any:
+        """The stored value (the default for an untouched cache)."""
+        i = self._index.get(name.lower())
+        row = self.rows.get(code)
+        return None if i is None or row is None else row[i]
+
+    def display(self, code: str, name: str) -> Any:
+        """What to show: the expression's result, or the stored value."""
+        i = self._index.get(name.lower())
+        row = self.rows.get(code)
+        return None if i is None or row is None else row[len(self.fields) + i]
+
+
+EMPTY_VALUES = Values((), {})
+
+# (database, field id, expression) whose display expression failed once.
+_failed_display: set[tuple[str, str, str]] = set()
+
+
+def load_values(
+    dbapi_connection: Any,
+    db_path: Path,
+    names: Optional[Iterable[str]] = None,
+    codes: Optional[Iterable[str]] = None,
+) -> Values:
+    """
+    The custom fields *names* (all fields of *db_path* if None) of the
+    caches *codes* (all if None), read from the caches_all view on
+    *dbapi_connection* — a connection of the database engines
+    (db/database.py), which have the view. Each with its display value
+    (display_expression(); the stored value when the expression fails
+    here). Fields the view lacks are left out; without the view the result
+    is empty. Read-only (read_only()).
+    """
+    try:
+        view_columns = {str(r[1]).lower() for r in
+                        dbapi_connection.execute(f"PRAGMA temp.table_info({VIEW})")}
+    except sqlite3.Error:
+        return EMPTY_VALUES
+    every = fields(db_path)
+    if names is None:
+        wanted = [f for f in every if f.name.lower() in view_columns]
+    else:
+        by_name = {f.name.lower(): f for f in every}
+        wanted = [by_name[n.lower()] for n in dict.fromkeys(names)
+                  if n.lower() in by_name and n.lower() in view_columns]
+    if not wanted:
+        return Values((), {})
+    all_names = [f.name for f in every]
+    key = companion.status_key(db_path)
+    displays: list[Optional[str]] = []
+    with read_only(dbapi_connection):
+        for f in wanted:
+            expr = display_expression(f, all_names)
+            stamp = (key, f.field_id, expr or "")
+            if expr is not None and stamp not in _failed_display:
+                try:
+                    dbapi_connection.execute(f"SELECT ({expr}) FROM {VIEW} LIMIT 0")
+                except sqlite3.Error as exc:
+                    _failed_display.add(stamp)
+                    logger.warning("custom fields: display expression of %s fails, the "
+                                   "stored value is shown: %s (%s)", f.name, exc, expr)
+            displays.append(None if expr is None or stamp in _failed_display else expr)
+        select = [CODE_COLUMN, *(_q(f.name) for f in wanted),
+                  *(f"({e})" for e in displays if e is not None)]
+        sql = f"SELECT {', '.join(select)} FROM {VIEW}"
+        n = len(wanted)
+        rows: dict[str, tuple[Any, ...]] = {}
+
+        def add(cursor: Any) -> None:
+            for row in cursor:
+                raw = tuple(row[1:n + 1])
+                shown = iter(row[n + 1:])
+                rows[row[0]] = raw + tuple(
+                    next(shown) if e is not None else raw[i] for i, e in enumerate(displays))
+
+        if codes is None:
+            add(dbapi_connection.execute(sql))
+        else:
+            wanted_codes = list(dict.fromkeys(codes))
+            for start in range(0, len(wanted_codes), _BATCH):
+                chunk = wanted_codes[start:start + _BATCH]
+                add(dbapi_connection.execute(
+                    f"{sql} WHERE {CODE_COLUMN} IN ({', '.join('?' * len(chunk))})", chunk))
+    expressions = frozenset(f.name.lower() for f, e in zip(wanted, displays) if e is not None)
+    return Values(tuple(wanted), rows, expressions)
+
+
+def check_expression(dbapi_connection: Any, db_path: Path, field_: Field) -> Optional[str]:
+    """
+    Why *field_*'s display expression can't be shown, or None when it can
+    (or there is none): it must translate (display_expression()) and run
+    in a read-only SELECT on the caches_all view of *dbapi_connection* (a
+    connection of the database engines). *field_* may be new or renamed;
+    it is checked as if its column existed already.
+    """
+    expr = (field_.expression or "").strip()
+    if not expr:
+        return None
+    if ";" in expr:
+        return "the expression must be one expression, without ;"
+    names = [f.name for f in fields(db_path) if f.field_id != field_.field_id]
+    sql = display_expression(field_, [*names, field_.name])
+    if sql is None:
+        return "the GSAK expression can't be translated into OpenSAK SQL"
+    try:
+        columns = {str(r[1]).lower() for r in
+                   dbapi_connection.execute(f"PRAGMA temp.table_info({VIEW})")}
+    except sqlite3.Error as exc:
+        return str(exc)
+    if not columns:
+        return "the custom fields are not available on this connection"
+    source = VIEW
+    if field_.name.lower() not in columns:
+        source = f"(SELECT *, NULL AS {_q(field_.name)} FROM {VIEW})"
+    try:
+        with read_only(dbapi_connection):
+            dbapi_connection.execute(f"SELECT ({sql}) FROM {source} LIMIT 0")
+    except sqlite3.Error as exc:
+        return str(exc)
+    return None
+
+
+def check_active_expression(field_: Field) -> Optional[str]:
+    """check_expression() for the active database."""
+    from opensak.db.database import get_engine, get_session
+    db_path = Path(get_engine().url.database or "")
+    with get_session() as session:
+        dbapi = session.connection().connection.dbapi_connection
+        return check_expression(dbapi, db_path, field_)
+
+
+def active_values(names: Optional[Iterable[str]] = None,
+                  codes: Optional[Iterable[str]] = None) -> Values:
+    """load_values() for the active database, on a connection of its engine."""
+    from opensak.db.database import get_engine, get_session
+    db_path = Path(get_engine().url.database or "")
+    with get_session() as session:
+        dbapi = session.connection().connection.dbapi_connection
+        return load_values(dbapi, db_path, names, codes)
+
+
+def parse_value(field_: Field, value: Any) -> Any:
+    """
+    *value* (typed in the GUI or passed by a macro) as the value to store
+    for *field_*: 0/1 for a boolean, a number, "YYYY-MM-DD" (or an ISO
+    date and time) for a date, text. None, and "" for every type but text,
+    mean "no value" (the default shows). Raises CustomFieldError if it
+    doesn't fit the type.
+    """
+    if value is None or (value == "" and field_.type != TYPE_STRING):
+        return None
+    if field_.type == TYPE_DATE:
+        from datetime import date, datetime
+        if isinstance(value, datetime):
+            return value.isoformat(timespec="seconds")
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                datetime.fromisoformat(text)
+            except ValueError:
+                pass
+            else:
+                return text
+        raise CustomFieldError(f'{field_.name} must be a date "YYYY-MM-DD", got {value!r}')
+    if field_.type == TYPE_STRING and not isinstance(value, str):
+        raise CustomFieldError(f"{field_.name} must be text, got {value!r}")
+    if field_.type in (TYPE_INTEGER, TYPE_REAL) and isinstance(value, bool):
+        raise CustomFieldError(f"{field_.name} must be a number, got {value!r}")
+    converted, ok = convert(field_.type, value)
+    if not ok:
+        kind = {TYPE_BOOLEAN: "true or false", TYPE_INTEGER: "a whole number",
+                TYPE_REAL: "a number"}.get(field_.type, field_.type)
+        raise CustomFieldError(f"{field_.name} must be {kind}, got {value!r}")
+    return converted
+
+
 # ── Runtime-built SQLAlchemy model ────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -1094,10 +1362,12 @@ def _q(name: str) -> str:
 
 
 __all__ = [
-    "ApplyResult", "CompanionError", "CustomFieldError", "Field", "PendingChange",
-    "ValuesModel", "apply_definitions", "change_type", "changed", "check_name",
-    "convert", "copy_definitions", "define_field", "define_global", "delete_field",
-    "drop_field", "ensure_view", "fields", "global_fields", "normalize_type",
-    "read_values", "rename_field", "rename_for_import", "stored_fields",
-    "update_definition", "values_model", "view_sql", "write_values",
+    "ApplyResult", "CompanionError", "CustomFieldError", "EMPTY_VALUES", "Field",
+    "PendingChange", "Values", "ValuesModel", "active_values", "apply_definitions",
+    "change_type", "check_active_expression", "check_expression", "parse_value",
+    "changed", "check_name", "convert", "copy_definitions", "define_field",
+    "define_global", "delete_field", "display_expression", "drop_field",
+    "ensure_view", "fields", "global_fields", "load_values", "normalize_type",
+    "read_only", "read_values", "rename_field", "rename_for_import",
+    "stored_fields", "update_definition", "values_model", "view_sql", "write_values",
 ]

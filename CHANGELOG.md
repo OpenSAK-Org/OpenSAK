@@ -164,6 +164,22 @@ its changes are part of this beta._
   fields) are shown but not changed there. A damaged companion can be
   moved aside; the database itself is never touched. Contributed by
   nagisml.
+- **Custom fields everywhere (#1028, #1149, #126, #821 item 5)** — with
+  the companion database on, your own fields per cache, as in GSAK:
+  *Tools → Custom fields…* adds, renames, retypes and deletes them, local
+  to one database or global for all. Each field can be a column in the
+  cache list (*Choose columns*), shows on the detail panel's *Custom*
+  tab and is edited on the *Custom fields* tab of *Edit cache*. The
+  Filter dialog has a *Custom* tab with the right conditions per type
+  (yes/no, text operators, numbers, dates), and Where clauses use the
+  fields by name. A field can have a display expression, such as
+  `nullif(GCFinds,-1)` (GSAK's are imported, your own are entered in
+  *Add…*/*Edit…* and checked on save), which the cache list shows;
+  filters and sorting use the stored value, as in GSAK. The GSAK filter import now brings over the *Custom* tab and
+  where clauses on custom fields, `Custom` and `CachesAll`. Macros read
+  them as `cache.custom`, change them with `opensak.update(code,
+  { custom = … })` and define them with `opensak.define_custom_field{}`.
+  Contributed by nagisml.
 - **Statistics example macros** — *find_statistics* (key figures,
   charts and maps of your finds), *database_statistics* (the same for all
   caches in a database) and *region_coverage* (the states or countries
