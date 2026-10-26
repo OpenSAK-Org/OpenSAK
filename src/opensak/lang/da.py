@@ -406,6 +406,7 @@ STRINGS: dict[str, str] = {
     "gsak_import_notes":            "Noter:",
     "gsak_import_note_images":      "Note-billeder → placeholders:",
     "gsak_import_trackables":       "Trackables:",
+    "gsak_import_custom_fields":    "Brugerdefinerede felter:",
     "gsak_import_warnings_header":  "Advarsler ({count}):",
     "gsak_import_no_db3_found":     "Ingen sqlite.db3-fil fundet i {name}",
     "gsak_import_done":             "✓ Import færdig.",

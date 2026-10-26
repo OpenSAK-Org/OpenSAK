@@ -427,6 +427,10 @@ class DatabaseManager:
             init_db(db_path=self._active.path)
 
         info = DatabaseInfo(name, path)
+        # Its db_uuid right away, not only when it is first opened: a
+        # database filled in the background (GSAK import into a new
+        # database) has an id before its companion file is made (#1034).
+        self._seed_db_settings(info)
         self._databases.append(info)
         self._save_to_settings()
         return info

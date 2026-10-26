@@ -131,6 +131,17 @@ class TestNewDatabase:
             b = manager.new_database("B", tmp_path / "B.db")
         assert a.name != b.name
 
+    def test_new_database_gets_its_db_uuid_right_away(self, real_manager, tmp_path):
+        # #1034: a database filled in the background (GSAK import into a new
+        # database) is never opened first; its companion needs the id.
+        from opensak.db.database import dispose_engine
+        from opensak.db.db_settings import UUID_KEY, read_file
+        a = real_manager.new_database("A", tmp_path / "A.db")
+        b = real_manager.new_database("B", tmp_path / "B.db")
+        dispose_engine()
+        ids = [read_file(info.path).get(UUID_KEY) for info in (a, b)]
+        assert all(ids) and ids[0] != ids[1]
+
     # ── Issue #539 (follow-up) ────────────────────────────────────────────────
     # GeePa67's beta.8 feedback: after several rename/remove/delete
     # experiments, a "New database" could silently reopen an orphaned file
@@ -291,7 +302,8 @@ class TestRename:
             new_db = manager.new_database("MyCaches", tmp_path / "MyCaches.db")
 
         assert new_db.path != db.path
-        assert new_db.path.read_text() == ""
+        # Empty apart from what new_database() writes itself (its db_uuid).
+        assert b"original caches" not in new_db.path.read_bytes()
 
     def test_rename_migrates_column_settings(self, manager, tmp_path):
         from opensak.gui.dialogs import column_dialog as cd

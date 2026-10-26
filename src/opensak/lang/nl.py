@@ -409,6 +409,7 @@ STRINGS: dict[str, str] = {
     "gsak_import_notes":            "Notities:",
     "gsak_import_note_images":      "Afbeeldingen in notities → placeholders:",
     "gsak_import_trackables":       "Trackables:",
+    "gsak_import_custom_fields":    "Aangepaste velden:",
     "gsak_import_warnings_header":  "Waarschuwingen ({count}):",
     "gsak_import_no_db3_found":     "Geen sqlite.db3-bestand gevonden in {name}",
     "gsak_import_done":             "✓ Importeren voltooid.",
