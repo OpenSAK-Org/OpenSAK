@@ -37,7 +37,7 @@ See [Example macros](#example-macros) for complete scripts and [Editor support](
 | [`opensak.detach`](#opensakdetach) | 3 |
 | [`opensak.attached`](#opensakattached) | 3, changed in 4 |
 | [`opensak.companion`](#opensakcompanion) | 4 |
-| [`opensak.companion_table`](#opensakcompaniontable) | 4 |
+| [`opensak.set_companion_table`](#opensaksetcompaniontable) | 4 |
 | [`opensak.companion_tables`](#opensakcompaniontables) | 4 |
 | [`opensak.custom_fields`](#opensakcustomfields) | 4 |
 | [`opensak.define_custom_field`](#opensakdefinecustomfield) | 4 |
@@ -713,7 +713,7 @@ for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end
 opensak.companion()
 ```
 
-Make sure the active database has a companion database — a second SQLite file next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to the SQL functions as schema `companion`. It is shared by all macros: every macro reads every table in it, and creates, changes and drops its own tables, indexes and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE companion.<name> …`). Like opensak.macro_db() this needs no approval to change databases, but opensak.sql_write() still asks for it, as it may change caches. OpenSAK records the macro's file as the owner of every table and view it creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables without an owner are read-only. A moved or renamed macro is a new owner. A table with a `gc_code` column is cache-linked: its rows belong to caches, several per cache if needed, and follow them — they are deleted with the cache, and copied or moved with it to another database (opensak.companion_table() changes that). Triggers are refused. The file follows its database when it is renamed, copied, moved, deleted or backed up. Once it exists, every macro run has it attached without this call. The first call creates the file and prints its path in the macro output; it cannot do that inside opensak.transaction(), and the macro must be saved, as its tables belong to its file. See The companion database.
+Make sure the active database has a companion database — a second SQLite file next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to the SQL functions as schema `companion`. It is shared by all macros: every macro reads every table in it, and creates, changes and drops its own tables, indexes and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE companion.<name> …`). Like opensak.macro_db() this needs no approval to change databases, but opensak.sql_write() still asks for it, as it may change caches. OpenSAK records the macro's file as the owner of every table and view it creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables without an owner are read-only. A moved or renamed macro is a new owner. A table with a `gc_code` column is cache-linked: its rows belong to caches, several per cache if needed, and follow them — they are deleted with the cache, and copied or moved with it to another database (opensak.set_companion_table() changes that). Triggers are refused. The file follows its database when it is renamed, copied, moved, deleted or backed up. Once it exists, every macro run has it attached without this call. The first call creates the file and prints its path in the macro output; it cannot do that inside opensak.transaction(), and the macro must be saved, as its tables belong to its file. See The companion database.
 
 Returns `string` — The path of the companion database file.
 
@@ -731,10 +731,10 @@ opensak.sql("INSERT OR REPLACE INTO companion.ftf_info VALUES (?, ?, ?)",
     { "GC12345", "2024-05-01", "someone" })
 ```
 
-### opensak.companion_table
+### opensak.set_companion_table
 
 ```lua
-opensak.companion_table(spec)
+opensak.set_companion_table(spec)
 ```
 
 Change how OpenSAK treats one of the macro's own tables or views in the companion database (see opensak.companion()). `linked = false`: the rows stay where they are when caches are deleted, copied or moved, even with a `gc_code` column. `linked = true` or `code_column`: the table is cache-linked by that column (default `gc_code`), which must exist. `description` is shown with the table in OpenSAK. Keys left out stay as they are. Create the table first.
@@ -752,8 +752,8 @@ Beta: only available while the `companion-db` feature flag is on (not yet in rel
 Example:
 
 ```lua
-opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
-opensak.companion_table{ name = "ftf_options", linked = false }
+opensak.set_companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
+opensak.set_companion_table{ name = "ftf_options", linked = false }
 ```
 
 ### opensak.companion_tables
@@ -4286,7 +4286,7 @@ Every OpenSAK database can have a companion database next to it (`Found.db` → 
 
 A macro creates its tables, indexes and views with plain SQL (`CREATE TABLE companion.<name> …`) through `opensak.sql()`, `opensak.sql_each()` or `opensak.sql_write()`, and OpenSAK records the macro's file as their owner. Only the owner can change, alter or drop them; every other macro can read them. A moved or renamed macro file is a new owner. Tables starting with `opensak_` belong to OpenSAK (`opensak_tables` lists the tables with their owners) and are read-only. Triggers can't be created there.
 
-A table with a `gc_code` column is *cache-linked*: its rows belong to the cache with that code. When caches are deleted, their rows are deleted; when they are copied or moved to another database, their rows go along, and the table is created there if needed. Rows whose cache is gone (after a crash) are removed when the database is opened. `opensak.companion_table{ name = ..., linked = false }` turns that off for a table; `code_column` names another column.
+A table with a `gc_code` column is *cache-linked*: its rows belong to the cache with that code. When caches are deleted, their rows are deleted; when they are copied or moved to another database, their rows go along, and the table is created there if needed. Rows whose cache is gone (after a crash) are removed when the database is opened. `opensak.set_companion_table{ name = ..., linked = false }` turns that off for a table; `code_column` names another column.
 
 ```lua
 -- ftf.lua: collects FTF information
@@ -4296,7 +4296,7 @@ opensak.sql("CREATE TABLE IF NOT EXISTS companion.ftf_info "
 opensak.sql("INSERT INTO companion.ftf_info VALUES (?, ?, ?) "
     .. "ON CONFLICT (gc_code) DO UPDATE SET ftf_date = excluded.ftf_date, "
     .. "ftf_by = excluded.ftf_by", { "GC12345", "2024-05-01", "someone" })
-opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
+opensak.set_companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
 
 -- any other macro: reads it
 for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name, f.ftf_date "
