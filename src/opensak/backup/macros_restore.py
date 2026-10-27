@@ -53,7 +53,6 @@ from opensak.backup.snapshot import SnapshotError, snapshot_database
 logger = logging.getLogger(__name__)
 
 _SETTINGS_FILE = "opensak.json"
-_APPROVALS_KEY = "macros.approvals"
 _UNPACK_SUFFIX = ".unpacking"
 _SQLITE_SUFFIXES = (".db", ".db3", ".sqlite", ".sqlite3")
 
@@ -292,20 +291,20 @@ def _restore_database(backup_set: BackupSet, item: MacroRestoreItem) -> None:
 
 def _restore_approvals(plan: MacroRestorePlan, in_place: list[MacroRestoreItem]) -> int:
     """Take over the backup's approvals of the macros in *in_place*."""
-    from opensak.macro.db_access import Approval, restore_approval
+    from opensak.macro.db_access import STORE_KEY, Approval, restore_approvals
 
     lua = {i.rel: i.target for i in in_place if not i.database}
     if not lua:
         return 0
     try:
-        raw = _backup_settings(plan.backup_set).get(_APPROVALS_KEY)
+        raw = _backup_settings(plan.backup_set).get(STORE_KEY)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         logger.warning("restore: macros: the backup's approvals can't be read — %s", exc)
         return 0
     if not isinstance(raw, list):
         return 0
     original_root = _original_root(plan.backup_set, plan.root)
-    stored = 0
+    records = []
     for data in raw:
         record = Approval.from_dict(data) if isinstance(data, dict) else None
         if record is None:
@@ -313,9 +312,8 @@ def _restore_approvals(plan: MacroRestorePlan, in_place: list[MacroRestoreItem])
         rel = _rel_to(original_root, record.path)
         if rel is None or rel not in lua:
             continue
-        if restore_approval(_replace(record, path=str(lua[rel]))):
-            stored += 1
-    return stored
+        records.append(_replace(record, path=str(lua[rel])))
+    return restore_approvals(records)
 
 
 def _backup_settings(backup_set: BackupSet) -> dict[str, Any]:
