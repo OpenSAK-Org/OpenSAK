@@ -35,23 +35,33 @@ def _is_prerelease(version: str) -> bool:
     return "-" in version
 
 
-_RELEASE_DEFAULTS: dict[str, bool] = {
-    "reverse-geocoding": True,
-    "map-popout": True,
-    # Lua macros (#938): on in beta builds only, so the POC cannot reach a
-    # stable release before the API (#938 step 4) is settled.
-    "lua-macros": _is_prerelease(__version__),
-    # Macros changing the active database (opensak.update, insert, sql_write,
-    # transaction, ...): beta-only on their own, so the rest of the macro
-    # system can go stable while the write API is still settling.
-    "lua-macro-write": _is_prerelease(__version__),
-    # Companion database per cache database (#1034): on in beta builds only,
-    # so it can be tested there before macros and custom fields go stable.
-    "companion-db": _is_prerelease(__version__),
-    # Macros contacting web sites (opensak.get_url, #1079): beta-only on its
-    # own, so it does not hold up the stable macro release.
-    "lua-macro-net": _is_prerelease(__version__),
-}
+def _release_defaults(prerelease: bool) -> dict[str, bool]:
+    """The built-in flag values of a beta (*prerelease*) or stable build."""
+    return {
+        "reverse-geocoding": True,
+        "map-popout": True,
+        # Lua macros (#938): on in beta builds only, so the POC cannot reach a
+        # stable release before the API (#938 step 4) is settled.
+        "lua-macros": prerelease,
+        # Macros changing the active database (opensak.update, insert, sql_write,
+        # transaction, ...): beta-only on their own, so the rest of the macro
+        # system can go stable while the write API is still settling.
+        "lua-macro-write": prerelease,
+        # Companion database per cache database (#1034): on in beta builds only,
+        # so it can be tested there before macros and custom fields go stable.
+        "companion-db": prerelease,
+        # Macros contacting web sites (opensak.get_url, #1079): beta-only on its
+        # own, so it does not hold up the stable macro release.
+        "lua-macro-net": prerelease,
+    }
+
+
+_RELEASE_DEFAULTS: dict[str, bool] = _release_defaults(_is_prerelease(__version__))
+
+# The flags that are off in a stable release, whatever this build is: what
+# they gate is beta-only (e.g. for macro.metadata.beta_only_names()).
+BETA_ONLY: frozenset[str] = frozenset(
+    name for name, on in _release_defaults(False).items() if not on)
 
 
 def _parse_argv() -> dict[str, bool]:

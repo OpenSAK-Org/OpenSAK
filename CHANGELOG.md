@@ -50,6 +50,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   deprecations, and the unit tests compare the API with the released one
   (`tests/fixtures/macro_api_baseline.json`) so nothing is removed by
   accident. Nothing is deprecated yet. Contributed by nagisml.
+- **Stable-release checks for shared macros** — for the OpenSAK-Macros
+  CI, next to the deprecation checks: `newest_stable_api()` gives the
+  newest macro API version a stable release has, so a macro asking for a
+  higher `Requires-API` can be refused, and `beta_only_names()` /
+  `find_beta_only()` list and find what only beta builds have (for now
+  `opensak.get_url()`, besides everything still behind a beta-only feature
+  flag). Both are taken from the function registry and the release
+  defaults of the feature flags, so they follow when a flag goes on in
+  stable. Contributed by nagisml.
 
 ### Fixed
 
