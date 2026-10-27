@@ -93,6 +93,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Mettre à jour les caches trouvées depuis la base de données de référence…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Exécuter une macro (Lua)…",
+    "action_find_more_macros":      "Trouver d’autres macros…",
     "macro_title":                  "Macro (Lua) — preuve de concept",
     "macro_btn_open":               "Ouvrir…",
     "macro_btn_run":                "▶  Exécuter",
@@ -106,6 +107,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Auteur",
     "macro_mgr_col_api":            "API requise",
     "macro_mgr_empty":              "Le dossier des macros ne contient encore aucune macro.\n\nEnregistrez-y une macro depuis l’éditeur de macros, ou ouvrez-en une via Macros → Ouvrir un exemple.",
+    "macro_mgr_empty_shared":       "Ou trouvez des macros partagées par d’autres utilisateurs dans le dépôt {link}.",
     "macro_mgr_shortcut":           "Raccourci…",
     "macro_mgr_output_hint":        "La sortie des macros exécutées ici s’affiche ici.",
     "macro_mgr_unreadable":         "Impossible de lire cette macro : {msg}",

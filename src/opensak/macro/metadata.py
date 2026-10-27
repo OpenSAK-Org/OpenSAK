@@ -70,6 +70,11 @@ from opensak.macro.deprecation import Deprecated, deprecated_message
 # folder may hold large generated macros.
 _HEAD_BYTES = 16 * 1024
 
+# The shared macro repository (#1173): one folder per macro, its header
+# checked by CI with this module. Linked from Macros → Find more macros…,
+# the Macro manager and the API reference.
+MACROS_REPO_URL = "https://github.com/OpenSAK-Org/OpenSAK-Macros"
+
 _KEYS = {
     "name": "name",
     "author": "author",

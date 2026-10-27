@@ -51,6 +51,7 @@ from opensak.macro.deprecation import Deprecated, deprecated_note
 from opensak.macro.metadata import (
     BLOCKED_DOMAINS,
     HEADER_KEYS,
+    MACROS_REPO_URL,
     NO_PERMISSIONS,
     PERMISSIONS,
     read_metadata,
@@ -847,6 +848,10 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "See [Example macros](#example-macros) for complete scripts and "
         "[Editor support](#editor-support) for autocompletion in VS Code, "
         "Notepad++ and UltraEdit.",
+        "",
+        f"Macros shared by other users are in the [OpenSAK-Macros]({MACROS_REPO_URL}) "
+        "repository, one folder per macro; its README explains how to install "
+        "one and how to share your own.",
         "",
         "## Functions",
         "",

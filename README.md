@@ -98,6 +98,11 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - **📏 Distance & Bearing** — distance and azimuth between two coordinates
 - All tools open pre-filled with the currently selected cache's coordinates
 
+### Lua Macros (beta)
+- 🧩 **Automate OpenSAK** with Lua macros — filter, change and export caches, build reports, or run a whole routine with one click; OpenSAK's successor to GSAK macros
+- 🛡️ **You decide what a macro may do** — OpenSAK asks before a macro changes your caches, uses a folder or contacts a web site
+- 📚 **Shared macros** in the [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) repository — download one, or share your own · [Macro API reference](docs/macros/api.md)
+
 ### Installation & Updates
 - 🪟 **Windows** — available from the [Microsoft Store](https://apps.microsoft.com/detail/9p4nbmm84h2d) (free, signed, updates itself automatically), or as a direct download from GitHub
 - 🍎 **macOS** — signed and notarized `.dmg` for Apple Silicon and Intel; updates and uninstalls itself from within the app
@@ -133,6 +138,8 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 | [Filter Reference](docs/filters.md) | All filter types across 10 tabs, text operators, AND/OR logic, invert, filter profiles |
 | [Update Locations](docs/update-location.md) | Filling in country/state/county via offline and online reverse geocoding |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Full shortcut reference |
+| [Macro API](docs/macros/api.md) | Every `opensak.*` function for Lua macros, with examples |
+| [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) | Macros shared by other users, and how to share your own |
 | [Feature Flags](docs/feature-flags.md) | Developer feature flag system |
 | [CLI --version flag](docs/cli-version-flag.md) | Print version or run a specific release |
 | [Roadmap](docs/ROADMAP.md) | Planned features and priorities |

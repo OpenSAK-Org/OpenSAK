@@ -93,6 +93,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Spustit makro (Lua)…",
+    "action_find_more_macros":      "Najít další makra…",
     "macro_title":                  "Makro (Lua) — ověření konceptu",
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
@@ -106,6 +107,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Autor",
     "macro_mgr_col_api":            "Vyžaduje API",
     "macro_mgr_empty":              "Ve složce maker zatím nejsou žádná makra.\n\nUložte tam makro z editoru maker, nebo otevřete příklad přes Makra → Otevřít příklad.",
+    "macro_mgr_empty_shared":       "Nebo najděte makra sdílená ostatními uživateli v repozitáři {link}.",
     "macro_mgr_shortcut":           "Klávesová zkratka…",
     "macro_mgr_output_hint":        "Zde se zobrazuje výstup maker spuštěných odsud.",
     "macro_mgr_unreadable":         "Toto makro nelze přečíst: {msg}",

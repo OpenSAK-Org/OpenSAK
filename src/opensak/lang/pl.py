@@ -95,6 +95,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Zaktualizuj znalezione z bazy referencyjnej…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Uruchom makro (Lua)…",
+    "action_find_more_macros":      "Znajdź więcej makr…",
     "macro_title":                  "Makro (Lua) — weryfikacja koncepcji",
     "macro_btn_open":               "Otwórz…",
     "macro_btn_run":                "▶  Uruchom",
@@ -108,6 +109,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Autor",
     "macro_mgr_col_api":            "Wymaga API",
     "macro_mgr_empty":              "W folderze makr nie ma jeszcze żadnych makr.\n\nZapisz tam makro z edytora makr albo otwórz przykład przez Makra → Otwórz przykład.",
+    "macro_mgr_empty_shared":       "Albo znajdź makra udostępnione przez innych użytkowników w repozytorium {link}.",
     "macro_mgr_shortcut":           "Skrót…",
     "macro_mgr_output_hint":        "Tutaj pojawia się wynik makr uruchomionych z tego okna.",
     "macro_mgr_unreadable":         "Nie można odczytać tego makra: {msg}",

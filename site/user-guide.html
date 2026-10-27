@@ -1437,6 +1437,7 @@ python run.py</code></pre>
         <tr><td><strong>Run macro (Lua)…</strong></td><td>Opens the macro editor, where you open, write, save and run a macro.</td></tr>
         <tr><td><strong>Macro manager…</strong></td><td>Lists the macros in your macros folder, to run them, edit them or give them a keyboard shortcut.</td></tr>
         <tr><td><strong>Open example</strong></td><td>Copies one of the example macros that come with OpenSAK into your macros folder and opens it in the editor.</td></tr>
+        <tr><td><strong>Find more macros…</strong></td><td>Opens the shared macro repository, OpenSAK-Macros, in your browser (see <a href="#macros-sharing">Finding and sharing macros</a>).</td></tr>
       </tbody>
     </table>
 
@@ -1485,6 +1486,14 @@ python run.py</code></pre>
       <li><strong>Runaway macros.</strong> A macro that runs far too long is stopped automatically, and changes it makes inside a transaction are undone if it fails.</li>
     </ul>
     <div class="callout tip"><div class="callout-icon">💡</div><div>Macros you get from other users (forum, Facebook group, GitHub) are plain text files: open them in the editor and have a look before you run them. Take a backup before running a macro that changes many caches.</div></div>
+
+    <h3 id="macros-sharing">Finding and sharing macros</h3>
+    <p>Macros written by other users are collected in the <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros">OpenSAK-Macros</a> repository on GitHub, one folder per macro with a short description. <strong>Macros → Find more macros…</strong> opens it, and so does the link in an empty Macro manager.</p>
+    <ul>
+      <li><strong>Installing a macro.</strong> Open the macro's folder in the repository, download its <code>.lua</code> file (and any other files in the folder), and put them in your macros folder: click <strong>Open macros folder</strong> in the Macro manager and save them there. Click <strong>Reload</strong>, and the macro appears in the list.</li>
+      <li><strong>What it may do.</strong> The <code>Permissions</code> and <code>Network</code> lines in a macro's header are the author's own statement of what it does. OpenSAK still asks before the macro first changes your caches, uses a folder or contacts a web site (see above), and asks again when an update of the macro changes it.</li>
+      <li><strong>Sharing your own.</strong> Contributions are made as pull requests and are checked before they are added. The repository's <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros/blob/main/CONTRIBUTING.md">CONTRIBUTING</a> guide explains the macro header and the folder layout, and <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros/blob/main/docs/github-website-guide.md">Sharing a macro with the GitHub website</a> walks you through it in the browser, without git.</li>
+    </ul>
 
     <h3>Where macros are kept</h3>
     <p>Your macros live in the <code>macros</code> folder inside OpenSAK's data folder, so they survive updates. <strong>Open macros folder</strong> in the macro editor's File menu or in the Macro manager opens it; <strong>Help → OpenSAK File Locations…</strong> shows where the data folder is on your computer.</p>

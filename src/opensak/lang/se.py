@@ -93,6 +93,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Uppdatera hittade från referensdatabasen…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Kör makro (Lua)…",
+    "action_find_more_macros":      "Hitta fler makron…",
     "macro_title":                  "Makro (Lua) — konceptbevis",
     "macro_btn_open":               "Öppna…",
     "macro_btn_run":                "▶  Kör",
@@ -106,6 +107,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Författare",
     "macro_mgr_col_api":            "Kräver API",
     "macro_mgr_empty":              "Det finns inga makron i makromappen ännu.\n\nSpara ett makro där från makroredigeraren, eller öppna ett via Makron → Öppna exempel.",
+    "macro_mgr_empty_shared":       "Eller hitta makron som andra användare har delat i {link}-arkivet.",
     "macro_mgr_shortcut":           "Kortkommando…",
     "macro_mgr_output_hint":        "Utdata från makron du kör här visas här.",
     "macro_mgr_unreadable":         "Det går inte att läsa makrot: {msg}",

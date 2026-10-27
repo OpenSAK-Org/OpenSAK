@@ -18,6 +18,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Links to shared macros (#1173)** — **Macros → Find more macros…**
+  opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
+  the repository of macros shared by users, in the browser, and an empty
+  Macro manager links to it too. The User Guide (section 29, "Finding and
+  sharing macros"), the macro API reference and the README explain how to
+  install a macro from it and how to share your own.
 - **Backups include your macros (#1137)** — every backup now holds the
   macros folder: your own macros, the files next to them, each macro's
   saved settings, and the macros' own databases (every SQLite file in the

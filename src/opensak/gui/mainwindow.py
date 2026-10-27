@@ -648,6 +648,12 @@ class MainWindow(QMainWindow):
             examples_menu.addAction(act)
         examples_menu.setEnabled(not examples_menu.isEmpty())
 
+        # #1173: the shared macro repository, in the browser.
+        macros_menu.addSeparator()
+        self._act_find_macros = QAction(tr("action_find_more_macros"), self)
+        self._act_find_macros.triggered.connect(self._open_macros_repo)
+        macros_menu.addAction(self._act_find_macros)
+
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
 
@@ -4112,6 +4118,13 @@ class MainWindow(QMainWindow):
         from opensak import __version__
         from opensak.updater import changelog_url_for_version
         QDesktopServices.openUrl(QUrl(changelog_url_for_version(__version__)))
+
+    def _open_macros_repo(self) -> None:
+        """Open the shared macro repository, OpenSAK-Macros (#1173)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from opensak.macro.metadata import MACROS_REPO_URL
+        QDesktopServices.openUrl(QUrl(MACROS_REPO_URL))
 
     def _open_support_page(self) -> None:
         """Open the Open Collective support/sponsor page in the default browser."""

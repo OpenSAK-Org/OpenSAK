@@ -96,6 +96,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Vondsten bijwerken vanuit referentiedatabase…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Macro uitvoeren (Lua)…",
+    "action_find_more_macros":      "Meer macro’s zoeken…",
     "macro_title":                  "Macro (Lua) — proof of concept",
     "macro_btn_open":               "Openen…",
     "macro_btn_run":                "▶  Uitvoeren",
@@ -109,6 +110,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Auteur",
     "macro_mgr_col_api":            "Vereist API",
     "macro_mgr_empty":              "Er staan nog geen macro’s in de macromap.\n\nSla er een macro op vanuit de macro-editor, of open er een via Macro’s → Voorbeeld openen.",
+    "macro_mgr_empty_shared":       "Of zoek macro’s die andere gebruikers hebben gedeeld in de repository {link}.",
     "macro_mgr_shortcut":           "Sneltoets…",
     "macro_mgr_output_hint":        "De uitvoer van de macro’s die u hier uitvoert, verschijnt hier.",
     "macro_mgr_unreadable":         "Deze macro kan niet worden gelezen: {msg}",

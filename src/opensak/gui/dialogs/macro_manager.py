@@ -68,6 +68,19 @@ def shortcut_allowed(sequence: str) -> bool:
     return bool(_FUNCTION_KEY.match(sequence))
 
 
+def _empty_text() -> str:
+    """The empty-list text, ending with a link to OpenSAK-Macros (#1173)."""
+    import html
+
+    from opensak.macro.metadata import MACROS_REPO_URL
+
+    link = f'<a href="{html.escape(MACROS_REPO_URL)}">OpenSAK-Macros</a>'
+    text = html.escape(tr("macro_mgr_empty")) + "\n\n" + html.escape(
+        tr("macro_mgr_empty_shared", link="\x00")
+    ).replace("\x00", link)
+    return text.replace("\n", "<br>")
+
+
 class MacroManagerDialog(QDialog):
     """Overview of the local macros, with Run / Edit / Shortcut… / Open
     folder / Reload and an output pane.
@@ -144,9 +157,12 @@ class MacroManagerDialog(QDialog):
         act_find.triggered.connect(self._focus_search)
         self.addAction(act_find)
 
-        self._empty = QLabel(tr("macro_mgr_empty"))
+        self._empty = QLabel(_empty_text())
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
+        # #1173: the text links to the shared macro repository.
+        self._empty.setTextFormat(Qt.TextFormat.RichText)
+        self._empty.setOpenExternalLinks(True)
 
         self._path_label = QLabel()
         self._path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)

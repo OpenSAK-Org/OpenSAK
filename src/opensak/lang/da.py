@@ -93,6 +93,7 @@ STRINGS: dict[str, str] = {
     "action_found_update":          "⟳  Opdater fund fra reference database…",
     # Lua macros (proof of concept)
     "action_run_macro":             "Kør makro (Lua)…",
+    "action_find_more_macros":      "Find flere makroer…",
     "macro_title":                  "Makro (Lua) — proof of concept",
     "macro_btn_open":               "Åbn…",
     "macro_btn_run":                "▶  Kør",
@@ -106,6 +107,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_col_author":         "Forfatter",
     "macro_mgr_col_api":            "Kræver API",
     "macro_mgr_empty":              "Der er endnu ingen makroer i makromappen.\n\nGem en makro der fra makroeditoren, eller åbn en via Makroer → Åbn eksempel.",
+    "macro_mgr_empty_shared":       "Eller find makroer, som andre brugere har delt, i {link}-repositoriet.",
     "macro_mgr_shortcut":           "Genvej…",
     "macro_mgr_output_hint":        "Output fra de makroer, du kører her, vises her.",
     "macro_mgr_unreadable":         "Makroen kan ikke læses: {msg}",
