@@ -487,6 +487,25 @@ def carry_over(
     return moved
 
 
+def restore_approval(record: Approval) -> bool:
+    """A restore from a backup (#1137) put the macro file *record.path*
+    back: store *record*, the approval the backup had for it, replacing the
+    macro's previous one. Only when the file holds exactly the code
+    *record* approves, and not when the macro already has a record for
+    that code (it may allow more than the backup's). True if stored."""
+    try:
+        sha = source_hash(read_macro_source(record.path))
+    except (OSError, UnicodeDecodeError):
+        return False
+    if sha != record.sha256 or not record.anything:
+        return False
+    current = _record(record.path)
+    if current is not None and current.sha256 == sha:
+        return False
+    _put(replace(record, path=str(Path(record.path).resolve())))
+    return True
+
+
 def reset_session() -> None:
     """Forget the approvals given until OpenSAK closes (used by tests)."""
     _session.clear()

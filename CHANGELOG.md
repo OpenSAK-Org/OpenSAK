@@ -18,6 +18,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Backups include your macros (#1137)** — every backup now holds the
+  macros folder: your own macros, the files next to them, each macro's
+  saved settings, and the macros' own databases (every SQLite file in the
+  folder is copied safely, also one no macro opened on this computer).
+  Example macros as shipped are left out, so a restore never puts an old
+  example over a newer one; an example you changed is kept. A change to
+  your macros counts when OpenSAK offers a backup on close. **File →
+  Restore from backup…** has **Also restore macros**, ticked for a backup
+  with macros: missing files come back, files that differ are listed so
+  you choose which to replace (the current one is kept as a `.bak`), and
+  a macro gets back what it was allowed to do if its code is exactly as
+  in the backup. Global custom field definitions were already in every
+  backup and come back with **Also restore settings**. Suggested by
+  ianwok.
 - **Deprecations in the macro API (#1185)** — from API 4, renaming or
   removing a macro function, parameter, cache field or header key needs a
   new API version and a deprecation period of at least one stable

@@ -10,6 +10,11 @@ restored so far in the same run, so a cancelled restore leaves nothing.
 #987: "Also restore settings" is opt-in. It saves the current settings as a
 safety set and stages the backup's settings for the next start (see
 opensak.backup.settings_restore); the user is offered to close OpenSAK.
+
+#1137: "Also restore macros" is on by default for a set that has macros. It
+puts the backup's macros back into today's macros folder right away (see
+opensak.backup.macros_restore). Files that differ from the backup are listed
+first (MacroConflictDialog); only the ones the user ticks are replaced.
 """
 
 from __future__ import annotations
@@ -37,6 +42,15 @@ from opensak.backup.backupset import (
     get_backup_dir,
     list_backup_sets,
     read_backup_set,
+)
+from opensak.backup.macros_restore import (
+    MacroRestoreError,
+    MacroRestoreItem,
+    MacroRestorePlan,
+    MacroRestoreResult,
+    has_macros,
+    plan_macro_restore,
+    restore_macros,
 )
 from opensak.backup.restore import (
     RestoreError,
@@ -149,6 +163,70 @@ class RestoreWorker(QThread):
                                exc_info=True)
 
 
+class MacroConflictDialog(QDialog):
+    """#1137: the macro files that differ from the backup. Ticked ones are
+    replaced by the backup's version; nothing is ticked at first."""
+
+    def __init__(
+        self, conflicts: Sequence[MacroRestoreItem], parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("restore_macros_conflicts_title"))
+        self.setMinimumWidth(480)
+        layout = QVBoxLayout(self)
+        intro = QLabel(tr("restore_macros_conflicts_intro"))
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self._list = QListWidget()
+        for item in conflicts:
+            text = (
+                tr("restore_macros_conflict_db", name=item.rel) if item.database
+                else item.rel
+            )
+            row = QListWidgetItem(text)
+            row.setData(Qt.ItemDataRole.UserRole, item.rel)
+            row.setToolTip(str(item.target))
+            row.setFlags(row.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            row.setCheckState(Qt.CheckState.Unchecked)
+            self._list.addItem(row)
+        layout.addWidget(self._list, 1)
+
+        note = QLabel(tr("restore_macros_conflicts_note"))
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row_layout = QHBoxLayout()
+        replace_all = QPushButton(tr("macro_replace_all"))
+        replace_all.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
+        keep_all = QPushButton(tr("restore_macros_keep_all"))
+        keep_all.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
+        row_layout.addWidget(replace_all)
+        row_layout.addWidget(keep_all)
+        row_layout.addStretch(1)
+        layout.addLayout(row_layout)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        clamp_dialog_height_to_screen(self, parent)   # issue #811
+
+    def _set_all(self, state: Qt.CheckState) -> None:
+        for i in range(self._list.count()):
+            self._list.item(i).setCheckState(state)
+
+    def replace_rels(self) -> list[str]:
+        """The files (relative to the macros folder) to replace."""
+        return [
+            self._list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self._list.count())
+            if self._list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+
+
 class RestoreDialog(QDialog):
     """Pick a backup set and the databases to restore from it."""
 
@@ -166,6 +244,10 @@ class RestoreDialog(QDialog):
         self._worker: Optional[RestoreWorker] = None
         self._progress_dialog: Optional[QProgressDialog] = None
         self._also_settings = False   # #987: chosen for the run in progress
+        # #1137: the macros to restore in the run in progress, and the
+        # conflicts the user chose to replace.
+        self._macro_plan: Optional[MacroRestorePlan] = None
+        self._macro_replace: list[str] = []
         self._running_set: Optional[BackupSet] = None
 
         layout = QVBoxLayout(self)
@@ -199,6 +281,10 @@ class RestoreDialog(QDialog):
         # #987: opt-in, off for every set that is selected.
         self._settings_cb = QCheckBox(tr("restore_settings_cb"))
         layout.addWidget(self._settings_cb)
+
+        # #1137: on for every set that has macros.
+        self._macros_cb = QCheckBox(tr("restore_macros_cb"))
+        layout.addWidget(self._macros_cb)
 
         note = QLabel(tr("restore_note"))
         note.setWordWrap(True)
@@ -257,6 +343,7 @@ class RestoreDialog(QDialog):
         else:
             self._db_list.clear()
             self._update_settings_cb(None)
+            self._update_macros_cb(None)
 
     def selected_set(self) -> Optional[BackupSet]:
         row = self._set_list.currentRow()
@@ -272,10 +359,23 @@ class RestoreDialog(QDialog):
         self._settings_cb.setEnabled(reason is None)
         self._settings_cb.setToolTip(reason or "")
 
+    def _update_macros_cb(self, backup_set: Optional[BackupSet]) -> None:
+        """#1137: ticked for a set with macros; disabled for one without."""
+        available = backup_set is not None and has_macros(backup_set)
+        self._macros_cb.setChecked(available)
+        self._macros_cb.setEnabled(available)
+        if backup_set is not None and backup_set.macros is not None:
+            self._macros_cb.setToolTip(
+                tr("restore_macros_count", count=backup_set.macros.files)
+            )
+        else:
+            self._macros_cb.setToolTip("" if available else tr("restore_macros_none"))
+
     def _on_set_selected(self, _row: int) -> None:
         self._db_list.clear()
         backup_set = self.selected_set()
         self._update_settings_cb(backup_set)
+        self._update_macros_cb(backup_set)
         if backup_set is None:
             return
         for entry in backup_set.databases:
@@ -315,11 +415,19 @@ class RestoreDialog(QDialog):
         backup_set = self.selected_set()
         entries = self.selected_entries()
         also_settings = self._settings_cb.isChecked() and self._settings_cb.isEnabled()
-        if backup_set is None or not (entries or also_settings):
+        also_macros = self._macros_cb.isChecked() and self._macros_cb.isEnabled()
+        if backup_set is None or not (entries or also_settings or also_macros):
             QMessageBox.warning(
                 self, tr("restore_dialog_title"), tr("restore_none_selected")
             )
             return
+        macro_plan: Optional[MacroRestorePlan] = None
+        macro_replace: list[str] = []
+        if also_macros:
+            prepared = self._prepare_macros(backup_set)
+            if prepared is None:
+                return
+            macro_plan, macro_replace = prepared
         if also_settings:
             answer = QMessageBox.question(
                 self, tr("restore_dialog_title"), tr("restore_settings_confirm"),
@@ -329,14 +437,15 @@ class RestoreDialog(QDialog):
             if answer != QMessageBox.StandardButton.Yes:
                 return
         self._also_settings = also_settings
+        self._macro_plan, self._macro_replace = macro_plan, macro_replace
 
         if not entries:
-            # Settings only: quick and on this thread, no worker needed.
+            # Settings and/or macros only: quick and on this thread.
             self._report(backup_set, RestoreSummary())
             return
 
         for widget in (self._browse_btn, self._set_list, self._db_list,
-                       self._settings_cb, self._start_btn):
+                       self._settings_cb, self._macros_cb, self._start_btn):
             widget.setEnabled(False)
 
         progress = QProgressDialog(
@@ -361,6 +470,61 @@ class RestoreDialog(QDialog):
         self._worker = worker
         worker.start()
 
+    def _prepare_macros(
+        self, backup_set: BackupSet,
+    ) -> Optional[tuple[MacroRestorePlan, list[str]]]:
+        """#1137: plan the macros restore and let the user choose what to do
+        with files that differ from the backup. None: don't start at all."""
+        from opensak.macro import macro_running
+        if macro_running():
+            QMessageBox.warning(
+                self, tr("restore_dialog_title"), tr("restore_macros_busy")
+            )
+            return None
+        try:
+            plan = plan_macro_restore(backup_set)
+        except MacroRestoreError as exc:
+            QMessageBox.critical(
+                self, tr("restore_failed_title"),
+                tr("restore_macros_failed", error=str(exc)),
+            )
+            return None
+        replace: list[str] = []
+        if plan.conflicts:
+            dialog = MacroConflictDialog(plan.conflicts, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            replace = dialog.replace_rels()
+        return plan, replace
+
+    def _restore_macros(self) -> tuple[Optional[MacroRestoreResult], str]:
+        """#1137: restore the planned macros (on this thread: they are small
+        files) and describe the result for the report."""
+        plan, replace = self._macro_plan, self._macro_replace
+        self._macro_plan, self._macro_replace = None, []
+        if plan is None:
+            return None, ""
+        try:
+            result = restore_macros(plan, replace)
+        except Exception as exc:
+            logger.exception("restore: macros failed")
+            return None, tr("restore_macros_failed", error=str(exc))
+        parts = [tr(
+            "restore_done_macros",
+            restored=len(result.restored), replaced=len(result.replaced),
+            kept=len(result.kept), unchanged=len(result.unchanged),
+        )]
+        if result.approvals:
+            parts.append(tr("restore_done_macros_approvals", count=result.approvals))
+        if result.failed:
+            parts.append(tr(
+                "restore_done_macros_failed",
+                reasons="\n".join(f"{rel}: {reason}" for rel, reason in result.failed),
+            ))
+        if result.outside:
+            parts.append(tr("restore_done_macros_outside", paths="\n".join(result.outside)))
+        return result, "\n".join(parts)
+
     def _on_progress(self, name: str, _fraction: float, overall: float) -> None:
         if self._progress_dialog is not None:
             self._progress_dialog.setLabelText(tr("restore_progress_label", name=name))
@@ -377,6 +541,7 @@ class RestoreDialog(QDialog):
             widget.setEnabled(True)
         self._start_btn.setEnabled(bool(self._sets))
         self._update_settings_cb(self.selected_set())
+        self._update_macros_cb(self.selected_set())
 
     def _on_done(self, summary: RestoreSummary) -> None:
         self._finish()
@@ -384,7 +549,10 @@ class RestoreDialog(QDialog):
         self._report(self._running_set, summary)
 
     def _report(self, backup_set: BackupSet, summary: RestoreSummary) -> None:
-        """Stage the settings if chosen (#987), then tell the user what happened."""
+        """Restore the macros and stage the settings if chosen (#1137, #987),
+        then tell the user what happened."""
+        macro_result, macros_text = self._restore_macros()
+        macros_done = macro_result is not None
         settings_staged = False
         settings_text = ""
         if self._also_settings:
@@ -406,6 +574,8 @@ class RestoreDialog(QDialog):
         if summary.profiles_added:
             parts.append(tr("restore_done_profiles",
                             names=", ".join(summary.profiles_added)))
+        if macros_text:
+            parts.append(macros_text)
         if settings_text:
             parts.append(settings_text)
         text = "\n\n".join(parts)
@@ -426,7 +596,11 @@ class RestoreDialog(QDialog):
             return
 
         if not summary.restored:
-            QMessageBox.warning(self, tr("restore_failed_title"), text)
+            if macros_done and not summary.refused:
+                QMessageBox.information(self, tr("restore_done_title"), text)
+                self.accept()
+            else:
+                QMessageBox.warning(self, tr("restore_failed_title"), text)
             return
 
         if len(summary.restored) == 1:
@@ -449,8 +623,9 @@ class RestoreDialog(QDialog):
         self.database_switched.emit(info)
 
     def _on_failed(self, reason: str) -> None:
-        # Nothing was restored, so the settings aren't either (#987).
+        # Nothing was restored, so the settings and macros aren't either.
         self._also_settings = False
+        self._macro_plan = None
         self._finish()
         QMessageBox.critical(
             self, tr("restore_failed_title"), tr("restore_failed_msg", error=reason)
@@ -458,6 +633,7 @@ class RestoreDialog(QDialog):
 
     def _on_cancelled(self) -> None:
         self._also_settings = False
+        self._macro_plan = None
         self._finish()
         QMessageBox.information(
             self, tr("restore_dialog_title"), tr("restore_cancelled_msg")

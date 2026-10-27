@@ -10,6 +10,7 @@ A *backup set* is one plain folder in the user's backup folder:
         databases/      one snapshot (#943) per database
         companions/     the companion database of a database, if it has one
         macro_databases/ one snapshot per macro_db() file of a Lua macro
+        macros/         the user's Lua macros folder (#1137, macros_backup.py)
         settings/       opensak.json, filters/, column_views/, icons/
 
 A set is built in ``<name>.partial`` and renamed into place only when it is
@@ -37,6 +38,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Protocol
 
+from opensak.backup import macros_backup
+from opensak.backup.macros_backup import MacroFile, MacrosEntry
 from opensak.backup.snapshot import SnapshotError, snapshot_database
 
 logger = logging.getLogger(__name__)
@@ -167,6 +170,9 @@ class BackupSet:
     format: int
     compressed: bool = False        # one .zip file instead of a folder (#989)
     macro_databases: tuple[MacroDatabaseEntry, ...] = ()
+    # The user's macros folder (#1137); None for a set without it (a safety
+    # set, no macros, or a set made before macros were backed up).
+    macros: Optional[MacrosEntry] = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +187,9 @@ class BackupResult:
     # Names of databases whose companion database could not be copied
     # (#1034). The database itself is in the set.
     skipped_companions: tuple[str, ...] = ()
+    # Files of the macros folder that could not be copied (#1137), relative
+    # to the macros folder. Never a reason to fail the backup itself.
+    skipped_macro_files: tuple[str, ...] = ()
 
 
 # ── Backup folder ─────────────────────────────────────────────────────────────
@@ -398,6 +407,7 @@ def write_backup_set(
     now: Optional[datetime] = None,
     compress: Optional[bool] = None,
     macro_databases: Optional[Iterable[Path]] = None,
+    macros: Optional[bool] = None,
 ) -> BackupResult:
     """
     Back up *databases*, the macros' own databases and the settings into a
@@ -407,7 +417,12 @@ def write_backup_set(
     is one zip file with the same layout inside, instead of a folder.
 
     *macro_databases* defaults to the recorded macro_db() files
-    (known_macro_databases()); a safety set (settings only) has none.
+    (known_macro_databases()) plus every SQLite file in the macros folder;
+    a safety set (settings only) has none.
+
+    *macros* (default: True except for a safety set) includes the user's
+    macros folder (#1137): see macros_backup.py for what is left out. A
+    macro file that can't be read is left out and reported.
 
     Databases whose file doesn't exist are skipped and reported in the
     result; the rest of the backup still completes. A macro database that is
@@ -442,8 +457,14 @@ def write_backup_set(
     skipped_names = tuple(skipped)
 
     if macro_databases is None:
-        macro_databases = [] if kind == KIND_SAFETY else known_macro_databases()
+        macro_databases = (
+            [] if kind == KIND_SAFETY
+            else [*known_macro_databases(), *_macros_folder_databases()]
+        )
     macro_present = _present_macro_databases(macro_databases)
+    if macros is None:
+        macros = kind != KIND_SAFETY
+    macro_files = _macro_files() if macros else []
 
     cleanup_partials(folder)
     cleanup_staging()
@@ -452,7 +473,8 @@ def write_backup_set(
         compress = get_compress()
 
     sizes = [size for _db, size in present] + [size for _p, size in macro_present]
-    total = sum(sizes)
+    macro_files_size = sum(f.size_bytes for f in macro_files)
+    total = sum(sizes) + macro_files_size
     staging_root = folder
     if compress:
         staging_root = _staging_root(folder)
@@ -470,17 +492,19 @@ def write_backup_set(
     name = _unique_set_name(folder, now, kind)
     macro_skipped: list[str] = []
     companion_skipped: list[str] = []
+    files_skipped: list[str] = []
     if compress:
         final = _write_compressed_set(
             present, total, folder, name, kind, now, progress,
             staging_root=staging_root,
             macro_present=macro_present, macro_skipped=macro_skipped,
             companion_skipped=companion_skipped,
+            macro_files=macro_files, macro_files_skipped=files_skipped,
         )
         logger.info("backup: wrote %s (compressed, %d skipped)", final, len(skipped_names))
         return BackupResult(
             read_backup_set(final), skipped_names, tuple(macro_skipped),
-            tuple(companion_skipped),
+            tuple(companion_skipped), tuple(files_skipped),
         )
 
     partial = folder / (name + PARTIAL_SUFFIX)
@@ -494,8 +518,15 @@ def write_backup_set(
             macro_present, total, sum(size for _db, size in present),
             partial, progress, macro_skipped,
         )
+        macros_entry = None
+        if macro_files:
+            macros_entry = macros_backup.copy_macros(
+                macro_files, partial / macros_backup.MACROS_DIRNAME,
+                skipped=files_skipped,
+            )
+            _report_macros(progress)
         settings = _copy_settings(partial / SETTINGS_DIRNAME)
-        manifest = _manifest(kind, now, entries, settings, macro_entries)
+        manifest = _manifest(kind, now, entries, settings, macro_entries, macros_entry)
         _write_json(partial / MANIFEST_NAME, manifest)
         os.replace(partial, final)
     except BaseException as exc:
@@ -509,12 +540,14 @@ def write_backup_set(
         raise
 
     logger.info(
-        "backup: wrote %s (%d database(s), %d macro database(s), %d skipped)",
-        final, len(entries), len(macro_entries), len(skipped_names),
+        "backup: wrote %s (%d database(s), %d macro database(s), %d macro file(s), "
+        "%d skipped)",
+        final, len(entries), len(macro_entries),
+        macros_entry.files if macros_entry else 0, len(skipped_names),
     )
     return BackupResult(
         read_backup_set(final), skipped_names, tuple(macro_skipped),
-        tuple(companion_skipped),
+        tuple(companion_skipped), tuple(files_skipped),
     )
 
 
@@ -531,6 +564,8 @@ def _write_compressed_set(
     macro_present: Optional[list[tuple[Path, int]]] = None,
     macro_skipped: Optional[list[str]] = None,
     companion_skipped: Optional[list[str]] = None,
+    macro_files: Optional[list[MacroFile]] = None,
+    macro_files_skipped: Optional[list[str]] = None,
 ) -> Path:
     """
     Write a compressed set (#989): ``<name>.zip`` with the same layout as a
@@ -568,12 +603,20 @@ def _write_compressed_set(
                 macro_skipped if macro_skipped is not None else [],
                 snapshot_share=0.5, after_each=_add_database,
             )
+            macros_entry = None
+            if macro_files:
+                # Small files, read straight from the macros folder: no
+                # staging needed.
+                macros_entry = macros_backup.zip_macros(
+                    zf, macro_files, skipped=macro_files_skipped,
+                )
+                _report_macros(progress)
             settings_dir = staging / SETTINGS_DIRNAME
             settings = _copy_settings(settings_dir)
             for path in sorted(p for p in settings_dir.rglob("*") if p.is_file()):
                 arcname = f"{SETTINGS_DIRNAME}/{path.relative_to(settings_dir).as_posix()}"
                 zf.write(path, arcname)
-            manifest = _manifest(kind, now, entries, settings, macro_entries)
+            manifest = _manifest(kind, now, entries, settings, macro_entries, macros_entry)
             zf.writestr(
                 MANIFEST_NAME,
                 json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -880,6 +923,31 @@ def _write_macro_databases(
     return entries
 
 
+def _macro_files() -> list[MacroFile]:
+    """The macros folder's files for a backup (#1137); never fails a backup."""
+    try:
+        return macros_backup.files_to_back_up()
+    except Exception:
+        logger.warning("backup: the macros folder could not be read", exc_info=True)
+        return []
+
+
+def _macros_folder_databases() -> list[Path]:
+    """Every SQLite file in the macros folder (#1137), so it is snapshotted
+    into macro_databases/ even if no macro opened it on this machine."""
+    try:
+        return macros_backup.sqlite_files()
+    except Exception:
+        logger.warning("backup: the macros folder could not be read", exc_info=True)
+        return []
+
+
+def _report_macros(progress: Optional[ProgressCallback]) -> None:
+    """The macro files are copied last, in one step."""
+    if progress is not None:
+        progress(macros_backup.MACROS_DIRNAME, 1.0, 1.0)
+
+
 def _copy_settings(target: Path) -> bool:
     """Copy the allow-listed settings into *target*."""
     from opensak.settings_store import get_install_dir, get_store
@@ -901,6 +969,7 @@ def _copy_settings(target: Path) -> bool:
 def _manifest(
     kind: str, now: datetime, entries: list[DatabaseEntry], settings: bool,
     macro_entries: Iterable[MacroDatabaseEntry] = (),
+    macros_entry: Optional[MacrosEntry] = None,
 ) -> dict[str, Any]:
     from opensak import __version__
     return {
@@ -930,6 +999,17 @@ def _manifest(
             {"file": e.file, "path": e.path, "size_bytes": e.size_bytes}
             for e in macro_entries
         ],
+        # The macros folder (#1137): only when the set has it. Older
+        # versions ignore the key, so the format stays 1.
+        **(
+            {"macros": {
+                "dir": macros_entry.dir,
+                "path": macros_entry.path,
+                "files": macros_entry.files,
+                "size_bytes": macros_entry.size_bytes,
+            }}
+            if macros_entry is not None else {}
+        ),
         "settings": settings,
     }
 
@@ -991,6 +1071,7 @@ def read_backup_set(path: Path) -> BackupSet:
             )
             for d in data.get("macro_databases") or ()
         )
+        macros = _macros_entry(data.get("macros"))
         return BackupSet(
             path=path,
             kind=kind,
@@ -1001,6 +1082,7 @@ def read_backup_set(path: Path) -> BackupSet:
             format=fmt,
             compressed=compressed,
             macro_databases=macro_databases,
+            macros=macros,
         )
     except BackupError:
         raise
@@ -1205,6 +1287,20 @@ def _companion_file(value: Any) -> Optional[str]:
     if not isinstance(value, dict):
         return None
     return _str_or_none(value.get("file")) or None
+
+
+def _macros_entry(value: Any) -> Optional[MacrosEntry]:
+    """The macros folder from a manifest (#1137), if the set has one. Only
+    the folder name "macros" is accepted, so a manifest can never point a
+    restore anywhere else in (or outside) the set."""
+    if not isinstance(value, dict) or value.get("dir") != macros_backup.MACROS_DIRNAME:
+        return None
+    return MacrosEntry(
+        dir=macros_backup.MACROS_DIRNAME,
+        path=str(value.get("path") or ""),
+        files=int(value.get("files", 0)),
+        size_bytes=int(value.get("size_bytes", 0)),
+    )
 
 
 def _str_or_none(value: Any) -> Optional[str]:

@@ -11,7 +11,10 @@ current state is recorded in ``backup.last_state`` (opensak.json):
 * per database in the database list: size and modification time of the
   ``.db`` file, and of the ``-wal`` file when it holds anything;
 * per settings folder (filters/, column_views/): the number of entries and
-  the newest modification time.
+  the newest modification time;
+* the files of the macros folder a backup includes (#1137), only when there
+  are any, so the state of a user without macros is unchanged
+  (macros_backup.fingerprint()).
 
 opensak.json itself is left out: OpenSAK writes the window geometry to it on
 every exit.
@@ -109,7 +112,7 @@ def current_state(databases: Optional[Iterable[Any]] = None) -> dict[str, Any]:
     """
     if databases is None:
         databases = _listed_databases()
-    return {
+    state: dict[str, Any] = {
         "format": _STATE_FORMAT,
         "databases": {
             _key(db.path): _database_fingerprint(Path(db.path))
@@ -117,6 +120,10 @@ def current_state(databases: Optional[Iterable[Any]] = None) -> dict[str, Any]:
         },
         "settings": _settings_fingerprint(),
     }
+    macros = _macros_fingerprint()
+    if macros is not None:
+        state["macros"] = macros
+    return state
 
 
 def has_changes_since_backup(databases: Optional[Iterable[Any]] = None) -> bool:
@@ -249,6 +256,16 @@ def _settings_fingerprint() -> dict[str, Any]:
     install = get_install_dir()
     return {name: _folder_fingerprint(install / name)
             for name in _WATCHED_SETTINGS_DIRS}
+
+
+def _macros_fingerprint() -> Optional[list]:
+    """The macros folder's part of the state (#1137); never raises."""
+    from opensak.backup import macros_backup
+    try:
+        return macros_backup.fingerprint()
+    except Exception:
+        logger.warning("backup: could not read the macros folder", exc_info=True)
+        return None
 
 
 def _folder_fingerprint(folder: Path) -> Optional[list[int]]:

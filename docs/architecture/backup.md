@@ -20,6 +20,8 @@
 
 *20 October 2026 (#1032): a backup folder inside the install or database folder is allowed after a warning, instead of refused. A backup set only copies the registered database files, opensak.json and `filters/`, `column_views/`, `icons/`, so it never copies itself, and a normal uninstall keeps user data — such a folder is only lost if the user chooses to remove all data. `validate_backup_dir()` still refuses the install or database folder itself, the three settings folders and OpenSAK's working folders (`backup-staging/`, `settings-restore-pending/`, `settings-restore-failed/`), or anything inside them; `backup_dir_inside_opensak()` reports the other cases. The Welcome Wizard, Settings, Back up now… and the on-exit prompt all go through `confirm_backup_folder()`: Use this folder / Choose another, asked once per folder (`backup.inside_confirmed`). The remove-all-data confirmation names the backup folder when it would be deleted (`backup_dir_removed_on_purge()`). Browse opens at the folder in the box or its nearest existing parent, and the home folder only if none exists (`nearest_existing_dir()`).*
 
+*27 October 2026 (#1137): backups include the user's macros folder as `macros/`, and Restore can bring it back ("Also restore macros", on by default for a set with macros). Unchanged example macros and SQLite files are left out of `macros/`; every SQLite file in the macros folder is snapshotted into `macro_databases/` instead. A changed macro file counts for the on-exit check. Restore asks keep/replace per file for files that differ, keeps a replaced one as `<name>.<stamp>.bak`, restores macro databases that were inside the macros folder, and takes over the backup's approvals for the macros that now hold its code. See "Macros".*
+
 ## Summary
 
 OpenSAK gets GSAK-style full backups: a user-chosen backup folder, a prompt on exit, manual backups any time, and a restore that brings a database back exactly as it was when the backup was taken. Automatic backups are rotated (keep the last 5 by default); manual backups are never deleted by OpenSAK.
@@ -90,6 +92,9 @@ OpenSAK Backups/
       Denmark.companion.db3
     macro_databases/    (the Lua macros' own opensak.macro_db() files)
       MyMacro.db3
+    macros/             (the user's macros folder, #1137)
+      MyMacro.lua
+      settings/MyMacro.json
     settings/
       opensak.json
       filters/          (filter profiles)
@@ -106,14 +111,37 @@ OpenSAK Backups/
 | Every database in the database list whose file exists, also those outside the database folder | Log files |
 | opensak.json, filters/, column_views/, icons/ from the install folder | The Geocaching.com token file and keyring passwords (credentials never go into a backup) |
 | The companion database (`<name>.companion.db3`, #1034) of every database included that has one | |
-| Every macro database (`opensak.macro_db()`, #1034) OpenSAK has opened whose file still exists — not in safety sets | |
+| Every macro database (`opensak.macro_db()`, #1034) OpenSAK has opened whose file still exists, and every SQLite file in the macros folder — not in safety sets | |
+| The macros folder (#1137): the user's macros, their data files and `settings/`, without unchanged examples and SQLite files — not in safety sets | Example macros as shipped with OpenSAK |
 | | bootstrap.json (it only points to the install folder on this machine) |
 
 Databases are written with `snapshot_database()` (#943), so a backup is consistent even for the open database.
 
-**Macro databases:** a macro's own database is `<macro>.db3` next to the macro file, which can be in any folder, so `opensak.macro_db()` records every file it opens in opensak.json under `macros.databases` (resolved paths). Each backup snapshots the recorded files that still exist into `macro_databases/`; a missing file is left out silently (it may be on a drive that isn't connected), and one that can't be copied is left out with a warning in the log — a macro's data never makes the whole backup fail. Restore doesn't offer them yet: copy the file from the set (or the zip) back to the path in the manifest.
+**Macro databases:** a macro's own database is `<macro>.db3` next to the macro file, which can be in any folder, so `opensak.macro_db()` records every file it opens in opensak.json under `macros.databases` (resolved paths). Each backup snapshots the recorded files that still exist into `macro_databases/`; a missing file is left out silently (it may be on a drive that isn't connected), and one that can't be copied is left out with a warning in the log — a macro's data never makes the whole backup fail. Restore brings back the ones that were inside the macros folder (see "Macros"); one from elsewhere is copied back by hand, from the set (or the zip) to the path in the manifest.
 
 **Companion databases:** a database's companion (`db/companion.py`) is snapshotted with it into `companions/`, named after the database's file in the set (`databases/Denmark.db` → `companions/Denmark.companion.db3`), and its size counts with its database for progress and free space. One that can't be copied is left out with a warning in the log and named in `BackupResult.skipped_companions`; the database itself is still backed up. Restore puts it next to the restored database, with the same integrity check; if that fails, nothing is restored. The companion keeps the db_uuid of its database, which a restore keeps too.
+
+### Macros
+
+*#1137.* `macros_backup.py` and `macros_restore.py`.
+
+**Backup.** The macros folder (`<install>/macros`) is copied into `macros/` with its own layout, in folder and compressed sets alike (files are added to the zip straight from the macros folder; they are small, so nothing is staged). Left out:
+
+- **Unchanged examples.** A `.lua` file directly in `examples/` whose code (the `source_hash()` that approvals use) is one of the shipped examples, and a data file there identical to the shipped file of the same name. Each release brings its own examples, so a restore can never put an old copy over a newer one. An edited example, and a user's own file in `examples/`, are kept. `settings/examples/` (the user's settings for the examples) is kept too.
+- **SQLite files** and their `-wal`/`-shm`/`-journal`: they may be open, so they are snapshotted into `macro_databases/` instead — every one in the macros folder, also one no macro opened through `macro_db()` on this machine.
+- **Symbolic links** are neither followed nor copied.
+
+A file that can't be read is left out with a warning in the log and named in `BackupResult.skipped_macro_files`. Safety sets have no macros.
+
+**On exit** the state has a `macros` entry — files, total size, newest mtime and a digest of the file names, over the files a backup would include — only when there are any, so a user without macros sees no change. The folders' own mtimes don't count: SQLite creates and removes its `-wal`/`-journal` next to a macro database every time it is used.
+
+**Restore** ("Also restore macros", on by default for a set that has macros) works on today's macros folder and runs right away, after the databases, on the GUI thread:
+
+1. **Plan.** Each file of `macros/` is *new* (nothing there), *same* (same bytes) or a *conflict*. Each macro database whose path was inside the macros folder the set was made from (`macros.path` in the manifest) maps to the same place in today's folder; it is new or, if a file exists, a conflict (databases aren't compared). One from elsewhere is not restored and is named in the report: a backup set must never be able to write anywhere on the disk. Paths that would end up outside the macros folder (`..`, absolute, `\`) and SQLite files in `macros/` are ignored.
+2. **Conflicts** are listed (MacroConflictDialog), nothing ticked; ticked ones are replaced, the rest kept. Cancel cancels the whole restore. A replaced file is kept first as `<name>.<YYYYMMDD-HHMMSS>.bak` next to it, as "Restore example" does; a replaced database is snapshotted to the `.bak` and checkpointed, so no stale `-wal` is applied to the restored file.
+3. **Approvals** (#1091, `macros.approvals`): for every macro file that now holds the backup's code — restored, replaced or already the same — the backup's record is taken over with its path moved to today's folder, via `db_access.restore_approval()`. It is stored only if the file's code hashes to the record's, and not when the macro already has a record for that code (it may allow more). This happens without "Also restore settings"; the shared folder list, shortcuts and the rest of `macros.*` come back only with the settings.
+
+Restoring macros is refused while a macro runs.
 
 **manifest.json** describes the set and is written last:
 
@@ -134,11 +162,13 @@ Databases are written with `snapshot_database()` (#943), so a backup is consiste
     {"file": "macro_databases/FindStat.db3",
      "path": "C:\\Users\\me\\Documents\\OpenSAK\\macros\\FindStat.db3", "size_bytes": 81920}
   ],
+  "macros": {"dir": "macros", "path": "C:\\Users\\me\\Documents\\OpenSAK\\macros",
+             "files": 12, "size_bytes": 40960},
   "settings": true
 }
 ```
 
-`companion` is only present for a database that has one. Like `macro_databases`, it was added without changing `format`: older versions ignore keys they don't know, so they still read the set (and restore the database without its companion).
+`companion` is only present for a database that has one, `macros` only for a set with macro files (only `"dir": "macros"` is accepted). Like `macro_databases`, they were added without changing `format`: older versions ignore keys they don't know, so they still read the set (and restore the database without its companion).
 
 **Never half a backup:** the set is built in a folder ending in `.partial` and renamed only when everything, manifest last, is written. A folder without a manifest is ignored by Restore and cleaned up at the next backup.
 
