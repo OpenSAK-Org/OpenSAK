@@ -48,6 +48,8 @@ Thumbs.db
 
 # Local export output (GPX/LOC/GGZ/KML written during manual testing)
 *.gpx
+# …except the test database of the example macros (#1202)
+!tests/fixtures/macros/examples.gpx
 *.loc
 *.ggz
 *.kml
