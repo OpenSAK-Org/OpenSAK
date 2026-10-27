@@ -6,6 +6,8 @@ API version: **4** (`opensak.api_version()`).
 
 Macros are Lua 5.4 scripts run in a sandbox. They talk to OpenSAK through the global `opensak` table. File access is limited to the folders listed in Settings → Folder permissions. When a macro needs a file in another folder, OpenSAK asks the user whether to allow that folder for this run only or always, or to deny it; reading and writing are asked separately. Both belong to this macro alone: another macro, also one started with `opensak.run_macro()`, is asked on its own, and a macro changed outside OpenSAK's macro editor is asked once whether it may have its folders again. An unsaved macro can be allowed a folder for one run only. OpenSAK's own settings and database files are never accessible.
 
+Within an API version, functions, parameters, cache fields and header keys are only added. A rename or removal comes with a new API version, after a deprecation period of at least one stable release: the reference marks what is deprecated and what to use instead, and the first call of a deprecated function in a run prints a warning naming the macro line. The macro keeps running.
+
 See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support) for autocompletion in VS Code, Notepad++ and UltraEdit.
 
 ## Functions
