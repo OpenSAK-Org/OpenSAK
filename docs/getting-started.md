@@ -78,7 +78,7 @@ OpenSAK works with standard **GPX files** and **Pocket Query ZIP files** — the
 If your Pocket Queries arrive by e-mail, OpenSAK can fetch them straight from your mailbox. Set up the mailbox under **Settings → Settings… → PQ Email**, then use **File → Check for PQ Email…**. The password is kept in your operating system's keyring, never in plain text.
 
 ### Coming from GSAK
-You can import a GSAK database directly with **File → Import from GSAK Database…** — including personal notes, corrected coordinates, child waypoints, attributes and the full log history. Point it at a GSAK backup `.zip` to see every database in the backup and import the ones you pick, each as its own OpenSAK database. The same import also turns your saved GSAK filters and user locations (from `gsak.db3`) into OpenSAK filter profiles and home locations — pick a backup, or `gsak.db3` on its own if you only want those. OpenSAK also uses the same GPX/PQ format as GSAK, so your Pocket Queries import as usual.
+You can import a GSAK database directly with **File → Import from GSAK Database…** — including personal notes, corrected coordinates, child waypoints, attributes and the full log history. Point it at a GSAK backup `.zip` to see every database in the backup and import the ones you pick, each as its own OpenSAK database. The same import also turns your saved GSAK filters, views and user locations (from `gsak.db3`) into OpenSAK filter profiles, column views and home locations — pick a backup, or `gsak.db3` on its own if you only want those. OpenSAK also uses the same GPX/PQ format as GSAK, so your Pocket Queries import as usual.
 
 ---
 
@@ -100,6 +100,7 @@ OpenSAK uses a three-panel layout:
 - Click any column header to sort
 - Right-click a cache for quick actions: **Open on geocaching.com**, **Copy coordinates**, **Mark as found**
 - Choose which columns to show via **View → Choose columns…**
+  — save a set of columns as a named column view there, or bring your GSAK views over with **File → Import from GSAK Database…** (tick **Also import the saved GSAK views**). A GSAK column OpenSAK has no column for is left out and listed after the import; a custom-field column is kept and shows in every database that has that field.
 
 ### Cache Details
 Shows the full description, hint (click to decode ROT13), attributes, and logs for the selected cache.

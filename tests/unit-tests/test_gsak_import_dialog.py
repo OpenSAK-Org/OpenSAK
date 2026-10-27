@@ -241,9 +241,12 @@ def manager():
 
 
 @pytest.fixture
-def dlg(qtbot, manager):
+def dlg(qtbot, manager, monkeypatch):
     d = GsakImportDialog()
     qtbot.addWidget(d)
+    # A gsak.db3-only pick ticks the view import too, whose dialog is modal;
+    # the tests that are about views put their own stand-in here.
+    monkeypatch.setattr(d, "_run_view_import", lambda p: None)
     return d
 
 

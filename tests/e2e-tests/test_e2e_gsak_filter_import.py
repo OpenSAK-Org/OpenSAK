@@ -52,6 +52,7 @@ def _open_dialog(window, monkeypatch, gsak_db, profiles_dir):
     imp = opened["import"]
     imp.set_path(gsak_db)
     imp._locations_cb.setChecked(False)
+    imp._views_cb.setChecked(False)
     imp._start_import()
     return opened["dlg"]
 
@@ -61,7 +62,7 @@ class TestGsakFilterImportE2E:
         # The GSAK import covers it: a backup or gsak.db3 offers the filters.
         assert not hasattr(empty_window, "_act_gsak_filter_import")
 
-    def test_gsak_db3_alone_offers_only_filters_and_locations(
+    def test_gsak_db3_alone_offers_only_its_settings(
         self, empty_window, monkeypatch, gsak_db
     ):
         from opensak.gui.dialogs import gsak_import_dialog as idlg
@@ -75,6 +76,7 @@ class TestGsakFilterImportE2E:
         assert imp._table.rowCount() == 0
         assert not imp._filters_cb.isHidden() and imp._filters_cb.isChecked()
         assert not imp._locations_cb.isHidden()
+        assert not imp._views_cb.isHidden()
         assert imp._import_btn.isEnabled()
 
     def test_import_writes_profiles_the_filter_dialog_can_load(
