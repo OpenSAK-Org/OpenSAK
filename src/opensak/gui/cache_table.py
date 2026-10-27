@@ -168,6 +168,10 @@ SHORT_HEADER_KEYS: dict[str, str] = {
 # Room for the sort indicator next to a header's text, in pixels.
 _SORT_INDICATOR_ROOM = 16
 
+# Upper bound for an auto-fitted column, so one long cache name or note
+# doesn't push every other column off-screen.
+_AUTOFIT_MAX_WIDTH = 400
+
 
 def _get_active_columns() -> list[str]:
     from opensak.gui.dialogs.column_dialog import get_visible_columns
@@ -1777,6 +1781,33 @@ class CacheTableView(QTableView):
             return
         widths = get_column_widths()
         widths[col_id] = new_size
+        set_column_widths(widths)
+
+    def autofit_columns(self) -> None:
+        """Size each visible column to fit its contents and save the widths.
+
+        Qt measures the header too, so a column with a short header (#1000)
+        is measured with that short header: its data decides the width, and
+        the full title comes back if it fits. Saved once at the end instead
+        of once per column via _on_column_resized().
+        """
+        columns = self._model._columns
+        widths = get_column_widths()
+        self._applying_widths = True
+        try:
+            for i, col_id in enumerate(columns):
+                if self.isColumnHidden(i):
+                    continue
+                if col_id in SHORT_HEADER_KEYS:
+                    self._model.set_short_header(col_id, True)
+                self.resizeColumnToContents(i)
+                width = min(self.columnWidth(i), _AUTOFIT_MAX_WIDTH)
+                self.setColumnWidth(i, width)
+                # No sectionResized if the width came out unchanged.
+                self._update_short_header(col_id, width)
+                widths[col_id] = width
+        finally:
+            self._applying_widths = False
         set_column_widths(widths)
 
     def _update_short_header(self, col_id: str, width: int) -> None:

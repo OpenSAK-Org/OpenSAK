@@ -29,6 +29,7 @@ _DEFAULTS: dict[str, str] = {
     "trip_planner":      "Ctrl+T",
     "coord_converter":   "Ctrl+K",
     "projection":        "Ctrl+P",
+    "autofit_columns":   "Ctrl+W",
 }
 
 

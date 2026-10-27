@@ -80,6 +80,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Ustaw filtr…",
     "action_clear_filter":          "❌  Wy&czyść filtr",
     "action_columns":               "&Wybierz kolumny…",
+    "action_autofit_columns":       "Dopasuj &szerokość kolumn",
     "action_maximize_map":          "⛶  &Powiększ mapę",
     "action_restore_map":           "◻  &Przywróć panele",
     "toolbar_maximize_map_tooltip": "Powiększ mapę (F11)",
@@ -344,6 +345,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Projekcja współrzędnych",
     "shortcut_maximize_map":        "Powiększ mapę",
     "shortcut_popout_map":          "Otwórz mapę w oknie",
+    "shortcut_autofit_columns":     "Dopasuj szerokość kolumn",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Narzędzia",

@@ -549,6 +549,11 @@ class MainWindow(QMainWindow):
         act_columns.triggered.connect(self._open_column_chooser)
         view_menu.addAction(act_columns)
 
+        self._act_autofit_columns = QAction(tr("action_autofit_columns"), self)
+        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+W"))
+        self._act_autofit_columns.triggered.connect(self._autofit_columns)
+        view_menu.addAction(self._act_autofit_columns)
+
         view_menu.addSeparator()
 
         self._act_maximize_map = QAction(tr("action_maximize_map"), self)
@@ -2430,6 +2435,7 @@ class MainWindow(QMainWindow):
             ("projection",        "shortcut_projection",        [self._act_projection]),
             ("maximize_map",      "shortcut_maximize_map",      [self._act_maximize_map]),
             ("popout_map",        "shortcut_popout_map",        [self._act_popout_map]),
+            ("autofit_columns",   "shortcut_autofit_columns",   [self._act_autofit_columns]),
         ]
 
     def _apply_saved_shortcuts(self) -> None:
@@ -3385,6 +3391,10 @@ class MainWindow(QMainWindow):
             if (self._visible_table_columns() & {"hints", "notes"}
                     and self._cache_table._model.has_lightweight_caches()):
                 self._refresh_table_only()
+
+    def _autofit_columns(self) -> None:
+        """Size every cache-list column to fit its contents (Ctrl+W)."""
+        self._cache_table.autofit_columns()
 
     def _populate_column_view_combo(self) -> None:
         """Genindlæs alle gemte Column Views i toolbar-dropdown (#607).

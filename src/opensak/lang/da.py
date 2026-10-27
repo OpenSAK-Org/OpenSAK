@@ -78,6 +78,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Sæt filter…",
     "action_clear_filter":          "❌  &Nulstil filter",
     "action_columns":               "&Vælg kolonner…",
+    "action_autofit_columns":       "&Tilpas kolonnebredder",
     "action_maximize_map":          "⛶  &Maksimér kort",
     "action_restore_map":           "◻  &Gendan paneler",
     "toolbar_maximize_map_tooltip": "Maksimér kort (F11)",
@@ -342,6 +343,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Koordinatprojektion",
     "shortcut_maximize_map":        "Maksimér kort",
     "shortcut_popout_map":          "Pop kort ud",
+    "shortcut_autofit_columns":     "Tilpas kolonnebredder",
 
     # ── Geocaching Værktøjer-menu ─────────────────────────────────────────────
     "menu_gc_tools":                "&Værktøjer",
