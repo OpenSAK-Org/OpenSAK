@@ -324,6 +324,14 @@ manifest therefore has a second `<Application>`, `OpenSAKCLI`:
   the same virtualized AppData (settings, databases, macro approvals) as
   the Store GUI. The zip install keeps separate data; `--db <path>` reaches
   a database file in either.
+- A bare `opensak` (or `opensak <file>`) is a call for the GUI: the
+  shell shouldn't wait for it. `opensak-cli.exe` then starts `opensak.exe`
+  next to it with the same arguments, detached (no console, its own
+  Ctrl+C group), and exits 0 at once (#1180). Commands (`import …`),
+  `--help` and `--run-macro` stay in `opensak-cli.exe`, so the shell keeps
+  waiting for their output and exit code. A process started from the
+  package's folder runs in the package too, so this GUI has the same
+  AppData as the one from the Start Menu.
 - In the Task Scheduler, the program is
   `%LOCALAPPDATA%\Microsoft\WindowsApps\opensak.exe` (or
   `opensak-beta.exe`).
@@ -336,6 +344,9 @@ sideloaded build (`build_msix_local.ps1 -InstallAfterBuild`):
 - [ ] `opensak --run-macro x.lua` is found through the alias
 - [ ] From cmd / PowerShell: the shell waits, the exit code is correct
       (`echo %ERRORLEVEL%` / `$LASTEXITCODE`), and output appears
+- [ ] A bare `opensak` returns the prompt at once and opens the window;
+      that GUI uses the same AppData (databases, settings) as the one
+      from the Start Menu
 - [ ] `opensak import gpx <folder> --db <name>` imports, with the summary
       on stdout and in the log file
 - [ ] From an editor (VS Code task, NppExec): output and the exit code come

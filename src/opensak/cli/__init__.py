@@ -20,6 +20,11 @@ On Windows, opensak.exe is a windowed program: a shell doesn't wait for it,
 and its exit code is lost. The build therefore also has opensak-cli.exe,
 the same program as a console program (opensak.spec); the MSIX package
 puts it on the PATH as `opensak` / `opensak-beta` (App Execution Alias).
+A shell waits for opensak-cli.exe, so when it is asked for the GUI (no
+arguments, or a file argument) it starts opensak.exe next to it with the same
+arguments and exits at once (#1180): a bare `opensak` gives the prompt back.
+Commands, --help and --run-macro still run in the console program, so the
+shell gets their output and exit code.
 
 Exit codes are those of `opensak --run-macro` (opensak.utils.run_macro):
 0 success, 1 the import failed or had errors, 2 bad arguments or a missing
@@ -30,10 +35,16 @@ another run), 130 interrupted.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
+from pathlib import Path
 
 # First arguments that select a headless command.
 COMMANDS = ("import",)
+
+# The Windows console program and the windowed program next to it (opensak.spec).
+CLI_EXE = "opensak-cli.exe"
+GUI_EXE = "opensak.exe"
 
 
 def is_cli_command(argv: list[str]) -> bool:
@@ -47,8 +58,41 @@ def entry() -> None:
     argv = sys.argv[1:]
     if is_cli_command(argv):
         sys.exit(main(argv))
+    if hand_off_to_gui_exe(argv):
+        sys.exit(0)
     from opensak.app import main as gui_main
     gui_main()
+
+
+def _is_run_macro(argv: list[str]) -> bool:
+    return any(a == "--run-macro" or a.startswith("--run-macro=") for a in argv)
+
+
+def hand_off_to_gui_exe(argv: list[str]) -> bool:
+    """In the frozen opensak-cli.exe, start the GUI *argv* asks for in the
+    windowed opensak.exe next to it, so the shell doesn't wait for the GUI
+    (#1180). True if it was started; False to run it here (not opensak-cli.exe,
+    --run-macro, or opensak.exe is missing)."""
+    if not getattr(sys, "frozen", False) or _is_run_macro(argv):
+        return False
+    exe = Path(sys.executable)
+    if exe.name.lower() != CLI_EXE:
+        return False
+    gui = exe.with_name(GUI_EXE)
+    if not gui.is_file():
+        return False
+    # No console and its own Ctrl+C group: closing or interrupting the shell
+    # leaves the GUI running. No inherited stdio, so a pipe doesn't stay open.
+    flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    try:
+        subprocess.Popen(
+            [str(gui), *argv], creationflags=flags, close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return True
 
 
 def build_parser() -> argparse.ArgumentParser:
