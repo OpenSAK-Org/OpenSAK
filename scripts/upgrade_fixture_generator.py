@@ -15,6 +15,8 @@ Usage (by make_upgrade_fixture.py):
 Writes into <root>:
     install/            the install folder (opensak.json, filters/, Default.db)
     databases/          the user's database folder
+    backup/             one backup set of every database, as this version
+                        writes it (only versions with backups, v1.21.0+)
     expected.json       what the upgraded data must look like afterwards
 and bootstrap.json under $HOME as the old version would.
 """
@@ -290,5 +292,20 @@ expected["generated_by"] = __version__
 
 from opensak.db.database import dispose_engine  # noqa: E402
 dispose_engine()
+
+# #1193: a backup set as this version writes it, so the tests can restore an
+# old set with the current code. Backups exist since v1.21.0 (#942).
+try:
+    from opensak.backup.backupset import KIND_MANUAL, write_backup_set
+except ImportError:
+    pass
+else:
+    from datetime import datetime, timezone
+    result = write_backup_set(
+        manager.databases, KIND_MANUAL, folder=ROOT / "backup",
+        now=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc), compress=False,
+    )
+    expected["backup"] = result.backup_set.path.name
+
 (ROOT / "expected.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
 print(json.dumps({"install_dir": str(install_dir), "db_dir": str(db_dir)}))

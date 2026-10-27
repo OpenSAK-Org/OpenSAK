@@ -11,6 +11,13 @@ per-database settings into the database files (#659), backs every database
 up exactly once before migrating it (#549), and does nothing more on the
 next start.
 
+Fixtures from v1.21.0 on also hold a backup set written by that release
+(backup/), which the current code must be able to restore (#1193). The
+tests at the end cover what the 1.22.0 cycle adds on top of an upgraded
+database: the last_user_update triggers and is_owner (migration 28, #1140)
+and the companion database, which only appears once something is stored
+in it (#1034).
+
 Add a folder for every new stable release (RELEASE_CHECKLIST.md §7); the
 tests pick it up automatically.
 """
@@ -77,10 +84,12 @@ def installed(request, tmp_path, monkeypatch, qapp):
     fixture: Path = request.param
     root = tmp_path / "root"
     root.mkdir()
-    for folder in ("install", "databases"):
-        shutil.copytree(fixture / folder, root / folder)
-    for f in (root / "install").rglob("*.json"):
-        f.write_text(json.dumps(_read_json(f, root), indent=2), encoding="utf-8")
+    for folder in ("install", "databases", "backup"):
+        if (fixture / folder).is_dir():
+            shutil.copytree(fixture / folder, root / folder)
+    for folder in ("install", "backup"):
+        for f in (root / folder).rglob("*.json"):
+            f.write_text(json.dumps(_read_json(f, root), indent=2), encoding="utf-8")
 
     bootstrap = ss._bootstrap_path()  # inside the fake home (tests/conftest.py)
     bootstrap.parent.mkdir(parents=True, exist_ok=True)
@@ -322,3 +331,114 @@ def test_second_start_migrates_nothing(installed, monkeypatch):
         n: _query(root / "databases" / s["file"], "PRAGMA user_version")[0][0]
         for n, s in expected["databases"].items()
     } == versions
+
+
+# ── What the 1.22.0 cycle adds on top of an upgraded database (#1193) ────────
+
+def _open_all(root: Path, expected: dict) -> Any:
+    manager, _ = _start_app()
+    for name in expected["databases"]:
+        _open(manager, name)
+    return manager
+
+
+def test_user_update_triggers_stamp_after_the_upgrade(installed):
+    """Migration 28 (#1140): the triggers exist, the migration itself stamps
+    nothing, and a user change afterwards is stamped."""
+    root, expected = installed
+    from opensak.db.database import _USER_UPDATE_TRIGGERS
+
+    _open_all(root, expected)
+    for name, spec in expected["databases"].items():
+        path = root / "databases" / spec["file"]
+        triggers = {r[0] for r in _query(
+            path, "SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+        assert triggers >= set(_USER_UPDATE_TRIGGERS), name
+        assert _query(path, "SELECT count(*) FROM caches "
+                            "WHERE last_user_update IS NOT NULL")[0][0] == 0, name
+
+    path = root / "databases" / expected["databases"]["Denmark"]["file"]
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("UPDATE caches SET user_flag = NOT user_flag WHERE gc_code = 'GCFX004'")
+        conn.commit()
+    finally:
+        conn.close()
+    stamped = _query(path, "SELECT gc_code FROM caches WHERE last_user_update IS NOT NULL")
+    assert stamped == [("GCFX004",)]
+
+
+def test_is_owner_follows_the_account_after_the_upgrade(installed):
+    """Migration 28 (#1140): is_owner from the account in Settings, which the
+    fixture has (user.gc_username / user.gc_finder_id)."""
+    root, expected = installed
+    store = json.loads((root / "install" / "opensak.json").read_text(encoding="utf-8"))
+    username = store.get("user.gc_username")
+    if not username:
+        pytest.skip("this fixture has no account")
+    # One of the user's own caches, as the old release stored it.
+    denmark = root / "databases" / expected["databases"]["Denmark"]["file"]
+    conn = sqlite3.connect(str(denmark))
+    try:
+        conn.execute("UPDATE caches SET owner_name = ?, owner_id = '7' "
+                     "WHERE gc_code = 'GCFX005'", (username,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    _open_all(root, expected)
+
+    owned = _query(denmark, "SELECT gc_code FROM caches WHERE is_owner = 1")
+    assert owned == [("GCFX005",)]
+    malta = root / "databases" / expected["databases"]["Malta Trip"]["file"]
+    assert _query(malta, "SELECT count(*) FROM caches WHERE is_owner = 1")[0][0] == 0
+
+
+def test_no_companion_file_until_something_is_stored(installed):
+    """#1034: opening, migrating and switching between the upgraded
+    databases creates no companion files."""
+    root, expected = installed
+    from opensak.db import companion
+
+    _open_all(root, expected)
+    for spec in expected["databases"].values():
+        path = root / "databases" / spec["file"]
+        assert not companion.companion_path(path).exists(), spec["file"]
+    assert not [p for p in root.rglob("*") if companion.is_companion_file(p)]
+
+
+def test_backup_set_from_the_old_release_restores(installed):
+    """#1193: a set written by the old release (no companions, no macros in
+    its manifest) restores with the current code: as new databases, with
+    their data, migrated on first open, and without a companion."""
+    root, expected = installed
+    if "backup" not in expected:
+        pytest.skip("this release had no backups")
+    from opensak.backup.backupset import read_backup_set
+    from opensak.backup.macros_restore import has_macros
+    from opensak.backup.restore import restore_database
+    from opensak.db import companion
+    from opensak.db.database import SCHEMA_VERSION
+
+    manager, _ = _start_app()
+    backup_set = read_backup_set(root / "backup" / expected["backup"])
+    assert backup_set.opensak_version == expected["generated_by"]
+    assert backup_set.macros is None and backup_set.macro_databases == ()
+    assert not has_macros(backup_set)
+    assert all(e.companion is None for e in backup_set.databases)
+
+    for entry in backup_set.databases:
+        if entry.name not in expected["databases"]:
+            continue
+        spec = expected["databases"][entry.name]
+        info = restore_database(backup_set, entry)
+        assert info.path != root / "databases" / spec["file"]
+        assert not companion.companion_path(info.path).exists()
+
+        _open(manager, info.name)
+        assert _query(info.path, "PRAGMA user_version")[0][0] == SCHEMA_VERSION
+        counts = {t: _query(info.path, f"SELECT count(*) FROM {t}")[0][0]
+                  for t in spec["counts"]}
+        assert counts == spec["counts"], entry.name
+        assert not companion.companion_path(info.path).exists()
+

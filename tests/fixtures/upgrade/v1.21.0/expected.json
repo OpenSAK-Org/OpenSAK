@@ -92,5 +92,6 @@
   },
   "active": "Denmark",
   "schema_version_before": 25,
-  "generated_by": "1.21.0"
+  "generated_by": "1.21.0",
+  "backup": "OpenSAK-backup-2026-01-02_1300-manual"
 }
