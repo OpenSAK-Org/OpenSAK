@@ -154,6 +154,16 @@ def test_events_reach_the_runtime(qtbot, monkeypatch):
     assert dialog._closer == "ok"
 
 
+def test_open_reaches_the_runtime_without_on_open_1197(qtbot):
+    # The runtime replays on_change of remembered values on "open", so the
+    # dialog sends it even when the form has no on_open.
+    seen = []
+    form = _form(timeout=0.01, fields=[])
+    dialog = _dialog(qtbot, form, lambda c, e, f: seen.append(e))
+    dialog.run()
+    assert seen[0] == "open"
+
+
 def test_exit_on_change_and_timeout_close_the_form(qtbot):
     form = _form(fields=[{"type": "choice", "id": "dish", "options": ["a", "b"],
                           "exit_on_change": True}])

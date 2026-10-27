@@ -613,16 +613,23 @@ def remembered_ids(form: Form) -> set[str]:
     }
 
 
-def apply_remembered(form: Form, stored: dict[str, Any], func: str) -> None:
+def apply_remembered(form: Form, stored: dict[str, Any], func: str) -> list[Field]:
     """Use *stored* values (from an earlier run) as defaults. Values that
-    no longer fit the field (e.g. a removed option) are ignored."""
+    no longer fit the field (e.g. a removed option) are ignored.
+
+    Returns the fields that got a stored value, in form order: only values
+    are remembered, so their on_change runs again when the form opens to
+    recalculate what depends on them (enabled, visible, labels, #1197)."""
     keep = remembered_ids(form)
+    restored = []
     for f in form.value_fields():
         if f.id in keep and f.id in stored:
             try:
                 f.props["default"] = coerce_value(f, stored[f.id], func)
             except MacroError:
                 continue
+            restored.append(f)
+    return restored
 
 
 # ── Documentation ────────────────────────────────────────────────────────────
@@ -717,12 +724,17 @@ FORM_KEY_DOCS: tuple[KeyDoc, ...] = (
     KeyDoc("remember", "boolean",
            "Start with the values the user entered last time (stored per macro "
            "file, next to opensak.settings; the macro must be saved). Fields "
-           "with `remember = false` and passwords are not kept."),
+           "with `remember = false` and passwords are not kept. Only values "
+           "are kept: when the form opens, `on_change` is called for each "
+           "field that got a remembered value (in form order, before "
+           "`on_open`), so what it enables, hides or relabels is set again."),
     KeyDoc("id", "string", "Name the remembered values are kept under (default: "
                            "the title), for macros with several forms."),
     KeyDoc("timeout", "number",
            'Close the form after this many seconds; it then returns the values and "timeout".'),
-    KeyDoc("on_open", "fun(f: opensak.Form)", "Called once when the form opens."),
+    KeyDoc("on_open", "fun(f: opensak.Form)",
+           "Called once when the form opens, after the `on_change` calls for "
+           "remembered values."),
     KeyDoc("validate", "fun(f: opensak.Form, button: string): string?",
            "Called before the form closes with a button other than a cancel button; "
            "return a message to show it and keep the form open."),
@@ -749,7 +761,8 @@ FIELD_KEY_DOCS: tuple[KeyDoc, ...] = (
     KeyDoc("font_size", "integer", "Caption font size in points."),
     KeyDoc("on_change", "fun(f: opensak.Form, value: any, id: string)",
            "Called when the user changes the value — a text or number field when it "
-           "loses focus or Enter is pressed. The form stays open."),
+           "loses focus or Enter is pressed — and, with `remember = true`, when the "
+           "form opens with a remembered value. The form stays open."),
     KeyDoc("exit_on_change", "boolean",
            "Close the form when the value changes (after on_change); it returns the "
            "values and the field's id. Like GSAK's ExitOnChange."),

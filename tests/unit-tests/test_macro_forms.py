@@ -170,7 +170,8 @@ def test_required_and_remember_helpers():
     assert check_required(form, {"a": ""}).id == "a"
     assert check_required(form, {"a": "z"}) is None
     assert remembered_ids(form) == {"a", "c"}
-    apply_remembered(form, {"a": "old", "c": "gone", "p": "secret"}, "f")
+    restored = apply_remembered(form, {"a": "old", "c": "gone", "p": "secret"}, "f")
+    assert [f.id for f in restored] == ["a"]  # "gone" isn't an option; passwords aren't kept
     values = {f.id: initial_value(f) for f in form.value_fields()}
     assert values["a"] == "old" and values["c"] == "x" and values["p"] == ""
 
@@ -731,6 +732,47 @@ def test_remember_restores_the_last_values(tmp_path):
     assert _run(UIHost(), script, settings_dir=tmp_path / "s", macro_path=macro) == ["a!\t\t"]
 
 
+def test_remember_calls_on_change_for_remembered_values_1197(tmp_path):
+    # The example from #1197: choosing GGZ greys out "Unfound only", and the
+    # next run must start with it greyed out again. Only values are stored;
+    # on_change of each restored field runs when the form opens, before
+    # on_open, and exit_on_change doesn't close the form then.
+    macro = tmp_path / "m.lua"
+    script = """
+        local calls = {}
+        local v = opensak.form{ remember = true, fields = {
+          { type = "checkbox", id = "unfound", label = "Unfound only", default = true },
+          { type = "choice", id = "fmt", options = { "GPX", "GGZ" },
+            on_change = function(f, value, id)
+              calls[#calls + 1] = id .. "=" .. value
+              f:set_enabled("unfound", value == "GPX")
+            end },
+          { type = "text", id = "skip", remember = false,
+            on_change = function(f, value, id) calls[#calls + 1] = id end },
+          { type = "radio", id = "go", options = { "a", "b" }, default = "a",
+            exit_on_change = true,
+            on_change = function(f, value, id) calls[#calls + 1] = id .. "=" .. value end },
+        }, on_open = function(f) calls[#calls + 1] = "open" end }
+        print(table.concat(calls, " "), v.fmt)
+    """
+    settings = tmp_path / "s"
+
+    def user(c: Scripted) -> None:
+        c.change("fmt", "GGZ")
+        c.values[c.field("skip")] = "typed"
+
+    first = UIHost(user)
+    assert _run(first, script, settings_dir=settings, macro_path=macro) == [
+        "open fmt=GGZ\tGGZ"]  # nothing remembered yet: only on_open when it opens
+    assert first.shown[0].state[("unfound", "enabled")] is False
+
+    second = UIHost()
+    assert _run(second, script, settings_dir=settings, macro_path=macro) == [
+        "fmt=GGZ go=a open\tGGZ"]
+    assert second.shown[0].state[("unfound", "enabled")] is False
+    assert second.shown[0].closer == "ok"  # not closed by go's exit_on_change
+
+
 def test_remember_in_an_unsaved_macro_just_uses_the_defaults():
     out = _run(UIHost(), 'print(opensak.form{ remember = true, fields = {'
                          ' { type = "text", id = "a", default = "d" } } }.a)')
@@ -840,7 +882,7 @@ class DbUIHost(UIHost):
             return apply_filters_auto(s, self.filterset)
 
 
-def test_find_with_form_example(tmp_db):
+def test_find_with_form_example(tmp_db, tmp_path):
     from opensak.db.database import get_session
     from opensak.db.models import Cache
 
@@ -859,15 +901,23 @@ def test_find_with_form_example(tmp_db):
 
     source = (Path(__file__).parents[2] / "macros/examples/find_with_form.lua").read_text(
         encoding="utf-8")
+    remember = {"settings_dir": tmp_path / "s", "macro_path": tmp_path / "m.lua"}
     host = DbUIHost()
-    _run(host, source)
+    _run(host, source, **remember)
     form = host.shown[0]
-    assert form.state[("km", "enabled")] is False  # on_open: "near" is not ticked
+    assert form.field("km").get("enabled") is False  # "near" is not ticked
+    assert ("km", "enabled") not in form.state
     assert host.selected == ["GCF2"]
     assert host.messages[-1] == ("2 caches match. Most favourite points (12): GCF2 Cache GCF2",
                                  "Find caches")
     assert [step[0] for step in host.windows[0].steps] == [1, 2]
     assert host.windows[0].closed == 1
+
+    # Ticked last time: the distance is enabled again when the form opens (#1197).
+    _run(DbUIHost(lambda c: c.change("near", True)), source, **remember)
+    again = DbUIHost(lambda c: c.click("cancel"))
+    _run(again, source, **remember)
+    assert again.shown[0].state[("km", "enabled")] is True
 
 
 def test_errors_name_the_line_of_the_macro():
@@ -929,6 +979,11 @@ def test_export_with_form_example(tmp_db, tmp_path):
     assert host.messages[-1] == (f"2 caches written to\n{written.resolve()}", "Export")
     text = written.read_text(encoding="utf-8")
     assert "1.5/2 Cache GCX1" in text and "3/2 Cache GCX2" in text
+
+    # The remembered "loc" greys out the POI options again when the form opens (#1197).
+    again = Host(lambda c: c.click("cancel"))
+    _run(again, source, settings_dir=tmp_path / "s", macro_path=tmp_path / "m.lua")
+    assert again.shown[0].state[("pois", "enabled")] is False
 
 
 def build_test_filter():

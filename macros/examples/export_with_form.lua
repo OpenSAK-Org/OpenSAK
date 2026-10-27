@@ -1,8 +1,8 @@
 -- OpenSAK Macro
 -- Name: Export with form
 -- Author: OpenSAK
--- Version: 1.0
--- Requires-API: 3
+-- Version: 1.1
+-- Requires-API: 4
 -- Description: Choose export options in a GSAK-style form, then export the list
 -- Permissions: write-files
 --
@@ -16,6 +16,10 @@
 -- picked with the "…" button may be written for this run without a
 -- folder permission. Open this macro, put the cursor inside the form and
 -- use Tools → Form designer to move the controls around.
+--
+-- Changes:
+--   1.1  on_change restores the POI options for a remembered format
+--        (API 4, #1197); no more on_open.
 
 local function count_text()
   return opensak.count() .. " caches in the list (" ..
@@ -48,6 +52,7 @@ local v, button = opensak.form{
       { type = "radio", id = "format", options = { "gpx", "ggz", "kml", "loc" }, default = "gpx",
         x = 10, y = 22, w = 110, h = 90,
         -- Child waypoints and attributes exist only in GPX/GGZ (and KML).
+        -- Also called when the form opens with a remembered format.
         on_change = function(f, fmt)
           f:set_enabled("pois", fmt ~= "loc")
         end },
@@ -72,7 +77,6 @@ local v, button = opensak.form{
     { type = "button", id = "cancel", label = "Cancel", cancel = true,
       x = 330, y = 274, w = 80, h = 28 },
   },
-  on_open = function(f) f:set_enabled("pois", f:get("format") ~= "loc") end,
 }
 if not v then return end  -- cancelled
 
