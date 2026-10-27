@@ -123,6 +123,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_unknown":       "Ukendte tilladelser (til en nyere OpenSAK?): {names}",
     "macro_mgr_perm_invalid_hosts": "Ikke et værtsnavn: {hosts}",
     "macro_mgr_perm_blocked":       "Makroer må aldrig kontakte {hosts}.",
+    "macro_mgr_deprecated_keys":    "Makroens header bruger forældede nøgler, som fjernes i en senere version:",
     "macro_mgr_api_newer_run":      "Makroen {name} kræver makro-API version {needed}, men denne OpenSAK har version {have}. Den bruger måske funktioner, som denne version ikke har.\n\nKør den alligevel?",
     "macro_mgr_running":            "▶ {name} ({path})",
     "macro_mgr_shortcut_title":     "Genvej til makro",

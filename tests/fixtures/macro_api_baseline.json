@@ -1,0 +1,1000 @@
+{
+  "api_version": 4,
+  "cache_fields": {
+    "archived": {},
+    "available": {},
+    "bearing": {},
+    "code": {},
+    "color": {},
+    "container": {},
+    "corrected": {},
+    "corrected_source": {},
+    "country": {},
+    "county": {},
+    "custom": {
+      "flag": "companion-db"
+    },
+    "difficulty": {},
+    "distance": {},
+    "dnf": {},
+    "dnf_date": {},
+    "elevation": {},
+    "favorite_points": {},
+    "find_count": {},
+    "found": {},
+    "found_date": {},
+    "ftf": {},
+    "gc_note": {},
+    "hidden": {},
+    "hint": {},
+    "last_gpx_update": {},
+    "last_log_date": {},
+    "last_user_update": {},
+    "lat": {},
+    "locked": {},
+    "log_count": {},
+    "lon": {},
+    "macro_flag": {},
+    "macro_sort": {},
+    "name": {},
+    "note": {},
+    "owned": {},
+    "owner": {},
+    "placed_by": {},
+    "premium": {},
+    "state": {},
+    "symbol": {},
+    "terrain": {},
+    "trackable_count": {},
+    "type": {},
+    "url": {},
+    "user_data": {},
+    "user_flag": {},
+    "user_sort": {},
+    "watch": {},
+    "waypoint_count": {}
+  },
+  "functions": {
+    "api_version": {
+      "params": {}
+    },
+    "attach": {
+      "flag": "lua-macro-write",
+      "params": {
+        "name": {},
+        "schema": {}
+      }
+    },
+    "attached": {
+      "flag": "lua-macro-write",
+      "params": {}
+    },
+    "attributes": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "cache": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "cache_type": {
+      "params": {
+        "value": {}
+      }
+    },
+    "cache_types": {
+      "params": {}
+    },
+    "caches": {
+      "params": {
+        "spec": {}
+      }
+    },
+    "center": {
+      "params": {}
+    },
+    "centers": {
+      "params": {}
+    },
+    "chart.bar": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "chart.heatmap": {
+      "params": {
+        "matrix": {},
+        "options": {}
+      }
+    },
+    "chart.line": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "chart.map": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "chart.points": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "chart.rose": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "choose": {
+      "params": {
+        "default": {},
+        "options": {},
+        "prompt": {},
+        "title": {}
+      }
+    },
+    "choose_file": {
+      "params": {
+        "filter": {},
+        "mode": {},
+        "title": {}
+      }
+    },
+    "choose_folder": {
+      "params": {
+        "title": {}
+      }
+    },
+    "clear_corrected": {
+      "params": {
+        "code": {}
+      }
+    },
+    "clear_filter": {
+      "params": {}
+    },
+    "codes": {
+      "params": {}
+    },
+    "columns": {
+      "params": {
+        "options": {},
+        "table": {}
+      }
+    },
+    "companion": {
+      "flag": "companion-db",
+      "params": {}
+    },
+    "companion_tables": {
+      "flag": "companion-db",
+      "params": {}
+    },
+    "confirm": {
+      "params": {
+        "message": {}
+      }
+    },
+    "coords.bearing": {
+      "params": {
+        "a": {},
+        "b": {},
+        "lat1": {},
+        "lat2": {},
+        "lon1": {},
+        "lon2": {}
+      }
+    },
+    "coords.distance": {
+      "params": {
+        "a": {},
+        "b": {},
+        "lat1": {},
+        "lat2": {},
+        "lon1": {},
+        "lon2": {}
+      }
+    },
+    "coords.format": {
+      "params": {
+        "coords": {},
+        "fmt": {},
+        "lat": {},
+        "lon": {}
+      }
+    },
+    "coords.inside": {
+      "params": {
+        "coords": {},
+        "lat": {},
+        "lon": {},
+        "polygon": {}
+      }
+    },
+    "coords.location": {
+      "params": {
+        "coords": {},
+        "lat": {},
+        "lon": {}
+      }
+    },
+    "coords.midpoint": {
+      "params": {
+        "a": {},
+        "b": {},
+        "lat1": {},
+        "lat2": {},
+        "lon1": {},
+        "lon2": {}
+      }
+    },
+    "coords.parse": {
+      "params": {
+        "fmt": {},
+        "text": {}
+      }
+    },
+    "coords.project": {
+      "params": {
+        "bearing": {},
+        "coords": {},
+        "km": {},
+        "lat": {},
+        "lon": {}
+      }
+    },
+    "copy_caches": {
+      "params": {
+        "options": {},
+        "target": {}
+      }
+    },
+    "copy_file": {
+      "params": {
+        "options": {},
+        "source": {},
+        "target": {}
+      }
+    },
+    "count": {
+      "params": {}
+    },
+    "create_database": {
+      "params": {
+        "name": {}
+      }
+    },
+    "create_folder": {
+      "params": {
+        "path": {}
+      }
+    },
+    "current": {
+      "params": {}
+    },
+    "custom_fields": {
+      "flag": "companion-db",
+      "params": {
+        "options": {}
+      }
+    },
+    "database": {
+      "params": {}
+    },
+    "database_exists": {
+      "params": {
+        "name": {}
+      }
+    },
+    "databases": {
+      "params": {}
+    },
+    "date.diff": {
+      "params": {
+        "a": {},
+        "b": {}
+      }
+    },
+    "date.format": {
+      "params": {
+        "fmt": {},
+        "t": {}
+      }
+    },
+    "date.parse": {
+      "params": {
+        "fmt": {},
+        "text": {}
+      }
+    },
+    "date.period": {
+      "params": {
+        "date": {},
+        "period": {}
+      }
+    },
+    "define_custom_field": {
+      "flag": "lua-macro-write",
+      "params": {
+        "field": {}
+      }
+    },
+    "delete": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "codes": {}
+      }
+    },
+    "delete_attribute": {
+      "flag": "lua-macro-write",
+      "params": {
+        "id": {}
+      }
+    },
+    "delete_custom_field": {
+      "flag": "lua-macro-write",
+      "params": {
+        "name": {}
+      }
+    },
+    "delete_file": {
+      "params": {
+        "path": {}
+      }
+    },
+    "delete_folder": {
+      "params": {
+        "path": {}
+      }
+    },
+    "delete_log": {
+      "flag": "lua-macro-write",
+      "params": {
+        "id": {}
+      }
+    },
+    "delete_trackable": {
+      "flag": "lua-macro-write",
+      "params": {
+        "id": {}
+      }
+    },
+    "delete_waypoint": {
+      "flag": "lua-macro-write",
+      "params": {
+        "id": {}
+      }
+    },
+    "description": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "detach": {
+      "flag": "lua-macro-write",
+      "params": {
+        "schema": {}
+      }
+    },
+    "exit": {
+      "params": {
+        "code": {}
+      }
+    },
+    "export_file": {
+      "params": {
+        "folder": {},
+        "setting": {}
+      }
+    },
+    "export_gpx": {
+      "params": {
+        "spec": {}
+      }
+    },
+    "export_poi": {
+      "params": {
+        "folder": {},
+        "setting": {}
+      }
+    },
+    "file_exists": {
+      "params": {
+        "path": {}
+      }
+    },
+    "file_info": {
+      "params": {
+        "path": {}
+      }
+    },
+    "filter": {
+      "params": {
+        "spec": {}
+      }
+    },
+    "filter_name": {
+      "params": {}
+    },
+    "filter_profile": {
+      "params": {
+        "name": {}
+      }
+    },
+    "folder_exists": {
+      "params": {
+        "path": {}
+      }
+    },
+    "form": {
+      "params": {
+        "spec": {}
+      }
+    },
+    "geo.outlines": {
+      "params": {
+        "layer": {},
+        "options": {}
+      }
+    },
+    "geo.regions": {
+      "params": {
+        "layer": {},
+        "options": {}
+      }
+    },
+    "get_url": {
+      "flag": "lua-macro-net",
+      "params": {
+        "options": {},
+        "url": {}
+      }
+    },
+    "html.columns": {
+      "params": {
+        "...": {}
+      }
+    },
+    "html.escape": {
+      "params": {
+        "value": {}
+      }
+    },
+    "html.matrix": {
+      "params": {
+        "matrix": {},
+        "options": {}
+      }
+    },
+    "html.page": {
+      "params": {
+        "spec": {}
+      }
+    },
+    "html.table": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "html.tiles": {
+      "params": {
+        "items": {}
+      }
+    },
+    "import_gpx": {
+      "flag": "lua-macro-write",
+      "params": {
+        "options": {},
+        "source": {}
+      }
+    },
+    "import_gsak": {
+      "flag": "lua-macro-write",
+      "params": {
+        "options": {},
+        "source": {}
+      }
+    },
+    "in_transaction": {
+      "flag": "lua-macro-write",
+      "params": {}
+    },
+    "input": {
+      "params": {
+        "default": {},
+        "prompt": {},
+        "title": {}
+      }
+    },
+    "insert": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fields": {}
+      }
+    },
+    "insert_attribute": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "fields": {}
+      }
+    },
+    "insert_log": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "fields": {}
+      }
+    },
+    "insert_trackable": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "fields": {}
+      }
+    },
+    "insert_waypoint": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "fields": {}
+      }
+    },
+    "list_dir": {
+      "params": {
+        "folder": {},
+        "pattern": {}
+      }
+    },
+    "log": {
+      "params": {
+        "...": {}
+      }
+    },
+    "logs": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "macro_db": {
+      "params": {}
+    },
+    "macro_flag": {
+      "flag": "lua-macro-write",
+      "params": {
+        "action": {},
+        "caches": {}
+      }
+    },
+    "macros_dir": {
+      "params": {}
+    },
+    "message": {
+      "params": {
+        "text": {},
+        "title": {}
+      }
+    },
+    "move_caches": {
+      "params": {
+        "options": {},
+        "target": {}
+      }
+    },
+    "move_file": {
+      "params": {
+        "options": {},
+        "source": {},
+        "target": {}
+      }
+    },
+    "open": {
+      "params": {
+        "path": {}
+      }
+    },
+    "profiles": {
+      "params": {}
+    },
+    "progress": {
+      "params": {
+        "title": {},
+        "total": {}
+      }
+    },
+    "re.escape": {
+      "params": {
+        "text": {}
+      }
+    },
+    "re.find": {
+      "params": {
+        "pattern": {},
+        "text": {}
+      }
+    },
+    "re.findall": {
+      "params": {
+        "pattern": {},
+        "text": {}
+      }
+    },
+    "re.match": {
+      "params": {
+        "pattern": {},
+        "text": {}
+      }
+    },
+    "re.replace": {
+      "params": {
+        "count": {},
+        "pattern": {},
+        "repl": {},
+        "text": {}
+      }
+    },
+    "re.split": {
+      "params": {
+        "pattern": {},
+        "text": {}
+      }
+    },
+    "read_csv": {
+      "params": {
+        "path": {},
+        "sep": {}
+      }
+    },
+    "read_text": {
+      "params": {
+        "options": {},
+        "path": {}
+      }
+    },
+    "refresh": {
+      "params": {}
+    },
+    "restore_filter": {
+      "params": {
+        "saved": {}
+      }
+    },
+    "resync": {
+      "flag": "lua-macro-write",
+      "params": {}
+    },
+    "run_macro": {
+      "params": {
+        "...": {},
+        "file": {}
+      }
+    },
+    "save_filter": {
+      "params": {}
+    },
+    "select": {
+      "params": {
+        "code": {}
+      }
+    },
+    "selected": {
+      "params": {}
+    },
+    "set_center": {
+      "flag": "lua-macro-write",
+      "params": {
+        "coords": {},
+        "lat": {},
+        "lon": {},
+        "name": {}
+      }
+    },
+    "set_companion_table": {
+      "flag": "companion-db",
+      "params": {
+        "spec": {}
+      }
+    },
+    "set_corrected": {
+      "params": {
+        "code": {},
+        "coords": {},
+        "lat": {},
+        "lon": {}
+      }
+    },
+    "settings.clear": {
+      "params": {}
+    },
+    "settings.load": {
+      "params": {}
+    },
+    "settings.save": {
+      "params": {
+        "settings": {}
+      }
+    },
+    "sleep": {
+      "params": {
+        "ms": {}
+      }
+    },
+    "sort": {
+      "params": {
+        "direction": {},
+        "field": {}
+      }
+    },
+    "sql": {
+      "params": {
+        "options": {},
+        "params": {},
+        "query": {}
+      }
+    },
+    "sql_each": {
+      "params": {
+        "options": {},
+        "params": {},
+        "query": {}
+      }
+    },
+    "sql_write": {
+      "flag": "lua-macro-write",
+      "params": {
+        "params": {},
+        "query": {}
+      }
+    },
+    "stats.every": {
+      "params": {
+        "options": {},
+        "rows": {},
+        "step": {}
+      }
+    },
+    "stats.fill": {
+      "params": {
+        "options": {},
+        "rows": {}
+      }
+    },
+    "stats.group": {
+      "params": {
+        "by": {},
+        "options": {},
+        "rows": {}
+      }
+    },
+    "stats.pivot": {
+      "params": {
+        "col_field": {},
+        "options": {},
+        "row_field": {},
+        "rows": {}
+      }
+    },
+    "stats.running": {
+      "params": {
+        "field": {},
+        "into": {},
+        "rows": {}
+      }
+    },
+    "stats.sort": {
+      "params": {
+        "...": {},
+        "rows": {}
+      }
+    },
+    "stats.streaks": {
+      "params": {
+        "field": {},
+        "rows": {}
+      }
+    },
+    "stats.summary": {
+      "params": {
+        "field": {},
+        "rows": {}
+      }
+    },
+    "switch_database": {
+      "params": {
+        "name": {}
+      }
+    },
+    "tables": {
+      "params": {
+        "options": {}
+      }
+    },
+    "temp_dir": {
+      "params": {}
+    },
+    "text.base64_decode": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.base64_encode": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.csv_split": {
+      "params": {
+        "line": {},
+        "sep": {}
+      }
+    },
+    "text.digit_sum": {
+      "params": {
+        "n": {}
+      }
+    },
+    "text.gc_to_id": {
+      "params": {
+        "code": {}
+      }
+    },
+    "text.html_decode": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.html_to_text": {
+      "params": {
+        "html": {}
+      }
+    },
+    "text.id_to_gc": {
+      "params": {
+        "id": {},
+        "prefix": {}
+      }
+    },
+    "text.lower": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.normalize_name": {
+      "params": {
+        "s": {}
+      }
+    },
+    "text.rot13": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.sub": {
+      "params": {
+        "i": {},
+        "j": {},
+        "text": {}
+      }
+    },
+    "text.trim": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.upper": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.url_decode": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.url_encode": {
+      "params": {
+        "text": {}
+      }
+    },
+    "text.word_value": {
+      "params": {
+        "text": {}
+      }
+    },
+    "trackables": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "transaction": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fn": {}
+      }
+    },
+    "update": {
+      "flag": "lua-macro-write",
+      "params": {
+        "code": {},
+        "fields": {}
+      }
+    },
+    "update_attribute": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fields": {},
+        "id": {}
+      }
+    },
+    "update_log": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fields": {},
+        "id": {}
+      }
+    },
+    "update_trackable": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fields": {},
+        "id": {}
+      }
+    },
+    "update_waypoint": {
+      "flag": "lua-macro-write",
+      "params": {
+        "fields": {},
+        "id": {}
+      }
+    },
+    "version": {
+      "params": {}
+    },
+    "waypoint_type": {
+      "params": {
+        "value": {}
+      }
+    },
+    "waypoint_types": {
+      "params": {}
+    },
+    "waypoints": {
+      "params": {
+        "code": {},
+        "options": {}
+      }
+    },
+    "write_text": {
+      "params": {
+        "options": {},
+        "path": {},
+        "text": {}
+      }
+    }
+  },
+  "header_keys": {
+    "Author": {},
+    "Description": {},
+    "Name": {},
+    "Network": {},
+    "Permissions": {},
+    "Requires-API": {},
+    "Version": {}
+  }
+}

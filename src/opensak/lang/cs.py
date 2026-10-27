@@ -123,6 +123,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_unknown":       "Neznámá oprávnění (pro novější OpenSAK?): {names}",
     "macro_mgr_perm_invalid_hosts": "Není název hostitele: {hosts}",
     "macro_mgr_perm_blocked":       "Makra nesmí nikdy kontaktovat {hosts}.",
+    "macro_mgr_deprecated_keys":    "Hlavička makra používá zastaralé klíče, které budou v pozdější verzi odstraněny:",
     "macro_mgr_api_newer_run":      "Makro {name} vyžaduje API maker verze {needed}, ale tento OpenSAK má verzi {have}. Může používat funkce, které tato verze nemá.\n\nPřesto spustit?",
     "macro_mgr_running":            "▶ {name} ({path})",
     "macro_mgr_shortcut_title":     "Klávesová zkratka makra",

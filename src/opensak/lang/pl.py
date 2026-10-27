@@ -125,6 +125,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_unknown":       "Nieznane uprawnienia (dla nowszego OpenSAK?): {names}",
     "macro_mgr_perm_invalid_hosts": "To nie jest nazwa hosta: {hosts}",
     "macro_mgr_perm_blocked":       "Makra nigdy nie mogą łączyć się z {hosts}.",
+    "macro_mgr_deprecated_keys":    "Nagłówek makra używa przestarzałych kluczy, które zostaną usunięte w późniejszej wersji:",
     "macro_mgr_api_newer_run":      "Makro {name} wymaga API makr w wersji {needed}, a ten OpenSAK ma wersję {have}. Może używać funkcji, których ta wersja nie ma.\n\nUruchomić mimo to?",
     "macro_mgr_running":            "▶ {name} ({path})",
     "macro_mgr_shortcut_title":     "Skrót makra",

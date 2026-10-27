@@ -123,6 +123,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_unknown":       "Unknown permissions (for a newer OpenSAK?): {names}",
     "macro_mgr_perm_invalid_hosts": "Not a host name: {hosts}",
     "macro_mgr_perm_blocked":       "Macros may never contact {hosts}.",
+    "macro_mgr_deprecated_keys":    "The macro header uses deprecated keys, which a later version will remove:",
     "macro_mgr_api_newer_run":      "The macro {name} needs macro API version {needed}, but this OpenSAK has version {have}. It may use functions this version does not have.\n\nRun it anyway?",
     "macro_mgr_running":            "▶ {name} ({path})",
     "macro_mgr_shortcut_title":     "Macro shortcut",

@@ -47,7 +47,14 @@ from opensak.macro.forms import (
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro import net_access
-from opensak.macro.metadata import BLOCKED_DOMAINS, NO_PERMISSIONS, PERMISSIONS, read_metadata
+from opensak.macro.deprecation import Deprecated, deprecated_note
+from opensak.macro.metadata import (
+    BLOCKED_DOMAINS,
+    HEADER_KEYS,
+    NO_PERMISSIONS,
+    PERMISSIONS,
+    read_metadata,
+)
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
@@ -160,12 +167,23 @@ def _header_section() -> list[str]:
         "`opensak.api_version()` the macro works with: the manager marks a "
         "macro that needs a newer one and asks before running it. Only the "
         "comment lines before the first line of code are read.",
+        *_deprecated_keys_section(),
         "",
         "From the manager, **Shortcut…** gives a macro a key (with Ctrl or Alt, "
         "or a function key) that runs it from the main window. The output then "
         "goes to the manager's output pane.",
         *_permissions_section(),
     ]
+
+
+def _deprecated_keys_section() -> list[str]:
+    """The deprecated header keys, if any."""
+    keys = [k for k in HEADER_KEYS if k.deprecated]
+    if not keys:
+        return []
+    return ["", "Deprecated keys still work; the Macro manager marks a macro "
+            "using one, and running it prints a warning:", "",
+            *(f"- `{k.name}` — {deprecated_note(k.deprecated)}" for k in keys)]
 
 
 def _blocked_domains() -> str:
@@ -772,7 +790,20 @@ def _children_section() -> list[str]:
 
 def _param_line(p: Param) -> str:
     optional = ", optional" if p.optional else ""
-    return f"- `{p.name}` (`{p.type}`{optional}) — {p.description}"
+    return (f"- `{p.name}` (`{p.type}`{optional}) — "
+            f"{_deprecated_prefix(p.deprecated)}{p.description}")
+
+
+def _deprecated_prefix(deprecated: Deprecated | None) -> str:
+    """E.g. "**Deprecated in API version 5: use `new`.** " before a
+    description; "" if not deprecated."""
+    return f"**{deprecated_note(deprecated)}** " if deprecated else ""
+
+
+def _deprecated_comment(deprecated: Deprecated | None) -> str:
+    """E.g. "(deprecated, use new) " before a description in the editor
+    files; "" if not deprecated."""
+    return f"(deprecated, use {deprecated[1]}) " if deprecated else ""
 
 
 def _since(func) -> str:
@@ -806,6 +837,13 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         "macro can be allowed a folder for one run only. OpenSAK's own "
         "settings and database files are never accessible.",
         "",
+        "Within an API version, functions, parameters, cache fields and header "
+        "keys are only added. A rename or removal comes with a new API version, "
+        "after a deprecation period of at least one stable release: the "
+        "reference marks what is deprecated and what to use instead, and the "
+        "first call of a deprecated function in a run prints a warning naming "
+        "the macro line. The macro keeps running.",
+        "",
         "See [Example macros](#example-macros) for complete scripts and "
         "[Editor support](#editor-support) for autocompletion in VS Code, "
         "Notepad++ and UltraEdit.",
@@ -818,10 +856,14 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     for func in API:
         anchor = func.name.replace("_", "").replace(".", "")
         changed = "".join(f", changed in {v}" for v, _ in func.changed)
+        if func.deprecated:
+            changed += f", deprecated in {func.deprecated[0]}"
         lines.append(f"| [`opensak.{func.name}`](#opensak{anchor}) | {func.since}{changed} |")
 
     for func in API:
         lines += ["", f"### opensak.{func.name}", ""]
+        if func.deprecated:
+            lines += [f"**{deprecated_note(func.deprecated)}**", ""]
         lines += _code("\n".join(func.signatures))
         lines += ["", func.description, ""]
         params: dict[str, Param] = {}
@@ -886,7 +928,8 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     ]
     for field in (*CACHE_FIELDS, CUSTOM_FIELD):
         type_ = field.type.replace("|", "\\|")
-        lines.append(f"| `{field.name}` | `{type_}` | {field.description} |")
+        lines.append(f"| `{field.name}` | `{type_}` | "
+                     f"{_deprecated_prefix(field.deprecated)}{field.description} |")
 
     lines += _changing_section()
     lines += _web_section()
@@ -1165,7 +1208,8 @@ def render_lua_stub() -> str:
         "---@class opensak.Cache",
     ]
     for field in (*CACHE_FIELDS, CUSTOM_FIELD):
-        lines.append(f"---@field {field.name} {field.type} {field.description}")
+        lines.append(f"---@field {field.name} {field.type} "
+                     f"{_deprecated_comment(field.deprecated)}{field.description}")
     # Macros may add fields of their own, e.g. to group by with opensak.stats.
     lines.append("---@field [string] any")
 
@@ -1229,8 +1273,12 @@ def render_lua_stub() -> str:
         if beta:
             lines += _comment(beta) + ["---"]
         lines += _comment(f"```lua\n{func.example}\n```")
+        if func.deprecated:
+            # Calls are shown struck through, with the hint
+            lines.append(f"---@deprecated Use {func.deprecated[1]}")
         for p in func.params:
-            lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} {p.description}")
+            lines.append(f"---@param {p.name}{'?' if p.optional else ''} {p.type} "
+                         f"{_deprecated_comment(p.deprecated)}{p.description}")
         if func.returns:
             lines += _return_lines(*func.returns)
         for form in func.overloads:
@@ -1261,6 +1309,8 @@ def _editor_words() -> dict[str, ApiFunction | LuaFunction | None]:
 
 def _calltip(func: ApiFunction | LuaFunction) -> str:
     text = textwrap.fill(func.description, 80)
+    if isinstance(func, ApiFunction) and func.deprecated:
+        text = f"(deprecated) Use {func.deprecated[1]} instead.\n{text}"
     if func.returns:
         text += "\n" + textwrap.fill(f"Returns {func.returns[0]} — {func.returns[1]}", 80)
     return text
