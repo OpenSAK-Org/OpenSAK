@@ -461,7 +461,7 @@ def _companion_section() -> list[str]:
         "are deleted; when they are copied or moved to another database, "
         "their rows go along, and the table is created there if needed. Rows "
         "whose cache is gone (after a crash) are removed when the database "
-        "is opened. `opensak.companion_table{ name = ..., linked = false }` "
+        "is opened. `opensak.set_companion_table{ name = ..., linked = false }` "
         "turns that off for a table; `code_column` names another column.",
         "",
         *_code(
@@ -472,7 +472,7 @@ def _companion_section() -> list[str]:
             'opensak.sql("INSERT INTO companion.ftf_info VALUES (?, ?, ?) "\n'
             '    .. "ON CONFLICT (gc_code) DO UPDATE SET ftf_date = excluded.ftf_date, "\n'
             '    .. "ftf_by = excluded.ftf_by", { "GC12345", "2024-05-01", "someone" })\n'
-            'opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
+            'opensak.set_companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
             "\n"
             "-- any other macro: reads it\n"
             'for _, r in ipairs(opensak.sql("SELECT c.gc_code, c.name, f.ftf_date "\n'
@@ -975,7 +975,7 @@ def render_lua_stub() -> str:
         "---@class opensak.ReadOptions",
         "---@field database? string Read this database instead of the active one.",
         "",
-        "---The table of `opensak.companion_table{}`.",
+        "---The table of `opensak.set_companion_table{}`.",
         "---@class opensak.CompanionTableSpec",
         "---@field name string A table or view of the running macro in the companion database.",
         "---@field linked? boolean Cache-linked: its rows follow their caches.",

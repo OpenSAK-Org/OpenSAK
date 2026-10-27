@@ -4,6 +4,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **`opensak.companion_table{}` is now `opensak.set_companion_table{}`
+  (#1186)** — the name said "get one entry of `companion_tables()`", but
+  the function changes a table's settings. It takes the same table,
+  returns the same value and behaves the same; the old name is gone, with
+  no alias, as the companion functions are beta-only and API 4 isn't
+  stable yet. Macros that call it need the new name. Contributed by
+  nagisml.
+
 ## [1.22.0-beta.10] — 2026-10-26
 
 > Headline: **OpenSAK can import without a window** — `opensak import

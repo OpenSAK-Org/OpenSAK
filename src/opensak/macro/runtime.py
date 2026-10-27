@@ -248,7 +248,7 @@ SLEEP_BUDGET_S = 60.0
 # largest macro file it reads.
 MAX_MACRO_DEPTH = 10
 MAX_MACRO_BYTES = 1024 * 1024
-# opensak.companion_table{}: the keys of its table.
+# opensak.set_companion_table{}: the keys of its table.
 _COMPANION_TABLE_KEYS = ("name", "linked", "code_column", "description")
 # opensak.export_gpx{}: the keys of its table, and what to do with an
 # existing file.
@@ -2375,8 +2375,8 @@ class MacroRuntime:
             self._attach_active_companion(db)
         return db
 
-    def _companion_table(self, lua, spec=None):
-        func = "opensak.companion_table"
+    def _set_companion_table(self, lua, spec=None):
+        func = "opensak.set_companion_table"
         if spec is None or not hasattr(spec, "items"):
             raise MacroError(f'{func} expects a table, e.g. {{ name = "ftf_info", linked = false }}')
         values = dict(spec.items())
@@ -5916,7 +5916,7 @@ API: tuple[ApiFunction, ...] = (
                     "cache-linked: its rows belong to caches, several per "
                     "cache if needed, and follow them — they are deleted with "
                     "the cache, and copied or moved with it to another "
-                    "database (opensak.companion_table() changes that). "
+                    "database (opensak.set_companion_table() changes that). "
                     "Triggers are refused. The file follows its database when "
                     "it is renamed, copied, moved, deleted or backed up. Once "
                     "it exists, every macro run has it attached without this "
@@ -5936,7 +5936,7 @@ API: tuple[ApiFunction, ...] = (
         companion=True,
     ),
     ApiFunction(
-        name="companion_table",
+        name="set_companion_table",
         description="Change how OpenSAK treats one of the macro's own tables "
                     "or views in the companion database (see "
                     "opensak.companion()). `linked = false`: the rows stay "
@@ -5946,10 +5946,10 @@ API: tuple[ApiFunction, ...] = (
                     "(default `gc_code`), which must exist. `description` is "
                     "shown with the table in OpenSAK. Keys left out stay as "
                     "they are. Create the table first.",
-        example='opensak.companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
-                'opensak.companion_table{ name = "ftf_options", linked = false }',
+        example='opensak.set_companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }\n'
+                'opensak.set_companion_table{ name = "ftf_options", linked = false }',
         since=4,
-        bind=lambda rt, lua: lambda *a: rt._companion_table(lua, *a),
+        bind=lambda rt, lua: lambda *a: rt._set_companion_table(lua, *a),
         params=(Param("spec", "opensak.CompanionTableSpec",
                       "`name` (required, with or without `companion.`), "
                       "`linked`, `code_column`, `description`."),),

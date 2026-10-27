@@ -873,7 +873,7 @@ class WritableDatabase:
         self, name: str, linked: Optional[bool], code_column: Optional[str],
         description: Optional[str],
     ) -> None:
-        """opensak.companion_table{}: set the registry entry of the running
+        """opensak.set_companion_table{}: set the registry entry of the running
         macro's table or view *name* — cache-linked or not (None: leave
         it), its code column, its description. Raises SqlError if it isn't
         the macro's own."""
