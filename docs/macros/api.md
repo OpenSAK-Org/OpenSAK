@@ -10,6 +10,8 @@ Within an API version, functions, parameters, cache fields and header keys are o
 
 See [Example macros](#example-macros) for complete scripts and [Editor support](#editor-support) for autocompletion in VS Code, Notepad++ and UltraEdit.
 
+Macros shared by other users are in the [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) repository, one folder per macro; its README explains how to install one and how to share your own.
+
 ## Functions
 
 | Function | Since |
