@@ -51,6 +51,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (`tests/fixtures/macro_api_baseline.json`) so nothing is removed by
   accident. Nothing is deprecated yet. Contributed by nagisml.
 
+### Fixed
+
+- **Sorting on a custom field column (#1201)** — the first click on the
+  header of a custom field column (for example GSAK's `LFL`) showed
+  "OpenSAK ran into a problem", and the sort was never remembered for the
+  database. Custom field columns and the Lat/Lon columns now sort like
+  every other column, and the chosen sort comes back the next time the
+  database is opened. Reported by ianwok.
+
 ## [1.22.0-beta.10] — 2026-10-26
 
 > Headline: **OpenSAK can import without a window** — `opensak import

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QPushButton,
     QDialogButtonBox, QComboBox, QInputDialog, QSizePolicy
 )
+from opensak.filters.engine import CUSTOM_SORT_PREFIX
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
 from opensak.settings_store import get_store
@@ -107,7 +108,8 @@ def get_all_columns():
 # database; a saved Column View may name fields a database doesn't have,
 # which are then simply not shown.
 
-CUSTOM_COLUMN_PREFIX = "custom:"
+# "custom:" — one prefix, so SortSpec accepts these column ids (#1201).
+CUSTOM_COLUMN_PREFIX = CUSTOM_SORT_PREFIX
 
 
 def custom_column_id(name: str) -> str:

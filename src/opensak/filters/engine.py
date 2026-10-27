@@ -3827,7 +3827,25 @@ SORT_FIELDS: dict[str, Any] = {
     # ── Issue #1141: columns stored since #1139 ──────────────────────────
     "last_user_update": lambda c: 0,
     "symbol":          lambda c: 0,
+    # ── Issue #1201: the Lat/Lon columns, sorted by CacheTableModel.sort()
+    # on the effective (corrected) coordinates ───────────────────────────────
+    "latitude":        lambda c: 0,
+    "longitude":       lambda c: 0,
 }
+
+# Custom field columns (#1028) have the id "custom:<field name>"
+# (gui/dialogs/column_dialog.py). Their names come from the database, so
+# they can't be listed above; like the placeholders, CacheTableModel.sort()
+# sorts them and apply_filters() leaves the order alone (#1201).
+CUSTOM_SORT_PREFIX = "custom:"
+
+
+def is_sort_field(field: str) -> bool:
+    """True if SortSpec accepts *field*: a field in SORT_FIELDS, or a
+    custom field column ("custom:<name>")."""
+    return field in SORT_FIELDS or (
+        field.startswith(CUSTOM_SORT_PREFIX) and len(field) > len(CUSTOM_SORT_PREFIX)
+    )
 
 
 def _sql_order_expr(field: str):
@@ -3876,10 +3894,10 @@ class SortSpec:
     ascending: bool = True
 
     def __post_init__(self):
-        if self.field not in SORT_FIELDS:
+        if not is_sort_field(self.field):
             raise ValueError(
                 f"Unknown sort field {self.field!r}. "
-                f"Valid fields: {list(SORT_FIELDS.keys())}"
+                f"Valid fields: {list(SORT_FIELDS.keys())} or {CUSTOM_SORT_PREFIX}<name>"
             )
 
     def to_dict(self) -> dict:
