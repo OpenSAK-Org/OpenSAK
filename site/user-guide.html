@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenSAK User Guide — v1.22.0-beta.10</title>
+<title>OpenSAK User Guide — v1.22.0-beta.11</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
@@ -473,7 +473,7 @@
 <nav>
   <div class="nav-header">
     <span class="nav-logo">OpenSAK</span>
-    <div class="nav-version">User Guide · v1.22.0-beta.10</div>
+    <div class="nav-version">User Guide · v1.22.0-beta.11</div>
   </div>
 
   <div class="nav-section-heading">Getting Started</div>
@@ -538,7 +538,7 @@
     <div class="hero-eyebrow">Complete User Guide</div>
     <h1>OpenSAK</h1>
     <p class="hero-sub">The open-source geocache management tool for Windows, Linux, and macOS.</p>
-    <div class="hero-meta">Version 1.22.0-beta.10 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
+    <div class="hero-meta">Version 1.22.0-beta.11 &nbsp;·&nbsp; MIT Licence &nbsp;·&nbsp; <a href="https://github.com/OpenSAK-Org/opensak">github.com/OpenSAK-Org/opensak</a></div>
   </div>
 
   <figure class="screenshot" style="margin-top:-0.5rem;">
@@ -719,6 +719,93 @@ python run.py</code></pre>
     <h3>Importing from a GSAK Database</h3>
     <p>Switching from GSAK? You don't have to re-download everything as GPX first. <strong>File → Import from GSAK Database…</strong> reads a GSAK backup ZIP or a raw <code>sqlite.db3</code> file directly, bringing in caches, waypoints, attributes, corrected coordinates, personal notes, trackables, and your <strong>full log history</strong> — not capped the way a GPX/PQ export is.</p>
     <div class="callout note"><div class="callout-icon">ℹ️</div><div>Re-importing the same GSAK database is safe — it works the same way as a GPX re-import. Notes containing GSAK's embedded local images are replaced with <code>[image: filename.ext]</code> placeholders, since those files live on your old machine and can't travel with the database.</div></div>
+
+    <h3 id="import-command-line">Importing from the Command Line</h3>
+    <p>OpenSAK can also import without opening its window. This is meant for <strong>scheduled imports</strong>: let your computer import the Pocket Queries in a folder every morning, or refresh a database from a GSAK backup overnight, using the operating system's own scheduler. The import does exactly what the Import dialog does — country, state and county are filled in and distances are updated — and caches already in the database are updated, as usual.</p>
+    <pre><code>opensak import gpx  &lt;file or folder&gt;… --db "My Caches"
+opensak import gsak &lt;zip, folder or sqlite.db3&gt; --db "My Caches"</code></pre>
+    <p>A folder means every <code>.gpx</code> and <code>.zip</code> file directly in it. <code>--db</code> is the name of the database as it appears in <strong>Databases → Manage databases</strong>, or the path of its file. The database must already exist: the command line never creates one. <code>opensak --help</code>, <code>opensak import gpx --help</code> and <code>opensak import gsak --help</code> list every option.</p>
+
+    <h4>Useful options</h4>
+    <table>
+      <thead><tr><th>Option</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>--move-imported-to FOLDER</code></td><td>Moves each file that was imported without errors into this folder, so the next run doesn't import it again. Recommended for scheduled imports.</td></tr>
+        <tr><td><code>--recursive</code></td><td>Also imports the files in subfolders (GPX only).</td></tr>
+        <tr><td><code>--wait SECONDS</code></td><td>If the database is open in OpenSAK, waits up to this long for it to be closed. Without it, the import stops at once.</td></tr>
+        <tr><td><code>--quiet</code> / <code>--json</code></td><td>No output, or the summary as JSON for your own scripts. Errors and the full summary always go to OpenSAK's log file.</td></tr>
+        <tr><td><code>--if-exists overwrite</code></td><td>GSAK only: empties the OpenSAK database before importing. The default, <code>merge</code>, adds and updates caches.</td></tr>
+        <tr><td><code>--gsak-db NAME</code></td><td>GSAK only: imports just this GSAK database from a backup or folder (repeat for more).</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn"><div class="callout-icon">⚠️</div><div><strong>Close the database in OpenSAK first, or use <code>--wait</code>.</strong> A command-line import never writes to a database that is open in OpenSAK at the same time. If OpenSAK may still be running when the scheduled import starts, give it something like <code>--wait 600</code>, or schedule it for a time when OpenSAK is closed.</div></div>
+
+    <h4>Finding the <code>opensak</code> command</h4>
+    <table>
+      <thead><tr><th>Installed from</th><th>Command</th></tr></thead>
+      <tbody>
+        <tr><td>Microsoft Store</td><td><code>opensak</code> — it is already on your PATH. Beta versions use <code>opensak-beta</code>. In the Task Scheduler, the program is <code>%LOCALAPPDATA%\Microsoft\WindowsApps\opensak.exe</code>.</td></tr>
+        <tr><td>Windows download (zip)</td><td><code>opensak-cli.exe</code> in the folder where you unpacked OpenSAK. Use this one, not <code>opensak.exe</code>: only <code>opensak-cli.exe</code> shows the output and lets a script wait for the result.</td></tr>
+        <tr><td>macOS</td><td><code>/Applications/OpenSAK.app/Contents/MacOS/opensak</code></td></tr>
+        <tr><td>Linux AppImage</td><td><code>~/.local/bin/OpenSAK.AppImage</code> once OpenSAK has added itself to your applications menu — otherwise the path of the <code>.AppImage</code> file you downloaded.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>The Store version and the zip version of OpenSAK on Windows keep their settings and databases apart. A command imports into the databases of the version it belongs to. To reach a database of the other one, give the path of its file with <code>--db</code>.</div></div>
+
+    <h4>Scheduling an import</h4>
+    <p>The examples import every Pocket Query in a folder into the database <em>My Caches</em> each morning at 06:30, and move the imported files into a <em>done</em> subfolder. Change the folders, the database name and the time to suit you.</p>
+
+    <p><strong>Windows</strong> — run this once in PowerShell (Store version):</p>
+    <pre><code>$action  = New-ScheduledTaskAction `
+  -Execute "$env:LOCALAPPDATA\Microsoft\WindowsApps\opensak.exe" `
+  -Argument 'import gpx "C:\PQ" --db "My Caches" --move-imported-to "C:\PQ\done" --wait 600 --quiet'
+$trigger = New-ScheduledTaskTrigger -Daily -At 6:30
+Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $trigger</code></pre>
+    <p>For the zip version, put the full path of <code>opensak-cli.exe</code> after <code>-Execute</code>. You can also create the task by hand in <strong>Task Scheduler → Create Basic Task…</strong> with the same program and arguments. Keep <em>Run only when user is logged on</em>: OpenSAK uses your own settings and databases.</p>
+
+    <p><strong>macOS</strong> — save this as <code>~/Library/LaunchAgents/com.opensak.pq-import.plist</code>, replacing <code>YOURNAME</code> with your user name:</p>
+    <pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.opensak.pq-import&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+  &lt;array&gt;
+    &lt;string&gt;/Applications/OpenSAK.app/Contents/MacOS/opensak&lt;/string&gt;
+    &lt;string&gt;import&lt;/string&gt;&lt;string&gt;gpx&lt;/string&gt;
+    &lt;string&gt;/Users/YOURNAME/PQ&lt;/string&gt;
+    &lt;string&gt;--db&lt;/string&gt;&lt;string&gt;My Caches&lt;/string&gt;
+    &lt;string&gt;--move-imported-to&lt;/string&gt;&lt;string&gt;/Users/YOURNAME/PQ/done&lt;/string&gt;
+    &lt;string&gt;--wait&lt;/string&gt;&lt;string&gt;600&lt;/string&gt;
+    &lt;string&gt;--quiet&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;StartCalendarInterval&lt;/key&gt;
+  &lt;dict&gt;&lt;key&gt;Hour&lt;/key&gt;&lt;integer&gt;6&lt;/integer&gt;&lt;key&gt;Minute&lt;/key&gt;&lt;integer&gt;30&lt;/integer&gt;&lt;/dict&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code></pre>
+    <p>Then switch it on in Terminal:</p>
+    <pre><code>launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.opensak.pq-import.plist</code></pre>
+    <p>Use a folder outside <em>Desktop</em>, <em>Documents</em> and <em>Downloads</em>: macOS may block a scheduled program from reading those. The Mac must be awake at the scheduled time; a run missed while it was asleep starts when it wakes.</p>
+
+    <p><strong>Linux</strong> — run <code>crontab -e</code> and add this line:</p>
+    <pre><code>30 6 * * * $HOME/.local/bin/OpenSAK.AppImage import gpx "$HOME/PQ" --db "My Caches" --move-imported-to "$HOME/PQ/done" --wait 600 --quiet</code></pre>
+    <p>No display is needed, so this also works on a machine where nobody is logged in to the desktop.</p>
+
+    <h4>Checking the result</h4>
+    <p>Every run writes its summary to OpenSAK's log file — <strong>Help → OpenSAK File Locations…</strong> shows where it is. Scripts can also check the exit code:</p>
+    <table>
+      <thead><tr><th>Exit code</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>0</code></td><td>The import succeeded</td></tr>
+        <tr><td><code>1</code></td><td>The import failed or finished with errors</td></tr>
+        <tr><td><code>2</code></td><td>Wrong arguments, or a file or folder that doesn't exist</td></tr>
+        <tr><td><code>5</code></td><td>Database not found</td></tr>
+        <tr><td><code>6</code></td><td>Database in use (open in OpenSAK, or another import is running)</td></tr>
+        <tr><td><code>130</code></td><td>Interrupted</td></tr>
+      </tbody>
+    </table>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>If the database comes from an older OpenSAK version, the command-line import updates it first — after making a backup, just like OpenSAK does when you open it.</div></div>
 
   </section>
 
@@ -1738,7 +1825,7 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
         <tr><td>Bug reports &amp; feature requests</td><td><a href="https://github.com/OpenSAK-Org/opensak/issues">github.com/OpenSAK-Org/opensak/issues</a></td></tr>
         <tr><td>Community discussion</td><td><a href="https://www.facebook.com/groups/opensak">Facebook group: OpenSAK</a></td></tr>
         <tr><td>Releases &amp; downloads</td><td><a href="https://github.com/OpenSAK-Org/opensak/releases">github.com/OpenSAK-Org/opensak/releases</a></td></tr>
-        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.22.0-beta.10/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
+        <tr><td>Changelog</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/v1.22.0-beta.11/CHANGELOG.md">CHANGELOG.md on GitHub</a></td></tr>
         <tr><td>Contributing</td><td><a href="https://github.com/OpenSAK-Org/opensak/blob/main/CONTRIBUTING.md">CONTRIBUTING.md on GitHub</a></td></tr>
         <tr><td>Support the project</td><td><a href="https://opencollective.com/opensak">opencollective.com/opensak</a></td></tr>
         <tr><td>Website</td><td><a href="https://opensak.com">opensak.com</a></td></tr>
@@ -1748,7 +1835,7 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     <div class="callout tip"><div class="callout-icon">💡</div><div>OpenSAK is free and open-source software released under the MIT licence. Contributions of any kind — code, translations, documentation, or testing — are very welcome.</div></div>
 
     <p style="margin-top:2rem;color:var(--ink-light);font-size:0.85rem;font-style:italic;">
-      This guide was generated from the OpenSAK source code (v1.22.0-beta.10). Last updated September 2026.
+      This guide was generated from the OpenSAK source code (v1.22.0-beta.11). Last updated September 2026.
     </p>
   </section>
 

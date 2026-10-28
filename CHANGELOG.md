@@ -4,17 +4,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [1.22.0-beta.11] — 2026-10-28
 
-### Changed
-
-- **`opensak.companion_table{}` is now `opensak.set_companion_table{}`
-  (#1186)** — the name said "get one entry of `companion_tables()`", but
-  the function changes a table's settings. It takes the same table,
-  returns the same value and behaves the same; the old name is gone, with
-  no alias, as the companion functions are beta-only and API 4 isn't
-  stable yet. Macros that call it need the new name. Contributed by
-  nagisml.
+> Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
+> the import can now bring along **your saved GSAK views** as column views,
+> and **View → Auto-fit column widths** sizes the cache list's columns to
+> their contents. **Backups include your macros**, and sorting on a custom
+> field column works. Beta testers get the macro API that v1.22.0 will
+> ship as **API 4**: the database tables a macro reads are part of it, and
+> renaming or removing anything now goes through a deprecation period.
+> From here until v1.22.0, only fixes go in.
+>
+> The new texts are machine-translated in all languages except Danish and
+> English — corrections from native speakers are very welcome.
 
 ### Added
 
@@ -25,25 +27,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   custom-field columns are kept when GSAK or the open database defines
   the field, and columns OpenSAK has no equivalent for are left out and
   listed in the import log. Contributed by nagisml.
-- **The database tables are part of the macro API (#1202)** — the macro
-  API reference has a new section, "Database tables for macros", listing
-  the tables and columns a macro can read with `opensak.sql()` and the
-  format of their values (dates, `0`/`1` booleans, units, cache, container
-  and log type names). From API 4 they keep their names and formats like
-  the functions do; columns are only added, and a structural change keeps
-  the old names as a view. Writes with `opensak.sql_write()`, OpenSAK's
-  `opensak_*` tables, indexes and the columns not listed are not covered.
-  A test keeps the list in step with the real database, also after
-  upgrading a database from an older release, and every example macro now
-  runs in CI against a small test database, once with the feature flags
-  of the coming stable release and once with all beta flags. Contributed
-  by nagisml.
-- **Links to shared macros (#1173)** — **Macros → Find more macros…**
-  opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
-  the repository of macros shared by users, in the browser, and an empty
-  Macro manager links to it too. The User Guide (section 29, "Finding and
-  sharing macros"), the macro API reference and the README explain how to
-  install a macro from it and how to share your own.
+- **Auto-fit column widths (#1212)** — **View → Auto-fit column widths**
+  (Ctrl+W) sizes each visible column of the cache list to its contents
+  and header, at most 400 pixels wide so one long name doesn't push the
+  other columns off-screen, and remembers the widths. Columns with a
+  short header ("L4") can shrink to their data. The shortcut can be
+  changed in the Shortcuts dialog. Contributed by nagisml.
 - **Backups include your macros (#1137)** — every backup now holds the
   macros folder: your own macros, the files next to them, each macro's
   saved settings, and the macros' own databases (every SQLite file in the
@@ -58,6 +47,56 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   in the backup. Global custom field definitions were already in every
   backup and come back with **Also restore settings**. Suggested by
   ianwok.
+- **User Guide: Importing from the command line (#1191, #937)** — a new
+  subsection under *Importing Caches* explains `opensak import gpx` and
+  `opensak import gsak`: the most useful options, where the `opensak`
+  command is for each kind of install (Store alias, `opensak-cli.exe`,
+  the macOS app bundle, the AppImage), ready-to-use scheduling examples
+  for Windows Task Scheduler, macOS launchd and Linux cron, and the exit
+  codes.
+
+### Fixed
+
+- **Sorting on a custom field column (#1201)** — the first click on the
+  header of a custom field column (for example GSAK's `LFL`) showed
+  "OpenSAK ran into a problem", and the sort was never remembered for the
+  database. Custom field columns and the Lat/Lon columns now sort like
+  every other column, and the chosen sort comes back the next time the
+  database is opened. Reported by ianwok.
+- **"Enable online lookup for higher accuracy" removed from Settings
+  (#1208)** — the *Location refinement* box in Settings → Advanced
+  offered an online OpenStreetMap lookup that no longer exists: it was
+  removed together with the old location lookup when the boundary data
+  arrived, so ticking it did nothing. The box is gone, and
+  `docs/update-location.md` now describes the boundary-data lookup and
+  the boundary-pack menu items instead of the online pass.
+- **A bare `opensak` gives the prompt back on Windows (#1180)** — through
+  the Store's command-line alias, `opensak` without a command kept the
+  shell waiting until OpenSAK was closed. It now starts OpenSAK and
+  returns at once; `opensak import …`, `--help` and `--run-macro` still
+  wait for their result and exit code. Contributed by nagisml.
+
+### In beta builds only
+
+- **Links to shared macros (#1173)** — **Macros → Find more macros…**
+  opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
+  the repository of macros shared by users, in the browser, and an empty
+  Macro manager links to it too. The User Guide (section 29, "Finding and
+  sharing macros"), the macro API reference and the README explain how to
+  install a macro from it and how to share your own.
+- **The database tables are part of the macro API (#1202)** — the macro
+  API reference has a new section, "Database tables for macros", listing
+  the tables and columns a macro can read with `opensak.sql()` and the
+  format of their values (dates, `0`/`1` booleans, units, cache, container
+  and log type names). From API 4 they keep their names and formats like
+  the functions do; columns are only added, and a structural change keeps
+  the old names as a view. Writes with `opensak.sql_write()`, OpenSAK's
+  `opensak_*` tables, indexes and the columns not listed are not covered.
+  A test keeps the list in step with the real database, also after
+  upgrading a database from an older release, and every example macro now
+  runs in CI against a small test database, once with the feature flags
+  of the coming stable release and once with all beta flags. Contributed
+  by nagisml.
 - **Deprecations in the macro API (#1185)** — from API 4, renaming or
   removing a macro function, parameter, cache field or header key needs a
   new API version and a deprecation period of at least one stable
@@ -79,16 +118,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   flag). Both are taken from the function registry and the release
   defaults of the feature flags, so they follow when a flag goes on in
   stable. Contributed by nagisml.
-
-### Fixed
-
-- **"Enable online lookup for higher accuracy" removed from Settings
-  (#1208)** — the *Location refinement* box in Settings → Advanced
-  offered an online OpenStreetMap lookup that no longer exists: it was
-  removed together with the old location lookup when the boundary data
-  arrived, so ticking it did nothing. The box is gone, and
-  `docs/update-location.md` now describes the boundary-data lookup and
-  the boundary-pack menu items instead of the online pass.
+- **`opensak.companion_table{}` is now `opensak.set_companion_table{}`
+  (#1186)** — the name said "get one entry of `companion_tables()`", but
+  the function changes a table's settings. It takes the same table,
+  returns the same value and behaves the same; the old name is gone, with
+  no alias, as the companion functions are beta-only and API 4 isn't
+  stable yet. Macros that call it need the new name. Contributed by
+  nagisml.
 - **A remembered form starts the way the user left it (#1197)** — with
   `remember = true` a form came back with last time's values, but not
   with what its `on_change` callbacks had changed: choose GGZ in the
@@ -101,12 +137,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (now version 1.1, `Requires-API: 4`) rely on this instead of repeating
   their `on_change` in `on_open`; the API reference lists it as a change
   of `opensak.form` in API 4. Reported by GeePa67, contributed by nagisml.
-- **Sorting on a custom field column (#1201)** — the first click on the
-  header of a custom field column (for example GSAK's `LFL`) showed
-  "OpenSAK ran into a problem", and the sort was never remembered for the
-  database. Custom field columns and the Lat/Lon columns now sort like
-  every other column, and the chosen sort comes back the next time the
-  database is opened. Reported by ianwok.
+
+### For developers
+
+- **Upgrade-path tests for 1.21.0 → 1.22.0 (#1193)** — the upgrade tests
+  now cover database migration 28, the companion database, a backup set
+  made by 1.21.0 and a restore onto a clean install, from fixtures
+  generated by `scripts/make_upgrade_fixture.py`.
 
 ## [1.22.0-beta.10] — 2026-10-26
 
