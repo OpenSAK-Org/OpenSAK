@@ -107,7 +107,7 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.message`](#opensakmessage) | 3 |
 | [`opensak.input`](#opensakinput) | 3 |
 | [`opensak.choose`](#opensakchoose) | 3 |
-| [`opensak.form`](#opensakform) | 3 |
+| [`opensak.form`](#opensakform) | 3, changed in 4 |
 | [`opensak.progress`](#opensakprogress) | 3 |
 | [`opensak.select`](#opensakselect) | 3 |
 | [`opensak.refresh`](#opensakrefresh) | 3 |
@@ -2408,7 +2408,7 @@ Parameters:
 
 Returns `table<string, any>?, string?` — The values by field id and the id of the button (or `exit_on_change` field, or "timeout") that closed the form; nil if it was cancelled.
 
-Since API version 3.
+Since API version 3. Changed in API version 4: with `remember = true`, `on_change` is called for each field that gets a remembered value when the form opens (#1197).
 
 Example:
 
@@ -4350,10 +4350,10 @@ The form returns two values: a table with the value of every field that has an `
 | `layout` | `"auto"\|"absolute"` | "auto" (default) stacks the fields with their labels on the left; "absolute" places each field at its `x`, `y` like GSAK. |
 | `width` | `integer` | Width of the field area in pixels (absolute layout: default fits the fields). |
 | `height` | `integer` | Height of the field area in pixels. |
-| `remember` | `boolean` | Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. |
+| `remember` | `boolean` | Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. Only values are kept: when the form opens, `on_change` is called for each field that got a remembered value (in form order, before `on_open`), so what it enables, hides or relabels is set again. |
 | `id` | `string` | Name the remembered values are kept under (default: the title), for macros with several forms. |
 | `timeout` | `number` | Close the form after this many seconds; it then returns the values and "timeout". |
-| `on_open` | `fun(f: opensak.Form)` | Called once when the form opens. |
+| `on_open` | `fun(f: opensak.Form)` | Called once when the form opens, after the `on_change` calls for remembered values. |
 | `validate` | `fun(f: opensak.Form, button: string): string?` | Called before the form closes with a button other than a cancel button; return a message to show it and keep the form open. |
 
 ### Form fields
@@ -4398,7 +4398,7 @@ Every field takes `type`, `id`, `label`, `tooltip`, `enabled`, `visible`, `x`, `
 | `italic` | `boolean` | Italic caption. |
 | `color` | `string` | Caption colour, "#rrggbb" or a name such as "red". |
 | `font_size` | `integer` | Caption font size in points. |
-| `on_change` | `fun(f: opensak.Form, value: any, id: string)` | Called when the user changes the value — a text or number field when it loses focus or Enter is pressed. The form stays open. |
+| `on_change` | `fun(f: opensak.Form, value: any, id: string)` | Called when the user changes the value — a text or number field when it loses focus or Enter is pressed — and, with `remember = true`, when the form opens with a remembered value. The form stays open. |
 | `exit_on_change` | `boolean` | Close the form when the value changes (after on_change); it returns the values and the field's id. Like GSAK's ExitOnChange. |
 | `remember` | `boolean` | false: never remember this field's value. |
 | `on_click` | `fun(f: opensak.Form, id: string)` | button: called on a click; the form stays open (f:close() closes it). |
