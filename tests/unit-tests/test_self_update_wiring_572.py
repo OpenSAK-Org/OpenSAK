@@ -80,7 +80,7 @@ class TestPrimaryButtonChoicePerPlatform:
              patch.object(MainWindow, "_start_self_download_update") as mock_start:
             fake_msg = _run_dialog_and_click_primary(window)
         primary_text = fake_msg.addButton.call_args_list[0][0][0]
-        assert primary_text == "Download & Install"
+        assert primary_text == "Download && Install"
         mock_start.assert_called_once_with("v1.20.0")
 
     def test_macos_offers_download_and_install(self, window):
@@ -90,7 +90,7 @@ class TestPrimaryButtonChoicePerPlatform:
              patch.object(MainWindow, "_start_self_download_update") as mock_start:
             fake_msg = _run_dialog_and_click_primary(window)
         primary_text = fake_msg.addButton.call_args_list[0][0][0]
-        assert primary_text == "Download & Install"
+        assert primary_text == "Download && Install"
         mock_start.assert_called_once_with("v1.20.0")
 
     def test_appimage_integrated_still_takes_priority_over_self_download(self, window):
