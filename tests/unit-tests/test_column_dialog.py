@@ -15,12 +15,14 @@ from opensak.gui.dialogs.column_dialog import (
     ColumnView,
     current_column_view_match,
     get_all_columns,
+    get_applied_view_name,
     get_column_widths,
     get_container_display,
     get_default_view,
     get_default_view_name,
     get_type_display,
     get_visible_columns,
+    set_applied_view_name,
     set_column_widths,
     set_container_display,
     set_default_view_name,
@@ -354,8 +356,46 @@ class TestCurrentViewMatch:
         _save_current_setup_as("Mine")
         assert current_column_view_match() == "Mine"
 
+    def test_identical_views_prefer_the_applied_one(self, store, views_dir):
+        # The report: "MyView" and "Before Print" hold the same setup, so
+        # picking "MyView" in the toolbar jumped back to "Before Print".
+        _save_current_setup_as("Before Print")
+        _save_current_setup_as("MyView")
+        assert current_column_view_match() == "Before Print"
+        set_applied_view_name("MyView")
+        assert current_column_view_match() == "MyView"
+
+    def test_stale_applied_name_falls_back_to_first_match(self, store, views_dir):
+        _save_current_setup_as("A")
+        _save_current_setup_as("B")
+        set_applied_view_name("Deleted view")
+        assert current_column_view_match() == "A"
+
+    def test_applied_name_does_not_force_a_mismatch(self, store, views_dir):
+        ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
+        set_applied_view_name("Other")
+        assert current_column_view_match() is None
+
 
 class TestDialogPreselectsView:
+    def test_preselects_applied_view_among_identical(self, qtbot, store, views_dir):
+        _save_current_setup_as("Before Print")
+        _save_current_setup_as("MyView")
+        set_applied_view_name("MyView")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        assert dlg._view_combo.currentText() == "MyView"
+
+    def test_ok_remembers_selected_view(self, qtbot, store, views_dir):
+        _save_current_setup_as("Before Print")
+        _save_current_setup_as("MyView")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("MyView")
+        dlg._save_and_accept()
+        assert get_applied_view_name() == "MyView"
+        assert current_column_view_match() == "MyView"
+
     def test_preselects_matching_view(self, qtbot, store, views_dir):
         ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
         path = _save_current_setup_as("Mine")
