@@ -550,7 +550,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(act_columns)
 
         self._act_autofit_columns = QAction(tr("action_autofit_columns"), self)
-        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+W"))
+        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+Alt+W"))
         self._act_autofit_columns.triggered.connect(self._autofit_columns)
         view_menu.addAction(self._act_autofit_columns)
 
@@ -3394,7 +3394,7 @@ class MainWindow(QMainWindow):
                 self._refresh_table_only()
 
     def _autofit_columns(self) -> None:
-        """Size every cache-list column to fit its contents (Ctrl+W)."""
+        """Size every cache-list column to fit its contents (Ctrl+Alt+W)."""
         self._cache_table.autofit_columns()
 
     def _populate_column_view_combo(self) -> None:
