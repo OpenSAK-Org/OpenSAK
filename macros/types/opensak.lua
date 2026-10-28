@@ -228,10 +228,10 @@
 ---@field layout? "auto"|"absolute" "auto" (default) stacks the fields with their labels on the left; "absolute" places each field at its `x`, `y` like GSAK.
 ---@field width? integer Width of the field area in pixels (absolute layout: default fits the fields).
 ---@field height? integer Height of the field area in pixels.
----@field remember? boolean Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept.
+---@field remember? boolean Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. Only values are kept: when the form opens, `on_change` is called for each field that got a remembered value (in form order, before `on_open`), so what it enables, hides or relabels is set again.
 ---@field id? string Name the remembered values are kept under (default: the title), for macros with several forms.
 ---@field timeout? number Close the form after this many seconds; it then returns the values and "timeout".
----@field on_open? fun(f: opensak.Form) Called once when the form opens.
+---@field on_open? fun(f: opensak.Form) Called once when the form opens, after the `on_change` calls for remembered values.
 ---@field validate? fun(f: opensak.Form, button: string): string? Called before the form closes with a button other than a cancel button; return a message to show it and keep the form open.
 
 ---A field of `opensak.form{}` (see Forms in the API reference).
@@ -251,7 +251,7 @@
 ---@field italic? boolean Italic caption.
 ---@field color? string Caption colour, "#rrggbb" or a name such as "red".
 ---@field font_size? integer Caption font size in points.
----@field on_change? fun(f: opensak.Form, value: any, id: string) Called when the user changes the value — a text or number field when it loses focus or Enter is pressed. The form stays open.
+---@field on_change? fun(f: opensak.Form, value: any, id: string) Called when the user changes the value — a text or number field when it loses focus or Enter is pressed — and, with `remember = true`, when the form opens with a remembered value. The form stays open.
 ---@field exit_on_change? boolean Close the form when the value changes (after on_change); it returns the values and the field's id. Like GSAK's ExitOnChange.
 ---@field remember? boolean false: never remember this field's value.
 ---@field on_click? fun(f: opensak.Form, id: string) button: called on a click; the form stays open (f:close() closes it).
@@ -705,7 +705,7 @@ function opensak.codes() end
 ---@return {short: string?, long: string?, html: boolean}? # Short and long description and whether they are HTML; nil if the cache is not in the database.
 function opensak.description(code, options) end
 
----Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+---Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. The tables and columns macros may rely on, and the format of their values, are listed in Database tables for macros; opensak.tables() and opensak.columns() list everything there is. Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 ---
 ---Since API version 2. Changed in API version 3: TEMP tables, views and indexes.
 ---
@@ -720,7 +720,7 @@ function opensak.description(code, options) end
 ---@return table<string, any>[] # One table per row, keyed by column name.
 function opensak.sql(query, params, options) end
 
----Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
+---Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size. The tables and columns to rely on are listed in Database tables for macros.
 ---
 ---Since API version 2.
 ---
@@ -746,7 +746,7 @@ function opensak.sql_each(query, params, options) end
 ---@return string[] # Table and view names, sorted.
 function opensak.tables(options) end
 
----The columns of a table or view of the active database (or the one named by the `database` option).
+---The columns of a table or view of the active database (or the one named by the `database` option): all of them, also those Database tables for macros leaves out, which may change in any version.
 ---
 ---Since API version 2. Changed in API version 3: added `required`.
 ---
@@ -1790,7 +1790,7 @@ function opensak.choose(prompt, options, default, title) end
 
 ---Show a dialog built from a table (see Forms) and wait until it is closed. Fields with a value come back in a table keyed by their `id`. Callbacks such as `on_change` run while the form stays open and can change it through the handle they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in the macro window builds forms visually and imports GSAK forms.
 ---
----Since API version 3.
+---Since API version 3. Changed in API version 4: with `remember = true`, `on_change` is called for each field that gets a remembered value when the form opens (#1197).
 ---
 ---```lua
 ---local v, button = opensak.form{

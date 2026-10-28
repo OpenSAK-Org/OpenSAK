@@ -4753,12 +4753,13 @@ class MacroRuntime:
         self._load_form_images(form, func)
         memory = self._form_memory_file() if form.remember else None
         key = macro_forms.remember_key(form)
+        restored: list[macro_forms.Field] = []
         if memory is not None:
             stored = self._load_form_memory(memory).get(key)
             if isinstance(stored, dict):
-                macro_forms.apply_remembered(form, stored, func)
+                restored = macro_forms.apply_remembered(form, stored, func)
 
-        session = _FormSession(self, lua, form)
+        session = _FormSession(self, lua, form, restored)
         result = show(form, session.dispatch)
         session.raise_error()
         if result is None:
@@ -5272,10 +5273,16 @@ class _FormSession:
     by raise_error() once the dialog has returned.
     """
 
-    def __init__(self, runtime: MacroRuntime, lua, form: macro_forms.Form):
+    def __init__(
+        self, runtime: MacroRuntime, lua, form: macro_forms.Form,
+        restored: Optional[list[macro_forms.Field]] = None,
+    ):
         self._rt = runtime
         self._lua = lua
         self._form = form
+        # Fields that start with a remembered value: their on_change runs
+        # again on "open", so the state it derives comes back too (#1197).
+        self._restored = restored or []
         self._by_id = form.by_id()
         self._error: Optional[BaseException] = None
         self._handle = None
@@ -5312,12 +5319,12 @@ class _FormSession:
             return None
         handle = self._handle_for(controller)
         if event == "open":
+            for restored in self._restored:
+                self._changed(controller, handle, restored)
             if form.on_open is not None:
                 form.on_open(handle)
         elif event == "change":
-            callback = field.get("on_change")
-            if callback is not None:
-                callback(handle, _to_lua(self._lua, controller.value(field)), field.id)
+            self._changed(controller, handle, field)
         elif event == "click":
             callback = field.get("on_click")
             if callback is not None:
@@ -5333,6 +5340,11 @@ class _FormSession:
                 return _ui_text("opensak.form: validate", "the message", answer)
             raise MacroError("opensak.form: validate must return nil or a message")
         return None
+
+    def _changed(self, controller, handle, field: macro_forms.Field) -> None:
+        callback = field.get("on_change")
+        if callback is not None:
+            callback(handle, _to_lua(self._lua, controller.value(field)), field.id)
 
     def values(self, controller) -> dict[str, Any]:
         return {f.id: controller.value(f) for f in self._form.value_fields() if f.id}
@@ -5891,9 +5903,10 @@ API: tuple[ApiFunction, ...] = (
                     "ends or calls opensak.switch_database(); changes to them "
                     "inside opensak.transaction() are undone with it. A TEMP "
                     "table may not take the name of a table of the database. "
-                    "Column names follow the database schema, which may "
-                    "change between versions (see opensak.tables() and "
-                    "opensak.columns()). Use `AS` to name computed columns. "
+                    "The tables and columns macros may rely on, and the "
+                    "format of their values, are listed in Database tables "
+                    "for macros; opensak.tables() and opensak.columns() "
+                    "list everything there is. Use `AS` to name computed columns. "
                     "NULL values are nil. At most "
                     f"{MAX_ROWS:,} rows; use opensak.sql_each() for more. A "
                     f"query is aborted after {QUERY_TIMEOUT_S:g} s.",
@@ -5917,7 +5930,8 @@ API: tuple[ApiFunction, ...] = (
         name="sql_each",
         description="Like opensak.sql(), but returns an iterator for a "
                     "generic `for` that fetches the rows in chunks — for "
-                    "results of any size.",
+                    "results of any size. The tables and columns to rely on "
+                    "are listed in Database tables for macros.",
         example='for r in opensak.sql_each("SELECT gc_code, name FROM caches WHERE found = 0") do\n'
                 "    print(r.gc_code, r.name)\nend",
         since=2,
@@ -5948,7 +5962,9 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="columns",
         description="The columns of a table or view of the active database "
-                    "(or the one named by the `database` option).",
+                    "(or the one named by the `database` option): all of "
+                    "them, also those Database tables for macros leaves out, "
+                    "which may change in any version.",
         example='for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
@@ -7174,6 +7190,8 @@ API: tuple[ApiFunction, ...] = (
                 'if not v then return end      -- cancelled\n'
                 'print(v.folder, v.maxdist, v.unfound, v.fmt)',
         since=3,
+        changed=((4, "with `remember = true`, `on_change` is called for each field "
+                     "that gets a remembered value when the form opens (#1197)"),),
         bind=lambda rt, lua: lambda *a: rt._form(lua, *a),
         params=(Param("spec", "opensak.FormSpec", "The form."),),
         returns=("table<string, any>?, string?",

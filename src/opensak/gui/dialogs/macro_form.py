@@ -661,7 +661,9 @@ class FormDialog(QDialog):
         return lambda: self._clicked(spec)
 
     def run(self) -> Optional[tuple[dict[str, Any], str]]:
-        if self._events is not None and self._form.on_open is not None:
+        # Always: besides on_open, "open" replays on_change of the fields
+        # that start with a remembered value (#1197).
+        if self._events is not None:
             QTimer.singleShot(0, lambda: self._emit("open", None))
         self.exec()
         if self._closer is None:

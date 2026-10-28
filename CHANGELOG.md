@@ -25,6 +25,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   custom-field columns are kept when GSAK or the open database defines
   the field, and columns OpenSAK has no equivalent for are left out and
   listed in the import log. Contributed by nagisml.
+- **The database tables are part of the macro API (#1202)** — the macro
+  API reference has a new section, "Database tables for macros", listing
+  the tables and columns a macro can read with `opensak.sql()` and the
+  format of their values (dates, `0`/`1` booleans, units, cache, container
+  and log type names). From API 4 they keep their names and formats like
+  the functions do; columns are only added, and a structural change keeps
+  the old names as a view. Writes with `opensak.sql_write()`, OpenSAK's
+  `opensak_*` tables, indexes and the columns not listed are not covered.
+  A test keeps the list in step with the real database, also after
+  upgrading a database from an older release, and every example macro now
+  runs in CI against a small test database, once with the feature flags
+  of the coming stable release and once with all beta flags. Contributed
+  by nagisml.
 - **Links to shared macros (#1173)** — **Macros → Find more macros…**
   opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
   the repository of macros shared by users, in the browser, and an empty
@@ -57,9 +70,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   deprecations, and the unit tests compare the API with the released one
   (`tests/fixtures/macro_api_baseline.json`) so nothing is removed by
   accident. Nothing is deprecated yet. Contributed by nagisml.
+- **Stable-release checks for shared macros** — for the OpenSAK-Macros
+  CI, next to the deprecation checks: `newest_stable_api()` gives the
+  newest macro API version a stable release has, so a macro asking for a
+  higher `Requires-API` can be refused, and `beta_only_names()` /
+  `find_beta_only()` list and find what only beta builds have (for now
+  `opensak.get_url()`, besides everything still behind a beta-only feature
+  flag). Both are taken from the function registry and the release
+  defaults of the feature flags, so they follow when a flag goes on in
+  stable. Contributed by nagisml.
 
 ### Fixed
 
+- **A remembered form starts the way the user left it (#1197)** — with
+  `remember = true` a form came back with last time's values, but not
+  with what its `on_change` callbacks had changed: choose GGZ in the
+  example from the API reference, and the next time "Unfound only" was
+  no longer greyed out. A form still remembers only values; when it
+  opens, `on_change` is now called for each field that got a remembered
+  value (in form order, before `on_open`, and without closing the form
+  for `exit_on_change`), so whatever it enables, hides or relabels is
+  set again. The example macros *find_with_form* and *export_with_form*
+  (now version 1.1, `Requires-API: 4`) rely on this instead of repeating
+  their `on_change` in `on_open`; the API reference lists it as a change
+  of `opensak.form` in API 4. Reported by GeePa67, contributed by nagisml.
 - **Sorting on a custom field column (#1201)** — the first click on the
   header of a custom field column (for example GSAK's `LFL`) showed
   "OpenSAK ran into a problem", and the sort was never remembered for the

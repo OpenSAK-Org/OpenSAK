@@ -487,23 +487,37 @@ def carry_over(
     return moved
 
 
-def restore_approval(record: Approval) -> bool:
-    """A restore from a backup (#1137) put the macro file *record.path*
-    back: store *record*, the approval the backup had for it, replacing the
-    macro's previous one. Only when the file holds exactly the code
-    *record* approves, and not when the macro already has a record for
-    that code (it may allow more than the backup's). True if stored."""
-    try:
-        sha = source_hash(read_macro_source(record.path))
-    except (OSError, UnicodeDecodeError):
-        return False
-    if sha != record.sha256 or not record.anything:
-        return False
-    current = _record(record.path)
-    if current is not None and current.sha256 == sha:
-        return False
-    _put(replace(record, path=str(Path(record.path).resolve())))
-    return True
+def restore_approvals(records: Iterable[Approval]) -> int:
+    """A restore from a backup (#1137) put macro files back: store each of
+    *records*, the approval the backup had for the file *record.path*,
+    replacing the macro's previous one. Only when the file holds exactly
+    the code the record approves, and not when the macro already has a
+    record for that code (it may allow more than the backup's). The store
+    is written once, after all of them. The number stored."""
+    stored = approvals()
+    index = {macro_key(a.path): i for i, a in enumerate(stored)}
+    count = 0
+    for record in records:
+        try:
+            sha = source_hash(read_macro_source(record.path))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if sha != record.sha256 or not record.anything:
+            continue
+        key = macro_key(record.path)
+        i = index.get(key)
+        if i is not None and stored[i].sha256 == sha:
+            continue
+        record = replace(record, path=str(Path(record.path).resolve()))
+        if i is None:
+            index[key] = len(stored)
+            stored.append(record)
+        else:
+            stored[i] = record
+        count += 1
+    if count:
+        _save(stored)
+    return count
 
 
 def reset_session() -> None:

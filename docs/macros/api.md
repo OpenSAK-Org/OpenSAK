@@ -107,7 +107,7 @@ Macros shared by other users are in the [OpenSAK-Macros](https://github.com/Open
 | [`opensak.message`](#opensakmessage) | 3 |
 | [`opensak.input`](#opensakinput) | 3 |
 | [`opensak.choose`](#opensakchoose) | 3 |
-| [`opensak.form`](#opensakform) | 3 |
+| [`opensak.form`](#opensakform) | 3, changed in 4 |
 | [`opensak.progress`](#opensakprogress) | 3 |
 | [`opensak.select`](#opensakselect) | 3 |
 | [`opensak.refresh`](#opensakrefresh) | 3 |
@@ -525,7 +525,7 @@ if d and d.long and d.long:find("bonus") then print("bonus cache") end
 opensak.sql(query [, params] [, options])
 ```
 
-Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. The tables and columns macros may rely on, and the format of their values, are listed in Database tables for macros; opensak.tables() and opensak.columns() list everything there is. Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 
 Parameters:
 
@@ -551,7 +551,7 @@ for _, r in ipairs(rows) do print(r.country, r.n) end
 opensak.sql_each(query [, params] [, options])
 ```
 
-Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
+Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size. The tables and columns to rely on are listed in Database tables for macros.
 
 Parameters:
 
@@ -599,7 +599,7 @@ print(table.concat(opensak.tables(), ", "))
 opensak.columns(table [, options])
 ```
 
-The columns of a table or view of the active database (or the one named by the `database` option).
+The columns of a table or view of the active database (or the one named by the `database` option): all of them, also those Database tables for macros leaves out, which may change in any version.
 
 Parameters:
 
@@ -2408,7 +2408,7 @@ Parameters:
 
 Returns `table<string, any>?, string?` — The values by field id and the id of the button (or `exit_on_change` field, or "timeout") that closed the form; nil if it was cancelled.
 
-Since API version 3.
+Since API version 3. Changed in API version 4: with `remember = true`, `on_change` is called for each field that gets a remembered value when the form opens (#1197).
 
 Example:
 
@@ -4350,10 +4350,10 @@ The form returns two values: a table with the value of every field that has an `
 | `layout` | `"auto"\|"absolute"` | "auto" (default) stacks the fields with their labels on the left; "absolute" places each field at its `x`, `y` like GSAK. |
 | `width` | `integer` | Width of the field area in pixels (absolute layout: default fits the fields). |
 | `height` | `integer` | Height of the field area in pixels. |
-| `remember` | `boolean` | Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. |
+| `remember` | `boolean` | Start with the values the user entered last time (stored per macro file, next to opensak.settings; the macro must be saved). Fields with `remember = false` and passwords are not kept. Only values are kept: when the form opens, `on_change` is called for each field that got a remembered value (in form order, before `on_open`), so what it enables, hides or relabels is set again. |
 | `id` | `string` | Name the remembered values are kept under (default: the title), for macros with several forms. |
 | `timeout` | `number` | Close the form after this many seconds; it then returns the values and "timeout". |
-| `on_open` | `fun(f: opensak.Form)` | Called once when the form opens. |
+| `on_open` | `fun(f: opensak.Form)` | Called once when the form opens, after the `on_change` calls for remembered values. |
 | `validate` | `fun(f: opensak.Form, button: string): string?` | Called before the form closes with a button other than a cancel button; return a message to show it and keep the form open. |
 
 ### Form fields
@@ -4398,7 +4398,7 @@ Every field takes `type`, `id`, `label`, `tooltip`, `enabled`, `visible`, `x`, `
 | `italic` | `boolean` | Italic caption. |
 | `color` | `string` | Caption colour, "#rrggbb" or a name such as "red". |
 | `font_size` | `integer` | Caption font size in points. |
-| `on_change` | `fun(f: opensak.Form, value: any, id: string)` | Called when the user changes the value — a text or number field when it loses focus or Enter is pressed. The form stays open. |
+| `on_change` | `fun(f: opensak.Form, value: any, id: string)` | Called when the user changes the value — a text or number field when it loses focus or Enter is pressed — and, with `remember = true`, when the form opens with a remembered value. The form stays open. |
 | `exit_on_change` | `boolean` | Close the form when the value changes (after on_change); it returns the values and the field's id. Like GSAK's ExitOnChange. |
 | `remember` | `boolean` | false: never remember this field's value. |
 | `on_click` | `fun(f: opensak.Form, id: string)` | button: called on a click; the form stays open (f:close() closes it). |
@@ -4501,6 +4501,187 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `last_user_update` | `string?` | When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate). |
 | `custom` | `table<string, any>` | The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). Only while the `companion-db` feature flag is on. |
 
+## Database tables for macros
+
+`opensak.sql()` and `opensak.sql_each()` read the tables of the database directly. The tables and columns listed here are part of the macro API for reading, like the functions: within an API version they keep their names and their value formats (cache type strings, date format, units, `0`/`1` for booleans), and tables and columns are only added. A rename or removal comes with a new API version, after a deprecation period, as for functions. If the structure of a table has to change, its old table and column names stay available as a compatibility view, so queries using them keep working.
+
+Not covered by this:
+
+- Writing to these tables with `opensak.sql_write()`. Writes are only promised through `opensak.update()`, `opensak.insert{}`, `opensak.delete()` and `opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()` (see [Changing caches](#changing-caches)).
+- Tables starting with `opensak_`, and tables not listed here (e.g. `db_settings`).
+- Indexes: which ones exist, and so how fast a query is.
+- Columns not listed here: `caches`: `last_four_logs`, `location_basis`, `location_dataset`, `location_source`, `location_updated`, `source_file`.
+- The tables other macros made in the companion database, and `companion.custom_values`, whose columns are the user's custom fields (read them with the `custom` cache field).
+
+A column is NULL (`nil` in Lua) where nothing is known. *Field* names the same value in the tables `opensak.cache()`, `opensak.logs()`, `opensak.waypoints()`, … return, which convert it to Lua: booleans to `true`/`false`, dates to `"YYYY-MM-DD"`.
+
+### Value formats
+
+| Format | Values |
+|---|---|
+| integer key | A row's key (`id`) or the key of the cache it belongs to (`cache_id` = `caches.id`). Only valid within one database: a cache copied or moved to another database gets a new `id`, so match caches across databases by `gc_code`. |
+| integer | A whole number. |
+| text | Text (UTF-8). |
+| 0 / 1 | `1` for yes, `0` for no: `WHERE found = 1`, `SUM(found)`. Not `true`/`false` (opensak.cache() turns them into Lua booleans, opensak.sql() does not). |
+| date and time | Text `"YYYY-MM-DD HH:MM:SS.ffffff"`, e.g. `"2024-05-01 00:00:00.000000"`, so it sorts and compares as text: `hidden_date >= '2024-01-01'`. `substr(x, 1, 10)` or `date(x)` gives the date. Dates from a listing or a log (hidden, found, log dates) have the time the import file gives, often 00:00:00; the times OpenSAK records itself (imports, changes) are UTC. |
+| decimal degrees | A latitude (−90 … 90, south negative) or longitude (−180 … 180, west negative) in decimal degrees, WGS84. |
+| 1 – 5 | Difficulty or terrain: 1.0 to 5.0 in steps of 0.5. |
+| km | A distance in kilometres. |
+| metres | A height in metres above sea level. |
+| degrees 0 – 360 | A compass bearing in degrees, 0 = north, 90 = east. |
+| cache type | One of "Traditional Cache", "Multi-cache", "Unknown Cache", "Letterbox Hybrid", "Wherigo Cache", "Earthcache", "Virtual Cache", "Webcam Cache", "Event Cache", "Cache In Trash Out Event", "Mega-Event Cache", "Giga-Event Cache", "Community Celebration Event", "Geocaching HQ Celebration", "Geocaching HQ Block Party", "Geocaching HQ Cache", "GPS Adventures Maze", "Lab Cache", "Project A.P.E. Cache", "Locationless (Reverse) Cache", "Waypoint", "Hotel/POI". |
+| container | One of "Micro", "Small", "Regular", "Large", "Other", "Not chosen". |
+| log type | geocaching.com's log type: "Announcement", "Archive", "Attended", "Didn't find it", "Enable Listing", "Found it", "Needs Archived", "Needs Maintenance", "Owner Maintenance", "Post Reviewer Note", "Publish Listing", "Retract Listing", "Temporarily Disable Listing", "Unarchive", "Update Coordinates", "Webcam Photo Taken", "Will Attend", "Write note". A log imported from elsewhere may have another type. |
+
+### Table `caches`
+
+One row per cache (and per custom waypoint, see `parent_gc_code`).
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The cache's key, used by `cache_id` in the other tables. |
+| `gc_code` | text | `code` | GC code, e.g. "GC12345"; unique in the database. |
+| `name` | text | `name` | Cache name. |
+| `cache_type` | cache type | `type` | Cache type. |
+| `container` | container | `container` | Container size; NULL if not known. |
+| `latitude` | decimal degrees | `lat` | Posted latitude. |
+| `longitude` | decimal degrees | `lon` | Posted longitude. |
+| `difficulty` | 1 – 5 | `difficulty` | Difficulty. |
+| `terrain` | 1 – 5 | `terrain` | Terrain. |
+| `placed_by` | text | `placed_by` | Placed-by name as shown on the listing. |
+| `owner_name` | text | `owner` | Owner's geocaching.com name. |
+| `owner_id` | text |  | Owner's geocaching.com member id. |
+| `hidden_date` | date and time | `hidden` | Hidden (placed) date. |
+| `last_updated` | date and time |  | When the listing last changed, as the import file says. |
+| `available` | 0 / 1 | `available` | 1 = not disabled. |
+| `archived` | 0 / 1 | `archived` | 1 = archived. |
+| `premium_only` | 0 / 1 | `premium` | 1 = premium-member only. |
+| `short_description` | text |  | Short description. |
+| `short_desc_html` | 0 / 1 |  | 1 = the short description is HTML. |
+| `long_description` | text |  | Long description. |
+| `long_desc_html` | 0 / 1 |  | 1 = the long description is HTML. |
+| `encoded_hints` | text | `hint` | Hint text as imported. |
+| `country` | text | `country` | Country. |
+| `state` | text | `state` | State / region. |
+| `county` | text | `county` | County. |
+| `found` | 0 / 1 | `found` | 1 = found by you. |
+| `found_date` | date and time | `found_date` | Your find date. |
+| `dnf` | 0 / 1 | `dnf` | 1 = your latest log is a Didn't find it. |
+| `dnf_date` | date and time | `dnf_date` | Date of a Didn't find it log: your own from GSAK (DNFDate), the latest by anyone from a GPX file. |
+| `first_to_find` | 0 / 1 | `ftf` | 1 = you were first to find. |
+| `user_flag` | 0 / 1 | `user_flag` | User flag. |
+| `user_sort` | integer | `user_sort` | User sort value. |
+| `user_data_1` | text | `user_data` | User data field 1 (GSAK's UserData). |
+| `user_data_2` | text | `user_data` | User data field 2. |
+| `user_data_3` | text | `user_data` | User data field 3. |
+| `user_data_4` | text | `user_data` | User data field 4. |
+| `distance` | km | `distance` | Distance from the active centre point; NULL until calculated. |
+| `bearing` | degrees 0 – 360 | `bearing` | Bearing from the active centre point; NULL until calculated. |
+| `favorite_points` | integer | `favorite_points` | Favourite points; NULL until known. |
+| `find_count` | integer | `find_count` | Number of Found it logs by anyone. |
+| `gc_note` | text | `gc_note` | Personal note from geocaching.com. |
+| `url` | text | `url` | Listing URL. |
+| `elevation` | metres | `elevation` | Elevation; NULL if not known. |
+| `color` | text | `color` | Colour tag, e.g. "#FF5733". |
+| `guid` | text |  | geocaching.com listing GUID. |
+| `watch` | 0 / 1 | `watch` | 1 = on the watchlist. |
+| `gc_cache_id` | text |  | geocaching.com's numeric cache id, as text. |
+| `log_count` | integer | `log_count` | Number of logs stored. |
+| `trackable_count` | integer | `trackable_count` | Number of trackables in the cache. |
+| `found_log_count` | integer |  | Number of your own Found it (Attended, Webcam Photo Taken) logs. |
+| `waypoint_count` | integer | `waypoint_count` | Number of additional waypoints. |
+| `last_log_date` | date and time | `last_log_date` | Date of the latest log. |
+| `last_found_date` | date and time |  | Date of the latest Found it log by anyone. |
+| `parent_gc_code` | text |  | For a custom waypoint: the GC code of the cache it belongs to; NULL for caches. |
+| `locked` | 0 / 1 | `locked` | 1 = locked against import changes. |
+| `imported_at` | date and time |  | When the cache was first imported (UTC). |
+| `last_gpx_update` | date and time | `last_gpx_update` | When an import last touched the cache (UTC). |
+| `last_user_update` | date and time | `last_user_update` | When a user field (user flag, user sort, user data, lock, note or correction) last changed (UTC). |
+| `macro_flag` | 0 / 1 | `macro_flag` | Flag for macros' own use (GSAK's MacroFlag). |
+| `macro_sort` | text | `macro_sort` | Text for macros' own use (GSAK's MacroSort). |
+| `is_owner` | 0 / 1 | `owned` | 1 = owned by your geocaching.com account in Settings. |
+| `symbol` | text | `symbol` | GPX waypoint symbol, e.g. "Geocache Found". |
+
+### Table `logs`
+
+The logs of the caches.
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The row's key. |
+| `cache_id` | integer key |  | The cache it belongs to (`caches.id`). |
+| `log_id` | text |  | geocaching.com's log id; unique. |
+| `log_type` | log type | `type` | Log type. |
+| `log_date` | date and time | `date` | Log date. |
+| `finder` | text | `finder` | Name of the logger. |
+| `finder_id` | text | `finder_id` | geocaching.com member id of the logger. |
+| `text` | text | `text` | Log text. |
+| `text_encoded` | 0 / 1 | `encoded` | 1 = the log text is encoded (ROT13). |
+| `latitude` | decimal degrees | `lat` | Coordinates of the log (e.g. Earthcache logs); usually NULL. |
+| `longitude` | decimal degrees | `lon` | Coordinates of the log; usually NULL. |
+| `logged_by_owner` | 0 / 1 | `by_owner` | 1 = logged by the cache owner. |
+
+### Table `waypoints`
+
+The additional waypoints of the caches (parking, stages, final, …).
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The row's key. |
+| `cache_id` | integer key |  | The cache it belongs to (`caches.id`). |
+| `prefix` | text | `prefix` | Waypoint prefix, e.g. "PK", "S1". |
+| `wp_type` | text | `type` | Waypoint type, e.g. "Parking Area", "Final Location". |
+| `name` | text | `name` | Name. |
+| `description` | text | `description` | Description. |
+| `comment` | text | `comment` | Comment. |
+| `latitude` | decimal degrees | `lat` | Latitude; NULL if not known yet. |
+| `longitude` | decimal degrees | `lon` | Longitude; NULL if not known yet. |
+| `parent_gc_code` | text |  | GC code of the cache. |
+| `wp_code` | text | `code` | Waypoint code, unique within the cache. |
+| `url` | text | `url` | URL. |
+| `wp_date` | date and time | `date` | Date. |
+| `created_by_user` | 0 / 1 |  | 1 = added in OpenSAK (or by a macro), not imported. |
+| `wp_flag` | 0 / 1 | `flag` | User flag of the waypoint. |
+
+### Table `attributes`
+
+The attributes of the caches.
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The row's key. |
+| `cache_id` | integer key |  | The cache it belongs to (`caches.id`). |
+| `attribute_id` | integer | `attribute_id` | Groundspeak attribute id, e.g. 1 = dogs; unique within the cache. |
+| `name` | text | `name` | Name, e.g. "Dogs allowed". |
+| `is_on` | 0 / 1 | `on` | 1: yes, 0: no (e.g. no dogs). |
+
+### Table `trackables`
+
+The trackables in the caches.
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The row's key. |
+| `cache_id` | integer key |  | The cache it belongs to (`caches.id`). |
+| `tracking_code` | text | `tracking_code` | Tracking code. |
+| `name` | text | `name` | Name. |
+| `ref` | text | `ref` | Reference, e.g. "TB1234". |
+
+### Table `user_notes`
+
+Your note and corrected coordinates: at most one row per cache.
+
+| Column | Format | Field | Meaning |
+|---|---|---|---|
+| `id` | integer key |  | The row's key. |
+| `cache_id` | integer key |  | The cache it belongs to (`caches.id`); unique. |
+| `note` | text | `note` | Your local note. |
+| `corrected_lat` | decimal degrees | `corrected` | Corrected latitude. |
+| `corrected_lon` | decimal degrees | `corrected` | Corrected longitude. |
+| `is_corrected` | 0 / 1 | `corrected` | 1 = the cache has corrected coordinates: test this, not the coordinates, as opensak.cache() does. |
+| `corrected_source` | text | `corrected_source` | Who corrected the coordinates: "user", "macro" or "import" (from GSAK); NULL if not known. |
+| `updated_at` | date and time |  | When the row last changed (UTC). |
+
 ## Changing caches
 
 Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, `opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, `opensak.sql_write()`, `opensak.transaction()`, `opensak.in_transaction()` and `opensak.resync()` are only available while the `lua-macro-write` feature flag is on, as it is in beta builds. Without it they are nil, and `opensak.set_corrected()` and `opensak.clear_corrected()` change the database without asking.
@@ -4516,7 +4697,7 @@ Which function to use:
 - Corrected coordinates: `opensak.set_corrected()` and `opensak.clear_corrected()`.
 - `opensak.sql_write()` is the power tool for bulk work: one INSERT, UPDATE or DELETE statement that changes many rows at once, e.g. marking every unfound cache of a country, or copying rows from the macro's own database. Use it when a loop over the functions above would be too slow or too long-winded.
 
-Start with the dedicated functions: they take Lua values, check each field (type, range, date format) with a clear error message, and need no knowledge of the database schema. `opensak.sql_write()` only refuses protected columns and what SQLite itself rejects, and its column names follow the schema, which may change between versions.
+Start with the dedicated functions: they take Lua values, check each field (type, range, date format) with a clear error message, and need no knowledge of the database schema. `opensak.sql_write()` only refuses protected columns and what SQLite itself rejects; it works with the tables and columns of [Database tables for macros](#database-tables-for-macros), but what it may change is not part of that promise.
 
 Writable cache fields: `name`, `type`, `container`, `lat`, `lon`, `difficulty`, `terrain`, `owner`, `placed_by`, `hidden`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `available`, `archived`, `premium`, `country`, `state`, `county`, `elevation`, `favorite_points`, `find_count`, `user_flag`, `user_sort`, `user_data`, `color`, `locked`, `watch`, `macro_flag`, `macro_sort`, `note`, `gc_note`, `hint`, `url`, `symbol`, `corrected`. `false` clears a field that is not a boolean, and "" clears a text field. `user_data` takes the slots to change, e.g. `{ [2] = "solved" }`; `corrected` takes `{ lat = .., lon = .. }` or a coordinate string. Dates are `"YYYY-MM-DD"`. `opensak.insert{}` also needs `code`, and `name`, `type`, `lat`, `lon`.
 
