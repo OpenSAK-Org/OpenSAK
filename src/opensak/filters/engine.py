@@ -30,8 +30,10 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from opensak import geodesy
 from opensak.db.models import Cache, Log, Trackable, UserNote, Waypoint
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
+from opensak.geodesy import DIRECTIONS, bearing_direction
 from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES
 
 
@@ -79,51 +81,7 @@ def _vincenty_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     difference is up to ~0.3 % on long distances. Falls back to Haversine
     when the formula fails to converge (antipodal points).
     """
-    # WGS84 ellipsoid parameters
-    a = 6378.137          # semi-major axis (km)
-    f = 1 / 298.257223563
-    b = a * (1 - f)       # semi-minor axis (km)
-
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    L = math.radians(lon2 - lon1)
-
-    U1 = math.atan((1 - f) * math.tan(phi1))
-    U2 = math.atan((1 - f) * math.tan(phi2))
-    sU1, cU1 = math.sin(U1), math.cos(U1)
-    sU2, cU2 = math.sin(U2), math.cos(U2)
-
-    lam = L
-    for _ in range(100):
-        sl = math.sin(lam)
-        cl = math.cos(lam)
-        sin_sigma = math.sqrt((cU2 * sl) ** 2 + (cU1 * sU2 - sU1 * cU2 * cl) ** 2)
-        if sin_sigma == 0.0:
-            return 0.0  # coincident points
-        cos_sigma = sU1 * sU2 + cU1 * cU2 * cl
-        sigma = math.atan2(sin_sigma, cos_sigma)
-        sin_alpha = cU1 * cU2 * sl / sin_sigma
-        cos2a = 1 - sin_alpha ** 2
-        cos2sm = (cos_sigma - 2 * sU1 * sU2 / cos2a) if cos2a else 0.0
-        C = f / 16 * cos2a * (4 + f * (4 - 3 * cos2a))
-        lam_prev = lam
-        lam = L + (1 - C) * f * sin_alpha * (
-            sigma + C * sin_sigma * (cos2sm + C * cos_sigma * (-1 + 2 * cos2sm ** 2))
-        )
-        if abs(lam - lam_prev) < 1e-12:
-            break
-    else:
-        return _haversine_km(lat1, lon1, lat2, lon2)  # non-convergence fallback
-
-    u2 = cos2a * (a ** 2 - b ** 2) / b ** 2
-    Av = 1 + u2 / 16384 * (4096 + u2 * (-768 + u2 * (320 - 175 * u2)))
-    Bv = u2 / 1024 * (256 + u2 * (-128 + u2 * (74 - 47 * u2)))
-    ds = Bv * sin_sigma * (
-        cos2sm + Bv / 4 * (
-            cos_sigma * (-1 + 2 * cos2sm ** 2)
-            - Bv / 6 * cos2sm * (-3 + 4 * sin_sigma ** 2) * (-3 + 4 * cos2sm ** 2)
-        )
-    )
-    return b * Av * (sigma - ds)
+    return geodesy.vincenty_inverse(lat1, lon1, lat2, lon2)[0]
 
 
 def vincenty_km_batch(lat0: float, lon0: float, lats, lons):
@@ -944,21 +902,6 @@ class DistanceFilter(BaseFilter):
 
     def __repr__(self) -> str:
         return f"<DistanceFilter {self.to_dict()}>"
-
-
-# Compass directions in clockwise order from north — index i is the 45° sector
-# centred on i*45° (N = 337.5°–22.5°). Language-independent codes; the dialog
-# shows them via tr("bearing_dirs"), which lists the same eight in this order.
-DIRECTIONS: tuple[str, ...] = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-
-
-def bearing_direction(deg: float) -> str:
-    """Compass direction code (see DIRECTIONS) for a bearing in degrees.
-
-    Sectors are half-open [lo, hi) — a bearing of exactly 22.5° is NE —
-    matching DirectionFilter.apply_to_query()'s SQL ranges.
-    """
-    return DIRECTIONS[int(((deg % 360.0) + 22.5) // 45.0) % 8]
 
 
 def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

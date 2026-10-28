@@ -487,6 +487,33 @@ The clause is combined with AND alongside any other active filters.
 
 With custom fields (beta, `companion-db` feature flag), the clause runs on the caches *and* their custom fields, so a field is used by name, as in GSAK: `Angel = 1 AND GCFinds > 100`. A cache nobody set a field for has the field's default. The **ⓘ** button lists the fields of the active database.
 
+### Distance, bearing and projection functions
+
+GSAK's geo functions work in the Where clause (and in macro SQL), so you can measure from any point without changing the centre point:
+
+| Function | Result |
+|---|---|
+| `g_Distance(lat1, lon1, lat2, lon2 [, units])` | Distance. *units*: `'K'` km (default) or `'M'` miles; append `H` for the Vincenty ellipsoid: `'KH'`, `'MH'` |
+| `g_Bearing2(lat1, lon1, lat2, lon2 [, method])` | Initial bearing in degrees, 0 = north, clockwise. *method*: `'G'` great circle (default) or `'H'` Vincenty |
+| `g_Bearing1(lat1, lon1, lat2, lon2 [, method])` | The same as a compass direction: `N`, `NE`, `E`, `SE`, `S`, `SW`, `W`, `NW` |
+| `g_Project(lat, lon, degrees, distance [, units [, calc]])` | The projected point as text `'lat;lon'` (6 decimals). *units*: `K` (default), `M`, `N` nautical miles, `T` metres, `Y` yards, `F` feet; *calc*: `'G'` great circle (default) or `'V'` Vincenty |
+
+Coordinates are decimal degrees. Examples:
+
+```sql
+g_Distance(latitude, longitude, 47.37, 8.54, 'KH') < 5
+g_Bearing1(47.37, 8.54, latitude, longitude) IN ('N', 'NE')
+g_Distance(latitude, longitude, 47.37, 8.54) BETWEEN 100 AND 101
+```
+
+The great circle (Haversine) is what the rest of OpenSAK uses; Vincenty is accurate to the millimetre and matters for challenges that measure on the ellipsoid. Saved GSAK filters that use these functions import unchanged. Where GSAK quietly calculates something else, OpenSAK differs:
+
+- NULL in any argument gives NULL; a coordinate that is not a number (or uses a decimal comma) and an unknown unit are errors — GSAK computes with 0 or treats unknown units as nautical miles.
+- The bearing between two identical points is NULL; identical and antipodal points don't fail (GSAK reports an error).
+- `g_Project` with `'G'` uses the same 6371 km sphere as `g_Distance`, so projecting and measuring back agree. GSAK projects on a 6366.7 km sphere, about 0.7 m per km away.
+- Vincenty results are computed to the millimetre; GSAK's stop up to about 20 cm short.
+- OpenSAK additions: the *method* of `g_Bearing1/2` (GSAK has only the great circle) and the defaults for *units* and *calc* (GSAK requires them).
+
 ---
 
 ## Custom tab

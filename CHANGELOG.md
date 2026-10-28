@@ -4,6 +4,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **GSAK's distance, bearing and projection functions in SQL (#917)** —
+  Where clauses, macro SQL and imported GSAK filters can use
+  `g_Distance(lat1, lon1, lat2, lon2, 'K')`, `g_Bearing1()` (N, NE, …),
+  `g_Bearing2()` (degrees) and `g_Project(lat, lon, degrees, distance,
+  units, 'G')` (returns `'lat;lon'`) with GSAK's arguments, to measure
+  between any two points without changing the centre point. Each has a
+  great-circle and a high-accuracy Vincenty mode (`'KH'`/`'MH'`,
+  `'V'`, and an optional `'H'` for the bearings). Unlike GSAK, NULL gives
+  NULL, an unknown unit or a non-numeric coordinate is an error instead of
+  a silent 0, identical or antipodal points don't fail, and Vincenty is
+  computed to the millimetre (GSAK stops ~20 cm short). GSAK filters using
+  these functions are now imported as working SQL instead of comments.
+  `opensak.coords.distance()`, `bearing()` and `project()` take an
+  optional `"vincenty"` method too (**macro API version 5**). The new
+  example macro *distance_bearing* lists the caches around any point with
+  distance, compass direction and the great-circle/Vincenty difference.
+  Contributed by nagisml.
+
+---
+
 ## [1.22.0-beta.11] — 2026-10-28
 
 > Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
