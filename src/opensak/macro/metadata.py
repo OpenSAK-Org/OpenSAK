@@ -53,6 +53,10 @@ deprecated keys a macro uses, which the Macro manager shows and the run
 prints. deprecated_names() and find_deprecated() give the community
 repository's CI everything deprecated in the macro API — functions,
 parameters, cache fields and header keys — to warn about.
+newest_stable_api(), beta_only_names() and find_beta_only() let the same
+CI refuse a Requires-API that no stable release has and flag macros that
+use what only beta builds have (opensak.get_url() while lua-macro-net is
+beta-only), taken from the registries and feature flags themselves.
 """
 
 from __future__ import annotations
@@ -405,6 +409,20 @@ def deprecated_names() -> tuple[DeprecatedName, ...]:
     return tuple(names)
 
 
+def _code_patterns(names) -> list[tuple[re.Pattern[str], str]]:
+    """(pattern, message) finding a use of each function and cache field
+    of *names* (DeprecatedName or BetaOnlyName) in a line of code."""
+    patterns: list[tuple[re.Pattern[str], str]] = []
+    for n in names:
+        if n.kind == "function":
+            patterns.append((re.compile(re.escape(n.name) + r"(?![\w.])"), n.message))
+        elif n.kind == "field":
+            word = re.escape(n.name)
+            patterns.append((re.compile(rf"\.{word}\b|\[\s*[\"']{word}[\"']\s*\]"),
+                             n.message))
+    return patterns
+
+
 def find_deprecated(text: str) -> list[tuple[int, str]]:
     """(line number, message) for each use of something deprecated in
     macro source *text*, in line order: deprecated header keys, and calls
@@ -417,14 +435,7 @@ def find_deprecated(text: str) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     lines = text.lstrip("\ufeff").splitlines()
     header = {n.name.lower(): n.message for n in names if n.kind == "header"}
-    patterns: list[tuple[re.Pattern[str], str]] = []
-    for n in names:
-        if n.kind == "function":
-            patterns.append((re.compile(re.escape(n.name) + r"(?![\w.])"), n.message))
-        elif n.kind == "field":
-            word = re.escape(n.name)
-            patterns.append((re.compile(rf"\.{word}\b|\[\s*[\"']{word}[\"']\s*\]"),
-                             n.message))
+    patterns = _code_patterns(names)
     in_header = True
     for number, raw in enumerate(lines, 1):
         line = raw.strip()
@@ -435,6 +446,69 @@ def find_deprecated(text: str) -> list[tuple[int, str]]:
             continue
         if line and not line.startswith("#!"):
             in_header = False
+        code = raw.split("--", 1)[0]
+        for pattern, message in patterns:
+            if pattern.search(code):
+                found.append((number, message))
+    return found
+
+
+def newest_stable_api() -> int:
+    """The newest macro API version a stable release has (or will have:
+    runtime.API_STABLE lists it once the release is planned), 0 if none,
+    e.g. for the OpenSAK-Macros CI to refuse a higher Requires-API.
+    runtime.API_STABLE gives the OpenSAK version for each one."""
+    from opensak.macro.runtime import API_STABLE
+
+    return max(API_STABLE, default=0)
+
+
+@dataclass(frozen=True)
+class BetaOnlyName:
+    """Something of the macro API only beta builds have, for
+    beta_only_names()."""
+
+    # "function" or "field"
+    kind: str
+    # "opensak.get_url" or "custom"
+    name: str
+    # The feature flag it needs, off in stable releases (utils/flags.py)
+    flag: str
+
+    @property
+    def message(self) -> str:
+        what = self.name if self.kind == "function" else f"cache field {self.name}"
+        return (f"{what} is only available in beta builds (feature flag "
+                f"{self.flag}), not in stable releases")
+
+
+def beta_only_names() -> tuple[BetaOnlyName, ...]:
+    """The functions and cache fields of the macro API that a stable
+    release doesn't have, because the feature flag they need is off there
+    (flags.BETA_ONLY) — whatever this build is and whatever features.json
+    says. E.g. for the OpenSAK-Macros CI to flag macros using them. Needs
+    OpenSAK installed, like deprecated_names()."""
+    from opensak.macro.cache_data import CUSTOM_FIELD
+    from opensak.macro.runtime import API
+    from opensak.utils.flags import BETA_ONLY
+
+    names = [BetaOnlyName("function", f"opensak.{func.name}", func.flag)
+             for func in API if func.flag in BETA_ONLY]
+    # Its values are read from the companion database (as api_baseline)
+    if "companion-db" in BETA_ONLY:
+        names.append(BetaOnlyName("field", CUSTOM_FIELD.name, "companion-db"))
+    return tuple(names)
+
+
+def find_beta_only(text: str) -> list[tuple[int, str]]:
+    """(line number, message) for each use of something beta-only
+    (beta_only_names()) in macro source *text*, in line order: calls of
+    its functions and reads of its cache fields, found by name outside
+    comments as in find_deprecated(), with the same limits. A macro that
+    checks first (`if opensak.get_url then`) is reported too."""
+    patterns = _code_patterns(beta_only_names())
+    found: list[tuple[int, str]] = []
+    for number, raw in enumerate(text.lstrip("\ufeff").splitlines(), 1):
         code = raw.split("--", 1)[0]
         for pattern, message in patterns:
             if pattern.search(code):
