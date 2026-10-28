@@ -207,6 +207,7 @@ class GsakImportDialog(QDialog):
     databases_changed = Signal()   # at least one OpenSAK database was created
     filters_imported  = Signal()   # the follow-up filter import wrote profiles
     locations_imported = Signal()  # the follow-up location import changed the list
+    views_imported    = Signal()   # the follow-up view import wrote Column Views
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -223,6 +224,7 @@ class GsakImportDialog(QDialog):
         self._extracted: Optional[dict] = None      # what the extract worker unpacked
         self._wants_filters = False             # migrate gsak.db3's filters at the end
         self._wants_locations = False           # migrate gsak.db3's user locations at the end
+        self._wants_views = False               # migrate gsak.db3's views at the end
         self._stage_settings = False            # the running extraction is gsak.db3
         # gsak.db3 on disk once known: unpacked before the databases when
         # their custom fields need its global definitions (#1028).
@@ -293,6 +295,11 @@ class GsakImportDialog(QDialog):
         self._locations_cb.toggled.connect(lambda _on: self._update_import_button())
         layout.addWidget(self._locations_cb)
 
+        self._views_cb = QCheckBox(tr("gsak_import_views_checkbox"))
+        self._views_cb.setVisible(False)
+        self._views_cb.toggled.connect(lambda _on: self._update_import_button())
+        layout.addWidget(self._views_cb)
+
         # Import + Close row
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -334,7 +341,7 @@ class GsakImportDialog(QDialog):
         self._file_label.setToolTip(str(path))
         self._table.setRowCount(0)
         self._contents = None
-        for cb in (self._filters_cb, self._locations_cb):
+        for cb in (self._filters_cb, self._locations_cb, self._views_cb):
             cb.setVisible(False)
             cb.setChecked(False)
         self._found_label.setText("")
@@ -365,14 +372,14 @@ class GsakImportDialog(QDialog):
             tr("gsak_import_databases_found", count=len(contents.databases))
         )
         if contents.has_settings_db:
-            # Issue #1090: migrating GSAK's saved filters and user locations is
+            # Issue #1090: migrating GSAK's saved filters, views and user locations is
             # opt-in. Users who refresh their GSAK databases and re-import them
             # regularly don't want those settings re-imported every time. The
             # exception is a pick with no cache databases at all (just
             # gsak.db3): the settings import is then the only thing the dialog
             # can do, so it starts ticked rather than with Import disabled.
             settings_only = not contents.databases
-            for cb in (self._filters_cb, self._locations_cb):
+            for cb in (self._filters_cb, self._locations_cb, self._views_cb):
                 cb.setVisible(True)
                 cb.setChecked(settings_only)
         self._set_list_enabled(bool(contents.databases))
@@ -498,7 +505,8 @@ class GsakImportDialog(QDialog):
 
     def _update_import_button(self) -> None:
         running = self._worker is not None and self._worker.isRunning()
-        wants_settings = self._wanted(self._filters_cb) or self._wanted(self._locations_cb)
+        wants_settings = any(self._wanted(cb) for cb in
+                             (self._filters_cb, self._locations_cb, self._views_cb))
         self._import_btn.setEnabled(
             not running and self._contents is not None
             and (bool(self._checked_rows()) or wants_settings)
@@ -509,6 +517,7 @@ class GsakImportDialog(QDialog):
         self._import_btn.setEnabled(not busy)
         self._filters_cb.setEnabled(not busy)
         self._locations_cb.setEnabled(not busy)
+        self._views_cb.setEnabled(not busy)
         self._set_list_enabled(not busy and self._table.rowCount() > 0)
         self._progress.setVisible(busy)
         if busy:
@@ -617,7 +626,8 @@ class GsakImportDialog(QDialog):
             return
         wants_filters = self._wanted(self._filters_cb)
         wants_locations = self._wanted(self._locations_cb)
-        if not jobs and not wants_filters and not wants_locations:
+        wants_views = self._wanted(self._views_cb)
+        if not jobs and not wants_filters and not wants_locations and not wants_views:
             return
 
         self._jobs = jobs
@@ -626,6 +636,7 @@ class GsakImportDialog(QDialog):
         self._images_confirmed = False
         self._wants_filters = wants_filters
         self._wants_locations = wants_locations
+        self._wants_views = wants_views
         self._log.clear()
         self._set_busy(True)
         if self._contents.is_zip:
@@ -857,7 +868,7 @@ class GsakImportDialog(QDialog):
 
     def _start_settings_stage(self) -> None:
         contents = self._contents
-        if not (self._wants_filters or self._wants_locations) or contents is None:
+        if not (self._wants_filters or self._wants_locations or self._wants_views)                 or contents is None:
             self._finish()
             return
         if self._settings_db is not None:
@@ -877,10 +888,13 @@ class GsakImportDialog(QDialog):
         copy serves both."""
         wants_locations, self._wants_locations = self._wants_locations, False
         wants_filters, self._wants_filters = self._wants_filters, False
+        wants_views, self._wants_views = self._wants_views, False
         if wants_locations:
             self._run_location_import(db3_path)
         if wants_filters:
             self._run_filter_import(db3_path)
+        if wants_views:
+            self._run_view_import(db3_path)
 
     def _on_progress(self, done: int, total: int) -> None:
         if total > 0:
@@ -992,6 +1006,15 @@ class GsakImportDialog(QDialog):
         dlg.set_path(db3_path)
         dlg.exec()
 
+    def _run_view_import(self, db3_path: Path) -> None:
+        """Hand gsak.db3 to the GSAK view import dialog."""
+        from opensak.gui.dialogs.gsak_view_import_dialog import GsakViewImportDialog
+
+        dlg = GsakViewImportDialog(self)
+        dlg.import_completed.connect(self.views_imported)
+        dlg.set_path(db3_path)
+        dlg.exec()
+
     def _cleanup_temp(self) -> None:
         if self._temp_dir is None:
             return
@@ -1005,6 +1028,7 @@ class GsakImportDialog(QDialog):
         self._jobs = []
         self._wants_filters = False
         self._wants_locations = False
+        self._wants_views = False
         self._stage_settings = False
         self._extracted = None
         try:

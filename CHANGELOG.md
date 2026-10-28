@@ -18,6 +18,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Import GSAK views as column views (#1209)** — **File → Import from GSAK
+  Database…** offers a third box, **Also import the saved GSAK views**,
+  next to filters and user locations. Each view saved in `gsak.db3`
+  becomes an OpenSAK column view with GSAK's column order and widths;
+  custom-field columns are kept when GSAK or the open database defines
+  the field, and columns OpenSAK has no equivalent for are left out and
+  listed in the import log. Contributed by nagisml.
 - **The database tables are part of the macro API (#1202)** — the macro
   API reference has a new section, "Database tables for macros", listing
   the tables and columns a macro can read with `opensak.sql()` and the

@@ -2256,6 +2256,7 @@ class MainWindow(QMainWindow):
         dlg.databases_changed.connect(self._reload_db_combo)
         dlg.filters_imported.connect(self._on_filter_profiles_imported)
         dlg.locations_imported.connect(self._on_home_points_imported)
+        dlg.views_imported.connect(self._populate_column_view_combo)
         dlg.exec()
 
     def _on_home_points_imported(self) -> None:
