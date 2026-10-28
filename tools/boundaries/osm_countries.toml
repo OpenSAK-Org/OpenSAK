@@ -1,0 +1,65 @@
+# tools/boundaries/osm_countries.toml — countries built from OpenStreetMap by osm_extract.py.
+#
+# One table per country, keyed by its ISO 3166-1 alpha-2 code (the value of the
+# country relation's ISO3166-1 / ISO3166-1:alpha2 tag in OSM).
+#
+#   iso3               OpenSAK's country code: pack file names and the `parent` property
+#                      (states/<iso3>.geojson, counties/<iso3>_<county_pack>.geojson)
+#   geofabrik          path of the country extract on download.geofabrik.de, without
+#                      "-latest.osm.pbf" (see https://download.geofabrik.de)
+#   state_level        OSM admin_level used for OpenSAK's State
+#   county_level       OSM admin_level used for OpenSAK's County (omit for none)
+#   county_pack        pack name part of the county file (default "all_<iso3>")
+#   name_tags          OSM tags tried in order for the name (default ["name"])
+#   county_name_tags   the same for counties only (default: name_tags)
+#   county_strip_prefixes  prefixes removed from county names, e.g. ["Gemeinde "]
+#   state_name_split   multilingual names such as "Graubünden/Grischun/Grigioni" are
+#   county_name_split  cut at this separator and the first part is kept (default: none)
+#   county_name_join   instead of cutting, replace the separator in county names with
+#                      this text, e.g. "Biel/Bienne" -> "Biel-Bienne"
+#   names              renames applied last, OSM name -> OpenSAK name, so names match
+#                      those geocaching.com / Project-GC use (both layers)
+#   county_exclude     county names (after renaming) to leave out, e.g. lake areas that
+#                      OSM tags at the municipality level but belong to no municipality
+#
+# Closed ways tagged boundary=administrative are always left out (mostly mistagged
+# buildings); counties sharing a name get their state's ISO 3166-2 code appended,
+# "Reinach (AG)" / "Reinach (BL)".
+#
+# admin_level differs per country — see
+# https://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative#Country_specific_values
+
+[CH]
+iso3 = "che"
+geofabrik = "europe/switzerland"
+state_level = 4            # cantons (26)
+county_level = 8           # municipalities (Gemeinden / communes / comuni)
+county_pack = "all_che"    # same file name as the GSAK-derived pack in #788
+# Official municipality names (BFS) carry the canton when the name exists more
+# than once: "Muri (AG)", "Reinach (BL)". OSM keeps them in official_name.
+county_name_tags = ["official_name", "name"]
+county_strip_prefixes = ["Gemeinde "]   # some GR official_name values: "Gemeinde Avers"
+state_name_split = "/"     # "Valais/Wallis" -> "Valais" (as in the GSAK-derived pack)
+county_name_split = "/"
+county_name_join = "-"     # "Biel/Bienne" -> "Biel-Bienne" (as in the GSAK-derived pack)
+# Lake areas not part of any municipality (gemeindefreie Gebiete) — a cache
+# position in these lakes gets no county, rather than the lake's name.
+county_exclude = [
+    "Bielersee (BE)", "Bielersee (NE)", "Brienzersee", "Thunersee",
+    "Lac de Neuchâtel (BE)", "Lac de Neuchâtel (NE)",
+]
+
+[CH.names]
+"Fribourg - Freiburg" = "Fribourg"   # municipality; the canton is "Fribourg/Freiburg"
+# Errors in OSM (no official_name) — to be fixed upstream in OSM, then removed here:
+"Biss'one" = "Bissone"               # r1684629, BFS 5154
+"Roveredo GR" = "Roveredo (GR)"      # r1684142, BFS 3834
+# official_name without the canton the BFS name carries:
+"Bremgarten" = "Bremgarten (AG)"
+"Carouge" = "Carouge (GE)"
+"Corsier" = "Corsier (GE)"
+"Hauterive" = "Hauterive (FR)"
+"Romont" = "Romont (FR)"
+"Crans" = "Crans (VD)"               # Crans-près-Céligny until 2021
+# State names: check against geocaching.com before adding, e.g.
+# "Basel-Landschaft" = "Basel Landschaft"
