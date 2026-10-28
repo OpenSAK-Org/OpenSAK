@@ -705,7 +705,7 @@ function opensak.codes() end
 ---@return {short: string?, long: string?, html: boolean}? # Short and long description and whether they are HTML; nil if the cache is not in the database.
 function opensak.description(code, options) end
 
----Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. Column names follow the database schema, which may change between versions (see opensak.tables() and opensak.columns()). Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
+---Run a read-only SQL query (SQLite) against the active database (or the one named by the `database` option) and return all rows. Only reading statements are allowed, except on TEMP tables: a macro may create, fill, change and drop its own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any query, opensak.sql_write() included. They are never stored in the database and are gone when the macro ends or calls opensak.switch_database(); changes to them inside opensak.transaction() are undone with it. A TEMP table may not take the name of a table of the database. The tables and columns macros may rely on, and the format of their values, are listed in Database tables for macros; opensak.tables() and opensak.columns() list everything there is. Use `AS` to name computed columns. NULL values are nil. At most 100,000 rows; use opensak.sql_each() for more. A query is aborted after 60 s.
 ---
 ---Since API version 2. Changed in API version 3: TEMP tables, views and indexes.
 ---
@@ -720,7 +720,7 @@ function opensak.description(code, options) end
 ---@return table<string, any>[] # One table per row, keyed by column name.
 function opensak.sql(query, params, options) end
 
----Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size.
+---Like opensak.sql(), but returns an iterator for a generic `for` that fetches the rows in chunks — for results of any size. The tables and columns to rely on are listed in Database tables for macros.
 ---
 ---Since API version 2.
 ---
@@ -746,7 +746,7 @@ function opensak.sql_each(query, params, options) end
 ---@return string[] # Table and view names, sorted.
 function opensak.tables(options) end
 
----The columns of a table or view of the active database (or the one named by the `database` option).
+---The columns of a table or view of the active database (or the one named by the `database` option): all of them, also those Database tables for macros leaves out, which may change in any version.
 ---
 ---Since API version 2. Changed in API version 3: added `required`.
 ---

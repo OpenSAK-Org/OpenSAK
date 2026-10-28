@@ -340,7 +340,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.columns" func="yes">
-			<Overload retVal="{name: string, type: string, required: boolean}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option).&#x0a;Returns {name: string, type: string, required: boolean}[] — Column names and SQL&#x0a;types, in table order; `required`: NOT NULL without a default, so an INSERT must&#x0a;give it.">
+			<Overload retVal="{name: string, type: string, required: boolean}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option): all of them, also those Database tables for macros leaves&#x0a;out, which may change in any version.&#x0a;Returns {name: string, type: string, required: boolean}[] — Column names and SQL&#x0a;types, in table order; `required`: NOT NULL without a default, so an INSERT must&#x0a;give it.">
 				<Param name="table: string" />
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
@@ -941,14 +941,14 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.sql" func="yes">
-			<Overload retVal="table&lt;string, any&gt;[]" descr="Run a read-only SQL query (SQLite) against the active database (or the one named&#x0a;by the `database` option) and return all rows. Only reading statements are&#x0a;allowed, except on TEMP tables: a macro may create, fill, change and drop its&#x0a;own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any&#x0a;query, opensak.sql_write() included. They are never stored in the database and&#x0a;are gone when the macro ends or calls opensak.switch_database(); changes to them&#x0a;inside opensak.transaction() are undone with it. A TEMP table may not take the&#x0a;name of a table of the database. Column names follow the database schema, which&#x0a;may change between versions (see opensak.tables() and opensak.columns()). Use&#x0a;`AS` to name computed columns. NULL values are nil. At most 100,000 rows; use&#x0a;opensak.sql_each() for more. A query is aborted after 60 s.&#x0a;Returns table&lt;string, any&gt;[] — One table per row, keyed by column name.">
+			<Overload retVal="table&lt;string, any&gt;[]" descr="Run a read-only SQL query (SQLite) against the active database (or the one named&#x0a;by the `database` option) and return all rows. Only reading statements are&#x0a;allowed, except on TEMP tables: a macro may create, fill, change and drop its&#x0a;own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any&#x0a;query, opensak.sql_write() included. They are never stored in the database and&#x0a;are gone when the macro ends or calls opensak.switch_database(); changes to them&#x0a;inside opensak.transaction() are undone with it. A TEMP table may not take the&#x0a;name of a table of the database. The tables and columns macros may rely on, and&#x0a;the format of their values, are listed in Database tables for macros;&#x0a;opensak.tables() and opensak.columns() list everything there is. Use `AS` to&#x0a;name computed columns. NULL values are nil. At most 100,000 rows; use&#x0a;opensak.sql_each() for more. A query is aborted after 60 s.&#x0a;Returns table&lt;string, any&gt;[] — One table per row, keyed by column name.">
 				<Param name="query: string" />
 				<Param name="[params: table]" />
 				<Param name="[options: opensak.ReadOptions]" />
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.sql_each" func="yes">
-			<Overload retVal="fun(): table&lt;string, any&gt;?" descr="Like opensak.sql(), but returns an iterator for a generic `for` that fetches the&#x0a;rows in chunks — for results of any size.&#x0a;Returns fun(): table&lt;string, any&gt;? — Iterator for a generic `for`.">
+			<Overload retVal="fun(): table&lt;string, any&gt;?" descr="Like opensak.sql(), but returns an iterator for a generic `for` that fetches the&#x0a;rows in chunks — for results of any size. The tables and columns to rely on are&#x0a;listed in Database tables for macros.&#x0a;Returns fun(): table&lt;string, any&gt;? — Iterator for a generic `for`.">
 				<Param name="query: string" />
 				<Param name="[params: table]" />
 				<Param name="[options: opensak.ReadOptions]" />
