@@ -53,6 +53,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **A remembered form starts the way the user left it (#1197)** — with
+  `remember = true` a form came back with last time's values, but not
+  with what its `on_change` callbacks had changed: choose GGZ in the
+  example from the API reference, and the next time "Unfound only" was
+  no longer greyed out. A form still remembers only values; when it
+  opens, `on_change` is now called for each field that got a remembered
+  value (in form order, before `on_open`, and without closing the form
+  for `exit_on_change`), so whatever it enables, hides or relabels is
+  set again. The example macros *find_with_form* and *export_with_form*
+  (now version 1.1, `Requires-API: 4`) rely on this instead of repeating
+  their `on_change` in `on_open`; the API reference lists it as a change
+  of `opensak.form` in API 4. Reported by GeePa67, contributed by nagisml.
 - **Sorting on a custom field column (#1201)** — the first click on the
   header of a custom field column (for example GSAK's `LFL`) showed
   "OpenSAK ran into a problem", and the sort was never remembered for the

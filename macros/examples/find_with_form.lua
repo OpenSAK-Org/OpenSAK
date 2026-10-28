@@ -1,8 +1,8 @@
 -- OpenSAK Macro
 -- Name: Find with form
 -- Author: OpenSAK
--- Version: 1.0
--- Requires-API: 3
+-- Version: 1.1
+-- Requires-API: 4
 -- Description: Pick search options in a form, then step through the matches
 -- Permissions: none
 --
@@ -15,6 +15,10 @@
 -- the one with the most favourite points and selects it. Nothing in the
 -- database is changed. Tools → Form designer in the macro window opens
 -- this form in the designer when the cursor is inside it.
+--
+-- Changes:
+--   1.1  "Distance" starts greyed out and on_change restores it for a
+--        remembered tick (API 4, #1197); no more on_open.
 
 local values = opensak.form{
   title = "Find caches",
@@ -26,12 +30,14 @@ local values = opensak.form{
     { type = "number", id = "dmax", label = "Max. difficulty", default = 2.5,
       min = 1, max = 5, decimals = 1, step = 0.5 },
     { type = "checkbox", id = "unfound", label = "Unfound only", default = true },
+    -- The distance only matters with "Near the centre point" ticked. It
+    -- starts greyed out like the unticked box; on_change is also called
+    -- when the form opens with a remembered tick.
     { type = "checkbox", id = "near", label = "Near the centre point",
       on_change = function(f, on) f:set_enabled("km", on) end },
-    { type = "number", id = "km", label = "Distance", default = 10, min = 1, suffix = " km" },
+    { type = "number", id = "km", label = "Distance", default = 10, min = 1, suffix = " km",
+      enabled = false },
   },
-  -- The distance only matters with "Near the centre point" ticked.
-  on_open = function(f) f:set_enabled("km", f:get("near")) end,
 }
 if not values then return end  -- cancelled
 
