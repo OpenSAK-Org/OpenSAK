@@ -446,6 +446,55 @@ def test_existing_approval_for_the_same_code_is_kept(dbs, backups, macros):
     assert db_access.approvals() == before
 
 
+def test_approvals_of_several_macros_are_stored_in_one_write(
+    dbs, backups, macros, monkeypatch,
+):
+    names = ("tag_unfound.lua", "a.lua", "b.lua")
+    for name in names[1:]:
+        _write(macros / name, f"-- {name}\n")
+    shas = {name: _approve(macros / name) for name in names}
+    s = _backup(dbs, backups)
+    for name in names:
+        (macros / name).unlink()
+    db_access.save_always_approved([])
+    db_access.reset_session()
+
+    saves = []
+    real_save = db_access._save
+    monkeypatch.setattr(db_access, "_save", lambda r: (saves.append(1), real_save(r)))
+    result = restore_macros(plan_macro_restore(s))
+
+    assert result.approvals == 3
+    assert len(saves) == 1
+    for name, sha in shas.items():
+        assert db_access.is_approved(macros / name, sha)
+
+
+def test_restore_approvals_replaces_a_record_for_other_code(macros):
+    macro = macros / "tag_unfound.lua"
+    old = _approve(macro)
+    _write(macro, "-- restored code\n")
+    new = source_hash(read_macro_source(macro))
+    record = db_access.Approval(str(macro), new, write=True)
+
+    assert db_access.restore_approvals([record]) == 1
+    assert [a.sha256 for a in db_access.approvals()] == [new]
+    assert db_access.restore_approvals([record]) == 0   # already there
+    assert old != new
+
+
+def test_restore_approvals_skips_unreadable_mismatched_and_empty(macros):
+    macro = macros / "tag_unfound.lua"
+    sha = source_hash(read_macro_source(macro))
+    records = [
+        db_access.Approval(str(macros / "missing.lua"), sha),
+        db_access.Approval(str(macro), "0" * 64),
+        db_access.Approval(str(macro), sha, write=False),
+    ]
+    assert db_access.restore_approvals(records) == 0
+    assert db_access.approvals() == []
+
+
 # ── Custom fields (#1028) are covered by the settings part of a backup ────────
 
 def test_global_custom_field_definitions_are_in_the_backup_and_restored(dbs, backups):
