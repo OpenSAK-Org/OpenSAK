@@ -214,7 +214,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## Acknowledgements
 
 - [OpenStreetMap](https://www.openstreetmap.org) for map tiles
-- [Leaflet.js](https://leafletjs.com) for the map library
+- [Leaflet.js](https://leafletjs.com) for the map library, with
+  [Leaflet.markercluster](https://github.com/Leaflet/Leaflet.markercluster) and
+  [Leaflet-Geoman](https://geoman.io) (bundled; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - [PySide6 / Qt](https://www.qt.io) for the GUI framework
 - [SQLAlchemy](https://www.sqlalchemy.org) for the database layer
 - [OpenSAK Contributors](CONTRIBUTORS.md)
