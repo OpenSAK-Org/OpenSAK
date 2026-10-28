@@ -20,6 +20,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Map tiles work offline for areas you have viewed (#1111)** — the map
+  now keeps the tiles you view in a cache on disk (previously it forgot
+  them when OpenSAK closed), so an area you looked at while online still
+  shows its map background without a connection for about a week. Set
+  the size under **Settings → Map → Map tile cache** (default 200 MB,
+  *Off* to keep none); **Clear cache** next to it empties it. Where no tiles are available, the map shows
+  *Offline – map tiles unavailable* instead of unexplained grey squares.
+  Only tiles you actually view are stored, as the OpenStreetMap tile
+  policy asks.
 - **Import GSAK views as column views (#1209)** — **File → Import from GSAK
   Database…** offers a third box, **Also import the saved GSAK views**,
   next to filters and user locations. Each view saved in `gsak.db3`
