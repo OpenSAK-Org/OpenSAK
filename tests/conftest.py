@@ -30,6 +30,17 @@ def _clear_premigration_notices():
 
 
 @pytest.fixture(autouse=True)
+def _reset_offline_flag():
+    """#1111: a test whose fake urlopen fails with a connectivity error sets
+    the session-wide "offline detected" flag; reset it so later tests'
+    automatic requests are not skipped."""
+    from opensak import net
+    net.reset_offline()
+    yield
+    net.reset_offline()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_app_paths(tmp_path, monkeypatch):
     """
     Isolate the process-global singletons in settings_store, logger og
