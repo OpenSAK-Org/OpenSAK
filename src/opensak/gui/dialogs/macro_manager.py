@@ -21,6 +21,9 @@ so macros saved from an external editor show up without asking.
 
 The main window runs macro shortcuts through run_path() as well, so their
 output is here too when the window is closed.
+
+Whether Shift is held is read when the user starts the macro (shift_held()),
+before any question, and passed on for opensak.shift_key() (#1038).
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ from typing import Callable, Optional
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QKeySequenceEdit,
+    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QHBoxLayout, QHeaderView, QKeySequenceEdit,
     QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStyle, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -55,6 +58,13 @@ _PATH_ROLE = Qt.ItemDataRole.UserRole
 _FUNCTION_KEY = re.compile(r"^(?:Shift\+)?F\d{1,2}$")
 
 TakenShortcuts = Callable[[Path], dict[str, str]]
+
+
+def shift_held() -> bool:
+    """Shift is held down right now — for opensak.shift_key() (#1038).
+    The keyboard itself, not the last event: a menu or button click may
+    come without one."""
+    return bool(QApplication.queryKeyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
 
 
 def shortcut_allowed(sequence: str) -> bool:
@@ -335,7 +345,7 @@ class MacroManagerDialog(QDialog):
     def _run_selected(self) -> None:
         path = self.selected_path()
         if path is not None:
-            self.run_path(path)
+            self.run_path(path, shift=shift_held())
 
     def _run_activated(self) -> None:
         """Double-click or Enter on a macro: run it after asking (No is
@@ -343,6 +353,7 @@ class MacroManagerDialog(QDialog):
         path = self.selected_path()
         if path is None:
             return
+        shift = shift_held()        # before the question: Shift may be let go
         info = next((m for m in self._macros if m.path == path), None)
         buttons = QMessageBox.StandardButton
         answer = QMessageBox.question(
@@ -351,13 +362,14 @@ class MacroManagerDialog(QDialog):
             buttons.Yes | buttons.No, buttons.No,
         )
         if answer == buttons.Yes:
-            self.run_path(path)
+            self.run_path(path, shift=shift)
 
-    def run_path(self, path: Path, parent=None) -> Optional[str]:
+    def run_path(self, path: Path, parent=None, shift: bool = False) -> Optional[str]:
         """Run the macro file *path*, its output going to the output pane.
         Returns the error message if it failed, None if it ran (or the user
         chose not to run a macro asking for a newer API). Questions go on
-        top of *parent*, this window by default."""
+        top of *parent*, this window by default. *shift*: Shift was held
+        when the user started it (opensak.shift_key())."""
 
         parent = parent or self
         path = Path(path)
@@ -378,7 +390,7 @@ class MacroManagerDialog(QDialog):
         try:
             source = read_macro_source(path)
             code = self._runtime.run(source, chunk_name=path.name, base_dir=path.parent,
-                                     macro_path=path)
+                                     macro_path=path, shift=shift)
         except (OSError, UnicodeDecodeError) as exc:
             error = tr("macro_open_error", path=str(path), msg=str(exc))
             self._append_output(error)

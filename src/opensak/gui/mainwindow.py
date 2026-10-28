@@ -3644,7 +3644,8 @@ class MainWindow(QMainWindow):
             act = QAction(path.stem, self)
             act.setShortcut(QKeySequence(seq))
             act.setData(str(path))
-            act.triggered.connect(lambda _=False, p=Path(path): self._run_macro_shortcut(p))
+            act.triggered.connect(
+                lambda _=False, p=Path(path), s=seq: self._run_macro_shortcut(p, s))
             self.addAction(act)
             self._macro_shortcut_actions.append(act)
 
@@ -3670,16 +3671,21 @@ class MainWindow(QMainWindow):
                 taken.setdefault(shortcut.key().toString(portable), shortcut.whatsThis() or "OpenSAK")
         return {k: v for k, v in taken.items() if k}
 
-    def _run_macro_shortcut(self, path) -> None:
-        """Run a macro from its shortcut. The output goes to the Macro
+    def _run_macro_shortcut(self, path, shortcut: str = "") -> None:
+        """Run a macro from its *shortcut*. The output goes to the Macro
         manager; with that window closed, the status bar says the macro
-        finished, and an error is shown with the choice to edit the macro."""
+        finished, and an error is shown with the choice to edit the macro.
+        opensak.shift_key() is true if Shift was held, unless the shortcut
+        itself includes Shift (#1038)."""
+        from opensak.gui.dialogs.macro_manager import shift_held
+        shift = shift_held() and "Shift+" not in QKeySequence(shortcut).toString(
+            QKeySequence.SequenceFormat.PortableText)
         manager = self._macro_manager_instance()
         if manager.isVisible():
             manager.select_path(path)
-            manager.run_path(path)
+            manager.run_path(path, shift=shift)
             return
-        error = manager.run_path(path, parent=self)
+        error = manager.run_path(path, parent=self, shift=shift)
         if error is None:
             self._statusbar.showMessage(tr("macro_mgr_shortcut_done", name=path.name), 5000)
             return

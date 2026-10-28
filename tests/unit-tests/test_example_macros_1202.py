@@ -458,6 +458,20 @@ def _check_new_since(ctx, out):
     assert ctx.host.label.startswith("New since ")
 
 
+def _quick_filter_first_run(ctx):
+    _, out = ctx.run("quick_filter.lua")       # nothing saved: the form opens
+    assert [k[0] for k, _ in ctx.host.forms] == ["Quick filter options"]
+    ctx.host.applied.clear()
+
+
+def _check_quick_filter(ctx, out):
+    # Without Shift it runs with the saved options and asks nothing (#1038).
+    assert len(ctx.host.forms) == 1
+    [(label, n)] = ctx.host.applied
+    assert label == "Quick filter" and n > 0
+    assert out == [f"{n} caches: Traditional, difficulty up to 2.5, unfound"]
+
+
 def _puzzle(c) -> None:
     for button in ("digit", "word", "rot13", "numbers", "hint", "listing", "show"):
         c.click(button)
@@ -529,6 +543,7 @@ SCENARIOS: dict[str, Scenario] = {
     "new_since_last_run.lua": Scenario(setup=_first_run_then_import, check=_check_new_since),
     "owned_statistics.lua": Scenario(check=_check_owned_statistics),
     "puzzle_helper.lua": Scenario(user=_puzzle, check=_check_puzzle),
+    "quick_filter.lua": Scenario(setup=_quick_filter_first_run, check=_check_quick_filter),
     "refile_by_country.lua": Scenario(check=_check_refile),
     "region_coverage.lua": Scenario(check=_check_region_coverage),
     "sql_report.lua": Scenario(check=_check_sql_report),

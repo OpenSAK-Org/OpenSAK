@@ -4,6 +4,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Macros can run unattended and show their options only with Shift
+  (#1038)** — the new `opensak.shift_key()` tells a macro whether Shift was
+  held when the user started it (GSAK's `$_ShiftKey`). A macro can then run
+  with its saved options (`opensak.settings`) and open its options form only
+  when the user holds Shift — from Run in the Macro manager (Shift is read
+  before the "Run this macro?" question), from the macro's shortcut, or with
+  the new **Shift+F5** (and **Ctrl+Shift+F5**, Save and run) in the macro
+  editor. A macro started by another macro with `opensak.run_macro()`, or
+  with `opensak --run-macro`, always gets `false`, so it runs unattended; so
+  does a macro whose shortcut itself includes Shift. The macro API is now
+  version 5. New example macro: *Quick filter* (`quick_filter.lua`).
+  Contributed by nagisml.
+
 ## [1.22.0-beta.11] — 2026-10-28
 
 > Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
