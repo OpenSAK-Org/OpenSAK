@@ -3,12 +3,13 @@ src/opensak/macro/api_baseline.py — the macro API as released, to catch
 breaking changes (#1185).
 
 From API 4 (v1.22.0) the macro API only grows within an API version.
-Renaming or removing a function, parameter, cache field or header key needs
-a new API version and a deprecation period (deprecation.py). snapshot()
-records what the API has — each entry with the API version it was
-deprecated in, and the feature flag it is only available with — and
-check() compares the API with such a snapshot taken at the last stable
-release (BASELINE_PATH, written by scripts/update_macro_api_baseline.py).
+Renaming or removing a function, parameter, cache field, header key or
+documented database column (db_schema.py) needs a new API version and a
+deprecation period (deprecation.py). snapshot() records what the API
+has — each entry with the API version it was deprecated in, and the
+feature flag it is only available with — and check() compares the
+API with such a snapshot taken at the last stable release (BASELINE_PATH,
+written by scripts/update_macro_api_baseline.py).
 
 check() accepts:
   * additions, and marking something as deprecated;
@@ -45,6 +46,7 @@ def _entry(deprecated: Optional[tuple[int, str]], flag: Optional[str] = None) ->
 def snapshot() -> dict[str, Any]:
     """The macro API as plain data (JSON-ready, sorted)."""
     from opensak.macro.cache_data import CACHE_FIELDS, CUSTOM_FIELD
+    from opensak.macro.db_schema import TABLES
     from opensak.macro.metadata import HEADER_KEYS
     from opensak.macro.runtime import API, API_VERSION
 
@@ -62,6 +64,9 @@ def snapshot() -> dict[str, Any]:
         "functions": functions,
         "cache_fields": fields,
         "header_keys": {k.name: _entry(k.deprecated) for k in HEADER_KEYS},
+        # Documented columns as "table.column" (D3 in #1196)
+        "columns": {f"{t.name}.{c.name}": _entry(c.deprecated)
+                    for t in TABLES for c in t.columns},
     }
 
 
@@ -129,9 +134,10 @@ def check(baseline: dict[str, Any], current: Optional[dict[str, Any]] = None,
         for param, old_param in old.get("params", {}).items():
             gone(f"opensak.{name} parameter {param}", old_param,
                  new["params"].get(param))
-    for kind, label in (("cache_fields", "cache field"), ("header_keys", "header key")):
+    for kind, label in (("cache_fields", "cache field"), ("header_keys", "header key"),
+                        ("columns", "database column")):
         for name, old in baseline.get(kind, {}).items():
-            gone(f"{label} {name}", old, current[kind].get(name))
+            gone(f"{label} {name}", old, current.get(kind, {}).get(name))
     return problems
 
 

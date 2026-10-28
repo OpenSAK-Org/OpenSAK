@@ -18,6 +18,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **The database tables are part of the macro API (#1202)** — the macro
+  API reference has a new section, "Database tables for macros", listing
+  the tables and columns a macro can read with `opensak.sql()` and the
+  format of their values (dates, `0`/`1` booleans, units, cache, container
+  and log type names). From API 4 they keep their names and formats like
+  the functions do; columns are only added, and a structural change keeps
+  the old names as a view. Writes with `opensak.sql_write()`, OpenSAK's
+  `opensak_*` tables, indexes and the columns not listed are not covered.
+  A test keeps the list in step with the real database, also after
+  upgrading a database from an older release, and every example macro now
+  runs in CI against a small test database, once with the feature flags
+  of the coming stable release and once with all beta flags. Contributed
+  by nagisml.
 - **Links to shared macros (#1173)** — **Macros → Find more macros…**
   opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
   the repository of macros shared by users, in the browser, and an empty

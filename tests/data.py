@@ -274,6 +274,24 @@ def seed_standard_caches(work_dir: Path) -> None:
         import_gpx(variant_file, session)
 
 
+EXAMPLES_GPX = Path(__file__).parent / "fixtures" / "macros" / "examples.gpx"
+EXAMPLES_ACCOUNT = ("Tester", "999")      # gc_username, gc_finder_id
+
+
+def seed_example_macro_caches() -> None:
+    """Import tests/fixtures/macros/examples.gpx — the test database of the
+    example macros (#1202) — into the active DB, with EXAMPLES_ACCOUNT as
+    the account in Settings, so finds and own hides are recognised."""
+    from opensak.db.database import get_session
+    from opensak.gui.settings import get_settings
+    from opensak.importer import import_gpx
+
+    settings = get_settings()
+    settings.gc_username, settings.gc_finder_id = EXAMPLES_ACCOUNT
+    with get_session() as session:
+        import_gpx(EXAMPLES_GPX, session)
+
+
 def wait_for_refresh(window, timeout_ms: int = 5000) -> None:
     """Issue #740: MainWindow._refresh_cache_list() now delegates the actual
     DB query to a background RefreshWorker and returns immediately instead

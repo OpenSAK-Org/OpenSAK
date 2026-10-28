@@ -47,6 +47,7 @@ from opensak.macro.forms import (
 from opensak.macro.gsak_compare import GSAK_COMPARE
 from opensak.macro.lua_stdlib import LUA_FUNCTIONS, LuaFunction
 from opensak.macro import net_access
+from opensak.macro.db_schema import FORMATS, INTERNAL, TABLES
 from opensak.macro.deprecation import Deprecated, deprecated_note
 from opensak.macro.metadata import (
     BLOCKED_DOMAINS,
@@ -663,8 +664,10 @@ def _changing_section() -> list[str]:
         "Start with the dedicated functions: they take Lua values, check each "
         "field (type, range, date format) with a clear error message, and need "
         "no knowledge of the database schema. `opensak.sql_write()` only "
-        "refuses protected columns and what SQLite itself rejects, and its "
-        "column names follow the schema, which may change between versions.",
+        "refuses protected columns and what SQLite itself rejects; it works "
+        "with the tables and columns of "
+        "[Database tables for macros](#database-tables-for-macros), but "
+        "what it may change is not part of that promise.",
         "",
         f"Writable cache fields: {writable}. `false` clears a field that is "
         'not a boolean, and "" clears a text field. `user_data` takes the '
@@ -751,6 +754,81 @@ def _web_section() -> list[str]:
         "Requests are GET only, with the User-Agent `OpenSAK-Macro/<version>` "
         "and without cookies. The system's proxy settings apply.",
     ]
+
+
+def _lua_fields() -> dict[tuple[str, str], str]:
+    """(table, column) → the field holding the same value in opensak.cache()
+    or opensak.logs(), waypoints(), ..."""
+    fields: dict[tuple[str, str], str] = {}
+    for field in CACHE_FIELDS:
+        for column in field.columns:
+            fields.setdefault((column.class_.__tablename__, column.key), field.name)
+    for t in CHILD_TABLES:
+        for f in t.fields:
+            fields[(t.model.__tablename__, f.attribute)] = f.name
+    return fields
+
+
+def _schema_section() -> list[str]:
+    internal = "; ".join(
+        f"`{table}`: " + ", ".join(f"`{c}`" for c in sorted(columns))
+        for table, columns in sorted(INTERNAL.items()))
+    lines = [
+        "",
+        "## Database tables for macros",
+        "",
+        "`opensak.sql()` and `opensak.sql_each()` read the tables of the "
+        "database directly. The tables and columns listed here are part of the "
+        "macro API for reading, like the functions: within an API version they "
+        "keep their names and their value formats (cache type strings, date "
+        "format, units, `0`/`1` for booleans), and tables and columns are only "
+        "added. A rename or removal comes with a new API version, after a "
+        "deprecation period, as for functions. If the structure of a table has "
+        "to change, its old table and column names stay available as a "
+        "compatibility view, so queries using them keep working.",
+        "",
+        "Not covered by this:",
+        "",
+        "- Writing to these tables with `opensak.sql_write()`. Writes are only "
+        "promised through `opensak.update()`, `opensak.insert{}`, "
+        "`opensak.delete()` and `opensak.insert_<x>()`, `opensak.update_<x>()`, "
+        "`opensak.delete_<x>()` (see [Changing caches](#changing-caches)).",
+        "- Tables starting with `opensak_`, and tables not listed here "
+        "(e.g. `db_settings`).",
+        "- Indexes: which ones exist, and so how fast a query is.",
+        f"- Columns not listed here: {internal}.",
+        "- The tables other macros made in the companion database, and "
+        "`companion.custom_values`, whose columns are the user's custom fields "
+        "(read them with the `custom` cache field).",
+        "",
+        "A column is NULL (`nil` in Lua) where nothing is known. *Field* names "
+        "the same value in the tables `opensak.cache()`, `opensak.logs()`, "
+        "`opensak.waypoints()`, … return, which convert it to Lua: booleans to "
+        '`true`/`false`, dates to `"YYYY-MM-DD"`.',
+        "",
+        "### Value formats",
+        "",
+        "| Format | Values |",
+        "|---|---|",
+    ]
+    lines += [f"| {f.label} | {f.description} |" for f in FORMATS.values()]
+    fields = _lua_fields()
+    for t in TABLES:
+        lines += [
+            "",
+            f"### Table `{t.name}`",
+            "",
+            t.description,
+            "",
+            "| Column | Format | Field | Meaning |",
+            "|---|---|---|---|",
+        ]
+        for c in t.columns:
+            field = fields.get((t.name, c.name))
+            lines.append(f"| `{c.name}` | {FORMATS[c.format].label} | "
+                         f"{f'`{field}`' if field else ''} | "
+                         f"{_deprecated_prefix(c.deprecated)}{c.description} |")
+    return lines
 
 
 def _update_type(field: ChildField) -> str:
@@ -936,6 +1014,7 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
         lines.append(f"| `{field.name}` | `{type_}` | "
                      f"{_deprecated_prefix(field.deprecated)}{field.description} |")
 
+    lines += _schema_section()
     lines += _changing_section()
     lines += _web_section()
     lines += _examples_section(examples_dir)

@@ -5903,9 +5903,10 @@ API: tuple[ApiFunction, ...] = (
                     "ends or calls opensak.switch_database(); changes to them "
                     "inside opensak.transaction() are undone with it. A TEMP "
                     "table may not take the name of a table of the database. "
-                    "Column names follow the database schema, which may "
-                    "change between versions (see opensak.tables() and "
-                    "opensak.columns()). Use `AS` to name computed columns. "
+                    "The tables and columns macros may rely on, and the "
+                    "format of their values, are listed in Database tables "
+                    "for macros; opensak.tables() and opensak.columns() "
+                    "list everything there is. Use `AS` to name computed columns. "
                     "NULL values are nil. At most "
                     f"{MAX_ROWS:,} rows; use opensak.sql_each() for more. A "
                     f"query is aborted after {QUERY_TIMEOUT_S:g} s.",
@@ -5929,7 +5930,8 @@ API: tuple[ApiFunction, ...] = (
         name="sql_each",
         description="Like opensak.sql(), but returns an iterator for a "
                     "generic `for` that fetches the rows in chunks — for "
-                    "results of any size.",
+                    "results of any size. The tables and columns to rely on "
+                    "are listed in Database tables for macros.",
         example='for r in opensak.sql_each("SELECT gc_code, name FROM caches WHERE found = 0") do\n'
                 "    print(r.gc_code, r.name)\nend",
         since=2,
@@ -5960,7 +5962,9 @@ API: tuple[ApiFunction, ...] = (
     ApiFunction(
         name="columns",
         description="The columns of a table or view of the active database "
-                    "(or the one named by the `database` option).",
+                    "(or the one named by the `database` option): all of "
+                    "them, also those Database tables for macros leaves out, "
+                    "which may change in any version.",
         example='for _, c in ipairs(opensak.columns("caches")) do print(c.name, c.type) end',
         since=2,
         bind=lambda rt, lua: lambda *a: rt._columns(lua, *a),
