@@ -78,6 +78,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Définir le filtre…",
     "action_clear_filter":          "❌  &Effacer le filtre",
     "action_columns":               "&Choisir les colonnes…",
+    "action_autofit_columns":       "&Ajuster la largeur des colonnes",
     "action_maximize_map":          "⛶  &Agrandir la carte",
     "action_restore_map":           "◻  &Restaurer les panneaux",
     "toolbar_maximize_map_tooltip": "Agrandir la carte (F11)",
@@ -342,6 +343,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Projection de coordonnées",
     "shortcut_maximize_map":        "Agrandir la carte",
     "shortcut_popout_map":          "Détacher la carte",
+    "shortcut_autofit_columns":     "Ajuster la largeur des colonnes",
 
     # ── Menu Outils de géocaching ─────────────────────────────────────────────
     "menu_gc_tools":                "&Outils géo",

@@ -78,6 +78,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Set filter…",
     "action_clear_filter":          "❌  &Clear filter",
     "action_columns":               "&Choose columns…",
+    "action_autofit_columns":       "&Auto-fit column widths",
     "action_maximize_map":          "⛶  &Maximize map",
     "action_restore_map":           "◻  &Restore panels",
     "toolbar_maximize_map_tooltip": "Maximize map (F11)",
@@ -342,6 +343,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Coordinate Projection",
     "shortcut_maximize_map":        "Maximize Map",
     "shortcut_popout_map":          "Pop Out Map",
+    "shortcut_autofit_columns":     "Auto-fit Column Widths",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Tools",

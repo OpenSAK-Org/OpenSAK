@@ -2066,3 +2066,55 @@ class TestLastGpxShortHeader:
     def test_tooltip_is_always_the_full_title(self, gpx_view):
         gpx_view.setColumnWidth(1, 60)
         assert self._header(gpx_view, Qt.ItemDataRole.ToolTipRole) == "Last GPX update"
+
+
+# ── Auto-fit column widths (Ctrl+W) ──────────────────────────────────────────
+
+class TestAutofitColumns:
+    @pytest.fixture
+    def fit_view(self, monkeypatch, qtbot, fake_settings):
+        import opensak.lang as lang
+        from opensak.lang.en import STRINGS
+        monkeypatch.setattr(lang, "_translations", STRINGS)
+        monkeypatch.setattr(ct, "_get_active_columns",
+                            lambda: ["gc_code", "name", "last_four_logs"])
+        monkeypatch.setattr(ct, "get_column_widths", lambda: {})
+        saved: list[dict[str, int]] = []
+        monkeypatch.setattr(ct, "set_column_widths", lambda w: saved.append(dict(w)))
+        v = CacheTableView()
+        qtbot.addWidget(v)
+        v.saved = saved
+        return v
+
+    def test_columns_grow_to_fit_their_contents(self, fit_view):
+        fit_view.load_caches([_cache(gc_code="GC1", name="A rather long cache name")])
+        fit_view.setColumnWidth(1, 20)
+        fit_view.saved.clear()
+        fit_view.autofit_columns()
+        assert fit_view.columnWidth(1) > 20
+        # Saved once, with every column, not once per resized column.
+        assert len(fit_view.saved) == 1
+        assert set(fit_view.saved[0]) == {"gc_code", "name", "last_four_logs"}
+        assert fit_view.saved[0]["name"] == fit_view.columnWidth(1)
+
+    def test_width_is_capped(self, fit_view):
+        fit_view.load_caches([_cache(gc_code="GC1", name="x" * 500)])
+        fit_view.autofit_columns()
+        assert fit_view.columnWidth(1) == ct._AUTOFIT_MAX_WIDTH
+
+    def test_hidden_columns_are_left_alone(self, fit_view):
+        fit_view.load_caches([_cache(gc_code="GC1", name="A rather long cache name")])
+        fit_view.setColumnWidth(1, 20)
+        fit_view.setColumnHidden(1, True)
+        fit_view.saved.clear()
+        fit_view.autofit_columns()
+        assert "name" not in fit_view.saved[0]
+
+    def test_short_header_column_can_shrink_below_its_title(self, fit_view):
+        # #1000: the data decides the width, not the full "Last four logs".
+        fit_view.load_caches([_cache(gc_code="GC1")])
+        fit_view.setColumnWidth(2, 300)
+        fit_view.autofit_columns()
+        assert fit_view.columnWidth(2) < 300
+        assert fit_view._model.headerData(
+            2, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) == "L4"

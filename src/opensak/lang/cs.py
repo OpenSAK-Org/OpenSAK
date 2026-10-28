@@ -78,6 +78,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Nastavit filtr…",
     "action_clear_filter":          "❌  &Zrušit filtr",
     "action_columns":               "&Vybrat sloupce…",
+    "action_autofit_columns":       "&Přizpůsobit šířku sloupců",
     "action_maximize_map":          "⛶  &Maximalizovat mapu",
     "action_restore_map":           "◻  &Obnovit panely",
     "toolbar_maximize_map_tooltip": "Maximalizovat mapu (F11)",
@@ -342,6 +343,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Projekce souřadnic",
     "shortcut_maximize_map":        "Maximalizovat mapu",
     "shortcut_popout_map":          "Odpojit mapu",
+    "shortcut_autofit_columns":     "Přizpůsobit šířku sloupců",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Nástroje",

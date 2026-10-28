@@ -488,6 +488,12 @@ class TestShortcutRegistry:
         from PySide6.QtGui import QKeySequence
         assert window._act_popout_map.shortcut() == QKeySequence("Ctrl+Shift+M")
 
+    def test_autofit_columns_is_ctrl_w_and_in_registry(self, window):
+        from PySide6.QtGui import QKeySequence
+        keys = [key for key, _, _ in window._shortcut_registry]
+        assert "autofit_columns" in keys
+        assert window._act_autofit_columns.shortcut() == QKeySequence("Ctrl+W")
+
 
 # ── Settings property tests ───────────────────────────────────────────────────
 

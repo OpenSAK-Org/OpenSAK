@@ -78,6 +78,7 @@ STRINGS: dict[str, str] = {
     "action_filter":                "🔍  &Sätt filter…",
     "action_clear_filter":          "❌  &Rensa filter",
     "action_columns":               "&Välj kolumner…",
+    "action_autofit_columns":       "&Anpassa kolumnbredd",
     "action_maximize_map":          "⛶  &Maximera karta",
     "action_restore_map":           "◻  &Återställ paneler",
     "toolbar_maximize_map_tooltip": "Maximera karta (F11)",
@@ -342,6 +343,7 @@ STRINGS: dict[str, str] = {
     "shortcut_projection":          "Koordinatprojektion",
     "shortcut_maximize_map":        "Maximera karta",
     "shortcut_popout_map":          "Koppla loss karta",
+    "shortcut_autofit_columns":     "Anpassa kolumnbredd",
 
     # ── Geocaching Tools menu ─────────────────────────────────────────────────
     "menu_gc_tools":                "&Verktyg",
