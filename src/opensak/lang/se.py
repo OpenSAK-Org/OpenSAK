@@ -647,9 +647,6 @@ STRINGS: dict[str, str] = {
     "wizard_step_of": "Steg {current} av {total}",
     "wizard_settings_file_exists_title": "Inställningsfilen finns redan",
     "wizard_settings_file_exists_msg": "Mappen \"{path}\" innehåller redan en opensak.json-fil, så dina nuvarande inställningar flyttades inte dit. Den befintliga filen lämnades orörd — kontrollera gärna mappen manuellt.",
-    "settings_group_nominatim":                    "Noggrannare platsuträkning",
-    "settings_nominatim_cb":                       "Aktivera onlinesökning för högre noggrannhet",
-    "settings_nominatim_hint":                     "När detta är aktiverat förfinas data gällande län, delstater och länder med hjälp av OpenStreetMap, efter den inledande snabba offline-bearbetningen.\n\nObs: Kräver internetanslutning och tar cirka 1 sekund per waypoint. Att fullständigt förfina en databas med 10 000 waypoints tar ungefär 3 timmar. Låt funktionen vara avstängd såvida du inte behöver högre noggrannhet i närheten av administrativa gränser.",
 
     "settings_group_folders": "Mappar",
     "settings_install_dir_label": "Installationsmapp (inställningar och loggar):",

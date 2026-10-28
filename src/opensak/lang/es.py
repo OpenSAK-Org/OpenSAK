@@ -649,9 +649,6 @@ STRINGS: dict[str, str] = {
     "wizard_step_of": "Paso {current} de {total}",
     "wizard_settings_file_exists_title": "El archivo de ajustes ya existe",
     "wizard_settings_file_exists_msg": "La carpeta «{path}» ya contiene un archivo opensak.json, así que tus ajustes actuales no se movieron allí. El archivo existente se dejó intacto — quizá quieras revisar esa carpeta manualmente.",
-    "settings_group_nominatim":                    "Refinamiento de ubicación",
-    "settings_nominatim_cb":                       "Activar búsqueda en línea para mayor precisión",
-    "settings_nominatim_hint":                     "Cuando está activado, los datos de provincia, estado y país se refinan aún más usando OpenStreetMap después del proceso rápido sin conexión.\n\nNota: requiere conexión a internet y tarda alrededor de 1 segundo por waypoint. Una base de datos de 10 000 waypoints tarda unas 3 horas en refinarse por completo. Déjalo desactivado a menos que necesites mayor precisión cerca de límites administrativos.",
 
     "settings_group_folders": "Carpetas",
     "settings_install_dir_label": "Carpeta de instalación (ajustes y registros):",

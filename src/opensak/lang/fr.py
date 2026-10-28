@@ -647,9 +647,6 @@ STRINGS: dict[str, str] = {
     "wizard_step_of": "Étape {current} sur {total}",
     "wizard_settings_file_exists_title": "Le fichier de paramètres existe déjà",
     "wizard_settings_file_exists_msg": "Le dossier « {path} » contient déjà un fichier opensak.json, vos paramètres actuels n'y ont donc pas été déplacés. Le fichier existant n'a pas été modifié — vous devriez peut-être vérifier ce dossier manuellement.",
-    "settings_group_nominatim":                    "Affinage de la localisation",
-    "settings_nominatim_cb":                       "Activer la recherche en ligne pour une meilleure précision",
-    "settings_nominatim_hint":                     "Lorsque cette option est activée, les données de département, d'état/région et de pays sont affinées avec OpenStreetMap après l'étape rapide hors ligne.\n\nNote : nécessite une connexion Internet et prend environ 1 seconde par waypoint. Une base de données de 10 000 waypoints nécessite environ 3 heures pour être entièrement affinée. Laissez cette option désactivée à moins d'avoir besoin d'une grande précision près des frontières administratives.",
 
     "settings_group_folders": "Dossiers",
     "settings_install_dir_label": "Dossier d'installation (paramètres et journaux) :",

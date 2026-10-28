@@ -717,19 +717,6 @@ class AppSettings:
     def quick_where_history(self, value: list[str]) -> None:
         get_store().set("search.where_history", list(value))
 
-    # ── Location refinement ───────────────────────────────────────────────────
-
-    @property
-    def nominatim_enabled(self) -> bool:
-        val = get_store().get("location.nominatim_enabled", False)
-        if isinstance(val, bool):
-            return val
-        return str(val).lower() in ("true", "1", "yes")
-
-    @nominatim_enabled.setter
-    def nominatim_enabled(self, value: bool) -> None:
-        get_store().set("location.nominatim_enabled", bool(value))
-
     # ── Last used paths ───────────────────────────────────────────────────────
 
     @property

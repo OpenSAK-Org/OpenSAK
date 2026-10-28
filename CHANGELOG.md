@@ -82,6 +82,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **"Enable online lookup for higher accuracy" removed from Settings
+  (#1208)** — the *Location refinement* box in Settings → Advanced
+  offered an online OpenStreetMap lookup that no longer exists: it was
+  removed together with the old location lookup when the boundary data
+  arrived, so ticking it did nothing. The box is gone, and
+  `docs/update-location.md` now describes the boundary-data lookup and
+  the boundary-pack menu items instead of the online pass.
 - **A remembered form starts the way the user left it (#1197)** — with
   `remember = true` a form came back with last time's values, but not
   with what its `on_change` callbacks had changed: choose GGZ in the

@@ -136,7 +136,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 | [Uninstalling](docs/Uninstalling-OpenSAK.md) | What OpenSAK creates on disk, and how to remove it |
 | [Getting Started](docs/getting-started.md) | First launch, importing, filtering, GPS export, multiple databases |
 | [Filter Reference](docs/filters.md) | All filter types across 10 tabs, text operators, AND/OR logic, invert, filter profiles |
-| [Update Locations](docs/update-location.md) | Filling in country/state/county via offline and online reverse geocoding |
+| [Update Locations](docs/update-location.md) | Filling in country/state/county from offline boundary data |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Full shortcut reference |
 | [Macro API](docs/macros/api.md) | Every `opensak.*` function for Lua macros, with examples |
 | [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) | Macros shared by other users, and how to share your own |

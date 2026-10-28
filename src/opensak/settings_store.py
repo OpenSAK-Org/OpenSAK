@@ -389,7 +389,7 @@ def repair_corrupted_bool_keys(store: SettingsStore) -> None:
     bool_keys = [
         "updates.check_enabled",
         "display.use_miles",
-        "location.nominatim_enabled",
+        "location.nominatim_enabled",  # unused since #1208; kept for old files
     ]
     fixes: dict[str, Any] = {}
     for key in bool_keys:
@@ -471,7 +471,7 @@ def migrate_from_qsettings(store: SettingsStore) -> bool:
             # Søgning
             "search/min_chars":         "search.min_chars",
             "search/debounce_ms":       "search.debounce_ms",
-            # Nominatim
+            # Nominatim (unused since #1208; kept so old settings migrate cleanly)
             "location/nominatim_enabled": "location.nominatim_enabled",
             # Opdateringer
             "updates/check_enabled":    "updates.check_enabled",

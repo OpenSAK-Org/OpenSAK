@@ -682,24 +682,6 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(search_group)
 
-        # ── Location refinement (only shown when reverse-geocoding flag is on) ──
-        from opensak.utils import flags
-        if flags.reverse_geocoding:
-            loc_ref_group = QGroupBox(tr("settings_group_nominatim"))
-            loc_ref_layout = QVBoxLayout(loc_ref_group)
-
-            self._nominatim_cb: QCheckBox | None = QCheckBox(tr("settings_nominatim_cb"))
-            loc_ref_layout.addWidget(self._nominatim_cb)
-
-            nominatim_hint = QLabel(tr("settings_nominatim_hint"))
-            nominatim_hint.setWordWrap(True)
-            nominatim_hint.setStyleSheet(hint_style())
-            loc_ref_layout.addWidget(nominatim_hint)
-
-            layout.addWidget(loc_ref_group)
-        else:
-            self._nominatim_cb = None
-
         # ── Opdateringer ──────────────────────────────────────────────────────
         update_group = QGroupBox(tr("settings_group_updates"))
         update_layout = QVBoxLayout(update_group)
@@ -1795,8 +1777,6 @@ class SettingsDialog(QDialog):
         self._pq_email_status.setText("")
         self._search_min_chars.setValue(s.search_min_chars)
         self._search_debounce_ms.setValue(s.search_debounce_ms)
-        if self._nominatim_cb is not None:
-            self._nominatim_cb.setChecked(s.nominatim_enabled)
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
         from opensak.backup import exit_state
@@ -1884,8 +1864,6 @@ class SettingsDialog(QDialog):
             app = QApplication.instance()
             if app is not None:
                 apply_theme(cast(QApplication, app), new_theme)
-        if self._nominatim_cb is not None:
-            s.nominatim_enabled = self._nominatim_cb.isChecked()
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()

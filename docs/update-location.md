@@ -1,6 +1,6 @@
 # Update Waypoint Locations
 
-OpenSAK can automatically fill in the county, state, and country fields for your waypoints using reverse geocoding. It always starts with a fast offline lookup, and optionally follows up with an online refinement for higher accuracy.
+OpenSAK can automatically fill in the county, state, and country fields for your waypoints using reverse geocoding. The lookup runs offline against boundary polygon data from [OpenSAK-Data](https://github.com/OpenSAK-Org/OpenSAK-Data).
 
 ---
 
@@ -31,43 +31,23 @@ Controls which waypoints are processed:
 
 Controls how the lookup behaves:
 
-**Use corrected coordinates when available** — when checked (the default), waypoints with a corrected final location are looked up using those coordinates instead of the original listing coordinates. This is the correct behaviour for mystery and multi-caches where the final location differs from the published coordinates.
-
-**Also use online lookup for higher accuracy** — when checked, an online refinement pass runs after the offline lookup. The initial state of this checkbox is controlled by **Settings → Advanced → Location refinement**; you can always override it per-run.
+**Use corrected coordinates when available** — off by default, so waypoints are looked up at their posted (listing) coordinates. Tick it to use a corrected final location instead, where one is set — for example for a mystery or multi-cache whose final is in another county.
 
 ---
 
 ## Offline lookup
 
-The offline lookup always runs first. Location data comes from [GeoNames](https://www.geonames.org/), a curated global geographic database bundled with the app. It resolves any number of coordinates instantly — no network connection required, no rate limits.
+The lookup finds the country, state and county whose boundary polygon contains each waypoint. It needs no network connection and has no rate limits. Country and state boundaries are included with OpenSAK; county boundaries come in packs per country, and a pack that is missing is downloaded the first time a waypoint needs it.
 
-**Known limitations:**
+- **Waypoint → Download boundary packs…** downloads every county pack at once, for full offline coverage.
+- **Waypoint → Check for boundary data updates…** fetches a newer version of the boundary data when there is one.
 
-- The lookup is point-based (nearest known locality), not polygon-based. Waypoints on or very close to an administrative boundary may resolve to the wrong side.
-- GeoNames data is periodically updated but may not reflect very recent political changes (e.g. county redefinitions).
-- Virginia (USA) has independent cities that are legally separate from the surrounding county. The offline lookup may assign the surrounding county instead of the correct independent city.
+A waypoint whose county isn't covered by the boundary data keeps an empty county field.
 
----
-
-## Online refinement (opt-in)
-
-When **Also use online lookup for higher accuracy** is checked, an additional pass runs after the offline lookup using the [Nominatim](https://nominatim.org/) reverse geocoding API (OpenStreetMap polygon data). This provides higher-accuracy results — especially for county — because it uses actual administrative boundary polygons rather than nearest-point matching.
-
-**Important notes:**
-
-- Requires an internet connection.
-- Rate-limited to **1 request per second** per Nominatim's usage policy. For large databases this can take a long time (e.g. ~3 hours for 10 000 waypoints).
-- Offline results are always written first. The online pass only overwrites a field if it returns a non-empty value — offline data is never erased by a failed or empty response.
-- Progress and estimated time remaining are shown in the dialog. You can cancel at any time and keep whatever has been refined so far.
-
-### Setting the default
-
-The online checkbox is **unchecked by default**. To have it checked by default for every run, go to **Settings → Advanced → Location refinement** and tick **Enable online lookup for higher accuracy**.
+> Earlier versions had an optional online refinement through OpenStreetMap's Nominatim service. It was removed when the boundary data replaced the old nearest-place lookup, and the setting for it is gone too (#1208). A macro can do an online lookup for waypoints the boundary data doesn't cover.
 
 ---
 
 ## Auto-geocode on import
 
 When importing a GPX or PQ zip file, OpenSAK automatically runs the offline lookup for any waypoints that are missing location data immediately after a successful import — no extra step needed.
-
-The online refinement is **never triggered automatically on import**. To run it, open the dialog manually via **Waypoint → Update Waypoint Locations…** after the import.

@@ -209,7 +209,7 @@ class TestDisplay:
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
 
-# ── window state / search / nominatim / paths ─────────────────────────────────────
+# ── window state / search / paths ─────────────────────────────────────
 
 class TestMisc:
     def test_window_state_roundtrip(self, s):
@@ -227,10 +227,6 @@ class TestMisc:
         s.search_debounce_ms = 250
         assert s.search_min_chars == 3
         assert s.search_debounce_ms == 250
-
-    def test_nominatim(self, s):
-        s.nominatim_enabled = True
-        assert s.nominatim_enabled is True
 
     def test_last_import_dir(self, s):
         assert s.last_import_dir  # defaults to home

@@ -647,9 +647,6 @@ STRINGS: dict[str, str] = {
     "wizard_step_of": "Schritt {current} von {total}",
     "wizard_settings_file_exists_title": "Einstellungsdatei existiert bereits",
     "wizard_settings_file_exists_msg": "Der Ordner \"{path}\" enthält bereits eine opensak.json-Datei, daher wurden Ihre aktuellen Einstellungen nicht dorthin verschoben. Die vorhandene Datei wurde nicht verändert — überprüfen Sie den Ordner bei Bedarf manuell.",
-    "settings_group_nominatim":                    "Standortverfeinerung",
-    "settings_nominatim_cb":                       "Online-Abfrage für höhere Genauigkeit aktivieren",
-    "settings_nominatim_hint":                     "Wenn aktiviert, werden Landkreis-, Bundesland- und Länderdaten nach dem schnellen Offline-Durchlauf zusätzlich über OpenStreetMap verfeinert.\n\nHinweis: Erfordert eine Internetverbindung und dauert etwa 1 Sekunde pro Wegpunkt. Eine Datenbank mit 10 000 Wegpunkten benötigt rund 3 Stunden für die vollständige Verfeinerung. Nur aktivieren, wenn du in der Nähe von Verwaltungsgrenzen eine höhere Genauigkeit brauchst.",
 
     "settings_group_folders": "Ordner",
     "settings_install_dir_label": "Installationsordner (Einstellungen & Protokolle):",

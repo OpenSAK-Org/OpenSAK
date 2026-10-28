@@ -649,9 +649,6 @@ STRINGS: dict[str, str] = {
     "wizard_step_of": "Krok {current} z {total}",
     "wizard_settings_file_exists_title": "Plik ustawień już istnieje",
     "wizard_settings_file_exists_msg": "Folder „{path}” już zawiera plik opensak.json, więc Twoje bieżące ustawienia nie zostały tam przeniesione. Istniejący plik pozostał nietknięty — warto sprawdzić ten folder ręcznie.",
-    "settings_group_nominatim":                    "Precyzowanie lokalizacji",
-    "settings_nominatim_cb":                       "Włącz wyszukiwanie online dla wyższej dokładności",
-    "settings_nominatim_hint":                     "Po włączeniu dane powiatu, województwa i kraju są dodatkowo precyzowane za pomocą OpenStreetMap po szybkim przebiegu offline.\n\nUwaga: wymaga połączenia z internetem i zajmuje ok. 1 sekundę na waypoint. Baza danych z 10 000 waypointów zajmuje ok. 3 godziny na pełne dopracowanie. Pozostaw to wyłączone, chyba że potrzebujesz wyższej dokładności w pobliżu granic administracyjnych.",
 
     "settings_group_folders": "Foldery",
     "settings_install_dir_label": "Folder instalacji (ustawienia i dzienniki):",
