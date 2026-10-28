@@ -52,6 +52,8 @@ dev = [
     "pytest-qt>=4.0,<5",
     "mypy>=1.8,<2.5",
     "pillow>=10.0,<14",
+    # tools/boundaries/osm_extract.py (boundary data from OpenStreetMap, #968)
+    "osmium>=4.0,<5",
 ]
 # Release builds only (build.yml, build-msix.yml): `pip install -e ".[build]"`
 build = [
