@@ -212,6 +212,35 @@ class TestConstruction:
         settings.map_max_caches = -5
         assert settings.map_max_caches == 0
 
+    def test_map_separation_radius_defaults_to_161_m(self, dlg):
+        # #1087
+        assert dlg._map_separation_radius.value() == pytest.approx(0.161)
+        assert dlg._map_separation_radius.suffix() == " km"
+
+    def test_map_separation_radius_zero_shows_off_text(self, qtbot, settings):
+        from opensak.lang import tr
+        settings.map_separation_radius_km = 0
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_separation_radius.text() == tr("settings_map_separation_off")
+
+    def test_map_separation_radius_saves_on_accept(self, qtbot, settings):
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        d._map_separation_radius.setValue(0.25)
+        d._save()
+        assert settings.map_separation_radius_km == pytest.approx(0.25)
+
+    def test_map_separation_radius_in_miles(self, qtbot, settings):
+        settings.use_miles = True
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_separation_radius.suffix() == " mi"
+        assert d._map_separation_radius.value() == pytest.approx(0.1)
+        d._map_separation_radius.setValue(0.2)
+        d._save()
+        assert settings.map_separation_radius_km == pytest.approx(0.2 * 1.60934)
+
 
 # ── coordinate / home-location feedback ───────────────────────────────────────
 

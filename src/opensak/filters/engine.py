@@ -32,7 +32,9 @@ from sqlalchemy.orm import Session
 
 from opensak.db.models import Cache, Log, Trackable, UserNote, Waypoint
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, LineShape
-from opensak.utils.constants import DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES
+from opensak.utils.constants import (
+    DNF_LOG_TYPES, FOUND_LOG_TYPES, LOG_TYPES, PHYSICAL_WAYPOINT_TYPES,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -4723,6 +4725,30 @@ def user_flagged_codes(session: Session) -> list[str]:
         .all()
     )
     return [row[0] for row in rows]
+
+
+def physical_waypoint_coords(session: Session, cache_ids: list[int]) -> list[tuple[float, float]]:
+    """Coordinates of the physical stages and finals (PHYSICAL_WAYPOINT_TYPES)
+    of the given caches — for the map's separation circles (#1087).
+    Waypoints without coordinates, or at 0/0, are left out."""
+    coords: list[tuple[float, float]] = []
+    # Chunked to stay under SQLite's bound-parameter limit.
+    for i in range(0, len(cache_ids), 500):
+        rows = (
+            session.query(Waypoint.latitude, Waypoint.longitude)
+            .filter(
+                Waypoint.cache_id.in_(cache_ids[i:i + 500]),
+                Waypoint.wp_type.in_(PHYSICAL_WAYPOINT_TYPES),
+                Waypoint.latitude.is_not(None),
+                Waypoint.longitude.is_not(None),
+            )
+            .all()
+        )
+        coords.extend(
+            (lat, lon) for lat, lon in rows
+            if lat is not None and lon is not None and (lat or lon)
+        )
+    return coords
 
 
 def get_nearby_caches(

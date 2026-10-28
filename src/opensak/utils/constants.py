@@ -39,6 +39,28 @@ CACHE_TYPES: list[str] = [
     "Hotel/POI",
 ]
 
+# ── Cache saturation (issue #1087) ────────────────────────────────────────────
+# Cache types with a physical container, and the child waypoint types that
+# mark a physical location — both count for geocaching.com's 0.1 mile
+# (161 m) proximity rule. The map draws separation circles around these.
+
+PHYSICAL_CACHE_TYPES: frozenset[str] = frozenset({
+    "Traditional Cache",
+    "Multi-cache",
+    "Unknown Cache",
+    "Letterbox Hybrid",
+    "Wherigo Cache",
+    "Geocaching HQ Cache",
+    "Project A.P.E. Cache",
+})
+
+PHYSICAL_WAYPOINT_TYPES: frozenset[str] = frozenset({
+    "Physical Stage",
+    "Final Location",
+})
+
+SATURATION_DISTANCE_KM: float = 0.161
+
 # ── Valid D/T rating values (Groundspeak standard) ────────────────────────────
 # D/T must be one of these — 1.7, 2.3 etc. are not valid geocache ratings.
 

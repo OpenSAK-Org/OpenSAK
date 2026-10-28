@@ -4,6 +4,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Separation circles on the map (#1087)** — the new ◯ button on the map
+  switches on a circle around every physical cache and its physical
+  stages and final. This helps when you plan a new hide. The circles
+  follow corrected coordinates. Virtuals, Earthcaches, Webcams, events
+  and Labs get none, as they don't count for saturation. They are drawn
+  once you zoom in (zoom 13 and closer). The radius is set under
+  **Settings → Map → Separation circle radius**. It defaults to 0.161 km
+  (0.1 mile), the geocaching.com minimum distance between caches; Off
+  hides the button. The circles are off until you switch them on, and the
+  map remembers your choice. The same button is on the split-screen map
+  and the popped-out map. Contributed by nagisml.
+
 ## [1.22.0-beta.11] — 2026-10-28
 
 > Headline: **the last feature beta before v1.22.0.** Coming from GSAK,

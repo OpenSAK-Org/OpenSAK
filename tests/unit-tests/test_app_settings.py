@@ -208,6 +208,32 @@ class TestDisplay:
         s.map_provider = "osm"
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
+    def test_map_separation_radius_defaults_to_saturation_distance(self, s):
+        # #1087: 0.1 mile, the geocaching.com proximity distance.
+        assert s.map_separation_radius_km == 0.161
+
+    def test_map_separation_radius_roundtrip_and_clamp(self, s):
+        s.map_separation_radius_km = 0.5
+        assert s.map_separation_radius_km == 0.5
+        s.map_separation_radius_km = -1
+        assert s.map_separation_radius_km == 0.0
+
+    def test_map_separation_radius_invalid_falls_back(self, s):
+        from opensak.settings_store import get_store
+        get_store().set("display.map_separation_radius_km", "bogus")
+        assert s.map_separation_radius_km == 0.161
+
+    def test_map_separation_circles_off_by_default(self, s):
+        # Off by default, so the map looks as before #1087.
+        assert s.map_separation_circles is False
+        s.map_separation_circles = True
+        assert s.map_separation_circles is True
+
+    def test_map_separation_circles_string_value(self, s):
+        from opensak.settings_store import get_store
+        get_store().set("display.map_separation_circles", "true")
+        assert s.map_separation_circles is True
+
 
 # ── window state / search / paths ─────────────────────────────────────
 
