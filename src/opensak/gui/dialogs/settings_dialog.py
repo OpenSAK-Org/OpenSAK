@@ -463,14 +463,13 @@ class SettingsDialog(QDialog):
 
         # Issue #1087: clustering radius and cache labels. Global; the map
         # is reloaded after OK, so they apply to the open map (main and
-        # pop-out share the same MapWidget).
+        # pop-out share the same MapWidget). Clustering itself is switched
+        # on/off with the button on the map.
         cluster_row = QHBoxLayout()
         cluster_row.addWidget(QLabel(tr("settings_map_cluster_label")))
         self._map_cluster_radius = QComboBox()
         for radius in MAP_CLUSTER_RADII:
-            text = (tr("settings_map_cluster_off") if radius == 0
-                    else tr("settings_map_cluster_px", px=radius))
-            self._map_cluster_radius.addItem(text, radius)
+            self._map_cluster_radius.addItem(tr("settings_map_cluster_px", px=radius), radius)
         cluster_row.addWidget(self._map_cluster_radius)
         cluster_row.addStretch()
         group_layout.addLayout(cluster_row)

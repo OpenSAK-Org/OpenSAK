@@ -44,7 +44,8 @@ def _cache(**kw):
 @pytest.fixture
 def fake_settings(monkeypatch):
     s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
-                        map_cluster_radius=40, map_labels="off")
+                        map_clustering=True, map_cluster_radius=40,
+                        map_labels="off")
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     return s
 
@@ -261,10 +262,10 @@ class TestLoadCachesJsBulkLoading:
     def test_marker_cluster_groups_use_chunked_loading(self):
         # Both the module-level initial group and the one recreated inside
         # loadCaches() need chunkedLoading, since loadCaches() always
-        # replaces the group before the bulk addLayers() call. Both are built
-        # by makeClusterGroup() (#1087), which sets it.
+        # replaces the group before the bulk addLayers() call. Every group
+        # is built by makeClusterGroup() (#1087), which sets it.
         assert mw_mod.MAP_HTML.count("chunkedLoading: true") == 1
-        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 2
+        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 3
 
     def test_pan_fit_bounds_deferred_to_chunk_completion(self):
         # The post-load pan/fitBounds step must run from chunkProgress once
@@ -447,10 +448,10 @@ class TestLifecycle:
         # #1087: Settings → OK reloads the map, which must pick up the
         # clustering/label settings changed in the dialog.
         w._page = FakePage()
-        fake_settings.map_cluster_radius = 0
+        fake_settings.map_cluster_radius = 80
         fake_settings.map_labels = "gc_code"
         w.reload_map()
-        assert "if (0 > 0) {" in w._page.html
+        assert "options.maxClusterRadius = 80;" in w._page.html
         assert "if (\"gc_code\" === 'off') return;" in w._page.html
 
     def test_set_pending_refresh(self, w):
@@ -795,24 +796,45 @@ class TestDisplayOptions:
         return mw_mod.MAP_HTML[start:end]
 
     def test_one_cluster_group_builder(self):
-        # Both constructions go through makeClusterGroup(), so they can't
+        # Every construction goes through makeClusterGroup(), so they can't
         # drift apart — and nothing hardcodes the radius any more.
         assert mw_mod.MAP_HTML.count("L.markerClusterGroup(") == 1
-        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 2
+        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 3
         assert "maxClusterRadius: 40" not in mw_mod.MAP_HTML
 
     def test_default_render_keeps_radius_40_and_no_labels(self):
         html = MapWidget._render_map_html(55.0, 12.0)
-        assert "if (40 > 0) {" in html
+        assert "var clusteringOn = true;" in html
         assert "options.maxClusterRadius = 40;" in html
         assert "if (\"off\" === 'off') return;" in html
-        assert "MAP_CLUSTER_RADIUS" not in html
+        assert "MAP_CLUSTER" not in html
+        assert "MAP_TIP_CLUSTERING" not in html
         assert "MAP_LABEL_MODE" not in html
 
     def test_cluster_off_disables_clustering(self):
-        html = MapWidget._render_map_html(55.0, 12.0, cluster_radius=0)
-        assert "if (0 > 0) {" in html
-        assert "options.disableClusteringAtZoom = 0;" in mw_mod.MAP_HTML
+        html = MapWidget._render_map_html(55.0, 12.0, clustering=False)
+        assert "var clusteringOn = false;" in html
+        assert "options.disableClusteringAtZoom = 0;" in self._fn_body("makeClusterGroup")
+
+    def test_set_clustering_regroups_loaded_markers(self):
+        # The map button regroups in place: same markers, new group, no
+        # reload and no refit (no chunkProgress → no afterCachesLoaded).
+        body = self._fn_body("setClustering")
+        assert "clusteringOn = !!on;" in body
+        assert "clusterGroup = makeClusterGroup();" in body
+        assert "clusterGroup.addLayers(layers)" in body
+        assert body.index("clusteringOn = !!on;") < body.index("makeClusterGroup()")
+
+    def test_clustering_button_on_every_map(self):
+        # Not behind MAP_ACTIONS_ENABLED: the trip/draw dialogs get it too.
+        assert "\nnew L.Control.Clustering().addTo(map);" in mw_mod.MAP_HTML
+        assert "bridge.on_clustering_toggled(clusteringOn)" in mw_mod.MAP_HTML
+
+    def test_clustering_tooltip_is_a_js_literal(self, monkeypatch):
+        monkeypatch.setattr(mw_mod, "tr", lambda key, *a, **kw: 'It\'s "on"')
+        html = MapWidget._render_map_html(55.0, 12.0)
+        line = next(l for l in html.splitlines() if " btn.title = " in l)
+        assert json.loads(line.split("btn.title = ", 1)[1].rstrip().rstrip(";")) == 'It\'s "on"'
 
     def test_label_mode_is_a_js_literal(self):
         html = MapWidget._render_map_html(55.0, 12.0, label_mode="name")
@@ -827,10 +849,20 @@ class TestDisplayOptions:
             assert "bindCacheLabel(marker, c);" in self._fn_body(fn)
 
     def test_html_options_read_settings(self, qtbot, fake_settings):
+        fake_settings.map_clustering = False
         fake_settings.map_cluster_radius = 80
         fake_settings.map_labels = "name"
         w = MapWidget()
         qtbot.addWidget(w)
         opts = w._html_options()
+        assert opts["clustering"] is False
         assert opts["cluster_radius"] == 80
         assert opts["label_mode"] == "name"
+
+    def test_clustering_toggle_is_remembered(self, qtbot, fake_settings):
+        w = MapWidget()
+        qtbot.addWidget(w)
+        w._bridge.on_clustering_toggled(False)
+        assert fake_settings.map_clustering is False
+        w._bridge.on_clustering_toggled(True)
+        assert fake_settings.map_clustering is True

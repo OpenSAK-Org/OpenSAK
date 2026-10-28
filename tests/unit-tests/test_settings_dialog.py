@@ -217,12 +217,11 @@ class TestConstruction:
         assert dlg._map_cluster_radius.currentData() == 40
         assert dlg._map_labels.currentData() == "off"
 
-    def test_map_cluster_off_shows_off_text(self, qtbot, settings):
-        from opensak.lang import tr
-        settings.map_cluster_radius = 0
-        d = SettingsDialog()
-        qtbot.addWidget(d)
-        assert d._map_cluster_radius.currentText() == tr("settings_map_cluster_off")
+    def test_map_cluster_radius_has_no_off_entry(self, dlg):
+        # Off is the button on the map, not a radius.
+        radii = [dlg._map_cluster_radius.itemData(i)
+                 for i in range(dlg._map_cluster_radius.count())]
+        assert radii == [10, 20, 40, 50, 80, 100]
 
     def test_map_cluster_and_labels_save_on_accept(self, qtbot, settings):
         d = SettingsDialog()

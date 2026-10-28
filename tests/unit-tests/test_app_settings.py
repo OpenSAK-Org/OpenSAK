@@ -213,8 +213,8 @@ class TestDisplay:
         assert s.map_cluster_radius == 40
 
     def test_map_cluster_radius_roundtrip(self, s):
-        s.map_cluster_radius = 0
-        assert s.map_cluster_radius == 0
+        s.map_cluster_radius = 10
+        assert s.map_cluster_radius == 10
         s.map_cluster_radius = 80
         assert s.map_cluster_radius == 80
 
@@ -222,8 +222,22 @@ class TestDisplay:
         from opensak.settings_store import get_store
         get_store().set("display.map_cluster_radius", 33)
         assert s.map_cluster_radius == 40
+        get_store().set("display.map_cluster_radius", 0)   # off is the map button
+        assert s.map_cluster_radius == 40
         get_store().set("display.map_cluster_radius", "bogus")
         assert s.map_cluster_radius == 40
+
+    def test_map_clustering_on_by_default(self, s):
+        # #1087: on by default, so the map looks as before; the map
+        # button switches it.
+        assert s.map_clustering is True
+        s.map_clustering = False
+        assert s.map_clustering is False
+
+    def test_map_clustering_string_value(self, s):
+        from opensak.settings_store import get_store
+        get_store().set("display.map_clustering", "false")
+        assert s.map_clustering is False
 
     def test_map_labels_default_off_and_roundtrip(self, s):
         assert s.map_labels == "off"

@@ -8,14 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
-- **Map clustering and cache labels (#1087)** — **Settings → Map** has two
-  new choices. **Cluster radius** sets how close pins must be, in screen
-  pixels, to be grouped into a numbered cluster: 10, 20, 40 (as before),
-  50, 80 or 100, or Off to show every pin. **Cache labels** writes each
-  cache's name or GC code under its pin; the labels appear once you zoom
-  in (zoom 13 and closer). Both apply to the open map, also the
-  split-screen and popped-out map, as soon as you click OK. Contributed by
-  nagisml.
+- **Map clustering and cache labels (#1087)** — the new ⁂ button on the
+  map switches clustering on and off: off shows every pin on its own. The
+  map regroups at once and remembers your choice. **Settings → Map** has
+  two new choices. **Cluster radius** sets how close pins must be, in
+  screen pixels, to be grouped into a numbered cluster: 10, 20, 40 (as
+  before), 50, 80 or 100. **Cache labels** writes each cache's name or GC
+  code under its pin; the labels appear once you zoom in (zoom 13 and
+  closer). Both apply to the open map, also the split-screen and
+  popped-out map, as soon as you click OK. Contributed by nagisml.
 
 ## [1.22.0-beta.11] — 2026-10-28
 

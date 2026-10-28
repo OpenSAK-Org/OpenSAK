@@ -13,9 +13,10 @@ from typing import Any
 from opensak.utils.types import CoordFormat, DateFormat, TextSize
 from opensak.settings_store import get_store
 
-# Issue #1087: map clustering radius choices (pixels, 0 = no clustering)
-# and cache label modes, offered on Settings → Map.
-MAP_CLUSTER_RADII: tuple[int, ...] = (0, 10, 20, 40, 50, 80, 100)
+# Issue #1087: map clustering radius choices (pixels) and cache label
+# modes, offered on Settings → Map. Clustering itself is switched on/off
+# with the button on the map (map_clustering).
+MAP_CLUSTER_RADII: tuple[int, ...] = (10, 20, 40, 50, 80, 100)
 MAP_CLUSTER_RADIUS_DEFAULT = 40
 MAP_LABEL_MODES: tuple[str, ...] = ("off", "name", "gc_code")
 
@@ -422,8 +423,8 @@ class AppSettings:
     @property
     def map_cluster_radius(self) -> int:
         """Issue #1087: Leaflet.markercluster's maxClusterRadius in pixels,
-        one of MAP_CLUSTER_RADII. 0 switches clustering off. Default 40, the
-        value hardcoded before #1087. Global, like map_max_caches."""
+        one of MAP_CLUSTER_RADII, used while map_clustering is on. Default
+        40, the value hardcoded before #1087. Global, like map_max_caches."""
         val = get_store().get("display.map_cluster_radius", MAP_CLUSTER_RADIUS_DEFAULT)
         try:
             val = int(val)
@@ -434,6 +435,19 @@ class AppSettings:
     @map_cluster_radius.setter
     def map_cluster_radius(self, value: int) -> None:
         get_store().set("display.map_cluster_radius", int(value))
+
+    @property
+    def map_clustering(self) -> bool:
+        """Issue #1087: whether pins are grouped into clusters — the on/off
+        button on the map. On by default, so the map looks as before."""
+        val = get_store().get("display.map_clustering", True)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @map_clustering.setter
+    def map_clustering(self, value: bool) -> None:
+        get_store().set("display.map_clustering", bool(value))
 
     @property
     def map_labels(self) -> str:
