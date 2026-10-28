@@ -115,6 +115,7 @@
   <h2>5. Third-Party Services</h2>
   <h3>5.1 Map tiles</h3>
   <p>The in-app map fetches tiles from OpenStreetMap servers. Standard web requests may include your IP address. The map component (Leaflet) is bundled with OpenSAK, so no content delivery network is contacted. See <a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy">OSM Privacy Policy</a>.</p>
+  <p>Map tiles you have viewed are kept in a cache on your own computer (up to the size set in <strong>Settings → Map → Map tile cache</strong>), so areas you viewed recently still show offline. Only viewed tiles are stored, nothing is downloaded in advance, and the cache is never sent anywhere.</p>
   <h3>5.2 Garmin GPS devices</h3>
   <p>Cache export to Garmin writes a GPX file via USB or MTP. No data is transmitted over the internet.</p>
   <h3>5.3 Update check and in-app updates (GitHub)</h3>
