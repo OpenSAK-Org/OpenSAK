@@ -223,6 +223,20 @@ MAP_HTML = """<!DOCTYPE html>
     border: 2px solid #fff;
     box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   }
+  .leaflet-tooltip.cache-label {
+    padding: 0 4px;
+    font-size: 11px;
+    font-family: sans-serif;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.85);
+    border: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .leaflet-tooltip.cache-label::before { display: none; }
+  .cache-labels-hidden .leaflet-tooltip.cache-label { display: none; }
   .leaflet-control-nearbylabel {
     background: #fff;
     padding: 4px 10px;
@@ -265,14 +279,58 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 }).addTo(map);
 
 // ── Marker cluster gruppe ─────────────────────────────────────────────────────
-var clusterGroup = L.markerClusterGroup({
-    maxClusterRadius: 40,
-    showCoverageOnHover: false,
-    chunkedLoading: true,
-    chunkInterval: 200,
-    chunkDelay: 10
-});
+// Issue #1087: both constructions (here and in loadCaches) go through
+// makeClusterGroup(), so the settings can't drift between them.
+// MAP_CLUSTER_RADIUS 0 switches clustering off: disableClusteringAtZoom 0
+// puts every marker straight on the top level, while the group's API
+// (addLayers, zoomToShowLayer, getBounds, chunkProgress) stays the same.
+function makeClusterGroup(extra) {
+    var options = {
+        showCoverageOnHover: false,
+        chunkedLoading: true,
+        chunkInterval: 200,
+        chunkDelay: 10
+    };
+    if (MAP_CLUSTER_RADIUS > 0) {
+        options.maxClusterRadius = MAP_CLUSTER_RADIUS;
+    } else {
+        options.disableClusteringAtZoom = 0;
+    }
+    return L.markerClusterGroup(L.extend(options, extra));
+}
+
+var clusterGroup = makeClusterGroup();
 map.addLayer(clusterGroup);
+
+// ── Issue #1087: cache labels ─────────────────────────────────────────────────
+// A permanent tooltip under each pin with its name or GC code
+// (MAP_LABEL_MODE 'name' / 'gc_code', 'off' = none). Hidden below
+// LABEL_MIN_ZOOM, where they would only cover each other.
+var LABEL_MIN_ZOOM = 13;
+
+function bindCacheLabel(marker, c) {
+    if (MAP_LABEL_MODE === 'off') return;
+    var text = MAP_LABEL_MODE === 'gc_code' ? c.gc_code : c.name;
+    if (!text) return;
+    marker.bindTooltip(escapeHtml(text), {
+        permanent: true,
+        direction: 'bottom',
+        offset: [0, 14],
+        className: 'cache-label',
+        interactive: false
+    });
+}
+
+function updateLabelVisibility() {
+    var container = map.getContainer();
+    if (map.getZoom() < LABEL_MIN_ZOOM) {
+        L.DomUtil.addClass(container, 'cache-labels-hidden');
+    } else {
+        L.DomUtil.removeClass(container, 'cache-labels-hidden');
+    }
+}
+map.on('zoomend', updateLabelVisibility);
+updateLabelVisibility();
 
 // ── State ─────────────────────────────────────────────────────────────────────
 var markers = {};          // gc_code → marker
@@ -591,12 +649,7 @@ function loadCaches(caches) {
 
     // Recreate the cluster group to avoid stale internal state from clearLayers()
     map.removeLayer(clusterGroup);
-    clusterGroup = L.markerClusterGroup({
-        maxClusterRadius: 40,
-        showCoverageOnHover: false,
-        chunkedLoading: true,
-        chunkInterval: 200,
-        chunkDelay: 10,
+    clusterGroup = makeClusterGroup({
         chunkProgress: function(processed, total) {
             // Issue #630: chunkedLoading adds markers to the map in
             // background chunks (via requestAnimationFrame/setTimeout)
@@ -626,6 +679,7 @@ function loadCaches(caches) {
         });
 
         marker.bindPopup(cachePopupHtml(c));
+        bindCacheLabel(marker, c);
 
         marker.on('click', function() {
             if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -864,6 +918,7 @@ function updateCacheMarker(c) {
     });
 
     marker.bindPopup(cachePopupHtml(c));
+    bindCacheLabel(marker, c);
 
     marker.on('click', function() {
         if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -1052,12 +1107,18 @@ class MapWidget(QWidget):
             cb()
 
     def _html_options(self) -> dict:
+        # Issue #1087: clustering and labels are read here, so the reload
+        # after Settings → OK (reload_map) applies them to the open map.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
         return {"map_actions": self._map_actions, "draw_button": self._draw_button,
-                "auto_fit_caches": self._auto_fit_caches}
+                "auto_fit_caches": self._auto_fit_caches,
+                "cluster_radius": s.map_cluster_radius, "label_mode": s.map_labels}
 
     @staticmethod
     def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
-                         draw_button: bool = False, auto_fit_caches: bool = True) -> str:
+                         draw_button: bool = False, auto_fit_caches: bool = True,
+                         cluster_radius: int = 40, label_mode: str = "off") -> str:
         """Render MAP_HTML template with dynamic values and localized tooltips."""
         import opensak.utils.flags as flags
         html = MAP_HTML.replace("INIT_LAT", str(lat))
@@ -1067,6 +1128,8 @@ class MapWidget(QWidget):
         html = html.replace("MAP_ACTIONS_ENABLED", "true" if map_actions else "false")
         html = html.replace("MAP_DRAW_BUTTON", "true" if draw_button else "false")
         html = html.replace("AUTO_FIT_CACHES", "true" if auto_fit_caches else "false")
+        html = html.replace("MAP_CLUSTER_RADIUS", str(max(0, int(cluster_radius))))
+        html = html.replace("MAP_LABEL_MODE", _js_inline_arg(label_mode))
         html = html.replace("GEOMAN_LANG", _js_inline_arg(_geoman_lang()))
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before

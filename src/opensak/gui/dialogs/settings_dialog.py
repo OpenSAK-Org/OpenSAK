@@ -17,7 +17,9 @@ from PySide6.QtWidgets import (
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
-from opensak.gui.settings import get_settings, HomePoint
+from opensak.gui.settings import (
+    get_settings, HomePoint, MAP_CLUSTER_RADII, MAP_LABEL_MODES,
+)
 from opensak.gui.dialogs.widgets import (
     DirRow, clamp_dialog_height_to_screen, remember_dialog_geometry,
 )
@@ -456,6 +458,41 @@ class SettingsDialog(QDialog):
         max_caches_note.setWordWrap(True)
         max_caches_note.setStyleSheet(hint_style())
         group_layout.addWidget(max_caches_note)
+
+        group_layout.addSpacing(8)
+
+        # Issue #1087: clustering radius and cache labels. Global; the map
+        # is reloaded after OK, so they apply to the open map (main and
+        # pop-out share the same MapWidget).
+        cluster_row = QHBoxLayout()
+        cluster_row.addWidget(QLabel(tr("settings_map_cluster_label")))
+        self._map_cluster_radius = QComboBox()
+        for radius in MAP_CLUSTER_RADII:
+            text = (tr("settings_map_cluster_off") if radius == 0
+                    else tr("settings_map_cluster_px", px=radius))
+            self._map_cluster_radius.addItem(text, radius)
+        cluster_row.addWidget(self._map_cluster_radius)
+        cluster_row.addStretch()
+        group_layout.addLayout(cluster_row)
+
+        labels_row = QHBoxLayout()
+        labels_row.addWidget(QLabel(tr("settings_map_labels_label")))
+        self._map_labels = QComboBox()
+        label_texts = {
+            "off":     tr("settings_map_labels_off"),
+            "name":    tr("col_name"),
+            "gc_code": tr("settings_map_labels_gc_code"),
+        }
+        for mode in MAP_LABEL_MODES:
+            self._map_labels.addItem(label_texts[mode], mode)
+        labels_row.addWidget(self._map_labels)
+        labels_row.addStretch()
+        group_layout.addLayout(labels_row)
+
+        cluster_note = QLabel(tr("settings_map_cluster_note"))
+        cluster_note.setWordWrap(True)
+        cluster_note.setStyleSheet(hint_style())
+        group_layout.addWidget(cluster_note)
 
         group_layout.addSpacing(8)
 
@@ -1747,6 +1784,10 @@ class SettingsDialog(QDialog):
         self._decode_hints_cb.setChecked(s.default_decode_hints)
         self._map_enabled_cb.setChecked(s.map_enabled)
         self._map_max_caches.setValue(s.map_max_caches)
+        idx = self._map_cluster_radius.findData(s.map_cluster_radius)
+        self._map_cluster_radius.setCurrentIndex(max(idx, 0))
+        idx = self._map_labels.findData(s.map_labels)
+        self._map_labels.setCurrentIndex(max(idx, 0))
         # Issue #718 — stored value is always km; display in the user's
         # configured unit, same conversion used by filter_dialog.py's
         # DistanceFilter radius field.
@@ -1846,6 +1887,8 @@ class SettingsDialog(QDialog):
         s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.map_enabled = self._map_enabled_cb.isChecked()
         s.map_max_caches = self._map_max_caches.value()
+        s.map_cluster_radius = self._map_cluster_radius.currentData()
+        s.map_labels = self._map_labels.currentData()
         # Issue #718 — convert back to km for storage if the field was
         # shown in miles (unit combo already saved above via s.use_miles).
         radius_val = self._map_nearby_radius.value()

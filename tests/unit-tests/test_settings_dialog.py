@@ -212,6 +212,27 @@ class TestConstruction:
         settings.map_max_caches = -5
         assert settings.map_max_caches == 0
 
+    def test_map_cluster_and_labels_defaults(self, dlg):
+        # #1087: defaults keep today's map.
+        assert dlg._map_cluster_radius.currentData() == 40
+        assert dlg._map_labels.currentData() == "off"
+
+    def test_map_cluster_off_shows_off_text(self, qtbot, settings):
+        from opensak.lang import tr
+        settings.map_cluster_radius = 0
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        assert d._map_cluster_radius.currentText() == tr("settings_map_cluster_off")
+
+    def test_map_cluster_and_labels_save_on_accept(self, qtbot, settings):
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        d._map_cluster_radius.setCurrentIndex(d._map_cluster_radius.findData(100))
+        d._map_labels.setCurrentIndex(d._map_labels.findData("name"))
+        d._save()
+        assert settings.map_cluster_radius == 100
+        assert settings.map_labels == "name"
+
 
 # ── coordinate / home-location feedback ───────────────────────────────────────
 

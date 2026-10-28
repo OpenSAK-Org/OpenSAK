@@ -34,7 +34,8 @@ class FakePage:
 @pytest.fixture
 def fake_settings(monkeypatch):
     s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
-                        use_miles=False, map_draw_dialog_geometry=None)
+                        use_miles=False, map_draw_dialog_geometry=None,
+                        map_cluster_radius=40, map_labels="off")
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     monkeypatch.setattr("opensak.gui.dialogs.map_draw_dialog.get_settings", lambda: s)
     return s

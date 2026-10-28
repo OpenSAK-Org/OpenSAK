@@ -43,7 +43,8 @@ def _cache(**kw):
 
 @pytest.fixture
 def fake_settings(monkeypatch):
-    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home")
+    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
+                        map_cluster_radius=40, map_labels="off")
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     return s
 
@@ -260,8 +261,10 @@ class TestLoadCachesJsBulkLoading:
     def test_marker_cluster_groups_use_chunked_loading(self):
         # Both the module-level initial group and the one recreated inside
         # loadCaches() need chunkedLoading, since loadCaches() always
-        # replaces the group before the bulk addLayers() call.
-        assert mw_mod.MAP_HTML.count("chunkedLoading: true") == 2
+        # replaces the group before the bulk addLayers() call. Both are built
+        # by makeClusterGroup() (#1087), which sets it.
+        assert mw_mod.MAP_HTML.count("chunkedLoading: true") == 1
+        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 2
 
     def test_pan_fit_bounds_deferred_to_chunk_completion(self):
         # The post-load pan/fitBounds step must run from chunkProgress once
@@ -439,6 +442,16 @@ class TestLifecycle:
         w.reload_map()
         assert w._ready is False
         assert w._page.html is not None
+
+    def test_reload_map_applies_display_settings(self, w, fake_settings):
+        # #1087: Settings → OK reloads the map, which must pick up the
+        # clustering/label settings changed in the dialog.
+        w._page = FakePage()
+        fake_settings.map_cluster_radius = 0
+        fake_settings.map_labels = "gc_code"
+        w.reload_map()
+        assert "if (0 > 0) {" in w._page.html
+        assert "if (\"gc_code\" === 'off') return;" in w._page.html
 
     def test_set_pending_refresh(self, w):
         cb = lambda: None
@@ -771,3 +784,53 @@ class TestTooltipEscaping:
     def test_token_names_inside_translation_are_not_rewritten(self, monkeypatch):
         html = self._render(monkeypatch, "HINT_TEXT_COLOR INIT_LAT")
         assert '"HINT_TEXT_COLOR INIT_LAT"' in html
+
+
+# ── Clustering and labels (issue #1087) ───────────────────────────────────────
+
+class TestDisplayOptions:
+    def _fn_body(self, fn_name: str) -> str:
+        start = mw_mod.MAP_HTML.index(f"function {fn_name}")
+        end = mw_mod.MAP_HTML.index("\n}", start)
+        return mw_mod.MAP_HTML[start:end]
+
+    def test_one_cluster_group_builder(self):
+        # Both constructions go through makeClusterGroup(), so they can't
+        # drift apart — and nothing hardcodes the radius any more.
+        assert mw_mod.MAP_HTML.count("L.markerClusterGroup(") == 1
+        assert mw_mod.MAP_HTML.count("clusterGroup = makeClusterGroup(") == 2
+        assert "maxClusterRadius: 40" not in mw_mod.MAP_HTML
+
+    def test_default_render_keeps_radius_40_and_no_labels(self):
+        html = MapWidget._render_map_html(55.0, 12.0)
+        assert "if (40 > 0) {" in html
+        assert "options.maxClusterRadius = 40;" in html
+        assert "if (\"off\" === 'off') return;" in html
+        assert "MAP_CLUSTER_RADIUS" not in html
+        assert "MAP_LABEL_MODE" not in html
+
+    def test_cluster_off_disables_clustering(self):
+        html = MapWidget._render_map_html(55.0, 12.0, cluster_radius=0)
+        assert "if (0 > 0) {" in html
+        assert "options.disableClusteringAtZoom = 0;" in mw_mod.MAP_HTML
+
+    def test_label_mode_is_a_js_literal(self):
+        html = MapWidget._render_map_html(55.0, 12.0, label_mode="name")
+        assert "var text = \"name\" === 'gc_code' ? c.gc_code : c.name;" in html
+
+    def test_label_text_is_escaped(self):
+        # Names come from cache owners — never raw HTML in a tooltip.
+        assert "bindTooltip(escapeHtml(text)" in self._fn_body("bindCacheLabel")
+
+    def test_labels_bound_on_both_marker_paths(self):
+        for fn in ("loadCaches", "updateCacheMarker"):
+            assert "bindCacheLabel(marker, c);" in self._fn_body(fn)
+
+    def test_html_options_read_settings(self, qtbot, fake_settings):
+        fake_settings.map_cluster_radius = 80
+        fake_settings.map_labels = "name"
+        w = MapWidget()
+        qtbot.addWidget(w)
+        opts = w._html_options()
+        assert opts["cluster_radius"] == 80
+        assert opts["label_mode"] == "name"

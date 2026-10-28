@@ -208,6 +208,37 @@ class TestDisplay:
         s.map_provider = "osm"
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
+    def test_map_cluster_radius_defaults_to_40(self, s):
+        # #1087: the value hardcoded before the setting existed.
+        assert s.map_cluster_radius == 40
+
+    def test_map_cluster_radius_roundtrip(self, s):
+        s.map_cluster_radius = 0
+        assert s.map_cluster_radius == 0
+        s.map_cluster_radius = 80
+        assert s.map_cluster_radius == 80
+
+    def test_map_cluster_radius_invalid_falls_back(self, s):
+        from opensak.settings_store import get_store
+        get_store().set("display.map_cluster_radius", 33)
+        assert s.map_cluster_radius == 40
+        get_store().set("display.map_cluster_radius", "bogus")
+        assert s.map_cluster_radius == 40
+
+    def test_map_labels_default_off_and_roundtrip(self, s):
+        assert s.map_labels == "off"
+        s.map_labels = "gc_code"
+        assert s.map_labels == "gc_code"
+        s.map_labels = "name"
+        assert s.map_labels == "name"
+
+    def test_map_labels_invalid_is_off(self, s):
+        from opensak.settings_store import get_store
+        s.map_labels = "bogus"
+        assert s.map_labels == "off"
+        get_store().set("display.map_labels", "smartname")
+        assert s.map_labels == "off"
+
 
 # ── window state / search / paths ─────────────────────────────────────
 
