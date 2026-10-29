@@ -23,6 +23,7 @@ from urllib.error import URLError
 from PySide6.QtCore import QThread, Signal
 
 from opensak.logger import get_logger
+from opensak import net
 from opensak.net import SSL_CONTEXT, build_ssl_context
 
 log = get_logger("updater")
@@ -118,6 +119,7 @@ def fetch_latest_release() -> dict | None:
         )
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
             data = json.load(resp)
+        net.note_success()
         release = {
             "tag_name": data.get("tag_name", ""),
             "html_url": data.get("html_url", RELEASES_PAGE),
@@ -126,6 +128,7 @@ def fetch_latest_release() -> dict | None:
         log.debug("Latest release: %s", release["tag_name"])
         return release
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
+        net.note_failure(exc)
         log.debug("Could not fetch latest release: %s", exc)
         return None
 
@@ -159,6 +162,7 @@ def fetch_latest_prerelease() -> dict | None:
         )
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=_SSL_CONTEXT) as resp:
             data = json.load(resp)
+        net.note_success()
         if not isinstance(data, list):
             return None
 
@@ -183,6 +187,7 @@ def fetch_latest_prerelease() -> dict | None:
             log.debug("No pre-release found among the latest %d releases", MAX_RELEASES_TO_SCAN)
         return best_release
     except (URLError, OSError, json.JSONDecodeError, KeyError) as exc:
+        net.note_failure(exc)
         log.debug("Could not fetch beta releases: %s", exc)
         return None
 

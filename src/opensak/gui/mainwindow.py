@@ -4214,6 +4214,12 @@ class MainWindow(QMainWindow):
         from opensak import msix
         if msix.is_msix_packaged():
             return
+        # #1111: an earlier request this session found no network — skip
+        # instead of waiting for a timeout. Help → Check for updates still
+        # tries.
+        from opensak import net
+        if net.offline_detected():
+            return
         self._update_worker = UpdateCheckWorker(
             __version__, parent=self,
             include_prereleases=get_settings().notify_about_betas,

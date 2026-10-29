@@ -113,6 +113,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **No long waits without a network connection (#1111)** — once a
+  request finds the network unreachable (no connection, DNS failure,
+  timeout), OpenSAK stops making automatic requests for five minutes
+  instead of waiting for each one to time out: the update check at
+  startup, the boundary data download on first run, and the county packs
+  fetched while importing or updating locations. Caches whose county
+  could not be looked up keep an empty county; *Update waypoint
+  locations* fills it in later. *Help → Check for updates* and the
+  boundary pack dialogs still try every time, and any request that gets
+  through ends the pause.
 - **Sorting on a custom field column (#1201)** — the first click on the
   header of a custom field column (for example GSAK's `LFL`) showed
   "OpenSAK ran into a problem", and the sort was never remembered for the
