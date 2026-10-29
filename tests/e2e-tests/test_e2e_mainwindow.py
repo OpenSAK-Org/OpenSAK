@@ -1798,7 +1798,10 @@ class TestAboutUpdates:
         monkeypatch.setattr(
             seeded_window, "_start_self_download_update", lambda tag: started.append(tag)
         )
-        self._click_update_dialog_button(monkeypatch, tr("update_download_button"))
+        # The button label escapes "&" as "&&" so Qt doesn't eat it as a mnemonic (#1218).
+        self._click_update_dialog_button(
+            monkeypatch, tr("update_download_button").replace("&", "&&")
+        )
 
         seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
 

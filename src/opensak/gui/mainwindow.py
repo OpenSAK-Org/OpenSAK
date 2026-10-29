@@ -4335,8 +4335,11 @@ class MainWindow(QMainWindow):
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
             )
         elif can_self_download:
+            # Escape "&" — Qt would otherwise eat it as a mnemonic marker
+            # ("Download & Install" rendered as "Download _Install").
             btn_primary = msg.addButton(
-                tr("update_download_button"), QMessageBox.ButtonRole.AcceptRole
+                tr("update_download_button").replace("&", "&&"),
+                QMessageBox.ButtonRole.AcceptRole,
             )
         else:
             btn_primary = msg.addButton(
