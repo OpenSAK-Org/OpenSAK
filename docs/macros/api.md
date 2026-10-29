@@ -646,7 +646,7 @@ end
 opensak.attach(name [, schema])
 ```
 
-Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. While the `companion-db` feature flag is on, the database's companion database (opensak.companion()) is attached with it, read-only, as `<schema>_companion`, if it has one, and detached with it. See Several databases in one query.
+Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. The database's companion database (opensak.companion()) is attached with it, read-only, as `<schema>_companion`, if it has one, and detached with it. See Several databases in one query.
 
 Parameters:
 
@@ -656,8 +656,6 @@ Parameters:
 Returns `string` — The schema name.
 
 Since API version 3. Changed in API version 4: also attaches the database's companion database.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
 
 Example:
 
@@ -683,8 +681,6 @@ Parameters:
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
-
 Example:
 
 ```lua
@@ -703,8 +699,6 @@ Returns `{schema: string, name: string, path: string, opensak: boolean, companio
 
 Since API version 3. Changed in API version 4: added `companion`.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
-
 Example:
 
 ```lua
@@ -722,8 +716,6 @@ Make sure the active database has a companion database — a second SQLite file 
 Returns `string` — The path of the companion database file.
 
 Since API version 4.
-
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 
 Example:
 
@@ -751,8 +743,6 @@ Returns `opensak.CompanionTable` — The table, as opensak.companion_tables() li
 
 Since API version 4.
 
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
-
 Example:
 
 ```lua
@@ -771,8 +761,6 @@ The tables and views in the active database's companion database (see opensak.co
 Returns `opensak.CompanionTable[]` — One table per table or view.
 
 Since API version 4.
-
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 
 Example:
 
@@ -798,8 +786,6 @@ Returns `opensak.CustomField[]` — One table per field; empty while there are n
 
 Since API version 4.
 
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
-
 Example:
 
 ```lua
@@ -824,8 +810,6 @@ Returns `opensak.CustomField` — The field, as opensak.custom_fields() lists it
 
 Since API version 4.
 
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
-
 Example:
 
 ```lua
@@ -849,8 +833,6 @@ Parameters:
 Returns `boolean` — false if there is no such field.
 
 Since API version 4.
-
-Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 
 Example:
 
@@ -1002,8 +984,6 @@ Returns `{name: string, lat: number, lon: number, saved: boolean}` — The new c
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1097,8 +1077,6 @@ Returns `opensak.GsakImportReport` — What was imported, per database.
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1127,8 +1105,6 @@ Parameters:
 Returns `opensak.GpxImportReport` — What was imported, per file.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1205,8 +1181,6 @@ Returns `boolean` — false if the cache is not in the database.
 
 Since API version 3. Changed in API version 4: `custom` changes custom fields.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1232,8 +1206,6 @@ Parameters:
 Returns `integer` — The number of caches whose flag changed.
 
 Since API version 4.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1261,8 +1233,6 @@ Returns `string` — The cache code as stored (upper case).
 
 Since API version 3. Changed in API version 4: `custom` sets custom fields.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1287,8 +1257,6 @@ Parameters:
 Returns `boolean|integer` — For one code: false if the cache is not in the database. For a list: the number of caches deleted.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1342,8 +1310,6 @@ Returns `integer?` — The new log's id; nil if the cache is not in the database
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1368,8 +1334,6 @@ Returns `boolean` — false if there is no log with this id.
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1393,8 +1357,6 @@ Parameters:
 Returns `boolean` — false if there is no log with this id.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1446,8 +1408,6 @@ Returns `integer?` — The new waypoint's id; nil if the cache is not in the dat
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1472,8 +1432,6 @@ Returns `boolean` — false if there is no waypoint with this id.
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1497,8 +1455,6 @@ Parameters:
 Returns `boolean` — false if there is no waypoint with this id.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1550,8 +1506,6 @@ Returns `integer?` — The new attribute's id; nil if the cache is not in the da
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1574,8 +1528,6 @@ Parameters:
 Returns `boolean` — false if there is no attribute with this id.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1600,8 +1552,6 @@ Parameters:
 Returns `boolean` — false if there is no attribute with this id.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1651,8 +1601,6 @@ Returns `integer?` — The new trackable's id; nil if the cache is not in the da
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1675,8 +1623,6 @@ Parameters:
 Returns `boolean` — false if there is no trackable with this id.
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1702,8 +1648,6 @@ Returns `boolean` — false if there is no trackable with this id.
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1728,8 +1672,6 @@ Parameters:
 Returns `integer` — Number of rows inserted, updated or deleted (without the rows deleted along with a cache).
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -1765,8 +1707,6 @@ Returns `any...` — What *fn* returns.
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1798,8 +1738,6 @@ Returns `boolean` — true inside opensak.transaction().
 
 Since API version 3.
 
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
-
 Example:
 
 ```lua
@@ -1817,8 +1755,6 @@ Recalculate now the columns OpenSAK maintains itself (distance and bearing, log,
 Returns `integer` — Number of caches recalculated (0 outside a transaction).
 
 Since API version 3.
-
-Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 
 Example:
 
@@ -4242,8 +4178,6 @@ Keys understood by `opensak.filter{}`, combined with AND (or OR with `mode`).
 
 ## Several databases in one query
 
-Beta: `opensak.attach()`, `opensak.detach()` and `opensak.attached()` are only available while the `lua-macro-write` feature flag is on.
-
 The `database` option reads one other database per call. To join several databases in one statement, as GSAK macros do with SQL `ATTACH`, attach them with `opensak.attach()`: each one becomes a schema of the active database's SQL connection, next to `opensak.macro_db()`'s `macro`. Attached databases are read-only; `opensak.sql_write()` still only changes the active database (and `macro`), but may read the attached ones, e.g. in a subquery. SQL `ATTACH` and `DETACH` stay refused, so a macro cannot open files past the folder permissions.
 
 For example, with found caches in one database and placed caches in another, as FindStatGen keeps them:
@@ -4275,8 +4209,6 @@ An attached database is not updated to the current schema: one last opened by an
 | own writable database | `opensak.macro_db()` |
 
 ## The companion database
-
-Beta: only available while the `companion-db` feature flag is on.
 
 Every OpenSAK database can have a companion database next to it (`Found.db` → `Found.companion.db3`) for data that doesn't fit the cache tables: per-cache data a macro collects (FTF information, solver notes, lookups), or tables one macro fills and others use. Unlike `opensak.macro_db()`, which is private to one macro, it belongs to the database and is shared by all macros. `opensak.companion()` creates it; from then on it is attached to every macro run as schema `companion`.
 
@@ -4312,8 +4244,6 @@ end
 `opensak.attach()` attaches a database's companion along with it, read-only, as `<schema>_companion`.
 
 ## Custom fields
-
-Beta: only available while the `companion-db` feature flag is on.
 
 Custom fields are user-defined fields per cache, as in GSAK: the user defines them in Tools → Custom fields, the GSAK import brings them along, and a macro can define its own with `opensak.define_custom_field{}`. A *local* field belongs to one database, a *global* one to every database. They are shown in the cache list and the detail panel, and the Filter dialog has a Custom tab for them.
 
@@ -4499,7 +4429,7 @@ Keys of the table returned by `opensak.cache()`, `opensak.current()` and `opensa
 | `last_log_date` | `string?` | Date of the latest log, "YYYY-MM-DD". |
 | `last_gpx_update` | `string?` | When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh. |
 | `last_user_update` | `string?` | When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate). |
-| `custom` | `table<string, any>` | The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). Only while the `companion-db` feature flag is on. |
+| `custom` | `table<string, any>` | The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). |
 
 ## Database tables for macros
 
@@ -4683,8 +4613,6 @@ Your note and corrected coordinates: at most one row per cache.
 | `updated_at` | date and time |  | When the row last changed (UTC). |
 
 ## Changing caches
-
-Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, `opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, `opensak.sql_write()`, `opensak.transaction()`, `opensak.in_transaction()` and `opensak.resync()` are only available while the `lua-macro-write` feature flag is on, as it is in beta builds. Without it they are nil, and `opensak.set_corrected()` and `opensak.clear_corrected()` change the database without asking.
 
 `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, `opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, `opensak.sql_write()`, `opensak.set_corrected()` and `opensak.clear_corrected()` change the active database. Before a macro's first change, OpenSAK asks whether this macro may change your OpenSAK databases: **Deny** (the function fails, and OpenSAK does not ask again during this run), **Until OpenSAK closes**, or **Always**. The answer belongs to the macro file and its code, not to a database: editing the macro in OpenSAK's macro editor keeps it, while a file changed in any other way (replaced by a downloaded update, edited in another editor) is asked about again, saying what changed: the version, and what the `Permissions:` and `Network:` header now declares that it did not before. A moved or renamed file is asked about again. Macros allowed always are listed in Settings → Folder permissions, where they can be removed again. An unsaved macro can only be allowed until OpenSAK closes. A macro started with `opensak.run_macro()` is asked about on its own. A run from an external editor (`opensak --run-macro`) asks in the OpenSAK window, like any other run, and also offers **While I edit it**: the macro may then change databases after every change of the file until OpenSAK closes, but only when run from the external editor.
 
@@ -4934,7 +4862,7 @@ Write the arguments, separated by tabs, to the macro output pane (to stdout when
 
 The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` libraries, plus `os.time`, `os.date` and `os.clock`. It removes `io`, `debug`, `package`, `require`, `load*`, `dofile` and the rest of `os`. So most of GSAK's language, string and math functions need no API.
 
-**Legend:** ✅ available · β beta: needs the `lua-macro-write` feature flag, which is on in beta builds (see [Changing caches](#changing-caches)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
+**Legend:** ✅ available · β beta: needs the `lua-macro-net` feature flag, which is on in beta builds only (see [Web sites](#web-sites)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
 
 ### Main gaps
 
@@ -4945,50 +4873,50 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| AddNew | ✅ β | `insert{}`, `insert_waypoint/log/attribute/trackable` |
+| AddNew | ✅ | `insert{}`, `insert_waypoint/log/attribute/trackable` |
 | CacheMate | 🚫 | Palm-era format |
 | CancelFilter | ✅ | `clear_filter()` |
 | CodeMatch | ✅ | `filter{codes=}`, `sql("… WHERE code IN …")` |
-| CustomConfig | ✅ β | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()` (needs the `companion-db` flag too); no control/height properties |
-| CustomGet / CustomPut | ✅ β | the `custom` field of a cache, `update(code, { custom = { … } })` (needs the `companion-db` flag too) |
+| CustomConfig | ✅ | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()`; no control/height properties |
+| CustomGet / CustomPut | ✅ | the `custom` field of a cache, `update(code, { custom = { … } })` |
 | Database | ✅ partial | `database()`, `switch_database`, `create_database`, `databases`; no delete |
 | DatabaseExists | ✅ | `database_exists()` |
-| DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` (β) for tables |
-| Delete | ✅ β | `delete(code)` or `delete(codes)`, e.g. `delete(codes())` for the active filter |
+| DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` for tables |
+| Delete | ✅ | `delete(code)` or `delete(codes)`, e.g. `delete(codes())` for the active filter |
 | Elevation | ✅ partial | `elevation` field (metres); no conversion to the user's unit |
 | Export | ✅ partial | `export_file` / `export_gpx` (GPX/LOC/GGZ/KML), `export_poi` (Garmin GPI); CSV or HTML built in Lua and written with `write_text()` |
 | Filter | ✅ | `filter_profile(name)`, `profiles()` |
 | GarminApi | 🚫 | Opencaching.com is gone |
-| GlobalReplace | ✅ β | `sql_write("UPDATE …")`, `update()` |
+| GlobalReplace | ✅ | `sql_write("UPDATE …")`, `update()` |
 | GetCountry / GetState / GetCounty | ✅ | `coords.location()`, `country/state/county` fields |
 | GetNear | ✅ | `filter{near=}`, `caches{near=}` |
 | GetPolygon | ✅ | `coords.inside()`, `filter{polygon=}` |
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
 | IsOwner | ✅ partial | `owned` cache field and `filter{owned=true}` (both follow the account in Settings); no log-owner check |
-| Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
-| MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
-| MacroFlag | ✅ β | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
+| Load | ✅ | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
+| MacroDelete | ✅ | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
+| MacroFlag | ✅ | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
-| PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
-| PurgeNote | ✅ β | `update(code, {note=false, gc_note=false})` |
+| PurgeLogs | ✅ | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
+| PurgeNote | ✅ | `update(code, {note=false, gc_note=false})` |
 | SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
-| ReSync | ✅ β | `resync()` |
+| ReSync | ✅ | `resync()` |
 | ReSyncLogs | 🚫 | needs the geocaching.com API |
-| SetColor | ✅ partial β | `update(code, {color=})` for the cache colour; no per-column colouring |
+| SetColor | ✅ partial | `update(code, {color=})` for the cache colour; no per-column colouring |
 | SQLGet / SQLNext / SQLGetClose | ✅ | `sql_each()` |
 | SQLQuote | ✅ | `?` / `:name` parameters make it unnecessary |
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
-| SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
+| SQLite `ATTACH` / `DETACH` | ✅ partial | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
 | SqlToHtml | ✅ | `html.table(sql(…), {columns=…})`, wrapped in `html.page{}` and written with `write_text()` |
 | Table | ➖ | separate functions per table |
 | TotChild | ✅ | `waypoint_count` field, `waypoints(code)` |
-| Transaction / InTransaction | ✅ β | `transaction(fn)`, `in_transaction()` |
+| Transaction / InTransaction | ✅ | `transaction(fn)`, `in_transaction()` |
 | UpdateElevation | ❌ | |
-| UserFlag | ✅ β | read `user_flag`; write `update(code, {user_flag=})`, `sql_write` |
-| UserSort | ✅ β | read `user_sort`; write `update(code, {user_sort=})` |
+| UserFlag | ✅ | read `user_flag`; write `update(code, {user_flag=})`, `sql_write` |
+| UserSort | ✅ | read `user_sort`; write `update(code, {user_sort=})` |
 | View | ❌ | |
 
 ### Date / Time
@@ -5049,7 +4977,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | UpdateCheck | 🚫 | online version check |
 | SpeedMode | ➖ | the UI refreshes when the macro ends; `refresh()` redraws it earlier |
 | Debug | ❌ | only `print` and `log()` |
-| InTransaction | ✅ β | `in_transaction()` |
+| InTransaction | ✅ | `in_transaction()` |
 
 ### Mathematical / Numeric
 
@@ -5097,10 +5025,10 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
+| Backup / Restore | ✅ partial | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
 | CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
-| Centre | ✅ β | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
+| Centre | ✅ | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
 | Clip / GetClipText | ❌ | |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |
 | Dualscreen / SplitScreen | 🚫 | GSAK UI |
