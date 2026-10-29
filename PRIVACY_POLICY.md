@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: October 25, 2026*
+*Effective date: October 28, 2026*
 
 ---
 
@@ -119,6 +119,8 @@ OpenSAK does not log, cache on any server, or share any data returned from the G
 
 The in-application map uses OpenStreetMap tiles to display the map background. When you view the map, your device fetches map tile images from OpenStreetMap servers. This is a standard web request and may include your IP address, as with any web browsing. OpenStreetMap's privacy policy is available at:
 https://wiki.osmfoundation.org/wiki/Privacy_Policy
+
+Map tiles you have viewed are kept in a cache on your own computer (in the OpenSAK data folder, up to the size set in **Settings → Map → Map tile cache**), so areas you viewed recently still show without an internet connection. Only tiles you actually viewed are stored; OpenSAK never downloads map areas in advance. The cache stays on your computer and is not sent anywhere.
 
 You can optionally configure OpenSAK to open cache locations in Google Maps or OpenStreetMap in your browser. This is triggered only by your explicit action and is subject to those services' own privacy policies.
 

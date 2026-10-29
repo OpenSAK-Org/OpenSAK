@@ -8,7 +8,9 @@ import pytest
 pytest.importorskip("pytestqt")
 
 from opensak.gui import map_widget as mw_mod
-from opensak.gui.map_widget import MapBridge, MapWidget, TileInterceptor, _cache_pin_html
+from opensak.gui import map_profile
+from opensak.gui.map_profile import TileInterceptor
+from opensak.gui.map_widget import MapBridge, MapWidget, _cache_pin_html
 
 
 # ── fakes / helpers ───────────────────────────────────────────────────────────
@@ -43,7 +45,8 @@ def _cache(**kw):
 
 @pytest.fixture
 def fake_settings(monkeypatch):
-    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home")
+    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
+                        map_tile_cache_mb=200)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     return s
 
@@ -457,8 +460,13 @@ class TestProductionSetup:
                 self._p = p
 
         class FakeProfile:
-            def setUrlRequestInterceptor(self, i):
-                self.i = i
+            # Records every setter map_profile calls on it.
+            def __init__(self, name=""):
+                self.name = name
+                self.calls: dict = {}
+
+            def __getattr__(self, attr):
+                return lambda *a: self.calls.__setitem__(attr, a)
 
         class FakeProdPage:
             def __init__(self, profile=None):
@@ -483,12 +491,18 @@ class TestProductionSetup:
         monkeypatch.setattr(mw_mod, "QWebEnginePage", FakeProdPage)
         monkeypatch.setattr(mw_mod, "QWebEngineView", FakeView)
         monkeypatch.setattr(mw_mod, "QWebChannel", FakeChannel)
+        monkeypatch.setattr(map_profile, "_profile", None)
+        monkeypatch.setattr(map_profile, "_users", 0)
 
         w = MapWidget()
         qtbot.addWidget(w)
         assert w._page is not None
         assert isinstance(w._view, FakeView)
         assert w._page.html is not None  # setHtml was called
+        # #1111: the shared, persistent map profile
+        assert isinstance(w._profile, FakeProfile)
+        assert w._profile.name == map_profile.STORAGE_NAME
+        assert map_profile._users == 1
 
 
 class TestCleanup:
@@ -498,16 +512,17 @@ class TestCleanup:
         w._cleanup_webengine()  # page None → early return
         assert w._cleaned is False
 
-    def test_cleanup_deletes_page_then_profile(self, qtbot):
+    def test_cleanup_deletes_page_then_releases_profile(self, qtbot, monkeypatch):
         w = MapWidget()
         qtbot.addWidget(w)
         order = []
         w._page = SimpleNamespace(deleteLater=lambda: order.append("page"))
-        w._profile = SimpleNamespace(deleteLater=lambda: order.append("profile"))
+        w._profile = SimpleNamespace()
         w._view = SimpleNamespace(setPage=lambda p: order.append(("setPage", p)))
+        monkeypatch.setattr(map_profile, "release", lambda: order.append("release"))
         w._cleanup_webengine()
         assert w._cleaned is True
-        assert order == [("setPage", None), "page", "profile"]
+        assert order == [("setPage", None), "page", "release"]
 
     def test_cleanup_idempotent(self, qtbot):
         w = MapWidget()
