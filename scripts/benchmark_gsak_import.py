@@ -294,6 +294,15 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
         (gi, "_restore_last_user_update"): "  restore_last_user_update",
         (gi, "_import_custom_fields"):     "custom fields",
     }
+    # Since #1231 an overwrite builds a fresh file and swaps it in.
+    replace = _replace_module() if name == "overwrite" else None
+    if replace is not None:
+        patched.update({
+            (replace, "import_gsak_db"):     "import_gsak_db (total)",
+            (replace, "copy_database_data"): "copy database data",
+            (replace, "_swap"):              "swap file",
+            (replace, "_custom_fields_after_swap"): "custom fields",
+        })
     patched = {key: label for key, label in patched.items() if hasattr(*key)}
     originals = {key: getattr(*key) for key in patched}
     for key, label in patched.items():
@@ -310,7 +319,23 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
     gc.callbacks.append(gcs)
     t_start = time.perf_counter()
     try:
-        with session_for(target) as session:
+        if replace is not None:
+            from sqlalchemy.engine import Engine
+            detach = sql.attach(Engine)   # it opens engines of its own
+            try:
+                commit_before = rec.time["commit"]
+                if profiler:
+                    profiler.enable()
+                with rec.phase("overwrite: fresh file + swap (total)"):
+                    result = replace.import_gsak_db_replacing(db3, target, batch_size=batch_size)
+                if profiler:
+                    profiler.disable()
+                import_commits = rec.time["commit"] - commit_before
+                print(f"  replaced {result.cleared} caches")
+            finally:
+                detach()
+        else:
+          with session_for(target) as session:
             detach = sql.attach(session.get_bind().engine)
             try:
                 if name == "overwrite":
@@ -344,8 +369,10 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
     if profiler and profile_path:
         profiler.dump_stats(profile_path)
 
-    top_level = ("load waypoints", "load attributes", "load corrected", "load logs",
-                 "existing gc map", "row_to_cache_data", "flush_batch", "custom fields")
+    top_level = ["load waypoints", "load attributes", "load corrected", "load logs",
+                 "existing gc map", "row_to_cache_data", "flush_batch"]
+    if replace is None:   # since #1231 an overwrite imports them after the swap
+        top_level.append("custom fields")
     import_total = rec.time["import_gsak_db (total)"]
     rest = import_total - import_commits - sum(rec.time[k] for k in top_level)
 
@@ -367,6 +394,14 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
         } if result is not None else None,
         "target_size_mb": target.stat().st_size / 1e6 if target.exists() else None,
     }
+
+
+def _replace_module():
+    try:
+        from opensak.importer import gsak_replace
+    except ImportError:   # before #1231
+        return None
+    return gsak_replace
 
 
 # ── Report ───────────────────────────────────────────────────────────────────

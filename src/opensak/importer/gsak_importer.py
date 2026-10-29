@@ -107,7 +107,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional, cast
 
-from sqlalchemy import Table, bindparam, select
+from sqlalchemy import Table, bindparam, select, text
 from sqlalchemy.orm import Session
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
@@ -408,6 +408,10 @@ class GsakImportResult(ImportResult):
         self.encoding_fallbacks: int = 0
         # Custom fields (#1028), when the companion database is on; else None.
         self.custom_fields: Optional["CustomFieldImportResult"] = None
+        # GC codes of the caches written, in GSAK's order.
+        self.codes: list[str] = []
+        # Overwrite import (#1231): caches the target held before.
+        self.cleared: Optional[int] = None
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -1468,6 +1472,8 @@ def import_gsak_db(
     progress_cb=None,
     batch_size: int = 200,
     settings_db: Optional[Path] = None,
+    scratch: bool = False,
+    custom_fields: bool = True,
 ) -> GsakImportResult:
     """
     Import a GSAK ``sqlite.db3`` file directly into OpenSAK (scope:
@@ -1487,6 +1493,12 @@ def import_gsak_db(
         GSAK's ``gsak.db3``, for the definitions of global custom fields.
         Custom fields are imported only while the ``companion-db`` feature
         flag is on (importer/gsak_custom_fields.py).
+    scratch : bool
+        The target is a new file that is thrown away if the import fails
+        (importer/gsak_replace.py): no durability while writing it.
+    custom_fields : bool
+        False leaves the custom fields to the caller (gsak_replace.py imports
+        them only once the new file is in place).
     """
     result = GsakImportResult()
     db_path = Path(db_path)
@@ -1529,6 +1541,14 @@ def import_gsak_db(
         if gc_was_enabled:
             gc.enable()
         _enter_bulk_import_pragmas(session)
+        if scratch:
+            # Journal in memory (savepoint rollbacks still work, unlike
+            # journal_mode=OFF) and no fsync: a crash only loses a file that
+            # gets deleted anyway. _exit_bulk_import_pragmas restores
+            # synchronous; the connection is disposed with its engine.
+            session.execute(text("PRAGMA journal_mode=MEMORY"))
+            session.execute(text("PRAGMA synchronous=OFF"))
+            session.commit()
 
         batch: list[_GsakBatchItem] = []
         codes: list[str] = []
@@ -1565,8 +1585,11 @@ def import_gsak_db(
             _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result, user)
             session.commit()
 
-        if flags.companion_db:
-            _import_custom_fields(conn, session, codes, settings_db, result)
+        result.codes = codes
+        if flags.companion_db and custom_fields:
+            target = session.get_bind().engine.url.database
+            if target:
+                _import_custom_fields(conn, Path(target), codes, settings_db, result)
 
     finally:
         _exit_bulk_import_pragmas(session)
@@ -1580,7 +1603,7 @@ def import_gsak_db(
     return result
 
 
-def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: list[str],
+def _import_custom_fields(conn: sqlite3.Connection, target: Path, codes: list[str],
                           settings_db: Optional[Path], result: GsakImportResult) -> None:
     """Custom fields into the target's companion database, after the caches
     are committed. A failure is reported; the caches stay imported."""
@@ -1588,11 +1611,8 @@ def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: lis
     from opensak.db.custom_fields import CustomFieldError
     from opensak.importer.gsak_custom_fields import import_custom_fields
 
-    target = session.get_bind().engine.url.database
-    if not target:
-        return
     try:
-        result.custom_fields = import_custom_fields(conn, Path(target), codes, settings_db)
+        result.custom_fields = import_custom_fields(conn, target, codes, settings_db)
     except (sqlite3.Error, OSError, CompanionError, CustomFieldError) as exc:
         logger.warning("GSAK import: custom fields not imported", exc_info=True)
         result.errors.append(f"Custom fields not imported: {exc}")
