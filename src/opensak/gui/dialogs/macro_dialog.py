@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.gui.dialogs.macro_editor import CodeEditor, FindReplaceBar
+from opensak.gui.dialogs.macro_manager import shift_held
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.lang import tr
 from opensak.macro import FolderApproval, MacroError, MacroHost, MacroRuntime, WriteApproval
@@ -185,6 +186,9 @@ class MacroDialog(QDialog):
 
         self._act_run = self._action(tr("macro_btn_run"), self._run, "F5", sp.SP_MediaPlay)
         self._act_save_run = self._action(tr("macro_act_save_run"), self._save_and_run, "Ctrl+F5")
+        # With Shift, opensak.shift_key() is true (#1038).
+        self._act_run.setShortcuts([QKeySequence("F5"), QKeySequence("Shift+F5")])
+        self._act_save_run.setShortcuts([QKeySequence("Ctrl+F5"), QKeySequence("Ctrl+Shift+F5")])
         self._act_help = self._action(tr("macro_act_help"), self._show_help, "F1",
                                       sp.SP_DialogHelpButton)
         self._act_designer = self._action(tr("macro_act_form_designer"),
@@ -540,6 +544,11 @@ class MacroDialog(QDialog):
         return self._path.name if self._path else "macro"
 
     def _run(self) -> None:
+        self._run_macro(shift_held())
+
+    def _run_macro(self, shift: bool) -> None:
+        """Run the macro in the editor; *shift*: Shift was held when the
+        user started it (opensak.shift_key())."""
         self._check_disk()          # run what is on disk unless the user keeps theirs
         self._output.clear()
         self._editor.clear_error_line()
@@ -555,6 +564,7 @@ class MacroDialog(QDialog):
                 base_dir=self._path.parent if self._path else None,
                 macro_path=self._path,
                 edited_from=self._edited_from,
+                shift=shift,
             )
             self._append_output(tr("macro_done_code", code=code) if code else tr("macro_done"))
         except MacroError as exc:
@@ -582,8 +592,9 @@ class MacroDialog(QDialog):
             self._editor.mark_error_line(line)
 
     def _save_and_run(self) -> None:
+        shift = shift_held()        # before a Save As dialog
         if self._save():
-            self._run()
+            self._run_macro(shift)
 
     # -- Form designer ---------------------------------------------------------
 

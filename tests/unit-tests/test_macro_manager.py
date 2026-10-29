@@ -608,6 +608,18 @@ def test_shortcut_run_reports_in_status_bar(window, macros_dir, monkeypatch):
     assert not window._macro_manager.isVisible()
 
 
+@pytest.mark.parametrize("shortcut, held, printed", [
+    ("Ctrl+Alt+Q", True, "true"),
+    ("Ctrl+Alt+Q", False, "false"),
+    ("Shift+F9", True, "false"),          # Shift is part of the key (#1038)
+])
+def test_shortcut_run_passes_shift(window, macros_dir, monkeypatch, shortcut, held, printed):
+    macro = _lua(macros_dir / "s.lua", "print(opensak.shift_key())\n")
+    monkeypatch.setattr(mm, "shift_held", lambda: held)
+    window._run_macro_shortcut(macro, shortcut)
+    assert window._macro_manager._output.toPlainText().splitlines()[1] == printed
+
+
 def test_shortcut_run_error_offers_edit(window, macros_dir, monkeypatch):
     from opensak.gui import mainwindow as mw
     macro = _lua(macros_dir / "boom.lua", "error('boom')\n")

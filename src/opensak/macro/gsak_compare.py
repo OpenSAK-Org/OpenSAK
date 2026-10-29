@@ -205,5 +205,5 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 DBToSQL, DBToSQLite, SQLiteCaches → `sql()` reads the database directly · GeoCalc → `coords.*` · GetSpecial, HTML, PngToJpg, PreProcess → 🚫 · Set → Lua assignment · ShowForm → `form{}` · Sort → `sort()` · SQL → `sql()`.
 
-GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`) were not checked one by one.
+GSAK's `$d_*` database variables map to the [cache fields](#cache-fields); custom fields (`$d_<field>`) are in the cache's `custom` table. `$d_MacroSort`, `$d_Symbol`, `$d_LastUserDate` and `kType` of the corrected coordinates are `macro_sort`, `symbol`, `last_user_update` and `corrected_source`. System variables (`$_CurrentDatabase` → `database()`, `$_Count` → `count()`, `$_ShiftKey` → `shift_key()`) were not checked one by one.
 """
