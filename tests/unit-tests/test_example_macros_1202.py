@@ -419,6 +419,32 @@ def _check_find_with_form(ctx, out):
     assert ctx.host.selected == ["GCEX004"]
 
 
+def _distance_form(c) -> None:
+    """Around GCEX001 (Bern), 100 km along the ellipsoid, shown in the list;
+    the result form is closed with "Another point"."""
+    if not any(f.id == "point" for f in c.form.walk()):
+        press_enter(c)
+        return
+    c.change("point", "N46 56.880 E007 26.844")
+    c.change("radius", 100)
+    c.change("method", "Vincenty (WGS-84 ellipsoid)")
+    c.change("show", True)
+    c.click("run")
+
+
+def _check_distance_bearing(ctx, out):
+    # Around, Another point on the result, then Close the point form
+    assert [c.closer for _, c in ctx.host.forms] == ["run", "again", None]
+    [result] = [c for _, c in ctx.host.forms if c.closer == "again"]
+    page = next(f for f in result.form.walk() if f.type == "html").get("html")
+    assert "5 caches" in page
+    found = ["GCEX001", "GCEX006", "GCEX003", "GCEX008", "GCEX002"]   # nearest first
+    assert [page.index(code) for code in found] == sorted(page.index(code) for code in found)
+    assert "GCEX004" not in page and "GCEX007" not in page
+    assert page.count("<td>100.000</td>") == 8      # the edge, measured back
+    assert ctx.host.applied[-1][1] == 5
+
+
 def _gsak_folder(ctx):
     """A minimal GSAK data folder in %APPDATA%\\gsak, which the user allows
     the macro to read when it asks."""
@@ -519,6 +545,7 @@ SCENARIOS: dict[str, Scenario] = {
     "corrected_coords_from_csv.lua": Scenario(setup=_csv_for_the_test_database,
                                               check=_check_csv),
     "database_statistics.lua": Scenario(check=_check_database_statistics),
+    "distance_bearing.lua": Scenario(user=_distance_form, check=_check_distance_bearing),
     "dnf_alert.lua": Scenario(setup=_run_dnf_stats, check=_check_dnf_alert),
     "dnf_stats.lua": Scenario(check=_check_dnf_stats),
     "export_filters_to_gpx.lua": Scenario(check=_check_export_filters),
