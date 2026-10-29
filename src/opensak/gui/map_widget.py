@@ -21,6 +21,7 @@ from opensak.db.models import Cache
 from opensak.filters.line_polygon import LP_MIN_POINTS, LP_MODES, Point, format_points_text
 from opensak.lang import current_language, tr
 from opensak.gui.theme import hint_text_color
+from opensak.utils.constants import PHYSICAL_CACHE_TYPES
 from opensak.utils.types import GcCode
 
 
@@ -108,6 +109,8 @@ class MapBridge(QObject):
     draw_clicked = Signal()
     # Drawn shape changed: '{"mode": …, "points": [[lat, lon], …]}'
     shape_changed = Signal(str)
+    # Separation circles switched on/off with the map button (#1087)
+    separation_toggled = Signal(bool)
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
@@ -138,6 +141,11 @@ class MapBridge(QObject):
     def on_shape_changed(self, shape_json: str) -> None:
         """Called from JavaScript when the user draws, edits or removes the shape."""
         self.shape_changed.emit(shape_json)
+
+    @Slot(bool)
+    def on_separation_toggled(self, on: bool) -> None:
+        """Called from JavaScript when the separation circles button is clicked."""
+        self.separation_toggled.emit(on)
 
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
@@ -215,6 +223,10 @@ MAP_HTML = """<!DOCTYPE html>
   }
   .leaflet-control-mapactions a:last-child {
     border-bottom: none;
+  }
+  .leaflet-control-mapactions a.separation-on {
+    background: #ffe0b2;
+    color: #e65100;
   }
   .draw-point-marker {
     width: 12px; height: 12px;
@@ -347,6 +359,84 @@ L.Control.MapActions = L.Control.extend({
 if (MAP_ACTIONS_ENABLED) {
     new L.Control.MapActions().addTo(map);
 }
+
+// ── Issue #1087: separation circles ──────────────────────────────────────────
+//
+// A circle of separationRadiusKm around every physical cache (marker._physical,
+// at its displayed position) and around the physical stages/finals Python
+// sends via setSeparationWaypoints(). Only drawn from SEPARATION_MIN_ZOOM and
+// within the (padded) view — at 161 m they are specks when zoomed out. The
+// map button switches them on/off; Python stores that choice.
+var SEPARATION_MIN_ZOOM = 13;
+var SEPARATION_STYLE = {color: '#e65100', weight: 1, fillColor: '#e65100',
+                        fillOpacity: 0.08, interactive: false, pmIgnore: true};
+var separationRadiusKm = 0;
+var separationOn = false;
+var separationWaypoints = [];   // [[lat, lon], …]
+var separationLayer = L.layerGroup().addTo(map);
+var separationControl = null;
+
+L.Control.Separation = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function(map) {
+        var container = L.DomUtil.create('div', 'leaflet-control-mapactions leaflet-bar');
+        var btn = L.DomUtil.create('a', separationOn ? 'separation-on' : '', container);
+        btn.innerHTML = '◯';
+        btn.title = MAP_TIP_SEPARATION;
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function(e) {
+            L.DomEvent.preventDefault(e);
+            separationOn = !separationOn;
+            if (separationOn) {
+                L.DomUtil.addClass(btn, 'separation-on');
+            } else {
+                L.DomUtil.removeClass(btn, 'separation-on');
+            }
+            drawSeparationCircles();
+            if (bridge) bridge.on_separation_toggled(separationOn);
+        });
+        return container;
+    }
+});
+
+// Radius 0 hides the circles and the button.
+function setSeparationConfig(radiusKm, on) {
+    separationRadiusKm = radiusKm;
+    separationOn = !!on;
+    if (separationControl) {
+        map.removeControl(separationControl);
+        separationControl = null;
+    }
+    if (radiusKm > 0) {
+        separationControl = new L.Control.Separation().addTo(map);
+    }
+    drawSeparationCircles();
+}
+
+function setSeparationWaypoints(points) {
+    separationWaypoints = points || [];
+    drawSeparationCircles();
+}
+
+function drawSeparationCircles() {
+    separationLayer.clearLayers();
+    if (!separationOn || !(separationRadiusKm > 0) || map.getZoom() < SEPARATION_MIN_ZOOM) {
+        return;
+    }
+    var bounds = map.getBounds().pad(0.5);
+    var options = L.extend({radius: separationRadiusKm * 1000}, SEPARATION_STYLE);
+    var add = function(ll) {
+        if (bounds.contains(ll)) separationLayer.addLayer(L.circle(ll, options));
+    };
+    Object.keys(markers).forEach(function(code) {
+        if (markers[code]._physical) add(markers[code].getLatLng());
+    });
+    separationWaypoints.forEach(function(p) { add(L.latLng(p[0], p[1])); });
+}
+
+map.on('moveend', drawSeparationCircles);   // also fires after a zoom
 
 // ── Draw tool (Line/Polygon filter) ──────────────────────────────────────────
 //
@@ -612,6 +702,7 @@ function loadCaches(caches) {
     });
     map.addLayer(clusterGroup);
     markers = {};
+    separationWaypoints = [];   // Python sends the new set after this call
 
     var markerArray = [];
     caches.forEach(function(c) {
@@ -625,6 +716,7 @@ function loadCaches(caches) {
             pmIgnore: true
         });
 
+        marker._physical = c.physical;
         marker.bindPopup(cachePopupHtml(c));
 
         marker.on('click', function() {
@@ -641,6 +733,7 @@ function loadCaches(caches) {
     // spatial index on every single addLayer() call, which is dramatically
     // slower than the library's own bulk API at large marker counts — the
     // library's own recommendation for exactly this case.
+    drawSeparationCircles();
     if (markerArray.length > 0) {
         clusterGroup.addLayers(markerArray);
     } else {
@@ -863,6 +956,7 @@ function updateCacheMarker(c) {
         pmIgnore: true
     });
 
+    marker._physical = c.physical;
     marker.bindPopup(cachePopupHtml(c));
 
     marker.on('click', function() {
@@ -872,6 +966,7 @@ function updateCacheMarker(c) {
 
     markers[c.gc_code] = marker;
     clusterGroup.addLayer(marker);
+    drawSeparationCircles();
     // Issue #474: a plain map.panTo() here only moves the view centre —
     // if the (possibly far-away) new location sits inside an unopened
     // cluster at the current zoom, the pin stays invisible. Reuse
@@ -911,6 +1006,10 @@ class MapWidget(QWidget):
         is where the map opens instead of Home."""
         super().__init__(parent)
         self._caches: list[Cache] = []
+        # The caches last sent to the page — load_caches()' set, or the
+        # nearby set from show_nearby_for_selection(). Their physical
+        # stages/finals get separation circles (#1087).
+        self._shown_caches: list[Cache] = []
         self._ready = False
         self._cleaned = False
         self._pending_caches: Optional[list[Cache]] = None
@@ -955,6 +1054,7 @@ class MapWidget(QWidget):
             self._bridge.popout_clicked.connect(self.popout_requested)
             self._bridge.draw_clicked.connect(self._show_draw_menu)
             self._bridge.shape_changed.connect(self._on_shape_changed)
+            self._bridge.separation_toggled.connect(self._on_separation_toggled)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
@@ -981,6 +1081,7 @@ class MapWidget(QWidget):
         self._bridge.popout_clicked.connect(self.popout_requested)
         self._bridge.draw_clicked.connect(self._show_draw_menu)
         self._bridge.shape_changed.connect(self._on_shape_changed)
+        self._bridge.separation_toggled.connect(self._on_separation_toggled)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -1021,6 +1122,10 @@ class MapWidget(QWidget):
         s = get_settings()
         home_label = s.active_home_name or tr("map_home_label")
         self._run_js(f"setHomeLocation({s.home_lat}, {s.home_lon}, {_js_arg(home_label)})")
+        self._run_js(
+            f"setSeparationConfig({s.map_separation_radius_km}, "
+            f"{_js_arg(s.map_separation_circles)})"
+        )
 
         # Indlæs ventende caches
         if self._pending_caches is not None:
@@ -1087,6 +1192,9 @@ class MapWidget(QWidget):
             "MAP_TIP_POPOUT", _js_inline_arg(tr("toolbar_popout_map_tooltip"))
         )
         html = html.replace("MAP_TIP_DRAW", _js_inline_arg(tr("map_draw_tooltip")))
+        html = html.replace(
+            "MAP_TIP_SEPARATION", _js_inline_arg(tr("map_separation_tooltip"))
+        )
         return html
 
     def _run_js(self, js: str) -> None:
@@ -1133,12 +1241,39 @@ class MapWidget(QWidget):
                 "corrected_label": tr("detail_corrected_coords"),
                 "pin_html":       _cache_pin_html(c.cache_type or "", bool(c.found), bool(c.dnf)),
                 "found":          c.found,
+                "physical":       c.cache_type in PHYSICAL_CACHE_TYPES,
             })
         return data
 
     def _do_load_caches(self, caches: list[Cache]) -> None:
         data = self._build_marker_data(caches)
         self._run_js(f"loadCaches({_js_arg(data)})")
+        self._shown_caches = caches
+        self._send_separation_waypoints()
+
+    def _send_separation_waypoints(self) -> None:
+        """Send the physical stages/finals of the shown caches to the page
+        for their separation circles (#1087) — only while the circles are
+        on, so the query never runs for a map that doesn't show them."""
+        from opensak.gui.settings import get_settings
+        s = get_settings()
+        if not (s.map_separation_circles and s.map_separation_radius_km > 0):
+            return
+        ids = [c.id for c in self._shown_caches
+               if c.cache_type in PHYSICAL_CACHE_TYPES and getattr(c, "id", None) is not None]
+        if not ids:
+            return
+        from opensak.db.database import get_session
+        from opensak.filters.engine import physical_waypoint_coords
+        with get_session() as session:
+            points = physical_waypoint_coords(session, ids)
+        self._run_js(f"setSeparationWaypoints({_js_arg(points)})")
+
+    def _on_separation_toggled(self, on: bool) -> None:
+        from opensak.gui.settings import get_settings
+        get_settings().map_separation_circles = on
+        if on:
+            self._send_separation_waypoints()
 
     def show_nearby_for_selection(
         self,
@@ -1185,6 +1320,8 @@ class MapWidget(QWidget):
             f"loadNearbyCaches({_js_arg(data)}, {center_lat}, {center_lon}, "
             f"{radius_km}, {_js_arg(cache.gc_code)}, {_js_arg(label_text)})"
         )
+        self._shown_caches = nearby_caches
+        self._send_separation_waypoints()
 
     def pan_to_cache(self, gc_code: GcCode) -> None:
         """Centrér kortet på en bestemt cache."""
@@ -1231,6 +1368,7 @@ class MapWidget(QWidget):
             "corrected_label": tr("detail_corrected_coords"),
             "pin_html":        _cache_pin_html(cache.cache_type or "", bool(cache.found), bool(cache.dnf)),
             "found":           cache.found,
+            "physical":        cache.cache_type in PHYSICAL_CACHE_TYPES,
         }
         self._run_js(f"updateCacheMarker({_js_arg(data)})")
 

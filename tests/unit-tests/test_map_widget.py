@@ -43,7 +43,8 @@ def _cache(**kw):
 
 @pytest.fixture
 def fake_settings(monkeypatch):
-    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home")
+    s = SimpleNamespace(home_lat=55.0, home_lon=12.0, active_home_name="Home",
+                        map_separation_radius_km=0.161, map_separation_circles=False)
     monkeypatch.setattr("opensak.gui.settings.get_settings", lambda: s)
     return s
 
@@ -771,3 +772,142 @@ class TestTooltipEscaping:
     def test_token_names_inside_translation_are_not_rewritten(self, monkeypatch):
         html = self._render(monkeypatch, "HINT_TEXT_COLOR INIT_LAT")
         assert '"HINT_TEXT_COLOR INIT_LAT"' in html
+
+
+# ── Separation circles (issue #1087) ──────────────────────────────────────────
+
+class _NullSession:
+    def __enter__(self):
+        return None
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _fail_query(*args, **kwargs):
+    raise AssertionError("physical_waypoint_coords() should not run here")
+
+
+class TestSeparationCircles:
+    @pytest.fixture
+    def w(self, qtbot, fake_settings):
+        widget = MapWidget()
+        qtbot.addWidget(widget)
+        widget._ready = True
+        widget._page = FakePage()
+        return widget
+
+    def _sent_points(self, w):
+        prefix = "setSeparationWaypoints("
+        return [json.loads(j[len(prefix):-1]) for j in w._page.js if j.startswith(prefix)]
+
+    def test_marker_data_flags_physical_types(self, w):
+        data = w._build_marker_data([
+            _cache(gc_code="GCTRAD", cache_type="Traditional Cache"),
+            _cache(gc_code="GCMYST", cache_type="Unknown Cache"),
+            _cache(gc_code="GCVIRT", cache_type="Virtual Cache"),
+            _cache(gc_code="GCEVNT", cache_type="Event Cache"),
+            _cache(gc_code="GCEART", cache_type="Earthcache"),
+        ])
+        assert {d["gc_code"]: d["physical"] for d in data} == {
+            "GCTRAD": True, "GCMYST": True,
+            "GCVIRT": False, "GCEVNT": False, "GCEART": False,
+        }
+
+    def test_update_cache_flags_physical(self, w):
+        w.update_cache(_cache(cache_type="Multi-cache"))
+        prefix = "updateCacheMarker("
+        js = next(j for j in w._page.js if j.startswith(prefix))
+        assert json.loads(js[len(prefix):-1])["physical"] is True
+
+    def test_config_sent_when_map_is_ready(self, qtbot, fake_settings):
+        fake_settings.map_separation_circles = True
+        widget = MapWidget()
+        qtbot.addWidget(widget)
+        widget._page = FakePage()
+        widget._on_leaflet_ready(True)
+        assert "setSeparationConfig(0.161, true)" in widget._page.js
+
+    def test_no_waypoint_query_while_circles_off(self, w, monkeypatch):
+        monkeypatch.setattr("opensak.filters.engine.physical_waypoint_coords", _fail_query)
+        w._do_load_caches([_cache(id=1)])
+        assert self._sent_points(w) == []
+
+    def test_no_waypoint_query_at_radius_zero(self, w, fake_settings, monkeypatch):
+        fake_settings.map_separation_circles = True
+        fake_settings.map_separation_radius_km = 0.0
+        monkeypatch.setattr("opensak.filters.engine.physical_waypoint_coords", _fail_query)
+        w._do_load_caches([_cache(id=1)])
+        assert self._sent_points(w) == []
+
+    def test_toggle_saves_setting_and_sends_waypoints(self, w, fake_settings, tmp_db):
+        from opensak.db.database import get_session
+        from opensak.db.models import Cache, Waypoint
+        with get_session() as s:
+            phys = Cache(gc_code="GCSEP1", name="Multi", cache_type="Multi-cache",
+                         latitude=55.0, longitude=12.0)
+            virt = Cache(gc_code="GCSEP2", name="Virtual", cache_type="Virtual Cache",
+                         latitude=55.1, longitude=12.1)
+            s.add_all([phys, virt])
+            s.flush()
+            s.add_all([
+                Waypoint(cache_id=phys.id, prefix="S1", wp_type="Physical Stage",
+                         latitude=55.01, longitude=12.01),
+                Waypoint(cache_id=phys.id, prefix="FN", wp_type="Final Location",
+                         latitude=55.02, longitude=12.02),
+                Waypoint(cache_id=phys.id, prefix="PK", wp_type="Parking Area",
+                         latitude=55.03, longitude=12.03),
+                Waypoint(cache_id=phys.id, prefix="S2", wp_type="Physical Stage",
+                         latitude=None, longitude=None),
+                Waypoint(cache_id=virt.id, prefix="FN", wp_type="Final Location",
+                         latitude=55.11, longitude=12.11),
+            ])
+            phys_id, virt_id = phys.id, virt.id
+        w._do_load_caches([
+            _cache(id=phys_id, gc_code="GCSEP1", cache_type="Multi-cache"),
+            _cache(id=virt_id, gc_code="GCSEP2", cache_type="Virtual Cache"),
+        ])
+        assert self._sent_points(w) == []   # circles still off
+
+        w._bridge.on_separation_toggled(True)
+        assert fake_settings.map_separation_circles is True
+        points = sorted(tuple(p) for p in self._sent_points(w)[-1])
+        assert points == [(55.01, 12.01), (55.02, 12.02)]
+
+    def test_toggle_off_saves_setting_without_query(self, w, fake_settings, monkeypatch):
+        fake_settings.map_separation_circles = True
+        monkeypatch.setattr("opensak.filters.engine.physical_waypoint_coords", _fail_query)
+        w._bridge.on_separation_toggled(False)
+        assert fake_settings.map_separation_circles is False
+
+    def test_nearby_view_sends_its_own_waypoints(self, w, fake_settings, monkeypatch):
+        fake_settings.map_separation_circles = True
+        seen = []
+
+        def coords(session, ids):
+            seen.append(ids)
+            return [(51.0, 0.0)]
+        monkeypatch.setattr("opensak.filters.engine.physical_waypoint_coords", coords)
+        monkeypatch.setattr("opensak.db.database.get_session", _NullSession)
+        selected = _cache(id=7, gc_code="GCSEL")
+        w.show_nearby_for_selection(selected, [selected, _cache(id=8, gc_code="GCN")], 2.0, "")
+        assert seen == [[7, 8]]
+        assert self._sent_points(w) == [[[51.0, 0.0]]]
+
+    def test_js_draws_only_physical_markers_from_min_zoom(self):
+        html = mw_mod.MAP_HTML
+        assert "marker._physical = c.physical;" in html
+        assert "var SEPARATION_MIN_ZOOM = 13;" in html
+        assert "map.getZoom() < SEPARATION_MIN_ZOOM" in html
+        assert "map.on('moveend', drawSeparationCircles);" in html
+
+    def test_js_load_caches_resets_waypoints(self):
+        start = mw_mod.MAP_HTML.index("function loadCaches")
+        end = mw_mod.MAP_HTML.index("\nfunction afterCachesLoaded", start)
+        body = mw_mod.MAP_HTML[start:end]
+        assert "separationWaypoints = [];" in body
+        assert "drawSeparationCircles();" in body
+
+    def test_tooltip_token_is_replaced(self):
+        html = MapWidget._render_map_html(55.0, 12.0)
+        assert "MAP_TIP_SEPARATION" not in html

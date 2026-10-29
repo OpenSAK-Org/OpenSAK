@@ -413,6 +413,36 @@ class AppSettings:
     def map_max_caches(self, value: int) -> None:
         get_store().set("display.map_max_caches", max(0, int(value)))
 
+    @property
+    def map_separation_radius_km(self) -> float:
+        """Issue #1087: radius (km) of the separation circles drawn around
+        physical caches and their physical stages/finals. 0 hides the
+        circles and their on-map toggle. Default 0.161 km (0.1 mile), the
+        geocaching.com saturation distance. Global, like map_max_caches."""
+        from opensak.utils.constants import SATURATION_DISTANCE_KM
+        val = get_store().get("display.map_separation_radius_km", SATURATION_DISTANCE_KM)
+        try:
+            return max(0.0, float(val))
+        except (TypeError, ValueError):
+            return SATURATION_DISTANCE_KM
+
+    @map_separation_radius_km.setter
+    def map_separation_radius_km(self, value: float) -> None:
+        get_store().set("display.map_separation_radius_km", max(0.0, float(value)))
+
+    @property
+    def map_separation_circles(self) -> bool:
+        """Issue #1087: whether the separation circles are switched on — the
+        on/off button on the map. Off by default, so the map looks as before."""
+        val = get_store().get("display.map_separation_circles", False)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @map_separation_circles.setter
+    def map_separation_circles(self, value: bool) -> None:
+        get_store().set("display.map_separation_circles", bool(value))
+
     # ── Split-screen kort: nærliggende caches (issue #718) ──────────────────────
     #
     # Per database (samme mønster som home_lat/home_lon ovenfor) — en tæt
