@@ -37,6 +37,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Deleted database still in the database list (#1232)** — after
+  deleting a database in **Manage databases**, the database dropdown in
+  the toolbar still listed it until you switched database or restarted
+  OpenSAK. The same happened after *Remove from list*, *Open existing…*,
+  *Scan database folder*, *Copy* and *Move*. The dropdown is now
+  refreshed whenever Manage databases closes. Reported by ianwok.
 - **Boundary data updates bring new and changed state packs (#1226)** —
   *Check for boundary data updates* only refreshed `boundaries.db` and the
   county packs already downloaded. A state pack that was new or changed

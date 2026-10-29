@@ -1080,6 +1080,10 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+        # #1232: the dialog only signals a switch or a rename, but deleting,
+        # removing from the list, opening, scanning the folder, copying and
+        # moving change the list too: the toolbar dropdown must show it.
+        self._reload_db_combo()
 
     def _open_custom_fields(self) -> None:
         """Tools → Custom fields… (#1028): define the active database's fields."""
