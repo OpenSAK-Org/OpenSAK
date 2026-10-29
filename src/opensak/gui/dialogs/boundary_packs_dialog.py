@@ -232,7 +232,13 @@ class BoundaryCheckDialog(QDialog):
     def _on_apply_done(self, count: int) -> None:
         self._bar.setVisible(False)
         self._close_btn.setEnabled(True)
-        self._status.setText(tr("boundary_check_done", count=count))
+        if count:
+            self._status.setText(tr("boundary_check_done", count=count))
+        else:
+            # apply_update() is all or nothing (#1226): no file means it
+            # couldn't fetch everything and changed nothing. Offer it again.
+            self._status.setText(tr("boundary_apply_failed"))
+            self._apply_btn.setVisible(True)
         self._worker = None
 
     def closeEvent(self, event) -> None:  # type: ignore[override]

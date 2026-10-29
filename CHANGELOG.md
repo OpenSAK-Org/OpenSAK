@@ -35,6 +35,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   *Importing from the Command Line* gets a systemd timer example next to
   cron.
 
+### Fixed
+
+- **Boundary data updates bring new and changed state packs (#1226)** —
+  *Check for boundary data updates* only refreshed `boundaries.db` and the
+  county packs already downloaded. A state pack that was new or changed
+  in a dataset release never arrived, so the new `boundaries.db` pointed
+  into files the install didn't have, or into an old one: states could
+  come out blank or with the wrong name until the boundary data was
+  deleted. The update now also brings every state pack (and
+  `world.geojson`) that is missing or differs from the release, checked
+  against the release's checksums. It is all or nothing: everything is
+  downloaded first, and if a file can't be fetched nothing is changed and
+  the dialog says so and offers the update again. A missing state pack is
+  also fetched when it's needed, as county packs already were. Needed
+  before the next OpenSAK-Data release, which adds Switzerland's cantons
+  (#788).
+
 ---
 
 ## [1.22.0-beta.11] — 2026-10-28

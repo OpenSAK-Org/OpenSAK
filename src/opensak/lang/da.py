@@ -812,6 +812,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Anvender opdatering…",
     "boundary_check_done":          "✓ Opdatering anvendt — {count} fil(er) opdateret.",
     "boundary_check_failed":        "Opdateringstjek mislykkedes — ingen netværksforbindelse.",
+    "boundary_apply_failed":        "Opdateringen kunne ikke anvendes — ikke alle filer kunne hentes. Intet er ændret; prøv igen senere.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny database",

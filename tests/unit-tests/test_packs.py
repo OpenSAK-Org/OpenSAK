@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -665,3 +666,209 @@ class TestOnDemandFetch:
         assert loc.county is None
         assert calls == ["missing.geojson"]  # only attempted once (2 candidates share it)
 
+
+
+# ── apply_update: baseline and all-or-nothing (#1226) ─────────────────────────
+
+
+_SQ_A = [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.0, 0.0]]]
+_SQ_B = [[[5.0, 5.0], [6.0, 5.0], [6.0, 6.0], [5.0, 6.0], [5.0, 5.0]]]
+_SQ_C = [[[9.0, 9.0], [9.5, 9.0], [9.5, 9.5], [9.0, 9.5], [9.0, 9.0]]]
+
+
+def _pack(version: str, *squares: list) -> bytes:
+    return json.dumps({
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"version": version},
+             "geometry": {"type": "Polygon", "coordinates": sq}}
+            for sq in squares
+        ],
+    }).encode()
+
+
+def _state_db(path: Path, version: str, states: list[tuple[int, str, str, int]]) -> bytes:
+    """A boundaries.db with *states* (id, name, pack, feature_index); returns its bytes."""
+    db = sqlite3.connect(path)
+    for layer in ("country", "state", "county"):
+        db.execute(f"CREATE VIRTUAL TABLE rtree_{layer} USING rtree(id, min_lat, max_lat, min_lon, max_lon)")
+        db.execute(f"CREATE TABLE region_{layer} (id INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+                   "parent TEXT, pack TEXT NOT NULL, feature_index INTEGER NOT NULL, "
+                   "poly_version INTEGER NOT NULL, is_bundled INTEGER NOT NULL)")
+    db.executemany("INSERT INTO region_state VALUES (?, ?, NULL, ?, ?, 1, 1)", states)
+    db.execute("CREATE TABLE file_version (layer TEXT, country TEXT, state TEXT, version INTEGER)")
+    db.execute("INSERT INTO file_version VALUES ('dataset', NULL, NULL, ?)", (version,))
+    db.commit()
+    db.close()
+    return path.read_bytes()
+
+
+def _entry(data: bytes, version: str = "1") -> dict:
+    return {"version": version, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data)}
+
+
+def _serve(monkeypatch, files: dict[str, bytes]) -> list[str]:
+    """urlopen serving *files* by name (anything else fails); returns the
+    list of requested names."""
+    requested: list[str] = []
+
+    def _fake(url, **_k):
+        name = url.rsplit("/", 1)[1]
+        requested.append(name)
+        if name not in files:
+            raise URLError("not found")
+        return _FakeResp(files[name])
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake)
+    return requested
+
+
+@pytest.fixture()
+def old_install(tmp_path: Path) -> Path:
+    """An install with dataset 1: state "Old" in aaa.geojson, plus world.geojson."""
+    data = tmp_path / "boundaries"
+    data.mkdir()
+    _state_db(data / "boundaries.db", "1", [(1, "Old", "aaa.geojson", 0)])
+    (data / "states").mkdir()
+    (data / "states" / "aaa.geojson").write_bytes(_pack("1", _SQ_A))
+    (data / "countries").mkdir()
+    (data / "countries" / "world.geojson").write_bytes(_pack("1", _SQ_C))
+    return data
+
+
+def _new_release(tmp_path: Path) -> tuple[dict[str, bytes], dict]:
+    """Dataset 2: aaa.geojson changed (a feature added in front), bbb.geojson new."""
+    files = {
+        "boundaries.db": _state_db(tmp_path / "remote.db", "2", [
+            (1, "Alpha", "aaa.geojson", 1), (2, "Beta", "bbb.geojson", 0)]),
+        "aaa.geojson": _pack("2", _SQ_C, _SQ_A),
+        "bbb.geojson": _pack("1", _SQ_B),
+        "world.geojson": _pack("1", _SQ_C),
+    }
+    manifest = {
+        "dataset_version": "2",
+        "baseline": {n: _entry(files[n], "2" if n == "aaa.geojson" else "1")
+                     for n in ("world.geojson", "aaa.geojson", "bbb.geojson")},
+        "packs": {},
+    }
+    return files, manifest
+
+
+class TestApplyUpdateBaseline:
+    def test_new_and_changed_state_packs_arrive_with_the_db(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        requested = _serve(monkeypatch, files)
+
+        updated = packs.apply_update(old_install, manifest)
+
+        assert set(updated) == {"boundaries.db", "aaa.geojson", "bbb.geojson"}
+        assert "world.geojson" not in requested  # unchanged: same sha256
+        store = BoundaryStore(old_install)
+        try:
+            alpha, beta = store.region("state", 1), store.region("state", 2)
+            assert alpha is not None and beta is not None
+            assert (alpha.name, beta.name) == ("Alpha", "Beta")
+            assert store.geometry("state", alpha)["coordinates"] == _SQ_A
+            assert store.geometry("state", beta)["coordinates"] == _SQ_B
+        finally:
+            store.close()
+
+    def test_missing_baseline_file_is_fetched(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        (old_install / "countries" / "world.geojson").unlink()
+        _serve(monkeypatch, files)
+        assert "world.geojson" in packs.apply_update(old_install, manifest)
+        assert (old_install / "countries" / "world.geojson").read_bytes() == files["world.geojson"]
+
+    def test_version_compared_when_manifest_has_no_sha256(self, tmp_path, old_install, monkeypatch):
+        manifest = {"dataset_version": "2", "packs": {},
+                    "baseline": {"aaa.geojson": {"version": "1"}, "world.geojson": {"version": "2"}}}
+        requested = _serve(monkeypatch, {"boundaries.db": b"db", "world.geojson": _pack("2", _SQ_C)})
+        updated = packs.apply_update(old_install, manifest)
+        assert "aaa.geojson" not in requested  # same version
+        assert "world.geojson" in updated
+
+    def test_failed_baseline_file_leaves_everything_as_it_was(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        del files["bbb.geojson"]
+        _serve(monkeypatch, files)
+        before = {p: p.read_bytes() for p in old_install.rglob("*") if p.is_file()}
+
+        assert packs.apply_update(old_install, manifest) == []
+
+        after = {p: p.read_bytes() for p in old_install.rglob("*") if p.is_file()}
+        assert after == before  # no file changed, no temp file or manifest left
+        assert packs._local_dataset_version(old_install) == "1"  # offered again
+
+    def test_sha256_mismatch_counts_as_failure(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        files["aaa.geojson"] = _pack("2", _SQ_B)  # not what the manifest says
+        _serve(monkeypatch, files)
+        assert packs.apply_update(old_install, manifest) == []
+        assert (old_install / "states" / "aaa.geojson").read_bytes() == _pack("1", _SQ_A)
+
+    def test_failed_db_download_changes_nothing(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        del files["boundaries.db"]
+        _serve(monkeypatch, files)
+        assert packs.apply_update(old_install, manifest) == []
+        assert not (old_install / "states" / "bbb.geojson").exists()
+
+    def test_failed_cached_county_pack_is_removed(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        counties = old_install / "counties"
+        counties.mkdir()
+        (counties / "aaa_counties.geojson").write_bytes(_pack("1", _SQ_A))
+        manifest["packs"] = {"aaa_counties.geojson": {"version": "2"}}
+        _serve(monkeypatch, files)  # the county pack isn't served
+
+        updated = packs.apply_update(old_install, manifest)
+
+        assert "boundaries.db" in updated
+        assert not (counties / "aaa_counties.geojson").exists()  # fetched on demand later
+
+    def test_boundaries_db_is_moved_into_place_last(self, tmp_path, old_install, monkeypatch):
+        files, manifest = _new_release(tmp_path)
+        _serve(monkeypatch, files)
+        replaced: list[str] = []
+        real_replace = packs.os.replace
+
+        def _recording_replace(src, dst):
+            replaced.append(Path(dst).name)
+            real_replace(src, dst)
+
+        monkeypatch.setattr(packs.os, "replace", _recording_replace)
+        packs.apply_update(old_install, manifest)
+        assert replaced[-2:] == ["boundaries.db", packs.MANIFEST_FILENAME]
+
+    def test_progress_reported_from_the_calling_thread(self, tmp_path, old_install, monkeypatch):
+        import threading
+
+        files, manifest = _new_release(tmp_path)
+        _serve(monkeypatch, files)
+        threads: set[int] = set()
+        packs.apply_update(old_install, manifest,
+                           progress_cb=lambda _f: threads.add(threading.get_ident()))
+        assert threads == {threading.get_ident()}
+
+
+class TestStatePackFallbackFetch:
+    def test_missing_state_pack_is_fetched_on_demand(self, tmp_path, monkeypatch):
+        _state_db(tmp_path / "boundaries.db", "2", [(1, "Beta", "bbb.geojson", 0)])
+        fetched: list[str] = []
+
+        def _fake_fetch(filename: str, dest_dir: Path, **_k: object) -> bool:
+            fetched.append(f"{dest_dir.name}/{filename}")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            (dest_dir / filename).write_bytes(_pack("1", _SQ_B))
+            return True
+
+        monkeypatch.setattr(packs, "fetch_pack", _fake_fetch)
+        store = BoundaryStore(tmp_path)
+        try:
+            region = store.region("state", 1)
+            assert region is not None
+            assert store.geometry("state", region)["coordinates"] == _SQ_B
+        finally:
+            store.close()
+        assert fetched == ["states/bbb.geojson"]

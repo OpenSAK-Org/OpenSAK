@@ -811,6 +811,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "The update could not be applied — not every file could be downloaded. Nothing was changed; please try again later.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "New database",
