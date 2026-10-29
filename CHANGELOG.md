@@ -4,6 +4,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.12] — Unreleased
+
+> Headline: **the release candidate for v1.22.0.** Macros, macros that
+> change caches, and custom fields with the companion file are now on in
+> every build, exactly as v1.22.0 will ship them. Only macros contacting
+> web sites (`opensak.get_url()`) stay beta-only for one more cycle.
+>
+> The macro and custom-field texts are machine-translated in all
+> languages except Danish and English — corrections from native speakers
+> are very welcome.
+
+### Changed
+
+- **Macros and custom fields on in stable builds (#1190)** — the
+  `lua-macros`, `lua-macro-write` and `companion-db` feature flags are on
+  in stable builds too, so the **Macros** menu, the macro write API,
+  **Tools → Custom fields…** and the companion database are part of
+  v1.22.0. `lua-macro-net` stays beta-only. The macro API reference and
+  the GSAK comparison mark only `opensak.get_url()` as beta; the notes
+  follow the stable defaults of the flags, so the docs are the same
+  whichever build generates them.
+- **User Guide for the stable release (#1191)** — *Macros* is no longer
+  a draft for beta builds: it notes that web sites are still beta-only,
+  shows a header with `Requires-API: 4` and `Permissions:`, explains the
+  `Permissions` and `Network` lines, and has a new part, *Macros and new
+  OpenSAK versions*, on what API 4 promises and what to do when a macro
+  needs a newer API. *Custom Fields* and the Filter dialog's *Custom* tab
+  lose "(beta)", and the companion file is explained in plain words.
+  *Importing from the Command Line* gets a systemd timer example next to
+  cron.
+
+---
+
 ## [1.22.0-beta.11] — 2026-10-28
 
 > Headline: **the last feature beta before v1.22.0.** Coming from GSAK,

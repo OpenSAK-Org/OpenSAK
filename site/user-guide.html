@@ -517,7 +517,7 @@
   <a href="#dist-bearing">Distance &amp; Bearing</a>
 
   <div class="nav-section-heading">Automation</div>
-  <a href="#macros">Macros (beta)</a>
+  <a href="#macros">Macros</a>
 
   <div class="nav-section-heading">Settings</div>
   <a href="#settings">Settings</a>
@@ -564,7 +564,7 @@
       <li><a href="#file-export">File Export</a></li>
       <li><a href="#trip-planner">Trip Planner</a></li>
       <li><a href="#coord-converter">Geocaching Tools</a></li>
-      <li><a href="#macros">Macros (beta)</a></li>
+      <li><a href="#macros">Macros</a></li>
       <li><a href="#settings">Settings</a></li>
       <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
     </ol>
@@ -788,9 +788,31 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
     <pre><code>launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.opensak.pq-import.plist</code></pre>
     <p>Use a folder outside <em>Desktop</em>, <em>Documents</em> and <em>Downloads</em>: macOS may block a scheduled program from reading those. The Mac must be awake at the scheduled time; a run missed while it was asleep starts when it wakes.</p>
 
-    <p><strong>Linux</strong> — run <code>crontab -e</code> and add this line:</p>
+    <p><strong>Linux (cron)</strong> — run <code>crontab -e</code> and add this line:</p>
     <pre><code>30 6 * * * $HOME/.local/bin/OpenSAK.AppImage import gpx "$HOME/PQ" --db "My Caches" --move-imported-to "$HOME/PQ/done" --wait 600 --quiet</code></pre>
     <p>No display is needed, so this also works on a machine where nobody is logged in to the desktop.</p>
+
+    <p><strong>Linux (systemd timer)</strong> — on distributions with systemd you can use a user timer instead of cron; it also catches up on a run missed while the computer was off. Save this as <code>~/.config/systemd/user/opensak-pq-import.service</code>:</p>
+    <pre><code>[Unit]
+Description=OpenSAK Pocket Query import
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/OpenSAK.AppImage import gpx %h/PQ --db "My Caches" --move-imported-to %h/PQ/done --wait 600 --quiet</code></pre>
+    <p>and this as <code>~/.config/systemd/user/opensak-pq-import.timer</code>:</p>
+    <pre><code>[Unit]
+Description=Daily OpenSAK Pocket Query import
+
+[Timer]
+OnCalendar=*-*-* 06:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target</code></pre>
+    <p>Then switch it on:</p>
+    <pre><code>systemctl --user daemon-reload
+systemctl --user enable --now opensak-pq-import.timer</code></pre>
+    <p><code>systemctl --user list-timers</code> shows when it runs next, and <code>journalctl --user -u opensak-pq-import</code> shows the output of the last runs. A user timer runs while you are logged in; to have it run when you are not, enable it once with <code>sudo loginctl enable-linger $USER</code>.</p>
 
     <h4>Checking the result</h4>
     <p>Every run writes its summary to OpenSAK's log file — <strong>Help → OpenSAK File Locations…</strong> shows where it is. Scripts can also check the exit code:</p>
@@ -1044,7 +1066,7 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
       <li><strong>Trackables</strong> — has / has no trackables, and filter by trackable name, tracking code and count</li>
       <li><strong>Attributes</strong> — all ~70 standard Groundspeak attributes, with Yes/No/Any per attribute, a search box, and AND/OR matching</li>
       <li><strong>Text Search</strong> — search descriptions, logs, and personal notes with the full set of text operators, including RegEx</li>
-      <li><strong>Custom</strong> (beta) — one row per <a href="#custom-fields">custom field</a> of the database, with conditions to fit its type</li>
+      <li><strong>Custom</strong> — one row per <a href="#custom-fields">custom field</a> of the database, with conditions to fit its type</li>
       <li><strong>Where</strong> — raw SQL WHERE clause against the caches table (advanced); custom fields can be used by name</li>
     </ul>
 
@@ -1252,8 +1274,9 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
     <p>Besides name, type, coordinates and descriptions, you can edit owner name, hidden / found / DNF dates, county, elevation, and whether the descriptions contain HTML. Unticking <em>Found</em> or <em>DNF</em> also clears the matching date. The <strong>Personal</strong> tab holds the user flag, user data 1–4, GC note, watch, your personal note, and corrected coordinates.</p>
     <p>The <strong>Waypoints</strong> tab lets you <strong>add, edit and delete child waypoints</strong>, including prefix, code, date, comment and flag. A prefix is required, and a waypoint code already used by another waypoint of the same cache is rejected. The detail panel and map update as soon as you save.</p>
 
-    <h3 id="custom-fields">Custom Fields (beta)</h3>
-    <p>Custom fields are your own fields per cache, as in GSAK: a <em>Yes/No</em> flag such as <em>Angel</em>, a number such as <em>GCFinds</em>, a text, or a date. They are part of the beta builds (the <code>companion-db</code> feature flag) and are stored in the database's companion file, which goes along with the database when you copy, move or back it up.</p>
+    <h3 id="custom-fields">Custom Fields</h3>
+    <p>Custom fields are your own fields per cache, as in GSAK: a <em>Yes/No</em> flag such as <em>Angel</em>, a number such as <em>GCFinds</em>, a text, or a date.</p>
+    <p id="companion-file">Their values are kept in the database's <strong>companion file</strong>: one extra file next to the database, with the same name and <code>.companion.db3</code> at the end — <code>My Caches.db</code> gets <code>My Caches.companion.db3</code>. It is created only when something is first stored in it — a custom field of this database, a custom field value, or a macro's data — so many databases never get one. Macros use the same file for data they keep per cache or share with other macros. You don't have to look after it: it is renamed, copied, moved, deleted and backed up together with its database, and when you copy or move caches to another database, their custom field values go along. If you copy database files by hand, copy the companion file too.</p>
     <ul>
       <li><strong>Tools → Custom fields…</strong> lists the fields of the active database and adds, edits and deletes them. A <em>local</em> field belongs to this database, a <em>global</em> one to every database. You choose this when you add a field and can't change it later: to move a field from local to global or back, add a new field with the other scope, copy the values (e.g. with a macro), and delete the old one. Renaming keeps the values; changing the type converts them, and values that don't fit the new type are lost (OpenSAK asks first). A deleted field keeps its values, shown greyed, until you click <strong>Remove data…</strong>.</li>
       <li>The <strong>GSAK import</strong> brings GSAK's local and global custom fields and their values along, and the GSAK filter import converts the <em>Custom</em> tab of your saved filters.</li>
@@ -1513,8 +1536,8 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
 
   <!-- ══════════════════════════════════════════════════════════ -->
   <section id="macros">
-    <h2><span class="section-num">29</span>Macros (beta)</h2>
-    <div class="callout warn"><div class="callout-icon">⚠️</div><div><strong>Draft — beta builds only.</strong> Lua macros are still being built, and this section describes them as they are in the current beta. The <strong>Macros</strong> menu only appears in beta builds of OpenSAK; stable releases don't have it yet. Functions, menus and dialogs may still change before macros reach a stable release.</div></div>
+    <h2><span class="section-num">29</span>Macros</h2>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div><strong>Web sites are still beta-only.</strong> Everything in this section works in stable releases, except that macros can contact web sites (<code>opensak.get_url()</code>) only in beta builds for now. A macro that needs a web site says so in its header (<code>Network:</code>, see below).</div></div>
     <p>Macros let you automate OpenSAK: filter, change and export caches, build reports, or run a whole routine with one click. They are OpenSAK's successor to the GSAK macro language. Macros are written in <a href="https://www.lua.org/">Lua</a>, a small, widely used scripting language, with an <code>opensak.*</code> library for everything geocaching. GSAK macros don't run unchanged; they are ported to Lua.</p>
 
     <h3>The Macros menu</h3>
@@ -1542,8 +1565,10 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
 -- Name: Find statistics
 -- Author: Your name
 -- Version: 1.0
--- Requires-API: 3
--- Description: Key figures, charts and maps of your finds</code></pre>
+-- Requires-API: 4
+-- Description: Key figures, charts and maps of your finds
+-- Permissions: write-files, open</code></pre>
+    <p>Every line is optional. <code>Permissions</code> says what the macro does that you may want to know before running it: <code>write</code> (changes caches or databases), <code>read-files</code> and <code>write-files</code> (uses files or folders outside the macros folder), <code>open</code> (opens a file in its app), <code>run-macros</code> (runs other macros), or <code>none</code>. A <code>Network:</code> line, such as <code>-- Network: api.example.com</code>, lists the web sites the macro contacts; while web sites are beta-only, a macro with a <code>Network</code> line needs a beta build for that part. Both lines are only the author's statement: OpenSAK still asks before a macro uses any of it (see <a href="#macros-safety">Safety</a>).</p>
     <p>Search the list, run or edit a macro, or click <strong>Shortcut…</strong> to run it from the main window with a key such as <kbd>Ctrl+Alt+F</kbd>. Use Ctrl, Alt or a function key, so that typing in the cache list doesn't start a macro. The output of macros run from here or by shortcut is shown in the Macro manager.</p>
 
     <h3>Example macros</h3>
@@ -1562,7 +1587,7 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
     </table>
     <p>If you change an example and OpenSAK later ships a newer version of it, you are asked whether to keep your copy or restore the original; your copy is kept as a <code>.bak</code> file.</p>
 
-    <h3>Safety: what a macro may do</h3>
+    <h3 id="macros-safety">Safety: what a macro may do</h3>
     <p>Macros run in a protected environment: they can't start programs, use the internet or reach files on their own. You decide what each macro may touch.</p>
     <ul>
       <li><strong>Files and folders.</strong> By default a macro may read your macros folder and use OpenSAK's own temp folder. The first time a macro wants to read or write anywhere else, OpenSAK asks: <em>This time only</em>, <em>Always</em> or <em>Deny</em>. <em>Always</em> allows the folder to <em>this macro</em> only; it is listed with the macro under <strong>Settings → Folder permissions</strong>, where you can see and remove it again. Folders you add there yourself apply to all macros.</li>
@@ -1582,6 +1607,10 @@ Register-ScheduledTask -TaskName "OpenSAK PQ import" -Action $action -Trigger $t
       <li><strong>Sharing your own.</strong> Contributions are made as pull requests and are checked before they are added. The repository's <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros/blob/main/CONTRIBUTING.md">CONTRIBUTING</a> guide explains the macro header and the folder layout, and <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros/blob/main/docs/github-website-guide.md">Sharing a macro with the GitHub website</a> walks you through it in the browser, without git.</li>
     </ul>
 
+    <h3 id="macros-api">Macros and new OpenSAK versions</h3>
+    <p>The <code>Requires-API</code> line names the version of the macro API — the <code>opensak.*</code> functions, the cache fields and the database tables macros read — that the macro was written for. API version 4 is the first one that is promised to stay: <strong>a macro written for API 4 keeps working in later OpenSAK releases.</strong> New versions only add functions and fields. If something ever has to be renamed or removed, the old name keeps working for at least one more stable release, with a warning in the macro's output that tells what to use instead.</p>
+    <p>If a macro needs a newer API than your OpenSAK has, the Macro manager says so, and OpenSAK asks before running it: it may use functions your version doesn't have yet. The fix is to update OpenSAK (see <a href="#updates">Updates</a>). If you run it anyway, it stops with an error where it calls something your version doesn't have.</p>
+
     <h3>Where macros are kept</h3>
     <p>Your macros live in the <code>macros</code> folder inside OpenSAK's data folder, so they survive updates. <strong>Open macros folder</strong> in the macro editor's File menu or in the Macro manager opens it; <strong>Help → OpenSAK File Locations…</strong> shows where the data folder is on your computer.</p>
 
@@ -1593,7 +1622,7 @@ for cache in opensak.caches() do
 end
 print(n .. " caches in the current filter are not found yet")</code></pre>
     <p>The full reference is in the editor under <strong>Help → Lua API reference</strong>, and on GitHub as <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/beta/docs/macros/api.md">docs/macros/api.md</a>. If you prefer your own editor (VS Code, Notepad++, UltraEdit, …), OpenSAK ships autocomplete definitions for it, and <code>opensak --run-macro file.lua</code> runs a macro in the open OpenSAK window from there — see <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/beta/docs/macros/run-from-editor.md">Running macros from an editor</a>.</p>
-    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Ideas, GSAK macros you'd like to see ported, and feedback on this draft are very welcome in the <a href="https://github.com/OpenSAK-Org/OpenSAK/issues/938">macro tracking issue (#938)</a> or in the Facebook group.</div></div>
+    <div class="callout note"><div class="callout-icon">ℹ️</div><div>Ideas, GSAK macros you'd like to see ported, and feedback on macros are very welcome in <a href="https://github.com/OpenSAK-Org/OpenSAK/discussions">GitHub Discussions</a> or in the Facebook group. Bugs go in <a href="https://github.com/OpenSAK-Org/OpenSAK/issues">GitHub Issues</a>.</div></div>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
