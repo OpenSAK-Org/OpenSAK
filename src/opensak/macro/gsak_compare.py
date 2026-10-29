@@ -15,7 +15,7 @@ GSAK_COMPARE = """\
 
 The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` libraries, plus `os.time`, `os.date` and `os.clock`. It removes `io`, `debug`, `package`, `require`, `load*`, `dofile` and the rest of `os`. So most of GSAK's language, string and math functions need no API.
 
-**Legend:** ✅ available · β beta: needs the `lua-macro-write` feature flag, which is on in beta builds (see [Changing caches](#changing-caches)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
+**Legend:** ✅ available · β beta: needs the `lua-macro-net` feature flag, which is on in beta builds only (see [Web sites](#web-sites)) · 🚧 in development, not in this version yet · ➖ covered by Lua itself, no API needed · ❌ not available yet · 🚫 not applicable or deliberately left out
 
 ### Main gaps
 
@@ -26,50 +26,50 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| AddNew | ✅ β | `insert{}`, `insert_waypoint/log/attribute/trackable` |
+| AddNew | ✅ | `insert{}`, `insert_waypoint/log/attribute/trackable` |
 | CacheMate | 🚫 | Palm-era format |
 | CancelFilter | ✅ | `clear_filter()` |
 | CodeMatch | ✅ | `filter{codes=}`, `sql("… WHERE code IN …")` |
-| CustomConfig | ✅ β | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()` (needs the `companion-db` flag too); no control/height properties |
-| CustomGet / CustomPut | ✅ β | the `custom` field of a cache, `update(code, { custom = { … } })` (needs the `companion-db` flag too) |
+| CustomConfig | ✅ | `define_custom_field{}`, `delete_custom_field()`, `custom_fields()`; no control/height properties |
+| CustomGet / CustomPut | ✅ | the `custom` field of a cache, `update(code, { custom = { … } })` |
 | Database | ✅ partial | `database()`, `switch_database`, `create_database`, `databases`; no delete |
 | DatabaseExists | ✅ | `database_exists()` |
-| DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` (β) for tables |
-| Delete | ✅ β | `delete(code)` or `delete(codes)`, e.g. `delete(codes())` for the active filter |
+| DataSave / DataRestore | ✅ workaround | `settings.save/load` for small values, `macro_db()` + `sql_write` for tables |
+| Delete | ✅ | `delete(code)` or `delete(codes)`, e.g. `delete(codes())` for the active filter |
 | Elevation | ✅ partial | `elevation` field (metres); no conversion to the user's unit |
 | Export | ✅ partial | `export_file` / `export_gpx` (GPX/LOC/GGZ/KML), `export_poi` (Garmin GPI); CSV or HTML built in Lua and written with `write_text()` |
 | Filter | ✅ | `filter_profile(name)`, `profiles()` |
 | GarminApi | 🚫 | Opencaching.com is gone |
-| GlobalReplace | ✅ β | `sql_write("UPDATE …")`, `update()` |
+| GlobalReplace | ✅ | `sql_write("UPDATE …")`, `update()` |
 | GetCountry / GetState / GetCounty | ✅ | `coords.location()`, `country/state/county` fields |
 | GetNear | ✅ | `filter{near=}`, `caches{near=}` |
 | GetPolygon | ✅ | `coords.inside()`, `filter{polygon=}` |
 | GoTo / Seek | ✅ | `select(code)` selects it in the grid; `cache(code)` reads it |
 | Grab | ❌ | planned |
 | IsOwner | ✅ partial | `owned` cache field and `filter{owned=true}` (both follow the account in Settings); no log-owner check |
-| Load | ✅ β | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
-| MacroDelete | ✅ β | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
-| MacroFlag | ✅ β | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
+| Load | ✅ | `import_gpx()` with a saved import setting, or a .gpx / .zip file or folder; no reverse geocoding |
+| MacroDelete | ✅ | `delete()`, `delete_waypoint/log/attribute/trackable`, `sql_write("DELETE …")` |
+| MacroFlag | ✅ | `macro_flag("set"/"clear"/"swap", codes or {all=true})`, default the active filter; read `macro_flag`, `update(code, {macro_flag=})`, `filter{macro_flag=true}` |
 | MFilter | ✅ | `filter{…}`, `filter{where=}` |
 | MoveCopy | ✅ | `move_caches`, `copy_caches` |
-| PurgeLogs | ✅ β | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
-| PurgeNote | ✅ β | `update(code, {note=false, gc_note=false})` |
+| PurgeLogs | ✅ | `delete_log(id)`, `sql_write("DELETE FROM logs WHERE …")` |
+| PurgeNote | ✅ | `update(code, {note=false, gc_note=false})` |
 | SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
-| ReSync | ✅ β | `resync()` |
+| ReSync | ✅ | `resync()` |
 | ReSyncLogs | 🚫 | needs the geocaching.com API |
-| SetColor | ✅ partial β | `update(code, {color=})` for the cache colour; no per-column colouring |
+| SetColor | ✅ partial | `update(code, {color=})` for the cache colour; no per-column colouring |
 | SQLGet / SQLNext / SQLGetClose | ✅ | `sql_each()` |
 | SQLQuote | ✅ | `?` / `:name` parameters make it unnecessary |
 | SQLite | ✅ | `sql`, `sql_write`, `tables`, `columns`, `macro_db` |
-| SQLite `ATTACH` / `DETACH` | ✅ partial β | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
+| SQLite `ATTACH` / `DETACH` | ✅ partial | `attach(name, schema)`, `detach(schema)` for OpenSAK databases, read-only (see [Several databases in one query](#several-databases-in-one-query)); other files not yet |
 | SQLSort | ✅ partial | `sort(field, dir)`, one field only |
 | SqlToHtml | ✅ | `html.table(sql(…), {columns=…})`, wrapped in `html.page{}` and written with `write_text()` |
 | Table | ➖ | separate functions per table |
 | TotChild | ✅ | `waypoint_count` field, `waypoints(code)` |
-| Transaction / InTransaction | ✅ β | `transaction(fn)`, `in_transaction()` |
+| Transaction / InTransaction | ✅ | `transaction(fn)`, `in_transaction()` |
 | UpdateElevation | ❌ | |
-| UserFlag | ✅ β | read `user_flag`; write `update(code, {user_flag=})`, `sql_write` |
-| UserSort | ✅ β | read `user_sort`; write `update(code, {user_sort=})` |
+| UserFlag | ✅ | read `user_flag`; write `update(code, {user_flag=})`, `sql_write` |
+| UserSort | ✅ | read `user_sort`; write `update(code, {user_sort=})` |
 | View | ❌ | |
 
 ### Date / Time
@@ -130,7 +130,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | UpdateCheck | 🚫 | online version check |
 | SpeedMode | ➖ | the UI refreshes when the macro ends; `refresh()` redraws it earlier |
 | Debug | ❌ | only `print` and `log()` |
-| InTransaction | ✅ β | `in_transaction()` |
+| InTransaction | ✅ | `in_transaction()` |
 
 ### Mathematical / Numeric
 
@@ -178,10 +178,10 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 
 | GSAK | Status | OpenSAK Lua |
 |---|---|---|
-| Backup / Restore | ✅ partial β | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
+| Backup / Restore | ✅ partial | `import_gsak()` imports a GSAK backup .zip, GSAK folder or database; backup planned |
 | BBcode | ❌ | |
 | CacheType / ChildType | ✅ | `cache_type("T")` / `waypoint_type("PK")` convert codes and names; `cache_types()`, `waypoint_types()` list them |
-| Centre | ✅ β | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
+| Centre | ✅ | `set_center(name)` or `set_center(lat, lon [, name])`; `center()`, `centers()` read the active and the saved centre points |
 | Clip / GetClipText | ❌ | |
 | CustomFormat / RefreshCustomHtml | 🚫 | OpenSAK has no custom HTML formats |
 | Dualscreen / SplitScreen | 🚫 | GSAK UI |

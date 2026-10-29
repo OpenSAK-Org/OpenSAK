@@ -170,8 +170,7 @@ CUSTOM_FIELD = CacheField(
     "custom", "table<string, any>",
     "The cache's custom fields, name → value: a boolean as true/false, numbers "
     'as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set '
-    "has its default. Changed with opensak.update(code, { custom = { … } }). "
-    "Only while the `companion-db` feature flag is on.",
+    "has its default. Changed with opensak.update(code, { custom = { … } }).",
     (),
 )
 

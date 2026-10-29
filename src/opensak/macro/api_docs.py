@@ -58,6 +58,7 @@ from opensak.macro.metadata import (
     read_metadata,
 )
 from opensak.macro.runtime import API, API_VERSION, FILTER_KEY_DOCS, ApiFunction, Param
+from opensak.utils.flags import BETA_ONLY
 from opensak.macro.sql import INSERT_COLUMNS, PROTECTED_COLUMNS, WRITABLE_TABLES
 
 DOC_PATH = Path("docs/macros/api.md")
@@ -414,14 +415,6 @@ def _forms_section() -> list[str]:
     return lines
 
 
-# Appended to the functions that need the lua-macro-write feature flag
-_WRITE_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
-               "is on, as it is in beta builds; check with `if opensak.update then`. "
-               "Changing caches needs the user's approval, given per macro "
-               "(see Changing caches).")
-# Appended to those that need the flag but change nothing (opensak.attach)
-_BETA = ("Beta: only available while the `lua-macro-write` feature flag "
-         "is on, as it is in beta builds; check with `if opensak.attach then`.")
 # Appended to the functions that need the lua-macro-net feature flag
 _NET_BETA = ("Beta: only available while the `lua-macro-net` feature flag "
              "is on, as it is in beta builds; check with `if opensak.get_url then`. "
@@ -429,18 +422,22 @@ _NET_BETA = ("Beta: only available while the `lua-macro-net` feature flag "
              "(see Web sites).")
 
 
-# Appended to those that need the companion-db feature flag
-_COMPANION_BETA = ("Beta: only available while the `companion-db` feature flag "
-                   "is on (not yet in release builds); check with "
-                   "`if opensak.companion then`.")
-
-
 def _beta_note(func: ApiFunction) -> str | None:
-    if func.companion:
-        return _COMPANION_BETA
+    """The note for a function a stable release does not have: one whose
+    feature flag is off in stable builds (flags.BETA_ONLY), None otherwise.
+    Based on the stable defaults, not on this build's flags, so the docs are
+    the same whichever build generates them."""
+    if func.flag not in BETA_ONLY:
+        return None
     if func.net:
         return _NET_BETA
-    return _WRITE_BETA if func.write else _BETA if func.beta else None
+    return (f"Beta: only available while the `{func.flag}` feature flag is "
+            f"on, as it is in beta builds; check with `if opensak.{func.name} then`.")
+
+
+def _flag_note(flag: str, text: str) -> list[str]:
+    """*text* and a blank line if *flag* is off in stable builds, else nothing."""
+    return [text, ""] if flag in BETA_ONLY else []
 
 
 def _companion_section() -> list[str]:
@@ -448,8 +445,8 @@ def _companion_section() -> list[str]:
         "",
         "## The companion database",
         "",
-        "Beta: only available while the `companion-db` feature flag is on.",
-        "",
+        *_flag_note("companion-db", "Beta: only available while the "
+                    "`companion-db` feature flag is on, as it is in beta builds."),
         "Every OpenSAK database can have a companion database next to it "
         "(`Found.db` → `Found.companion.db3`) for data that doesn't fit the "
         "cache tables: per-cache data a macro collects (FTF information, "
@@ -511,8 +508,8 @@ def _custom_fields_section() -> list[str]:
         "",
         "## Custom fields",
         "",
-        "Beta: only available while the `companion-db` feature flag is on.",
-        "",
+        *_flag_note("companion-db", "Beta: only available while the "
+                    "`companion-db` feature flag is on, as it is in beta builds."),
         "Custom fields are user-defined fields per cache, as in GSAK: the "
         "user defines them in Tools → Custom fields, the GSAK import brings "
         "them along, and a macro can define its own with "
@@ -552,9 +549,10 @@ def _attach_section() -> list[str]:
         "",
         "## Several databases in one query",
         "",
-        "Beta: `opensak.attach()`, `opensak.detach()` and `opensak.attached()` "
-        "are only available while the `lua-macro-write` feature flag is on.",
-        "",
+        *_flag_note("lua-macro-write", "Beta: `opensak.attach()`, "
+                    "`opensak.detach()` and `opensak.attached()` are only "
+                    "available while the `lua-macro-write` feature flag is on, "
+                    "as it is in beta builds."),
         "The `database` option reads one other database per call. To join "
         "several databases in one statement, as GSAK macros do with SQL "
         "`ATTACH`, attach them with `opensak.attach()`: each one becomes a "
@@ -608,14 +606,16 @@ def _changing_section() -> list[str]:
         "",
         "## Changing caches",
         "",
-        "Beta: `opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
-        "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
-        "`opensak.sql_write()`, `opensak.transaction()`, "
-        "`opensak.in_transaction()` and `opensak.resync()` are only available "
-        "while the `lua-macro-write` feature flag is on, as it is in beta "
-        "builds. Without it they are nil, and `opensak.set_corrected()` and "
-        "`opensak.clear_corrected()` change the database without asking.",
-        "",
+        *_flag_note("lua-macro-write", "Beta: `opensak.update()`, "
+                    "`opensak.insert{}`, `opensak.delete()`, "
+                    "`opensak.insert_<x>()`, `opensak.update_<x>()`, "
+                    "`opensak.delete_<x>()`, `opensak.sql_write()`, "
+                    "`opensak.transaction()`, `opensak.in_transaction()` and "
+                    "`opensak.resync()` are only available while the "
+                    "`lua-macro-write` feature flag is on, as it is in beta "
+                    "builds. Without it they are nil, and "
+                    "`opensak.set_corrected()` and `opensak.clear_corrected()` "
+                    "change the database without asking."),
         "`opensak.update()`, `opensak.insert{}`, `opensak.delete()`, "
         "`opensak.insert_<x>()`, `opensak.update_<x>()`, `opensak.delete_<x>()`, "
         "`opensak.sql_write()`, "
@@ -724,9 +724,9 @@ def _web_section() -> list[str]:
         "",
         "## Web sites",
         "",
-        "Beta: `opensak.get_url()` is only available while the "
-        "`lua-macro-net` feature flag is on, as it is in beta builds.",
-        "",
+        *_flag_note("lua-macro-net", "Beta: `opensak.get_url()` is only "
+                    "available while the `lua-macro-net` feature flag is on, "
+                    "as it is in beta builds."),
         "A macro can read everything in your databases, so a macro that "
         "contacts a web site could also send your data there. Before a "
         "macro first contacts a web site (host), OpenSAK therefore asks "
@@ -1306,7 +1306,7 @@ def render_lua_stub() -> str:
     for writable in WRITABLE_FIELDS:
         lines.append(f"---@field {writable.name}? {writable.type} {descriptions[writable.name]}")
     lines.append("---@field custom? table<string, any> Custom fields to change, name → value "
-                 "(see Custom fields; `companion-db` feature flag).")
+                 "(see Custom fields).")
     lines += [
         "",
         "---A new cache for `opensak.insert{}`.",

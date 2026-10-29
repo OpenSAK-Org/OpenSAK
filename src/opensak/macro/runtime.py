@@ -5503,7 +5503,7 @@ class ApiFunction:
     # (API version, what changed) for changes after `since`
     changed: tuple[tuple[int, str], ...] = ()
     # Changes the active database: only registered with the lua-macro-write
-    # feature flag (beta builds), see utils/flags.py.
+    # feature flag (on in every build since v1.22.0), see utils/flags.py.
     write: bool = False
     # Only registered with that flag too, but changes nothing (opensak.attach)
     beta: bool = False
@@ -6050,8 +6050,8 @@ API: tuple[ApiFunction, ...] = (
                     "detached when the macro ends. A macro started with "
                     "opensak.run_macro() sees its caller's attached "
                     "databases; what it attaches or detaches is undone when "
-                    "it returns. While the `companion-db` feature flag is on, "
-                    "the database's companion database (opensak.companion()) "
+                    "it returns. The database's companion database "
+                    "(opensak.companion()) "
                     "is attached with it, read-only, as `<schema>_companion`, "
                     "if it has one, and detached with it. See Several "
                     "databases in one query.",

@@ -128,8 +128,8 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
-        # Lua macros are beta-only (same flag as the Macros menu), and so is
-        # the list of folders they may access.
+        # The list of folders Lua macros may access: shown with the same flag
+        # as the Macros menu.
         from opensak.utils import flags
         self._perm_table: QTableWidget | None = None
         self._perm_loaded: list = []

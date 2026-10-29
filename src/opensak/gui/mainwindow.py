@@ -632,9 +632,9 @@ class MainWindow(QMainWindow):
         self._act_custom_fields.setVisible(flags.companion_db)
         gc_tools_menu.addAction(self._act_custom_fields)
 
-        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        # ── Macros (Lua) ──────────────────────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
-        # Beta-only until the macro API is settled (#938 step 4).
+        # On in every build since v1.22.0; features.json can still turn it off.
         macros_menu.menuAction().setVisible(flags.lua_macros)
 
         act_run_macro = QAction(tr("action_run_macro"), self)
