@@ -2068,7 +2068,7 @@ class TestLastGpxShortHeader:
         assert self._header(gpx_view, Qt.ItemDataRole.ToolTipRole) == "Last GPX update"
 
 
-# ── Auto-fit column widths (Ctrl+W) ──────────────────────────────────────────
+# ── Auto-fit column widths (Ctrl+Alt+W) ──────────────────────────────────────
 
 class TestAutofitColumns:
     @pytest.fixture
