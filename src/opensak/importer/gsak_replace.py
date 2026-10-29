@@ -12,6 +12,10 @@ Everything in the target that isn't cache data is copied over — above all
 ``db_settings`` with the db_uuid its companion belongs to — and the new file
 replaces the target with one rename. Until then the target is untouched.
 
+An import into a database without caches (a new one) takes the same path
+(is_empty()): there is nothing to keep, and skipping the WAL is what makes
+it fast.
+
 Afterwards, as decided in #1231, every cache-linked row of the companion
 (custom field values, macro tables keyed by GC code) belonged to the old
 caches and is removed; the GSAK custom fields are imported after that.
@@ -55,6 +59,26 @@ BUILD_SUFFIX = ".gsak-import"
 # timer on the GUI thread, a virus scanner) still holds the target open.
 _SWAP_TRIES = 20
 _SWAP_WAIT = 0.25
+
+
+def is_empty(target: Path) -> bool:
+    """True when *target* is an existing OpenSAK database without caches —
+    a new one, say. Importing into it has nothing to keep, so it can take
+    the fresh-file path too (no WAL, no deletes). Anything unreadable is
+    not empty."""
+    target = Path(target)
+    if not target.is_file():
+        return False
+    try:
+        conn = sqlite3.connect(f"file:{target.as_posix()}?mode=ro", uri=True, timeout=30)
+    except sqlite3.Error:
+        return False
+    try:
+        return conn.execute("SELECT 1 FROM caches LIMIT 1").fetchone() is None
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
 
 
 def build_path(target: Path) -> Path:

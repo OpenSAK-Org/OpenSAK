@@ -269,7 +269,7 @@ def _gsak_counts(db3: Path) -> dict[str, int]:
 # ── One scenario ─────────────────────────────────────────────────────────────
 
 def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
-                 profile_path: Optional[Path]) -> dict[str, Any]:
+                 profile_path: Optional[Path], pragmas: tuple[str, ...] = ()) -> dict[str, Any]:
     from opensak.db.database import optimize_database, session_for
     from opensak.importer import gsak_import_service as service
     from opensak.importer import gsak_importer as gi
@@ -294,8 +294,11 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
         (gi, "_restore_last_user_update"): "  restore_last_user_update",
         (gi, "_import_custom_fields"):     "custom fields",
     }
-    # Since #1231 an overwrite builds a fresh file and swaps it in.
-    replace = _replace_module() if name == "overwrite" else None
+    # Since #1231 an overwrite, or an import into a database without caches,
+    # builds a fresh file and swaps it in — as the import dialog and service do.
+    replace = _replace_module()
+    if replace is not None and not (name == "overwrite" or replace.is_empty(target)):
+        replace = None
     if replace is not None:
         patched.update({
             (replace, "import_gsak_db"):     "import_gsak_db (total)",
@@ -304,9 +307,23 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
             (replace, "_custom_fields_after_swap"): "custom fields",
         })
     patched = {key: label for key, label in patched.items() if hasattr(*key)}
+    if pragmas:
+        # --pragma: extra settings once the import's bulk pragmas are on.
+        from sqlalchemy import text as sa_text
+        enter = gi._enter_bulk_import_pragmas
+
+        def enter_with_extra(session) -> None:
+            enter(session)
+            for pragma in pragmas:
+                session.execute(sa_text(f"PRAGMA {pragma}"))
+            session.commit()
+        patched[(gi, "_enter_bulk_import_pragmas")] = "bulk pragmas"
+        originals_extra = {(gi, "_enter_bulk_import_pragmas"): enter_with_extra}
+    else:
+        originals_extra = {}
     originals = {key: getattr(*key) for key in patched}
     for key, label in patched.items():
-        setattr(key[0], key[1], rec.wrap(label, originals[key]))
+        setattr(key[0], key[1], rec.wrap(label, originals_extra.get(key, originals[key])))
 
     from sqlalchemy.orm import Session
     orig_flush, orig_commit = Session.flush, Session.commit
@@ -326,7 +343,7 @@ def run_scenario(name: str, db3: Path, target: Path, batch_size: int,
                 commit_before = rec.time["commit"]
                 if profiler:
                     profiler.enable()
-                with rec.phase("overwrite: fresh file + swap (total)"):
+                with rec.phase("fresh file + swap (total)"):
                     result = replace.import_gsak_db_replacing(db3, target, batch_size=batch_size)
                 if profiler:
                     profiler.disable()
@@ -446,6 +463,9 @@ def main() -> int:
                              "scenario) and print the top functions; makes the run slower")
     parser.add_argument("--json", type=Path, metavar="FILE", help="also write all numbers as JSON")
     parser.add_argument("--top-sql", type=int, default=15)
+    parser.add_argument("--pragma", action="append", default=[], metavar="SETTING",
+                        help="extra SQLite pragma for the import connection, e.g. "
+                             "wal_autocheckpoint=0 (repeatable; for experiments)")
     args = parser.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -478,14 +498,14 @@ def main() -> int:
     print(f"GSAK source: {db3}  {_gsak_counts(db3)}")
     print(f"Target: {target}")
     print(f"GC user set: {bool(user_values['user.gc_username'] or user_values['user.gc_finder_id'])}, "
-          f"batch size {args.batch_size}")
+          f"batch size {args.batch_size}, extra pragmas {args.pragma or 'none'}")
 
     reports = []
     for name in scenarios:
         print(f"\nRunning {name} ...", flush=True)
         prof = (args.profile.with_name(f"{args.profile.stem}_{name}{args.profile.suffix or '.prof'}")
                 if args.profile else None)
-        rep = run_scenario(name, db3, target, args.batch_size, prof)
+        rep = run_scenario(name, db3, target, args.batch_size, prof, tuple(args.pragma))
         reports.append(rep)
         print_report(rep, args.top_sql)
         if prof:

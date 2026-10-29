@@ -42,7 +42,7 @@ from opensak.importer.gsak_importer import (
     list_gsak_backup,
     list_gsak_folder,
 )
-from opensak.importer.gsak_replace import import_gsak_db_replacing
+from opensak.importer.gsak_replace import import_gsak_db_replacing, is_empty
 
 if TYPE_CHECKING:
     from opensak.importer.gsak_filter_importer import GsakFilterImportResult
@@ -610,9 +610,10 @@ def _run_job(job: _Job, index: int, contents: GsakBackupContents,
     rep.active = rep.target_path == active_path
     label = f"{entry.name} → {rep.target}"
     progress(label)
-    if job.replace:
+    if job.replace or is_empty(rep.target_path):
         # #1231: built in a fresh file and swapped in; the target stays as it
-        # was if the import fails.
+        # was if the import fails. A target without caches (a new database)
+        # has nothing to keep either, so it goes the same fast way.
         job.started = True
         rep.result = import_gsak_db_replacing(
             db3_path, rep.target_path,

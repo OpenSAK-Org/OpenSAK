@@ -189,3 +189,35 @@ def test_active_database_is_replaced_under_the_open_engine(tmp_path):
     assert journal.lower() == "wal"
     # The cached settings were those of the old file.
     assert db_settings.get_value("dist_calc_lat", None) is None
+
+
+def test_is_empty(tmp_path):
+    from opensak.importer.gsak_replace import is_empty
+
+    empty = tmp_path / "New.db"
+    init_db(db_path=empty)
+    dispose_engine(empty)
+    assert is_empty(empty)
+    assert not is_empty(_target(tmp_path / "Found.db"))
+    assert not is_empty(tmp_path / "missing.db")
+    (tmp_path / "junk.db").write_bytes(b"not a database")
+    assert not is_empty(tmp_path / "junk.db")
+
+
+def test_merge_import_leaves_no_big_wal_on_the_open_active_database(tmp_path):
+    # #1231: automatic WAL checkpoints are off during an import and one
+    # checkpoint at the end truncates the WAL — the active database's
+    # connection stays open, so nothing else would.
+    from opensak.importer.gsak_importer import import_gsak_db
+
+    target = _target(tmp_path / "Found.db")
+    manager = get_db_manager()
+    manager.switch_to(manager.open_database(target))
+    with get_session() as session:
+        result = import_gsak_db(_gsak(tmp_path), session)
+        assert result.errors == []
+        assert session.execute(text("PRAGMA wal_autocheckpoint")).scalar_one() == 1000
+
+    wal = Path(str(target) + "-wal")
+    assert not wal.exists() or wal.stat().st_size == 0
+    assert _codes(target) == {"GCOLD1", "GCOLD2", "GC1TEST"}

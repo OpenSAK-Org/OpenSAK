@@ -180,6 +180,25 @@ class TestGsakImportWorker:
         GsakImportWorker._update_distances(Path("/other.db"))  # must not raise
         assert "could not update distances" in caplog.text
 
+    def test_run_into_empty_target_builds_a_fresh_file(self, monkeypatch, tmp_path):
+        # #1231: a target without caches (a new database) has nothing to keep,
+        # so it takes the fresh-file path too — without a "cleared" message.
+        from opensak.db.database import dispose_engine, init_db
+
+        target = tmp_path / "New.db"
+        init_db(db_path=target)
+        dispose_engine(target)
+        self._patch_common(monkeypatch)
+        calls = []
+        monkeypatch.setattr("opensak.importer.gsak_replace.import_gsak_db_replacing",
+                            lambda path, t, progress_cb=None, **_kw: calls.append(t) or _result())
+        w = GsakImportWorker(Path("/gsak.db3"), target_db_path=target)
+        cleared = []
+        w.cleared.connect(cleared.append)
+        w.run()
+        assert calls == [target]
+        assert cleared == []
+
     def test_run_without_replace_does_not_clear(self, monkeypatch):
         self._patch_common(monkeypatch)
         calls = []
