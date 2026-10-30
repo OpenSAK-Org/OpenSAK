@@ -105,9 +105,8 @@ class GsakImportWorker(QThread):
     def run(self) -> None:
         from opensak.db.database import get_session, session_for
         from opensak.db.manager import get_db_manager
-        from opensak.importer.gsak_importer import (
-            clear_opensak_cache_data, import_gsak_db,
-        )
+        from opensak.importer.gsak_importer import import_gsak_db
+        from opensak.importer.gsak_replace import import_gsak_db_replacing, is_empty
 
         # Another database than the active one gets a private session —
         # never swap the app-wide engine from this thread (see session_for).
@@ -119,16 +118,27 @@ class GsakImportWorker(QThread):
         )
 
         try:
-            with (session_for(self.target_db_path)
-                  if other_db and self.target_db_path is not None
-                  else get_session()) as session:
-                if self.replace:
-                    self.cleared.emit(clear_opensak_cache_data(session))
-                result = import_gsak_db(
-                    self.db3_path, session,
+            if target_path is not None and (self.replace or is_empty(target_path)):
+                # #1231: built in a fresh file and swapped in; the target
+                # stays as it was if the import fails. A target without
+                # caches (a new database) has nothing to keep either. The
+                # dialog is modal, so nothing edits the database meanwhile.
+                result = import_gsak_db_replacing(
+                    self.db3_path, target_path,
                     progress_cb=lambda done, total: self.progress.emit(done, total),
                     settings_db=self.settings_db,
                 )
+                if self.replace:
+                    self.cleared.emit(result.cleared or 0)
+            else:
+                with (session_for(self.target_db_path)
+                      if other_db and self.target_db_path is not None
+                      else get_session()) as session:
+                    result = import_gsak_db(
+                        self.db3_path, session,
+                        progress_cb=lambda done, total: self.progress.emit(done, total),
+                        settings_db=self.settings_db,
+                    )
             self.result_ready.emit(result)
             if self.update_distances:
                 # Busy mode — the import's own progress sits at 100% meanwhile.
