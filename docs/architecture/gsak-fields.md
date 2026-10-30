@@ -1,6 +1,6 @@
 # Full GSAK Field Compatibility — Design (Epic #1028)
 
-*Draft, 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141), 23 October 2026 when custom fields moved to the companion database (#1034, epic #1149) and their storage and GSAK import were implemented (step 3), and 24 October 2026 when their UI and macro API were implemented (steps 4–5, #1149 phase 6). Update this file in the same commit when a sub-issue changes the design.*
+*Written 9 October 2026; revised 15 October 2026 after nagisml's review on #1028, 21 October 2026 when the small columns landed (#1139) and OpenSAK started filling them itself (#1140) and using them in filters (#1141), 23 October 2026 when custom fields moved to the companion database (#1034, epic #1149) and their storage and GSAK import were implemented (step 3), 24 October 2026 when their UI and macro API were implemented (steps 4–5, #1149 phase 6), and 30 October 2026 for the stable release: custom fields ship in v1.22.0, with the `companion-db` flag on in every build (#1190). Update this file in the same commit when a sub-issue changes the design.*
 
 ## Summary
 
@@ -84,7 +84,7 @@ All of these, like the other personal fields, are updated even for a locked cach
 Coordinates are mapped. Not mapped:
 
 - **kType** — how the correction was made: `gui` 61, `macro` 37, `api` 3. Imported into `user_notes.corrected_source` (#1139): `gui` → `user`, `macro` → `macro`, `api` → `import`, anything else → NULL. Corrections that existed before migration 27 stay NULL ("unknown"), so a macro never mistakes an old user correction for one of its own. Since #1140 OpenSAK sets it itself when the user or a macro corrects coordinates (see above).
-- **kBeforeState/County, kAfterState/County** — the region before and after correction. Probably covered by OpenSAK's own reverse geocoding (`location_basis`); verify before adding anything.
+- **kBeforeState/County, kAfterState/County** — the region before and after correction. Probably covered by OpenSAK's own reverse geocoding (`location_basis`); verify before adding anything (open, see Questions).
 
 ### Other tables
 
@@ -93,7 +93,7 @@ Coordinates are mapped. Not mapped:
 | Waypoints, WayMemo | 3,592 | Mapped. `sB1` unused (0 rows) — left out |
 | Logs, LogMemo | 1.12 M | Mapped. `lHasHtml` unused (0 rows) — left out; `lTime` is folded into `log_date` |
 | Attributes | 69,865 | Mapped |
-| **Ignore** | 74 | Not imported. Code + name of caches the user never wants re-imported. Tracked as #473 |
+| **Ignore** | 74 | Not imported. Code + name of caches the user never wants re-imported. Tracked as #1008 |
 | **CacheImages** | 4,831 | Not imported. Image URL, GUID, name, description per cache |
 | **LogImages** | 91,654 | Not imported. The same per log |
 | **Custom**, **CustomLocal** | 12,600 / 23 | Not imported — see next section |
@@ -211,7 +211,7 @@ CASE PMFav WHEN 0.0 THEN '' ELSE printf(...) END     -- formatted display value 
 
 #### GSAK import
 
-Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` after the caches are committed (only with the `companion-db` feature flag). The import dialog and `run_gsak_import()` unpack `gsak.db3` before the databases, so the global definitions are there.
+Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` after the caches are committed. The import dialog and `run_gsak_import()` unpack `gsak.db3` before the databases, so the global definitions are there.
 
 - Local definitions come from `CustomLocal` in the GSAK database. Global definitions come from `CustomGlobal` in `gsak.db3`: every field there is global, so `CustomDefs` isn't needed (it is also stale in real data).
 - Values come from `Custom`, which holds the columns for both local and global fields, for the imported caches that are in the target database.
@@ -234,7 +234,7 @@ Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` af
 | Macro API | `cache.custom` (name → value; booleans as true/false, defaults for untouched caches), `opensak.update/insert(…, { custom = { … } })` with the write approval (inside `opensak.transaction()` written after the outermost commit), `opensak.custom_fields()`, `opensak.define_custom_field{}` (idempotent for the same name and type), `opensak.delete_custom_field()`. SQL can read `companion.custom_values` but not change it (owner `opensak`). `macro_flag` and `macro_sort` are exposed to macros from the start |
 | Move / copy caches | Values travel with the cache; a field missing in the target database is created there first (logged) |
 | Backup / restore | Values and a copy of every stored definition (local and global) are in the companion, which backup sets include (#1034). The global master in the app settings belongs with the app-settings part of backup (#942) |
-| GPX export | Out of scope for now |
+| GPX export | Not yet, #1169 |
 
 ## Edge cases and risks
 
@@ -247,26 +247,28 @@ Implemented in `importer/gsak_custom_fields.py`, called by `import_gsak_db()` af
 
 ## Sub-issues and order of work
 
-1. **Agree this design** — storage model agreed with nagisml on #1028 (15 Oct 2026); global-field location answered by nagisml (`gsak.db3`). Still open: macro API shape and computed fields (see Questions).
+1. **Agree this design** — storage model agreed with nagisml on #1028 (15 Oct 2026); global-field location answered by nagisml (`gsak.db3`); computed fields settled 23 Oct 2026 (see Computed fields); macro API settled with step 5.
 2. **Small columns** — **done in #1139** (migration 27): `last_user_update`, `macro_flag`, `macro_sort`, `is_owner`, `symbol`, `user_notes.corrected_source`; the GSAK importer fills them and keeps GSAK's `imported_at`, `last_gpx_update` and `user_notes.updated_at`, all as UTC (#1097).
    - **2b-1.** **Done in #1140** (migration 28): OpenSAK fills the columns itself — `last_user_update` via triggers, `is_owner` from the account, `symbol` from GPX, `corrected_source` from the GUI and macros.
    - **2b-2.** **Done in #1141**: the Dates tab has *Last user update* (`last_user_update`, compared in local time; settles #821 item 6\*), the column chooser has *Last user update* and *GPX symbol*, and the GSAK filter importer maps LastUserDate, IsOwner, MacroFlag, MacroSort and Symbol to the new columns.
    - **2c.** Macro access to the new columns (@nagisml): read all of them, write `macro_flag`, `macro_sort` and `symbol` (see above).
-3. **Custom fields: storage and GSAK import** — implemented in the companion database (#1149 phase 4, behind the `companion-db` flag): `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, the `caches_all` TEMP view, import of local and global definitions and values, import report.
-4. **Custom fields: UI** — implemented (#1149 phase 6, behind the `companion-db` flag): define dialog, column chooser, detail panel, Edit cache, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer, display expressions.
+3. **Custom fields: storage and GSAK import** — implemented in the companion database (#1149 phase 4): `custom_fields`, the runtime-built `custom_values` model, the apply-definitions step, global master in the app settings, the `caches_all` TEMP view, import of local and global definitions and values, import report.
+4. **Custom fields: UI** — implemented (#1149 phase 6): define dialog, column chooser, detail panel, Edit cache, Custom tab in the Filter dialog (#821 item 5), Where tab and GSAK filter importer, display expressions.
 5. **Custom fields: macro API** — implemented with step 4: read, write, define.
-6. **Ignore list** — #473.
+6. **Ignore list** — #1008 (replaces the ignore-list part of #473).
 7. **Cache and log images** — import the image metadata (URL, name, description). Lowest priority.
 
 Steps 2 and 3 stop the data loss; everything after builds on stored data and can land in any order.
 
 ## Questions
 
-- Does GSAK export custom fields in its GPX extension at all? If so, the GPX importer should read them too.
-- `kBeforeState/County` and `kAfterState/County`: is OpenSAK's `location_basis` enough, or do users rely on GSAK's before/after values?
+Both continue in #1169, which covers GSAK's GPX fields:
+
+- **Custom fields in GPX:** GSAK does write them, as `CustomData` in its GPX extension (real export in #1169). OpenSAK neither reads nor writes them yet. Should the GPX importer read them too?
+- **`kBeforeState/County` and `kAfterState/County`:** is OpenSAK's `location_basis` enough, or do users rely on GSAK's before/after values? GSAK's GPX has them too (`StateBeforeCorrect`, `CountyBeforeCorrect`).
 
 ## Out of scope for now
 
 - GSAK-internal tables and columns listed as "left out" above.
-- Writing custom fields into GPX exports.
+- Writing custom fields into GPX exports (#1169).
 - Syncing global definitions beyond what the apply-definitions step does (add, rename, orphan). There is no automatic propagation of type or default changes to closed databases — those are confirmed per database when it is opened.
