@@ -113,6 +113,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **The map no longer needs unpkg.com (#1111)** — Leaflet 1.9.4,
+  Leaflet.markercluster 1.5.3 and Leaflet-Geoman 2.19.3 are now bundled
+  with OpenSAK instead of being downloaded from the unpkg.com content
+  delivery network each time the map opens. With no internet connection
+  the map used to stay completely blank; now the pins, clustering and
+  map actions work offline (the map background still needs a
+  connection). The licences are listed in `THIRD_PARTY_NOTICES.md`.
 - **Sorting on a custom field column (#1201)** — the first click on the
   header of a custom field column (for example GSAK's `LFL`) showed
   "OpenSAK ran into a problem", and the sort was never remembered for the

@@ -460,6 +460,9 @@ class TestProductionSetup:
             def setUrlRequestInterceptor(self, i):
                 self.i = i
 
+            def installUrlSchemeHandler(self, scheme, handler):
+                self.handlers = {scheme: handler}
+
         class FakeProdPage:
             def __init__(self, profile=None):
                 self.loadFinished = SimpleNamespace(connect=lambda cb: None)
@@ -489,6 +492,8 @@ class TestProductionSetup:
         assert w._page is not None
         assert isinstance(w._view, FakeView)
         assert w._page.html is not None  # setHtml was called
+        # Bundled Leaflet assets are served via opensak:// (#1111)
+        assert w._profile.handlers == {b"opensak": w._asset_handler}
 
 
 class TestCleanup:
