@@ -17,6 +17,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Faster text search in filters (#1225)** — a filter with a Text Search
+  over descriptions, logs or notes no longer loads every matching cache's
+  logs and descriptions when the database can answer it alone. Where they
+  are still needed (regular expressions, OR filters), each cache's
+  descriptions are no longer repeated once per log.
 - **Macros and custom fields on in stable builds (#1190)** — the
   `lua-macros`, `lua-macro-write` and `companion-db` feature flags are on
   in stable builds too, so the **Macros** menu, the macro write API,

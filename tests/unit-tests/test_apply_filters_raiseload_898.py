@@ -9,6 +9,7 @@ Relationships a filter *does* need are still eager-loaded and readable.
 """
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import InvalidRequestError
 
 from opensak.db.database import get_session
@@ -68,6 +69,40 @@ def test_needed_relationships_are_still_loaded():
     assert [a.attribute_id for a in cache.attributes] == [1]
     assert [t.ref for t in cache.trackables] == ["TB898"]
     assert [lg.text for lg in cache.logs] == ["needle in log"]
+
+
+def test_fully_pushed_text_search_loads_no_logs_or_descriptions():
+    # Issue #1225: every filter is in SQL, so matches() never reads these.
+    fs = FilterSet(mode="AND")
+    fs.add(TextSearchFilter("needle", search_logs=True))
+    with get_session() as s:
+        cache = apply_filters(s, fs)[0]
+        assert "long_description" not in cache.__dict__
+        assert "short_description" not in cache.__dict__
+    with pytest.raises(InvalidRequestError):
+        getattr(cache, "logs")
+
+
+def test_text_search_left_to_python_loads_logs_separately():
+    # Issue #1225: the logs come from their own query, not a join that
+    # repeats the descriptions on every log row.
+    fs = FilterSet(mode="AND")
+    fs.add(TextSearchFilter("needle in l.g", op="regex"))
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *_):
+        statements.append(statement)
+
+    with get_session() as s:
+        engine = s.get_bind()
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            cache = apply_filters(s, fs)[0]
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+    assert [lg.text for lg in cache.logs] == ["needle in log"]
+    main = next(st for st in statements if "long_description" in st)
+    assert "JOIN logs" not in main
 
 
 def test_log_and_waypoint_filters_count_without_the_relationship():
