@@ -643,3 +643,108 @@ def test_sort_by_macro_sort_orders_the_caches():
         codes = [c.gc_code for c in apply_filters(s, fs, SortSpec("macro_sort"))]
     assert codes == ["GCMS2", "GCMS3", "GCMS1"]          # empty first, then case-insensitive
 
+
+# ── description and changed_date ─────────────────────────────────────────────
+
+
+def _fresh_cache(code="GC1"):
+    """A fresh cache *code*: the seeded ones are shared within this module."""
+    with get_session() as session:
+        session.query(Cache).filter_by(gc_code=code).delete()
+        session.add(Cache(gc_code=code, name=code, cache_type="Traditional Cache",
+                          latitude=47.0, longitude=8.0))
+
+
+def _description_row(code="GC1"):
+    with get_session() as session:
+        c = session.query(Cache).filter_by(gc_code=code).one()
+        return (c.short_description, c.long_description, c.short_desc_html, c.long_desc_html)
+
+
+def test_update_description_changes_only_the_given_keys():
+    _fresh_cache()
+    _run('opensak.update("GC1", { description = { short = "S", long = "<b>L</b>", html = true } })')
+    assert _description_row() == ("S", "<b>L</b>", True, True)
+    _run('opensak.update("GC1", { description = { long = "L2" } })')
+    assert _description_row() == ("S", "L2", True, True)
+    _run('opensak.update("GC1", { description = { html = false } })')
+    assert _description_row() == ("S", "L2", False, False)
+    _run('opensak.update("GC1", { description = { short = false } })')
+    assert _description_row() == (None, "L2", False, False)
+
+
+def test_update_description_false_clears_it_all():
+    _fresh_cache()
+    _run('opensak.update("GC1", { description = { short = "S", long = "L", html = true } })')
+    _run('opensak.update("GC1", { description = false })')
+    assert _description_row() == (None, None, False, False)
+
+
+def test_description_read_can_be_written_back():
+    _fresh_cache()
+    _run('opensak.update("GC1", { description = { short = "S", long = "L", html = true } })')
+    _, out = _run("""
+        local d = opensak.description("GC1")
+        d.long = d.long .. "!"
+        opensak.update("GC1", { description = d })
+        local again = opensak.description("GC1")
+        print(again.short, again.long, again.html)
+    """)
+    assert out == ["S\tL!\ttrue"]
+
+
+@pytest.mark.parametrize("value, message", [
+    ("{}", "must be a table with"),
+    ('"text"', "must be a table with"),
+    ('{ summary = "x" }', "must be a table with"),
+    ("{ long = 1 }", "description.long must be a string"),
+    ('{ html = "yes" }', "description.html must be true or false"),
+])
+def test_update_description_refuses(value, message):
+    _fresh_cache()
+    with pytest.raises(MacroError, match=message):
+        _run(f'opensak.update("GC1", {{ description = {value} }})')
+
+
+def test_update_changed_date_reads_back():
+    _fresh_cache()
+    _, out = _run("""
+        opensak.update("GC1", { changed_date = "2026-10-31" })
+        print(opensak.cache("GC1").changed_date)
+        opensak.update("GC1", { changed_date = "2026-11-01T12:30:00" })
+        print(opensak.cache("GC1").changed_date)
+        opensak.update("GC1", { changed_date = false })
+        print(opensak.cache("GC1").changed_date)
+    """)
+    assert out == ["2026-10-31T00:00:00", "2026-11-01T12:30:00", "nil"]
+    with get_session() as session:
+        assert session.query(Cache).filter_by(gc_code="GC1").one().last_updated is None
+
+
+def test_update_changed_date_refuses_a_non_date():
+    _fresh_cache()
+    with pytest.raises(MacroError, match="changed_date must be a date"):
+        _run('opensak.update("GC1", { changed_date = "yesterday" })')
+
+
+def test_description_and_changed_date_in_a_transaction_roll_back():
+    _fresh_cache()
+    with pytest.raises(MacroError, match="stop"):
+        _run("""
+            opensak.transaction(function()
+                opensak.update("GC1", { description = { long = "L" }, changed_date = "2026-10-31" })
+                error("stop")
+            end)
+        """)
+    assert _description_row()[1] is None
+    with get_session() as session:
+        assert session.query(Cache).filter_by(gc_code="GC1").one().last_updated is None
+
+
+def test_insert_with_description_and_changed_date():
+    _run("""opensak.insert{ code = "GC9", name = "New", type = "Traditional", lat = 1, lon = 2,
+                            description = { long = "L", html = true },
+                            changed_date = "2026-10-31" }""")
+    assert _description_row("GC9") == (None, "L", True, True)
+    with get_session() as session:
+        assert session.query(Cache).filter_by(gc_code="GC9").one().last_updated == datetime(2026, 10, 31)

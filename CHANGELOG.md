@@ -19,6 +19,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
   default; the `null` option puts a value of your choice in its place and
   writes it back as null. Contributed by nagisml.
+- **Macros can change a cache's description and changed date** —
+  `opensak.update()` and `opensak.insert{}` take `description` (a table like
+  the one `opensak.description()` returns) and `changed_date`, which until now
+  needed `opensak.sql_write()`. Caches read by macros have the new field
+  `changed_date`. Contributed by nagisml.
 
 ## [1.22.0-beta.12] — Unreleased
 

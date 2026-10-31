@@ -6566,9 +6566,16 @@ API: tuple[ApiFunction, ...] = (
                     "Locked caches can be changed too: the lock only protects "
                     "from imports. `custom` changes custom fields: a table "
                     "of field name → value (see Custom fields). "
+                    "`description` changes the listing description: a table "
+                    "like the one `opensak.description()` returns, where keys "
+                    "left out stay, `html` applies to both texts and `false` "
+                    "clears it all. An import replaces the description and "
+                    "`changed_date` unless the cache is locked. "
                     "Before a macro's first change, OpenSAK asks the user to "
                     "allow that macro (see Changing caches).",
         example='opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })\n'
+                'opensak.update("GC12345", { description = { long = "<p>Solved</p>", html = true },\n'
+                '                            changed_date = "2026-10-31" })\n'
                 'for c in opensak.caches{ found = true, fields = {"color"} } do\n'
                 '    if not c.color then opensak.update(c.code, { color = "#00AA00" }) end\nend',
         since=3,
@@ -6576,7 +6583,8 @@ API: tuple[ApiFunction, ...] = (
         params=(_CODE, Param("fields", "opensak.CacheUpdate", "The fields to change.")),
         returns=("boolean", "false if the cache is not in the database."),
         write=True,
-        changed=((4, "`custom` changes custom fields"),),
+        changed=((4, "`custom` changes custom fields"),
+                 (5, "`description` and `changed_date` can be written"),),
     ),
     ApiFunction(
         name="macro_flag",
@@ -6616,7 +6624,8 @@ API: tuple[ApiFunction, ...] = (
         params=(Param("fields", "opensak.CacheInsert", "The new cache's fields."),),
         returns=("string", "The cache code as stored (upper case)."),
         write=True,
-        changed=((4, "`custom` sets custom fields"),),
+        changed=((4, "`custom` sets custom fields"),
+                 (5, "`description` and `changed_date` can be set"),),
     ),
     ApiFunction(
         name="delete",
