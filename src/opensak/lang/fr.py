@@ -121,6 +121,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_perm_read_files":    "read-files — lit des fichiers hors du dossier des macros et du dossier temporaire d’OpenSAK",
     "macro_mgr_perm_write_files":   "write-files — écrit, déplace ou supprime des fichiers hors du dossier temporaire d’OpenSAK",
     "macro_mgr_perm_open":          "open — ouvre des fichiers dans leur application par défaut",
+    "macro_mgr_perm_read_clipboard": "read-clipboard — lit le presse-papiers",
     "macro_mgr_perm_run_macros":    "run-macros — exécute d’autres macros",
     "macro_mgr_perm_network":       "network — contacte {hosts}",
     "macro_mgr_perm_unknown":       "Autorisations inconnues (pour un OpenSAK plus récent ?) : {names}",

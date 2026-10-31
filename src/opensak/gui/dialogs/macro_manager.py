@@ -489,6 +489,7 @@ _PERMISSION_KEYS = {
     "read-files": "macro_mgr_perm_read_files",
     "write-files": "macro_mgr_perm_write_files",
     "open": "macro_mgr_perm_open",
+    "read-clipboard": "macro_mgr_perm_read_clipboard",
     "run-macros": "macro_mgr_perm_run_macros",
 }
 
