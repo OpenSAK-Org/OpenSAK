@@ -1011,7 +1011,7 @@ function opensak.copy_caches(target, options) end
 ---
 ---```lua
 ---local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
----  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+---  databases = {"Found", "Holidays"}, if_exists = "merge",
 ---  locations = true })
 ---for _, db in ipairs(r.databases) do
 ---  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
