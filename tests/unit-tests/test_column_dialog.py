@@ -396,6 +396,28 @@ class TestDialogPreselectsView:
         assert get_applied_view_name() == "MyView"
         assert current_column_view_match() == "MyView"
 
+    def test_view_name_starting_with_default_mark_is_kept(self, qtbot, store, views_dir):
+        _save_current_setup_as("★ Mine")
+        _save_current_setup_as("★Other")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        for name in ("★ Mine", "★Other"):
+            dlg._select_view_by_name(name)
+            assert dlg._view_combo.currentText() == name
+            dlg._save_and_accept()
+            assert get_applied_view_name() == name
+
+    def test_default_view_is_found_by_its_name_not_its_label(self, qtbot, store, views_dir):
+        _save_current_setup_as("★ Mine")
+        _save_current_setup_as("Other")
+        set_default_view_name("★ Mine")
+        dlg = ColumnChooserDialog()
+        qtbot.addWidget(dlg)
+        dlg._select_view_by_name("★ Mine")
+        assert dlg._view_combo.currentText() == "★ ★ Mine"
+        dlg._save_and_accept()
+        assert get_applied_view_name() == "★ Mine"
+
     def test_preselects_matching_view(self, qtbot, store, views_dir):
         ColumnView("Other", visible_columns=["gc_code", "name", "found"]).save()
         path = _save_current_setup_as("Mine")

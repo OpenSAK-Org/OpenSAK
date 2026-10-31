@@ -498,6 +498,9 @@ class ColumnChooserDialog(QDialog):
     """Dialog til at vælge hvilke kolonner der vises i cachelisten."""
 
     _DEFAULT_MARK = "★ "
+    # The view's real name: the label can't tell the mark from a name that
+    # starts with the same characters.
+    _VIEW_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -663,13 +666,14 @@ class ColumnChooserDialog(QDialog):
             if default_name and view.name == default_name:
                 label = f"{self._DEFAULT_MARK}{label}"
             self._view_combo.addItem(label, path)
+            self._view_combo.setItemData(
+                self._view_combo.count() - 1, view.name, self._VIEW_NAME_ROLE)
 
     def _select_view_by_name(self, name: str) -> None:
-        """Select the combo entry for the saved view *name* (★ mark ignored)."""
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        """Select the combo entry for the saved view *name*."""
+        index = self._view_combo.findData(name, self._VIEW_NAME_ROLE)
+        if index >= 0:
+            self._view_combo.setCurrentIndex(index)
 
     def _update_view_buttons(self) -> None:
         path = self._view_combo.currentData()
@@ -770,7 +774,7 @@ class ColumnChooserDialog(QDialog):
         path = self._view_combo.currentData()
         if path is None:
             return
-        view_name = self._view_combo.currentText().lstrip(self._DEFAULT_MARK)
+        view_name = self._view_combo.currentData(self._VIEW_NAME_ROLE)
         reply = QMessageBox.question(
             self, tr("column_view_delete_title"),
             tr("column_view_delete_msg", name=view_name),
@@ -793,7 +797,7 @@ class ColumnChooserDialog(QDialog):
         path = self._view_combo.currentData()
         if path is None:
             return
-        view_name = self._view_combo.currentText().lstrip(self._DEFAULT_MARK)
+        view_name = self._view_combo.currentData(self._VIEW_NAME_ROLE)
         set_default_view_name(view_name)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
@@ -813,5 +817,5 @@ class ColumnChooserDialog(QDialog):
         set_type_display(self._type_display_combo.currentData())
         if self._view_combo.currentData() is not None:
             set_applied_view_name(
-                self._view_combo.currentText().lstrip(self._DEFAULT_MARK))
+                self._view_combo.currentData(self._VIEW_NAME_ROLE))
         self.accept()
