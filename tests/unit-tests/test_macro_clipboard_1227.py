@@ -108,6 +108,14 @@ def test_get_clipboard_refuses_too_long_text(host):
         runtime.run("opensak.get_clipboard()")
 
 
+def test_get_clipboard_over_the_memory_limit_is_an_error(host):
+    """Not a crash of the whole process (json_codec.py)."""
+    host.clipboard = "x" * 9_000_000
+    runtime = MacroRuntime(host, memory_limit=4 * 1024 * 1024)
+    with pytest.raises(MacroError, match="not enough memory"):
+        runtime.run("opensak.get_clipboard()")
+
+
 def test_get_clipboard_asks_once_per_run(host):
     runtime, _ = _runtime(host)
     runtime.run("opensak.get_clipboard() opensak.get_clipboard()")
