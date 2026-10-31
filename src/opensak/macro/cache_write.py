@@ -154,6 +154,19 @@ def _user_data(name: str, value: Any) -> dict[int, Optional[str]]:
     return result
 
 
+def _description(name: str, value: Any) -> dict[str, Any]:
+    """{ short = .., long = .., html = .. }, as opensak.description() returns
+    it; the keys not given stay. false → no description at all."""
+    if _clear(value):
+        return {"short": None, "long": None, "html": False}
+    if not isinstance(value, dict) or not value or set(value) - {"short", "long", "html"}:
+        raise CacheWriteError(
+            f"{name} must be a table with short, long and/or html, or false to clear it"
+        )
+    return {key: _bool(f"{name}.html", item) if key == "html" else _text(f"{name}.{key}", item)
+            for key, item in value.items()}
+
+
 def _corrected(name: str, value: Any) -> Optional[tuple[float, float]]:
     """{ lat = .., lon = .. } or a coordinate string → (lat, lon); false → None."""
     if _clear(value):
@@ -232,6 +245,9 @@ WRITABLE_FIELDS: tuple[WritableField, ...] = (
     WritableField("note", "string|false", _text),
     WritableField("gc_note", "string|false", _text, "gc_note"),
     WritableField("hint", "string|false", _text, "encoded_hints"),
+    WritableField("description", "{short?: string|false, long?: string|false, html?: boolean}|false",
+                  _description),
+    WritableField("changed_date", "string|false", _date, "last_updated"),
     WritableField("url", "string|false", _text, "url"),
     WritableField("symbol", "string|false", _text, "symbol"),
     WritableField("corrected", "{lat: number, lon: number}|string|false", _corrected),
@@ -307,6 +323,13 @@ def _apply(session, cache: Cache, values: dict[str, Any]) -> None:
         elif key == "user_data":
             for slot, text in value.items():
                 setattr(cache, f"user_data_{slot}", text)
+        elif key == "description":
+            if "short" in value:
+                cache.short_description = value["short"]
+            if "long" in value:
+                cache.long_description = value["long"]
+            if "html" in value:
+                cache.short_desc_html = cache.long_desc_html = value["html"]
         else:                      # note, corrected: in user_notes
             note = cache.user_note
             if note is None:

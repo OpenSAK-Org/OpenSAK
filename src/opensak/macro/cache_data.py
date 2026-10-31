@@ -161,6 +161,9 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
                "When a user field (user flag, user sort, user data, lock, note or "
                'correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK\'s LastUserDate).',
                (Cache.last_user_update,), _datetime),
+    CacheField("changed_date", "string?",
+               'When the listing last changed, as the import file says, '
+               '"YYYY-MM-DDTHH:MM:SS".', (Cache.last_updated,), _datetime),
 )
 
 # The custom fields (#1028): not a column but a table, field name → value,
