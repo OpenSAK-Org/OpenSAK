@@ -3164,7 +3164,7 @@ class MacroRuntime:
             if not isinstance(values, list) or not all(
                     isinstance(v, str) and v.strip() for v in values):
                 raise MacroError(f'{func}: {key} must be a name or a list of names, '
-                                 f'e.g. {{"AllCH", "Holidays"}}')
+                                 f'e.g. {{"Found", "Holidays"}}')
             return [v.strip() for v in values]
 
         if "databases" in raw:
@@ -3181,7 +3181,7 @@ class MacroRuntime:
                 result["targets"] = {k: v.strip() for k, v in target.items()}
             else:
                 raise MacroError(f'{func}: target must be a database name, or a table '
-                                 f'of GSAK name = database name, e.g. {{ AllCH = "Switzerland" }}')
+                                 f'of GSAK name = database name, e.g. {{ Found = "Switzerland" }}')
         if_exists = raw.get("if_exists", "skip")
         if if_exists not in IF_EXISTS:
             raise MacroError(f"{func}: if_exists must be one of {', '.join(IF_EXISTS)}, "
@@ -6395,7 +6395,7 @@ API: tuple[ApiFunction, ...] = (
                     "imported. The summary is printed (unless `quiet`) and "
                     "written to the log file.",
         example='local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {\n'
-                '  databases = {"AllCH", "Holidays"}, if_exists = "merge",\n'
+                '  databases = {"Found", "Holidays"}, if_exists = "merge",\n'
                 '  locations = true })\n'
                 'for _, db in ipairs(r.databases) do\n'
                 '  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)\n'

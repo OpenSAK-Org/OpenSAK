@@ -77,7 +77,7 @@ def _backup(tmp_path: Path, dbs: dict[str, tuple[str, ...]], settings: bool = Tr
 def _gsak_install(tmp_path: Path) -> Path:
     """%AppData%\\gsak: gsak.db3 + data/<name>/sqlite.db3."""
     root = tmp_path / "gsak"
-    _gsak_db(root / "data" / "AllCH" / "sqlite.db3", "GC1A", "GC1B")
+    _gsak_db(root / "data" / "Found" / "sqlite.db3", "GC1A", "GC1B")
     _gsak_db(root / "data" / "Holidays" / "sqlite.db3", "GC2A")
     _settings_db(root / "gsak.db3", LOCATIONS)
     return root
@@ -105,26 +105,26 @@ class TestSources:
     def test_install_folder(self, tmp_path):
         root = _gsak_install(tmp_path)
         contents = list_gsak_folder(root)
-        assert [d.name for d in contents.databases] == ["AllCH", "Holidays"]
+        assert [d.name for d in contents.databases] == ["Found", "Holidays"]
         assert contents.settings_path == root / "gsak.db3"
         assert not contents.is_zip
 
     def test_data_folder_finds_the_install_settings(self, tmp_path):
         root = _gsak_install(tmp_path)
         contents = list_gsak_folder(root / "data")
-        assert [d.name for d in contents.databases] == ["AllCH", "Holidays"]
+        assert [d.name for d in contents.databases] == ["Found", "Holidays"]
         assert contents.settings_path == root / "gsak.db3"
 
     def test_folder_of_one_database(self, tmp_path):
         root = _gsak_install(tmp_path)
-        contents = list_gsak_folder(root / "data" / "AllCH")
-        assert [d.name for d in contents.databases] == ["AllCH"]
+        contents = list_gsak_folder(root / "data" / "Found")
+        assert [d.name for d in contents.databases] == ["Found"]
         assert contents.settings_path == root / "gsak.db3"
 
     def test_kinds(self, tmp_path):
         root = _gsak_install(tmp_path)
         assert service.list_gsak_source(root)[0] == service.SOURCE_FOLDER
-        kind, contents = service.list_gsak_source(root / "data" / "AllCH" / "sqlite.db3")
+        kind, contents = service.list_gsak_source(root / "data" / "Found" / "sqlite.db3")
         # A single file is just that database, not the install's settings.
         assert kind == service.SOURCE_FILE and contents.settings_path is None
         assert service.list_gsak_source(root / "gsak.db3")[0] == service.SOURCE_SETTINGS
@@ -226,7 +226,7 @@ class TestRun:
         report = service.run_gsak_import(_gsak_install(tmp_path),
                                          GsakImportOptions(locations="skip"))
         assert [d.action for d in report.databases] == ["created", "created"]
-        assert _codes(_db("AllCH").path) == ["GC1A", "GC1B"]
+        assert _codes(_db("Found").path) == ["GC1A", "GC1B"]
         assert sorted(report.locations.added) == ["Cabin", "Work"]
 
     def test_single_file_ignores_settings(self, manager, tmp_path):
@@ -250,7 +250,7 @@ class TestRun:
 
         report = service.run_gsak_import(root, check_file=check)
         assert [(d.gsak_name, d.action) for d in report.databases] == [
-            ("AllCH", "created"), ("Holidays", "failed")]
+            ("Found", "created"), ("Holidays", "failed")]
         # Nothing created for the refused one.
         assert "Holidays" not in [d.name for d in manager.databases]
 
@@ -447,7 +447,7 @@ def test_example_imports_gsak_from_appdata(manager, tmp_path, monkeypatch):
     assert len(host.questions) == 1 and "are updated" in host.questions[0]
     assert host.folders_asked == [appdata / "gsak"]
     assert out[0] == f"GSAK import from {appdata / 'gsak'}"
-    assert "AllCH" in out[1] and "created (2 new, 0 updated)" in out[1]
+    assert "Found" in out[1] and "created (2 new, 0 updated)" in out[1]
     assert "  Locations: 2 added, 0 updated, 0 kept, 1 invalid" in out
     assert out[-1] == "Total: 3 new and 0 updated caches, 0 errors"
     assert _codes(_db("Holidays").path) == ["GC2A"]
@@ -487,7 +487,7 @@ def test_example_asks_first_and_no_imports_nothing(manager, tmp_path, monkeypatc
     assert out == ["Cancelled — nothing imported."]
     # Asked before anything else: no write or folder approval, nothing created.
     assert host.events == [] and host.folders_asked == []
-    assert "AllCH" not in [d.name for d in manager.databases]
+    assert "Found" not in [d.name for d in manager.databases]
 
 
 def test_example_without_question(manager, tmp_path, monkeypatch):

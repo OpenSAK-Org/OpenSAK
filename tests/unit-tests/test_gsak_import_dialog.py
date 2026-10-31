@@ -320,10 +320,10 @@ def _db_by_name(manager, name):
 
 class TestGsakImportDialogListing:
     def test_zip_lists_every_database_named_after_its_folder(self, dlg, tmp_path):
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1", "AdventureLabs": "GC2"}))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1", "AdventureLabs": "GC2"}))
         assert dlg._table.rowCount() == 2
         names = [dlg._table.item(r, gdlg.COL_GSAK).text() for r in range(2)]
-        assert names == ["AdventureLabs", "AllCH"]
+        assert names == ["AdventureLabs", "Found"]
         assert [_target(dlg, r).currentText() for r in range(2)] == names
         assert all(dlg._table.item(r, gdlg.COL_GSAK).checkState() == Qt.CheckState.Checked
                    for r in range(2))
@@ -359,7 +359,7 @@ class TestGsakImportDialogListing:
         assert dlg._import_btn.isEnabled()
 
     def test_filters_checkbox_hidden_without_gsak_db3(self, dlg, tmp_path):
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1"}, with_settings=False))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1"}, with_settings=False))
         assert dlg._filters_cb.isHidden()
 
     def test_single_db3_file_is_one_row(self, dlg, tmp_path):
@@ -369,8 +369,8 @@ class TestGsakImportDialogListing:
         assert dlg._import_btn.isEnabled()
 
     def test_existing_target_is_flagged(self, dlg, manager, tmp_path):
-        manager.new_database("AllCH")
-        dlg.set_path(_backup(tmp_path, {"allch": "GC1"}))  # case-insensitive match
+        manager.new_database("Found")
+        dlg.set_path(_backup(tmp_path, {"found": "GC1"}))  # case-insensitive match
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("file_locations_col_exists")
         _target(dlg, 0).setCurrentText("Something else")
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("gsak_import_status_new")
@@ -464,12 +464,12 @@ class TestGsakImportDialogRun:
         dlg.import_completed.connect(lambda: signals.__setitem__("completed", signals["completed"] + 1))
         dlg.databases_changed.connect(lambda: signals.__setitem__("dbs", signals["dbs"] + 1))
 
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA", "Holidays": "GC2BBB"}))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1AAA", "Holidays": "GC2BBB"}))
         dlg._filters_cb.setChecked(True)      # opt-in since #1090
         dlg._locations_cb.setChecked(False)
         _run(dlg, qtbot)
 
-        assert _codes(_db_by_name(manager, "AllCH").path) == ["GC1AAA"]
+        assert _codes(_db_by_name(manager, "Found").path) == ["GC1AAA"]
         assert _codes(_db_by_name(manager, "Holidays").path) == ["GC2BBB"]
         assert _codes(manager.active_path) == []      # active DB untouched
         assert signals == {"completed": 1, "dbs": 2}   # one per created database
@@ -480,7 +480,7 @@ class TestGsakImportDialogRun:
         # … and the whole temp folder is gone afterwards
         assert dlg._temp_dir is None
         assert not path.exists() and not path.parent.parent.exists()
-        assert "'AllCH → AllCH'" in dlg._log.toPlainText()
+        assert "'Found → Found'" in dlg._log.toPlainText()
 
     def test_distances_are_calculated_for_each_target_database(
             self, dlg, manager, tmp_path, qtbot):
@@ -492,10 +492,10 @@ class TestGsakImportDialogRun:
         from opensak.gui.settings import get_settings
         active_before = db_settings.read_file(manager.active_path)
 
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA"}, with_settings=False))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1AAA"}, with_settings=False))
         _run(dlg, qtbot)
 
-        path = _db_by_name(manager, "AllCH").path
+        path = _db_by_name(manager, "Found").path
         lat, lon = get_settings().home_for_db_file(path)
         conn = sqlite3.connect(path)
         try:
