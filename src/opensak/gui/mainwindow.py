@@ -550,7 +550,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(act_columns)
 
         self._act_autofit_columns = QAction(tr("action_autofit_columns"), self)
-        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+W"))
+        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+Alt+W"))
         self._act_autofit_columns.triggered.connect(self._autofit_columns)
         view_menu.addAction(self._act_autofit_columns)
 
@@ -632,9 +632,9 @@ class MainWindow(QMainWindow):
         self._act_custom_fields.setVisible(flags.companion_db)
         gc_tools_menu.addAction(self._act_custom_fields)
 
-        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        # ── Macros (Lua) ──────────────────────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
-        # Beta-only until the macro API is settled (#938 step 4).
+        # On in every build since v1.22.0; features.json can still turn it off.
         macros_menu.menuAction().setVisible(flags.lua_macros)
 
         act_run_macro = QAction(tr("action_run_macro"), self)
@@ -1080,6 +1080,10 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+        # #1232: the dialog only signals a switch or a rename, but deleting,
+        # removing from the list, opening, scanning the folder, copying and
+        # moving change the list too: the toolbar dropdown must show it.
+        self._reload_db_combo()
 
     def _open_custom_fields(self) -> None:
         """Tools → Custom fields… (#1028): define the active database's fields."""
@@ -3394,7 +3398,7 @@ class MainWindow(QMainWindow):
                 self._refresh_table_only()
 
     def _autofit_columns(self) -> None:
-        """Size every cache-list column to fit its contents (Ctrl+W)."""
+        """Size every cache-list column to fit its contents (Ctrl+Alt+W)."""
         self._cache_table.autofit_columns()
 
     def _populate_column_view_combo(self) -> None:
@@ -4336,8 +4340,11 @@ class MainWindow(QMainWindow):
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
             )
         elif can_self_download:
+            # Escape "&" — Qt would otherwise eat it as a mnemonic marker
+            # ("Download & Install" rendered as "Download _Install").
             btn_primary = msg.addButton(
-                tr("update_download_button"), QMessageBox.ButtonRole.AcceptRole
+                tr("update_download_button").replace("&", "&&"),
+                QMessageBox.ButtonRole.AcceptRole,
             )
         else:
             btn_primary = msg.addButton(

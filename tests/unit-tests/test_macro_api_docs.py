@@ -216,3 +216,27 @@ def test_npp_standard_function_calltip():
     assert form.get("retVal") == "string"
     assert [p.get("name") for p in form.findall("Param")] == ["fmt: string", "...: any"]
     assert root.find(".//KeyWord[@name='math.pi']").get("func") is None
+
+
+# ── Beta notes (#1190) ────────────────────────────────────────────────────────
+
+def test_beta_notes_only_for_flags_off_in_stable_builds():
+    # Since v1.22.0 only lua-macro-net (get_url) is beta-only, whatever
+    # build generates the docs: every "Beta:" note names that flag.
+    from opensak.utils.flags import BETA_ONLY
+
+    for text in (render_api_markdown(), render_lua_stub()):
+        notes = [line for line in text.splitlines() if "Beta:" in line]
+        assert notes, "get_url() must keep its beta note"
+        for note in notes:
+            assert any(f"`{flag}`" in note for flag in BETA_ONLY), note
+        assert "`lua-macro-write` feature flag" not in text
+        assert "`companion-db` feature flag" not in text
+
+
+def test_gsak_comparison_marks_only_beta_only_functions():
+    from opensak.macro.gsak_compare import GSAK_COMPARE
+
+    rows = [line for line in GSAK_COMPARE.splitlines()
+            if line.startswith("|") and "β" in line]
+    assert [row.split("|")[1].strip() for row in rows] == ["GetUrl"]

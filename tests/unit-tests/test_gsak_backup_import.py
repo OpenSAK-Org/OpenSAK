@@ -54,7 +54,7 @@ def _backup(tmp_path: Path, members: dict[str, bytes]) -> Path:
 class TestListBackup:
     def test_every_database_is_listed_by_folder_name(self, tmp_path):
         archive = _backup(tmp_path, {
-            "AllCH/sqlite.db3": b"a" * 10,
+            "Found/sqlite.db3": b"a" * 10,
             "AdventureLabs/sqlite.db3": b"b" * 20,
             "Holidays/sqlite.db3": b"c",
             "Holidays/Attachments/readme.txt": b"x",
@@ -62,9 +62,9 @@ class TestListBackup:
             "Macros/ImportAdventureLabs.db3": b"macro",
         })
         contents = list_gsak_backup(archive)
-        assert [db.name for db in contents.databases] == ["AdventureLabs", "AllCH", "Holidays"]
+        assert [db.name for db in contents.databases] == ["AdventureLabs", "Found", "Holidays"]
         assert [db.size for db in contents.databases] == [20, 10, 1]
-        assert contents.databases[1].member == "AllCH/sqlite.db3"
+        assert contents.databases[1].member == "Found/sqlite.db3"
         assert contents.is_zip
         assert contents.settings_member == "gsak.db3"
         assert contents.has_settings_db
@@ -90,16 +90,16 @@ class TestListBackup:
         assert not contents.has_settings_db
 
     def test_single_file_is_named_after_its_folder(self, tmp_path):
-        db = tmp_path / "gsak" / "data" / "AllCH" / "sqlite.db3"
+        db = tmp_path / "gsak" / "data" / "Found" / "sqlite.db3"
         db.parent.mkdir(parents=True)
         db.write_bytes(b"x" * 5)
         contents = list_gsak_backup(db)
         assert not contents.is_zip
-        assert [(d.name, d.size, d.path) for d in contents.databases] == [("AllCH", 5, db)]
+        assert [(d.name, d.size, d.path) for d in contents.databases] == [("Found", 5, db)]
         assert not contents.has_settings_db
 
     def test_single_file_picks_up_gsak_db3_of_its_install(self, tmp_path):
-        db = tmp_path / "gsak" / "data" / "AllCH" / "sqlite.db3"
+        db = tmp_path / "gsak" / "data" / "Found" / "sqlite.db3"
         db.parent.mkdir(parents=True)
         db.write_bytes(b"x")
         settings = tmp_path / "gsak" / "gsak.db3"

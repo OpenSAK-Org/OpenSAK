@@ -1,6 +1,6 @@
 # OpenSAK Roadmap
 
-*Last updated: 14 October 2026 (1.21.0 released: Backup Support done)*
+*Last updated: 29 October 2026 (1.22.0: Macro & Scripting Support and Full GSAK Field Compatibility done)*
 
 *This reflects the current priority order for planned work. It's a living
 document and will be updated as things progress — not a fixed release schedule
@@ -8,39 +8,7 @@ or a set of promises with dates attached.*
 
 ---
 
-### 1. Macro & Scripting Support
-Give users a way to automate OpenSAK, as a modern successor to the GSAK Macro
-Language. The concept is an embedded scripting language (Lua) with a documented
-OpenSAK macro API, so existing GSAK macros are ported rather than run unchanged.
-This does not depend on Geocaching.com API access: macros can work with
-everything OpenSAK already stores, and only the extra fields that come from the
-API (item 10) will be missing until that access exists.
-
-This is a large piece of work, so it arrives in steps rather than all at once:
-- **Already in the 1.21.0 betas:** a **Macros** menu with **Run macro (Lua)…**,
-  macros that filter the cache list and apply saved filter profiles, and macros
-  that set corrected coordinates from a CSV file (with a ready-made example
-  under **Macros → Open example**). Macros run in a sandbox: they are stopped if
-  they loop endlessly, they can only use the folders listed under
-  **Settings → Folder permissions**, and they can never reach OpenSAK's own
-  settings, login or database files. The functions are documented in
-  `docs/macros/api.md`, with autocompletion in VS Code.
-- **Next:** command-line import of GPX files and GSAK databases, so a refresh
-  can be scheduled overnight (#937), and a read-only SQL query tool for ad hoc
-  queries (#810).
-- **Then:** dialogs and forms that macros can show (#982), and per-macro saved
-  settings (#983). Most GSAK macros rely on forms, so these come before the
-  rest.
-- **Later:** a wider core API (cache access, notes, import/export, database
-  management), a macro manager, help with porting GSAK macros, and further API
-  driven by real-world macros.
-
-*Status: in progress (#938). Macros are **beta builds only** for now and the
-commands will change while the API settles, so treat macros written today as
-experiments. Community use cases are collected in #808–#813 — more are
-welcome.*
-
-### 2. Reverse-Geocoding Boundary Data
+### 1. Reverse-Geocoding Boundary Data
 OpenSAK fills in a cache's country, state and county from its coordinates using
 offline boundary data (OpenSAK-Data). It is one of the most requested areas for
 improvement: some regions are missing or out of date (Switzerland, Mexico,
@@ -68,24 +36,13 @@ The plan, in steps:
 *Status: planned (#968). The first fix (#781) is targeted for an upcoming
 release; contributions from the community are very welcome.*
 
-### 3. Full GSAK Field Compatibility
-Extend the database to support the complete set of fields historically supported by
-GSAK, establishing full GSAK parity as a foundation to build on. This also matters
-for macros (ported GSAK macros read these fields) and for a Custom tab in the
-Filter dialog, the largest remaining gap in the filter parity work.
-
-*Status: design draft. Tracked in epic #1028; the inventory of a real GSAK
-database and the proposal for custom fields are in
-[`docs/architecture/gsak-fields.md`](architecture/gsak-fields.md). (Separate from
-the Filter dialog's GSAK parity, #821, which largely landed in 1.19.0 and 1.20.0.)*
-
-### 4. Welcome Wizard Enhancements
+### 2. Welcome Wizard Enhancements
 Expand the first-run Welcome Wizard. Candidates to evaluate: language selection,
 first-database creation, guided PQ/GPX import, Geocaching.com login, and (on
 Windows) a prompt to exclude the database folder from antivirus scanning. (The
 backup folder is already chosen in the wizard as of 1.21.0.)
 
-### 5. GPSBabel Integration
+### 3. GPSBabel Integration
 Integrate GPSBabel as both an import and export option, primarily to support legacy
 and third-party formats (e.g. GDB) on the import side. Native GPX/GGZ export already
 covers most current needs, so this mainly rounds out format compatibility for the
@@ -93,28 +50,28 @@ remaining edge cases.
 
 *Status: under investigation (#795), with the focus on the import side.*
 
-### 6. Description & Hint Translation
+### 4. Description & Hint Translation
 Offer machine translation of cache descriptions and hints using Argos Translate
 (offline, no external API dependency). Must preserve the original text, allow
 restoring it, and never let a re-import/GPX refresh silently overwrite the
 translation or the saved original.
 
-### 7. Customizable Menus & Toolbars
+### 5. Customizable Menus & Toolbars
 Give users control over toolbar/menu layout: icons-only mode, add/remove items,
 additional pulldown menus, and automatic adaptation of the number of visible menu
 items to the window size.
 
-### 8. User Preferences & Theming
+### 6. User Preferences & Theming
 Add a user-facing settings/configuration system covering things like font size,
 color scheme, and default layout — a foundation for broader personalization over
 time.
 
-### 9. Geo-Data Auto-Update
+### 7. Geo-Data Auto-Update
 Keep the boundary data current automatically, pulling updates from
 OpenStreetMap or a versioned central repository instead of relying on manual
-rebuilds. Builds on the contribution path in item 2.
+rebuilds. Builds on the contribution path in item 1.
 
-### 10. Geocaching.com API Field Coverage
+### 8. Geocaching.com API Field Coverage
 Extend database field support to cover data available via the Geocaching.com
 Partner API. This depends on API access approval from Geocaching.com — included
 here so the plans are visible while we wait.
@@ -124,6 +81,37 @@ here so the plans are visible while we wait.
 ---
 
 ## Done
+
+### Macro & Scripting Support
+Give users a way to automate OpenSAK, as a modern successor to the GSAK Macro
+Language: an embedded scripting language (Lua) with a documented OpenSAK macro
+API, so existing GSAK macros are ported rather than run unchanged.
+
+> **✅ Done (1.22.0).** A **Macros** menu with a macro editor (form designer,
+> API reference, autocomplete for VS Code, Notepad++ and UltraEdit), a Macro
+> manager with keyboard shortcuts, and example macros. Macros filter, change,
+> import and export caches, show dialogs and keep their own settings and
+> tables. They run in a sandbox and ask before they change your caches or use
+> a folder. Macro API 4 is the first stable API: macros written for it keep
+> working in later releases, and anything renamed or removed goes through a
+> deprecation period. Shared macros are collected in
+> [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros). GPX and GSAK
+> imports can also run from the command line, for scheduled imports (#937).
+> Macros contacting web sites (`opensak.get_url()`) stay in beta builds for one
+> more cycle; that, headless macros and more API follow in #1195.
+
+### Full GSAK Field Compatibility
+Support the fields GSAK users rely on, so GSAK databases, filters and ported
+macros carry over.
+
+> **✅ Done (1.22.0).** Custom fields as in GSAK — local and global, Yes/No,
+> number, text and date, with display expressions — defined in
+> **Tools → Custom fields…**, brought along by the GSAK import, shown as
+> columns and on the detail panel, edited in **Edit cache**, filtered on the
+> Filter dialog's **Custom** tab and in Where clauses, and read and written by
+> macros. They live in a companion file next to the database, which is copied,
+> moved and backed up with it. The design and the GSAK field inventory are in
+> [`docs/architecture/gsak-fields.md`](architecture/gsak-fields.md).
 
 ### Backup Support
 Built-in backup and restore for OpenSAK databases, so every user's data is

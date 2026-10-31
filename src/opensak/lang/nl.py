@@ -815,6 +815,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Update wordt toegepast…",
     "boundary_check_done":          "✓ Update toegepast — {count} bestand(en) bijgewerkt.",
     "boundary_check_failed":        "Updatecontrole mislukt — geen netwerkverbinding.",
+    "boundary_apply_failed":        "De update kon niet worden toegepast — niet alle bestanden konden worden gedownload. Er is niets gewijzigd; probeer het later opnieuw.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nieuwe database",

@@ -813,6 +813,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Application de la mise à jour…",
     "boundary_check_done":          "✓ Mise à jour appliquée — {count} fichier(s) mis à jour.",
     "boundary_check_failed":        "Échec de la vérification des mises à jour — pas de connexion réseau.",
+    "boundary_apply_failed":        "La mise à jour n'a pas pu être appliquée — certains fichiers n'ont pas pu être téléchargés. Rien n'a été modifié ; réessayez plus tard.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nouvelle base de données",

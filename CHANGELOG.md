@@ -4,6 +4,62 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.12] — Unreleased
+
+> Headline: **the release candidate for v1.22.0.** Macros, macros that
+> change caches, and custom fields with the companion file are now on in
+> every build, exactly as v1.22.0 will ship them. Only macros contacting
+> web sites (`opensak.get_url()`) stay beta-only for one more cycle.
+>
+> The macro and custom-field texts are machine-translated in all
+> languages except Danish and English — corrections from native speakers
+> are very welcome.
+
+### Changed
+
+- **Macros and custom fields on in stable builds (#1190)** — the
+  `lua-macros`, `lua-macro-write` and `companion-db` feature flags are on
+  in stable builds too, so the **Macros** menu, the macro write API,
+  **Tools → Custom fields…** and the companion database are part of
+  v1.22.0. `lua-macro-net` stays beta-only. The macro API reference and
+  the GSAK comparison mark only `opensak.get_url()` as beta; the notes
+  follow the stable defaults of the flags, so the docs are the same
+  whichever build generates them.
+- **User Guide for the stable release (#1191)** — *Macros* is no longer
+  a draft for beta builds: it notes that web sites are still beta-only,
+  shows a header with `Requires-API: 4` and `Permissions:`, explains the
+  `Permissions` and `Network` lines, and has a new part, *Macros and new
+  OpenSAK versions*, on what API 4 promises and what to do when a macro
+  needs a newer API. *Custom Fields* and the Filter dialog's *Custom* tab
+  lose "(beta)", and the companion file is explained in plain words.
+  *Importing from the Command Line* gets a systemd timer example next to
+  cron.
+
+### Fixed
+
+- **Deleted database still in the database list (#1232)** — after
+  deleting a database in **Manage databases**, the database dropdown in
+  the toolbar still listed it until you switched database or restarted
+  OpenSAK. The same happened after *Remove from list*, *Open existing…*,
+  *Scan database folder*, *Copy* and *Move*. The dropdown is now
+  refreshed whenever Manage databases closes. Reported by ianwok.
+- **Boundary data updates bring new and changed state packs (#1226)** —
+  *Check for boundary data updates* only refreshed `boundaries.db` and the
+  county packs already downloaded. A state pack that was new or changed
+  in a dataset release never arrived, so the new `boundaries.db` pointed
+  into files the install didn't have, or into an old one: states could
+  come out blank or with the wrong name until the boundary data was
+  deleted. The update now also brings every state pack (and
+  `world.geojson`) that is missing or differs from the release, checked
+  against the release's checksums. It is all or nothing: everything is
+  downloaded first, and if a file can't be fetched nothing is changed and
+  the dialog says so and offers the update again. A missing state pack is
+  also fetched when it's needed, as county packs already were. Needed
+  before the next OpenSAK-Data release, which adds Switzerland's cantons
+  (#788).
+
+---
+
 ## [1.22.0-beta.11] — 2026-10-28
 
 > Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
