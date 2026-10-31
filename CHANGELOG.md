@@ -57,6 +57,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   also fetched when it's needed, as county packs already were. Needed
   before the next OpenSAK-Data release, which adds Switzerland's cantons
   (#788).
+- **Picked column view jumped back when views were identical (#1222)** —
+  when several saved column views held exactly the same setup, the toolbar
+  and the **Choose Columns** dialog always showed the alphabetically first
+  one. OpenSAK now remembers, per database, which view you last applied
+  and keeps that one selected.
 
 ---
 

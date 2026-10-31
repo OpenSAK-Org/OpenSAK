@@ -3451,7 +3451,7 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.column_dialog import (
             ALWAYS_VISIBLE, ColumnView,
             set_visible_columns, set_column_widths,
-            set_container_display, set_type_display,
+            set_container_display, set_type_display, set_applied_view_name,
         )
         try:
             view = ColumnView.load(path)
@@ -3464,6 +3464,7 @@ class MainWindow(QMainWindow):
         set_column_widths(view.widths)
         set_container_display(view.container_display)
         set_type_display(view.type_display)
+        set_applied_view_name(view.name)
         self._cache_table.reload_columns()
         # Issue #658 follow-up — same reasoning as _open_column_chooser():
         # reload_columns() doesn't refetch data, so a view that turns on

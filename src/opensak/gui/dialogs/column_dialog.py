@@ -445,6 +445,22 @@ def set_type_display(mode: str) -> None:
     get_store().set(_TYPE_DISPLAY_KEY, mode)
 
 
+def get_applied_view_name() -> Optional[str]:
+    """Name of the saved view last applied to the active database, if any."""
+    val = _get_db_columns("applied_view")
+    return val if isinstance(val, str) and val else None
+
+
+def set_applied_view_name(name: Optional[str]) -> None:
+    """Remember which saved view was last applied to the active database.
+
+    Only a tie-breaker for current_column_view_match(): when several saved
+    views hold the exact same setup, the one the user picked stays selected
+    instead of the alphabetically first one.
+    """
+    _set_db_columns("applied_view", name or None)
+
+
 def current_column_view_match() -> Optional[str]:
     """Return the name of a saved Column View that matches the active
     database's current column setup (visible columns in order, widths,
@@ -453,6 +469,8 @@ def current_column_view_match() -> Optional[str]:
     A fresh comparison every time, not a stored "this database follows that
     view" link. Shared by the toolbar dropdown (mainwindow) and the
     Choose Columns dialog, so both always show the same view (#996).
+    If several views match, the last applied one (get_applied_view_name())
+    wins over the alphabetically first.
     """
     current = (
         list(get_visible_columns()),
@@ -460,6 +478,8 @@ def current_column_view_match() -> Optional[str]:
         get_container_display(),
         get_type_display(),
     )
+    applied = get_applied_view_name()
+    first_match: Optional[str] = None
     for path in ColumnView.list_views():
         try:
             view = ColumnView.load(path)
@@ -467,14 +487,20 @@ def current_column_view_match() -> Optional[str]:
             continue
         if (list(view.visible_columns), dict(view.widths),
                 view.container_display, view.type_display) == current:
-            return view.name
-    return None
+            if applied is None or view.name == applied:
+                return view.name
+            if first_match is None:
+                first_match = view.name
+    return first_match
 
 
 class ColumnChooserDialog(QDialog):
     """Dialog til at vælge hvilke kolonner der vises i cachelisten."""
 
     _DEFAULT_MARK = "★ "
+    # The view's real name: the label can't tell the mark from a name that
+    # starts with the same characters.
+    _VIEW_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -640,13 +666,14 @@ class ColumnChooserDialog(QDialog):
             if default_name and view.name == default_name:
                 label = f"{self._DEFAULT_MARK}{label}"
             self._view_combo.addItem(label, path)
+            self._view_combo.setItemData(
+                self._view_combo.count() - 1, view.name, self._VIEW_NAME_ROLE)
 
     def _select_view_by_name(self, name: str) -> None:
-        """Select the combo entry for the saved view *name* (★ mark ignored)."""
-        for i in range(self._view_combo.count()):
-            if self._view_combo.itemText(i).lstrip(self._DEFAULT_MARK) == name:
-                self._view_combo.setCurrentIndex(i)
-                break
+        """Select the combo entry for the saved view *name*."""
+        index = self._view_combo.findData(name, self._VIEW_NAME_ROLE)
+        if index >= 0:
+            self._view_combo.setCurrentIndex(index)
 
     def _update_view_buttons(self) -> None:
         path = self._view_combo.currentData()
@@ -747,7 +774,7 @@ class ColumnChooserDialog(QDialog):
         path = self._view_combo.currentData()
         if path is None:
             return
-        view_name = self._view_combo.currentText().lstrip(self._DEFAULT_MARK)
+        view_name = self._view_combo.currentData(self._VIEW_NAME_ROLE)
         reply = QMessageBox.question(
             self, tr("column_view_delete_title"),
             tr("column_view_delete_msg", name=view_name),
@@ -770,7 +797,7 @@ class ColumnChooserDialog(QDialog):
         path = self._view_combo.currentData()
         if path is None:
             return
-        view_name = self._view_combo.currentText().lstrip(self._DEFAULT_MARK)
+        view_name = self._view_combo.currentData(self._VIEW_NAME_ROLE)
         set_default_view_name(view_name)
         self._view_combo.blockSignals(True)
         self._load_views_into_combo()
@@ -788,4 +815,7 @@ class ColumnChooserDialog(QDialog):
         set_visible_columns(visible)
         set_container_display(self._container_display_combo.currentData())
         set_type_display(self._type_display_combo.currentData())
+        if self._view_combo.currentData() is not None:
+            set_applied_view_name(
+                self._view_combo.currentData(self._VIEW_NAME_ROLE))
         self.accept()
