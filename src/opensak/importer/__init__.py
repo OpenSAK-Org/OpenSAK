@@ -11,6 +11,7 @@ Supports:
 
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -25,6 +26,8 @@ from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoi
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
+
+logger = logging.getLogger(__name__)
 
 
 # ── XML namespace map used by Groundspeak Pocket Queries ─────────────────────
@@ -1517,6 +1520,32 @@ def _upsert_cache(
     return cache, created
 
 
+def _wpt_code(wpt_el) -> Optional[str]:
+    """The code of a <wpt> for an error message, read as _parse_wpt does."""
+    gpx_ns = {"gpx": etree.QName(wpt_el).namespace or NS["gpx"]}
+    return _text(wpt_el, "gpx:name", gpx_ns) or _text(wpt_el, "gpx:n", gpx_ns)
+
+
+def _parse_error(file: str, code: Optional[str], line: Optional[int], exc: Exception) -> str:
+    """Log a record that could not be read (with traceback) and return the
+    summary line naming it, so it can be looked up in the source file (#465)."""
+    logger.warning("Could not read %s, line %s, %s", file, line, code, exc_info=exc)
+    return tr("import_err_parse", file=file, code=code or "?", line=line or "?", error=exc)
+
+
+def _db_error(data: dict, source: str, exc: Exception) -> str:
+    """Log a cache that could not be saved and return its summary line.
+
+    A SQLAlchemy error's text carries the whole statement and its parameters
+    (the cache description included): those go to the log, the summary only
+    gets the database's own message (#465).
+    """
+    gc_code = data.get("gc_code", "?")
+    logger.warning("Could not save %s from %s", gc_code, source, exc_info=exc)
+    return tr("import_err_db", gc_code=gc_code, source=source,
+              error=getattr(exc, "orig", None) or exc)
+
+
 def _flush_cache_batch(
     session: Session,
     batch: list[dict],
@@ -1582,8 +1611,7 @@ def _flush_cache_batch_isolated(
                 result.updated += 1
         except Exception as e:
             cell.rollback()
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
-                                     source=source, error=e))
+            result.errors.append(_db_error(data, source, e))
             result.skipped += 1
 
 
@@ -1678,6 +1706,9 @@ def _link_extra_waypoints(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+MAX_ERRORS_SHOWN = 5
+
+
 class ImportResult:
     """Summary of a GPX/LOC import operation."""
 
@@ -1693,6 +1724,14 @@ class ImportResult:
     def total(self) -> int:
         return self.created + self.updated
 
+    def errors_shown(self) -> list[str]:
+        """The errors for a summary: the first few, then how many more there are."""
+        shown = self.errors[:MAX_ERRORS_SHOWN]
+        hidden = len(self.errors) - len(shown)
+        if hidden:
+            shown.append(tr("import_errors_more", count=hidden))
+        return shown
+
     def __str__(self) -> str:
         lines = [
             f"  Caches created : {self.created}",
@@ -1705,7 +1744,7 @@ class ImportResult:
                 lines.append(f"  ⚠ {w}")
         if self.errors:
             lines.append(f"  Errors         : {len(self.errors)}")
-            for e in self.errors[:5]:
+            for e in self.errors_shown():
                 lines.append(f"    - {e}")
         return "\n".join(lines)
 
@@ -1740,7 +1779,7 @@ def _parse_gpx_to_data(
                         if extra is not None:
                             extra_wpts.append(extra)
                 except Exception as e:
-                    errors.append(tr("import_err_parse", file=gpx_path.name, error=e))
+                    errors.append(_parse_error(gpx_path.name, _wpt_code(elem), elem.sourceline, e))
                 finally:
                     elem.clear()
                     while elem.getprevious() is not None:
@@ -1827,7 +1866,7 @@ def import_gpx(
                         else:
                             result.skipped += 1
                 except Exception as e:
-                    result.errors.append(tr("import_err_parse", file=source, error=e))
+                    result.errors.append(_parse_error(source, _wpt_code(elem), elem.sourceline, e))
                     result.skipped += 1
                 finally:
                     # CRITICAL: Clear the element and its preceding siblings from memory
@@ -1999,7 +2038,9 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
         try:
             data = _parse_loc_waypoint(wpt_el)
         except Exception as e:
-            result.errors.append(tr("import_err_parse", file=source, error=e))
+            name_el = wpt_el.find("name")
+            code = name_el.get("id") if name_el is not None else None
+            result.errors.append(_parse_error(source, code, wpt_el.sourceline, e))
             result.skipped += 1
             continue
 
@@ -2014,8 +2055,7 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
             else:
                 result.updated += 1
         except Exception as e:
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
-                                     source=source, error=e))
+            result.errors.append(_db_error(data, source, e))
             result.skipped += 1
 
     return result

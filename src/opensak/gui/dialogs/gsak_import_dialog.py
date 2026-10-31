@@ -932,7 +932,7 @@ class GsakImportDialog(QDialog):
                 lines.append(f"    - {w}")
         if result.errors:
             lines.append(tr("import_errors_header", count=len(result.errors)))
-            for e in result.errors[:5]:
+            for e in result.errors_shown():
                 lines.append(f"    - {e}")
 
         self._append_log("\n".join(lines))

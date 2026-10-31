@@ -112,6 +112,7 @@ from sqlalchemy.orm import Session
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
 from opensak.importer import (
     ImportResult,
+    _db_error,
     _enter_bulk_import_pragmas,
     _exit_bulk_import_pragmas,
     _load_existing_gc_map,
@@ -1350,8 +1351,7 @@ def _flush_gsak_batch_isolated(
             result.note_images_replaced += data.get("note_images_replaced", 0)
         except Exception as e:
             cell.rollback()
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
-                                     source=source, error=e))
+            result.errors.append(_db_error(data, source, e))
             result.skipped += 1
 
 
