@@ -4,6 +4,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Macros can use the clipboard (#1227)** — `opensak.set_clipboard(text)` and
+  `opensak.get_clipboard()` are GSAK's `Clip` and `GetClipText`, e.g. to paste
+  a downloaded page into a regex tester, or to try a macro on different texts.
+  The clipboard may hold private text, so reading it asks the user first, once
+  per run; a macro declares this with `read-clipboard` in its `Permissions`
+  header. The macro API is now version 5. Contributed by nagisml.
+
+---
+
 ## [1.23.0-beta.3] — 2026-11-12
 
 > Headline: **macros without a window, and a Macros toolbar.**

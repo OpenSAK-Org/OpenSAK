@@ -231,6 +231,8 @@ DEFAULT_MEMORY_LIMIT = 256 * 1024 * 1024
 MAX_CHOOSE_FILE_TEXT = 200
 # opensak.message() / input() / choose() texts
 MAX_UI_TEXT = 100_000
+# opensak.set_clipboard() / get_clipboard(): longest text
+MAX_CLIPBOARD_TEXT = 10_000_000
 # A form image (file or base64 data)
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 # Where opensak.form{ remember = true } keeps the last values: a folder of
@@ -939,6 +941,12 @@ class MacroHost(Protocol):
     def choose_folder(self, title: str, start_dir: Path) -> Optional[Path]:
         """Let the user pick a folder in OpenSAK's folder dialog; None if
         cancelled."""
+
+    def set_clipboard(self, text: str) -> None:
+        """Put *text* on the system clipboard."""
+
+    def get_clipboard(self) -> str:
+        """The text on the system clipboard, "" if it holds no text."""
 
     def show_form(
         self, form: macro_forms.Form, events: macro_forms.FormEvents
@@ -1658,6 +1666,9 @@ class MacroRuntime:
         # the ones opensak.open() shows without asking.
         self._written: set[Path] = set()
         self._opened = 0
+        # Macro files the user let read the clipboard in this run (None: an
+        # unsaved macro).
+        self._clipboard_readers: set[Optional[Path]] = set()
         self._cancelled = threading.Event()
         # opensak.progress() windows still open; closed after the run.
         self._progress_windows: list[ProgressHandle] = []
@@ -4796,6 +4807,36 @@ class MacroRuntime:
             return None
         return str(self._pick_folder(chosen, func))
 
+    def _set_clipboard(self, text=None) -> None:
+        func = "opensak.set_clipboard"
+        if isinstance(text, (int, float)) and not isinstance(text, bool):
+            text = macro_forms.format_number(text)
+        elif isinstance(text, bytes):       # e.g. opensak.get_url{ binary = true }
+            text = text.decode("utf-8", "replace")
+        if not isinstance(text, str):
+            raise MacroError(f"{func}: text must be a string, got {_lua_kind(text) or repr(text)}")
+        if len(text) > MAX_CLIPBOARD_TEXT:
+            raise MacroError(f"{func}: text is longer than {MAX_CLIPBOARD_TEXT:,} characters")
+        self._ui("set_clipboard", func)(text)
+
+    def _get_clipboard(self) -> str:
+        func = "opensak.get_clipboard"
+        read = self._ui("get_clipboard", func)
+        # The clipboard may hold anything the user copied, passwords too, and
+        # a macro with web access could send it on: put to the user once per
+        # macro file and run.
+        if self._macro_path not in self._clipboard_readers:
+            if not self._host.confirm(
+                    "The macro wants to read the text on the clipboard, which may be "
+                    "private (e.g. a password you copied).\n\nAllow it for this run?"):
+                raise MacroError(f"{func}: the user did not allow reading the clipboard")
+            self._clipboard_readers.add(self._macro_path)
+        text = read()
+        if len(text) > MAX_CLIPBOARD_TEXT:
+            raise MacroError(f"{func}: the clipboard holds more than "
+                             f"{MAX_CLIPBOARD_TEXT:,} characters")
+        return text
+
     def _form(self, lua, spec=None):
         func = "opensak.form"
         show = self._ui("show_form", func)
@@ -5098,6 +5139,7 @@ class MacroRuntime:
         self._picked = set()
         self._written = set()
         self._opened = 0
+        self._clipboard_readers = set()
         self._cancelled.clear()
         self._exit_code = None
         self._slept = 0.0
@@ -7216,6 +7258,33 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: rt._choose_folder,
         params=(Param("title", "string", "Dialog title.", optional=True),),
         returns=("string?", "Full path of the folder, or nil if cancelled."),
+    ),
+    ApiFunction(
+        name="set_clipboard",
+        description="Put text on the system clipboard, replacing what is "
+                    "there (GSAK's Clip), e.g. to paste a downloaded page "
+                    "into a regex tester. At most "
+                    f"{MAX_CLIPBOARD_TEXT:,} characters. Needs the user "
+                    "interface.",
+        example='opensak.set_clipboard("Copied by a macro")',
+        since=5,
+        bind=lambda rt, lua: rt._set_clipboard,
+        params=(Param("text", "string", "The text."),),
+    ),
+    ApiFunction(
+        name="get_clipboard",
+        description="The text on the system clipboard (GSAK's GetClipText), "
+                    "e.g. to try a macro on different texts by copying them. "
+                    "The clipboard may hold private text, so the user is "
+                    "asked first, once per run; if they say no, the macro "
+                    "stops with an error. A macro that reads it should "
+                    "declare `read-clipboard` in its `Permissions` header. "
+                    "Needs the user interface.",
+        example='local text = opensak.get_clipboard()\n'
+                'print(#text .. " bytes")',
+        since=5,
+        bind=lambda rt, lua: rt._get_clipboard,
+        returns=("string", 'The text, "" if the clipboard holds no text.'),
     ),
     ApiFunction(
         name="message",
