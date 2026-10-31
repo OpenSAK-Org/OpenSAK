@@ -441,7 +441,7 @@ def find_gsak_db3_in_zip(path: Path) -> Path:
 # ── Multi-database GSAK backups ──────────────────────────────────────────────
 #
 # A GSAK backup .zip ("File → Backup") holds one folder per GSAK database,
-# each with its own ``sqlite.db3`` (e.g. ``AllCH/sqlite.db3``), plus GSAK's
+# each with its own ``sqlite.db3`` (e.g. ``Found/sqlite.db3``), plus GSAK's
 # settings database ``gsak.db3`` (saved filters etc.) at the root. The folder
 # name *is* the GSAK database name, so it doubles as the OpenSAK database
 # name the import dialog proposes.
