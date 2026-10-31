@@ -134,6 +134,7 @@ from opensak.importer.gpx_import_settings import (
 from opensak.hint_detect import rot13
 from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
+from opensak.macro import json_codec
 from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
 from opensak.db.database import get_session, optimize_database
@@ -290,6 +291,8 @@ OPEN_SUFFIXES = (".html", ".htm", ".svg", ".txt", ".csv", ".tsv", ".md", ".json"
                  ".gpx", ".kml", ".pdf")
 MAX_OPENS_PER_RUN = 5
 # opensak.get_url(): the keys of its options table (Lua name → Python name)
+JSON_ENCODE_OPTIONS = {"null": "null", "empty": "empty", "indent": "indent"}
+JSON_DECODE_OPTIONS = {"null": "null"}
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
 
@@ -1550,6 +1553,15 @@ def _to_lua(lua, value: Any) -> Any:
     if isinstance(value, (dict, list, tuple)):
         return lua.table_from(value, recursive=True)
     return value
+
+
+def _lua_describe(lua) -> Any:
+    """The *describe* function of settings.to_json(): type() and a table's
+    address, captured before the macro could replace them: lupa gives no
+    stable Python identity for tables."""
+    return lua.eval('(function(type, fmt) return function(v) local t = type(v) '
+                    'if t == "table" then return t, fmt("%p", v) end return t end '
+                    'end)(type, string.format)')
 
 
 def _ui_text(func: str, name: str, value: Any, optional: bool = False) -> str:
@@ -4819,7 +4831,7 @@ class MacroRuntime:
             raise MacroError(f"{func}: text is longer than {MAX_CLIPBOARD_TEXT:,} characters")
         self._ui("set_clipboard", func)(text)
 
-    def _get_clipboard(self) -> str:
+    def _get_clipboard(self, lua) -> str:
         func = "opensak.get_clipboard"
         read = self._ui("get_clipboard", func)
         # The clipboard may hold anything the user copied, passwords too, and
@@ -4835,6 +4847,7 @@ class MacroRuntime:
         if len(text) > MAX_CLIPBOARD_TEXT:
             raise MacroError(f"{func}: the clipboard holds more than "
                              f"{MAX_CLIPBOARD_TEXT:,} characters")
+        json_codec.check_memory(lua, json_codec.string_cost(text), func)
         return text
 
     def _form(self, lua, spec=None):
@@ -5007,6 +5020,27 @@ class MacroRuntime:
             raise MacroError(f"{func} expects a table, got {helpers.lua_tostring(value)}")
         data = macro_settings.to_json(value, describe, func)
         macro_settings.save_settings(self._settings_file(func), data, func)
+
+    def _json_encode(self, lua, describe, value=None, options=None) -> str:
+        func = "opensak.json.encode"
+        if value is None:
+            raise MacroError(f"{func} expects a value, got nil")
+        opts = self._options(func, JSON_ENCODE_OPTIONS, options)
+        empty = opts.get("empty", "array")
+        if empty not in ("array", "object"):
+            raise MacroError(f'{func}: empty must be "array" or "object"')
+        indent = int(self._number_option(func, opts, "indent", 0, 0, 8))
+        return json_codec.encode(
+            lua, macro_settings.to_json(value, describe, func, "encode"), func,
+            null=opts.get("null", json_codec.NO_NULL), empty_object=empty == "object",
+            indent=indent,
+        )
+
+    def _json_decode(self, lua, text=None, options=None) -> Any:
+        func = "opensak.json.decode"
+        opts = self._options(func, JSON_DECODE_OPTIONS, options)
+        return json_codec.to_lua(lua, json_codec.decode(text, func), func,
+                                 null=opts.get("null", json_codec.NO_NULL))
 
     def _settings_clear(self) -> None:
         func = "opensak.settings.clear"
@@ -7283,7 +7317,7 @@ API: tuple[ApiFunction, ...] = (
         example='local text = opensak.get_clipboard()\n'
                 'print(#text .. " bytes")',
         since=5,
-        bind=lambda rt, lua: rt._get_clipboard,
+        bind=lambda rt, lua: functools.partial(rt._get_clipboard, lua),
         returns=("string", 'The text, "" if the clipboard holds no text.'),
     ),
     ApiFunction(
@@ -7800,6 +7834,62 @@ API: tuple[ApiFunction, ...] = (
         bind=lambda rt, lua: helpers.re_escape,
         params=(_TEXT,),
         returns=("string", "The escaped text."),
+    ),
+
+    # -- opensak.json ---------------------------------------------------------
+    ApiFunction(
+        name="json.decode",
+        description="Turn JSON text into Lua values, e.g. what "
+                    "`opensak.get_url()` downloaded: an object becomes a table "
+                    "with string keys, an array a list starting at 1. Invalid "
+                    "JSON is an error. A Lua table cannot hold nil, so by "
+                    "default a null member is simply absent (it reads as nil) "
+                    "and a null array item leaves a gap, where `#` and "
+                    "`ipairs` are unreliable. With the option `null`, a "
+                    "string, number or boolean of your choice stands in for "
+                    "every null. At most "
+                    f"{json_codec.MAX_JSON_TEXT:,} characters.",
+        example='local q = opensak.json.decode(\'{"Name": "Hut", "MultiChoiceOptions": null}\')\n'
+                'print(q.Name)                -- Hut\n'
+                'print(q.MultiChoiceOptions)  -- nil\n'
+                'local a = opensak.json.decode("[1, null, 3]", { null = false })\n'
+                'print(#a, a[2])              -- 3   false',
+        since=5,
+        bind=lambda rt, lua: functools.partial(rt._json_decode, lua),
+        params=(
+            Param("text", "string", "The JSON text."),
+            Param("options", "{ null?: string|number|boolean }",
+                  "`null`: the value to use for every null.", optional=True),
+        ),
+        returns=("any", "The value; nil if the text is just null."),
+    ),
+    ApiFunction(
+        name="json.encode",
+        description="Turn a Lua value into JSON text. Strings, numbers, "
+                    "booleans and nested tables can be encoded, following the "
+                    "same rules as `opensak.settings.save()`: a table needs "
+                    "string keys, or 1, 2, 3, … for an array. Functions, "
+                    "cyclic tables and infinite numbers are refused. Object "
+                    "keys are sorted, so the same table always gives the same "
+                    "text. An empty table becomes `[]`, or `{}` with the "
+                    "option `empty = \"object\"`. Since a table cannot hold "
+                    "nil, write null with the option `null`: every value equal "
+                    "to it becomes null, also the one `opensak.json.decode()` "
+                    "put in. `indent`: spaces per level for readable text.",
+        example='print(opensak.json.encode({ name = "Hut", tags = {"a", "b"} }))\n'
+                '-- {"name":"Hut","tags":["a","b"]}\n'
+                'print(opensak.json.encode({ note = "<null>" }, { null = "<null>" }))\n'
+                '-- {"note":null}',
+        since=5,
+        bind=lambda rt, lua: functools.partial(rt._json_encode, lua, _lua_describe(lua)),
+        params=(
+            Param("value", "any", "The value to encode."),
+            Param("options",
+                  '{ null?: string|number|boolean, empty?: "array"|"object", indent?: integer }',
+                  "`null`: the value to write as null. `empty`: what an empty "
+                  "table becomes. `indent`: 0 to 8 spaces per level.", optional=True),
+        ),
+        returns=("string", "The JSON text."),
     ),
 
     # -- opensak.text ---------------------------------------------------------
@@ -8624,14 +8714,7 @@ API: tuple[ApiFunction, ...] = (
                 's.types = {"Traditional", "Multi"}\n'
                 'opensak.settings.save(s)',
         since=3,
-        bind=lambda rt, lua: functools.partial(
-            rt._settings_save,
-            # type() and a table's address, captured before the macro could
-            # replace them: lupa gives no stable Python identity for tables.
-            lua.eval('(function(type, fmt) return function(v) local t = type(v) '
-                     'if t == "table" then return t, fmt("%p", v) end return t end '
-                     'end)(type, string.format)'),
-        ),
+        bind=lambda rt, lua: functools.partial(rt._settings_save, _lua_describe(lua)),
         params=(Param("settings", "table", "The settings to save."),),
     ),
     ApiFunction(

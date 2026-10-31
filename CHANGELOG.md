@@ -14,6 +14,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The clipboard may hold private text, so reading it asks the user first, once
   per run; a macro declares this with `read-clipboard` in its `Permissions`
   header. The macro API is now version 5. Contributed by nagisml.
+- **Macros can read and write JSON** — `opensak.json.decode(text)` and
+  `opensak.json.encode(value)`, so a macro no longer needs a JSON parser of its
+  own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
+  default; the `null` option puts a value of your choice in its place and
+  writes it back as null. Contributed by nagisml.
 
 ---
 
