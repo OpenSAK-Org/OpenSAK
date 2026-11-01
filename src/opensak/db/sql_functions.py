@@ -17,6 +17,8 @@ changing the centre point:
       The projected point as 'lat;lon' with 6 decimals, as in GSAK. units:
       K (default), M, N (nautical miles), T (metres), Y (yards), F (feet);
       calc: 'G' (great circle, the default) or 'V' (Vincenty).
+  g_RegEx(pattern, text)
+      1 if the regular expression matches anywhere in text (ignoring case), else 0.
 
 Coordinates are decimal degrees, as numbers or numeric strings (GSAK stores
 them as text). Where GSAK calculates with 0 or crashes, these differ: NULL
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import sqlite3
 from typing import Any, Callable, Optional
 
@@ -157,12 +160,24 @@ def g_project(lat: Any, lon: Any, degrees: Any, distance: Any,
     return f"{lat2:.6f};{lon2:.6f}"
 
 
+def g_regex(pattern: Any, text: Any) -> int:
+    """g_RegEx(pattern, text): 1 if *pattern* matches anywhere in *text*
+    (ignoring case), else 0. NULL text doesn't match."""
+    if pattern is None or text is None:
+        return 0
+    try:
+        return 1 if re.search(str(pattern), str(text), re.IGNORECASE) else 0
+    except re.error as exc:
+        raise _fail(f"g_RegEx: invalid pattern {pattern!r}: {exc}") from None
+
+
 # name → (function, the argument counts it takes)
 GEO_FUNCTIONS: dict[str, tuple[Callable[..., Any], tuple[int, ...]]] = {
     "g_Distance": (g_distance, (4, 5)),
     "g_Bearing1": (g_bearing1, (4, 5)),
     "g_Bearing2": (g_bearing2, (4, 5)),
     "g_Project": (g_project, (4, 5, 6)),
+    "g_RegEx": (g_regex, (2,)),
 }
 
 

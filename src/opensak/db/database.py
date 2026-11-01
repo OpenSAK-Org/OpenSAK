@@ -111,8 +111,8 @@ def _enable_wal_and_fk(dbapi_connection, _connection_record) -> None:
 
 @event.listens_for(Engine, "connect")
 def _register_sql_functions(dbapi_connection, _connection_record) -> None:
-    """GSAK's g_Distance(), g_Bearing1/2() and g_Project() for Where clauses
-    and everything else that runs SQL through an engine (#917)."""
+    """GSAK's g_Distance(), g_Bearing1/2(), g_Project() and g_RegEx() for Where
+    clauses and everything else that runs SQL through an engine (#917)."""
     register_geo_functions(dbapi_connection)
 
 
