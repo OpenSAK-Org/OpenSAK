@@ -3759,6 +3759,44 @@ def _container_sort_key(c) -> tuple:
     return (2, "O")
 
 
+def _parse_last_four_logs(raw: str) -> list[tuple[str, str, str]]:
+    """Parse the "date\\ttype\\tfinder" per-line format _upsert_cache() writes
+    into last_four_logs. Returns (date_str, log_type, finder) tuples, most
+    recent first — malformed/partial lines are silently skipped rather than
+    raising, since this is display-only data derived from the DB, not
+    user input."""
+    if not raw:
+        return []
+    out = []
+    for line in raw.split("\n"):
+        fields = line.split("\t")
+        if len(fields) == 3:
+            out.append((fields[0], fields[1], fields[2]))
+    return out
+
+
+def _last_four_logs_pattern(c) -> str:
+    """Issue #1154: the squares of the Last four logs column as a 4-letter
+    sort key, most recent log first: D = DNF, F = found-type log, N = any
+    other log. "~" fills empty slots and sorts after the letters, so caches
+    with fewer than four logs don't jump ahead."""
+    logs = _parse_last_four_logs(c.last_four_logs or "")[:4]
+    letters = "".join(
+        "D" if log_type in DNF_LOG_TYPES else "F" if log_type in FOUND_LOG_TYPES else "N"
+        for _, log_type, _ in logs
+    )
+    return letters.ljust(4, "~")
+
+
+def sort_by_last_four_logs(caches: list, reverse: bool = False) -> None:
+    """Issue #1154: sort *caches* in place by their log pattern, so DDDD, DDDF,
+    DDFF, ... group together. The most recently logged cache comes first within
+    a pattern in both directions, hence two stable passes: each line of the
+    stored text starts with its date, newest line first."""
+    caches.sort(key=lambda c: c.last_four_logs or "", reverse=True)
+    caches.sort(key=_last_four_logs_pattern, reverse=reverse)
+
+
 # Valid sort fields and how to extract the sort key from a Cache object
 SORT_FIELDS: dict[str, Any] = {
     "name":            lambda c: (c.name or "").lower(),
@@ -3823,7 +3861,7 @@ SORT_FIELDS: dict[str, Any] = {
     # ── Issue #716: last_found_date, last_gpx_update, last_four_logs ────
     "last_found_date": lambda c: 0,
     "last_gpx_update": lambda c: 0,
-    "last_four_logs":  lambda c: 0,
+    "last_four_logs":  _last_four_logs_pattern,   # see _sort_in_python()
     # ── Issue #1141: columns stored since #1139 ──────────────────────────
     "last_user_update": lambda c: 0,
     "symbol":          lambda c: 0,
@@ -3906,6 +3944,14 @@ class SortSpec:
     @classmethod
     def from_dict(cls, data: dict) -> "SortSpec":
         return cls(field=data.get("field", "name"), ascending=data.get("ascending", True))
+
+
+def _sort_in_python(results: list, sort: SortSpec) -> None:
+    """Sort *results* in place for a field _sql_order_expr() doesn't handle."""
+    if sort.field == "last_four_logs":
+        sort_by_last_four_logs(results, reverse=not sort.ascending)
+    elif sort.field in SORT_FIELDS:
+        results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
 
 
 # ── Distance annotation helper ────────────────────────────────────────────────
@@ -4292,8 +4338,7 @@ def apply_filters(
 
     # Sort in Python only for fields not handled by SQL.
     if not sql_sorted:
-        if sort.field in SORT_FIELDS:
-            results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
+        _sort_in_python(results, sort)
 
     if limit:
         results = results[:limit]
@@ -4589,8 +4634,7 @@ def apply_filters_lightweight(
         results = list(all_caches)
 
     if not sql_sorted:
-        if sort.field in SORT_FIELDS:
-            results.sort(key=SORT_FIELDS[sort.field], reverse=not sort.ascending)
+        _sort_in_python(results, sort)
 
     if limit and not limit_pushed:
         results = results[:limit]
