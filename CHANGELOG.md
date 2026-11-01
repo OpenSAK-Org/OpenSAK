@@ -34,6 +34,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   lose "(beta)", and the companion file is explained in plain words.
   *Importing from the Command Line* gets a systemd timer example next to
   cron.
+- **Import summary names what failed (#465)** — a cache or waypoint that
+  could not be read now shows its code and its line in the file, instead
+  of only the file name. When there are more errors than the summary
+  lists, it says how many more. A database error no longer fills the
+  summary with the SQL statement and the cache's data. Every failing
+  cache, with the full details, is written to the log file. Requested by
+  C3GPS.
 
 ### Fixed
 

@@ -140,7 +140,7 @@ class GpxImportReport:
             lines.append(f"  {f.path.name}: {r.created} new, {r.updated} updated, "
                          f"{r.skipped} skipped, {r.waypoints} waypoints, "
                          f"{len(r.errors)} errors")
-            lines.extend(f"    - {e}" for e in r.errors[:5])
+            lines.extend(f"    - {e}" for e in r.errors_shown())
         if not self.files:
             lines.append("  no .gpx or .zip files to import")
         else:
