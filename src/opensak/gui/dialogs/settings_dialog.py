@@ -490,6 +490,30 @@ class SettingsDialog(QDialog):
         nearby_note.setStyleSheet(hint_style())
         group_layout.addWidget(nearby_note)
 
+        group_layout.addSpacing(8)
+
+        # #1111: on-disk tile cache, so viewed map areas still show offline
+        # (gui/map_profile.py). 0 = off.
+        tile_cache_row = QHBoxLayout()
+        tile_cache_row.addWidget(QLabel(tr("settings_map_tile_cache_label")))
+        self._map_tile_cache = QSpinBox()
+        self._map_tile_cache.setRange(0, 10000)
+        self._map_tile_cache.setSingleStep(50)
+        self._map_tile_cache.setSuffix(" MB")
+        self._map_tile_cache.setSpecialValueText(tr("settings_map_tile_cache_off"))
+        self._map_tile_cache.setFixedWidth(100)
+        tile_cache_row.addWidget(self._map_tile_cache)
+        self._map_tile_cache_clear_btn = QPushButton(tr("settings_map_tile_cache_clear"))
+        self._map_tile_cache_clear_btn.clicked.connect(self._clear_map_tile_cache)
+        tile_cache_row.addWidget(self._map_tile_cache_clear_btn)
+        tile_cache_row.addStretch()
+        group_layout.addLayout(tile_cache_row)
+
+        tile_cache_note = QLabel(tr("settings_map_tile_cache_note"))
+        tile_cache_note.setWordWrap(True)
+        tile_cache_note.setStyleSheet(hint_style())
+        group_layout.addWidget(tile_cache_note)
+
         layout.addWidget(group)
         layout.addStretch()
 
@@ -1747,6 +1771,7 @@ class SettingsDialog(QDialog):
         self._decode_hints_cb.setChecked(s.default_decode_hints)
         self._map_enabled_cb.setChecked(s.map_enabled)
         self._map_max_caches.setValue(s.map_max_caches)
+        self._map_tile_cache.setValue(s.map_tile_cache_mb)
         # Issue #718 — stored value is always km; display in the user's
         # configured unit, same conversion used by filter_dialog.py's
         # DistanceFilter radius field.
@@ -1806,6 +1831,16 @@ class SettingsDialog(QDialog):
             self, new_backup_dir, title=tr("wizard_backup_dir_title"), db_dir=new_db_dir,
         )
 
+    def _clear_map_tile_cache(self) -> None:
+        # #1111: takes effect at once, not on OK — like the other buttons.
+        from opensak.gui import map_profile
+        freed = map_profile.clear_cache()
+        QMessageBox.information(
+            self,
+            tr("settings_map_tile_cache_clear"),
+            tr("settings_map_tile_cache_cleared", size=f"{freed / (1024 * 1024):.1f}"),
+        )
+
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK
         if self._editing_original_name is not None:
@@ -1846,6 +1881,7 @@ class SettingsDialog(QDialog):
         s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.map_enabled = self._map_enabled_cb.isChecked()
         s.map_max_caches = self._map_max_caches.value()
+        s.map_tile_cache_mb = self._map_tile_cache.value()
         # Issue #718 — convert back to km for storage if the field was
         # shown in miles (unit combo already saved above via s.use_miles).
         radius_val = self._map_nearby_radius.value()

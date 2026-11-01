@@ -11,7 +11,7 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, Slot, QUrl, Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu
 from PySide6.QtGui import QClipboard
@@ -24,13 +24,7 @@ from opensak.gui.theme import hint_text_color
 from opensak.utils.types import GcCode
 
 
-# ── Tile request interceptor (sætter Referer header for OSM tiles) ───────────
-
-class TileInterceptor(QWebEngineUrlRequestInterceptor):
-    def interceptRequest(self, info) -> None:
-        url = info.requestUrl().toString()
-        if "tile.openstreetmap.org" in url:
-            info.setHttpHeader(b"Referer", b"https://www.openstreetmap.org/")
+from opensak.gui import map_profile
 
 # ── Cache type → Leaflet marker HTML ─────────────────────────────────────────
 
@@ -223,6 +217,16 @@ MAP_HTML = """<!DOCTYPE html>
     border: 2px solid #fff;
     box-shadow: 0 1px 4px rgba(0,0,0,0.5);
   }
+  .leaflet-control-tilesoffline {
+    background: #fff3e0;
+    color: #6d4c41;
+    padding: 4px 10px;
+    border-radius: 4px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    font-size: 11px;
+    font-family: sans-serif;
+    white-space: nowrap;
+  }
   .leaflet-control-nearbylabel {
     background: #fff;
     padding: 4px 10px;
@@ -258,11 +262,35 @@ var map = L.map('map', {
     zoomControl: true
 });
 
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+var tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     maxZoom: 19,
     crossOrigin: true
 }).addTo(map);
+
+// #1111: tiles that are neither online nor in the tile cache fail to load —
+// say so instead of leaving grey squares unexplained. Pins, clustering and
+// map actions keep working; the notice goes away once a tile loads again.
+var TilesOffline = L.Control.extend({
+    options: { position: 'bottomleft' },
+    onAdd: function() {
+        var div = L.DomUtil.create('div', 'leaflet-control-tilesoffline');
+        div.textContent = MAP_TILES_OFFLINE;
+        return div;
+    }
+});
+var tilesOfflineNotice = null;
+tileLayer.on('tileerror', function() {
+    if (!tilesOfflineNotice) {
+        tilesOfflineNotice = new TilesOffline().addTo(map);
+    }
+});
+tileLayer.on('tileload', function() {
+    if (tilesOfflineNotice) {
+        map.removeControl(tilesOfflineNotice);
+        tilesOfflineNotice = null;
+    }
+});
 
 // ── Marker cluster gruppe ─────────────────────────────────────────────────────
 var clusterGroup = L.markerClusterGroup({
@@ -945,7 +973,6 @@ class MapWidget(QWidget):
         if webengine_disabled():
             from PySide6.QtWidgets import QLabel
             self._profile = None
-            self._interceptor = None
             self._page = None
             self._view = None
             self._channel = None
@@ -959,14 +986,13 @@ class MapWidget(QWidget):
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
 
-        # Brug en isoleret off-the-record profil til kortet så TileInterceptor
-        # ikke påvirker andre QWebEngineView instanser (fx beskrivelsespanelet).
-        # Dette løser et Windows 11-specifikt problem hvor den globale
-        # defaultProfile interceptor blokerede setHtml() i cache_detail.py.
-        # Ingen Qt-parent — vi rydder selv op i _cleanup_webengine().
-        self._profile = QWebEngineProfile()
-        self._interceptor = TileInterceptor()
-        self._profile.setUrlRequestInterceptor(self._interceptor)
+        # Kortet har sin egen profil så TileInterceptor ikke påvirker andre
+        # QWebEngineView instanser (fx beskrivelsespanelet). Dette løser et
+        # Windows 11-specifikt problem hvor den globale defaultProfile
+        # interceptor blokerede setHtml() i cache_detail.py.
+        # #1111: én persistent profil delt af alle kort (tile-cache på disk),
+        # se map_profile.py. Frigives i _cleanup_webengine().
+        self._profile = map_profile.acquire(QWebEngineProfile)
 
         self._page = QWebEnginePage(self._profile)
         self._view = QWebEngineView()
@@ -1087,6 +1113,7 @@ class MapWidget(QWidget):
             "MAP_TIP_POPOUT", _js_inline_arg(tr("toolbar_popout_map_tooltip"))
         )
         html = html.replace("MAP_TIP_DRAW", _js_inline_arg(tr("map_draw_tooltip")))
+        html = html.replace("MAP_TILES_OFFLINE", _js_inline_arg(tr("map_tiles_offline")))
         return html
 
     def _run_js(self, js: str) -> None:
@@ -1496,7 +1523,8 @@ class MapWidget(QWidget):
     def _cleanup_webengine(self) -> None:
         """Slet QWebEnginePage FØR QWebEngineProfile destrueres.
 
-        The map uses a parent-less off-the-record QWebEngineProfile + QWebEnginePage.
+        The map uses a parent-less QWebEnginePage on the shared map profile
+        (map_profile.py), which is deleted at quit after the last release().
         Without an explicit, ordered teardown they are released by Python GC in a
         nondeterministic order; when the profile is collected before its page Qt
         logs 'Release of profile requested but WebEnginePage still not deleted.
@@ -1515,7 +1543,7 @@ class MapWidget(QWidget):
             self._ready = False
             self._view.setPage(None)  # type: ignore[arg-type]
             self._page.deleteLater()
-            self._profile.deleteLater()
         except RuntimeError:
             # Widget er allerede slettet af Qt — intet at gøre
             pass
+        map_profile.release()
