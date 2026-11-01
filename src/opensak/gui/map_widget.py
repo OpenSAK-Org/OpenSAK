@@ -149,19 +149,19 @@ MAP_HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OpenSAK Map</title>
 
-<!-- Leaflet CSS -->
+<!-- Leaflet 1.9.4 CSS (bundled in assets/web/, served via opensak:// — #1111) -->
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  href="opensak://assets/leaflet/leaflet.css"/>
 
-<!-- Leaflet MarkerCluster CSS -->
+<!-- Leaflet.markercluster 1.5.3 CSS -->
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+  href="opensak://assets/leaflet.markercluster/MarkerCluster.css"/>
 <link rel="stylesheet"
-  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+  href="opensak://assets/leaflet.markercluster/MarkerCluster.Default.css"/>
 
-<!-- Leaflet-Geoman (draw tool for the Line/Polygon filter) -->
+<!-- Leaflet-Geoman 2.19.3 (draw tool for the Line/Polygon filter) -->
 <link rel="stylesheet"
-  href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.css"/>
+  href="opensak://assets/leaflet-geoman/leaflet-geoman.css"/>
 
 <style>
   html, body, #map { height: 100%; margin: 0; padding: 0; }
@@ -239,13 +239,13 @@ MAP_HTML = """<!DOCTYPE html>
 <div id="map"></div>
 
 <!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="opensak://assets/leaflet/leaflet.js"></script>
 
 <!-- Leaflet MarkerCluster -->
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="opensak://assets/leaflet.markercluster/leaflet.markercluster.js"></script>
 
 <!-- Leaflet-Geoman -->
-<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.19.3/dist/leaflet-geoman.js"></script>
+<script src="opensak://assets/leaflet-geoman/leaflet-geoman.js"></script>
 
 <!-- Qt WebChannel -->
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -946,6 +946,7 @@ class MapWidget(QWidget):
             from PySide6.QtWidgets import QLabel
             self._profile = None
             self._interceptor = None
+            self._asset_handler = None
             self._page = None
             self._view = None
             self._channel = None
@@ -967,6 +968,9 @@ class MapWidget(QWidget):
         self._profile = QWebEngineProfile()
         self._interceptor = TileInterceptor()
         self._profile.setUrlRequestInterceptor(self._interceptor)
+        # Leaflet & plugins come from the bundled assets via opensak:// (#1111)
+        from opensak.gui.web_assets import install_handler
+        self._asset_handler = install_handler(self._profile)
 
         self._page = QWebEnginePage(self._profile)
         self._view = QWebEngineView()

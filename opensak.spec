@@ -83,6 +83,9 @@ a = Analysis(
         ("src/opensak/assets/icons/cache_types", "opensak/assets/icons/cache_types"),
         ("src/opensak/assets/icons/cache_found", "opensak/assets/icons/cache_found"),
         ("src/opensak/assets/icon_guide.html",   "opensak/assets/icon_guide.html"),
+        # #1111: Leaflet, Leaflet.markercluster and Leaflet-Geoman (+ their
+        # licences), served to the map via opensak:// instead of unpkg.com.
+        ("src/opensak/assets/web",               "opensak/assets/web"),
         # Example Lua macros (+ their CSV), copied into the user's macros
         # folder by Macros → Open example (opensak.macro.examples).
         ("macros/examples",                       "macros/examples"),

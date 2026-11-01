@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: October 25, 2026*
+*Effective date: October 28, 2026*
 
 ---
 
@@ -122,7 +122,7 @@ https://wiki.osmfoundation.org/wiki/Privacy_Policy
 
 You can optionally configure OpenSAK to open cache locations in Google Maps or OpenStreetMap in your browser. This is triggered only by your explicit action and is subject to those services' own privacy policies.
 
-The map component itself (Leaflet and its marker-clustering plugin) is loaded from the unpkg.com content delivery network when the map is shown — again a standard web request.
+The map component itself (Leaflet and its marker-clustering and drawing plugins) is bundled with OpenSAK and loaded from your own computer; no content delivery network is contacted.
 
 ### 5.2 Garmin GPS devices
 
