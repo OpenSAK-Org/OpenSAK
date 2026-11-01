@@ -114,6 +114,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_unreadable":         "Não é possível ler esta macro: {msg}",
     "macro_mgr_api_newer":          "Requer a versão {needed} da API de macros; este OpenSAK tem a versão {have}.",
     "macro_mgr_col_permissions":    "Permissões",
+    "macro_mgr_col_headless":       "Sem janela",
     "macro_mgr_perm_info":          "Conforme declarado no cabeçalho da macro. O OpenSAK continua a perguntar antes de cada escrita e de cada acesso a pastas ou sites.",
     "macro_mgr_perm_undeclared":    "A macro não declara as suas permissões.",
     "macro_mgr_perm_none":          "A macro declara que não precisa de nenhuma destas permissões.",

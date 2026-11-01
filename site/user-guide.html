@@ -1599,6 +1599,59 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
     </ul>
     <div class="callout tip"><div class="callout-icon">💡</div><div>Macros you get from other users (forum, Facebook group, GitHub) are plain text files: open them in the editor and have a look before you run them. Take a backup before running a macro that changes many caches.</div></div>
 
+    <h3 id="macros-unattended">Running macros unattended</h3>
+    <p>A macro can also run without a window, for example from your computer's scheduler. Together with <a href="#import-command-line">the command-line import</a>, this lets you import your Pocket Queries each morning and then clean up the database. Use the same command as for the import (see <a href="#import-command-line">Finding the <code>opensak</code> command</a>).</p>
+    <pre><code>opensak run &lt;macro.lua&gt; --db "My Caches" [--arg key=value …] [--yes] [--allow-write] [--allow-folder FOLDER …] [--wait SECONDS]</code></pre>
+    <p>The macro can be a file, or the file name or name of a macro in your macros folder. <code>opensak run --help</code> lists every option. The database you give counts for this run only: OpenSAK still opens the same database next time.</p>
+
+    <h4>When nobody can answer</h4>
+    <p>A run never waits for an answer. If a macro asks something, the answer comes from <code>--arg</code>, from the values a form remembered, or from the defaults with <code>--yes</code>. If there is no answer, the macro stops with exit code 7 and a message saying what it needs. Macro authors can find the details in the <a href="https://github.com/OpenSAK-Org/OpenSAK/blob/beta/docs/macros/api.md#running-without-a-window">API reference</a>.</p>
+
+    <h4>Letting a macro change your data</h4>
+    <p>A macro may only change a database if you allowed that. There are two ways:</p>
+    <table>
+      <thead><tr><th>Way</th><th>When to use it</th></tr></thead>
+      <tbody>
+        <tr><td>Run it once in OpenSAK and choose <strong>Always</strong></td><td>The safer choice. If the macro's code changes later, it stops and needs your approval again, so nobody can change what your scheduler runs without you noticing.</td></tr>
+        <tr><td><code>--allow-write</code></td><td>For a macro whose file only you can change, or when you can't run it in OpenSAK first. It keeps working after the macro is edited: by putting it in your scheduler, you've made that choice.</td></tr>
+      </tbody>
+    </table>
+    <p>Without either, the macro stops at its first write, and that write isn't made. Folders work the same way: approve the folder in OpenSAK, or give it with <code>--allow-folder</code>.</p>
+
+    <h4>Example: import, back up, clean up</h4>
+    <p>The example macro <code>delete_archived.lua</code> deletes the archived caches you haven't found; caches you found, own or locked are kept. Deleted caches only come back from a backup, so make one first. Copy the example into your macros folder through <strong>Macros → Open example</strong>, then try it with <code>--arg dry_run=yes</code>, which only lists what it would delete:</p>
+    <pre><code>opensak run delete_archived.lua --db "Not found" --allow-write --arg dry_run=yes</code></pre>
+    <p>The examples below run it each morning at 07:00, after the import scheduled at 06:30 above. Back up with <code>opensak db backup "Not found"</code> in the same way, for example at 06:45.</p>
+    <p><strong>Windows (Task Scheduler)</strong> — in PowerShell (Store version):</p>
+    <pre><code>$action  = New-ScheduledTaskAction `
+  -Execute "$env:LOCALAPPDATA\Microsoft\WindowsApps\opensak.exe" `
+  -Argument 'run delete_archived.lua --db "Not found" --allow-write --wait 600 --quiet'
+$trigger = New-ScheduledTaskTrigger -Daily -At 7:00
+Register-ScheduledTask -TaskName "OpenSAK clean-up" -Action $action -Trigger $trigger</code></pre>
+    <p><strong>macOS (launchd)</strong> — use the <a href="#import-command-line">property list of the import</a> with its own label and these arguments, and <code>Hour</code> 7, <code>Minute</code> 0:</p>
+    <pre><code>&lt;string&gt;/Applications/OpenSAK.app/Contents/MacOS/opensak&lt;/string&gt;
+&lt;string&gt;run&lt;/string&gt;&lt;string&gt;delete_archived.lua&lt;/string&gt;
+&lt;string&gt;--db&lt;/string&gt;&lt;string&gt;Not found&lt;/string&gt;
+&lt;string&gt;--allow-write&lt;/string&gt;
+&lt;string&gt;--wait&lt;/string&gt;&lt;string&gt;600&lt;/string&gt;
+&lt;string&gt;--quiet&lt;/string&gt;</code></pre>
+    <p><strong>Linux (cron)</strong>:</p>
+    <pre><code>0 7 * * * $HOME/.local/bin/OpenSAK.AppImage run delete_archived.lua --db "Not found" --allow-write --wait 600 --quiet</code></pre>
+    <p><strong>Linux (systemd timer)</strong> — use the <a href="#import-command-line">service and timer of the import</a> under their own names, with this line and <code>OnCalendar=*-*-* 07:00</code>:</p>
+    <pre><code>ExecStart=%h/.local/bin/OpenSAK.AppImage run delete_archived.lua --db "Not found" --allow-write --wait 600 --quiet</code></pre>
+
+    <h4>Other commands</h4>
+    <table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>opensak export gpx --db NAME --filter "Saved filter" --out FILE</code></td><td>Exports the caches of a saved filter as GPX, the same way OpenSAK does. If no cache matches, no file is written.</td></tr>
+        <tr><td><code>opensak db list</code></td><td>Lists your databases.</td></tr>
+        <tr><td><code>opensak db backup NAME [--out FOLDER]</code></td><td>Backs up the database with its custom fields, your settings and your macros, like a backup in OpenSAK.</td></tr>
+        <tr><td><code>opensak db check NAME</code></td><td>Checks that the database isn't damaged. The exit code is 1 if it finds a problem.</td></tr>
+      </tbody>
+    </table>
+    <p>The exit codes are those of <a href="#import-command-line">the command-line import</a>, plus <code>7</code>: the macro needs an answer or an approval it didn't get. A macro can also set its own with <code>opensak.exit()</code>. <code>--json</code> writes the result for your own scripts, and <code>--log-file FILE</code> keeps a macro's output in a file of its own.</p>
+
     <h3 id="macros-sharing">Finding and sharing macros</h3>
     <p>Macros written by other users are collected in the <a href="https://github.com/OpenSAK-Org/OpenSAK-Macros">OpenSAK-Macros</a> repository on GitHub, one folder per macro with a short description. <strong>Macros → Find more macros…</strong> opens it, and so does the link in an empty Macro manager.</p>
     <ul>

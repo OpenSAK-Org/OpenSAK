@@ -114,6 +114,7 @@ STRINGS: dict[str, str] = {
     "macro_mgr_unreadable":         "Det går inte att läsa makrot: {msg}",
     "macro_mgr_api_newer":          "Kräver makro-API version {needed}; denna OpenSAK har version {have}.",
     "macro_mgr_col_permissions":    "Behörigheter",
+    "macro_mgr_col_headless":       "Utan fönster",
     "macro_mgr_perm_info":          "Enligt makrots header. OpenSAK frågar fortfarande före varje skrivning och varje åtkomst till mappar eller webbplatser.",
     "macro_mgr_perm_undeclared":    "Makrot anger inte sina behörigheter.",
     "macro_mgr_perm_none":          "Makrot anger att det inte behöver någon av dessa behörigheter.",
