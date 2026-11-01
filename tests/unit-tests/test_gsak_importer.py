@@ -1529,3 +1529,83 @@ def test_gsak_reimport_updates_found_log_count(db_session, tmp_path):
     assert (
         db_session.query(Cache).filter_by(gc_code="GC1TEST").one().found_log_count == 2
     )
+
+
+# ── Issue #1231: bulk writes, date fast path, GC switched off ────────────────
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("2020-01-05", datetime(2020, 1, 5)),
+    ("2020-01-05 13:04:05", datetime(2020, 1, 5, 13, 4, 5)),
+    ("2020-1-5", datetime(2020, 1, 5)),          # not ISO, strptime still accepts it
+    (" 2020-01-05 ", datetime(2020, 1, 5)),
+    ("2020-01-05T13:04:05", None),               # never accepted, fast path or not
+    ("2020-W01-1", None),                        # ISO week date: fromisoformat would take it
+    ("2020-13-01", None),
+    ("", None),
+    (None, None),
+])
+def test_gsak_date_parsing_accepts_the_same_inputs_as_before(raw, expected):
+    from opensak.importer.gsak_importer import _d
+
+    assert _d(raw) == expected
+
+
+@pytest.mark.parametrize("enabled_before", [True, False])
+def test_import_restores_garbage_collector_state(db_session, tmp_path, enabled_before):
+    import gc
+
+    db = _make_gsak_db(tmp_path / "gsak.db3")
+    was = gc.isenabled()
+    try:
+        gc.enable() if enabled_before else gc.disable()
+        import_gsak_db(db, db_session)
+        assert gc.isenabled() is enabled_before
+    finally:
+        gc.enable() if was else gc.disable()
+
+
+def test_failing_batch_is_replayed_per_cache_without_repeating_warnings(db_session, tmp_path):
+    # The same code twice in one batch breaks the batch's INSERT (unique
+    # gc_code); the per-cache replay then creates the first and updates it
+    # with the second. GC2TEST's duplicate-waypoint warning must be reported
+    # once, not once for the failed batch and again for the replay.
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{}, {"Code": "GC2TEST"}, {"Name": "Second row"}],
+        waypoints=[
+            {"cParent": "GC2TEST", "cCode": "PK", "cPrefix": "PK", "cName": "Parking",
+             "cType": "Parking Area", "cLat": "55.1", "cLon": "11.1"},
+            {"cParent": "GC2TEST", "cCode": "PK", "cPrefix": "PK", "cName": "Parking 2",
+             "cType": "Parking Area", "cLat": "55.2", "cLon": "11.2"},
+        ],
+    )
+    result = import_gsak_db(db, db_session)
+
+    assert result.errors == []
+    assert (result.created, result.updated) == (2, 1)
+    assert sum("dropped duplicate waypoint" in w for w in result.warnings) == 1
+    assert db_session.query(Cache).count() == 2
+    assert db_session.query(Waypoint).count() == 1
+
+
+def test_reimport_keeps_updated_at_of_an_unchanged_note(db_session, tmp_path):
+    from sqlalchemy import text
+
+    db = _make_gsak_db(tmp_path / "gsak.db3",
+                       memos=[{"Code": "GC1TEST", "UserNote": "Same note."}])
+    import_gsak_db(db, db_session)
+    db_session.execute(text("UPDATE user_notes SET updated_at = '2001-02-03 04:05:06.000000'"))
+    db_session.commit()
+
+    import_gsak_db(db, db_session)
+    db_session.expire_all()
+    assert db_session.query(UserNote).one().updated_at == datetime(2001, 2, 3, 4, 5, 6)
+
+    changed = _make_gsak_db(tmp_path / "gsak2.db3",
+                            memos=[{"Code": "GC1TEST", "UserNote": "Changed note."}])
+    import_gsak_db(changed, db_session)
+    db_session.expire_all()
+    note = db_session.query(UserNote).one()
+    assert note.note == "Changed note."
+    assert note.updated_at > datetime(2001, 2, 3, 4, 5, 6)
