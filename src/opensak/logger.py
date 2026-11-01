@@ -1,21 +1,21 @@
 """
-src/opensak/logger.py — Central logging-opsætning til OpenSAK.
+src/opensak/logger.py — Central logging setup for OpenSAK.
 
 Issue #232: lightweight, always-on debug logging system.
 
-  - Altid aktiveret — ingen brugerhandling nødvendig.
-  - Roterer ved hver opstart (issue #737) — forrige sessions fulde log
-    gemmes som opensak.log.previous i stedet for at blive slettet, så en
-    session der endte i et crash/hæng stadig kan hentes efter genstart.
-    Kun den ene seneste tidligere session bevares (samme #232-mål om
-    aldrig at vokse ubegrænset — se setup_logging()).
-  - Roterer også ved 1 MB med 1 backup (RotatingFileHandler) — fanger
-    også langvarige sessioner uden at logfilen vokser uendeligt.
-  - Per-modul kontrol via debug_flags.py — ingen kodeændringer nødvendige
-    for at slå debug til/fra for et modul.
+  - Always enabled — no user action required.
+  - Rotates at every startup (issue #737) — the previous session's full log
+    is saved as opensak.log.previous instead of being deleted, so a session
+    that ended in a crash/hang can still be retrieved after restart.
+    Only the single most recent previous session is kept (same #232 goal of
+    never growing without bound — see setup_logging()).
+  - Also rotates at 1 MB with 1 backup (RotatingFileHandler) — catches
+    long-running sessions without the log file growing endlessly.
+  - Per-module control via debug_flags.py — no code changes required to turn
+    debug on/off for a module.
 
-Loggen ligger i install_dir (samme sted som opensak.json), så den følger
-brugerens valg fra velkomst-wizarden (#210) i stedet for en fast sti.
+The log lives in install_dir (the same place as opensak.json), so it follows
+the user's choice from the welcome wizard (#210) instead of a fixed path.
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ _initialized = False
 
 def setup_logging(rotate: bool = True) -> Path:
     """
-    Initialiser logging-systemet. Kaldes én gang ved opstart fra app.py.
+    Initialize the logging system. Called once at startup from app.py.
 
-    Returnerer stien til logfilen.
+    Returns the log file path.
+
 
     *rotate* (default): start a new log and keep the previous session's as
     opensak.log.previous (#737). A headless run (#937) passes False and
@@ -43,6 +44,10 @@ def setup_logging(rotate: bool = True) -> Path:
 
     Idempotent: gentagne kald (fx i tests) gør ikke noget hvis allerede
     initialiseret, og returnerer blot den eksisterende sti.
+
+    Idempotent: repeated calls (for example in tests) do nothing if already
+    initialized and simply return the existing path.
+
     """
     global _initialized
 
@@ -54,19 +59,19 @@ def setup_logging(rotate: bool = True) -> Path:
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Issue #737: bevar forrige sessions log i stedet for at slette den —
-    # gør den nuværende opensak.log til opensak.log.previous (overskriver
-    # en evt. ældre .previous-fil, så kun den seneste forrige session
-    # bevares). replace() overskriver atomisk på tværs af platforme
-    # (Windows inkl.), i modsætning til rename()/Path.rename() som fejler
-    # hvis målfilen allerede findes på Windows.
+    # Issue #737: keep the previous session's log instead of deleting it —
+    # rename the current opensak.log to opensak.log.previous (overwriting any
+    # older .previous file, so only the most recent previous session is kept).
+    # replace() is atomic across platforms (including Windows), unlike
+    # rename()/Path.rename(), which fails if the target already exists on
+    # Windows.
     try:
         if rotate and log_path.exists():
             log_path.replace(get_previous_log_path())
     except OSError:
-        # Best-effort — hvis rotation fejler (fx låst fil), falder vi
-        # tilbage til den gamle adfærd: slet, så den nye session ikke
-        # skriver oven på forældede rester.
+        # Best-effort — if rotation fails (for example, because the file is
+        # locked), fall back to the old behavior: delete it so the new session
+        # does not write on top of stale leftovers.
         try:
             log_path.unlink(missing_ok=True)
         except OSError:
@@ -75,7 +80,7 @@ def setup_logging(rotate: bool = True) -> Path:
     root_logger = logging.getLogger("opensak")
     root_logger.setLevel(logging.DEBUG)
 
-    # RotatingFileHandler roterer derefter ved 1 MB hvis sessionen er lang.
+    # RotatingFileHandler rotates after 1 MB if the session is long.
     handler = RotatingFileHandler(
         log_path,
         mode="a",
@@ -96,14 +101,14 @@ def setup_logging(rotate: bool = True) -> Path:
 
 def get_logger(module: str) -> logging.Logger:
     """
-    Returner en logger for det givne modul.
+    Return a logger for the given module.
 
-    Brug: log = get_logger("updater")
-          log.debug("Tjekker for ny version...")
+    Usage: log = get_logger("updater")
+           log.debug("Checking for a new version...")
 
-    Hvis modulets debug-flag (i debug_flags.py) er False, sættes loggeren
-    til kun at logge WARNING og højere — debug()/info() bliver tavse uden
-    at kalderen behøver tjekke flaget selv.
+    If the module's debug flag (in debug_flags.py) is False, the logger is set
+    to only log WARNING and above — debug()/info() become silent without the
+    caller needing to check the flag itself.
     """
     from opensak.debug_flags import is_debug_enabled
 
@@ -114,8 +119,8 @@ def get_logger(module: str) -> logging.Logger:
 
 def reset_logging() -> None:
     """
-    Nulstil initialiserings-state — bruges af tests for at sikre isolation
-    mellem testkørsler.
+    Reset the initialization state — used by tests to ensure isolation between
+    test runs.
     """
     global _initialized
     _initialized = False
