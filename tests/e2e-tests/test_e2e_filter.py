@@ -601,3 +601,144 @@ def test_where_exists_logs_narrows_rows(seeded_window, qtbot):
     wait_for_refresh(window)
 
     assert window._cache_table.row_count() == 2
+
+
+# ── Toolbar presets, Clear and profiles (issue #1242) ──────────────────────────
+
+
+def _mark_owned(gc_code):
+    from opensak.db.database import get_session
+    from opensak.db.models import Cache
+
+    with get_session() as session:
+        session.query(Cache).filter_by(gc_code=gc_code).one().is_owner = True
+
+
+def _count_refreshes(window, monkeypatch):
+    calls = []
+    original = window._refresh_cache_list
+
+    def counting():
+        calls.append(1)
+        original()
+
+    monkeypatch.setattr(window, "_refresh_cache_list", counting)
+    return calls
+
+
+def _add_profile(window, monkeypatch, filterset):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from opensak.filters.engine import SortSpec
+
+    profile = SimpleNamespace(name="P", filterset=filterset, sort=SortSpec("name"))
+    monkeypatch.setattr("opensak.filters.engine.FilterProfile.load",
+                        staticmethod(lambda p: profile))
+    window._filter_profile_combo.addItem("P", userData=Path("/x/p.json"))
+    return window._filter_profile_combo.count() - 1
+
+
+def _traditional_only():
+    from opensak.filters.engine import FilterSet, CacheTypeFilter
+
+    fs = FilterSet(mode="AND")
+    fs.add(CacheTypeFilter(["Traditional Cache"]))  # GC12345 + GCAAA01
+    return fs
+
+
+@pytest.mark.parametrize("preset", [1, 3])  # Not found, Available (not found)
+def test_not_found_presets_leave_out_own_caches(seeded_window, qtbot, preset):
+    window = seeded_window
+    _mark_owned("GC12345")
+
+    window._quick_filter.setCurrentIndex(preset)
+    wait_for_refresh(window)
+
+    assert window._cache_table.row_count() == TOTAL - 1
+
+
+def test_clear_filter_resets_preset(seeded_window, qtbot, monkeypatch):
+    from opensak.lang import tr
+
+    window = seeded_window
+    window._quick_filter.setCurrentIndex(2)  # Found → 0 rows
+    wait_for_refresh(window)
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_active")
+
+    calls = _count_refreshes(window, monkeypatch)
+    window._clear_filter()
+    wait_for_refresh(window)
+
+    assert len(calls) == 1
+    assert window._quick_filter.currentIndex() == 0
+    assert window._cache_table.row_count() == TOTAL
+    assert window._filter_profile_combo.currentText() == tr("toolbar_filter_combo_none")
+    assert not window._btn_clear_filter.isEnabled()
+
+
+def test_clear_button_follows_preset(seeded_window, qtbot):
+    window = seeded_window
+    assert not window._btn_clear_filter.isEnabled()
+
+    window._quick_filter.setCurrentIndex(2)
+    wait_for_refresh(window)
+    assert window._btn_clear_filter.isEnabled()
+
+    window._quick_filter.setCurrentIndex(0)
+    wait_for_refresh(window)
+    assert not window._btn_clear_filter.isEnabled()
+
+
+def test_emptying_search_box_keeps_clear_button_for_preset(seeded_window, qtbot):
+    window = seeded_window
+    window._quick_filter.setCurrentIndex(1)
+    wait_for_refresh(window)
+
+    window._search_box.setText("x")
+    window._search_box.clear()
+    wait_for_refresh(window)
+
+    assert window._btn_clear_filter.isEnabled()
+
+
+def test_deleting_active_profile_keeps_clear_button_for_preset(seeded_window, qtbot):
+    window = seeded_window
+    window._quick_filter.setCurrentIndex(1)
+    wait_for_refresh(window)
+    window._active_filter_name = "P"
+
+    window._on_profile_deleted("P")
+    wait_for_refresh(window)
+
+    assert window._btn_clear_filter.isEnabled()
+
+
+def test_profile_combines_with_search_box(seeded_window, qtbot, monkeypatch):
+    window = seeded_window
+    window._search_gc.setText("GC12345")
+    wait_for_refresh(window)
+
+    index = _add_profile(window, monkeypatch, _traditional_only())
+    window._on_filter_profile_combo_changed(index)
+    wait_for_refresh(window)
+
+    assert window._search_gc.text() == "GC12345"
+    assert window._cache_table.row_count() == 1
+
+
+def test_profile_with_preset_refreshes_once(seeded_window, qtbot, monkeypatch):
+    window = seeded_window
+    window._quick_filter.setCurrentIndex(2)  # Found → 0 rows
+    wait_for_refresh(window)
+
+    calls = _count_refreshes(window, monkeypatch)
+    index = _add_profile(window, monkeypatch, _traditional_only())
+    # The handler must leave the query to the refresh, not run its own.
+    monkeypatch.setattr("opensak.gui.mainwindow.apply_filters_auto",
+                        lambda *a, **k: pytest.fail("queried outside the refresh"))
+    window._on_filter_profile_combo_changed(index)
+    wait_for_refresh(window)
+
+    assert len(calls) == 1
+    assert window._quick_filter.currentIndex() == 0
+    assert window._cache_table.row_count() == 2

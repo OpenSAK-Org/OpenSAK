@@ -23,7 +23,7 @@ from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
     FilterSet, SortSpec, apply_filters_auto, get_nearby_caches, effective_coords,
-    AvailableFilter, NotFoundFilter, CacheTypeFilter,
+    AvailableFilter, NotFoundFilter, IsOwnerFilter, CacheTypeFilter,
     DifficultyFilter, TerrainFilter
 )
 from opensak.gui.cache_table import CacheTableView
@@ -1894,12 +1894,14 @@ class MainWindow(QMainWindow):
 
         if idx == 1:   # Ikke fundne / Not found
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 2:  # Fundne / Found
             from opensak.filters.engine import FoundFilter
             fs.add(FoundFilter())
         elif idx == 3:  # Tilgængelige ikke fundne / Available not found
             fs.add(AvailableFilter())
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 4:  # Traditional let / Traditional easy
             fs.add(CacheTypeFilter(["Traditional Cache"]))
             fs.add(DifficultyFilter(max_difficulty=2.0))
@@ -2095,11 +2097,8 @@ class MainWindow(QMainWindow):
 
     def _update_quick_search_state(self) -> None:
         """Sync the Clear button and the profile dropdown's 'None' / 'Active
-        (unsaved)' entry with the toolbar search boxes."""
-        if self._has_quick_search():
-            self._set_clear_filter_active(True)
-        elif not self._active_filter_name:
-            self._set_clear_filter_active(False)
+        (unsaved)' entry with the filters in effect."""
+        self._set_clear_filter_active(self._has_active_filter())
         self._update_filter_combo_placeholder()
 
     def _on_search_changed(self, text: str) -> None:
@@ -2133,7 +2132,7 @@ class MainWindow(QMainWindow):
         return min_chars, debounce_ms
 
     def _on_quick_filter_changed(self, index: int) -> None:
-        self._update_filter_combo_placeholder()
+        self._update_quick_search_state()
         self._refresh_cache_list()
 
     # ── Quick "Where" box (issue #558) ────────────────────────────────────────
@@ -3044,7 +3043,7 @@ class MainWindow(QMainWindow):
         # Ingen gemt profil — nulstil filter
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
-        self._set_clear_filter_active(False)
+        self._set_clear_filter_active(self._has_active_filter())
         if hasattr(self, "_filter_lbl"):
             self._filter_lbl.setText("")
         if hasattr(self, "_filter_profile_combo"):
@@ -3207,7 +3206,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
-            self._set_clear_filter_active(self._has_quick_search())
+            self._set_clear_filter_active(self._has_active_filter())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
             self._refresh_cache_list()
@@ -3249,6 +3248,9 @@ class MainWindow(QMainWindow):
         self._where_combo.blockSignals(False)
         self._where_sql_applied = ""
         self._set_where_error(None)
+        self._quick_filter.blockSignals(True)
+        self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -3262,6 +3264,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+
+    def _has_active_filter(self) -> bool:
+        """True if any filter is in effect: a saved profile, an unsaved
+        filter, a search box or a quick-filter preset (issue #1242)."""
+        return bool(self._active_filter_name) or self._has_unsaved_active_filter()
 
     def _has_unsaved_active_filter(self) -> bool:
         """True if a filter is currently in effect that isn't a saved profile.
@@ -3352,23 +3359,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
         self._filter_lbl.setText(f"🔍 {profile.name}")
+        # Signals blocked so the preset reset doesn't refresh as well (#1242).
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
-        with get_session() as session:
-            caches = apply_filters_auto(
-                session, profile.filterset, self._current_sort,
-                columns=self._visible_table_columns(),
-            )
-        self._cache_table.load_caches(caches)
-        if get_settings().map_enabled:
-            self._update_map_filter_shape()
-            self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
-        count = self._cache_table.row_count()
-        if count == 1:
-            self._count_lbl.setText(tr("count_cache_single"))
-        else:
-            self._count_lbl.setText(tr("count_caches", count=count))
-        self._statusbar.showMessage(tr("status_filter_result", count=count), 3000)
-        self._update_info_bar()
+        self._quick_filter.blockSignals(False)
+        self._refresh_cache_list()
 
     def _open_column_chooser(self) -> None:
         if self._trip_planner_active():

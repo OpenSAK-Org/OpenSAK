@@ -1397,6 +1397,7 @@ class TestFilters:
         seeded_window._filter_profile_combo.addItem("P1", userData=Path("/x/p.json"))
         idx = seeded_window._filter_profile_combo.count() - 1
         seeded_window._on_filter_profile_combo_changed(idx)
+        wait_for_refresh(seeded_window)
         assert seeded_window._cache_table.row_count() == 1
 
     def test_filter_profile_combo_changed_profile(self, seeded_window, monkeypatch):
