@@ -1911,11 +1911,20 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import ArchivedFilter
             fs.add(ArchivedFilter())
 
+        for search_filter in self._search_box_filters():
+            fs.add(search_filter)
+
+        return fs
+
+    def _search_box_filters(self) -> list:
+        """The filters for the toolbar search boxes (GC code / Name / Where)."""
+        filters: list = []
+
         # GC-nummer søgefelt (søger kun i GC kode)
         gc_search = self._search_gc.text().strip()
         if gc_search:
             from opensak.filters.engine import GcCodeFilter
-            fs.add(GcCodeFilter(gc_search))
+            filters.append(GcCodeFilter(gc_search))
 
         # Navn-søgefelt — matcher kun på navn (GSAK-style, issue #86)
         # Issue #80 introduced a combined Name+GC code search here, but
@@ -1924,14 +1933,27 @@ class MainWindow(QMainWindow):
         name_search = self._search_box.text().strip()
         if name_search:
             from opensak.filters.engine import NameFilter
-            fs.add(NameFilter(name_search))
+            filters.append(NameFilter(name_search))
 
         # Quick "Where" box (issue #558) — only the validated expression
         if self._where_sql_applied:
             from opensak.filters.engine import WhereClauseFilter
-            fs.add(WhereClauseFilter(self._where_sql_applied))
+            filters.append(WhereClauseFilter(self._where_sql_applied))
 
-        return fs
+        return filters
+
+    def _with_search_boxes(self, filterset: FilterSet) -> FilterSet:
+        """*filterset* AND the toolbar search boxes: what the list shows once
+        *filterset* is active, as _show_filter_result() resets the preset."""
+        filters = self._search_box_filters()
+        if not filters:
+            return filterset
+        combined = FilterSet(mode="AND")
+        if len(filterset) > 0:
+            combined.add(filterset)
+        for search_filter in filters:
+            combined.add(search_filter)
+        return combined
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -3137,7 +3159,7 @@ class MainWindow(QMainWindow):
             # `sort` from the dialog is always SortSpec("name") — ignore it
             # and keep the user's column sort for this database.
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
 
@@ -3156,7 +3178,8 @@ class MainWindow(QMainWindow):
         self._show_filter_result(filterset, profile_name, caches)
 
     def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
-        """Make *filterset* the active filter and show its (non-empty) *caches*.
+        """Make *filterset* the active filter and show its (non-empty) *caches*,
+        queried with _with_search_boxes().
 
         Shared by the "Set filter" dialog and Lua macros (opensak.filter).
         """
@@ -3166,12 +3189,17 @@ class MainWindow(QMainWindow):
         self._set_clear_filter_active(True)
         label = profile_name if profile_name else tr("filter_active_label")
         self._filter_lbl.setText(f"🔍 {label}")
+        # Signals blocked: *caches* is already the result without a preset.
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
             self._update_map_filter_shape()
-            self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
+            self._map_widget.load_caches(
+                self._fetch_map_caches(self._with_search_boxes(filterset), caches)
+            )
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -3706,7 +3734,7 @@ class MainWindow(QMainWindow):
         leaves the current view untouched and returns 0."""
         with get_session() as session:
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
         if caches:

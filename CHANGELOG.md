@@ -67,8 +67,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   dropdown no longer list your own caches. ✕ and *None* now also reset that
   dropdown to *All caches*, and ✕ is enabled whenever any filter is in
   effect, including when that dropdown is the only one. Picking a saved
-  profile now combines it with the text in the GC code, Name and Where
-  boxes, so the list always matches the toolbar.
+  profile, applying **Set filter** and `opensak.filter()` now combine the
+  filter with the text in the GC code, Name and Where boxes, so the list
+  always matches the toolbar.
 
 ---
 

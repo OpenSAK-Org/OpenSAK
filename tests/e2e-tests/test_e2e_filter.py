@@ -742,3 +742,65 @@ def test_profile_with_preset_refreshes_once(seeded_window, qtbot, monkeypatch):
     assert len(calls) == 1
     assert window._quick_filter.currentIndex() == 0
     assert window._cache_table.row_count() == 2
+
+
+def test_set_filter_combines_with_search_box(seeded_window, qtbot, monkeypatch):
+    from opensak.filters.engine import SortSpec
+
+    window = seeded_window
+    window._search_gc.setText("GC12345")
+    wait_for_refresh(window)
+
+    window._on_filter_applied(_traditional_only(), SortSpec("name"), "")
+
+    # Right away, without waiting for a refresh.
+    assert window._cache_table.row_count() == 1
+    assert window._search_gc.text() == "GC12345"
+
+
+def test_set_filter_with_preset_does_not_refresh(seeded_window, qtbot, monkeypatch):
+    from opensak.filters.engine import SortSpec
+
+    window = seeded_window
+    window._quick_filter.setCurrentIndex(2)  # Found → 0 rows
+    wait_for_refresh(window)
+
+    calls = _count_refreshes(window, monkeypatch)
+    window._on_filter_applied(_traditional_only(), SortSpec("name"), "")
+    wait_for_refresh(window)
+
+    assert calls == []
+    assert window._quick_filter.currentIndex() == 0
+    assert window._cache_table.row_count() == 2
+
+
+def test_set_filter_without_match_in_search_box_keeps_view(seeded_window, qtbot, monkeypatch):
+    # The filter matches on its own, but nothing that the search box allows.
+    from opensak.filters.engine import SortSpec
+
+    window = seeded_window
+    window._search_gc.setText("GC99999")  # Unknown, not Traditional
+    window._search_timer.stop()  # don't wait for the debounce
+    window._refresh_cache_list()
+    wait_for_refresh(window)
+    warnings = []
+    monkeypatch.setattr("opensak.gui.mainwindow.QMessageBox.warning",
+                        lambda *a, **k: warnings.append(a))
+    monkeypatch.setattr(window, "_show_filter_dialog", lambda *a, **k: None)
+
+    window._on_filter_applied(_traditional_only(), SortSpec("name"), "")
+    qtbot.wait(10)
+
+    assert len(warnings) == 1
+    assert window._active_filter_name == ""
+    assert window._cache_table.row_count() == 1
+
+
+def test_macro_filter_combines_with_search_box(seeded_window, qtbot):
+    window = seeded_window
+    window._search_gc.setText("GC12345")
+    wait_for_refresh(window)
+
+    assert window.apply_filter(_traditional_only(), "From macro") == 1
+    assert window._cache_table.row_count() == 1
+    assert window.cache_count() == 1
