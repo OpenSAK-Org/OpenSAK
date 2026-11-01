@@ -4,6 +4,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Macros can use the clipboard (#1227)** — `opensak.set_clipboard(text)` and
+  `opensak.get_clipboard()` are GSAK's `Clip` and `GetClipText`, e.g. to paste
+  a downloaded page into a regex tester, or to try a macro on different texts.
+  The clipboard may hold private text, so reading it asks the user first, once
+  per run; a macro declares this with `read-clipboard` in its `Permissions`
+  header. The macro API is now version 5. Contributed by nagisml.
+- **Macros can read and write JSON** — `opensak.json.decode(text)` and
+  `opensak.json.encode(value)`, so a macro no longer needs a JSON parser of its
+  own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
+  default; the `null` option puts a value of your choice in its place and
+  writes it back as null. Contributed by nagisml.
+- **Macros can change a cache's description and changed date** —
+  `opensak.update()` and `opensak.insert{}` take `description` (a table like
+  the one `opensak.description()` returns) and `changed_date`, which until now
+  needed `opensak.sql_write()`. Caches read by macros have the new field
+  `changed_date`. Contributed by nagisml.
+
 ## [1.22.0-beta.12] — Unreleased
 
 > Headline: **the release candidate for v1.22.0.** Macros, macros that
