@@ -487,9 +487,15 @@ The clause is combined with AND alongside any other active filters.
 
 With custom fields (beta, `companion-db` feature flag), the clause runs on the caches *and* their custom fields, so a field is used by name, as in GSAK: `Angel = 1 AND GCFinds > 100`. A cache nobody set a field for has the field's default. The **ⓘ** button lists the fields of the active database.
 
-### Regular expressions
+### Regular expressions and log dates
 
-`g_RegEx(pattern, text)` works in the Where clause (and in macro SQL). It gives 1 if the regular expression matches anywhere in *text*, ignoring case; otherwise 0, also when *text* is NULL. An invalid pattern is an error.
+These functions work in the Where clause (and in macro SQL):
+
+| Function | Result |
+|---|---|
+| `g_RegEx(pattern, text)` | 1 if the regular expression matches anywhere in *text*, ignoring case; otherwise 0, also when *text* is NULL. An invalid pattern is an error. |
+| `g_GcDate(date [, time])` | A log's date as `YYYY-MM-DD`. The time changes nothing, because OpenSAK's log date is already the date shown on geocaching.com. |
+| `g_GcDate2(date, time, code)` | The same; the time and code change nothing. |
 
 ```sql
 g_RegEx('^(mega|giga)\b', name)

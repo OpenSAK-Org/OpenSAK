@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from opensak.db.sql_functions import g_regex, register_geo_functions
+from opensak.db.sql_functions import g_gc_date, g_regex, register_geo_functions
 from opensak.importer.gsak_filter_importer import translate_where
 
 
@@ -52,3 +52,24 @@ def test_gsak_filter_import_keeps_the_function(conn):
     assert verified and not warnings
     rows = conn.execute(f"SELECT id FROM caches WHERE ({sql}) ORDER BY id").fetchall()
     assert rows == [(2,), (3,)]
+
+
+def test_g_gc_date():
+    assert g_gc_date("2020-05-06 23:30:00.000000") == "2020-05-06"
+    assert g_gc_date("2020-05-06", "23:30:00") == "2020-05-06"
+    assert g_gc_date(None) is None
+
+
+@pytest.mark.parametrize("call", [
+    "g_GcDate('2020-05-06 23:30:00.000000')",
+    "g_GcDate('2020-05-06', '23:30:00')",
+    "g_GcDate2('2020-05-06', '23:30:00', 'GC1')",
+])
+def test_g_gc_date_in_sql(conn, call):
+    assert conn.execute(f"SELECT {call}").fetchone()[0] == "2020-05-06"
+
+
+def test_gsak_filter_import_keeps_g_gc_date():
+    sql, warnings, _notes, verified = translate_where("g_GcDate('2020-05-06') > date('2017-01-01')")
+    assert verified and not warnings
+    assert "g_GcDate('2020-05-06')" in sql
