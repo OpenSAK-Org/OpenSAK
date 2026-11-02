@@ -80,6 +80,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   dialog the button read "Download Install" with the I underlined (the
   same in German, Swiss German and Dutch), because Qt took the "&" as a
   keyboard shortcut marker. The "&" now shows as written.
+- **Logs doubled after a GPX import into a GSAK-imported database (#1255)**
+  — a cache that came in with **File → Import from GSAK** got a second copy
+  of every log when a GPX or Pocket Query with the same logs was imported
+  later, so the Logs tab showed each log twice and the log count was
+  doubled. The two importers name logs differently, and the GPX import now
+  recognises the GSAK ones and updates them. Logs already doubled are
+  merged back into one the next time a GPX or Pocket Query with that cache
+  is imported. Reported by lignumaqua.
 
 ---
 
