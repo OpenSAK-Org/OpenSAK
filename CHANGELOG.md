@@ -4,12 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.22.0-beta.12] — Unreleased
+## [1.22.0-beta.12] — 2026-11-02
 
 > Headline: **the release candidate for v1.22.0.** Macros, macros that
 > change caches, and custom fields with the companion file are now on in
 > every build, exactly as v1.22.0 will ship them. Only macros contacting
 > web sites (`opensak.get_url()`) stay beta-only for one more cycle.
+> Besides that, only fixes: the toolbar's quick filters, logs doubled after
+> a GPX import into a database imported from GSAK, and macros or filters
+> with very long GC code lists.
 >
 > The macro and custom-field texts are machine-translated in all
 > languages except Danish and English — corrections from native speakers
@@ -39,7 +42,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   pressing it out of habit replaced your column widths with no undo.
   Ctrl+Alt+W is now the default on every platform. If you clicked OK in
   **Help → Keyboard Shortcuts…** in beta.11, Ctrl+W was saved there and
-  stays until you click *Reset All to Defaults*.
+  stays until you click *Reset All to Defaults*. Contributed by nagisml.
 
 ### Fixed
 
@@ -67,7 +70,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   when several saved column views held exactly the same setup, the toolbar
   and the **Choose Columns** dialog always showed the alphabetically first
   one. OpenSAK now remembers, per database, which view you last applied
-  and keeps that one selected.
+  and keeps that one selected. Contributed by nagisml.
 - **Toolbar filters: Not found, Clear and profiles (#1242)** — the *Not
   found* and *Available (not found)* choices in the toolbar's quick-filter
   dropdown no longer list your own caches. ✕ and *None* now also reset that
@@ -75,11 +78,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   effect, including when that dropdown is the only one. Picking a saved
   profile, applying **Set filter** and `opensak.filter()` now combine the
   filter with the text in the GC code, Name and Where boxes, so the list
-  always matches the toolbar.
+  always matches the toolbar. Contributed by nagisml.
 - **"Download & Install" button lost its "&" (#1218)** — in the update
   dialog the button read "Download Install" with the I underlined (the
   same in German, Swiss German and Dutch), because Qt took the "&" as a
-  keyboard shortcut marker. The "&" now shows as written.
+  keyboard shortcut marker. The "&" now shows as written. Contributed by
+  nagisml.
 - **Logs doubled after a GPX import into a GSAK-imported database (#1255)**
   — a cache that came in with **File → Import from GSAK** got a second copy
   of every log when a GPX or Pocket Query with the same logs was imported
@@ -94,7 +98,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   when a macro passed on `opensak.codes()` for a large filter. The same
   applied to **Set filter**'s *in list* and *not in list* for GC code and
   the other text fields. Lists of any length now work. Found through a
-  macro by GeePa67.
+  macro by GeePa67, contributed by nagisml.
 
 ---
 
