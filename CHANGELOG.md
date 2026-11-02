@@ -34,6 +34,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   lose "(beta)", and the companion file is explained in plain words.
   *Importing from the Command Line* gets a systemd timer example next to
   cron.
+- **Auto-fit column widths is now Ctrl+Alt+W (#1212)** — beta.11 used
+  Ctrl+W, the usual key for closing a window or tab (Cmd+W on macOS), so
+  pressing it out of habit replaced your column widths with no undo.
+  Ctrl+Alt+W is now the default on every platform. If you clicked OK in
+  **Help → Keyboard Shortcuts…** in beta.11, Ctrl+W was saved there and
+  stays until you click *Reset All to Defaults*.
 
 ### Fixed
 
@@ -70,6 +76,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   profile, applying **Set filter** and `opensak.filter()` now combine the
   filter with the text in the GC code, Name and Where boxes, so the list
   always matches the toolbar.
+- **"Download & Install" button lost its "&" (#1218)** — in the update
+  dialog the button read "Download Install" with the I underlined (the
+  same in German, Swiss German and Dutch), because Qt took the "&" as a
+  keyboard shortcut marker. The "&" now shows as written.
 
 ---
 
