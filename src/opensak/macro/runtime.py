@@ -5853,8 +5853,8 @@ API: tuple[ApiFunction, ...] = (
                      "`symbol`, `corrected_source` and `last_user_update`")),
         bind=lambda rt, lua: lambda *a: rt._caches(lua, *a),
         params=(Param("spec", "opensak.CachesSpec",
-                      "Filter keys, `all`, `database` and/or `fields`; no filter "
-                      "keys (nothing, or only `fields`) = the active filter.",
+                      "Filter keys, `all`, `database` and/or `fields`; nothing, "
+                      "or only `fields` = the active filter.",
                       optional=True),),
         returns=("fun(): opensak.Cache?", "Iterator for a generic `for`."),
     ),
@@ -6664,12 +6664,12 @@ API: tuple[ApiFunction, ...] = (
                     "permission like opensak.update(). A macro that ends "
                     "inside a transaction (e.g. cancelled) keeps none of it.",
         example='local n = opensak.transaction(function()\n'
-                '    local n = 0\n'
+                '    local count = 0\n'
                 '    for c in opensak.caches{ found = true, fields = {"code"} } do\n'
                 '        opensak.update(c.code, { user_flag = true })\n'
-                '        n = n + 1\n'
+                '        count = count + 1\n'
                 '    end\n'
-                '    return n\n'
+                '    return count\n'
                 'end)\n'
                 'print(n .. " caches flagged")\n'
                 '-- error() inside the function undoes everything it changed:\n'

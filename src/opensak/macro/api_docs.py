@@ -689,14 +689,14 @@ def _changing_section() -> list[str]:
         "",
         *_code(
             "local n = opensak.transaction(function()\n"
-            "    local n = 0\n"
+            "    local count = 0\n"
             '    for c in opensak.caches{ fields = {"corrected"} } do\n'
             "        if c.corrected then\n"
             "            opensak.clear_corrected(c.code)\n"
-            "            n = n + 1\n"
+            "            count = count + 1\n"
             "        end\n"
             "    end\n"
-            "    return n\n"
+            "    return count\n"
             "end)\n"
             'print(n .. " corrected coordinates cleared")'
         ),
