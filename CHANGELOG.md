@@ -62,6 +62,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and the **Choose Columns** dialog always showed the alphabetically first
   one. OpenSAK now remembers, per database, which view you last applied
   and keeps that one selected.
+- **Toolbar filters: Not found, Clear and profiles (#1242)** — the *Not
+  found* and *Available (not found)* choices in the toolbar's quick-filter
+  dropdown no longer list your own caches. ✕ and *None* now also reset that
+  dropdown to *All caches*, and ✕ is enabled whenever any filter is in
+  effect, including when that dropdown is the only one. Picking a saved
+  profile, applying **Set filter** and `opensak.filter()` now combine the
+  filter with the text in the GC code, Name and Where boxes, so the list
+  always matches the toolbar.
 
 ---
 
