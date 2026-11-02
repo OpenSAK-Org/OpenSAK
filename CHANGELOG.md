@@ -88,6 +88,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   recognises the GSAK ones and updates them. Logs already doubled are
   merged back into one the next time a GPX or Pocket Query with that cache
   is imported. Reported by lignumaqua.
+- **Long GC code lists failed with "too many SQL variables" (#1254)** —
+  `opensak.caches{codes = …}` and `opensak.filter{codes = …}` stopped with
+  a database error when the list held more than about 32,000 codes, e.g.
+  when a macro passed on `opensak.codes()` for a large filter. The same
+  applied to **Set filter**'s *in list* and *not in list* for GC code and
+  the other text fields. Lists of any length now work. Found through a
+  macro by GeePa67.
 
 ---
 

@@ -535,6 +535,12 @@ _TEXT_OP_LIKE = {
 }
 
 
+# Longest needle list pushed to SQL as one LIKE per needle; a longer
+# non-ASCII list is left to matches(). Well below SQLite's bound-variable limit (999 in builds
+# before 3.32, 32,766 since).
+_MAX_LIKE_NEEDLES = 500
+
+
 def _like_pattern(needle: str) -> str:
     """Escape LIKE wildcards in *needle* (for ESCAPE '\\') and turn every
     non-ASCII character into a "_" wildcard — see TextMatchFilter.__init__."""
@@ -605,7 +611,7 @@ class TextMatchFilter(BaseFilter):
         None when it can't be expressed in SQL (see apply_to_query). A no-op
         filter yields true(). Shared with WaypointFilter, which matches the
         same operators against waypoint columns."""
-        from sqlalchemy import and_, func, or_, true
+        from sqlalchemy import and_, func, or_, select, true
         if self._is_noop():
             return true()
         if self.op == "empty":
@@ -623,11 +629,18 @@ class TextMatchFilter(BaseFilter):
             # that lower-cases to several (e.g. "İ") breaks the one-"_"-per-
             # character pattern — leave both to matches().
             return None
+        if len(self._needles()) > _MAX_LIKE_NEEDLES and not self.sql_exact:
+            # One bound variable per LIKE — a long list would exceed SQLite's
+            # variable limit (issue #1254), so matches() decides alone.
+            return None
         lowered = func.lower(col)
         if self.sql_exact and positive == "equals":
             cond = lowered == self._needle
         elif self.sql_exact and positive == "in_list":
-            cond = lowered.in_(self._items)
+            # The whole list as one JSON bound variable, so a list of any
+            # length stays below SQLite's variable limit (issue #1254).
+            values = func.json_each(json.dumps(self._items)).table_valued("value")
+            cond = lowered.in_(select(values.c.value))
         else:
             cond = or_(*(
                 lowered.like(_TEXT_OP_LIKE[positive].format(_like_pattern(n)), escape="\\")
