@@ -2427,6 +2427,8 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
             else:
                 self._detail_panel.refresh_sizes()
+            if getattr(self, "_macro_dialog", None) is not None:
+                self._macro_dialog.refresh_sizes()
 
     # ── Tastaturgenveje ────────────────────────────────────────────────────────
 
