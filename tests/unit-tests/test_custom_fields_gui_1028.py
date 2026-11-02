@@ -129,8 +129,16 @@ def test_detail_panel_custom_tab(active, qtbot):
         ).filter_by(gc_code="GC1").one()
         panel.show_cache(cache)
     assert panel._tabs.isTabVisible(panel._custom_tab)
-    text = panel._custom_browser.toPlainText()
-    assert "Angel" in text and "Yes" in text and "Lot A" in text
+    form = panel._custom_form
+    shown = {}
+    for row in range(form.rowCount()):
+        label = form.itemAt(row, form.ItemRole.LabelRole).widget()
+        value = form.itemAt(row, form.ItemRole.FieldRole).widget()
+        shown[label.text()] = value.isChecked() if isinstance(value, QCheckBox) else value.text()
+    assert shown == {"<b>Angel</b>": True, "<b>GCFinds</b>": "12",
+                     "<b>Parking</b>": "Lot A",
+                     "<b>Visited</b>": format_date(datetime(2024, 5, 1),
+                                                   get_settings().date_format)}
     panel.clear()
     assert not panel._tabs.isTabVisible(panel._custom_tab)
 

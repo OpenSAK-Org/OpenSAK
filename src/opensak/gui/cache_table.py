@@ -4,6 +4,8 @@ Understøtter dynamiske kolonner valgt af brugeren.
 """
 
 from __future__ import annotations
+import logging
+import sqlite3
 import webbrowser
 from typing import Optional
 from datetime import datetime
@@ -47,7 +49,9 @@ from opensak.db import custom_fields
 from opensak.gui.custom_field_format import (
     CENTERED_TYPES as CUSTOM_CENTERED_TYPES,
     format_value as format_custom_value,
+    is_true as is_custom_true,
     sort_key as custom_sort_key,
+    toggles as toggles_custom,
 )
 import math
 
@@ -720,6 +724,7 @@ class CacheTableModel(QAbstractTableModel):
 
     flags_changed = Signal()          # emitteres når user_flag toggler
     sort_changed = Signal(str, bool)  # (col_id, ascending) når brugeren sorterer
+    custom_value_changed = Signal(str)  # gc_code — a custom field was toggled (#1241)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -733,17 +738,47 @@ class CacheTableModel(QAbstractTableModel):
         # #1028: the custom fields of the visible custom columns, per cache
         self._custom: custom_fields.Values = custom_fields.EMPTY_VALUES
 
+    def toggles(self, col: str) -> bool:
+        """Whether a click on column *col* switches its value: user flag,
+        FTF, locked, and boolean custom fields without an expression (#1241)."""
+        if col in ("user_flag", "first_to_find", "locked"):
+            return True
+        name = custom_column_name(col)
+        return name is not None and toggles_custom(self._custom.field(name),
+                                                   self._custom.by_expression(name))
+
     def flags(self, index: QModelIndex | QPersistentModelIndex):
         base = super().flags(index)
-        if index.isValid() and self._columns[index.column()] in ("user_flag", "first_to_find", "locked"):
+        if index.isValid() and self.toggles(self._columns[index.column()]):
             return base | Qt.ItemFlag.ItemIsEditable
         return base
+
+    def toggle_custom(self, index: QModelIndex | QPersistentModelIndex) -> Optional[str]:
+        """Switch the boolean custom field in *index*'s column for its cache
+        and save it (#1241). An error message when it can't be saved."""
+        name = custom_column_name(self._columns[index.column()])
+        if name is None or not self.toggles(self._columns[index.column()]):
+            return None
+        code = self._caches[index.row()].gc_code
+        try:
+            custom_fields.write_active_values(
+                code, {name: not is_custom_true(self._custom.raw(code, name))})
+        except (custom_fields.CustomFieldError, custom_fields.CompanionError,
+                sqlite3.Error, OSError) as exc:
+            logging.getLogger(__name__).warning(
+                "cache table: custom value %s of %s not saved: %s", name, code, exc)
+            return tr("wp_custom_save_failed", error=exc)
+        self.reload_custom([code])
+        self.custom_value_changed.emit(code)
+        return None
 
     def setData(self, index: QModelIndex | QPersistentModelIndex, value, role=Qt.ItemDataRole.EditRole) -> bool:
         """Toggle user_flag, first_to_find eller locked når brugeren klikker på kolonnen."""
         if not index.isValid():
             return False
         col = self._columns[index.column()]
+        if custom_column_name(col) is not None:
+            return self.toggles(col) and self.toggle_custom(index) is None
         if col not in ("user_flag", "first_to_find", "locked"):
             return False
         cache = self._caches[index.row()]
@@ -1581,6 +1616,7 @@ class CacheTableView(QTableView):
     center_point_requested = Signal(object)  # emitted with a Cache — "Sæt som centerpunkt" (#511)
     corrected_coords_changed = Signal(str)  # gc_code — emitted after Add/Edit/Clear
     found_status_changed = Signal(str)  # gc_code — emitted after Mark as Found (#649)
+    custom_value_changed = Signal(str)  # gc_code — forwarded from the model (#1241)
                                              # corrected coordinates via the context menu
                                              # (issue #474: map wasn't refreshed until now)
 
@@ -1589,6 +1625,7 @@ class CacheTableView(QTableView):
         self._model = CacheTableModel()
         self.setModel(self._model)
         self._model.flags_changed.connect(self.flags_changed)
+        self._model.custom_value_changed.connect(self.custom_value_changed)
         self._model.sort_changed.connect(self._on_model_sort_changed)
         # Gemmes som col_id, ikke indeks — indekset bliver forældet når
         # kolonner flyttes eller en database med andre kolonner åbnes.
@@ -1682,6 +1719,13 @@ class CacheTableView(QTableView):
             if col in ("user_flag", "first_to_find", "locked") and event.button() == Qt.MouseButton.LeftButton:
                 self._model.setData(index, None)
                 return
+            # #1241: a boolean custom field switches on a click too
+            if self._model.toggles(col) and event.button() == Qt.MouseButton.LeftButton:
+                error = self._model.toggle_custom(index)
+                if error:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, tr("warning"), error)
+                return
         super().mousePressEvent(event)
 
     def _on_double_clicked(self, index) -> None:
@@ -1702,7 +1746,7 @@ class CacheTableView(QTableView):
             return
         if col == "corrected":
             self._edit_corrected(cache)
-        elif col not in ("user_flag", "first_to_find", "locked"):
+        elif not self._model.toggles(col):
             webbrowser.open(f"https://coord.info/{cache.gc_code}")
 
     def _apply_header_height(self) -> None:
@@ -2295,6 +2339,11 @@ class CacheTableView(QTableView):
         if self._model.custom_names():
             self._model.reload_custom([gc_code])
         self._reset_model_preserving_selection()
+
+    def refresh_custom(self, gc_code: str) -> None:
+        """Show the custom values of *gc_code* again (#1241)."""
+        if self._model.custom_names():
+            self._model.reload_custom([gc_code])
 
     def refresh_visuals(self) -> None:
         """Re-paint all visible cells after UI size change (font-size, etc.)."""
