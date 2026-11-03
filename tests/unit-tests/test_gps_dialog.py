@@ -173,6 +173,7 @@ class TestDialogInteraction:
             def __init__(self, *a, **k):
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
                 self.progress = MagicMock()
             def start(self):
                 launched.append(True)
@@ -199,6 +200,7 @@ class TestDialogInteraction:
             def __init__(self, dest, export_format="gpx"):
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
             def start(self):
                 launched.append(True)
             def isRunning(self):
@@ -232,6 +234,7 @@ class TestDialogInteraction:
             def __init__(self, *a, **k):
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
                 self.progress = MagicMock()
             def start(self):
                 launched.append(True)
@@ -284,6 +287,7 @@ class _FakeExportWorker:
     def __init__(self, *a, **k):
         self.finished = MagicMock()
         self.error = MagicMock()
+        self.cancelled = MagicMock()
         self.progress = MagicMock()
 
     def start(self):
@@ -428,6 +432,7 @@ class TestFilenameCollisionPrompt:
             def __init__(self, dest, export_format="gpx"):
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
             def start(self):
                 pass
             def isRunning(self):

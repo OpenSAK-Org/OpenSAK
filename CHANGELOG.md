@@ -4,6 +4,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Cancel for imports, exports, Send to GPS and Move/Copy (#1265)** —
+  while a GPX/PQ import, a GPX/LOC/GGZ, KML or POI export, Send to GPS or
+  Move/Copy caches runs, the dialog's Close button reads **Cancel** and
+  stops it; Escape does the same. An import stops after the caches being
+  saved (those imported so far are kept); an export writes no file and
+  leaves a previous one as it was; Move/Copy stops between groups of
+  caches, so a cache is never left in both databases. Cancel in **Download
+  boundary data** now also stops the download between packs instead of
+  only before it starts. Contributed by nagisml.
+
+### Fixed
+
+- **OpenSAK closed when Escape was pressed during an import or export
+  (#1265)** — pressing Escape, or the window's close button, while a dialog
+  was still working (importing a GPX, exporting, sending to the GPS,
+  updating found status, moving caches, looking up locations, checking PQ
+  e-mail, downloading boundary data and more) closed OpenSAK at once,
+  without a message. These dialogs now stay open until the work is done,
+  or cancel it where it can be cancelled (see Added). Settings closes as
+  before, and a connection test still running finishes in the background.
+  Contributed by nagisml.
+
+---
+
 ## [1.22.0-beta.13] — 2026-11-03
 
 > Headline: **one fix on top of the v1.22.0 release candidate.** Switching

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.settings import get_settings
 from opensak.gui.theme import hint_style
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.lang import tr
 
 
@@ -63,7 +63,7 @@ class PQEmailCheckWorker(QThread):
             self.error.emit("other", str(exc))
 
 
-class PQEmailCheckDialog(QDialog):
+class PQEmailCheckDialog(WorkerGuardMixin, QDialog):
     """Dialog til manuelt at tjekke den opsatte mailkonto for PQ-mails."""
 
     import_completed = Signal()   # emitted når mindst én cache blev oprettet/opdateret
@@ -232,14 +232,6 @@ class PQEmailCheckDialog(QDialog):
         self._check_btn.setEnabled(True)
         self._open_settings_btn.setEnabled(True)
 
-    def closeEvent(self, event) -> None:
-        try:
-            if self._worker and self._worker.isRunning():
-                self._worker.wait()
-        except RuntimeError:
-            pass
-        self._worker = None
-        super().closeEvent(event)
 
     # ── Log helper ────────────────────────────────────────────────────────────
 

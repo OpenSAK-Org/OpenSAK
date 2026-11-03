@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
@@ -65,7 +65,7 @@ class GsakFilterImportWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class GsakFilterImportDialog(QDialog):
+class GsakFilterImportDialog(WorkerGuardMixin, QDialog):
     """Dialog for importing GSAK's saved filters (gsak.db3 or a .zip backup)."""
 
     import_completed = Signal()   # at least one filter profile was written
@@ -295,14 +295,6 @@ class GsakFilterImportDialog(QDialog):
         self._worker = None
         self._update_import_button()
 
-    def closeEvent(self, event) -> None:
-        try:
-            if self._worker and self._worker.isRunning():
-                self._worker.wait()
-        except RuntimeError:
-            pass
-        self._worker = None
-        super().closeEvent(event)
 
     # ── Log helpers ──────────────────────────────────────────────────────────
 

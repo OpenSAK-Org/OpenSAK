@@ -1918,6 +1918,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "Kopírovat {count} keš(í) do {target}?",
     "move_caches_done":                        "{count} keš(í) úspěšně přesunuto.",
     "copy_caches_done":                        "{count} keš(í) úspěšně zkopírováno.",
+    "import_cancelled":                        "Import zrušen. Dosud importované keše zůstávají zachovány.",
+    "export_cancelled":                        "Export zrušen.",
+    "move_caches_cancelled":                   "Zrušeno — dosud přesunuto {count} keš(í).",
+    "copy_caches_cancelled":                   "Zrušeno — dosud zkopírováno {count} keš(í).",
     "move_caches_error":                       "Při přesouvání keší došlo k chybě:\n{message}",
     "copy_caches_error":                       "Při kopírování keší došlo k chybě:\n{message}",
 

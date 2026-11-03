@@ -34,6 +34,8 @@ from opensak.export.poi_export_settings import (
     PROXIMITY_UNITS, PoiExportProfile, PoiExportSettings,
 )
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog, _ElidedLabel
+from opensak.gui.dialogs.widgets import WorkerGuardMixin
+from opensak.utils.cancel import CancelFlag
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
 
@@ -43,6 +45,7 @@ from opensak.lang import tr
 class _PlanWorker(QThread):
     planned = Signal(list)    # list[PoiFile]
     error = Signal(str)
+    cancelled = Signal()      # cancelled while planning; nothing is written
 
     def __init__(self, caches: list, settings: PoiExportSettings, folder: Path,
                  database: str, filter_name: str, center_name: str):
@@ -52,12 +55,17 @@ class _PlanWorker(QThread):
         self._folder = folder
         self._names = dict(database=database, filter_name=filter_name,
                            center_name=center_name)
+        self.cancel = CancelFlag()
 
     def run(self) -> None:
         try:
-            self.planned.emit(plan_poi_export(
+            planned = plan_poi_export(
                 self._caches, self._settings, self._folder, **self._names,
-            ))
+            )
+            if self.cancel.is_set():
+                self.cancelled.emit()
+            else:
+                self.planned.emit(planned)
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -65,7 +73,7 @@ class _PlanWorker(QThread):
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
-class PoiExportDialog(SavedSettingsDialog):
+class PoiExportDialog(WorkerGuardMixin, SavedSettingsDialog):
     """Dialog for exporting filtered caches as Garmin POI files."""
 
     _profile_cls = PoiExportProfile
@@ -122,11 +130,12 @@ class PoiExportDialog(SavedSettingsDialog):
         self._btn_export = QPushButton(tr("file_export_btn_export"))
         self._btn_export.setDefault(True)
         self._btn_export.clicked.connect(self._do_export)
-        btn_close = QPushButton(tr("close"))
-        btn_close.clicked.connect(self.reject)
+        # #1265: "Cancel" while the export is planned (see _set_running).
+        self._btn_close = QPushButton(tr("close"))
+        self._btn_close.clicked.connect(self.reject)
         btn_row.addStretch()
         btn_row.addWidget(self._btn_export)
-        btn_row.addWidget(btn_close)
+        btn_row.addWidget(self._btn_close)
         layout.addLayout(btn_row)
 
     def _build_file_group(self) -> QGroupBox:
@@ -402,7 +411,7 @@ class PoiExportDialog(SavedSettingsDialog):
         self._log.clear()
         self._log.setVisible(True)
         self._progress.setVisible(True)
-        self._btn_export.setEnabled(False)
+        self._set_running(True)
 
         self._worker = _PlanWorker(
             select_for_export(self._caches), settings, Path(settings.folder),
@@ -410,7 +419,27 @@ class PoiExportDialog(SavedSettingsDialog):
         )
         self._worker.planned.connect(lambda files: self._write(files, settings))
         self._worker.error.connect(self._on_error)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
+
+    def _set_running(self, running: bool) -> None:
+        """While the export is planned, Close becomes Cancel (#1265)."""
+        self._btn_export.setEnabled(not running)
+        self._btn_close.setText(tr("cancel") if running else tr("close"))
+        self._btn_close.setEnabled(True)
+
+    def _close_while_running(self) -> None:
+        # Cancel, Escape and the window's close button: the plan is dropped
+        # once it is ready, so no file gets written.
+        if self._worker is not None:
+            self._worker.cancel.set()
+        self._btn_close.setEnabled(False)
+
+    def _on_cancelled(self) -> None:
+        self._progress.setVisible(False)
+        self._set_running(False)
+        self._log.setVisible(True)
+        self._log.setPlainText("– " + tr("export_cancelled"))
 
     def _keep_existing(self, files: list[PoiFile], if_exists: str) -> list[PoiFile]:
         """Drop the files that exist and must not be overwritten."""
@@ -430,7 +459,7 @@ class PoiExportDialog(SavedSettingsDialog):
 
     def _write(self, planned: list[PoiFile], settings: PoiExportSettings) -> None:
         self._progress.setVisible(False)
-        self._btn_export.setEnabled(True)
+        self._set_running(False)
         if not planned:
             self._log.setPlainText("– " + tr("poi_export_nothing_msg"))
             return
@@ -453,6 +482,6 @@ class PoiExportDialog(SavedSettingsDialog):
 
     def _on_error(self, msg: str) -> None:
         self._progress.setVisible(False)
-        self._btn_export.setEnabled(True)
+        self._set_running(False)
         self._log.setPlainText("✗ " + msg)
         QMessageBox.critical(self, tr("file_export_error_title"), msg)

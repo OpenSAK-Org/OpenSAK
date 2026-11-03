@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 from ...export.kml import export_kml
 from ...gui.icon import OpenSAKMessageBox as QMessageBox
 from ...lang import tr
-from .widgets import clamp_dialog_height_to_screen
+from ...utils.cancel import CancelFlag, Cancelled
+from .widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from . import make_progress_cb
 
 
@@ -33,9 +34,10 @@ from . import make_progress_cb
 # ---------------------------------------------------------------------------
 
 class _ExportWorker(QThread):
-    finished = Signal(int)
-    error    = Signal(str)
-    progress = Signal(int, int)   # (done, total)
+    finished  = Signal(int)
+    error     = Signal(str)
+    progress  = Signal(int, int)   # (done, total)
+    cancelled = Signal()           # stopped by cancel; no file was written
 
     def __init__(self, caches, output_path: str, include_waypoints: bool, include_found: bool):
         super().__init__()
@@ -43,19 +45,23 @@ class _ExportWorker(QThread):
         self._output_path       = output_path
         self._include_waypoints = include_waypoints
         self._include_found     = include_found
+        self.cancel             = CancelFlag()
 
     def run(self) -> None:
         try:
             from ...db.database import reload_caches_full
             caches = reload_caches_full(self._caches)
+            self.cancel.raise_if_set()
             count = export_kml(
                 caches,
                 self._output_path,
                 include_waypoints=self._include_waypoints,
                 include_found=self._include_found,
-                progress_cb=make_progress_cb(self.progress.emit),
+                progress_cb=make_progress_cb(self.progress.emit, self.cancel),
             )
             self.finished.emit(count)
+        except Cancelled:
+            self.cancelled.emit()
         except Exception as exc:  # noqa: BLE001
             self.error.emit(str(exc))
 
@@ -64,7 +70,7 @@ class _ExportWorker(QThread):
 # Dialog
 # ---------------------------------------------------------------------------
 
-class KmlExportDialog(QDialog):
+class KmlExportDialog(WorkerGuardMixin, QDialog):
     def __init__(self, caches: list, parent=None) -> None:
         super().__init__(parent)
         clamp_dialog_height_to_screen(self, parent)
@@ -162,6 +168,7 @@ class KmlExportDialog(QDialog):
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
         self._worker.progress.connect(self._on_progress)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
 
     def _reset_progress(self) -> None:
@@ -186,7 +193,20 @@ class KmlExportDialog(QDialog):
             tr("kml_dialog_done_title"),
             tr("kml_dialog_done_msg", count=count, path=path),
         )
+        # Sent from run(), which returns right after it — wait for that, or
+        # the guard (#1265) would refuse to close.
+        if self._worker is not None:
+            self._worker.wait()
         self.accept()
+
+    def _close_while_running(self) -> None:
+        # #1265: Cancel, Escape and the window's close button stop the export.
+        if self._worker is not None:
+            self._worker.cancel.set()
+
+    def _on_cancelled(self) -> None:
+        self._progress.setVisible(False)
+        self._export_btn.setEnabled(True)
 
     def _on_error(self, message: str) -> None:
         self._progress.setVisible(False)
