@@ -9,10 +9,14 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
+
+class _DownloadCancelled(Exception):
+    """Raised from the progress callback to stop fetch_all() between packs."""
+
 
 class _DownloadAllWorker(QThread):
     progress = Signal(int, int)   # (done, total)
@@ -25,6 +29,10 @@ class _DownloadAllWorker(QThread):
     def request_cancel(self) -> None:
         self._cancel = True
 
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel
+
     def run(self) -> None:
         from opensak.geo.store import default_data_dir
         from opensak.geo import packs
@@ -36,9 +44,14 @@ class _DownloadAllWorker(QThread):
             nonlocal downloaded
             downloaded = done
             self.progress.emit(done, total)
+            if self._cancel:
+                raise _DownloadCancelled
 
         if not self._cancel:
-            downloaded = packs.fetch_all(data_dir, progress_cb=_cb)
+            try:
+                downloaded = packs.fetch_all(data_dir, progress_cb=_cb)
+            except _DownloadCancelled:
+                pass
         self.finished.emit(downloaded)
 
 
@@ -69,7 +82,7 @@ class _CheckUpdateWorker(QThread):
 
 # ── Download-all dialog ───────────────────────────────────────────────────────
 
-class BoundaryDownloadDialog(QDialog):
+class BoundaryDownloadDialog(WorkerGuardMixin, QDialog):
     """Progress dialog for downloading all county packs from OpenSAK-Data."""
 
     def __init__(self, parent=None):
@@ -128,7 +141,9 @@ class BoundaryDownloadDialog(QDialog):
 
     def _on_done(self, downloaded: int) -> None:
         self._bar.setVisible(False)
-        if downloaded == 0:
+        if self._worker is not None and self._worker.cancel_requested:
+            self._status.setText(tr("boundary_dl_cancelled"))
+        elif downloaded == 0:
             self._status.setText(tr("boundary_dl_none"))
         else:
             self._status.setText(tr("boundary_dl_done", downloaded=downloaded))
@@ -136,23 +151,19 @@ class BoundaryDownloadDialog(QDialog):
         self._worker = None
 
     def _on_cancel(self) -> None:
-        if self._worker and self._worker.isRunning():
+        self.reject()
+
+    def _close_while_running(self) -> None:
+        # #1265: Cancel, Escape and the window's close button cancel the
+        # download; the dialog stays open until the worker is done (_on_done).
+        if self._worker is not None:
             self._worker.request_cancel()
             self._status.setText(tr("boundary_dl_cancelled"))
-            self._worker.wait(2000)
-            self._worker = None
-        self.close()
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.request_cancel()
-            self._worker.wait(2000)
-        super().closeEvent(event)
 
 
 # ── Check-for-updates dialog ──────────────────────────────────────────────────
 
-class BoundaryCheckDialog(QDialog):
+class BoundaryCheckDialog(WorkerGuardMixin, QDialog):
     """Checks for boundary data updates and optionally applies them."""
 
     def __init__(self, parent=None):
@@ -240,8 +251,3 @@ class BoundaryCheckDialog(QDialog):
             self._status.setText(tr("boundary_apply_failed"))
             self._apply_btn.setVisible(True)
         self._worker = None
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(2000)
-        super().closeEvent(event)

@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (
 
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
+from opensak.utils.cancel import CancelFlag, Cancelled
 
 # Issue #656 (CheminerWill's follow-up suggestion): remember the "use
 # database name as filename" checkbox state across exports/sessions.
@@ -72,9 +73,10 @@ class DeleteWorker(QThread):
 
 class ExportWorker(QThread):
     """Kører eksporten i baggrundstråd."""
-    finished = Signal(object)
-    error    = Signal(str)
-    progress = Signal(int, int)   # (done, total)
+    finished  = Signal(object)
+    error     = Signal(str)
+    progress  = Signal(int, int)   # (done, total)
+    cancelled = Signal()           # stopped by cancel (#1265)
 
     def __init__(self, caches, device_path, filename, max_caches, export_format="gpx"):
         super().__init__()
@@ -83,6 +85,7 @@ class ExportWorker(QThread):
         self.filename      = filename
         self.max_caches    = max_caches
         self.export_format = export_format   # "gpx" eller "ggz"
+        self.cancel        = CancelFlag()
 
     def run(self) -> None:
         try:
@@ -93,7 +96,7 @@ class ExportWorker(QThread):
             # export never holds every fully loaded cache in memory.
             caches = iter_caches_full(selected)
             total = len(selected)
-            cb = make_progress_cb(self.progress.emit)
+            cb = make_progress_cb(self.progress.emit, self.cancel)
 
             is_device = (
                 is_mtp_device(self.device_path)
@@ -129,12 +132,14 @@ class ExportWorker(QThread):
                     )
 
             self.finished.emit(result)
+        except Cancelled:
+            self.cancelled.emit()
         except Exception:
             import traceback
             self.error.emit(traceback.format_exc())
 
 
-class GpsExportDialog(QDialog):
+class GpsExportDialog(WorkerGuardMixin, QDialog):
     """Dialog til at eksportere caches til GPS enhed."""
 
     def __init__(self, parent=None, caches=None):
@@ -149,19 +154,30 @@ class GpsExportDialog(QDialog):
         self._caches        = caches or []
         self._worker        = None
         self._delete_worker = None
+        self._cancel_requested = False   # #1265: while deleting old files
         self._export_format = "gpx"   # "gpx" eller "ggz"
         self._setup_ui()
         self._scan_devices()
 
-    def closeEvent(self, event) -> None:
-        """Afbryd igangværende MTP-overførsler når dialogen lukkes."""
+    def _guarded_workers(self):
+        return (self._worker, self._delete_worker)
+
+    def _close_while_running(self) -> None:
+        """#1265: Cancel, Escape and the window's close button stop the
+        export (an MTP copy too). Deleting the old files can't be stopped;
+        the export after it is then not started."""
         from opensak.gps.garmin import cancel_mtp_transfer
+        self._cancel_requested = True
+        if self._worker is not None:
+            self._worker.cancel.set()
         cancel_mtp_transfer()
-        for worker in (self._worker, self._delete_worker):
-            if worker is not None and worker.isRunning():
-                worker.quit()
-                worker.wait(2000)
-        super().closeEvent(event)
+        self._close_btn.setEnabled(False)
+
+    def _set_running(self, running: bool) -> None:
+        """While sending, Close becomes Cancel (#1265)."""
+        self._export_btn.setEnabled(not running)
+        self._close_btn.setText(tr("cancel") if running else tr("close"))
+        self._close_btn.setEnabled(True)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -328,9 +344,10 @@ class GpsExportDialog(QDialog):
         self._export_btn.clicked.connect(self._start_export)
         btn_row.addWidget(self._export_btn)
 
-        close_btn = QPushButton(tr("close"))
-        close_btn.clicked.connect(self.accept)
-        btn_row.addWidget(close_btn)
+        # #1265: "Cancel" while sending (see _set_running).
+        self._close_btn = QPushButton(tr("close"))
+        self._close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(self._close_btn)
         layout.addLayout(btn_row)
 
         self._selected_file_path: Path | None = None
@@ -498,7 +515,8 @@ class GpsExportDialog(QDialog):
             if msg.exec() != QMessageBox.StandardButton.Ok:
                 return
 
-        self._export_btn.setEnabled(False)
+        self._cancel_requested = False
+        self._set_running(True)
         self._reset_progress()
         self._progress.setVisible(True)
 
@@ -522,6 +540,9 @@ class GpsExportDialog(QDialog):
     ) -> None:
         """Kaldt når sletning er færdig — fortsæt med export."""
         self._log.setPlainText(str(delete_result) + "\n")
+        if self._cancel_requested:
+            self._on_cancelled()
+            return
         if (
             not getattr(delete_result, "success", True)
             or getattr(delete_result, "failed_count", 0) > 0
@@ -564,6 +585,7 @@ class GpsExportDialog(QDialog):
         self._worker.finished.connect(self._on_finished)
         self._worker.error.connect(self._on_error)
         self._worker.progress.connect(self._on_progress)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
 
     def _reset_progress(self) -> None:
@@ -582,10 +604,15 @@ class GpsExportDialog(QDialog):
 
     def _on_finished(self, result) -> None:
         self._progress.setVisible(False)
-        self._export_btn.setEnabled(True)
+        self._set_running(False)
         self._log.setPlainText(str(result))
+
+    def _on_cancelled(self) -> None:
+        self._progress.setVisible(False)
+        self._set_running(False)
+        self._log.append("– " + tr("export_cancelled"))
 
     def _on_error(self, msg: str) -> None:
         self._progress.setVisible(False)
-        self._export_btn.setEnabled(True)
+        self._set_running(False)
         self._log.setPlainText(f"✗ {tr('error')}:\n{msg}")

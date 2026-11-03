@@ -1920,6 +1920,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "{count} cache(s) kopiëren naar {target}?",
     "move_caches_done":                        "{count} cache(s) succesvol verplaatst.",
     "copy_caches_done":                        "{count} cache(s) succesvol gekopieerd.",
+    "import_cancelled":                        "Import geannuleerd. De tot dan geïmporteerde caches blijven bewaard.",
+    "export_cancelled":                        "Export geannuleerd.",
+    "move_caches_cancelled":                   "Geannuleerd — tot dan {count} cache(s) verplaatst.",
+    "copy_caches_cancelled":                   "Geannuleerd — tot dan {count} cache(s) gekopieerd.",
     "move_caches_error":                       "Er is een fout opgetreden bij het verplaatsen:\n{message}",
     "copy_caches_error":                       "Er is een fout opgetreden bij het kopiëren:\n{message}",
 

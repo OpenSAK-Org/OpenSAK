@@ -15,7 +15,7 @@ import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from lxml import etree
 from sqlalchemy.orm import Session
@@ -1719,6 +1719,8 @@ class ImportResult:
         self.waypoints: int = 0
         self.errors:    list[str] = []
         self.warnings:  list[str] = []
+        # #1265: stopped early by should_cancel(); what was committed stays.
+        self.cancelled: bool = False
 
     @property
     def total(self) -> int:
@@ -1805,7 +1807,8 @@ def import_gpx(
     session: Session | None = None,
     wpts_path: Optional[Path] = None,
     progress_cb=None,
-    batch_size: int = 200
+    batch_size: int = 200,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> ImportResult:
     """
     Import a single GPX file into the database using streaming for high performance.
@@ -1813,6 +1816,10 @@ def import_gpx(
     Uses etree.iterparse to handle files of any size without RAM exhaustion.
     A new session is managed internally; when *session* is given it is opened
     on the same database (its bind), otherwise on the active database.
+
+    *should_cancel* (#1265) is asked after each committed batch; once it
+    returns True the import stops there and result.cancelled is set — the
+    caches committed so far stay, the extra waypoints are not linked.
     """
     from opensak.db.database import make_session
 
@@ -1872,6 +1879,13 @@ def import_gpx(
                     batch.clear()
                     db_session.commit()
                     db_session.expunge_all()
+                    if should_cancel is not None and should_cancel():
+                        result.cancelled = True
+                        break
+
+        if result.cancelled:
+            context.close()   # closes the file now, not when collected
+            return result
 
         # Flush the trailing partial batch and commit the remainder.
         _flush_cache_batch(db_session, batch, source, existing_ids, result)
@@ -1910,13 +1924,21 @@ def import_gpx(
 
     return result
 
-def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None) -> ImportResult:
+def import_zip(
+    zip_path: Path,
+    session: Session | None = None,
+    progress_cb=None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> ImportResult:
     """
     High-performance parallel ZIP import.
 
     Strategy:
     1. Parse all GPX files in parallel threads (CPU-bound, no DB access).
     2. Write all parsed data to the database sequentially (IO-bound, single session).
+
+    *should_cancel* is as for import_gpx(): asked after parsing and after
+    each committed batch.
     """
     from concurrent.futures import ThreadPoolExecutor
     from opensak.db.database import make_session
@@ -1959,6 +1981,14 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                 except Exception as e:
                     overall_result.errors.append(f"Parse error: {str(e)}")
 
+        def _cancelled() -> bool:
+            if should_cancel is not None and should_cancel():
+                overall_result.cancelled = True
+            return overall_result.cancelled
+
+        if _cancelled():
+            return overall_result
+
         # Step 2: Write all parsed cache data sequentially (single session).
         db_session = make_session(_bind_of(session))
         existing_ids = _load_existing_gc_map(db_session)
@@ -1973,7 +2003,11 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                         existing_ids, overall_result,
                     )
                     db_session.commit()
+                    if _cancelled():
+                        break
                 db_session.expunge_all()
+                if overall_result.cancelled:
+                    return overall_result
 
                 if extra_wpts:
                     seen: set = set()

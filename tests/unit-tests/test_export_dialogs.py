@@ -130,6 +130,7 @@ class TestKmlExportDialog:
             def __init__(self, **kw):
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
                 self.progress = MagicMock()
 
             def start(self):
@@ -265,6 +266,7 @@ class TestFileExportDialog:
                 captured["path"] = output_path
                 self.finished = MagicMock()
                 self.error = MagicMock()
+                self.cancelled = MagicMock()
                 self.progress = MagicMock()
 
             def start(self):

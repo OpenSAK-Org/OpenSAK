@@ -25,8 +25,9 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog
+from opensak.utils.cancel import CancelFlag
 from opensak.importer.gpx_import_settings import (
     GpxImportProfile, GpxImportSettings, folder_import_files, import_file,
 )
@@ -51,6 +52,9 @@ class ImportWorker(QThread):
         super().__init__()
         self.paths = paths
         self.target_db_path = target_db_path  # None → use currently active DB
+        # #1265: set by Cancel; checked before each file and, inside a file,
+        # after each committed batch (import_gpx/import_zip should_cancel).
+        self.cancel = CancelFlag()
 
     def run(self) -> None:
         from opensak.db.database import get_session, optimize_database, session_for
@@ -70,6 +74,8 @@ class ImportWorker(QThread):
             return session_for(self.target_db_path) if other_db else get_session()
 
         for i, path in enumerate(self.paths):
+            if self.cancel.is_set():
+                break
             self.file_started.emit(i, path.name)
             try:
                 if get_import_type(path) == ImportType.GPX:
@@ -80,7 +86,8 @@ class ImportWorker(QThread):
                 else:
                     self.total.emit(-1)
                 with _session() as session:
-                    result = import_file(path, session, progress_cb=self.progress.emit)
+                    result = import_file(path, session, progress_cb=self.progress.emit,
+                                         should_cancel=self.cancel.is_set)
 
                 self.file_finished.emit(i, result)
 
@@ -95,7 +102,7 @@ class ImportWorker(QThread):
         # once this method returns, and the dialog reacts to that instead.
 
 
-class ImportDialog(SavedSettingsDialog):
+class ImportDialog(WorkerGuardMixin, SavedSettingsDialog):
     """Dialog for importing one or more GPX or PQ zip files.
 
     *paths* (e.g. files or folders dropped on the main window) replace
@@ -131,6 +138,9 @@ class ImportDialog(SavedSettingsDialog):
         clamp_dialog_height_to_screen(self, parent)
         self._worker: ImportWorker | None = None
         self._geo_worker: ReverseGeocodeWorker | None = None
+        # The running import's cancel flag; kept after _worker is dropped,
+        # so _on_all_done() can tell a cancelled import (#1265).
+        self._import_cancel: CancelFlag | None = None
         # Database of the running import (None = the active one).
         self._target_db_path: Path | None = None
         self._selected_paths: list[Path] = []
@@ -415,12 +425,11 @@ class ImportDialog(SavedSettingsDialog):
         self._remove_btn.setEnabled(False)
         # Loading other settings would replace the list being imported.
         self._settings_group.setEnabled(False)
-        # Issue #802: the import step itself has no cancellation support
-        # (ImportWorker.run() has no cancel flag to check between files),
-        # so simply disable Close rather than pretending it can respond —
-        # clicking it while enabled used to block the GUI thread on
-        # closeEvent()'s synchronous worker.wait().
-        self._close_btn.setEnabled(False)
+        # Issue #802 / #1265: Close becomes Cancel while the import runs;
+        # _on_close_clicked() sets the worker's cancel flag instead of
+        # closing, and the import stops after the batch in progress.
+        self._close_btn.setText(tr("cancel"))
+        self._close_btn.setEnabled(True)
         self._progress.setVisible(True)
         self._any_success = False
         self._failed_rows = set()
@@ -441,6 +450,7 @@ class ImportDialog(SavedSettingsDialog):
         except OSError:
             pass  # failing to remember the settings must not block the import
         self._worker = ImportWorker(list(self._run_paths), target_db_path=target_db_path)
+        self._import_cancel = self._worker.cancel
         self._worker.file_started.connect(self._on_file_started)
         self._worker.file_finished.connect(self._on_file_finished)
         self._worker.file_error.connect(self._on_file_error)
@@ -517,13 +527,17 @@ class ImportDialog(SavedSettingsDialog):
     def _on_all_done(self) -> None:
         self._progress.setVisible(False)
 
-        self._append_log(tr("import_all_done", count=len(self._run_paths)))
+        cancelled = self._import_cancel is not None and self._import_cancel.is_set()
+        if cancelled:
+            self._append_log(tr("import_cancelled"))
+        else:
+            self._append_log(tr("import_all_done", count=len(self._run_paths)))
 
         if self._any_success:
             self.import_completed.emit()
 
         from opensak.utils import flags
-        if flags.reverse_geocoding and self._any_success:
+        if flags.reverse_geocoding and self._any_success and not cancelled:
             self._start_geocoding()
         else:
             self._browse_btn.setEnabled(True)
@@ -531,6 +545,7 @@ class ImportDialog(SavedSettingsDialog):
             self._settings_group.setEnabled(True)
             self._import_btn.setText(tr("import_again"))
             self._import_btn.setEnabled(True)
+            self._close_btn.setText(tr("close"))
             self._close_btn.setEnabled(True)
 
     def _start_geocoding(self) -> None:
@@ -611,15 +626,13 @@ class ImportDialog(SavedSettingsDialog):
         closeEvent()'s synchronous worker.wait() — a freeze that looked and
         felt like a hang or crash on a large import.
 
-        The import step itself has no cancellation support, so the button
-        is simply disabled while it runs (see _start_import()) and this
-        branch shouldn't normally be reachable then — guarded defensively
-        regardless. The geocode step *can* be cancelled responsively
-        (ReverseGeocodeWorker checks a flag between rows), so while it's
-        running the button is relabelled "Cancel" and routed here instead
-        of closing: request_cancel() just sets that flag and returns
-        immediately, the actual stop is reported asynchronously via the
-        cancelled signal → _on_geocode_done() → _finish_geocoding().
+        While the import or the geocode step runs, the button is relabelled
+        "Cancel" and routed here instead of closing (#1265: Escape and the
+        window's close button too, via _close_while_running()). Both steps
+        only set a flag here and return immediately: the import stops after
+        the batch in progress (ImportWorker.cancel) and _on_all_done()
+        reports it; ReverseGeocodeWorker checks its flag between rows and
+        reports via cancelled → _on_geocode_done() → _finish_geocoding().
         """
         cancelled_geocode = False
         try:
@@ -638,27 +651,22 @@ class ImportDialog(SavedSettingsDialog):
 
         try:
             if self._worker is not None and self._worker.isRunning():
+                # #1265: Cancel during the import itself — it stops after
+                # the batch in progress; _on_all_done() reports it.
+                self._worker.cancel.set()
+                self._close_btn.setEnabled(False)
                 return
         except RuntimeError:
             self._worker = None
 
         self.accept()
 
-    def closeEvent(self, event) -> None:
-        try:
-            if self._worker and self._worker.isRunning():
-                self._worker.wait()
-        except RuntimeError:
-            pass
-        self._worker = None
-        try:
-            if self._geo_worker and self._geo_worker.isRunning():
-                self._geo_worker.request_cancel()
-                self._geo_worker.wait()
-        except RuntimeError:
-            pass
-        self._geo_worker = None
-        super().closeEvent(event)
+    def _guarded_workers(self):
+        return (self._worker, self._geo_worker)
+
+    def _close_while_running(self) -> None:
+        # #1265: Escape and the window's close button do what Cancel does.
+        self._on_close_clicked()
 
     # ── Log helpers ───────────────────────────────────────────────────────────
 

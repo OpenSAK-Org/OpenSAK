@@ -27,7 +27,7 @@ from opensak.geo.reverse_geocode import (
     UpdateLocationResult,
     reverse_geocode,
 )
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 log = get_logger("gui.update_location_dialog")
 
@@ -68,7 +68,7 @@ class ReverseGeocodeWorker(QThread):
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
-class UpdateLocationDialog(QDialog):
+class UpdateLocationDialog(WorkerGuardMixin, QDialog):
     """Dialog to update cache locations via offline reverse geocoding.
 
     The same dialog is used from the menu and from the right-click context menu.
@@ -308,8 +308,6 @@ class UpdateLocationDialog(QDialog):
         C++ object either."""
         self._worker = None
 
-    def closeEvent(self, event) -> None:
-        if self._worker and self._worker.isRunning():
-            self._worker.request_cancel()
-            self._worker.wait()
-        super().closeEvent(event)
+    def _close_while_running(self) -> None:
+        # #1265: Escape and the window's close button cancel the lookup.
+        self._request_cancel()

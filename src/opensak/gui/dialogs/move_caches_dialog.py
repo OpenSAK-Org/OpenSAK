@@ -22,7 +22,8 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from opensak.db.transfer import transfer_caches
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
+from opensak.utils.cancel import CancelFlag
 
 
 class _MoveWorker(QThread):
@@ -30,6 +31,7 @@ class _MoveWorker(QThread):
     deleting them from the source DB."""
 
     finished = Signal(int)   # number of caches moved/copied
+    cancelled = Signal(int)  # cancelled; number moved/copied until then
     error = Signal(str)
 
     def __init__(
@@ -44,20 +46,26 @@ class _MoveWorker(QThread):
         self.source_db_path = source_db_path
         self.target_db_path = target_db_path
         self.copy_only = copy_only
+        self.cancel = CancelFlag()
 
     def run(self) -> None:
         try:
+            # Checked between chunks only: a chunk written to the target is
+            # always deleted from the source as well (#1265).
             count = transfer_caches(
                 self.gc_codes, self.source_db_path, self.target_db_path,
-                copy_only=self.copy_only,
+                copy_only=self.copy_only, should_cancel=self.cancel.is_set,
             )
         except Exception as exc:
             self.error.emit(str(exc))
             return
-        self.finished.emit(count)
+        if self.cancel.is_set():
+            self.cancelled.emit(count)
+        else:
+            self.finished.emit(count)
 
 
-class MoveCachesDialog(QDialog):
+class MoveCachesDialog(WorkerGuardMixin, QDialog):
     """Dialog that lets the user move or copy caches to another database."""
 
     caches_moved = Signal()
@@ -226,7 +234,8 @@ class MoveCachesDialog(QDialog):
             return
 
         self._move_btn.setEnabled(False)
-        self._close_btn.setEnabled(False)
+        # #1265: Close becomes Cancel while the caches are transferred.
+        self._close_btn.setText(tr("cancel"))
         self._progress.setVisible(True)
 
         source_path = manager.active_path
@@ -240,13 +249,25 @@ class MoveCachesDialog(QDialog):
             copy_only=self._copy_only,
         )
         self._worker.finished.connect(self._on_finished)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
-    def _on_finished(self, count: int) -> None:
+    def _close_while_running(self) -> None:
+        # #1265: Cancel, Escape and the window's close button stop the
+        # transfer after the chunk in progress.
+        if self._worker is not None:
+            self._worker.cancel.set()
+        self._close_btn.setEnabled(False)
+
+    def _idle(self) -> None:
         self._progress.setVisible(False)
         self._move_btn.setEnabled(True)
+        self._close_btn.setText(tr("close"))
         self._close_btn.setEnabled(True)
+
+    def _on_finished(self, count: int) -> None:
+        self._idle()
         done_key = "copy_caches_done" if self._copy_only else "move_caches_done"
         QMessageBox.information(
             self,
@@ -254,12 +275,21 @@ class MoveCachesDialog(QDialog):
             tr(done_key, count=count),
         )
         self.caches_moved.emit()
+        # Sent from run(), which returns right after it — wait for that, or
+        # the guard (#1265) would refuse to close.
+        if self._worker is not None:
+            self._worker.wait()
         self.accept()
 
+    def _on_cancelled(self, count: int) -> None:
+        self._idle()
+        key = "copy_caches_cancelled" if self._copy_only else "move_caches_cancelled"
+        QMessageBox.information(self, tr(self._title_key), tr(key, count=count))
+        if count:
+            self.caches_moved.emit()
+
     def _on_error(self, message: str) -> None:
-        self._progress.setVisible(False)
-        self._move_btn.setEnabled(True)
-        self._close_btn.setEnabled(True)
+        self._idle()
         QMessageBox.critical(
             self,
             tr(self._title_key),
