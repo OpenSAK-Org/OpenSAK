@@ -41,16 +41,17 @@
                                 be installed side by side — see README.md
                                 "Command line (App Execution Alias)"
 
-  Two applications: "OpenSAK" is the Start Menu app (the windowed
-  opensak.exe). "OpenSAKCLI" is the console opensak-cli.exe for scripts and
-  the Task Scheduler (#937): no Start Menu entry (AppListEntry="none"), only
-  the alias, which puts __CLI_ALIAS__ on the user's PATH
-  (%LOCALAPPDATA%\Microsoft\WindowsApps). desktop4:Subsystem="console"
-  makes a shell wait for it and keep its output and exit code; an alias to
-  the windowed exe would start it but not wait. Its DisplayName is the
-  package's own on purpose: Partner Center rejects display names that are
-  not reserved (README.md "Known Partner Center quirks"). Windows shows it
-  only in Settings → Apps → App execution aliases, next to the alias.
+  One application, "OpenSAK": the Start Menu app (the windowed opensak.exe).
+  The command line (#937) is an App Execution Alias extension of that same
+  application with its own Executable, the console opensak-cli.exe. It
+  puts __CLI_ALIAS__ on the user's PATH (%LOCALAPPDATA%\Microsoft\WindowsApps).
+  desktop4:Subsystem="console" makes a shell wait for it and keep its
+  output and exit code; an alias to the windowed exe would start it but
+  not wait. Not a second <Application> with AppListEntry="none": the Store
+  treats that as a "headless app" and rejects the package unless Microsoft
+  grants a HeadlessAppBypass waiver (README.md "Known Partner Center
+  quirks"). Windows shows the alias in Settings → Apps → App execution
+  aliases, under the package's display name.
 
   Capabilities: only `runFullTrust` (required for any Desktop Bridge app)
   and `internetClient` (OpenSAK's update checker, Leaflet/OSM tile
@@ -105,16 +106,6 @@
         Square44x44Logo="assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="assets\Wide310x150Logo.png" Square71x71Logo="assets\Square71x71Logo.png" />
       </uap:VisualElements>
-    </Application>
-    <Application Id="OpenSAKCLI" Executable="__CLI_EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication"
-                 desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="__DISPLAY_NAME__"
-        Description="OpenSAK on the command line, for scripts and scheduled runs."
-        BackgroundColor="transparent"
-        Square150x150Logo="assets\Square150x150Logo.png"
-        Square44x44Logo="assets\Square44x44Logo.png"
-        AppListEntry="none" />
       <Extensions>
         <uap5:Extension Category="windows.appExecutionAlias" Executable="__CLI_EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">

@@ -4,6 +4,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Microsoft Store package refused because of the command line (#937)** —
+  since beta.10 the Store package provided the `opensak-beta` / `opensak`
+  command as a second, hidden app, which Partner Center rejects as a
+  "headless app". The command is now part of the OpenSAK app itself and
+  works the same way. Only the Store package is affected; the Windows
+  installer and zip are unchanged.
+
+---
+
 ## [1.22.0-beta.12] — 2026-11-02
 
 > Headline: **the release candidate for v1.22.0.** Macros, macros that

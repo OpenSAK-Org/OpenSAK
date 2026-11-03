@@ -109,29 +109,31 @@ def test_build_script_fills_every_placeholder():
     assert "__" not in _filled_manifest("opensak-beta.exe")
 
 
-def test_manifest_has_console_app_with_alias():
+def test_manifest_has_console_alias_without_headless_app():
     root = ET.fromstring(_filled_manifest("opensak-beta.exe"))
-    apps = {a.get("Id"): a for a in root.iterfind("m:Applications/m:Application", NS)}
-    assert apps["OpenSAK"].get("Executable") == r"OpenSAK\opensak.exe"
-
-    cli = apps["OpenSAKCLI"]
-    assert cli.get("Executable") == r"OpenSAK\opensak-cli.exe"
-    assert cli.get(_SUBSYSTEM) == "console"
-    visual = cli.find("uap:VisualElements", NS)
-    assert visual is not None and visual.get("AppListEntry") == "none"
+    apps = root.findall("m:Applications/m:Application", NS)
+    # One application only: a second one with AppListEntry="none" is a
+    # "headless app", which Partner Center rejects without a
+    # HeadlessAppBypass waiver (seen on the v1.22.0-beta.12 flight upload).
+    assert [a.get("Id") for a in apps] == ["OpenSAK"]
+    app = apps[0]
+    assert app.get("Executable") == r"OpenSAK\opensak.exe"
+    visual = app.find("uap:VisualElements", NS)
+    assert visual is not None and visual.get("AppListEntry") is None
     # Partner Center only accepts reserved display names.
     assert visual.get("DisplayName") == "OpenSAK Beta"
 
-    ext = cli.find("m:Extensions/uap5:Extension", NS)
+    # The alias is an extension of the GUI app with the console program as
+    # its own executable, so a shell waits for it (#937).
+    ext = app.find("m:Extensions/uap5:Extension", NS)
     assert ext is not None
     assert ext.get("Category") == "windows.appExecutionAlias"
-    assert ext.get("Executable") == cli.get("Executable")
+    assert ext.get("Executable") == r"OpenSAK\opensak-cli.exe"
+    assert ext.get("EntryPoint") == "Windows.FullTrustApplication"
     alias = ext.find("uap5:AppExecutionAlias", NS)
     assert alias is not None and alias.get(_SUBSYSTEM) == "console"
     names = [e.get("Alias") for e in alias.iterfind("uap5:ExecutionAlias", NS)]
     assert names == ["opensak-beta.exe"]
-    # The GUI app keeps its Start Menu entry and gets no alias.
-    assert apps["OpenSAK"].find("m:Extensions", NS) is None
 
 
 def test_msix_workflow_passes_alias_for_beta_and_stable():
