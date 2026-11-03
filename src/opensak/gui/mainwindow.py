@@ -1173,6 +1173,14 @@ class MainWindow(QMainWindow):
             from opensak.db.database import recalculate_distances, distances_up_to_date
             if not distances_up_to_date(s.home_lat, s.home_lon):
                 recalculate_distances(s.home_lat, s.home_lon)
+        # The rows still loaded in the table belong to the previous database.
+        # Empty the table before switching to the new database's columns: if
+        # the new database shows the Hints/Notes column and the old rows are
+        # LightweightCache (the fast path used when the old database had
+        # those columns off), the very next repaint crashed with
+        # AttributeError (encoded_hints). The real rows are fetched by
+        # _refresh_cache_list (via reload_map below), with the new columns.
+        self._cache_table.load_caches([], custom_fields.EMPTY_VALUES)
         # Genindlæs kolonner for den nye database (issue #199)
         self._cache_table.reload_columns()
         # Issue #607 (opfølgning): genindlæs comboen for den nye database —
