@@ -4,10 +4,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [1.22.0-beta.13] — 2026-11-03
+
+> Headline: **one fix on top of the v1.22.0 release candidate.** Switching
+> database no longer crashes the cache list when the new database shows the
+> Hints or Notes column. Everything else is as in beta.12; the second fix
+> only concerns the Microsoft Store package.
 
 ### Fixed
 
+- **Crash when switching to a database with the Hints column (#1264)** —
+  switching from a database with the Hints and Notes columns off to one
+  with Hints (or Notes) on raised an error in the cache list and logged a
+  `[CRITICAL] Uncaught exception` on every switch, although the list
+  recovered a moment later. The list is now emptied before the new
+  database's columns are shown and then filled with its caches.
 - **Microsoft Store package refused because of the command line (#937)** —
   since beta.10 the Store package provided the `opensak-beta` / `opensak`
   command as a second, hidden app, which Partner Center rejects as a
