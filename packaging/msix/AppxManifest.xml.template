@@ -47,7 +47,9 @@
   puts __CLI_ALIAS__ on the user's PATH (%LOCALAPPDATA%\Microsoft\WindowsApps).
   desktop4:Subsystem="console" makes a shell wait for it and keep its
   output and exit code; an alias to the windowed exe would start it but
-  not wait. Not a second <Application> with AppListEntry="none": the Store
+  not wait. A console alias requires desktop4:SupportsMultipleInstances
+  on its Application (makeappx error 80080204 without it), so a command
+  can run while the GUI is open. Not a second <Application> with AppListEntry="none": the Store
   treats that as a "headless app" and rejects the package unless Microsoft
   grants a HeadlessAppBypass waiver (README.md "Known Partner Center
   quirks"). Windows shows the alias in Settings → Apps → App execution
@@ -97,7 +99,8 @@
   </Capabilities>
 
   <Applications>
-    <Application Id="OpenSAK" Executable="__EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="OpenSAK" Executable="__EXE_RELATIVE_PATH__" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="__DISPLAY_NAME__"
         Description="Free, open-source, cross-platform geocache management tool."

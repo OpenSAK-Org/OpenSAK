@@ -28,6 +28,7 @@ NS = {
     "desktop4": "http://schemas.microsoft.com/appx/manifest/desktop/windows10/4",
 }
 _SUBSYSTEM = f"{{{NS['desktop4']}}}Subsystem"
+_MULTI = f"{{{NS['desktop4']}}}SupportsMultipleInstances"
 
 
 class _Target:
@@ -118,6 +119,9 @@ def test_manifest_has_console_alias_without_headless_app():
     assert [a.get("Id") for a in apps] == ["OpenSAK"]
     app = apps[0]
     assert app.get("Executable") == r"OpenSAK\opensak.exe"
+    # makeappx refuses a console alias unless its Application allows
+    # multiple instances (error 80080204).
+    assert app.get(_MULTI) == "true"
     visual = app.find("uap:VisualElements", NS)
     assert visual is not None and visual.get("AppListEntry") is None
     # Partner Center only accepts reserved display names.
