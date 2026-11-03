@@ -4,6 +4,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **OpenSAK closed when Escape was pressed during an import or export
+  (#1265)** — pressing Escape, or the window's close button, while a dialog
+  was still working (importing a GPX, exporting, sending to the GPS,
+  updating found status, moving or copying caches, looking up locations,
+  checking PQ e-mail, downloading boundary data and more) closed OpenSAK at
+  once, without a message. A Move could then leave the caches in both
+  databases. These dialogs now stay open until the work is done; where it
+  can already be cancelled (location lookup), Escape cancels it like the
+  Cancel button. Settings still closes at once; a connection test or login
+  still running finishes in the background. Contributed by nagisml.
+
+---
+
 ## [1.22.0-beta.13] — 2026-11-03
 
 > Headline: **one fix on top of the v1.22.0 release candidate.** Switching

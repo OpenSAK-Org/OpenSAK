@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ class _CheckUpdateWorker(QThread):
 
 # ── Download-all dialog ───────────────────────────────────────────────────────
 
-class BoundaryDownloadDialog(QDialog):
+class BoundaryDownloadDialog(WorkerGuardMixin, QDialog):
     """Progress dialog for downloading all county packs from OpenSAK-Data."""
 
     def __init__(self, parent=None):
@@ -136,23 +136,21 @@ class BoundaryDownloadDialog(QDialog):
         self._worker = None
 
     def _on_cancel(self) -> None:
-        if self._worker and self._worker.isRunning():
+        self.reject()
+
+    def _close_while_running(self) -> None:
+        # #1265: Cancel, Escape and the window's close button request the
+        # cancel, as Cancel did before. The dialog used to wait 2 s for the
+        # worker and close anyway, which aborted OpenSAK; now it stays open
+        # until the worker is done.
+        if self._worker is not None:
             self._worker.request_cancel()
             self._status.setText(tr("boundary_dl_cancelled"))
-            self._worker.wait(2000)
-            self._worker = None
-        self.close()
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.request_cancel()
-            self._worker.wait(2000)
-        super().closeEvent(event)
 
 
 # ── Check-for-updates dialog ──────────────────────────────────────────────────
 
-class BoundaryCheckDialog(QDialog):
+class BoundaryCheckDialog(WorkerGuardMixin, QDialog):
     """Checks for boundary data updates and optionally applies them."""
 
     def __init__(self, parent=None):
@@ -240,8 +238,3 @@ class BoundaryCheckDialog(QDialog):
             self._status.setText(tr("boundary_apply_failed"))
             self._apply_btn.setVisible(True)
         self._worker = None
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(2000)
-        super().closeEvent(event)
