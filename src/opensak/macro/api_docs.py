@@ -684,7 +684,22 @@ def _changing_section() -> list[str]:
         "Each change is committed on its own. To keep several changes "
         "together, or undo them all on an error, run them inside "
         "`opensak.transaction(function() ... end)`, which is also faster for "
-        "many changes. SQL `BEGIN`/`COMMIT` is refused.",
+        "many changes. SQL `BEGIN`/`COMMIT` is refused. For example, to "
+        "clear the corrected coordinates of the caches of the active filter:",
+        "",
+        *_code(
+            "local n = opensak.transaction(function()\n"
+            "    local count = 0\n"
+            '    for c in opensak.caches{ fields = {"corrected"} } do\n'
+            "        if c.corrected then\n"
+            "            opensak.clear_corrected(c.code)\n"
+            "            count = count + 1\n"
+            "        end\n"
+            "    end\n"
+            "    return count\n"
+            "end)\n"
+            'print(n .. " corrected coordinates cleared")'
+        ),
         "",
         "`opensak.sql_write()` may INSERT into, UPDATE and DELETE from these "
         "tables. An "
@@ -982,7 +997,9 @@ def render_api_markdown(examples_dir: Path = EXAMPLES_DIR) -> str:
     lines += [
         "",
         "`opensak.caches{}` also takes `fields`, an array of the cache fields "
-        "to load (`code` is always included), and `database`.",
+        "to load (`code` is always included), and `database`. Filter keys "
+        "given to `opensak.caches{}` search the whole database; they do not "
+        "narrow the active filter.",
         "",
         "## Reading another database",
         "",

@@ -1120,6 +1120,22 @@ def test_filter_with_long_code_list():
     assert host.selected == {"GCMAC1", "GCMAC3"}
 
 
+def test_caches_fields_keep_active_filter_but_filter_keys_search_whole_db():
+    # As the help of opensak.caches says (discussion #1248): `fields` alone
+    # still loops over the active filter, filter keys do not narrow it.
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ type = "Traditional", code = "GCMAC" }
+        local codes = {}
+        for c in opensak.caches{ fields = {"difficulty"} } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+        codes = {}
+        for c in opensak.caches{ code = "GCMAC", found = false } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+    """, host=host)
+    assert out == ["GCMAC1,GCMAC2,GCMAC4", "GCMAC1,GCMAC2,GCMAC3,GCMAC5"]
+
+
 def test_caches_loads_in_chunks(monkeypatch):
     monkeypatch.setattr(cache_data, "CHUNK_SIZE", 2)
     _, out = _run("""
