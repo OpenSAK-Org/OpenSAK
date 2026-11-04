@@ -4,6 +4,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.15] — 2026-11-04
+
+> Headline: **a saved column view now comes back exactly as it was saved.**
+> Picking a view in View → Choose Columns showed the right columns, but kept
+> the current database's column order and widths. It now applies the
+> view's order and widths too, as the toolbar's view dropdown already did.
+
+### Fixed
+
+- **A column view picked in Choose Columns kept the old order and widths
+  (#1144)** — a view saved in one database and applied to another through
+  View → Choose Columns came out with the right columns, but in the other
+  database's order and at its widths, so the layout had to be rebuilt by
+  hand. Choose Columns now applies the whole view: column order, widths and
+  display settings. Checking or unchecking columns after picking the view
+  still works as before. Saving the result under a new name keeps the
+  picked view's order and widths. Reported by dstein766.
+
+---
+
 ## [1.22.0-beta.14] — 2026-11-04
 
 > Headline: **one more fix before v1.22.0.** Pressing Escape while an
