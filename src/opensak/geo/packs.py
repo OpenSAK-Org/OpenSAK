@@ -17,6 +17,7 @@ from typing import Callable, Iterable
 from urllib.error import URLError
 
 from opensak.logger import get_logger
+from opensak import net
 from opensak.net import SSL_CONTEXT
 
 log = get_logger("geo.packs")
@@ -59,8 +60,11 @@ def fetch_manifest(timeout: int = REQUEST_TIMEOUT) -> dict | None:
         with urllib.request.urlopen(
             _asset_url(MANIFEST_FILENAME), timeout=timeout, context=SSL_CONTEXT
         ) as resp:
-            return json.load(resp)  # type: ignore[no-any-return]
+            manifest = json.load(resp)
+        net.note_success()
+        return manifest  # type: ignore[no-any-return]
     except (*_FETCH_ERRORS, json.JSONDecodeError) as exc:
+        net.note_failure(exc)
         # Issue #901: warning, ikke debug — kalderen melder det blot som
         # "ingen netværksforbindelse", så den faktiske årsag (fx en SSL-
         # certifikatfejl) skal kunne ses i opensak.log.
@@ -80,8 +84,10 @@ def fetch_pack(filename: str, dest_dir: Path, timeout: int = DOWNLOAD_TIMEOUT) -
         ) as resp:
             data = resp.read()
     except _FETCH_ERRORS as exc:
+        net.note_failure(exc)
         log.debug("pack fetch failed (%s): %s", filename, exc)
         return False
+    net.note_success()
     return _atomic_write(dest_dir, filename, data)
 
 
@@ -123,7 +129,9 @@ def fetch_packs(
 
     A single short reachability probe (PROBE_TIMEOUT) runs first — if the
     network is unreachable, the whole batch is skipped immediately rather
-    than paying the full timeout for each pack in turn.
+    than paying the full timeout for each pack in turn. When an earlier
+    request this session already found the network unreachable
+    (net.offline_detected(), #1111), even the probe is skipped.
 
     progress_cb(done, total) is called from the calling thread as each pack
     finishes downloading (success or failure) — safe to update a Qt
@@ -135,8 +143,8 @@ def fetch_packs(
     if not to_fetch:
         return 0
 
-    if fetch_manifest(timeout=PROBE_TIMEOUT) is None:
-        log.debug("fetch_packs: reachability probe failed, skipping %d pack(s)", total)
+    if net.offline_detected() or fetch_manifest(timeout=PROBE_TIMEOUT) is None:
+        log.debug("fetch_packs: network unreachable, skipping %d pack(s)", total)
         if progress_cb:
             progress_cb(total, total)
         return 0
@@ -316,8 +324,10 @@ def _fetch_file_atomic(filename: str, dest_dir: Path) -> bool:
         ) as resp:
             data = resp.read()
     except _FETCH_ERRORS as exc:
+        net.note_failure(exc)
         log.debug("file fetch failed (%s): %s", filename, exc)
         return False
+    net.note_success()
     return _atomic_write(dest_dir, filename, data)
 
 
@@ -366,8 +376,10 @@ def _download_to_temp(filename: str, dest_dir: Path, sha256: str = "") -> Path |
         ) as resp:
             data = resp.read()
     except _FETCH_ERRORS as exc:
+        net.note_failure(exc)
         log.debug("file fetch failed (%s): %s", filename, exc)
         return None
+    net.note_success()
     if sha256 and hashlib.sha256(data).hexdigest() != sha256:
         log.warning("boundary update: %s does not match the manifest's sha256", filename)
         return None

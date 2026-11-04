@@ -555,6 +555,24 @@ def minimal_store(tmp_path: Path) -> Iterator[BoundaryStore]:
 
 
 class TestOnDemandFetch:
+    def test_skipped_after_failed_probe(self, tmp_path: Path, monkeypatch):
+        # #1111: once the pre-fetch probe found no network, a missing pack is
+        # not fetched on demand (up to DOWNLOAD_TIMEOUT seconds each).
+        from opensak import net
+        monkeypatch.setattr("urllib.request.urlopen",
+                            lambda *_a, **_k: (_ for _ in ()).throw(URLError(TimeoutError())))
+        packs.fetch_packs(["missing.geojson"], tmp_path / "counties")
+        assert net.offline_detected()
+
+        _build_minimal_db(tmp_path)
+        fetched: list[str] = []
+        monkeypatch.setattr(packs, "fetch_pack", lambda fn, *_a, **_k: fetched.append(fn))
+        s = BoundaryStore(tmp_path)
+        loc = TerritoryResolver(s).resolve(0.5, 0.5)
+        s.close()
+        assert fetched == []
+        assert loc.county is None
+
     def test_fetch_called_when_pack_missing(self, tmp_path: Path, monkeypatch):
         _build_minimal_db(tmp_path)
         fetched: list[str] = []
