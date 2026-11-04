@@ -4,7 +4,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [1.22.0-beta.14] — 2026-11-04
+
+> Headline: **one more fix before v1.22.0.** Pressing Escape while an
+> import, export or other job was still running closed OpenSAK without a
+> message. The dialog now stays open until the job is done. Everything
+> else is as in beta.13.
 
 ### Fixed
 
