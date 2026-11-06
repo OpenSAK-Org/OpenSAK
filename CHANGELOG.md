@@ -19,6 +19,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
   default; the `null` option puts a value of your choice in its place and
   writes it back as null. Contributed by nagisml.
+- **Macros can show what a table holds (#1275)** — `opensak.inspect(value)`
+  writes any value out as readable text: nested tables indented, keys sorted,
+  strings quoted, a table inside itself as `<cycle>`. `opensak.log()` now does
+  the same for a table, where it showed only the table's address. Contributed
+  by nagisml.
 - **Macros can change a cache's description and changed date** —
   `opensak.update()` and `opensak.insert{}` take `description` (a table like
   the one `opensak.description()` returns) and `changed_date`, which until now

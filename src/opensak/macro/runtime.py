@@ -134,6 +134,7 @@ from opensak.importer.gpx_import_settings import (
 from opensak.hint_detect import rot13
 from opensak.macro import forms as macro_forms
 from opensak.macro import helpers
+from opensak.macro import inspect_text
 from opensak.macro import json_codec
 from opensak.macro import settings as macro_settings
 from opensak.macro.errors import MacroError
@@ -293,6 +294,7 @@ MAX_OPENS_PER_RUN = 5
 # opensak.get_url(): the keys of its options table (Lua name → Python name)
 JSON_ENCODE_OPTIONS = {"null": "null", "empty": "empty", "indent": "indent"}
 JSON_DECODE_OPTIONS = {"null": "null"}
+INSPECT_OPTIONS = {"depth": "depth", "indent": "indent"}
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
 
@@ -4408,10 +4410,23 @@ class MacroRuntime:
         assert self._stop is not None
         self._stop("opensak.exit")
 
-    def _lua_log(self, *args) -> None:
-        text = "\t".join(helpers.lua_tostring(a) for a in args)
+    def _lua_log(self, describe, *args) -> None:
+        # A table is written out (#1275): its address alone tells nothing.
+        text = "\t".join(inspect_text.inspect(a, describe) if _is_lua_table(a)
+                         else helpers.lua_tostring(a) for a in args)
         logger.info("macro: %s", text)
         self._log(text)
+
+    def _inspect(self, lua, describe, value=None, options=None) -> str:
+        func = "opensak.inspect"
+        opts = self._options(func, INSPECT_OPTIONS, options)
+        depth = int(self._number_option(func, opts, "depth", inspect_text.DEFAULT_DEPTH,
+                                        1, macro_settings.MAX_DEPTH))
+        indent = int(self._number_option(func, opts, "indent", inspect_text.DEFAULT_INDENT,
+                                         0, 8))
+        text = inspect_text.inspect(value, describe, depth=depth, indent=indent)
+        json_codec.check_memory(lua, json_codec.string_cost(text), func)
+        return text
 
     def _sleep(self, ms=None) -> None:
         value = _number(ms)
@@ -7606,11 +7621,41 @@ API: tuple[ApiFunction, ...] = (
         name="log",
         description="Write a message to OpenSAK's log file and the macro "
                     "output. Run with `opensak --run-macro`, it goes to "
-                    "stderr while print() goes to stdout.",
-        example='opensak.log("checked " .. opensak.count() .. " caches")',
+                    "stderr while print() goes to stdout. A table is written "
+                    "out with its contents, as `opensak.inspect()` does.",
+        example='opensak.log("checked " .. opensak.count() .. " caches")\n'
+                'opensak.log("cache:", opensak.cache("GC12345"))',
         since=3,
-        bind=lambda rt, lua: rt._lua_log,
+        bind=lambda rt, lua: functools.partial(rt._lua_log, _lua_describe(lua)),
         params=(Param("...", "any", "Values, joined with tabs like print()."),),
+    ),
+    ApiFunction(
+        name="inspect",
+        description="Any value as readable text, e.g. to see what a table "
+                    "holds while writing a macro: print() only shows a "
+                    "table's address. The list part comes first, then the "
+                    "other keys sorted, so the same table always gives the "
+                    "same text. Strings are quoted. A table nested deeper "
+                    "than `depth` shows as `{...}`, a table inside itself as "
+                    "`<cycle>`, a function as `<function>`; metatables are "
+                    "ignored. Short tables stay on one line. Text longer "
+                    f"than {inspect_text.MAX_INSPECT_TEXT:,} characters is cut "
+                    "off and ends with `... (truncated)`.",
+        example='print(opensak.inspect({ 10, 20, name = "Hut", tags = { "a", "b" } }))\n'
+                '-- { 10, 20, name = "Hut", tags = { "a", "b" } }\n'
+                'opensak.log(opensak.inspect(opensak.cache("GC12345"), { depth = 1 }))',
+        since=5,
+        bind=lambda rt, lua: functools.partial(rt._inspect, lua, _lua_describe(lua)),
+        params=(
+            Param("value", "any", "The value to show."),
+            Param("options", "{ depth?: integer, indent?: integer }",
+                  "`depth`: how many levels of nested tables to write out, "
+                  f"1 to {macro_settings.MAX_DEPTH} (default "
+                  f"{inspect_text.DEFAULT_DEPTH}). `indent`: 0 to 8 spaces per "
+                  f"level (default {inspect_text.DEFAULT_INDENT}); 0 writes "
+                  "everything on one line.", optional=True),
+        ),
+        returns=("string", "The text."),
     ),
     ApiFunction(
         name="exit",
