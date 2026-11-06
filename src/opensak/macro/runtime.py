@@ -295,6 +295,9 @@ MAX_OPENS_PER_RUN = 5
 JSON_ENCODE_OPTIONS = {"null": "null", "empty": "empty", "indent": "indent"}
 JSON_DECODE_OPTIONS = {"null": "null"}
 INSPECT_OPTIONS = {"depth": "depth", "indent": "indent"}
+# opensak.log_vars() (#1276): tables are written on one line, this deep.
+LOG_VARS_OPTIONS = {"depth": "depth", "globals": "globals"}
+LOG_VARS_DEPTH = 2
 GET_URL_OPTIONS = {"timeout": "timeout", "caption": "caption", "binary": "binary",
                    "max_bytes": "max_bytes"}
 
@@ -590,8 +593,11 @@ FILTER_KEY_DOCS: tuple[FilterKeyDoc, ...] = (
 #     errors do (luaL_where; level 3 = where, the API function, its caller).
 #   * line(level) returns the chunk name and line at *level* the same way,
 #     ("macro", 12), or ("", -1) if there is none: for deprecation warnings.
-#   * make_loader() returns the loader opensak.run_macro() compiles other
-#     macros with (see below).
+#   * make_loader(main) returns the loader opensak.run_macro() compiles other
+#     macros with (see below); *main* is the chunk name of the macro itself.
+#   * variables(level, globals) returns the variables in scope at *level*
+#     for opensak.log_vars() (#1276), or nil if *level* is not the macro's
+#     own code (see below).
 _SANDBOX_SETUP = """
 local limit = ...
 local sethook, getinfo = debug.sethook, debug.getinfo
@@ -647,6 +653,8 @@ end
 local os_time, os_date, os_clock = os.time, os.date, os.clock
 os = { time = os_time, date = os_date, clock = os_clock }
 local raw_load, next = load, next
+local getlocal, getupvalue, rawequal = debug.getlocal, debug.getupvalue, rawequal
+local type, sub = type, string.sub
 io, debug, package, require, dofile, loadfile, load, collectgarbage, python = nil
 local function stop(msg)
   stopped = msg
@@ -671,18 +679,96 @@ end
 -- takes a snapshot of the globals and returns a loader that compiles another
 -- macro as text only (never bytecode) in a fresh copy of that snapshot, so
 -- macros share nothing but what they pass as arguments and return values.
-local function make_loader()
-  local base = {}
+-- envs maps the chunk name of every macro to its globals, for variables().
+local base, envs = {}, {}
+local function make_loader(main)
   for k, v in next, _G do base[k] = v end
+  envs[main] = _G
   return function(source, name)
     local env = {}
     for k, v in next, base do env[k] = v end
     env._G = env
     local fn, err = raw_load(source, name, "t", env)
+    if fn then envs[name] = env end
     return fn, err
   end
 end
-return stop, where, line, make_loader
+-- For opensak.log_vars() (#1276): the locals, varargs and upvalues of the
+-- function at *level* and, if *globals*, the globals it changed or added
+-- (compared with the snapshot of make_loader). Only a function of a macro
+-- is read: called through pcall, a coroutine, a library function or this
+-- sandbox, the function at *level* is not the macro's, and its variables
+-- (here e.g. raw_load) must not reach the macro.
+local function variables(level, globals)
+  local info = getinfo(level + 1, "Slf")
+  if not info or info.what == "C" or envs[info.source] == nil then return nil end
+  level = level + 1
+  local env, locals, upvalues = nil, {}, {}
+  local i = 1
+  while true do
+    local name, value = getlocal(level, i)
+    if name == nil then break end
+    if name == "_ENV" then
+      env = value
+    elseif sub(name, 1, 1) ~= "(" then
+      locals[#locals + 1] = { name, value }
+    end
+    i = i + 1
+  end
+  local varargs = { n = 0 }
+  i = -1
+  while true do
+    local name, value = getlocal(level, i)
+    if name == nil then break end
+    varargs.n = -i
+    varargs[-i] = value
+    i = i - 1
+  end
+  i = 1
+  while true do
+    local name, value = getupvalue(info.func, i)
+    if name == nil then break end
+    if name == "_ENV" then
+      if env == nil then env = value end
+    elseif name ~= "" then
+      upvalues[#upvalues + 1] = { name, value }
+    end
+    i = i + 1
+  end
+  local changed
+  if globals then
+    env = env or envs[info.source]
+    if type(env) == "table" then
+      changed = {}
+      for k, v in next, env do
+        if not rawequal(base[k], v) and not rawequal(v, env) then
+          changed[#changed + 1] = { k, v }
+        end
+      end
+    end
+  end
+  return { where = info.short_src .. ":" .. info.currentline, locals = locals,
+           varargs = varargs, upvalues = upvalues, globals = changed }
+end
+return stop, where, line, make_loader, variables
+"""
+
+# opensak.log_vars() (#1276), written in Lua so that it reads the variables
+# of the function calling it on the thread it runs on: a Lua function called
+# from Python runs on the main thread, even inside a coroutine. variables is
+# the sandbox's; emit is MacroRuntime._log_vars, wrapped. emit returns its
+# error message rather than raising it, so that error() here names the macro
+# line: an error raised in Python would name this chunk's line.
+_LOG_VARS_LUA = """
+local variables, emit = ...
+local type, rawget, error = type, rawget, error
+return function(options)
+  local globals = type(options) == "table" and rawget(options, "globals") == true
+  local frame = variables(2, globals)
+  local message = emit(frame, options)
+  -- Not called from macro code: no line of the sandbox in the message.
+  if message then error(message, frame and 2 or 0) end
+end
 """
 
 # opensak.transaction(fn), written in Lua: an error raised by fn passes
@@ -1566,6 +1652,80 @@ def _lua_describe(lua) -> Any:
                     'end)(type, string.format)')
 
 
+def _lua_list(table: Any) -> list:
+    """The entries 1..#table of a Lua table built by the sandbox."""
+    return [table[i] for i in range(1, len(table) + 1)]
+
+
+def _unique(entries: list) -> list[tuple[Any, Any]]:
+    """(name, value) of the sandbox's { name, value } entries; of several
+    with one name only the last, the one the code sees."""
+    last: dict[Any, Any] = {}
+    for entry in entries:
+        last.pop(entry[1], None)
+        last[entry[1]] = entry[2]
+    return list(last.items())
+
+
+def _variable_lines(frame: Any, describe: Any, depth: int, globals_: bool) -> list[str]:
+    """The lines opensak.log_vars() writes for *frame* (#1276): a header,
+    then the locals in the order they were declared, the varargs, the
+    upvalues the locals do not hide and, if *globals_*, the globals the
+    macro added or changed, sorted. All values together are at most
+    MAX_INSPECT_TEXT characters, like the text of opensak.inspect()."""
+    left = inspect_text.MAX_INSPECT_TEXT
+    body: list[str] = []
+
+    def add(line: str) -> None:
+        nonlocal left
+        left -= len(line)
+        body.append(line)
+
+    def show(value: Any) -> str:
+        return inspect_text.inspect(value, describe, depth=depth, indent=0,
+                                    limit=max(left, 1))
+
+    def name_text(name: Any) -> str:
+        if inspect_text.is_name(name):
+            return name
+        return "[" + inspect_text.inspect(name, describe, depth=1, indent=0) + "]"
+
+    locals_ = _unique(_lua_list(frame["locals"]))
+    hidden = {name for name, _ in locals_}
+    upvalues = [(name, value) for name, value in _unique(_lua_list(frame["upvalues"]))
+                if name not in hidden]
+    varargs = frame["varargs"]
+    count = int(varargs["n"])
+    globals_found = None if frame["globals"] is None else sorted(
+        ((entry[1], entry[2]) for entry in _lua_list(frame["globals"])),
+        key=lambda pair: inspect_text.key_order(pair[0]))
+
+    for name, value in locals_:
+        if left > 0:
+            add(f"{name} = {show(value)}")
+    if count and left > 0:
+        add("... = " + ", ".join(show(varargs[i]) for i in range(1, count + 1)))
+    if upvalues and left > 0:
+        body.append("-- upvalues")
+        for name, value in upvalues:
+            if left > 0:
+                add(f"{name} = {show(value)}")
+    if globals_ and left > 0:
+        if globals_found is None:
+            body.append("-- globals: not known in this function")
+        elif globals_found:
+            body.append("-- globals")
+            for name, value in globals_found:
+                if left > 0:
+                    add(f"{name_text(name)} = {show(value)}")
+    header = f"-- variables at {frame['where']}"
+    if left <= 0:
+        body.append(inspect_text.TRUNCATED.lstrip("\n"))
+    elif not body:
+        header += ": none"
+    return [header] + body
+
+
 def _ui_text(func: str, name: str, value: Any, optional: bool = False) -> str:
     """A text argument of a UI function; numbers are accepted, nil only
     when *optional* (→ "")."""
@@ -1693,6 +1853,8 @@ class MacroRuntime:
         # The sandbox's where() and line(), set while a run is in progress
         self._where: Optional[Callable[[], str]] = None
         self._line: Optional[Callable[[int], tuple[str, int]]] = None
+        # The sandbox's variables(), for opensak.log_vars() (#1276)
+        self._variables: Any = None
         # Deprecation warnings printed in this run: (macro file, name), so
         # each macro gets each one once (#1185)
         self._warned: set[tuple[Optional[Path], str]] = set()
@@ -4417,6 +4579,32 @@ class MacroRuntime:
         logger.info("macro: %s", text)
         self._log(text)
 
+    def _log_vars(self, describe, frame=None, options=None) -> Optional[str]:
+        """opensak.log_vars() (#1276): *frame* is what the sandbox's
+        variables() found at the calling line, nil if that is not macro
+        code. One `name = value` line per variable goes to the log. Returns
+        the error message, if any, for _LOG_VARS_LUA to raise."""
+        func = "opensak.log_vars"
+        try:
+            # First: a library function passes its own arguments as options.
+            if frame is None:
+                raise MacroError(
+                    f"{func} must be called from the macro's own code, not "
+                    "passed to pcall(), coroutine.wrap() or another function")
+            opts = self._options(func, LOG_VARS_OPTIONS, options)
+            depth = int(self._number_option(func, opts, "depth", LOG_VARS_DEPTH,
+                                            1, macro_settings.MAX_DEPTH))
+            globals_ = opts.get("globals", False)
+            if not isinstance(globals_, bool):
+                raise MacroError(f"{func}: globals must be true or false, "
+                                 f"got {helpers.lua_tostring(globals_)}")
+        except MacroError as exc:
+            return str(exc)
+        text = "\n".join(_variable_lines(frame, describe, depth, globals_))
+        logger.info("macro: %s", text)
+        self._log(text)
+        return None
+
     def _inspect(self, lua, describe, value=None, options=None) -> str:
         func = "opensak.inspect"
         opts = self._options(func, INSPECT_OPTIONS, options)
@@ -5213,7 +5401,7 @@ class MacroRuntime:
             # script only gets the plain functions in the opensak table.
             attribute_filter=self._deny_attribute,
         )
-        self._stop, self._where, self._line, make_loader = lua.execute(
+        self._stop, self._where, self._line, make_loader, self._variables = lua.execute(
             _SANDBOX_SETUP, self._instruction_limit
         )
 
@@ -5249,7 +5437,7 @@ class MacroRuntime:
                 table[name] = self._api_function(bound)
         g.opensak = lua.table_from(api, recursive=True)
         self._install_removed(lua, g.opensak)
-        self._load_macro = make_loader()
+        self._load_macro = make_loader(f"={chunk_name}")
 
         try:
             self._show_declarations()
@@ -5278,7 +5466,7 @@ class MacroRuntime:
             # attribute_filter) propagates as itself, not as a LuaError.
             raise MacroError(f"{type(exc).__name__}: {exc}") from exc
         finally:
-            self._stop = self._where = self._line = None
+            self._stop = self._where = self._line = self._variables = None
             if self._boundaries is not None:
                 self._boundaries[0].close()
                 self._boundaries = None
@@ -7656,6 +7844,38 @@ API: tuple[ApiFunction, ...] = (
                   "everything on one line.", optional=True),
         ),
         returns=("string", "The text."),
+    ),
+    ApiFunction(
+        name="log_vars",
+        description="For debugging: write the variables in scope at this "
+                    "line to the log, one `name = value` line each, as "
+                    "`opensak.log()` does. The locals come first, in the "
+                    "order they were declared, then the arguments passed as "
+                    "`...`, then the upvalues (locals of an enclosing "
+                    "function that the code uses). With `globals = true` "
+                    "the globals the macro added or changed follow, sorted. "
+                    "Values are written as `opensak.inspect()` does, a table "
+                    "on one line. Call it from the macro's code: passed to "
+                    "`pcall()`, `coroutine.wrap()` or another library "
+                    "function, it raises an error.",
+        example='local name, tags = "Hut", { "a", "b" }\n'
+                'opensak.log_vars()\n'
+                '-- -- variables at macro:2\n'
+                '-- name = "Hut"\n'
+                '-- tags = { "a", "b" }\n'
+                'opensak.log_vars({ globals = true, depth = 1 })',
+        since=5,
+        bind=lambda rt, lua: lua.execute(
+            _LOG_VARS_LUA, rt._variables,
+            rt._wrap(functools.partial(rt._log_vars, _lua_describe(lua)))),
+        params=(
+            Param("options", "{ depth?: integer, globals?: boolean }",
+                  "`depth`: how many levels of nested tables to write out, "
+                  f"1 to {macro_settings.MAX_DEPTH} (default {LOG_VARS_DEPTH}); "
+                  "deeper ones show as `{...}`. `globals`: also write the "
+                  "globals the macro added or changed (default false).",
+                  optional=True),
+        ),
     ),
     ApiFunction(
         name="exit",

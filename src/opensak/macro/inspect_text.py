@@ -110,6 +110,16 @@ def _key_order(key: Any) -> tuple:
     return (3, 0, (), "")
 
 
+def key_order(key: Any) -> tuple:
+    """Sort key for table keys, in the order inspect() writes them."""
+    return _key_order(key)
+
+
+def is_name(key: Any) -> bool:
+    """Whether *key* can be written as a bare name: `name = value`."""
+    return isinstance(key, str) and bool(_NAME.match(key)) and key not in _KEYWORDS
+
+
 def inspect(value: Any, describe: Callable[[Any], Any], depth: int = DEFAULT_DEPTH,
             indent: int = DEFAULT_INDENT, limit: int = MAX_INSPECT_TEXT) -> str:
     """*value* as readable text (see the module docstring).
@@ -165,7 +175,7 @@ def inspect(value: Any, describe: Callable[[Any], Any], depth: int = DEFAULT_DEP
             for key, item in rest:
                 if budget.spent:
                     break
-                if isinstance(key, str) and _NAME.match(key) and key not in _KEYWORDS:
+                if is_name(key):
                     shown_key = budget.spend(key)
                 else:
                     shown_key = "[" + show(key, level + 1, active) + "]"

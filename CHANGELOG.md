@@ -19,6 +19,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   own, e.g. for what `opensak.get_url()` downloads. A null is absent (`nil`) by
   default; the `null` option puts a value of your choice in its place and
   writes it back as null. Contributed by nagisml.
+- **Macros can log their variables (#1276)** — for debugging,
+  `opensak.log_vars()` writes the variables in scope at that line to the log,
+  one `name = value` line each: locals, arguments and upvalues, tables on one
+  line. With `{ globals = true }` the globals the macro added or changed are
+  listed too. The new example macro `debugging_a_macro.lua` shows it next to
+  `opensak.log()` and `opensak.inspect()`. Contributed by nagisml.
 - **Macros can show what a table holds (#1275)** — `opensak.inspect(value)`
   writes any value out as readable text: nested tables indented, keys sorted,
   strings quoted, a table inside itself as `<cycle>`. `opensak.log()` now does
