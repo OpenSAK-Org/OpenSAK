@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
     QToolButton, QWidget,
 )
 
+from opensak.gui.settings import get_settings
 from opensak.lang import tr
+from opensak.utils.types import TEXT_SIZE_MAP
 
 INDENT = "    "
 
@@ -172,9 +174,7 @@ class CodeEditor(QPlainTextEdit):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * len(INDENT))
         self.highlighter = LuaHighlighter(self.document(), dark=_is_dark(self))
         self._error_line: int | None = None
         self._numbers = _LineNumberArea(self)
@@ -182,8 +182,17 @@ class CodeEditor(QPlainTextEdit):
         self.updateRequest.connect(self._update_numbers)
         self.cursorPositionChanged.connect(self._update_selections)
         self.textChanged.connect(self.clear_error_line)
-        self._update_margin()
+        self.refresh_sizes()
         self._update_selections()
+
+    def refresh_sizes(self) -> None:
+        """Apply the font size of the Text size setting (issue #1246)."""
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        font.setPointSize(TEXT_SIZE_MAP[get_settings().text_size]["editor"])
+        self.setFont(font)
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * len(INDENT))
+        self._update_margin()
+        self._numbers.update()
 
     # -- Line numbers ----------------------------------------------------------
 
