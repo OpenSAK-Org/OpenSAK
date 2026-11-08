@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Nastavení…",
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Spustit makro (Lua)…",
     "action_find_more_macros":      "Najít další makra…",
-    "macro_title":                  "Makro (Lua) — ověření konceptu",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
     "macro_open_title":             "Otevřít makro Lua",
