@@ -4,6 +4,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.17] — 2026-11-08
+
+> Headline: **last touches before v1.22.0.** The macro windows no longer
+> call themselves a "proof of concept", and the GSAK macro comparison
+> now shows that ReSyncLogs works in OpenSAK. Everything else is as in
+> beta.16.
+
+### Changed
+
+- **Macro windows no longer say "proof of concept" (#1278)** — the macro
+  editor, the progress dialog and the title of macro forms and message
+  boxes read "Macro (Lua) — proof of concept". With macros part of
+  v1.22.0, the title is now simply "Macro (Lua)", in all languages.
+  Contributed by nagisml.
+
+### Fixed
+
+- **ReSyncLogs in the GSAK macro comparison (#1274)** — the "GSAK macros
+  compared" section of the macro API reference marked GSAK's ReSyncLogs
+  as needing the geocaching.com API. It doesn't: it only recalculates
+  values that depend on the logs, which OpenSAK already does by itself
+  after every log change from a macro. It is now marked as available,
+  with the OpenSAK equivalent. Contributed by nagisml.
+
+### For developers
+
+- **Linux build retries the appimagetool download** — a short network
+  error while downloading `appimagetool` failed the whole Linux AppImage
+  job (wget exit code 4). `build.yml` now uses `curl` with five retries.
+- **English comments in `logger.py` (#1249)** — the Danish comments and
+  docstrings are translated to English; the code is unchanged.
+  Contributed by Jahnavi-HJ.
+
+---
+
 ## [1.22.0-beta.16] — 2026-11-08
 
 ### Changed
