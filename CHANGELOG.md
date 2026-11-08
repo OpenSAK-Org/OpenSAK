@@ -4,6 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.22.0-beta.16] — 2026-11-08
+
+### Changed
+
+- **The Microsoft Store now lists all 11 languages** — the Store page showed
+  only "English (United States)" under Supported languages, because the
+  MSIX package declared only English. The package now declares every UI
+  language (Danish, English, French, Dutch, Portuguese, Czech, Swedish,
+  German, Swiss German, Polish and Spanish). The Store description itself
+  stays in English. A new test keeps the package's language list in step
+  with the languages in the app.
+
+---
+
 ## [1.22.0-beta.15] — 2026-11-05
 
 > Headline: **a saved column view now comes back exactly as it was saved.**

@@ -85,8 +85,23 @@
     <Description>Free, open-source, cross-platform geocache management tool.</Description>
   </Properties>
 
+  <!-- The Store shows these as "Supported languages". Keep in sync with
+       AVAILABLE_LANGUAGES in the opensak.lang package (checked by
+       tests/unit-tests/test_msix_languages.py). en-us must stay first:
+       the first entry is the package's default language. OpenSAK's "se"
+       (Swedish) is "sv-se" here; "se" is Northern Sami in BCP-47. -->
   <Resources>
     <Resource Language="en-us" />
+    <Resource Language="da-dk" />
+    <Resource Language="fr-fr" />
+    <Resource Language="nl-nl" />
+    <Resource Language="pt-pt" />
+    <Resource Language="cs-cz" />
+    <Resource Language="sv-se" />
+    <Resource Language="de-de" />
+    <Resource Language="de-ch" />
+    <Resource Language="pl-pl" />
+    <Resource Language="es-es" />
   </Resources>
 
   <Dependencies>
