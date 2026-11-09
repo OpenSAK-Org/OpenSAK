@@ -4,6 +4,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.1] — Unreleased
+
+### Changed
+
 ## [1.22.0] — 2026-11-09
 
 > First stable release of the 1.22.0 cycle. Replaces the `1.22.0-beta.1`
