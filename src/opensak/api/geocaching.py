@@ -38,6 +38,7 @@ from enum import IntEnum
 from opensak.net import SSL_CONTEXT
 from opensak.utils.types import GcCode, LogType
 from opensak.utils.utils import validate_gc_code
+from opensak.lang import tr
 
 logger = logging.getLogger(__name__)
 
@@ -145,13 +146,14 @@ class _CallbackHandler(http.server.BaseHTTPRequestHandler):
             if code:
                 self.server.auth_code = code
                 self.server.auth_error = None
-                html = self._html("Login gennemført", "Du kan lukke dette vindue og vende tilbage til OpenSAK.", "✓")
+                html = self._html(tr("gc_oauth_success_title"), tr("gc_oauth_success_msg"), "✓")
             else:
                 self.server.auth_code = None
-                self.server.auth_error = error or "Ukendt fejl"
-                html = self._html("Login fejlede", f"Fejl: {self.server.auth_error}", "✗")
+                self.server.auth_error = error or tr("gc_oauth_unknown_error")
+                html = self._html(tr("gc_oauth_failed_title"),
+                                  tr("gc_oauth_error", error=self.server.auth_error), "✗")
         else:
-            html = self._html("OpenSAK", "Venter på godkendelse...", "")
+            html = self._html("OpenSAK", tr("gc_oauth_waiting"), "")
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -184,8 +186,8 @@ def start_oauth_flow() -> Optional[dict]:
     """
     if not GC_CLIENT_ID:
         logger.warning(
-            "GC_CLIENT_ID er ikke sat — Geocaching.com API ikke tilgængeligt endnu. "
-            "Udfyld GC_CLIENT_ID i api/geocaching.py når API-adgang er godkendt."
+            "GC_CLIENT_ID is not set — Geocaching.com API not available yet. "
+            "Fill in GC_CLIENT_ID in api/geocaching.py once API access is approved."
         )
         return None
 
@@ -213,17 +215,17 @@ def start_oauth_flow() -> Optional[dict]:
     thread.start()
 
     # Åbn browser
-    logger.info("Åbner browser til Geocaching.com login...")
+    logger.info("Opening browser for Geocaching.com login...")
     webbrowser.open(auth_url)
 
     # Vent på callback (max 120 sekunder)
     thread.join(timeout=120)
 
     if server.auth_error:
-        raise RuntimeError(f"OAuth fejl: {server.auth_error}")
+        raise RuntimeError(tr("gc_oauth_error", error=server.auth_error))
 
     if not server.auth_code:
-        raise RuntimeError("Timeout — intet svar fra Geocaching.com inden 2 minutter.")
+        raise RuntimeError(tr("gc_oauth_timeout"))
 
     # Veksle authorization code → tokens
     return _exchange_code(server.auth_code, code_verifier)
@@ -254,7 +256,7 @@ def _exchange_code(code: str, code_verifier: str) -> dict:
     token_data["expires_at"] = time.time() + expires_in
 
     _save_token(token_data)
-    logger.info("Token gemt til disk.")
+    logger.info("Token saved to disk.")
     return token_data
 
 
@@ -287,7 +289,7 @@ def _refresh_token() -> Optional[dict]:
         return new_token
 
     except Exception as exc:
-        logger.error(f"Token refresh fejlede: {exc}")
+        logger.error(f"Token refresh failed: {exc}")
         return None
 
 
@@ -315,7 +317,7 @@ def get_valid_token() -> Optional[str]:
 def logout() -> None:
     """Log ud — slet token fra disk."""
     _delete_token()
-    logger.info("Logget ud fra Geocaching.com.")
+    logger.info("Logged out of Geocaching.com.")
 
 
 def is_logged_in() -> bool:
@@ -338,7 +340,7 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
     """
     access_token = get_valid_token()
     if not access_token:
-        logger.warning("Ikke logget ind — kan ikke kalde API.")
+        logger.warning("Not logged in — cannot call the API.")
         return None
 
     url = GC_API_BASE + endpoint
@@ -359,15 +361,15 @@ def _api_get(endpoint: str, params: Optional[dict] = None) -> Optional[dict]:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
-            logger.warning("401 Unauthorized — token muligvis udløbet.")
+            logger.warning("401 Unauthorized — token may have expired.")
             # Forsøg refresh og prøv én gang til
             refreshed = _refresh_token()
             if refreshed:
                 return _api_get(endpoint, params)
-        logger.error(f"API HTTP fejl {exc.code}: {endpoint}")
+        logger.error(f"API HTTP error {exc.code}: {endpoint}")
         return None
     except Exception as exc:
-        logger.error(f"API fejl: {exc}")
+        logger.error(f"API error: {exc}")
         return None
 
 

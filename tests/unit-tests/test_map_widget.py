@@ -732,3 +732,42 @@ class TestScriptInjection:
     def test_home_popup_escapes_label(self):
         body = self._fn_body("setHomeLocation", "\n}")
         assert "escapeHtml(label)" in body
+
+
+# ── Translated tooltips spliced into the page source (issue #1094) ────────────
+
+class TestTooltipEscaping:
+    NASTY = "Don't \"quote\" me \\ </script><script>alert(1)</script>"
+
+    def _render(self, monkeypatch, text):
+        monkeypatch.setattr(mw_mod, "tr", lambda key, *a, **kw: text)
+        return MapWidget._render_map_html(55.0, 12.0)
+
+    def test_template_tokens_are_not_quoted(self):
+        # The tokens must be replaced by complete JS literals, not spliced
+        # between quotes in the template.
+        assert "'MAP_TIP_MAXIMIZE'" not in mw_mod.MAP_HTML
+        assert "'MAP_TIP_POPOUT'" not in mw_mod.MAP_HTML
+        assert "maxBtn.title = MAP_TIP_MAXIMIZE;" in mw_mod.MAP_HTML
+        assert "popBtn.title = MAP_TIP_POPOUT;" in mw_mod.MAP_HTML
+
+    def test_quotes_and_backslashes_round_trip_as_js_literal(self, monkeypatch):
+        html = self._render(monkeypatch, self.NASTY)
+        for var in ("maxBtn", "popBtn"):
+            line = next(l for l in html.splitlines() if f"{var}.title = " in l)
+            literal = line.split(f"{var}.title = ", 1)[1].rstrip().rstrip(";")
+            # "<\/" is a valid JSON escape for "/", so json.loads round-trips it.
+            assert json.loads(literal) == self.NASTY
+
+    def test_script_close_tag_cannot_end_inline_script(self, monkeypatch):
+        html = self._render(monkeypatch, self.NASTY)
+        # Only the template's own closing tags may remain.
+        assert html.count("</script>") == mw_mod.MAP_HTML.count("</script>")
+
+    def test_no_tokens_left_unreplaced(self, monkeypatch):
+        html = self._render(monkeypatch, "Maximize")
+        assert "MAP_TIP_" not in html
+
+    def test_token_names_inside_translation_are_not_rewritten(self, monkeypatch):
+        html = self._render(monkeypatch, "HINT_TEXT_COLOR INIT_LAT")
+        assert '"HINT_TEXT_COLOR INIT_LAT"' in html

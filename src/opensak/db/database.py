@@ -14,18 +14,22 @@ from __future__ import annotations
 
 import errno
 import logging
+import re
 import sqlite3
 import time
+import weakref
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterable
+from typing import Callable, Generator, Iterable, Iterator, cast
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from opensak.backup.premigration import backup_before_migration, pending_schema_version
+from opensak.db import companion, custom_fields, maintenance
 from opensak.db.models import Base
+from opensak.utils import flags
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,42 @@ def _make_engine(db_path: Path) -> Engine:
         future=True,
         connect_args={"check_same_thread": False, "timeout": 30},
     )
+    _attach_companion_on_checkout(engine, db_path)
     return engine
+
+
+def _attach_companion_on_checkout(engine: Engine, db_path: Path) -> None:
+    """
+    Attach *db_path*'s companion database (db/companion.py) to each of
+    *engine*'s connections, as ``companion``, once it is usable. Checked on
+    checkout rather than on connect, so a companion created while the
+    engine is open is attached by the next session without reopening the
+    database. A connection never has a transaction open at checkout, which
+    ATTACH needs.
+
+    It also keeps the ``caches_all`` TEMP view (custom fields, #1028) of
+    each connection up to date (db/custom_fields.py), once _open_engine()
+    is done with the schema: a TEMP view on ``caches`` makes SQLite refuse
+    the table rebuilds of the migrations.
+    """
+    if not flags.companion_db:
+        return
+    key = companion.status_key(db_path)
+
+    @event.listens_for(engine, "checkout")
+    def _attach(dbapi_connection, connection_record, _proxy) -> None:
+        info = connection_record.info
+        if (not info.get("companion_attached")
+                and companion.status_for_key(key) is companion.Status.OK
+                and companion.attach(dbapi_connection, db_path)):
+            info["companion_attached"] = True
+        if engine in _schema_ready:
+            custom_fields.ensure_view(
+                dbapi_connection, db_path, info, bool(info.get("companion_attached")))
+
+
+# Engines whose schema _open_engine() has brought up to date.
+_schema_ready: "weakref.WeakSet[Engine]" = weakref.WeakSet()
 
 
 @event.listens_for(Engine, "connect")
@@ -79,7 +118,33 @@ _migrated_paths: set = set()  # undgår at køre migrationer to gange på samme 
 # bumped to the highest migration number whenever a new migration is added
 # below — _run_migrations() skips the whole block when the database already
 # reports this version, so a stale constant means new migrations never run.
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 28
+
+# Steps of opening a database that can take a while, for set_progress_callback().
+PROGRESS_MIGRATING = "migrating"
+PROGRESS_COMPACTING = "compacting"
+
+_progress_callback: Callable[[str], None] | None = None
+
+
+def set_progress_callback(callback: Callable[[str], None] | None) -> None:
+    """
+    Tell *callback* when opening a database starts a slow step:
+    PROGRESS_MIGRATING (the schema is being updated) or PROGRESS_COMPACTING
+    (VACUUM after a migration that rebuilt tables). The GUI shows it on the
+    splash screen or in a progress dialog. None removes the callback.
+    """
+    global _progress_callback
+    _progress_callback = callback
+
+
+def _report_progress(step: str) -> None:
+    if _progress_callback is None:
+        return
+    try:
+        _progress_callback(step)
+    except Exception:
+        logger.debug("progress callback failed", exc_info=True)
 
 
 def init_db(db_path: Path | None = None) -> Engine:
@@ -128,7 +193,10 @@ def init_db(db_path: Path | None = None) -> Engine:
     _engine = new_engine
     _SessionLocal = _session_factory(new_engine)
     if old_engine is not None and old_engine is not new_engine:
+        optimize_database(_engine_path(old_engine))
         old_engine.dispose()
+    # #1048: statistics for the query planner, created the first time.
+    optimize_database(db_path)
     logger.info("init_db: ready (+%.2fs total)", time.monotonic() - t0)
     return _engine
 
@@ -161,6 +229,14 @@ def _open_engine(db_path: Path) -> Engine:
         if db_path not in _migrated_paths:
             backup_before_migration(db_path, SCHEMA_VERSION)
 
+        # The companion database (#1034): check it and update its own
+        # schema, so the connections can attach it. Never raises.
+        if flags.companion_db:
+            companion.prepare(db_path)
+            # Custom fields (#1028): add or rename columns as the
+            # definitions say. Never raises.
+            custom_fields.on_open(db_path)
+
         # Create all tables that don't exist yet (safe to call multiple times).
         logger.info("open_db: opening %s", db_path)
         t0 = time.monotonic()
@@ -171,6 +247,7 @@ def _open_engine(db_path: Path) -> Engine:
         if db_path not in _migrated_paths:
             _run_migrations(new_engine)
             _migrated_paths.add(db_path)
+        _schema_ready.add(new_engine)
     except Exception:
         new_engine.dispose()
         raise
@@ -205,6 +282,7 @@ def _run_migrations(engine: Engine) -> None:
             "migrations: starting, current_version=%s target=%s",
             current_version, SCHEMA_VERSION,
         )
+        _report_progress(PROGRESS_MIGRATING)
         _mig_t0 = time.monotonic()
 
         # ── Migration 1: Tilføj is_corrected til user_notes ──────────────────
@@ -218,7 +296,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE user_notes ADD COLUMN is_corrected BOOLEAN NOT NULL DEFAULT 0"
             ))
             conn.commit()
-            print("Migration: tilføjede user_notes.is_corrected")
+            logger.info("Migration: added user_notes.is_corrected")
 
         # ── Migration 2: Udvid waypoints unique constraint ────────────────────
         logger.debug("[migrations] entering migration 2 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -253,6 +331,9 @@ def _run_migrations(engine: Engine) -> None:
             # Unik-constraint laves som et NAVNGIVET index (ikke inline UNIQUE,
             # der ville få et auto-genereret sqlite_autoindex-navn) så gaten
             # ovenfor faktisk genkender den og matcher modellens constraint-navn.
+            # NB: this PRAGMA is a no-op inside an open transaction, and none
+            # is committed first. It only works because waypoints is a child
+            # table — don't copy this for a parent table (see migration 26).
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text("""
                 CREATE TABLE waypoints_new (
@@ -287,7 +368,7 @@ def _run_migrations(engine: Engine) -> None:
                 "[migrations] 2: waypoints table rebuild done (+%.2fs)",
                 time.monotonic() - _step_t0,
             )
-            print("Migration: opdaterede waypoints unique constraint til (cache_id, prefix, name)")
+            logger.info("Migration: updated waypoints unique constraint to (cache_id, prefix, name)")
 
         # ── Migration 3: Tilføj county til caches ────────────────────────────
         logger.debug("[migrations] entering migration 3 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -298,7 +379,7 @@ def _run_migrations(engine: Engine) -> None:
         if "county" not in existing_caches:
             conn.execute(text("ALTER TABLE caches ADD COLUMN county VARCHAR(64)"))
             conn.commit()
-            print("Migration: tilføjede caches.county")
+            logger.info("Migration: added caches.county")
 
         # ── Migration 4: GSAK field parity (issue #33) ───────────────────────
         logger.debug("[migrations] entering migration 4 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -330,7 +411,7 @@ def _run_migrations(engine: Engine) -> None:
 
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-felter til caches: {', '.join(added)}")
+            logger.info(f"Migration: added GSAK fields to caches: {', '.join(added)}")
 
         # ── Migration 5: Normaliser GPS Adventures cache_type varianter ─────
         logger.debug("[migrations] entering migration 5 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -344,7 +425,7 @@ def _run_migrations(engine: Engine) -> None:
         """))
         if result.rowcount:
             conn.commit()
-            print(f"Migration: normaliserede {result.rowcount} GPS Adventures cache_type værdier")
+            logger.info(f"Migration: normalised {result.rowcount} GPS Adventures cache_type values")
 
         # ── Migration 6: indexes on logs table (issue #723) ──────────────────
         logger.debug("[migrations] entering migration 6 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -383,7 +464,7 @@ def _run_migrations(engine: Engine) -> None:
                 created_log_idx.append(idx_name)
         if created_log_idx:
             conn.commit()
-            print(f"Migration: oprettede {len(created_log_idx)} indexes på logs ({', '.join(created_log_idx)})")
+            logger.info(f"Migration: created {len(created_log_idx)} indexes on logs ({', '.join(created_log_idx)})")
 
         # ── Migration 7: log_count kolonne (issue #87) ───────────────────────
         logger.debug("[migrations] entering migration 7 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -412,7 +493,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.log_count og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: added caches.log_count and updated {result.rowcount} caches")
 
 
         # ── Migration 8: Nano → Micro (data normalisation) ───────────────────
@@ -427,7 +508,7 @@ def _run_migrations(engine: Engine) -> None:
         ))
         if result.rowcount:
             conn.commit()
-            print(f"Migration: konverterede {result.rowcount} 'Nano' container værdier til 'Micro'")
+            logger.info(f"Migration: converted {result.rowcount} 'Nano' container values to 'Micro'")
 
 
         # ── Migration 9: parent_gc_code (issue #141) ─────────────────────────
@@ -443,7 +524,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN parent_gc_code VARCHAR(16)"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.parent_gc_code")
+            logger.info("Migration: added caches.parent_gc_code")
 
         # ── Migration 10: owner_name (issue #158) ─────────────────────────────
         logger.debug("[migrations] entering migration 10 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -458,7 +539,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN owner_name VARCHAR(128)"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.owner_name")
+            logger.info("Migration: added caches.owner_name")
 
         # ── Migration 11: last_log_date (issue #186) ─────────────────────────
         logger.debug("[migrations] entering migration 11 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -482,7 +563,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.last_log_date og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: added caches.last_log_date and updated {result.rowcount} caches")
 
         # ── Migration 12: indexes for filter/sort columns (#214 phase 3) ─────
         logger.debug("[migrations] entering migration 12 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -534,7 +615,7 @@ def _run_migrations(engine: Engine) -> None:
                 created_idx.append(idx_name)
         if created_idx:
             conn.commit()
-            print(f"Migration: oprettede {len(created_idx)} indexes på caches ({', '.join(created_idx)})")
+            logger.info(f"Migration: created {len(created_idx)} indexes on caches ({', '.join(created_idx)})")
 
         # ── Migration 13: location provenance columns (issue #60 phase 3) ──────
         logger.debug("[migrations] entering migration 13 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -558,7 +639,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede provenance-kolonner til caches: {', '.join(added)}")
+            logger.info(f"Migration: added provenance columns to caches: {', '.join(added)}")
 
         # ── Migration 14: parent_gc_code on waypoints (issue #376) ───────────
         logger.debug("[migrations] entering migration 14 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -580,7 +661,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print("Migration: tilføjede waypoints.parent_gc_code")
+            logger.info("Migration: added waypoints.parent_gc_code")
 
         # ── Migration 15: waypoint_count on caches (issue #377) ──────────────
         logger.debug("[migrations] entering migration 15 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -601,7 +682,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print("Migration: tilføjede caches.waypoint_count")
+            logger.info("Migration: added caches.waypoint_count")
 
         # ── Migration 16: locked flag on caches (issue #202) ─────────────────
         logger.debug("[migrations] entering migration 16 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -617,7 +698,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN locked BOOLEAN NOT NULL DEFAULT 0"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.locked")
+            logger.info("Migration: added caches.locked")
 
         # ── Migration 17: trackables table (issue #491) ───────────────────────
         logger.debug("[migrations] entering migration 17 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -649,7 +730,7 @@ def _run_migrations(engine: Engine) -> None:
                 "CREATE INDEX ix_trackables_cache_id ON trackables (cache_id)"
             ))
             conn.commit()
-            print("Migration: oprettede trackables-tabellen (manglede siden v1.14.0)")
+            logger.info("Migration: created the trackables table (missing since v1.14.0)")
 
         # ── Migration 18: trackable_count kolonne (issue #489/#491) ──────────
         logger.debug("[migrations] entering migration 18 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -674,7 +755,7 @@ def _run_migrations(engine: Engine) -> None:
                 )
             """))
             conn.commit()
-            print(f"Migration: tilføjede caches.trackable_count og opdaterede {result.rowcount} caches")
+            logger.info(f"Migration: added caches.trackable_count and updated {result.rowcount} caches")
 
         # ── Migration 19: GSAK database import schema additions (issue #469) ─
         logger.debug("[migrations] entering migration 19 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -702,7 +783,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til caches: {', '.join(added)}")
+            logger.info(f"Migration: added GSAK import fields to caches: {', '.join(added)}")
 
         existing_wpts_18 = [
             row[1]
@@ -722,7 +803,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til waypoints: {', '.join(added)}")
+            logger.info(f"Migration: added GSAK import fields to waypoints: {', '.join(added)}")
 
         existing_logs_18 = [
             row[1]
@@ -740,7 +821,7 @@ def _run_migrations(engine: Engine) -> None:
                 added.append(col_name)
         if added:
             conn.commit()
-            print(f"Migration: tilføjede GSAK-import-felter til logs: {', '.join(added)}")
+            logger.info(f"Migration: added GSAK import fields to logs: {', '.join(added)}")
 
         # ── Migration 20: find_count on caches (issue #517) ──────────────────
         logger.debug("[migrations] entering migration 20 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -755,7 +836,7 @@ def _run_migrations(engine: Engine) -> None:
                 "ALTER TABLE caches ADD COLUMN find_count INTEGER"
             ))
             conn.commit()
-            print("Migration: tilføjede caches.find_count")
+            logger.info("Migration: added caches.find_count")
 
         # ── Migration 21: remove leftover favorite_point column (issue #530) ─
         logger.debug("[migrations] entering migration 21 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -784,12 +865,12 @@ def _run_migrations(engine: Engine) -> None:
             if sqlite3.sqlite_version_info >= (3, 35, 0):
                 conn.execute(text("ALTER TABLE caches DROP COLUMN favorite_point"))
                 conn.commit()
-                print("Migration: fjernede efterladt caches.favorite_point kolonne")
+                logger.info("Migration: removed leftover caches.favorite_point column")
             else:
-                print(
-                    "Migration: kunne ikke fjerne efterladt caches.favorite_point "
-                    f"kolonne — SQLite {sqlite3.sqlite_version} understøtter ikke "
-                    "DROP COLUMN (kræver 3.35+). Kontakt hello@opensak.com."
+                logger.warning(
+                    "Migration: could not remove leftover caches.favorite_point "
+                    f"column — SQLite {sqlite3.sqlite_version} does not support "
+                    "DROP COLUMN (needs 3.35+). Contact hello@opensak.com."
                 )
 
         # ── Migration 22: waypoints unique constraint on wp_code, not name (#536) ─
@@ -824,6 +905,9 @@ def _run_migrations(engine: Engine) -> None:
                 if name != "uq_waypoint_cache_prefix_name" and sql
             ]
 
+            # NB: no-op inside the open transaction (see migration 2); only
+            # harmless because waypoints is a child table. Migration 26
+            # shows the pattern for a parent table.
             conn.execute(text("PRAGMA foreign_keys=OFF"))
             conn.execute(text("""
                 CREATE TABLE waypoints_new (
@@ -863,7 +947,7 @@ def _run_migrations(engine: Engine) -> None:
             ))
             conn.execute(text("PRAGMA foreign_keys=ON"))
             conn.commit()
-            print("Migration: opdaterede waypoints unique constraint til (cache_id, wp_code)")
+            logger.info("Migration: updated waypoints unique constraint to (cache_id, wp_code)")
 
         # ── Migration 23: found_log_count kolonne (issue #552) ───────────────
         logger.debug("[migrations] entering migration 23 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -916,14 +1000,14 @@ def _run_migrations(engine: Engine) -> None:
                     WHERE caches.found = 1
                 """), {"gc_finder_id": gc_finder_id, "gc_username": gc_username})
                 conn.commit()
-                print(
-                    "Migration: tilføjede caches.found_log_count og "
-                    f"opdaterede {result.rowcount} caches"
+                logger.info(
+                    "Migration: added caches.found_log_count and "
+                    f"updated {result.rowcount} caches"
                 )
             else:
-                print(
-                    "Migration: tilføjede caches.found_log_count "
-                    "(intet gc_username/gc_finder_id sat — springer backfill over)"
+                logger.info(
+                    "Migration: added caches.found_log_count "
+                    "(no gc_username/gc_finder_id set — skipping backfill)"
                 )
 
         # ── Migration 24: last_found_date, last_gpx_update, last_four_logs
@@ -1022,7 +1106,7 @@ def _run_migrations(engine: Engine) -> None:
 
         if added_23:
             conn.commit()
-            print(f"Migration: tilføjede caches.{', caches.'.join(added_23)}")
+            logger.info(f"Migration: added caches.{', caches.'.join(added_23)}")
 
         # ── Migration 25: partial index on caches missing a distance ─────────
         logger.debug("[migrations] entering migration 25 (+%.2fs)", time.monotonic() - _mig_t0)
@@ -1037,6 +1121,57 @@ def _run_migrations(engine: Engine) -> None:
         ))
         conn.commit()
 
+        # ── Migration 26: database defaults for NOT NULL columns (#1033) ─────
+        logger.debug("[migrations] entering migration 26 (+%.2fs)", time.monotonic() - _mig_t0)
+        # Columns that had a default only in the model need one in the
+        # database too, so a plain SQL INSERT only has to list the real data.
+        # SQLite cannot change a column's default, so each affected table is
+        # rebuilt — only where a default is still missing, which also makes
+        # this a no-op on databases created by create_all() from now on.
+        _step_t0 = time.monotonic()
+        rebuilt = _add_column_defaults(conn, _COLUMN_DEFAULTS_26)
+        if rebuilt:
+            logger.info(
+                "[migrations] 26: rebuilt %s with column defaults (+%.2fs)",
+                ", ".join(rebuilt), time.monotonic() - _step_t0,
+            )
+            logger.info(f"Migration: added database defaults to {', '.join(rebuilt)}")
+
+        # ── Migration 27: GSAK's small columns (#1139, #1028 step 2) ─────────
+        logger.debug("[migrations] entering migration 27 (+%.2fs)", time.monotonic() - _mig_t0)
+        # Plain ADD COLUMNs: SQLite allows NOT NULL here because each one has
+        # a constant default, so no table rebuild is needed. No backfill —
+        # the values only exist in GSAK (or come with the next import), and
+        # existing corrections keep corrected_source NULL ("unknown").
+        added_27 = _add_missing_columns(conn, _NEW_COLUMNS_27)
+        if added_27:
+            conn.commit()
+            logger.info(f"Migration: added {', '.join(added_27)}")
+
+        # ── Migration 28: last_user_update triggers + is_owner (#1140) ───────
+        logger.debug("[migrations] entering migration 28 (+%.2fs)", time.monotonic() - _mig_t0)
+        # The database stamps caches.last_user_update itself whenever a user
+        # field changes, whatever wrote it (GUI, macros, raw SQL). IF NOT
+        # EXISTS makes this safe to run again, and also creates them on new
+        # databases. NB: a migration that rebuilds caches or user_notes
+        # (DROP TABLE) drops their triggers too and must call this again.
+        create_user_update_triggers(conn)
+        # is_owner from the account in Settings, for existing databases; from
+        # now on the GPX import and a change of account keep it current. Safe
+        # to run again: it only follows the current account (and does nothing
+        # without one, keeping what the GSAK import brought in).
+        from opensak.db.ownership import recalculate_is_owner
+        from opensak.gui.settings import get_settings
+        _sett_28 = get_settings()
+        changed_28 = recalculate_is_owner(
+            conn,
+            getattr(_sett_28, "gc_finder_id", ""),
+            getattr(_sett_28, "gc_username", ""),
+        )
+        if changed_28:
+            logger.info(f"Migration: set caches.is_owner on {changed_28} caches")
+        conn.commit()
+
         # ── Stamp the schema version so the next launch skips the probes ─────
         # PRAGMA does not accept bind parameters; SCHEMA_VERSION is a trusted
         # int constant, so inlining it is safe.
@@ -1046,6 +1181,306 @@ def _run_migrations(engine: Engine) -> None:
             "migrations: done, now at schema %s (+%.2fs total)",
             SCHEMA_VERSION, time.monotonic() - _mig_t0,
         )
+
+        # ── Compact after migration 26 (#1033) ───────────────────────────────
+        # The rebuild left the old tables' pages on the free list, so the
+        # file grew by about the size of the rebuilt tables. VACUUM gives
+        # that back — after the commit, with foreign keys on again. It only
+        # runs when it pays off and the disk has room, and never raises: a
+        # database that could not be compacted is still valid, just larger.
+        if rebuilt:
+            maintenance.vacuum(
+                cast(sqlite3.Connection, conn.connection.driver_connection),
+                Path(engine.url.database or ""),
+                progress=lambda: _report_progress(PROGRESS_COMPACTING),
+            )
+
+        # #1048: a table rebuild drops the planner's statistics, and new
+        # columns and indexes have none yet. Never raises.
+        try:
+            maintenance.optimize(cast(sqlite3.Connection, conn.connection.driver_connection))
+        except sqlite3.Error as exc:
+            logger.warning("migrations: optimize failed: %s", exc)
+
+
+# Migration 26 (#1033): the defaults models.py has as server_default, frozen
+# here so later model changes don't alter what this migration does.
+_SQL_NOW_26 = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000')"
+_COLUMN_DEFAULTS_26: dict[str, dict[str, str]] = {
+    "caches": {
+        "available": "1", "archived": "0", "premium_only": "0",
+        "short_desc_html": "0", "long_desc_html": "0", "found": "0", "dnf": "0",
+        "first_to_find": "0", "user_flag": "0", "watch": "0", "locked": "0",
+        "log_count": "0", "trackable_count": "0", "found_log_count": "0",
+        "waypoint_count": "0", "imported_at": _SQL_NOW_26,
+    },
+    "user_notes": {"is_corrected": "0", "updated_at": _SQL_NOW_26},
+    "logs": {"text_encoded": "0", "logged_by_owner": "0"},
+    "attributes": {"is_on": "1"},
+    # Migration 22 already rebuilt waypoints with DEFAULT 0 on every
+    # database; listed so the result does not depend on that.
+    "waypoints": {"created_by_user": "0", "wp_flag": "0"},
+}
+
+# Migration 27 (#1139): table -> [(column, SQL definition)], frozen here so
+# later model changes don't alter what this migration does.
+_NEW_COLUMNS_27: dict[str, list[tuple[str, str]]] = {
+    "caches": [
+        ("last_user_update", "DATETIME"),
+        ("macro_flag", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("macro_sort", "TEXT"),
+        ("is_owner", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("symbol", "VARCHAR(64)"),
+    ],
+    "user_notes": [
+        ("corrected_source", "VARCHAR(16)"),
+    ],
+}
+
+
+def _add_missing_columns(conn: Connection, columns_by_table: dict[str, list[tuple[str, str]]]) -> list[str]:
+    """
+    ADD COLUMN every listed column its table doesn't have yet, so this can
+    run again safely (and is a no-op on a database create_all() just made).
+    Returns the added columns as "table.column".
+    """
+    added: list[str] = []
+    for table, columns in columns_by_table.items():
+        existing = {r[1] for r in conn.execute(text(f'PRAGMA table_info("{table}")'))}
+        for column, definition in columns:
+            if column not in existing:
+                # Table/column names and definitions are trusted constants.
+                conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+                added.append(f"{table}.{column}")
+    return added
+
+
+# ── last_user_update triggers (#1140) ────────────────────────────────────────
+# Current UTC time in SQLAlchemy's DateTime storage format (as models._SQL_NOW).
+_TRIGGER_NOW = "(strftime('%Y-%m-%d %H:%M:%f', 'now') || '000')"
+# The user's own fields on caches. Text fields compare with NULL and '' as
+# equal, so a dialog that saves an untouched empty field doesn't count.
+_USER_FIELDS_TEXT = ("user_data_1", "user_data_2", "user_data_3", "user_data_4")
+_USER_FIELDS_VALUE = ("user_flag", "user_sort", "locked")
+
+
+def _changed(cols_text: tuple[str, ...], cols_value: tuple[str, ...]) -> str:
+    parts = [f"IFNULL(NEW.{c}, '') IS NOT IFNULL(OLD.{c}, '')" for c in cols_text]
+    parts += [f"NEW.{c} IS NOT OLD.{c}" for c in cols_value]
+    return " OR ".join(parts)
+
+
+_USER_UPDATE_TRIGGERS: dict[str, str] = {
+    # A user field really changed, and the statement didn't set
+    # last_user_update itself (an import bringing its own date, e.g. GSAK's
+    # LastUserDate, wins). Updating last_user_update doesn't fire this again:
+    # it is not in the OF list.
+    "trg_caches_last_user_update": (
+        "AFTER UPDATE OF " + ", ".join(_USER_FIELDS_VALUE + _USER_FIELDS_TEXT)
+        + " ON caches FOR EACH ROW WHEN NEW.last_user_update IS OLD.last_user_update AND ("
+        + _changed(_USER_FIELDS_TEXT, _USER_FIELDS_VALUE) + ") "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.id; END"
+    ),
+    # A personal note or a correction was added …
+    "trg_user_notes_insert_last_user_update": (
+        "AFTER INSERT ON user_notes FOR EACH ROW "
+        "WHEN IFNULL(NEW.note, '') <> '' OR NEW.is_corrected "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.cache_id; END"
+    ),
+    # … or changed. Deleting a note row is not covered: OpenSAK clears a note
+    # or a correction by updating the row, and only deletes it along with
+    # its cache — where a trigger touching the cache row being deleted would
+    # be undefined behaviour in SQLite.
+    "trg_user_notes_update_last_user_update": (
+        "AFTER UPDATE OF note, corrected_lat, corrected_lon, is_corrected ON user_notes "
+        "FOR EACH ROW WHEN "
+        + _changed(("note",), ("corrected_lat", "corrected_lon", "is_corrected")) + " "
+        f"BEGIN UPDATE caches SET last_user_update = {_TRIGGER_NOW} WHERE id = NEW.cache_id; END"
+    ),
+}
+
+# Their names; opensak.sql_write() lets them write last_user_update, which a
+# macro cannot.
+USER_UPDATE_TRIGGER_NAMES = frozenset(_USER_UPDATE_TRIGGERS)
+
+
+def create_user_update_triggers(conn: Connection) -> None:
+    """Create the last_user_update triggers (#1140) where they are missing."""
+    for name, body in _USER_UPDATE_TRIGGERS.items():
+        conn.execute(text(f"CREATE TRIGGER IF NOT EXISTS {name} {body}"))
+
+
+# A column type as SQLAlchemy writes it: BOOLEAN, VARCHAR(16), NUMERIC(10, 2).
+_SQL_TYPE = r"\w+(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?"
+
+
+def _add_column_defaults(conn: Connection, defaults_by_table: dict[str, dict[str, str]]) -> list[str]:
+    """
+    Give existing columns a database default by rebuilding their tables.
+
+    Only columns that exist and have no default yet are changed, so this can
+    run again safely. Returns the names of the tables it rebuilt.
+    """
+    plans: dict[str, dict[str, str]] = {}
+    for table, defaults in defaults_by_table.items():
+        info = {r[1]: r for r in conn.execute(text(f'PRAGMA table_info("{table}")'))}
+        missing = {c: d for c, d in defaults.items() if c in info and info[c][4] is None}
+        if missing:
+            plans[table] = missing
+    if not plans:
+        return []
+
+    # caches is the parent of every other table, so DROP TABLE caches fails
+    # while foreign keys are on. PRAGMA foreign_keys does nothing inside an
+    # open transaction: commit first and check that it took effect.
+    conn.commit()
+    conn.execute(text("PRAGMA foreign_keys=OFF"))
+    if conn.execute(text("PRAGMA foreign_keys")).scalar() != 0:
+        raise RuntimeError("migration 26: could not switch off foreign keys")
+    try:
+        # Rows that already broke a foreign key are not this migration's
+        # business; it only must not add any.
+        fk_before = conn.execute(text("PRAGMA foreign_key_check")).fetchall()
+        # One transaction for all tables, so a failure leaves the old schema.
+        conn.exec_driver_sql("BEGIN")
+        # Triggers (#1140) go first and come back afterwards: DROP TABLE takes
+        # a table's own triggers with it, and the rename back to the old name
+        # fails while another table's trigger refers to the dropped table.
+        triggers = conn.execute(text(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL"
+        )).fetchall()
+        for name, _sql in triggers:
+            conn.exec_driver_sql(f'DROP TRIGGER "{name}"')
+        for table, missing in plans.items():
+            _rebuild_with_defaults(conn, table, missing)
+        for _name, sql in triggers:
+            conn.exec_driver_sql(sql)
+        fk_new = set(conn.execute(text("PRAGMA foreign_key_check")).fetchall()) - set(fk_before)
+        if fk_new:
+            raise RuntimeError(f"migration 26: foreign key check failed: {sorted(fk_new)[:5]}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+    if fk_before:
+        logger.warning(
+            "[migrations] 26: database already had %s foreign key violations",
+            len(fk_before),
+        )
+    return list(plans)
+
+
+def _rebuild_with_defaults(conn: Connection, table: str, missing: dict[str, str]) -> None:
+    """
+    Rebuild *table* with ` DEFAULT x` added to the columns in *missing*.
+
+    The new table is built from the table's own CREATE TABLE text, so its
+    constraints and any columns older migrations appended stay as they are.
+    Column order does not change, so SELECT * copies the data.
+    """
+    create_sql = conn.execute(
+        text("SELECT sql FROM sqlite_master WHERE type='table' AND name=:t"), {"t": table}
+    ).scalar()
+    if create_sql is None:
+        raise RuntimeError(f"migration 26: no CREATE TABLE for {table}")
+    for col, default in missing.items():
+        # The column's definition right after "(" or ",": name (quoted or
+        # not), type and an optional NOT NULL; the default goes after that,
+        # before the next column or constraint.
+        create_sql, n = re.subn(
+            rf'([(,]\s*"?{re.escape(col)}"?\s+{_SQL_TYPE})(\s+NOT\s+NULL)?'
+            r'(?=\s*[,)]|\s+(?:PRIMARY|UNIQUE|CHECK|REFERENCES|COLLATE|CONSTRAINT)\b)',
+            lambda m: f"{m.group(1)}{m.group(2) or ''} DEFAULT {default}",
+            create_sql, count=1, flags=re.IGNORECASE,
+        )
+        if n != 1:
+            raise RuntimeError(f"migration 26: cannot find {table}.{col} in its CREATE TABLE")
+    # A rebuilt table's name is stored quoted ("caches") after the RENAME.
+    create_sql, n = re.subn(
+        rf'^(\s*CREATE\s+TABLE\s+)"?{re.escape(table)}"?(?=\s*\()',
+        lambda m: f"{m.group(1)}{table}_new", create_sql, count=1, flags=re.IGNORECASE,
+    )
+    if n != 1:
+        raise RuntimeError(f"migration 26: unexpected CREATE TABLE for {table}")
+
+    # Indexes go with the dropped table; autoindexes of UNIQUE constraints
+    # (sql IS NULL) come back with the CREATE TABLE text.
+    indexes = conn.execute(text(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name=:t "
+        "AND sql IS NOT NULL"
+    ), {"t": table}).scalars().all()
+
+    # A TEMP view on the table (caches_all, custom fields) makes SQLite
+    # refuse the RENAME below; it is made again on the next checkout.
+    custom_fields.drop_view(conn)
+
+    # Raw SQL from sqlite_master: exec_driver_sql, so nothing in it is taken
+    # for a bind parameter.
+    conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table}_new")
+    conn.exec_driver_sql(create_sql)
+    conn.exec_driver_sql(f"INSERT INTO {table}_new SELECT * FROM {table}")
+    conn.exec_driver_sql(f"DROP TABLE {table}")
+    conn.exec_driver_sql(f"ALTER TABLE {table}_new RENAME TO {table}")
+    for index_sql in indexes:
+        conn.exec_driver_sql(index_sql)
+
+
+def optimize_database(db_path: Path | None = None) -> None:
+    """
+    Refresh the query planner's statistics (#1048) of *db_path* (default:
+    the active database) and of its companion database. Cheap when nothing
+    changed much; the first time it creates them from a sample of each index
+    (about 0.2 s, at any database size).
+
+    Called when a database is opened, closed or switched, and after imports,
+    deletes and moves. Runs on its own connection, waits at most a few
+    seconds for a writer, and never raises: without fresh statistics the
+    queries are only slower.
+    """
+    try:
+        if db_path is None:
+            if _engine is None:
+                return
+            db_path = _engine_path(_engine)
+        db_path = Path(db_path)
+        if not db_path.is_file():
+            return
+        maintenance.optimize_file(db_path, timeout=_OPTIMIZE_TIMEOUT)
+        if flags.companion_db and companion.exists(db_path):
+            companion.optimize(db_path, timeout=_OPTIMIZE_TIMEOUT)
+    except Exception:
+        logger.warning("optimize %s failed", db_path, exc_info=True)
+
+
+# Seconds optimize_database() waits for another connection's write.
+_OPTIMIZE_TIMEOUT = 5
+
+
+def _engine_path(engine: Engine) -> Path:
+    return Path(engine.url.database or "")
+
+
+def release_connections(db_path: Path) -> bool:
+    """
+    Close the pooled connections of the active engine if it points at
+    *db_path* — and with them the companion attached to them — so a
+    maintenance step can have the files to itself (VACUUM, moving a damaged
+    companion aside, #1048). Unlike dispose_engine() the engine stays: the
+    next session simply opens a new connection, so nothing on the GUI
+    thread finds the database closed meanwhile. True if it was the active
+    database.
+    """
+    if _engine is None:
+        return False
+    try:
+        if _engine_path(_engine).resolve() != Path(db_path).resolve():
+            return False
+    except OSError:
+        return False
+    _engine.dispose()
+    return True
 
 
 def dispose_engine(db_path: Path | None = None) -> None:
@@ -1076,6 +1511,8 @@ def dispose_engine(db_path: Path | None = None) -> None:
         if engine_path != target_path:
             return  # Denne engine peger ikke på den ønskede database
 
+    # #1048: the database is closed (switch, exit, move, rename …).
+    optimize_database(_engine_path(_engine))
     _engine.dispose()
     _engine = None
     _SessionLocal = None
@@ -1177,7 +1614,7 @@ def migrate_databases(paths: Iterable[Path]) -> list[tuple[Path, Exception]]:
     return failed
 
 
-def _session_on(db_path: Path | None):
+def session_on(db_path: Path | None):
     """get_session() when *db_path* is None or the database the active
     engine already points at, otherwise session_for(db_path) — so a helper
     given another database's path never reads or writes the active one."""
@@ -1224,6 +1661,20 @@ def reload_caches_full(caches: list) -> list:
 
     Objects without a matching DB row (e.g. test stand-ins) pass through
     unchanged.
+
+    This holds every fully loaded cache in memory at once; exports of a
+    whole large database use iter_caches_full() instead (#1075).
+    """
+    return list(iter_caches_full(caches))
+
+
+def iter_caches_full(caches: list) -> Iterator:
+    """Yield *caches* reloaded as by reload_caches_full(), in the original
+    order, reloading RELOAD_CHUNK_SIZE of them at a time.
+
+    #1075: an export of 100,000+ caches ran out of memory holding all of
+    them (with their logs and descriptions) at once. As long as the caller
+    does not keep the yielded caches, only one chunk is in memory at a time.
     """
     from opensak.db.models import Cache
     from opensak.filters.engine import LightweightCache
@@ -1233,34 +1684,33 @@ def reload_caches_full(caches: list) -> list:
     # real .id — anything else (e.g. SimpleNamespace stand-ins in tests)
     # passes through unchanged.
     reloadable = (Cache, LightweightCache)
-    ids = [c.id for c in caches if isinstance(c, reloadable) and c.id is not None]
-    if not ids:
-        return list(caches)
 
     # #1041: the IN query is chunked to stay under SQLite's bound-parameter
     # limit — exporting a whole large database failed with "too many SQL
     # variables".
-    by_id: dict[int, Cache] = {}
-    with get_session() as session:
-        for start in range(0, len(ids), RELOAD_CHUNK_SIZE):
-            chunk = ids[start:start + RELOAD_CHUNK_SIZE]
-            rows = (
-                session.query(Cache)
-                .options(
-                    selectinload(Cache.logs),
-                    selectinload(Cache.waypoints),
-                    selectinload(Cache.attributes),
-                    joinedload(Cache.user_note),
-                    undefer(Cache.short_description),
-                    undefer(Cache.long_description),
-                    undefer(Cache.encoded_hints),
+    for start in range(0, len(caches), RELOAD_CHUNK_SIZE):
+        chunk = caches[start:start + RELOAD_CHUNK_SIZE]
+        ids = [c.id for c in chunk if isinstance(c, reloadable) and c.id is not None]
+        by_id: dict[int, Cache] = {}
+        if ids:
+            with get_session() as session:
+                rows = (
+                    session.query(Cache)
+                    .options(
+                        selectinload(Cache.logs),
+                        selectinload(Cache.waypoints),
+                        selectinload(Cache.attributes),
+                        joinedload(Cache.user_note),
+                        undefer(Cache.short_description),
+                        undefer(Cache.long_description),
+                        undefer(Cache.encoded_hints),
+                    )
+                    .filter(Cache.id.in_(ids))
+                    .all()
                 )
-                .filter(Cache.id.in_(chunk))
-                .all()
-            )
-            by_id.update((c.id, c) for c in rows)
-
-    return [by_id.get(c.id, c) if isinstance(c, reloadable) else c for c in caches]
+                by_id.update((c.id, c) for c in rows)
+        for c in chunk:
+            yield by_id.get(c.id, c) if isinstance(c, reloadable) else c
 
 
 # ── Distance recalculation ────────────────────────────────────────────────────
@@ -1309,7 +1759,7 @@ def recalculate_distances(lat: float, lon: float, db_path: Path | None = None) -
                 return (math.degrees(math.atan2(x2, y2)) + 360) % 360
             return [_scalar(la, lo) for la, lo in zip(lats, lons)]
 
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         rows = session.execute(
             text("SELECT id, latitude, longitude FROM caches WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
         ).fetchall()
@@ -1401,7 +1851,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
     # whether it currently has a persisted distance. Checked first (and
     # unconditionally) so an empty/coordinate-less database is always
     # considered up to date — there is nothing to recalculate either way.
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         row = session.execute(
             text(
                 "SELECT latitude, longitude, distance FROM caches "
@@ -1450,7 +1900,7 @@ def distances_up_to_date(lat: float, lon: float, db_path: Path | None = None) ->
 
     # Served by the partial index ix_caches_distance_missing (migration 25),
     # so this stays cheap on large databases.
-    with _session_on(db_path) as session:
+    with session_on(db_path) as session:
         missing = session.execute(
             text(
                 "SELECT 1 FROM caches WHERE distance IS NULL "

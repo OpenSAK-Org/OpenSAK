@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 EXPORT_FORMATS = ("gpx", "loc", "ggz")
 
@@ -165,16 +165,23 @@ def expand_file_name(
 
 
 class FileExportProfile:
-    """A named FileExportSettings, saved as JSON."""
+    """A named FileExportSettings, saved as JSON.
 
-    def __init__(self, name: str, settings: FileExportSettings):
+    Subclasses store another settings class in another folder by
+    overriding settings_class and dir_name (see PoiExportProfile).
+    """
+
+    settings_class: type[Any] = FileExportSettings
+    dir_name = "export_settings"
+
+    def __init__(self, name: str, settings):
         self.name = name
         self.settings = settings
 
-    @staticmethod
-    def default_dir() -> Path:
+    @classmethod
+    def default_dir(cls) -> Path:
         from opensak.config import get_app_data_dir
-        return get_app_data_dir() / "export_settings"
+        return get_app_data_dir() / cls.dir_name
 
     @classmethod
     def profile_path(cls, name: str, profiles_dir: Optional[Path] = None) -> Path:
@@ -203,7 +210,7 @@ class FileExportProfile:
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls(
             name=data["name"],
-            settings=FileExportSettings.from_dict(data.get("settings", {})),
+            settings=cls.settings_class.from_dict(data.get("settings", {})),
         )
 
     @classmethod
@@ -226,19 +233,19 @@ class FileExportProfile:
         return profiles_dir / f"{_LAST_USED_STEM}.json"
 
     @classmethod
-    def load_last_used(cls, profiles_dir: Optional[Path] = None) -> FileExportSettings:
+    def load_last_used(cls, profiles_dir: Optional[Path] = None):
         """Return the settings of the most recent export, or the defaults."""
         path = cls.last_used_path(profiles_dir)
         try:
             return cls.load(path).settings
         except Exception:
-            return FileExportSettings()
+            return cls.settings_class()
 
     @classmethod
     def save_last_used(
-        cls, settings: FileExportSettings, profiles_dir: Optional[Path] = None
+        cls, settings, profiles_dir: Optional[Path] = None
     ) -> None:
         cls(_LAST_USED_STEM, settings)._write(cls.last_used_path(profiles_dir))
 
     def __repr__(self) -> str:
-        return f"<FileExportProfile {self.name!r}>"
+        return f"<{type(self).__name__} {self.name!r}>"

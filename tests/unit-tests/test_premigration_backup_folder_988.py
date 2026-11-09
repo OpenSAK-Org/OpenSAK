@@ -105,14 +105,23 @@ class TestWhereTheCopyGoes:
         assert not (tmp_path / "USB-not-mounted").exists()
 
     def test_next_to_the_database_when_the_folder_is_unsuitable(self, tmp_path):
-        # A folder inside the database folder is refused for backups (#952).
-        unsuitable = get_db_dir() / "backups-here"
-        unsuitable.mkdir(parents=True)
+        # The database folder itself is refused for backups (#952, #1032).
+        unsuitable = get_db_dir()
+        unsuitable.mkdir(parents=True, exist_ok=True)
         get_store().set(BACKUP_DIR_KEY, str(unsuitable))
         db = _make_old_db(tmp_path / "Main.db")
         _open(db)
         assert backup_path_for(db, OLD).is_file()
         assert not (unsuitable / BACKUP_FOLDER_SUBDIR).exists()
+
+    def test_a_folder_inside_the_database_folder_is_used(self, tmp_path):
+        # #1032: allowed now (the GUI warned when it was chosen).
+        inside = get_db_dir() / "backups-here"
+        inside.mkdir(parents=True)
+        get_store().set(BACKUP_DIR_KEY, str(inside))
+        db = _make_old_db(tmp_path / "Main.db")
+        _open(db)
+        assert (inside / BACKUP_FOLDER_SUBDIR).is_dir()
 
 
 class TestNames:

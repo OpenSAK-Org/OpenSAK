@@ -12,7 +12,7 @@ means the betas leading up to it.
 
 ## 0. Preconditions — don't start until these are true
 
-- [ ] No open release-blocking issues on the milestone for `X.Y.0`
+- [ ] No open issues labelled `area: release-blocker`
 - [ ] Latest beta tested and confirmed on **macOS** (e.g. Mike Wood, Bob Long,
       or our own Mac Mini), including in-app update ("Download & Install")
       from the previous beta and Settings → Advanced → Uninstall
@@ -71,6 +71,10 @@ merge in §3, so they ship with the release.
       `docs/` is linked), download/install wording
 - [ ] `site/user-guide.html` — all new/changed features covered, no leftover
       `beta.N` labels, screenshots refreshed (latest screenshots auto-PR merged)
+- [ ] Macro API docs current — no open `docs: regenerate macro API docs` PR
+      (branch `bot/macro-api-docs`, opened by `macro-api-docs.yml`); merge it
+      if there is one. `python scripts/generate_macro_api_docs.py --check`
+      exits 0 on `beta`
 - [ ] `site/index.html` — feature list, language count, download section
       (Microsoft Store first on Windows), `<meta name="description">`
 - [ ] `docs/ROADMAP.md` — status note per item and the "Last updated" date
@@ -132,6 +136,12 @@ merge in §3, so they ship with the release.
 
 - [ ] On `main`: `git tag vX.Y.0 && git push origin vX.Y.0` — pushing the tag
       is what triggers `build.yml`, `screenshots.yml` and `deploy-site.yml`
+- [ ] Before tagging, `python scripts/bump_version.py --check-tag vX.Y.0`
+      passes locally. `build.yml` (job `version-check`) and
+      `deploy-site.yml` run the same check and stop within seconds, with no
+      artifacts and no release, if the tag doesn't match `__version__` or
+      the User Guide is stale (#1168). If it fails after pushing: don't move
+      the tag — bump, commit and tag a new version
 - [ ] `build.yml` attached all five files to the GitHub Release:
       `OpenSAK-vX.Y.0-Windows.zip`, `OpenSAK-vX.Y.0-Linux-x86_64.AppImage`,
       `OpenSAK-vX.Y.0-macOS-arm64.dmg`, `OpenSAK-vX.Y.0-macOS-x86_64.dmg`,
@@ -197,9 +207,7 @@ merge in §3, so they ship with the release.
 ## 7. Close out and start the next cycle
 
 - [ ] Close the issues that shipped in this release (only once they're in the
-      tagged build with green CI); re-triage anything deliberately deferred to
-      the next milestone instead of leaving it dangling
-- [ ] Close the `X.Y.0` milestone and open one for the next version
+      tagged build with green CI)
 - [ ] Generate and commit the upgrade fixture for the version just released,
       so the next stable is tested against it (#997):
       `python scripts/make_upgrade_fixture.py vX.Y.0` → commit

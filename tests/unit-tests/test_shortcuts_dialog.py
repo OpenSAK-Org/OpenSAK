@@ -119,6 +119,6 @@ class TestDefaultsDict:
         expected = {
             "manage_databases", "import", "quit", "add_cache", "edit_cache",
             "delete_cache", "refresh", "filter", "settings", "gps_export",
-            "trip_planner", "coord_converter", "projection",
+            "trip_planner", "coord_converter", "projection", "autofit_columns",
         }
         assert set(_DEFAULTS.keys()) == expected

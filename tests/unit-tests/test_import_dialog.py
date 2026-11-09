@@ -11,6 +11,7 @@ pytest.importorskip("pytestqt")
 
 from opensak.gui.dialogs import import_dialog as idlg
 from opensak.gui.dialogs.import_dialog import ImportWorker, ImportDialog
+from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
 from opensak.lang import tr
 
 
@@ -309,7 +310,7 @@ class TestImportDialog:
         started = []
 
         class FakeGeo:
-            def __init__(self, rows, parent=None):
+            def __init__(self, rows, parent=None, db_path=None):
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
                 self.finished = MagicMock()
@@ -325,6 +326,29 @@ class TestImportDialog:
         dlg._start_geocoding()
         assert started == [True]
 
+    def test_geocoding_works_on_the_database_imported_into(self, dlg, monkeypatch):
+        # #937: the import target, not the active database.
+        import opensak.geo.reverse_geocode as geo
+        target = Path("/other.db")
+        seen = []
+        monkeypatch.setattr(geo, "rows_missing_location",
+                            lambda db_path: seen.append(db_path) or ["row"])
+
+        class FakeGeo:
+            def __init__(self, rows, parent=None, db_path=None):
+                seen.append(db_path)
+                self.all_done = self.cancelled = self.finished = MagicMock()
+                self.deleteLater = MagicMock()
+                self.isRunning = MagicMock(return_value=False)
+            def start(self):
+                pass
+        monkeypatch.setattr(
+            "opensak.gui.dialogs.update_location_dialog.ReverseGeocodeWorker", FakeGeo
+        )
+        dlg._target_db_path = target
+        dlg._start_geocoding()
+        assert seen == [target, target]
+
     def test_on_geocode_done(self, dlg):
         fired = []
         dlg.import_completed.connect(lambda: fired.append(True))
@@ -332,14 +356,20 @@ class TestImportDialog:
         assert fired == [True]
         assert dlg._import_btn.isEnabled() is True
 
-    def test_close_event_waits_for_workers(self, dlg):
+    def test_close_while_workers_run_keeps_dialog_open(self, dlg):
+        # #1265: closing used to block on the workers' wait() (and Escape
+        # skipped that entirely). Now the dialog stays open, the location
+        # lookup is cancelled and nothing blocks the GUI thread.
+        dlg.show()
         dlg._worker = SimpleNamespace(isRunning=lambda: True, wait=MagicMock())
         dlg._geo_worker = SimpleNamespace(
             isRunning=lambda: True, request_cancel=MagicMock(), wait=MagicMock()
         )
         dlg.close()
-        assert dlg._worker is None
-        assert dlg._geo_worker is None
+        assert dlg.isVisible()
+        dlg._geo_worker.request_cancel.assert_called_once_with()
+        dlg._worker.wait.assert_not_called()
+        dlg._geo_worker.wait.assert_not_called()
 
     # ── Issue #802: Close button responsiveness ─────────────────────────────
 
@@ -380,7 +410,7 @@ class TestImportDialog:
         dlg._close_btn.setEnabled(False)
 
         class FakeGeo:
-            def __init__(self, rows, parent=None):
+            def __init__(self, rows, parent=None, db_path=None):
                 self.all_done = MagicMock()
                 self.cancelled = MagicMock()
                 self.finished = MagicMock()
@@ -582,3 +612,203 @@ class TestImportWorkerTotal:
         w.total.connect(lambda t: totals.append(t))
         w.run()
         assert totals == [-1]
+
+
+# ── Saved settings ──────────────────────────────────────────────────────────────
+
+class TestImportDialogSettings:
+    def test_settings_survive_the_dialog(self, dlg, tmp_path):
+        files = [tmp_path / "a.gpx", tmp_path / "b.zip"]
+        for f in files:
+            f.write_text("x")
+        settings = GpxImportSettings(database=str(Path("/other.db")),
+                                     files=[str(f) for f in files])
+        dlg._apply_settings(settings)
+        assert dlg._db_combo.currentData() == Path("/other.db")
+        assert dlg._import_btn.isEnabled() is True
+        assert dlg._collect_settings() == settings
+
+    def test_apply_replaces_file_list(self, dlg, tmp_path):
+        new = tmp_path / "new.gpx"
+        new.write_text("x")
+        dlg.add_files([Path("/old.gpx")])
+        dlg._apply_settings(GpxImportSettings(files=[str(new)]))
+        assert dlg._selected_paths == [new]
+        assert dlg._file_list.count() == 1
+
+    def test_apply_leaves_out_missing_files(self, dlg, tmp_path, monkeypatch):
+        monkeypatch.setattr(idlg, "tr", lambda key, **kw: f"{key}:{kw.get('count', '')}")
+        there = tmp_path / "there.gpx"
+        there.write_text("x")
+        dlg._apply_settings(GpxImportSettings(
+            files=[str(there), str(tmp_path / "gone.gpx")]))
+        assert dlg._selected_paths == [there]
+        assert "import_settings_missing_files:1" in dlg._log.toPlainText()
+
+    def test_apply_unknown_database_keeps_selection(self, dlg):
+        dlg._apply_settings(GpxImportSettings(database="/nowhere.db"))
+        assert dlg._db_combo.currentData() == Path("/active.db")
+
+    def test_opens_with_last_used_settings(self, qtbot, manager, tmp_path):
+        f = tmp_path / "pq.zip"
+        f.write_text("x")
+        GpxImportProfile.save_last_used(
+            GpxImportSettings(database=str(Path("/other.db")), files=[str(f)]))
+        d = ImportDialog()
+        qtbot.addWidget(d)
+        assert d._db_combo.currentData() == Path("/other.db")
+        assert d._selected_paths == [f]
+
+    def test_dropped_paths_replace_last_used_files(self, qtbot, manager, tmp_path):
+        old, dropped = tmp_path / "old.gpx", tmp_path / "dropped.gpx"
+        for f in (old, dropped):
+            f.write_text("x")
+        GpxImportProfile.save_last_used(
+            GpxImportSettings(database=str(Path("/other.db")), files=[str(old)]))
+        d = ImportDialog(paths=[dropped])
+        qtbot.addWidget(d)
+        assert d._selected_paths == [dropped]
+        assert d._db_combo.currentData() == Path("/other.db")
+
+    def test_start_import_saves_last_used(self, dlg, monkeypatch, tmp_path):
+        f = tmp_path / "a.gpx"
+        f.write_text("x")
+        dlg.add_files([f])
+        monkeypatch.setattr(idlg, "ImportWorker", MagicMock())
+        dlg._start_import()
+        last = GpxImportProfile.load_last_used()
+        assert last.files == [str(f)]
+        assert last.database == str(Path("/active.db"))
+        assert dlg._settings_group.isEnabled() is False
+
+    def test_settings_group_reenabled_after_import(self, dlg, monkeypatch):
+        monkeypatch.setattr("opensak.utils.flags.reverse_geocoding", False)
+        dlg._settings_group.setEnabled(False)
+        dlg._on_all_done()
+        assert dlg._settings_group.isEnabled() is True
+
+    def test_saved_profile_listed_in_combo(self, qtbot, manager):
+        GpxImportProfile("Nightly PQs", GpxImportSettings()).save()
+        d = ImportDialog()
+        qtbot.addWidget(d)
+        assert d._settings_combo.findText("Nightly PQs") >= 0
+
+
+# ── Folder entries ──────────────────────────────────────────────────────────────
+
+def _make_files(folder, *names):
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (folder / n).write_text("x")
+    return [folder / n for n in names]
+
+
+class TestFolderImportFiles:
+    def test_gpx_and_zip_only_sorted_not_recursive(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.importer._is_companion_gpx", lambda p: False)
+        _make_files(tmp_path, "b.zip", "a.gpx", "notes.txt", "c.GPX")
+        _make_files(tmp_path / "sub", "deep.gpx")
+        assert [f.name for f in idlg.folder_import_files(tmp_path)] == ["a.gpx", "b.zip", "c.GPX"]
+
+    def test_drops_companion_when_main_gpx_present(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.importer._is_companion_gpx",
+                            lambda p: p.name.endswith("-wpts.gpx"))
+        _make_files(tmp_path, "pq.gpx", "pq-wpts.gpx")
+        assert [f.name for f in idlg.folder_import_files(tmp_path)] == ["pq.gpx"]
+
+    def test_keeps_companion_alone(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.importer._is_companion_gpx", lambda p: True)
+        _make_files(tmp_path, "pq-wpts.gpx")
+        assert [f.name for f in idlg.folder_import_files(tmp_path)] == ["pq-wpts.gpx"]
+
+    def test_missing_folder_is_empty(self, tmp_path):
+        assert idlg.folder_import_files(tmp_path / "gone") == []
+
+
+class TestImportDialogFolders:
+    @pytest.fixture(autouse=True)
+    def _no_companions(self, monkeypatch):
+        monkeypatch.setattr("opensak.importer._is_companion_gpx", lambda p: False)
+
+    def test_add_folder_entry(self, dlg, tmp_path):
+        files = _make_files(tmp_path / "pq", "a.gpx", "b.zip")
+        dlg.add_folders([tmp_path / "pq", tmp_path / "pq"])
+        assert dlg._selected_paths == [tmp_path / "pq"]   # deduped
+        assert "📁 pq" in dlg._file_list.item(0).text()
+        assert dlg._run_paths == files and dlg._run_rows == [0, 0]
+        assert dlg._import_btn.isEnabled() is True
+
+    def test_browse_folder(self, dlg, tmp_path, monkeypatch):
+        monkeypatch.setattr(idlg.QFileDialog, "getExistingDirectory",
+                            lambda *a, **k: str(tmp_path))
+        dlg._browse_folder()
+        assert dlg._selected_paths == [tmp_path]
+        assert tmp_path in dlg._folders
+
+    def test_browse_folder_cancel(self, dlg, monkeypatch):
+        monkeypatch.setattr(idlg.QFileDialog, "getExistingDirectory", lambda *a, **k: "")
+        dlg._browse_folder()
+        assert dlg._selected_paths == []
+
+    def test_file_in_listed_folder_imported_once(self, dlg, tmp_path):
+        (a,) = _make_files(tmp_path, "a.gpx")
+        dlg.add_files([a])
+        dlg.add_folders([tmp_path])
+        assert dlg._run_paths == [a] and dlg._run_rows == [0]
+
+    def test_start_import_scans_folder_again(self, dlg, tmp_path, monkeypatch):
+        dlg.add_folders([tmp_path])
+        (late,) = _make_files(tmp_path, "late.zip")
+        worker = MagicMock()
+        monkeypatch.setattr(idlg, "ImportWorker", worker)
+        dlg._start_import()
+        assert worker.call_args.args[0] == [late]
+
+    def test_start_import_empty_folder_logs_and_stops(self, dlg, tmp_path, monkeypatch):
+        worker = MagicMock()
+        monkeypatch.setattr(idlg, "ImportWorker", worker)
+        dlg.add_folders([tmp_path])
+        dlg._start_import()
+        worker.assert_not_called()
+        assert tr("import_folder_empty") in dlg._log.toPlainText()
+        assert dlg._browse_btn.isEnabled() is True
+
+    def test_folder_row_status_follows_its_files(self, dlg, tmp_path):
+        _make_files(tmp_path, "a.gpx", "b.gpx", "c.gpx")
+        dlg.add_folders([tmp_path])
+        dlg._on_file_started(0, "a.gpx")
+        assert dlg._file_list.item(0).text().startswith("🔄")
+        dlg._on_file_error(1, "bad")
+        dlg._on_file_finished(2, _result())
+        # One failed file keeps the folder marked failed.
+        assert dlg._file_list.item(0).text().startswith("❌")
+
+    def test_remove_folder_entry(self, dlg, tmp_path):
+        _make_files(tmp_path, "a.gpx")
+        dlg.add_folders([tmp_path])
+        dlg._file_list.item(0).setSelected(True)
+        dlg._remove_selected()
+        assert dlg._selected_paths == [] and dlg._folders == set()
+        assert dlg._run_paths == []
+        assert dlg._import_btn.isEnabled() is False
+
+    def test_settings_keep_folders(self, dlg, tmp_path):
+        (f,) = _make_files(tmp_path / "files", "one.gpx")
+        folder = tmp_path / "pq"
+        folder.mkdir()
+        settings = GpxImportSettings(database=str(Path("/active.db")),
+                                     files=[str(f)], folders=[str(folder)])
+        dlg._apply_settings(settings)
+        assert folder in dlg._folders
+        assert dlg._collect_settings() == settings
+
+    def test_apply_leaves_out_missing_folder(self, dlg, tmp_path, monkeypatch):
+        monkeypatch.setattr(idlg, "tr", lambda key, **kw: f"{key}:{kw.get('count', '')}")
+        dlg._apply_settings(GpxImportSettings(folders=[str(tmp_path / "gone")]))
+        assert dlg._selected_paths == []
+        assert "import_settings_missing_files:1" in dlg._log.toPlainText()
+
+    def test_dropped_folder_becomes_folder_entry(self, qtbot, manager, tmp_path):
+        d = ImportDialog(paths=[tmp_path])
+        qtbot.addWidget(d)
+        assert d._selected_paths == [tmp_path] and tmp_path in d._folders

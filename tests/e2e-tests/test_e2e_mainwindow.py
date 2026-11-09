@@ -55,6 +55,9 @@ def fake_dialog(*, exec_result=0, signals=(), data=None, attrs=None):
 
         def save_related(self, session, cache):
             pass
+
+        def save_custom(self, gc_code):
+            return None    # custom fields saved (#1028)
     return _Fake
 
 
@@ -1394,6 +1397,7 @@ class TestFilters:
         seeded_window._filter_profile_combo.addItem("P1", userData=Path("/x/p.json"))
         idx = seeded_window._filter_profile_combo.count() - 1
         seeded_window._on_filter_profile_combo_changed(idx)
+        wait_for_refresh(seeded_window)
         assert seeded_window._cache_table.row_count() == 1
 
     def test_filter_profile_combo_changed_profile(self, seeded_window, monkeypatch):
@@ -1609,6 +1613,20 @@ class TestHomeAndCwExtra:
         assert s.home_lat == pytest.approx(56.0)
         assert s.home_lon == pytest.approx(10.0)
 
+    def test_reload_home_combo_sorts_home_first_then_a_to_z(self, seeded_window):
+        from opensak.gui.settings import HomePoint, get_settings
+        s = get_settings()
+        s.gc_home_location = "N55 40.566 E012 34.098"
+        s.home_points = [HomePoint("Zug", 47.2, 8.5), HomePoint("bern", 46.9, 7.4),
+                         HomePoint("Aarau", 47.4, 8.0)]
+        s.active_home_name = "Zug"
+        seeded_window._reload_home_combo()
+        combo = seeded_window._home_combo
+        assert [combo.itemText(i) for i in range(combo.count())] == [
+            "★ Home", "Aarau", "bern", "Zug",
+        ]
+        assert combo.currentData() == "Zug"
+
     def test_reload_home_combo_without_points_changes_nothing(self, seeded_window):
         # Issue #962: the placeholder item has no data — never activate it.
         from opensak.gui.settings import get_settings
@@ -1781,7 +1799,10 @@ class TestAboutUpdates:
         monkeypatch.setattr(
             seeded_window, "_start_self_download_update", lambda tag: started.append(tag)
         )
-        self._click_update_dialog_button(monkeypatch, tr("update_download_button"))
+        # The button label escapes "&" as "&&" so Qt doesn't eat it as a mnemonic (#1218).
+        self._click_update_dialog_button(
+            monkeypatch, tr("update_download_button").replace("&", "&&")
+        )
 
         seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
 

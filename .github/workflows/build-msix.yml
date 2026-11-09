@@ -64,7 +64,7 @@ jobs:
         env:
           PYTHONPATH: src
 
-      - name: Determine MSIX version and display name
+      - name: Determine MSIX version, display name and command-line alias
         id: msix-version
         shell: pwsh
         run: |
@@ -85,10 +85,20 @@ jobs:
             $displayName = "OpenSAK"
           }
 
+          # The App Execution Alias of opensak-cli.exe (#937): a beta and a
+          # stable install must not claim the same command name.
+          if ($rawVersion -match "-beta\.") {
+            $cliAlias = "opensak-beta.exe"
+          } else {
+            $cliAlias = "opensak.exe"
+          }
+
           Write-Host "Using MSIX version: $version"
           Write-Host "Using display name: $displayName"
+          Write-Host "Using command-line alias: $cliAlias"
           "version=$version" >> $env:GITHUB_OUTPUT
           "display_name=$displayName" >> $env:GITHUB_OUTPUT
+          "cli_alias=$cliAlias" >> $env:GITHUB_OUTPUT
 
       # makeappx.exe / signtool.exe ship with the Windows SDK, which is
       # preinstalled on windows-latest runners, but their bin folder isn't
@@ -117,6 +127,7 @@ jobs:
             -PublisherCN $env:MSIX_PUBLISHER_CN `
             -PublisherDisplayName $env:MSIX_PUBLISHER_DISPLAY_NAME `
             -DisplayName "${{ steps.msix-version.outputs.display_name }}" `
+            -CliAlias "${{ steps.msix-version.outputs.cli_alias }}" `
             -Version "${{ steps.msix-version.outputs.version }}" `
             -SkipBuild
 

@@ -24,7 +24,12 @@ from opensak.coords import format_coords, parse_coords
 from opensak.utils.types import CoordFormat
 from opensak.gui.settings import get_settings
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.utils.constants import EARTH_RADIUS_M
+
+# English 8-point compass, clockwise from north; used when the
+# "bearing_dirs" translation can't be used (see _compass()).
+_COMPASS_FALLBACK = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -65,6 +70,7 @@ class DistanceBearingDialog(QDialog):
 
     def __init__(self, lat: float | None = None, lon: float | None = None, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("dist_title"))
         self.setMinimumWidth(500)
         self.setWindowFlags(
@@ -173,7 +179,15 @@ class DistanceBearingDialog(QDialog):
 
     @staticmethod
     def _compass(deg: float) -> str:
-        """Return an 8-point compass direction for a bearing in degrees."""
-        dirs = ["N", "NØ", "Ø", "SØ", "S", "SV", "V", "NV"]
+        """Return an 8-point compass direction for a bearing in degrees.
+
+        Falls back to the English points when "bearing_dirs" doesn't give
+        exactly eight: before a language is loaded tr() returns the key
+        itself, and a translation with a missing point would otherwise
+        raise IndexError for some bearings.
+        """
+        dirs = tr("bearing_dirs").split()
+        if len(dirs) != len(_COMPASS_FALLBACK):
+            dirs = list(_COMPASS_FALLBACK)
         idx = round(deg / 45) % 8
         return dirs[idx]

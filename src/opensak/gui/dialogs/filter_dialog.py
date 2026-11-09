@@ -1,7 +1,7 @@
 """
 src/opensak/gui/dialogs/filter_dialog.py — Komplet filter dialog.
 
-Ti faner:
+Elleve faner:
 1. Generelt    — navn, type, D/T, afstand, fundet, tilgængelighed osv.
 2. Datoer      — udlagt dato, fundet dato, DNF dato, seneste log dato
 3. Øvrigt      — land/stat/kommune, user flag, DNF, favorit points
@@ -11,7 +11,8 @@ Ti faner:
 7. Trackables  — caches efter deres trackables (navn, tracking code, antal)
 8. Attributter — alle Groundspeak attributter
 9. Tekstsøgning — søg i beskrivelse, logs, noter og hint
-10. Where      — rå SQL WHERE-betingelse
+10. Custom     — databasens custom fields (#1028; kun med companion-db flaget)
+11. Where      — rå SQL WHERE-betingelse (custom fields kan bruges ved navn)
 
 Understøtter gem/indlæs filterprofiler.
 """
@@ -53,6 +54,7 @@ from opensak.filters.engine import (
     bearing_op_ok,
     LinePolygonFilter, lookup_code_coords, user_flagged_codes,
     TextMatchFilter, TEXT_OPS_VALUELESS,
+    CustomFieldFilter,
     AttributeFilter, HasTrackableFilter, HasCorrectedFilter, NoCorrectedFilter,
     CorrectedDistanceFilter, DISTANCE_OPS,
     PremiumFilter, NonPremiumFilter,
@@ -67,7 +69,9 @@ from opensak.filters.engine import (
     LogFilter, LOG_CATEGORIES, LOG_SCOPE_CHOICES, LOG_TYPE_OTHER,
     FilterProfile,
 )
-from opensak.filters.line_polygon import LP_MIN_POINTS, parse_points_text, read_points_file
+from opensak.filters.line_polygon import (
+    LP_MIN_POINTS, format_point, format_points_text, parse_points_text, read_points_file,
+)
 
 
 # ── Groundspeak attribut definitioner ─────────────────────────────────────────
@@ -461,6 +465,7 @@ _DATE_FIELD_LABELS: tuple[tuple[str, str], ...] = (
     ("dnf_date",        "col_dnf_date"),
     ("creation_date",   "col_creation_date"),
     ("last_gpx_update", "col_last_gpx_update"),
+    ("last_user_update", "col_last_user_update"),   # #1141
     ("last_log_date",   "filter_log_date_group"),
     ("changed_date",    "col_changed_date"),
 )
@@ -548,10 +553,6 @@ _DIR_DEFAULT_OP, _DIR_DEFAULT_DEG = "between", (0.0, 90.0)  # pejling i grader
 _CC_DIST_DEFAULT_M = 3219.0  # 2 miles — GSAK's/Groundspeak's mystery-final rule
 _FAV_DEFAULT_OP, _FAV_DEFAULT_PTS = "at_least", 10
 _ELEV_DEFAULT_OP, _ELEV_DEFAULT_M = "at_least", 1000.0
-
-
-def _format_lp_point(point: tuple[float, float]) -> str:
-    return f"{point[0]:.6f}, {point[1]:.6f}"
 
 
 def _qdate_to_date(qdate: QDate) -> date:
@@ -754,6 +755,133 @@ class DateFilterRow(QWidget):
         self.label.setFont(font)
 
 
+# ── Custom-fanen (#821 punkt 5, #1028) ────────────────────────────────────────
+
+class CustomFilterRow(QWidget):
+    """The Custom tab's row for one custom field, by the field's type:
+
+      boolean          Yes / No boxes, both ticked = any
+      string           the text operators (TextFilterRow)
+      integer, real    "Any" or a number condition, one or two values
+      date             the date operators (DateFilterRow, without compare)
+
+    build() gives the field's CustomFieldFilter, or None while the row is
+    not set.
+    """
+
+    def __init__(self, name: str, type_: str, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.type = type_
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        self._text: Optional[TextFilterRow] = None
+        self._date: Optional[DateFilterRow] = None
+        if type_ == "boolean":
+            self.label = hug_label(QLabel(f"{name}:"))
+            self._yes = QCheckBox(tr("yes"))
+            self._no = QCheckBox(tr("no"))
+            for box in (self._yes, self._no):
+                box.setChecked(True)
+                layout.addWidget(box)
+            layout.addStretch()
+        elif type_ == "string":
+            self._text = TextFilterRow(f"{name}:", tr("filter_contains_placeholder"))
+            self.label = self._text.label
+            layout.addWidget(self._text)
+        elif type_ == "date":
+            self._date = DateFilterRow(None, f"{name}:")
+            self.label = self._date.label
+            layout.addWidget(self._date)
+        else:
+            self.label = hug_label(QLabel(f"{name}:"))
+            self._op = QComboBox()
+            self._op.addItem(tr("filter_date_op_any"), "any")
+            for op, key in _DISTANCE_OP_LABELS:
+                self._op.addItem(tr(key), op)
+            layout.addWidget(self._op)
+            decimals = 0 if type_ == "integer" else 2
+            self._value1, self._value2 = QDoubleSpinBox(), QDoubleSpinBox()
+            for spin in (self._value1, self._value2):
+                spin.setRange(-1e9, 1e9)
+                spin.setDecimals(decimals)
+            self._and = QLabel("–")
+            layout.addWidget(self._value1)
+            layout.addWidget(self._and)
+            layout.addWidget(self._value2)
+            layout.addStretch()
+            self._op.currentIndexChanged.connect(self._update_inputs)
+            self._update_inputs()
+
+    def _update_inputs(self) -> None:
+        op = self._op.currentData()
+        self._value1.setVisible(op != "any")
+        two = op in ("between", "not_between")
+        self._and.setVisible(two)
+        self._value2.setVisible(two)
+
+    def reset(self) -> None:
+        if self.type == "boolean":
+            self._yes.setChecked(True)
+            self._no.setChecked(True)
+        elif self._text is not None:
+            self._text.reset()
+        elif self._date is not None:
+            self._date.reset()
+        else:
+            self._op.setCurrentIndex(0)
+            self._value1.setValue(0)
+            self._value2.setValue(0)
+
+    def is_set(self) -> bool:
+        if self.type == "boolean":
+            return self._yes.isChecked() != self._no.isChecked()
+        if self._text is not None:
+            return self._text.is_set()
+        if self._date is not None:
+            return self._date.op() != "any"
+        return self._op.currentData() != "any"
+
+    def build(self) -> Optional[CustomFieldFilter]:
+        if not self.is_set():
+            return None
+        if self.type == "boolean":
+            return CustomFieldFilter(self.name, self.type,
+                                     "yes" if self._yes.isChecked() else "no")
+        if self._text is not None:
+            return self._text.build(
+                lambda text, op: CustomFieldFilter(self.name, self.type, op, text=text))
+        if self._date is not None:
+            dates = self._date.range_args()
+            return CustomFieldFilter(self.name, self.type, self._date.op(),
+                                     date1=dates["date1"], date2=dates["date2"],
+                                     amount=dates["amount"], unit=dates["unit"])
+        low, high = self._value1.value(), self._value2.value()
+        if self._op.currentData() in ("between", "not_between") and low > high:
+            low, high = high, low
+            self._value1.setValue(low)
+            self._value2.setValue(high)
+        return CustomFieldFilter(self.name, self.type, self._op.currentData(),
+                                 value1=low, value2=high)
+
+    def text_row(self) -> Optional[TextFilterRow]:
+        return self._text
+
+    def load(self, f: CustomFieldFilter) -> None:
+        if self.type == "boolean":
+            self._yes.setChecked(f.op == "yes")
+            self._no.setChecked(f.op == "no")
+        elif self._text is not None:
+            self._text.load(f)
+        elif self._date is not None:
+            self._date.load_range(f.op, f.date1, f.date2, f.amount, f.unit)
+        else:
+            self._op.setCurrentIndex(max(self._op.findData(f.op), 0))
+            self._value1.setValue(f.value1)
+            self._value2.setValue(f.value2)
+
+
 # ── Filter dialog ─────────────────────────────────────────────────────────────
 
 class FilterDialog(QDialog):
@@ -768,8 +896,12 @@ class FilterDialog(QDialog):
                                     # and then closes the dialog without clicking Apply.
 
     def __init__(self, parent=None, current_filterset: Optional[FilterSet] = None,
-                 last_profile_name: str = "", current_cache=None):
+                 last_profile_name: str = "", current_cache=None,
+                 map_caches: Optional[list] = None, initial_tab: Optional[str] = None):
+        """*map_caches* are shown as context in the Line/Polygon tab's
+        "Draw on map" dialog; *initial_tab* ("line_polygon") opens that tab."""
         super().__init__(parent)
+        self._map_caches = map_caches or []
         self.setWindowTitle(tr("filter_dialog_title"))
         self._attr_boxes: dict[int, tuple] = {}
         # attr_id -> (table row, name item, folded search text)
@@ -822,6 +954,8 @@ class FilterDialog(QDialog):
                     break
         elif current_filterset:
             self._load_filterset(current_filterset)
+        if initial_tab == "line_polygon":
+            self._tabs.setCurrentWidget(self._line_polygon_tab)
 
     # ── UI bygning ────────────────────────────────────────────────────────────
 
@@ -873,6 +1007,7 @@ class FilterDialog(QDialog):
         self._waypoints_tab = self._build_waypoints_tab()
         self._trackables_tab = self._build_trackables_tab()
         self._text_search_tab = self._build_text_search_tab()
+        self._custom_tab = self._build_custom_tab()
         self._where_tab = self._build_where_tab()
         self._tabs.addTab(self._general_tab, tr("settings_tab_general"))
         self._tabs.addTab(self._dates_tab, tr("filter_tab_dates"))
@@ -883,6 +1018,8 @@ class FilterDialog(QDialog):
         self._tabs.addTab(self._trackables_tab, tr("filter_trackables_group"))
         self._tabs.addTab(self._attributes_tab, tr("filter_tab_attributes"))
         self._tabs.addTab(self._text_search_tab, tr("filter_tab_text_search"))
+        if self._custom_tab is not None:
+            self._tabs.addTab(self._custom_tab, tr("filter_tab_custom"))
         self._tabs.addTab(self._where_tab, tr("filter_tab_where"))
         layout.addWidget(self._tabs)
 
@@ -1423,10 +1560,17 @@ class FilterDialog(QDialog):
         self._lp_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         left.addWidget(self._lp_text, 1)
 
+        lp_btn_row = QHBoxLayout()
         flagged_btn = QPushButton(tr("filter_lp_add_flagged_btn"))
         flagged_btn.setAutoDefault(False)
         flagged_btn.clicked.connect(self._add_flagged_points)
-        left.addWidget(flagged_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        lp_btn_row.addWidget(flagged_btn)
+        draw_btn = QPushButton(tr("filter_lp_draw_btn"))
+        draw_btn.setAutoDefault(False)
+        draw_btn.clicked.connect(self._draw_lp_on_map)
+        lp_btn_row.addWidget(draw_btn)
+        lp_btn_row.addStretch()
+        left.addLayout(lp_btn_row)
 
         file_group = QGroupBox(tr("filter_lp_file_group"))
         file_layout = QVBoxLayout(file_group)
@@ -1537,7 +1681,7 @@ class FilterDialog(QDialog):
 
         for i, (attr_id, attr_key) in enumerate(unique_attrs):
             name_item = QTableWidgetItem(tr(attr_key))
-            name_item.setToolTip(f"Attribut ID: {attr_id}")
+            name_item.setToolTip(tr("filter_attr_id_tip", id=attr_id))
             table.setItem(i, 0, name_item)
 
             ja_cb    = QCheckBox()
@@ -2060,6 +2204,70 @@ class FilterDialog(QDialog):
         layout.addStretch()
         return widget
 
+    def _build_custom_tab(self) -> Optional[QWidget]:
+        """Custom fane (#821 punkt 5, #1028) — én række pr. custom field i
+        den aktive database. Filtre på felter databasen ikke har (fra en
+        profil lavet til en anden database) beholdes uændret og nævnes
+        nederst. Kun med companion-db feature flaget."""
+        self._custom_rows: dict[str, CustomFilterRow] = {}
+        self._custom_kept: list[CustomFieldFilter] = []
+        from opensak.utils import flags
+        if not flags.companion_db:
+            return None
+        fields_: list = []
+        try:
+            from opensak.db import custom_fields
+            from opensak.db.manager import get_db_manager
+            active = get_db_manager().active_path
+            if active is not None:
+                fields_ = custom_fields.fields(Path(active))
+        except Exception:
+            fields_ = []
+
+        content = QWidget()
+        form = QFormLayout(content)
+        form.setSpacing(8)
+        form.setContentsMargins(10, 10, 10, 10)
+        if not fields_:
+            empty = QLabel(tr("filter_custom_none"))
+            empty.setWordWrap(True)
+            form.addRow(empty)
+        for f in fields_:
+            row = CustomFilterRow(f.name, f.type)
+            self._custom_rows[f.name.lower()] = row
+            form.addRow(row.label, row)
+        self._custom_kept_label = QLabel()
+        self._custom_kept_label.setWordWrap(True)
+        self._custom_kept_label.setVisible(False)
+        form.addRow(self._custom_kept_label)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+        return scroll
+
+    def _reset_custom(self) -> None:
+        for row in self._custom_rows.values():
+            row.reset()
+        self._custom_kept = []
+        if self._custom_tab is not None:
+            self._custom_kept_label.setVisible(False)
+
+    def _load_custom_filter(self, f: CustomFieldFilter) -> None:
+        """Show *f* in its field's row — or keep it as it is when this
+        database has no such field (of that type), or the row is taken."""
+        row = self._custom_rows.get(f.field.lower())
+        if row is not None and row.type == f.type and not row.is_set():
+            row.load(f)
+            return
+        self._custom_kept.append(f)
+        if self._custom_tab is not None:
+            self._custom_kept_label.setText(tr(
+                "filter_custom_kept",
+                fields=", ".join(dict.fromkeys(k.field for k in self._custom_kept))))
+            self._custom_kept_label.setVisible(True)
+
     def _build_where_tab(self) -> QWidget:
         """Where filter fane — SQL WHERE clause editor."""
         widget = QWidget()
@@ -2201,6 +2409,10 @@ class FilterDialog(QDialog):
             (self._where_tab, None,
              lambda: bool(self._where_sql_general.toPlainText().strip())),
         ]
+        if self._custom_tab is not None:
+            for custom_row in self._custom_rows.values():
+                specs.append((self._custom_tab, custom_row.label, custom_row.is_set))
+            specs.append((self._custom_tab, None, lambda: bool(self._custom_kept)))
         return specs
 
     def _attributes_changed(self) -> bool:
@@ -2279,17 +2491,23 @@ class FilterDialog(QDialog):
                    error=text_filter.regex_error),
             )
             return False
+        custom_text_rows = {
+            name: text_row for name, r in self._custom_rows.items()
+            if (text_row := r.text_row()) is not None
+        }
         for tab, rows in ((self._waypoints_tab, self._wp_text_rows),
-                          (self._trackables_tab, self._tb_text_rows)):
+                          (self._trackables_tab, self._tb_text_rows),
+                          (self._custom_tab, custom_text_rows)):
             for row in rows.values():
                 text_filter = row.build(TextMatchFilter)
                 if text_filter is None or text_filter.regex_error is None:
                     continue
-                self._tabs.setCurrentWidget(tab)
+                if tab is not None:
+                    self._tabs.setCurrentWidget(tab)
                 row.edit.setFocus()
                 QMessageBox.warning(
                     self, tr("warning"),
-                    tr("filter_regex_invalid", field=row.label,
+                    tr("filter_regex_invalid", field=row.label.text().rstrip(":"),
                        error=text_filter.regex_error),
                 )
                 return False
@@ -2397,6 +2615,28 @@ class FilterDialog(QDialog):
             return
         self._add_lp_lines([f"W,{code}" for code in codes])
 
+    def _draw_lp_on_map(self) -> None:
+        """Draw/edit the tab's shape in MapDrawDialog; on OK the drawn
+        points replace the list and the filter type follows the drawing."""
+        points, bad = self._lp_points()
+        if bad:
+            self._validate_line_polygon()  # names the unreadable lines
+            return
+        center = None
+        if self._current_cache is not None:
+            from opensak.filters.engine import effective_coords
+            lat, lon = effective_coords(self._current_cache)
+            if lat is not None and lon is not None:
+                center = (lat, lon)
+        from opensak.gui.dialogs.map_draw_dialog import MapDrawDialog
+        dlg = MapDrawDialog(self, self._lp_mode(), points, self._map_caches, center)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._add_lp_lines(
+            format_points_text(dlg.mode(), dlg.points()).splitlines(), replace=True,
+        )
+        self._lp_mode_buttons[dlg.mode()].setChecked(True)
+
     def _load_points_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, tr("filter_lp_file_group"), "", tr("filter_lp_file_filter"),
@@ -2412,7 +2652,7 @@ class FilterDialog(QDialog):
             QMessageBox.warning(self, tr("warning"), tr("filter_lp_file_no_points"))
             return
         self._add_lp_lines(
-            [_format_lp_point(p) for p in points],
+            [format_point(p) for p in points],
             replace=self._lp_replace.isChecked(),
         )
 
@@ -2787,6 +3027,7 @@ class FilterDialog(QDialog):
         self._reset_waypoints()
         self._reset_trackables()
         self._reset_text_search()
+        self._reset_custom()
         if self._where_tab is not None:
             self._where_sql_general.clear()
             self._where_error_label.hide()
@@ -2816,6 +3057,8 @@ class FilterDialog(QDialog):
             self._reset_trackables()
         elif tab is self._text_search_tab:
             self._reset_text_search()
+        elif self._custom_tab is not None and tab is self._custom_tab:
+            self._reset_custom()
         self._refresh_highlights()
 
     # ── Byg FilterSet fra UI ──────────────────────────────────────────────────
@@ -3083,6 +3326,15 @@ class FilterDialog(QDialog):
         if text_search is not None:
             fs.add(text_search)
 
+        # Custom fields (#1028) — plus the kept filters on fields this
+        # database doesn't have
+        for custom_row in self._custom_rows.values():
+            custom_filter = custom_row.build()
+            if custom_filter is not None:
+                fs.add(custom_filter)
+        for kept in self._custom_kept:
+            fs.add(kept)
+
         # WHERE clause
         if self._where_tab is not None:
             sql = self._where_sql_general.toPlainText().strip()
@@ -3316,7 +3568,7 @@ class FilterDialog(QDialog):
                 self._set_ccd_distances(getattr(f, "dist1_m", 0.0), getattr(f, "dist2_m", 0.0))
             elif ftype == "line_polygon":
                 self._lp_text.setPlainText(
-                    f.text or "\n".join(_format_lp_point(p) for p in f.points)
+                    f.text or "\n".join(format_point(p) for p in f.points)
                 )
                 self._lp_mode_buttons[f.mode].setChecked(True)
                 from opensak.gui.settings import get_settings as _gs
@@ -3346,6 +3598,8 @@ class FilterDialog(QDialog):
             elif ftype == "where_clause":
                 if self._where_tab is not None:
                     self._where_sql_general.setPlainText(getattr(f, "sql", ""))
+            elif ftype == "custom_field":
+                self._load_custom_filter(f)
             elif ftype == "user_flag":
                 flagged = getattr(f, "flagged", True)
                 self._flag_yes.setChecked(flagged)
@@ -3425,6 +3679,39 @@ class FilterDialog(QDialog):
         self.accept()
 
 
+def _where_custom_help() -> str:
+    """The Where help's part on custom fields (#1028): the active database's
+    fields, usable by name. Empty without the feature flag or fields."""
+    import html as _html
+    from opensak.utils import flags
+    if not flags.companion_db:
+        return ""
+    try:
+        from opensak.db import custom_fields
+        from opensak.db.manager import get_db_manager
+        active = get_db_manager().active_path
+        fields_ = custom_fields.fields(Path(active)) if active is not None else []
+    except Exception:
+        fields_ = []
+    if not fields_:
+        return ""
+    from opensak.gui.custom_field_format import type_label
+    rows = "".join(
+        f"<tr><td><code>{_html.escape(f.name)}</code></td>"
+        f"<td>{_html.escape(type_label(f.type))}</td></tr>"
+        for f in fields_
+    )
+    first = fields_[0]
+    test = {"boolean": "= 1", "integer": "> 0", "real": "> 0",
+            "date": ">= '2024-01-01'"}.get(first.type, "<> ''")
+    return (
+        f"<br><br><b>{tr('filter_where_custom_heading')}</b><br>"
+        f"{tr('filter_where_custom_intro')}<br>"
+        f"<table cellspacing='4'>{rows}</table>"
+        f"<code>{_html.escape(first.name)} {_html.escape(test)}</code>"
+    )
+
+
 def show_where_info(parent: Optional[QWidget] = None) -> None:
     """Show the Where-clause column reference dialog. Shared by the Set
     Filter dialog's Where tab and the toolbar's quick Where box (#558)."""
@@ -3466,7 +3753,7 @@ def show_where_info(parent: Optional[QWidget] = None) -> None:
     content.setTextFormat(Qt.TextFormat.RichText)
     content.setWordWrap(True)
     content.setContentsMargins(8, 8, 8, 8)
-    content.setText(
+    content.setText(  # i18n: ignore — SQL column names and types
         f"<b>{tr('filter_where_help_heading')}</b><br><br>"
         f"{tr('filter_where_help_intro')}<br><br>"
         "<table cellspacing='4'>"
@@ -3517,6 +3804,7 @@ def show_where_info(parent: Optional[QWidget] = None) -> None:
         "</table><br>"
         "<code>EXISTS (SELECT 1 FROM logs WHERE logs.cache_id = caches.id AND logs.text LIKE '%TFTC%')</code><br>"
         "<code>EXISTS (SELECT 1 FROM user_notes WHERE user_notes.cache_id = caches.id AND user_notes.note LIKE '%bookmark%')</code>"
+        + _where_custom_help()
     )
 
     scroll.setWidget(content)

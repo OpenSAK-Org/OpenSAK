@@ -137,18 +137,49 @@ def vincenty_km_batch(lat0: float, lon0: float, lats, lons):
     return [_vincenty_km(lat0, lon0, la, lo) for la, lo in zip(lats, lons)]
 
 
-def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Scalar distance (km) dispatched by the user's distance_method setting."""
+DISTANCE_METHODS = ("haversine", "vincenty")
+
+
+def distance_method_setting() -> str:
+    """The user's distance_method setting.
+
+    Issue #1096: this is the only place in filters/engine.py that reaches
+    into opensak.gui. Core and headless callers (Lua macros, #938) should
+    read it once and pass ``method=`` to distance_km() / distance_km_batch()
+    instead of relying on the fallback, so the method is visible in the call
+    rather than hidden global state.
+    """
     from opensak.gui.settings import get_settings
-    if get_settings().distance_method == "vincenty":
+    return get_settings().distance_method
+
+
+def _resolve_distance_method(method: str | None) -> str:
+    """None → the user's setting (any unknown stored value means haversine,
+    as before). An explicit method must be one of DISTANCE_METHODS."""
+    if method is None:
+        return distance_method_setting()
+    if method not in DISTANCE_METHODS:
+        raise ValueError(
+            f"Unknown distance method {method!r}; expected one of {DISTANCE_METHODS}"
+        )
+    return method
+
+
+def distance_km(
+    lat1: float, lon1: float, lat2: float, lon2: float,
+    method: str | None = None,
+) -> float:
+    """Scalar distance (km) using *method* ("haversine" or "vincenty").
+    When *method* is None, the user's distance_method setting decides."""
+    if _resolve_distance_method(method) == "vincenty":
         return _vincenty_km(lat1, lon1, lat2, lon2)
     return _haversine_km(lat1, lon1, lat2, lon2)
 
 
-def distance_km_batch(lat0: float, lon0: float, lats, lons):
-    """Batch distance (km) dispatched by the user's distance_method setting."""
-    from opensak.gui.settings import get_settings
-    if get_settings().distance_method == "vincenty":
+def distance_km_batch(lat0: float, lon0: float, lats, lons, method: str | None = None):
+    """Batch distance (km) using *method* ("haversine" or "vincenty").
+    When *method* is None, the user's distance_method setting decides."""
+    if _resolve_distance_method(method) == "vincenty":
         return vincenty_km_batch(lat0, lon0, lats, lons)
     return haversine_km_batch(lat0, lon0, lats, lons)
 
@@ -504,6 +535,12 @@ _TEXT_OP_LIKE = {
 }
 
 
+# Longest needle list pushed to SQL as one LIKE per needle; a longer
+# non-ASCII list is left to matches(). Well below SQLite's bound-variable limit (999 in builds
+# before 3.32, 32,766 since).
+_MAX_LIKE_NEEDLES = 500
+
+
 def _like_pattern(needle: str) -> str:
     """Escape LIKE wildcards in *needle* (for ESCAPE '\\') and turn every
     non-ASCII character into a "_" wildcard — see TextMatchFilter.__init__."""
@@ -574,7 +611,7 @@ class TextMatchFilter(BaseFilter):
         None when it can't be expressed in SQL (see apply_to_query). A no-op
         filter yields true(). Shared with WaypointFilter, which matches the
         same operators against waypoint columns."""
-        from sqlalchemy import and_, func, or_, true
+        from sqlalchemy import and_, func, or_, select, true
         if self._is_noop():
             return true()
         if self.op == "empty":
@@ -592,11 +629,18 @@ class TextMatchFilter(BaseFilter):
             # that lower-cases to several (e.g. "İ") breaks the one-"_"-per-
             # character pattern — leave both to matches().
             return None
+        if len(self._needles()) > _MAX_LIKE_NEEDLES and not self.sql_exact:
+            # One bound variable per LIKE — a long list would exceed SQLite's
+            # variable limit (issue #1254), so matches() decides alone.
+            return None
         lowered = func.lower(col)
         if self.sql_exact and positive == "equals":
             cond = lowered == self._needle
         elif self.sql_exact and positive == "in_list":
-            cond = lowered.in_(self._items)
+            # The whole list as one JSON bound variable, so a list of any
+            # length stays below SQLite's variable limit (issue #1254).
+            values = func.json_each(json.dumps(self._items)).table_valued("value")
+            cond = lowered.in_(select(values.c.value))
         else:
             cond = or_(*(
                 lowered.like(_TEXT_OP_LIKE[positive].format(_like_pattern(n)), escape="\\")
@@ -1483,6 +1527,58 @@ class LockedFilter(BaseFilter):
         return cls(locked=data["locked"])
 
 
+class IsOwnerFilter(BaseFilter):
+    """Keep caches owned (or not owned) by the user: is_owner, which follows
+    the account in Settings (#1140, GSAK's IsOwner)."""
+    filter_type = "is_owner"
+
+    def __init__(self, owned: bool):
+        self.owned = owned
+
+    def apply_to_query(self, query):
+        # NOT NULL DEFAULT 0, but same NULL-as-falsy mirror as UserFlagFilter.
+        from sqlalchemy import or_
+        if self.owned:
+            return query.filter(Cache.is_owner == True)  # noqa: E712
+        return query.filter(or_(Cache.is_owner == False, Cache.is_owner.is_(None)))  # noqa: E712
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.is_owner) == self.owned
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "owned": self.owned}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "IsOwnerFilter":
+        return cls(owned=data["owned"])
+
+
+class MacroFlagFilter(BaseFilter):
+    """Keep caches based on macro_flag, the macros' own flag (GSAK's
+    MacroFlag, #1139). Only macros set it: opensak.filter{macro_flag = ..}."""
+    filter_type = "macro_flag"
+
+    def __init__(self, flagged: bool):
+        self.flagged = flagged
+
+    def apply_to_query(self, query):
+        # NOT NULL DEFAULT 0, but same NULL-as-falsy mirror as UserFlagFilter.
+        from sqlalchemy import or_
+        if self.flagged:
+            return query.filter(Cache.macro_flag == True)  # noqa: E712
+        return query.filter(or_(Cache.macro_flag == False, Cache.macro_flag.is_(None)))  # noqa: E712
+
+    def matches(self, cache: Cache) -> bool:
+        return bool(cache.macro_flag) == self.flagged
+
+    def to_dict(self) -> dict:
+        return {"filter_type": self.filter_type, "flagged": self.flagged}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MacroFlagFilter":
+        return cls(flagged=data["flagged"])
+
+
 class DnfFilter(BaseFilter):
     """Keep caches based on DNF (Did Not Find) flag."""
     filter_type = "dnf"
@@ -2012,12 +2108,17 @@ DATE_FILTER_FIELDS: dict[str, str] = {
     "dnf_date":        "dnf_date",
     "creation_date":   "imported_at",
     "last_gpx_update": "last_gpx_update",
+    "last_user_update": "last_user_update",   # #1141, GSAK's LastUserDate
     "last_log_date":   "last_log_date",
     "changed_date":    "last_updated",
 }
 # Fields whose DateFilter bounds may carry a time of day (to the minute) —
 # timestamps OpenSAK records itself, where the time is meaningful.
-DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "changed_date")
+DATETIME_FILTER_FIELDS = ("creation_date", "last_gpx_update", "last_user_update", "changed_date")
+# Fields holding a timestamp OpenSAK records itself, stored as naive UTC
+# (#1097). Bounds the user types are local time, so these are compared in
+# local time: the stored value is converted, or the bounds are (in SQL).
+UTC_DATE_FILTER_FIELDS = ("creation_date", "last_gpx_update", "last_user_update")
 DATE_OPS = ("on_or_before", "on_or_after", "equal", "between",
             "during", "not_during", "compare")
 DATE_UNITS = ("days", "weeks", "months", "years")
@@ -2145,16 +2246,20 @@ def _date_op_range(
     return _shift_back(today, amount, unit), today
 
 
-def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date]):
+def _date_range_sql(col, op: str, lo: Optional[date], hi: Optional[date], utc: bool = False):
     """SQL form of _date_in_range() on datetime column *col*. Compares the raw
-    column against day (or minute) boundaries, so an index on it stays usable."""
+    column against day (or minute) boundaries, so an index on it stays usable.
+    With *utc* the column holds naive UTC and the (local) boundaries are
+    converted to UTC first (#1097)."""
     from sqlalchemy import and_, not_, or_
+    from opensak.utils.timestamps import local_to_utc
     conditions = [col.is_not(None)]
     if lo is not None:
-        conditions.append(col >= _bound_start(lo))
+        start = _bound_start(lo)
+        conditions.append(col >= (local_to_utc(start) if utc else start))
     end = _bound_end(hi) if hi is not None else None
     if end is not None:
-        conditions.append(col < end)
+        conditions.append(col < (local_to_utc(end) if utc else end))
     inside = and_(*conditions)
     if op == "not_during":
         return or_(col.is_(None), not_(inside))
@@ -2247,20 +2352,38 @@ class DateFilter(BaseFilter):
         # date()/julianday() so both sides are reduced to calendar dates.
         from sqlalchemy import func
         col = getattr(Cache, DATE_FILTER_FIELDS[self.field])
+        utc = self.field in UTC_DATE_FILTER_FIELDS
         if self.op == "compare":
             other = getattr(Cache, DATE_FILTER_FIELDS[self.other_field])
-            diff = func.julianday(func.date(col)) - func.julianday(func.date(other))
+
+            def _day(c, field: str):
+                # #1097: a UTC timestamp's calendar day is its local day.
+                if field in UTC_DATE_FILTER_FIELDS:
+                    return func.date(c, "localtime")
+                return func.date(c)
+
+            diff = (func.julianday(_day(col, self.field))
+                    - func.julianday(_day(other, self.other_field)))
             return query.filter(
                 col.is_not(None), other.is_not(None),
                 _compare_diff(self.compare_op, diff, self.compare_days, func.abs),
             )
-        return query.filter(_date_range_sql(col, self.op, *self._range()))
+        return query.filter(_date_range_sql(col, self.op, *self._range(), utc=utc))
+
+    @staticmethod
+    def _value(cache: Cache, field: str):
+        """The cache's value for *field*; UTC timestamps as local time (#1097)."""
+        raw = getattr(cache, DATE_FILTER_FIELDS[field], None)
+        if field in UTC_DATE_FILTER_FIELDS and isinstance(raw, datetime):
+            from opensak.utils.timestamps import utc_to_local
+            return utc_to_local(raw)
+        return raw
 
     def matches(self, cache: Cache) -> bool:
-        raw = getattr(cache, DATE_FILTER_FIELDS[self.field], None)
+        raw = self._value(cache, self.field)
         value = _to_date(raw)
         if self.op == "compare":
-            other = _to_date(getattr(cache, DATE_FILTER_FIELDS[self.other_field], None))
+            other = _to_date(self._value(cache, self.other_field))
             if value is None or other is None:
                 return False
             return _compare_diff(self.compare_op, (value - other).days, self.compare_days)
@@ -3250,6 +3373,227 @@ class LogFilter(BaseFilter):
         return f"<LogFilter {self.to_dict()}>"
 
 
+# ── Custom field filter (#1028 step 4, #821 item 5) ───────────────────────────
+
+# The view of caches plus their custom fields (db/custom_fields.py), a TEMP
+# view on every connection of the database engines.
+CUSTOM_VIEW = "caches_all"
+CUSTOM_FIELD_TYPES = ("string", "integer", "real", "date", "boolean")
+CUSTOM_BOOLEAN_OPS = ("yes", "no")
+# DateFilter's operators, minus compare (a field has only its own date).
+CUSTOM_DATE_OPS = WAYPOINT_DATE_OPS
+
+
+def custom_field_ops(type_: str) -> tuple[str, ...]:
+    """The operators a custom field of *type_* can be filtered with."""
+    if type_ == "boolean":
+        return CUSTOM_BOOLEAN_OPS
+    if type_ == "string":
+        return TEXT_OPS
+    if type_ == "date":
+        return CUSTOM_DATE_OPS
+    return NUMBER_OPS
+
+
+def _custom_date(value) -> Optional[date]:
+    """A stored custom date ("YYYY-MM-DD", maybe with a time) as a date."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip()).date()
+    except ValueError:
+        return None
+
+
+class CustomFieldFilter(BaseFilter):
+    """Keep caches by one of their custom fields (the Filter dialog's Custom
+    tab), by name. *type_* is the field's type, kept with the filter so a
+    profile shows the same row in a database without the field:
+
+      boolean   op yes / no
+      string    the text operators (TextMatchFilter), on *text*
+      integer,  NUMBER_OPS against *value1* (and *value2* for (not) between)
+      real
+      date      DateFilter's operators but compare, on *date1*/*date2* or
+                the last *amount* *unit*s
+
+    The values come from the caches_all view, so an untouched cache has the
+    field's default, as in GSAK. prepare() collects the matching caches in
+    one query on the view; a database without the field (or without the
+    view) matches nothing, like a Where clause that fails.
+    """
+    filter_type = "custom_field"
+
+    def __init__(
+        self,
+        field: str,
+        type_: str,
+        op: str,
+        *,
+        text: str = "",
+        value1: float = 0.0,
+        value2: float = 0.0,
+        date1: Optional[date] = None,
+        date2: Optional[date] = None,
+        amount: int = 1,
+        unit: str = "days",
+    ):
+        if type_ not in CUSTOM_FIELD_TYPES:
+            raise ValueError(f"Unknown custom field type {type_!r}")
+        if op not in custom_field_ops(type_):
+            raise ValueError(f"Operator {op!r} doesn't fit a {type_} field")
+        if unit not in DATE_UNITS:
+            raise ValueError(f"Unknown date unit {unit!r}")
+        self.field = field.strip()
+        self.type = type_
+        self.op = op
+        self.text = text.strip()
+        self.value1 = float(value1)
+        self.value2 = float(value2)
+        self.date1 = _to_date(date1)
+        self.date2 = _to_date(date2)
+        if type_ == "date" and op in ("on_or_before", "on_or_after", "equal", "between") \
+                and self.date1 is None:
+            raise ValueError(f"Date operator {op!r} needs date1")
+        if type_ == "date" and op == "between" and self.date2 is None:
+            raise ValueError("Date operator 'between' needs date2")
+        self.amount = max(0, int(amount))
+        self.unit = unit
+        self._text = TextMatchFilter(self.text, op) if type_ == "string" else None
+        self.sql_exact = self._text is None or (
+            self._text.sql_exact and _TEXT_OP_NEGATIONS.get(op, op) != "regex")
+        # cache ids that match, filled by prepare(); None until then
+        self._ids: Optional[set[int]] = None
+        # False when the database has no such field (or no view)
+        self._available = True
+
+    @property
+    def regex_error(self) -> Optional[str]:
+        return self._text.regex_error if self._text is not None else None
+
+    def _date_range(self) -> tuple[Optional[date], Optional[date]]:
+        return _date_op_range(self.op, self.date1, self.date2, self.amount, self.unit)
+
+    def _column(self):
+        from sqlalchemy import column
+        return column(self.field)
+
+    def _view(self):
+        from sqlalchemy import column, table
+        return table(CUSTOM_VIEW, column("id"), self._column())
+
+    def sql_condition(self, col):
+        """SQL condition on the field's column *col*, or None (regex, and
+        text needing Python's case folding — see TextMatchFilter)."""
+        from sqlalchemy import and_, func, not_, or_
+        if self.type == "boolean":
+            truthy = func.coalesce(col, 0) != 0
+            return truthy if self.op == "yes" else not_(truthy)
+        if self.type == "string":
+            assert self._text is not None
+            return self._text.sql_condition(col)
+        if self.type == "date":
+            day = func.date(col)
+            lo, hi = self._date_range()
+            conditions = [day.is_not(None)]
+            if lo is not None:
+                conditions.append(day >= lo.isoformat())
+            if hi is not None:
+                conditions.append(day <= hi.isoformat())
+            inside = and_(*conditions)
+            return or_(day.is_(None), not_(inside)) if self.op == "not_during" else inside
+        return _op_sql(col, self.op, self.value1, self.value2) & col.is_not(None)
+
+    def match_value(self, value) -> bool:
+        """Whether the field's value *value* passes (the Python side of
+        sql_condition())."""
+        if self.type == "boolean":
+            truthy = value not in (None, 0, "0", "", False)
+            return truthy if self.op == "yes" else not truthy
+        if self.type == "string":
+            assert self._text is not None
+            return self._text.match_value(None if value is None else str(value))
+        if self.type == "date":
+            return _date_in_range(_custom_date(value), self.op, *self._date_range())
+        if value is None or isinstance(value, bool):
+            return False
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return False
+        return _distance_op_ok(self.op, number, self.value1, self.value2, 0)
+
+    def prepare(self, session: Session) -> None:
+        """Collect the matching caches from the view (see the class docstring)."""
+        from sqlalchemy import select, text as _sa_text
+        self._ids = set()
+        try:
+            columns = {str(r[1]).lower() for r in
+                       session.execute(_sa_text(f"PRAGMA temp.table_info({CUSTOM_VIEW})"))}
+        except Exception:
+            columns = set()
+        self._available = self.field.lower() in columns
+        if not self._available:
+            return
+        view, col = self._view(), self._column()
+        cond = self.sql_condition(col) if self.sql_exact else None
+        try:
+            if cond is not None:
+                rows = session.execute(select(view.c.id).where(cond))
+                self._ids = {row[0] for row in rows}
+            else:
+                rows = session.execute(select(view.c.id, col))
+                self._ids = {row[0] for row in rows if self.match_value(row[1])}
+        except Exception:
+            self._ids = set()
+            self._available = False
+
+    def apply_to_query(self, query):
+        from sqlalchemy import false, select
+        if not self._available:
+            return query.filter(false())
+        if not self.sql_exact:
+            return None  # matches() decides, from prepare()'s ids
+        cond = self.sql_condition(self._column())
+        return query.filter(Cache.id.in_(select(self._view().c.id).where(cond)))
+
+    def matches(self, cache: Cache) -> bool:
+        return self._ids is not None and cache.id in self._ids
+
+    def to_dict(self) -> dict:
+        data: dict = {"filter_type": self.filter_type, "field": self.field,
+                      "type": self.type, "op": self.op}
+        if self.type == "string":
+            data["text"] = self.text
+        elif self.type in ("integer", "real"):
+            data.update(value1=self.value1, value2=self.value2)
+        elif self.type == "date":
+            data.update(
+                date1=self.date1.isoformat() if self.date1 else None,
+                date2=self.date2.isoformat() if self.date2 else None,
+                amount=self.amount, unit=self.unit,
+            )
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CustomFieldFilter":
+        return cls(
+            data["field"], data["type"], data["op"],
+            text=data.get("text", ""),
+            value1=data.get("value1", 0.0), value2=data.get("value2", 0.0),
+            date1=_parse_iso_date(data.get("date1")),
+            date2=_parse_iso_date(data.get("date2")),
+            amount=data.get("amount", 1), unit=data.get("unit", "days"),
+        )
+
+    def __repr__(self) -> str:
+        return f"<CustomFieldFilter {self.to_dict()}>"
+
+
 # ── Filter registry (for deserialisation) ─────────────────────────────────────
 
 FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
@@ -3287,6 +3631,8 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "where_clause":       WhereClauseFilter,
     "user_flag":          UserFlagFilter,
     "locked":             LockedFilter,
+    "macro_flag":         MacroFlagFilter,
+    "is_owner":           IsOwnerFilter,
     "dnf":                DnfFilter,
     "ftf":                FtfFilter,
     "user_note":          UserNoteFilter,
@@ -3303,6 +3649,7 @@ FILTER_REGISTRY: dict[str, type[BaseFilter]] = {
     "waypoint":           WaypointFilter,
     "trackable":          TrackableFilter,
     "log":                LogFilter,
+    "custom_field":       CustomFieldFilter,
 }
 
 
@@ -3461,6 +3808,9 @@ SORT_FIELDS: dict[str, Any] = {
     "user_data_2":     lambda c: (c.user_data_2 or "").lower(),
     "user_data_3":     lambda c: (c.user_data_3 or "").lower(),
     "user_data_4":     lambda c: (c.user_data_4 or "").lower(),
+    # Macros' own sort text (GSAK's MacroSort, #1139): opensak.sort("macro_sort").
+    # Text, so sorted in Python like user_data (see _sql_order_expr).
+    "macro_sort":      lambda c: (c.macro_sort or "").lower(),
     # ── Issue #658: additional GSAK-compatible columns — placeholders, same
     # reasoning as log_count/last_log/corrected above: real sorting happens
     # in CacheTableModel.sort() when the user clicks the column header.
@@ -3487,7 +3837,28 @@ SORT_FIELDS: dict[str, Any] = {
     "last_found_date": lambda c: 0,
     "last_gpx_update": lambda c: 0,
     "last_four_logs":  lambda c: 0,
+    # ── Issue #1141: columns stored since #1139 ──────────────────────────
+    "last_user_update": lambda c: 0,
+    "symbol":          lambda c: 0,
+    # ── Issue #1201: the Lat/Lon columns, sorted by CacheTableModel.sort()
+    # on the effective (corrected) coordinates ───────────────────────────────
+    "latitude":        lambda c: 0,
+    "longitude":       lambda c: 0,
 }
+
+# Custom field columns (#1028) have the id "custom:<field name>"
+# (gui/dialogs/column_dialog.py). Their names come from the database, so
+# they can't be listed above; like the placeholders, CacheTableModel.sort()
+# sorts them and apply_filters() leaves the order alone (#1201).
+CUSTOM_SORT_PREFIX = "custom:"
+
+
+def is_sort_field(field: str) -> bool:
+    """True if SortSpec accepts *field*: a field in SORT_FIELDS, or a
+    custom field column ("custom:<name>")."""
+    return field in SORT_FIELDS or (
+        field.startswith(CUSTOM_SORT_PREFIX) and len(field) > len(CUSTOM_SORT_PREFIX)
+    )
 
 
 def _sql_order_expr(field: str):
@@ -3536,10 +3907,10 @@ class SortSpec:
     ascending: bool = True
 
     def __post_init__(self):
-        if self.field not in SORT_FIELDS:
+        if not is_sort_field(self.field):
             raise ValueError(
                 f"Unknown sort field {self.field!r}. "
-                f"Valid fields: {list(SORT_FIELDS.keys())}"
+                f"Valid fields: {list(SORT_FIELDS.keys())} or {CUSTOM_SORT_PREFIX}<name>"
             )
 
     def to_dict(self) -> dict:
@@ -3623,15 +3994,15 @@ def _prepare_where_clause_filters(
 ) -> None:
     """Pre-populate every WhereClauseFilter's _matching_ids by running its raw
     SQL directly against the database, and every WaypointFilter's waypoint
-    counts, TrackableFilter's trackable counts and LogFilter's log counts
-    (their prepare()). Must run
+    counts, TrackableFilter's trackable counts, LogFilter's log counts and
+    CustomFieldFilter's matching caches (their prepare()). Must run
     before any Python-level matches() call touches one of those filters.
     Mutates the filter objects in place; returns nothing.
     """
     if not filterset:
         return
     for _f in _iter_filters(filterset):
-        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter)):
+        if isinstance(_f, (WaypointFilter, TrackableFilter, LogFilter, CustomFieldFilter)):
             _f.prepare(session)
     from sqlalchemy import text as _sa_text
     _where_filters = [
@@ -3642,6 +4013,7 @@ def _prepare_where_clause_filters(
     if any(_DISTANCE_RE.search(_f.sql) for _f in _where_filters):
         _register_distance_udf(session, distance_from)
         _dist_udf_ready = True
+    _source = where_source(session) if _where_filters else "caches"
 
     for _f in _where_filters:
         try:
@@ -3651,7 +4023,7 @@ def _prepare_where_clause_filters(
                 else _f.sql
             )
             _result = session.execute(
-                _sa_text(f"SELECT id FROM caches WHERE ({_sql})")
+                _sa_text(f"SELECT id FROM {_source} WHERE ({_sql})")
             )
             _f._matching_ids = {row[0] for row in _result}
         except Exception:
@@ -3699,10 +4071,25 @@ def validate_where_sql(session: Session, sql: str) -> Optional[str]:
         if _DISTANCE_RE.search(sql):
             _register_distance_udf(session, None)
             sql = _DISTANCE_RE.sub("_opensak_dist(latitude, longitude)", sql)
-        session.execute(_sa_text(f"SELECT 1 FROM caches WHERE ({sql}) LIMIT 0"))
+        session.execute(_sa_text(f"SELECT 1 FROM {where_source(session)} WHERE ({sql}) LIMIT 0"))
         return None
     except Exception as exc:
         return str(exc)
+
+
+def where_source(session: Session) -> str:
+    """What a Where clause runs on: ``caches`` — or, where the connection
+    has the caches_all view (custom fields, #1028), the view under the name
+    ``caches``, so a clause can use custom fields by name (as in GSAK) and
+    sub-selects referring to ``caches.id`` keep working."""
+    from sqlalchemy import text as _sa_text
+    try:
+        has_view = session.execute(_sa_text(
+            "SELECT 1 FROM sqlite_temp_master WHERE type = 'view' AND name = :n"
+        ), {"n": CUSTOM_VIEW}).first() is not None
+    except Exception:
+        has_view = False
+    return f"{CUSTOM_VIEW} AS caches" if has_view else "caches"
 
 
 def _apply_sql_pushdown(queryable, filterset: Optional["FilterSet"]):
@@ -3999,6 +4386,9 @@ _LIGHTWEIGHT_COLUMNS = [
     Cache.source_file,
     # Issue #716
     Cache.last_found_date, Cache.last_gpx_update, Cache.last_four_logs,
+    # Issue #1139/#1141
+    Cache.last_user_update, Cache.macro_flag, Cache.macro_sort, Cache.is_owner,
+    Cache.symbol,
 ]
 
 
@@ -4414,6 +4804,7 @@ def get_nearby_caches(
         lat, lon,
         [ec[0] for ec in eff],
         [ec[1] for ec in eff],
+        method=distance_method_setting(),  # read once, passed down (#1096)
     )
     within_radius = [
         (c, d) for c, d, (elat, elon) in zip(candidates, dists, eff)

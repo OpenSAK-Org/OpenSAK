@@ -16,11 +16,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional
 
 from sqlalchemy import select
 
 from opensak.db.models import Cache, UserNote
+from opensak.macro.deprecation import Deprecated
 
 # Codes per query — well below SQLite's bound-parameter limit.
 CHUNK_SIZE = 500
@@ -60,6 +62,11 @@ class CacheField:
     columns: tuple
     # columns' values → the Lua value; default: the single column as is
     convert: Optional[Callable[..., Any]] = None
+    # (API version, what to use instead) once the field is deprecated. No
+    # warning at run time — the records are plain tables, and watching
+    # every key read would slow down large loops — only in the docs, the
+    # editor files and metadata.find_deprecated() (deprecation.py).
+    deprecated: Optional[Deprecated] = None
 
     def value(self, row: Any) -> Any:
         values = [row[_label(c)] for c in self.columns]
@@ -86,6 +93,9 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("owner", "string?", "Owner name.", (Cache.owner_name,)),
     CacheField("placed_by", "string?", "Placed-by name as shown on the listing.",
                (Cache.placed_by,)),
+    CacheField("owned", "boolean",
+               "Owned by you: the owner matches your geocaching.com account in "
+               "Settings (GSAK's IsOwner).", (Cache.is_owner,), _bool),
     CacheField("hidden", "string?", 'Hidden date, "YYYY-MM-DD".', (Cache.hidden_date,), _date),
     CacheField("found", "boolean", "Found by you.", (Cache.found,), _bool),
     CacheField("found_date", "string?", 'Your find date, "YYYY-MM-DD".',
@@ -117,14 +127,25 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("color", "string?", 'Colour tag, e.g. "#FF5733".', (Cache.color,)),
     CacheField("locked", "boolean", "Locked against import changes.", (Cache.locked,), _bool),
     CacheField("watch", "boolean", "On the watchlist.", (Cache.watch,), _bool),
+    CacheField("macro_flag", "boolean",
+               "Flag for macros' own use, separate from the user flag (GSAK's MacroFlag).",
+               (Cache.macro_flag,), _bool),
+    CacheField("macro_sort", "string?",
+               "Text for macros' own use, e.g. to sort by (GSAK's MacroSort).",
+               (Cache.macro_sort,)),
     CacheField("note", "string?", "Your local note.", (UserNote.note,)),
     CacheField("gc_note", "string?", "Personal note from geocaching.com.", (Cache.gc_note,)),
     CacheField("hint", "string?", "Hint text as imported.", (Cache.encoded_hints,)),
     CacheField("url", "string?", "Listing URL.", (Cache.url,)),
+    CacheField("symbol", "string?", 'GPX waypoint symbol, e.g. "Geocache Found" (GSAK\'s Symbol).',
+               (Cache.symbol,)),
     CacheField("corrected", "{lat: number, lon: number}?",
                "Corrected coordinates; nil if the cache is not solved.",
                (UserNote.is_corrected, UserNote.corrected_lat, UserNote.corrected_lon),
                _corrected),
+    CacheField("corrected_source", "string?",
+               'Who corrected the coordinates: "user", "macro" or "import" (from GSAK); '
+               "nil if not corrected or not known.", (UserNote.corrected_source,)),
     CacheField("waypoint_count", "integer", "Number of additional waypoints.",
                (Cache.waypoint_count,)),
     CacheField("log_count", "integer", "Number of logs stored.", (Cache.log_count,)),
@@ -133,13 +154,34 @@ CACHE_FIELDS: tuple[CacheField, ...] = (
     CacheField("last_log_date", "string?", 'Date of the latest log, "YYYY-MM-DD".',
                (Cache.last_log_date,), _date),
     CacheField("last_gpx_update", "string?",
-               'When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS"; '
+               'When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; '
                "finds caches the latest Pocket Query did not refresh.",
                (Cache.last_gpx_update,), _datetime),
+    CacheField("last_user_update", "string?",
+               "When a user field (user flag, user sort, user data, lock, note or "
+               'correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK\'s LastUserDate).',
+               (Cache.last_user_update,), _datetime),
 )
 
-_BY_NAME = {f.name: f for f in CACHE_FIELDS}
-FIELD_NAMES = tuple(_BY_NAME)
+# The custom fields (#1028): not a column but a table, field name → value,
+# filled from the companion database (macro/custom_data.py). Only with the
+# companion-db feature flag.
+CUSTOM_FIELD = CacheField(
+    "custom", "table<string, any>",
+    "The cache's custom fields, name → value: a boolean as true/false, numbers "
+    'as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set '
+    "has its default. Changed with opensak.update(code, { custom = { … } }).",
+    (),
+)
+
+
+def _all_fields() -> tuple[CacheField, ...]:
+    from opensak.utils import flags
+    return (*CACHE_FIELDS, CUSTOM_FIELD) if flags.companion_db else CACHE_FIELDS
+
+
+_BY_NAME = {f.name: f for f in (*CACHE_FIELDS, CUSTOM_FIELD)}
+FIELD_NAMES = tuple(f.name for f in CACHE_FIELDS)
 
 
 class UnknownField(ValueError):
@@ -149,16 +191,18 @@ class UnknownField(ValueError):
 def resolve_fields(names: Optional[Iterable[str]]) -> tuple[CacheField, ...]:
     """The fields to load: all for None, else *names* plus `code` (always
     included so a record can be identified)."""
+    every = _all_fields()
     if names is None:
-        return CACHE_FIELDS
+        return every
     wanted = {str(n) for n in names}
-    unknown = wanted - set(_BY_NAME)
+    unknown = wanted - {f.name for f in every}
     if unknown:
         raise UnknownField(
-            f"unknown cache field(s) {sorted(unknown)}; valid fields: {', '.join(FIELD_NAMES)}"
+            f"unknown cache field(s) {sorted(unknown)}; valid fields: "
+            f"{', '.join(f.name for f in every)}"
         )
     wanted.add("code")
-    return tuple(f for f in CACHE_FIELDS if f.name in wanted)
+    return tuple(f for f in every if f.name in wanted)
 
 
 def _query(fields: tuple[CacheField, ...]):
@@ -173,27 +217,36 @@ def _query(fields: tuple[CacheField, ...]):
 
 
 def load_records(
-    session, codes: list[str], fields: tuple[CacheField, ...] = CACHE_FIELDS
+    session, codes: list[str], fields: tuple[CacheField, ...] = CACHE_FIELDS,
+    db_path: Optional[Path] = None,
 ) -> list[dict[str, Any]]:
     """Records for *codes*, in that order; codes not in the database are
-    left out."""
-    stmt = _query(fields)
+    left out. `custom` (CUSTOM_FIELD) comes from the companion database of
+    *db_path*, the database *session* reads ({} without one)."""
+    columns = tuple(f for f in fields if f.columns)
+    stmt = _query(columns)
     by_code: dict[str, dict[str, Any]] = {}
     for start in range(0, len(codes), CHUNK_SIZE):
         chunk = codes[start:start + CHUNK_SIZE]
         for row in session.execute(stmt.where(Cache.gc_code.in_(chunk))).mappings():
-            by_code[row[_label(Cache.gc_code)]] = {f.name: f.value(row) for f in fields}
+            by_code[row[_label(Cache.gc_code)]] = {f.name: f.value(row) for f in columns}
+    if any(f is CUSTOM_FIELD for f in fields):
+        from opensak.macro.custom_data import record_values
+        custom = record_values(db_path, list(by_code))
+        for code, record in by_code.items():
+            record[CUSTOM_FIELD.name] = custom.get(code, {})
     return [by_code[c] for c in codes if c in by_code]
 
 
 def iter_records(
-    session_factory, codes: list[str], fields: tuple[CacheField, ...] = CACHE_FIELDS
+    session_factory, codes: list[str], fields: tuple[CacheField, ...] = CACHE_FIELDS,
+    db_path: Optional[Path] = None,
 ) -> Iterator[dict[str, Any]]:
     """Like load_records(), but loads one chunk at a time — each with its
     own short session, so a macro loop never holds a session open."""
     for start in range(0, len(codes), CHUNK_SIZE):
         with session_factory() as session:
-            records = load_records(session, codes[start:start + CHUNK_SIZE], fields)
+            records = load_records(session, codes[start:start + CHUNK_SIZE], fields, db_path)
         yield from records
 
 

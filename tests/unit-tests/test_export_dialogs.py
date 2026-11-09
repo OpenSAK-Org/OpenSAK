@@ -193,12 +193,31 @@ class TestFileExportWorker:
     def test_run_error_emits_traceback(self, tmp_path, monkeypatch):
         def boom(*a, **k):
             raise RuntimeError("gen failed")
-        monkeypatch.setattr("opensak.gps.garmin.generate_gpx", boom)
+        monkeypatch.setattr("opensak.gps.garmin.write_gpx", boom)
         w = FileWorker([_cache()], tmp_path / "x.gpx", "gpx")
         errs = []
         w.error.connect(errs.append)
         w.run()
         assert errs and "gen failed" in errs[0]
+
+    @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz")])
+    def test_failed_export_keeps_existing_file(self, tmp_path, monkeypatch, fmt, suffix):
+        # #1075: the export streams into a temporary file, so a failure
+        # halfway neither truncates the previous export nor leaves the
+        # temporary file behind.
+        def boom(caches):
+            yield next(iter(caches))
+            raise RuntimeError("halfway")
+        monkeypatch.setattr("opensak.db.database.iter_caches_full", boom)
+        out = tmp_path / f"export{suffix}"
+        out.write_bytes(b"previous export")
+        w = FileWorker([_cache(gc_code="GC1"), _cache(gc_code="GC2")], out, fmt)
+        errs = []
+        w.error.connect(errs.append)
+        w.run()
+        assert errs and "halfway" in errs[0]
+        assert out.read_bytes() == b"previous export"
+        assert list(tmp_path.iterdir()) == [out]
 
     @pytest.mark.parametrize("fmt,suffix", [("gpx", ".gpx"), ("loc", ".loc"), ("ggz", ".ggz")])
     def test_run_emits_progress(self, tmp_path, fmt, suffix):

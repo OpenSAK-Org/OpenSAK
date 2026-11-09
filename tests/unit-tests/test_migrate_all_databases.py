@@ -175,6 +175,14 @@ class TestMainWindowApplyToAll:
             mainwindow.MainWindow._migrate_other_databases(MagicMock(), pending)
 
         assert _user_version(other) == SCHEMA_VERSION
-        box.warning.assert_not_called()
-        _parent, _title, text = box.information.call_args.args
-        assert str(backup_path_for(other, OLD)) in text
+        msg = box.return_value
+        msg.setIcon.assert_called_once_with(box.Icon.Information)
+        # The short text names only the backup folder; the per-database list
+        # goes into the scrollable details so the box stays on screen.
+        (text,) = msg.setText.call_args.args
+        backup = backup_path_for(other, OLD)
+        assert str(backup.parent) in text
+        assert str(backup) not in text
+        (details,) = msg.setDetailedText.call_args.args
+        assert f"Other: {backup}" in details
+        msg.exec.assert_called_once()

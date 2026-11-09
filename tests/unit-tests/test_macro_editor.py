@@ -3,7 +3,8 @@
 Covers the recent-macros list, syntax highlighting, the editing helpers of
 CodeEditor, find/replace, the MacroDialog file workflow (open, save, save
 as, unsaved changes, recent menu, run with error-line highlight) and the
-in-app API reference.
+in-app API reference, and how changes made to the open file on disk are
+picked up.
 """
 
 from pathlib import Path
@@ -460,6 +461,141 @@ def test_close_with_unsaved_changes_can_be_cancelled(make_dialog, md, monkeypatc
     _answer(monkeypatch, md, "Discard")
     d.close()
     assert not d.isVisible()
+
+
+# ── Changes on disk ──────────────────────────────────────────────────────────
+
+def _disk_answers(monkeypatch, d, changed=False, deleted=False):
+    """Patch the two disk questions; returns the list of questions asked."""
+    asked = []
+    monkeypatch.setattr(d, "_ask_disk_changed", lambda n: asked.append("changed") or changed)
+    monkeypatch.setattr(d, "_ask_disk_deleted", lambda n: asked.append("deleted") or deleted)
+    return asked
+
+
+def test_external_change_reloads_unmodified_editor(make_dialog, monkeypatch, tmp_path):
+    f = _lua(tmp_path / "m.lua", "a\nb\nc\n")
+    d = make_dialog()
+    d.open_path(f)
+    asked = _disk_answers(monkeypatch, d)
+    d._editor.go_to_line(3)
+    f.write_text("a\nB\nc\nd\n", encoding="utf-8")
+    d._check_disk()
+    assert asked == []
+    assert d._editor.toPlainText() == "a\nB\nc\nd\n"
+    assert not d.isWindowModified()
+    assert d._editor.textCursor().blockNumber() == 2
+    d._editor.undo()                                   # reload is one undo step
+    assert d._editor.toPlainText() == "a\nb\nc\n"
+
+
+def test_watcher_signal_reloads(make_dialog, qtbot, tmp_path):
+    f = _lua(tmp_path / "m.lua", "-- one\n")
+    d = make_dialog()
+    d.open_path(f)
+    assert d._watcher.files() == [str(f)]
+    f.write_text("-- two\n", encoding="utf-8")
+    d._watcher.fileChanged.emit(str(f))
+    qtbot.waitUntil(lambda: d._editor.toPlainText() == "-- two\n", timeout=2000)
+
+
+def test_own_save_is_not_an_external_change(make_dialog, monkeypatch, tmp_path):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    _type(d, "b\n")
+    asked = _disk_answers(monkeypatch, d)
+    assert d._save()
+    d._check_disk()
+    assert asked == [] and d._editor.toPlainText() == "b\n"
+
+
+@pytest.mark.parametrize("reload_, text, on_disk", [
+    (True, "external\n", "external\n"),
+    (False, "mine", "mine"),
+])
+def test_conflict_asks_reload_or_keep_mine(make_dialog, monkeypatch, tmp_path,
+                                           reload_, text, on_disk):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    _type(d, "mine")
+    f.write_text("external\n", encoding="utf-8")
+    asked = _disk_answers(monkeypatch, d, changed=reload_)
+    d._check_disk()
+    assert asked == ["changed"]
+    assert d._editor.toPlainText() == text
+    d._check_disk()                                    # answered: not asked again
+    assert asked == ["changed"]
+    if not reload_:
+        assert d._save()
+    assert f.read_text(encoding="utf-8") == on_disk
+
+
+def test_save_asks_before_overwriting_external_change(make_dialog, monkeypatch, tmp_path):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    _type(d, "mine")
+    f.write_text("external\n", encoding="utf-8")
+    asked = _disk_answers(monkeypatch, d, changed=True)
+    d._save()
+    assert asked == ["changed"]
+    assert f.read_text(encoding="utf-8") == "external\n"
+    assert d._editor.toPlainText() == "external\n"
+
+
+def test_conflict_waits_while_window_is_inactive(make_dialog, monkeypatch, tmp_path):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    _type(d, "mine")
+    f.write_text("external\n", encoding="utf-8")
+    asked = _disk_answers(monkeypatch, d)
+    d._check_disk(interactive=False)
+    assert asked == [] and d._editor.toPlainText() == "mine"
+    d._check_disk()
+    assert asked == ["changed"]
+
+
+def test_same_text_on_disk_clears_modified(make_dialog, monkeypatch, tmp_path):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    _type(d, "b\n")
+    f.write_text("b\n", encoding="utf-8")
+    asked = _disk_answers(monkeypatch, d)
+    d._check_disk()
+    assert asked == [] and not d.isWindowModified()
+
+
+@pytest.mark.parametrize("save_again", [True, False])
+def test_deleted_file_offers_to_save_again(make_dialog, monkeypatch, tmp_path, save_again):
+    f = _lua(tmp_path / "m.lua", "a\n")
+    d = make_dialog()
+    d.open_path(f)
+    f.unlink()
+    asked = _disk_answers(monkeypatch, d, deleted=save_again)
+    d._check_disk(interactive=False)
+    assert asked == []
+    d._check_disk()
+    assert asked == ["deleted"]
+    assert f.is_file() is save_again
+    assert d.isWindowModified() is not save_again
+    d._check_disk()                                    # answered: not asked again
+    assert asked == ["deleted"]
+
+
+def test_run_uses_text_changed_on_disk(make_dialog, monkeypatch, tmp_path):
+    host = MagicMock()
+    f = _lua(tmp_path / "m.lua", "-- nothing\n")
+    d = make_dialog()
+    d._runtime._host = host
+    d.open_path(f)
+    f.write_text("opensak.clear_filter()\n", encoding="utf-8")
+    _disk_answers(monkeypatch, d)
+    d._run()
+    host.clear_filter.assert_called_once()
 
 
 # ── API reference ────────────────────────────────────────────────────────────

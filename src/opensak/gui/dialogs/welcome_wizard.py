@@ -159,7 +159,7 @@ def _page_gc_profile() -> tuple[QWidget, QLineEdit, QLineEdit]:
     lay.addSpacing(8)
     lay.addWidget(QLabel(tr("wizard_gc_home_label")))
     home_edit = QLineEdit()
-    home_edit.setPlaceholderText("N55 47.123 E012 25.456")
+    home_edit.setPlaceholderText("N55 47.123 E012 25.456")  # i18n: ignore — coordinate example
     lay.addWidget(home_edit)
 
     hint = QLabel(tr("wizard_gc_skip_hint"))
@@ -392,23 +392,19 @@ class WelcomeWizard(QDialog):
 
     def _check_backup_dir(self) -> bool:
         """
-        Issue #986: the backup folder must not be inside the install or
-        database folder chosen on the earlier pages (not saved yet). Warn and
-        return False if it is.
+        Issue #986: check the backup folder against the install and database
+        folders chosen on the earlier pages (not saved yet). Return False if
+        it can't be used; #1032: a folder inside them is allowed after a
+        confirmation.
         """
-        from opensak.backup.backupset import BackupError, validate_backup_dir
-        try:
-            validate_backup_dir(
-                self._backup_row.path,
-                install_dir=self._install_row.path,
-                db_dir=self._db_row.path,
-            )
-        except BackupError:
-            QMessageBox.warning(
-                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
-            )
-            return False
-        return True
+        from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
+        return confirm_backup_folder(
+            self,
+            self._backup_row.path,
+            title=tr("wizard_backup_dir_title"),
+            install_dir=self._install_row.path,
+            db_dir=self._db_row.path,
+        )
 
     def _save_all(self, use_defaults: bool = False):
         from opensak.settings_store import (
@@ -520,7 +516,16 @@ class WelcomeWizard(QDialog):
             s = get_settings()
             username = self._username_edit.text().strip()
             if username:
+                old_account = (s.gc_finder_id, s.gc_username)
                 s.gc_username = username
+                # #1140: a new account changes which caches are the user's own.
+                # That rewrites every registered database, so show it's working.
+                from opensak.db.ownership import account_changed, account_change_needs_recalc
+                if account_change_needs_recalc(*old_account):
+                    from opensak.gui.dialogs.widgets import busy_box
+                    with busy_box(self, tr("updating_own_caches"),
+                                  self.windowTitle()):
+                        account_changed(*old_account)
             home = self._home_edit.text().strip()
             if home:
                 from opensak.coords import parse_coords
@@ -583,7 +588,10 @@ class WelcomeWizard(QDialog):
             øverste undermappe for registrerede databaser dybere nede,
           - alle *.db(-shm/-wal)-filer, hvis databasemappen ER
             installationsmappen (standard-layoutet) — også uregistrerede.
+        Companion databases (#1034, *.companion.db3 with their -shm/-wal)
+        count as part of their database in both cases.
         """
+        from opensak.db import companion
         from opensak.settings_store import get_store
 
         keep: set[Path] = set()
@@ -611,8 +619,11 @@ class WelcomeWizard(QDialog):
             except OSError:
                 continue
             if db_path.parent == root:
-                for suffix in ("", "-shm", "-wal"):
-                    keep.add(db_path.with_name(db_path.name + suffix))
+                # #1034: the companion database moves with its database.
+                companion_file = companion.companion_path(db_path)
+                for base in (db_path, companion_file):
+                    for suffix in ("", "-shm", "-wal"):
+                        keep.add(base.with_name(base.name + suffix))
             else:
                 top = _top_level(db_path)
                 if top is not None:
@@ -621,7 +632,10 @@ class WelcomeWizard(QDialog):
         if db_dir == root:
             try:
                 for f in root.iterdir():
-                    if f.is_file() and f.name.endswith((".db", ".db-shm", ".db-wal")):
+                    if f.is_file() and f.name.endswith((
+                        ".db", ".db-shm", ".db-wal",
+                        companion.SUFFIX, companion.SUFFIX + "-shm", companion.SUFFIX + "-wal",
+                    )):
                         keep.add(f.resolve())
             except OSError:
                 pass

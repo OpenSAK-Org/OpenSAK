@@ -27,6 +27,7 @@ from PySide6.QtGui import QFont
 from opensak.coords import format_coords, parse_coords
 from opensak.utils.types import CoordFormat
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 
 
@@ -57,6 +58,7 @@ class ChecksumDialog(QDialog):
 
     def __init__(self, lat: float | None = None, lon: float | None = None, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("chk_title"))
         self.setMinimumWidth(460)
         self.setWindowFlags(

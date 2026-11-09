@@ -15,6 +15,8 @@ Usage (by make_upgrade_fixture.py):
 Writes into <root>:
     install/            the install folder (opensak.json, filters/, Default.db)
     databases/          the user's database folder
+    backup/             one backup set of every database, as this version
+                        writes it (only versions with backups, v1.21.0+)
     expected.json       what the upgraded data must look like afterwards
 and bootstrap.json under $HOME as the old version would.
 """
@@ -177,6 +179,11 @@ from opensak.filters.engine import (  # noqa: E402
     CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, HasCorrectedFilter,
 )
 from opensak.gui.settings import get_settings  # noqa: E402
+
+try:  # v1.21.0+: per-database settings live in the database file (#659)
+    from opensak.db import db_settings  # noqa: E402
+except ImportError:
+    db_settings = None  # type: ignore[assignment]
 from opensak.utils.types import CoordFormat, DateFormat  # noqa: E402
 
 settings = get_settings()
@@ -213,18 +220,26 @@ for name, spec in DATABASES.items():
             caches[code].user_flag = True
         session.commit()
 
-    # Per-database settings exactly as v1.20.0 keeps them in opensak.json
-    # (moved into the database file by #659).
+    # Per-database settings, stored the way this release stores them: in
+    # opensak.json up to v1.20.0, inside the database file from v1.21.0
+    # (#659, opensak.db.db_settings).
     settings.home_lat, settings.home_lon = spec["home"]
     field, ascending, profile = spec["sort"]
-    sort_key = f"sort.{info.path}"
-    store.set_many({
-        f"{sort_key}.field": field,
-        f"{sort_key}.ascending": ascending,
-        f"{sort_key}.filter_profile": profile,
-    })
-    from opensak.gui.dialogs.column_dialog import _col_key  # noqa: E402
-    store.set(_col_key("visible"), spec["columns"])
+    if db_settings is not None:
+        db_settings.set_value("sort.field", None, field)
+        db_settings.set_value("sort.ascending", None, ascending)
+        if profile:
+            db_settings.set_value("sort.filter_profile", None, profile)
+        db_settings.set_value("columns.visible", None, spec["columns"])
+    else:
+        sort_key = f"sort.{info.path}"
+        store.set_many({
+            f"{sort_key}.field": field,
+            f"{sort_key}.ascending": ascending,
+            f"{sort_key}.filter_profile": profile,
+        })
+        from opensak.gui.dialogs.column_dialog import _col_key  # noqa: E402
+        store.set(_col_key("visible"), spec["columns"])
 
     with get_session() as session:
         count = lambda sql: session.execute(__import__("sqlalchemy").text(sql)).scalar()  # noqa: E731
@@ -277,5 +292,20 @@ expected["generated_by"] = __version__
 
 from opensak.db.database import dispose_engine  # noqa: E402
 dispose_engine()
+
+# #1193: a backup set as this version writes it, so the tests can restore an
+# old set with the current code. Backups exist since v1.21.0 (#942).
+try:
+    from opensak.backup.backupset import KIND_MANUAL, write_backup_set
+except ImportError:
+    pass
+else:
+    from datetime import datetime, timezone
+    result = write_backup_set(
+        manager.databases, KIND_MANUAL, folder=ROOT / "backup",
+        now=datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc), compress=False,
+    )
+    expected["backup"] = result.backup_set.path.name
+
 (ROOT / "expected.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
 print(json.dumps({"install_dir": str(install_dir), "db_dir": str(db_dir)}))

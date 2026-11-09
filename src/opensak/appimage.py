@@ -208,7 +208,7 @@ def should_prompt_for_integration() -> bool:
     if is_appimage_integrated():
         return False
     if _has_appimagelauncher_desktop_entry():
-        log.debug("Eksisterende AppImageLauncher-integration fundet — adopterer stille")
+        log.debug("Existing AppImageLauncher integration found — adopting it silently")
         get_store().set(_KEY_INTEGRATED, True)
         return False
     if _integration_declined_permanently():
@@ -322,17 +322,17 @@ def integrate_appimage() -> IntegrationResult:
         if icon_src is not None:
             _install_icons(icon_src)
         else:
-            log.debug("Intet bundlet ikon fundet ($APPDIR ikke sat/tomt) — springer over")
+            log.debug("No bundled icon found ($APPDIR not set/empty) — skipping")
 
     except OSError as exc:
-        log.warning("AppImage-integration fejlede: %s", exc)
+        log.warning("AppImage integration failed: %s", exc)
         return IntegrationResult(success=False, error=str(exc))
 
     get_store().set_many({
         _KEY_INTEGRATED: True,
         _KEY_INSTALL_PATH: str(target),
     })
-    log.debug("AppImage integreret til %s", target)
+    log.debug("AppImage integrated to %s", target)
     return IntegrationResult(success=True, installed_path=target)
 
 
@@ -413,7 +413,7 @@ def uninstall_appimage(*, purge_data: bool) -> UninstallResult:
         get_integrated_appimage_path().unlink(missing_ok=True)
 
     except OSError as exc:
-        log.warning("AppImage-afinstallation fejlede: %s", exc)
+        log.warning("AppImage uninstall failed: %s", exc)
         return UninstallResult(success=False, error=str(exc))
 
     log.debug("AppImage afinstalleret (purge_data=%s)", purge_data)

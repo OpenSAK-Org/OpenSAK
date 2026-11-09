@@ -151,7 +151,7 @@ class TestFoundUpdaterDialog:
         qtbot.addWidget(dlg)
         fired = []
         dlg.update_completed.connect(lambda: fired.append(True))
-        dlg._on_finished(SimpleNamespace(updated=3, errors=["e1"]))
+        dlg._on_finished(SimpleNamespace(updated=3, already=0, not_found=0, errors=["e1"]))
         assert fired == [True]
         assert "e1" in dlg._log.toPlainText()
 
@@ -161,7 +161,7 @@ class TestFoundUpdaterDialog:
         qtbot.addWidget(dlg)
         fired = []
         dlg.update_completed.connect(lambda: fired.append(True))
-        dlg._on_finished(SimpleNamespace(updated=0, errors=[]))
+        dlg._on_finished(SimpleNamespace(updated=0, already=0, not_found=0, errors=[]))
         assert fired == []
 
     def test_on_error_logs(self, qtbot, patch_manager):

@@ -124,7 +124,9 @@ class TestHelperWidgets:
 
 class TestConstruction:
     def test_ten_tabs(self, dlg):
-        assert dlg._tabs.count() == 10
+        # An eleventh, Custom, with custom fields (#1028, companion-db flag)
+        from opensak.utils import flags
+        assert dlg._tabs.count() == (11 if flags.companion_db else 10)
 
     def test_init_with_filterset(self, qtbot):
         fs = FilterSet(mode="AND")
@@ -1176,7 +1178,7 @@ class TestLogsTab:
         # An empty "Logged by" matches a log by anyone, which is rarely what
         # ticking the box means — so it starts on the user's own name.
         monkeypatch.setattr(fd, "get_settings",
-                            lambda: SimpleNamespace(gc_username="Nagi", text_size=None))
+                            lambda: SimpleNamespace(gc_username="TestUser", text_size=None))
         d = FilterDialog.__new__(FilterDialog)
         d._log_finder_enabled = fd.QCheckBox()
         d._log_finder_row = fd.TextFilterRow("", "")
@@ -1186,7 +1188,7 @@ class TestLogsTab:
         d._update_log_finder_inputs()
         # Exactly, not "contains" — a caching name is an identity, so a
         # substring match would also catch every longer name embedding it.
-        assert d._log_finder_row.edit.text() == "Nagi"
+        assert d._log_finder_row.edit.text() == "TestUser"
         assert d._log_finder_row.op() == "equals"
 
     def test_enabling_finder_keeps_text_the_user_typed(self, dlg):

@@ -67,6 +67,11 @@ changed in version 1.14.0:
 | Language only | `preferences.json` | merged into `opensak.json` |
 | Database(s) | Same folder as settings | A folder you chose in the welcome wizard (can be the same folder, or a different one) |
 | Logs | `opensak.log` (same folder) | `opensak.log` inside the install folder |
+| Crash detection | — | `session.lock` and `crash_native.log` inside the install folder |
+
+`session.lock` exists while OpenSAK is running (and stays behind if it was
+closed abnormally); `crash_native.log` holds the technical details of the last
+hard crash, if any. Both are safe to delete while OpenSAK is closed.
 
 If you upgraded from an older version to 1.14.0+, OpenSAK automatically copied
 your old settings into the new `opensak.json` the first time it ran. The old

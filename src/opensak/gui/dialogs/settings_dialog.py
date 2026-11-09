@@ -3,6 +3,7 @@ src/opensak/gui/dialogs/settings_dialog.py — Settings dialog.
 """
 
 from __future__ import annotations
+from pathlib import Path
 from typing import cast
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -11,12 +12,15 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QGroupBox, QComboBox,
     QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QTabWidget, QWidget,
-    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox
+    QFrame, QSizePolicy, QSpinBox, QScrollArea, QDoubleSpinBox,
+    QListWidget, QListWidgetItem,
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
 from opensak.gui.settings import get_settings, HomePoint
-from opensak.gui.dialogs.widgets import DirRow, clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import (
+    DirRow, clamp_dialog_height_to_screen, keep_worker_alive, remember_dialog_geometry,
+)
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.gui.theme import hint_style
 from opensak.coords import FORMATS, format_coords
@@ -106,9 +110,13 @@ class SettingsDialog(QDialog):
         clamp_dialog_height_to_screen(self, parent)
         self._oauth_worker        = None
         self._profile_worker      = None
+        self._pq_email_worker: _ImapTestWorker | None = None
         self._editing_original_name: str | None = None   # Issue #157
         self._setup_ui()
         self._load()
+        # Issue #1030: reopen at the size/position the user left it at,
+        # clamped to the screens connected now.
+        remember_dialog_geometry(self, "settings")
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -121,11 +129,12 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
-        # Lua macros are beta-only (same flag as the Macros menu), and so is
-        # the list of folders they may access.
+        # The list of folders Lua macros may access: shown with the same flag
+        # as the Macros menu.
         from opensak.utils import flags
         self._perm_table: QTableWidget | None = None
         self._perm_loaded: list = []
+        self._db_write_list: QListWidget | None = None
         if flags.lua_macros:
             self._tabs.addTab(self._build_folder_permissions_tab(),
                               tr("settings_tab_folder_permissions"))
@@ -179,8 +188,7 @@ class SettingsDialog(QDialog):
         self._points_table.verticalHeader().setVisible(False)
         self._points_table.setShowGrid(False)
         self._points_table.setAlternatingRowColors(True)
-        self._points_table.verticalHeader().setDefaultSectionSize(24)
-        self._points_table.setMaximumHeight(160)
+        self._fit_points_table_height()
         self._points_table.itemSelectionChanged.connect(self._on_point_selected)
         loc_layout.addWidget(self._points_table)
 
@@ -260,13 +268,19 @@ class SettingsDialog(QDialog):
         map_row.addWidget(self._map_provider)
         map_row.addStretch()
         disp_layout.addLayout(map_row)
+        # #1143: the setting only picks the website for "Open in …" links;
+        # say so, since it reads as if it switched the built-in map.
+        map_note = QLabel(tr("settings_map_external_note"))
+        map_note.setWordWrap(True)
+        map_note.setStyleSheet(hint_style())
+        disp_layout.addWidget(map_note)
 
         coord_fmt_row = QHBoxLayout()
         coord_fmt_row.addWidget(QLabel(tr("settings_coord_format_label")))
         self._coord_format = QComboBox()
-        self._coord_format.addItem("DMM  —  N55 47.250 E012 25.000", CoordFormat.DMM)
-        self._coord_format.addItem("DMS  —  N55° 47' 15\" E012° 25' 00\"", CoordFormat.DMS)
-        self._coord_format.addItem("DD   —  55.78750, 12.41667", CoordFormat.DD)
+        self._coord_format.addItem("DMM  —  N55 47.250 E012 25.000", CoordFormat.DMM)  # i18n: ignore — coordinate format sample
+        self._coord_format.addItem("DMS  —  N55° 47' 15\" E012° 25' 00\"", CoordFormat.DMS)  # i18n: ignore — coordinate format sample
+        self._coord_format.addItem("DD   —  55.78750, 12.41667", CoordFormat.DD)  # i18n: ignore — coordinate format sample
         coord_fmt_row.addWidget(self._coord_format)
         coord_fmt_row.addStretch()
         disp_layout.addLayout(coord_fmt_row)
@@ -275,9 +289,9 @@ class SettingsDialog(QDialog):
         date_fmt_row.addWidget(QLabel(tr("settings_date_format_label")))
         self._date_format = QComboBox()
         self._date_format.addItem(tr("settings_date_format_locale"), DateFormat.LOCALE)
-        self._date_format.addItem("dd.mm.yyyy", DateFormat.DMY)
-        self._date_format.addItem("mm/dd/yyyy", DateFormat.MDY)
-        self._date_format.addItem("yyyy-mm-dd", DateFormat.YMD)
+        self._date_format.addItem("dd.mm.yyyy", DateFormat.DMY)  # i18n: ignore — date format pattern
+        self._date_format.addItem("mm/dd/yyyy", DateFormat.MDY)  # i18n: ignore — date format pattern
+        self._date_format.addItem("yyyy-mm-dd", DateFormat.YMD)  # i18n: ignore — date format pattern
         date_fmt_row.addWidget(self._date_format)
         date_fmt_row.addStretch()
         disp_layout.addLayout(date_fmt_row)
@@ -669,24 +683,6 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(search_group)
 
-        # ── Location refinement (only shown when reverse-geocoding flag is on) ──
-        from opensak.utils import flags
-        if flags.reverse_geocoding:
-            loc_ref_group = QGroupBox(tr("settings_group_nominatim"))
-            loc_ref_layout = QVBoxLayout(loc_ref_group)
-
-            self._nominatim_cb: QCheckBox | None = QCheckBox(tr("settings_nominatim_cb"))
-            loc_ref_layout.addWidget(self._nominatim_cb)
-
-            nominatim_hint = QLabel(tr("settings_nominatim_hint"))
-            nominatim_hint.setWordWrap(True)
-            nominatim_hint.setStyleSheet(hint_style())
-            loc_ref_layout.addWidget(nominatim_hint)
-
-            layout.addWidget(loc_ref_group)
-        else:
-            self._nominatim_cb = None
-
         # ── Opdateringer ──────────────────────────────────────────────────────
         update_group = QGroupBox(tr("settings_group_updates"))
         update_layout = QVBoxLayout(update_group)
@@ -944,6 +940,11 @@ class SettingsDialog(QDialog):
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
+        # The macros allowed something always: changing databases (with the
+        # macro write API) and folders of their own (#1091).
+        layout.addSpacing(12)
+        layout.addWidget(self._build_db_write_section())
+
         scroll = QScrollArea()
         scroll.setWidget(tab)
         scroll.setWidgetResizable(True)
@@ -1093,6 +1094,69 @@ class SettingsDialog(QDialog):
         for row in sorted(rows, reverse=True):
             table.removeRow(row)
 
+    def _build_db_write_section(self) -> QWidget:
+        """The macros allowed something always (answered "Always" when they
+        first wrote, needed a folder or contacted a web site), listed by
+        file name with what they may do, and the full path as tooltip.
+        They can only be removed here, each with all it may; adding happens
+        through those questions."""
+        from opensak.gui.dialogs.macro_dialog import approval_lines
+        from opensak.macro.db_access import approvals
+
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        intro = QLabel(tr("settings_macro_write_intro"))
+        intro.setWordWrap(True)
+        intro.setStyleSheet(hint_style())
+        layout.addWidget(intro)
+
+        records = approvals()
+        self._db_write_loaded = [a.path for a in records]
+        db_write_list = QListWidget()
+        self._db_write_list = db_write_list
+        for record in records:
+            lines = [Path(record.path).name]
+            lines += [f"    {line}"
+                      for line in approval_lines(record.write, record.folders, record.hosts)]
+            item = QListWidgetItem("\n".join(lines))
+            item.setToolTip(record.path)
+            item.setData(Qt.ItemDataRole.UserRole, record.path)
+            db_write_list.addItem(item)
+        db_write_list.setMaximumHeight(160)
+        layout.addWidget(db_write_list)
+
+        btn_row = QHBoxLayout()
+        remove_btn = QPushButton(tr("settings_folder_perm_remove"))
+        self._btn_db_write_remove = remove_btn
+        remove_btn.setEnabled(False)
+        remove_btn.clicked.connect(self._on_remove_db_write)
+        db_write_list.itemSelectionChanged.connect(
+            lambda: remove_btn.setEnabled(bool(db_write_list.selectedItems()))
+        )
+        btn_row.addWidget(remove_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return box
+
+    def _on_remove_db_write(self) -> None:
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return
+        for item in db_write_list.selectedItems():
+            db_write_list.takeItem(db_write_list.row(item))
+
+    def _collect_db_write(self) -> list[str]:
+        db_write_list = self._db_write_list
+        if db_write_list is None:
+            return []
+        return [
+            db_write_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(db_write_list.count())
+        ]
+
     # ── Fane 2: Geocaching.com ────────────────────────────────────────────────
 
     def _build_gc_tab(self) -> QWidget:
@@ -1224,7 +1288,7 @@ class SettingsDialog(QDialog):
         form = QFormLayout(form_group)
 
         self._pq_email_host = QLineEdit()
-        self._pq_email_host.setPlaceholderText("imap.example.com")
+        self._pq_email_host.setPlaceholderText("imap.example.com")  # i18n: ignore — host name example
         form.addRow(tr("pq_email_host_label"), self._pq_email_host)
 
         self._pq_email_port = QSpinBox()
@@ -1440,6 +1504,24 @@ class SettingsDialog(QDialog):
             self._update_gc_ui_logged_out()
 
     # ── Hjemmepunkter — hjælpefunktioner ──────────────────────────────────────
+
+    # #1146: how many locations the table shows before it scrolls.
+    POINTS_TABLE_MIN_ROWS = 6
+    POINTS_TABLE_MAX_ROWS = 10
+
+    def _fit_points_table_height(self) -> None:
+        """Size the User locations table in rows, not pixels. A fixed pixel
+        cap left room for only 2–3 rows with a larger system font (Windows
+        text size / scaling), and the tab's scroll area shrank it further.
+        The minimum keeps it from being squeezed; the maximum keeps a long
+        list from pushing the rest of the tab down."""
+        table = self._points_table
+        row_h = max(24, table.fontMetrics().height() + 8)
+        table.verticalHeader().setDefaultSectionSize(row_h)
+        frame = 2 * table.frameWidth()
+        header = table.horizontalHeader().sizeHint().height()
+        table.setMinimumHeight(header + frame + self.POINTS_TABLE_MIN_ROWS * row_h)
+        table.setMaximumHeight(header + frame + self.POINTS_TABLE_MAX_ROWS * row_h)
 
     def _reload_points_table(self) -> None:
         s = get_settings()
@@ -1696,8 +1778,6 @@ class SettingsDialog(QDialog):
         self._pq_email_status.setText("")
         self._search_min_chars.setValue(s.search_min_chars)
         self._search_debounce_ms.setValue(s.search_debounce_ms)
-        if self._nominatim_cb is not None:
-            self._nominatim_cb.setChecked(s.nominatim_enabled)
         self._update_check_cb.setChecked(s.updates_check_enabled)
         self._notify_betas_cb.setChecked(s.notify_about_betas)
         from opensak.backup import exit_state
@@ -1712,23 +1792,29 @@ class SettingsDialog(QDialog):
         self._refresh_gc_status_on_open()
 
     def _backup_dir_is_valid(self) -> bool:
-        """Issue #986: warn and return False if the backup folder is unsuitable."""
-        from opensak.backup.backupset import (
-            BackupError, get_backup_dir, validate_backup_dir,
-        )
+        """
+        Issue #986: return False if the backup folder can't be used. #1032:
+        a folder inside OpenSAK's folders is allowed after a confirmation.
+        """
+        from opensak.backup.backupset import get_backup_dir
+        from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
         from opensak.settings_store import get_db_dir
         new_backup_dir = self._backup_dir_row.path
         new_db_dir = self._db_dir_row.path
         if new_backup_dir == get_backup_dir() and new_db_dir == get_db_dir():
             return True
-        try:
-            validate_backup_dir(new_backup_dir, db_dir=new_db_dir)
-        except BackupError:
-            QMessageBox.warning(
-                self, tr("wizard_backup_dir_title"), tr("backup_folder_invalid")
-            )
-            return False
-        return True
+        return confirm_backup_folder(
+            self, new_backup_dir, title=tr("wizard_backup_dir_title"), db_dir=new_db_dir,
+        )
+
+    def done(self, result: int) -> None:
+        # #1265: OK, Cancel, Escape and the window's close button all end
+        # here. The dialog is deleted right after it closes, and a worker
+        # still running (connection test, login, profile) with it, which
+        # aborts OpenSAK — hand it to the main window until it is done.
+        for worker in (self._pq_email_worker, self._oauth_worker, self._profile_worker):
+            keep_worker_alive(worker, self.parent())
+        super().done(result)
 
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK
@@ -1744,7 +1830,15 @@ class SettingsDialog(QDialog):
             return
 
         s = get_settings()
+        old_account = (s.gc_finder_id, s.gc_username)
         s.gc_username       = self._gc_username.text()
+        # #1140: a new account changes which caches are the user's own.
+        # That rewrites every registered database, so show it's working.
+        from opensak.db.ownership import account_changed, account_change_needs_recalc
+        if account_change_needs_recalc(*old_account):
+            from opensak.gui.dialogs.widgets import busy_box
+            with busy_box(self, tr("updating_own_caches"), tr("settings_dialog_title")):
+                account_changed(*old_account)
         # Home Location gemmes via knappen, men vi gemmer også ved OK
         # (hvis brugeren har tastet uden at trykke Gem)
         home_text = self._gc_home_location.text().strip()
@@ -1780,8 +1874,6 @@ class SettingsDialog(QDialog):
             app = QApplication.instance()
             if app is not None:
                 apply_theme(cast(QApplication, app), new_theme)
-        if self._nominatim_cb is not None:
-            s.nominatim_enabled = self._nominatim_cb.isChecked()
         s.updates_check_enabled = self._update_check_cb.isChecked()
         s.notify_about_betas = self._notify_betas_cb.isChecked()
         s.distance_method = self._distance_method_combo.currentData()
@@ -1824,6 +1916,11 @@ class SettingsDialog(QDialog):
             permissions = self._collect_permissions()
             if permissions != self._perm_loaded:
                 save_permissions(permissions)
+        if self._db_write_list is not None:
+            from opensak.macro.db_access import save_always_approved
+            databases = self._collect_db_write()
+            if databases != self._db_write_loaded:
+                save_always_approved(databases)
 
         # Database-mappe — kun gem og advar hvis brugeren faktisk har ændret den
         from opensak.settings_store import get_db_dir, get_store

@@ -26,6 +26,7 @@ def _result(created=1, updated=0, waypoints=0, attributes=0, logs=0, notes=0,
         logs=logs, notes=notes, note_images_replaced=note_images_replaced,
         trackables=trackables,
         corrected=corrected, skipped=skipped, warnings=warnings or [], errors=errors or [],
+        custom_fields=None,
     )
 
 
@@ -50,7 +51,7 @@ class TestGsakImportWorker:
         self._patch_common(monkeypatch)
         monkeypatch.setattr(
             "opensak.importer.gsak_importer.import_gsak_db",
-            lambda path, session, progress_cb=None: _result(created=48),
+            lambda path, session, progress_cb=None, **_kw: _result(created=48),
         )
         w = GsakImportWorker(Path("/gsak.db3"))
         got = []
@@ -61,7 +62,7 @@ class TestGsakImportWorker:
     def test_run_reports_progress(self, monkeypatch):
         self._patch_common(monkeypatch)
 
-        def fake_import(path, session, progress_cb=None):
+        def fake_import(path, session, progress_cb=None, **_kw):
             progress_cb(5, 10)
             return _result()
 
@@ -90,7 +91,7 @@ class TestGsakImportWorker:
         # is never swapped from the worker thread.
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         inits, opened = [], []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
         monkeypatch.setattr("opensak.db.database.get_session",
@@ -105,7 +106,7 @@ class TestGsakImportWorker:
     def test_run_active_target_uses_active_session(self, monkeypatch):
         self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         inits = []
         monkeypatch.setattr("opensak.db.database.init_db", lambda **k: inits.append(k.get("db_path")))
         monkeypatch.setattr("opensak.db.database.session_for",
@@ -120,7 +121,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
                             lambda session: calls.append("clear") or 7)
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: calls.append("import") or _result())
+                            lambda path, session, progress_cb=None, **_kw: calls.append("import") or _result())
         w = GsakImportWorker(Path("/gsak.db3"), replace=True)
         cleared = []
         w.cleared.connect(cleared.append)
@@ -131,7 +132,7 @@ class TestGsakImportWorker:
     def test_run_updates_distances_of_target(self, monkeypatch):
         updated = self._patch_common(monkeypatch, active_path=Path("/active.db"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         monkeypatch.setattr("opensak.db.database.session_for", lambda p: _fake_session())
         GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db")).run()
         GsakImportWorker(Path("/gsak.db3")).run()  # no target → the active DB
@@ -143,7 +144,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr(GsakImportWorker, "_invalidate_distances",
                             staticmethod(invalidated.append))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         monkeypatch.setattr("opensak.db.database.session_for", lambda p: _fake_session())
         w = GsakImportWorker(Path("/gsak.db3"), target_db_path=Path("/other.db"),
                              update_distances=False)
@@ -175,7 +176,7 @@ class TestGsakImportWorker:
         monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
                             lambda session: calls.append("clear") or 0)
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None: _result())
+                            lambda path, session, progress_cb=None, **_kw: _result())
         GsakImportWorker(Path("/gsak.db3")).run()
         assert calls == []
 
@@ -240,9 +241,12 @@ def manager():
 
 
 @pytest.fixture
-def dlg(qtbot, manager):
+def dlg(qtbot, manager, monkeypatch):
     d = GsakImportDialog()
     qtbot.addWidget(d)
+    # A gsak.db3-only pick ticks the view import too, whose dialog is modal;
+    # the tests that are about views put their own stand-in here.
+    monkeypatch.setattr(d, "_run_view_import", lambda p: None)
     return d
 
 
@@ -316,19 +320,46 @@ def _db_by_name(manager, name):
 
 class TestGsakImportDialogListing:
     def test_zip_lists_every_database_named_after_its_folder(self, dlg, tmp_path):
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1", "AdventureLabs": "GC2"}))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1", "AdventureLabs": "GC2"}))
         assert dlg._table.rowCount() == 2
         names = [dlg._table.item(r, gdlg.COL_GSAK).text() for r in range(2)]
-        assert names == ["AdventureLabs", "AllCH"]
+        assert names == ["AdventureLabs", "Found"]
         assert [_target(dlg, r).currentText() for r in range(2)] == names
         assert all(dlg._table.item(r, gdlg.COL_GSAK).checkState() == Qt.CheckState.Checked
                    for r in range(2))
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("gsak_import_status_new")
-        assert not dlg._filters_cb.isHidden() and dlg._filters_cb.isChecked()
+        # #1090: shown, but opt-in when there are cache databases to import.
+        assert not dlg._filters_cb.isHidden() and not dlg._filters_cb.isChecked()
+        assert dlg._import_btn.isEnabled()
+
+    def test_settings_imports_are_opt_in_alongside_databases(self, dlg, tmp_path):
+        # Issue #1090: re-importing refreshed GSAK databases must not re-import
+        # GSAK's saved filters and user locations unless asked to.
+        dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        for cb in (dlg._filters_cb, dlg._locations_cb):
+            assert not cb.isHidden()
+            assert not cb.isChecked()
+
+    def test_settings_imports_reset_to_unticked_on_new_pick(self, dlg, tmp_path):
+        (tmp_path / "one").mkdir()
+        (tmp_path / "two").mkdir()
+        dlg.set_path(_backup(tmp_path / "one", {"A": "GC1"}))
+        dlg._filters_cb.setChecked(True)
+        dlg._locations_cb.setChecked(True)
+        dlg.set_path(_backup(tmp_path / "two", {"B": "GC2"}))
+        assert not dlg._filters_cb.isChecked()
+        assert not dlg._locations_cb.isChecked()
+
+    def test_settings_only_backup_starts_ticked(self, dlg, tmp_path):
+        # #1090 exception: with no cache databases, the gsak.db3 migrations
+        # are all the dialog can do — don't leave Import disabled.
+        dlg.set_path(_backup(tmp_path, {}))
+        assert dlg._table.rowCount() == 0
+        assert dlg._filters_cb.isChecked() and dlg._locations_cb.isChecked()
         assert dlg._import_btn.isEnabled()
 
     def test_filters_checkbox_hidden_without_gsak_db3(self, dlg, tmp_path):
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1"}, with_settings=False))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1"}, with_settings=False))
         assert dlg._filters_cb.isHidden()
 
     def test_single_db3_file_is_one_row(self, dlg, tmp_path):
@@ -338,8 +369,8 @@ class TestGsakImportDialogListing:
         assert dlg._import_btn.isEnabled()
 
     def test_existing_target_is_flagged(self, dlg, manager, tmp_path):
-        manager.new_database("AllCH")
-        dlg.set_path(_backup(tmp_path, {"allch": "GC1"}))  # case-insensitive match
+        manager.new_database("Found")
+        dlg.set_path(_backup(tmp_path, {"found": "GC1"}))  # case-insensitive match
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("file_locations_col_exists")
         _target(dlg, 0).setCurrentText("Something else")
         assert dlg._table.item(0, gdlg.COL_STATUS).text() == gdlg.tr("gsak_import_status_new")
@@ -356,7 +387,9 @@ class TestGsakImportDialogListing:
 
     def test_nothing_ticked_disables_import_unless_filters_wanted(self, dlg, tmp_path):
         dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        dlg._filters_cb.setChecked(True)
         dlg._check_all(False)
+        dlg._locations_cb.setChecked(False)
         assert dlg._import_btn.isEnabled()          # filters still ticked
         dlg._filters_cb.setChecked(False)
         assert dlg._import_btn.isEnabled() is False
@@ -431,10 +464,12 @@ class TestGsakImportDialogRun:
         dlg.import_completed.connect(lambda: signals.__setitem__("completed", signals["completed"] + 1))
         dlg.databases_changed.connect(lambda: signals.__setitem__("dbs", signals["dbs"] + 1))
 
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA", "Holidays": "GC2BBB"}))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1AAA", "Holidays": "GC2BBB"}))
+        dlg._filters_cb.setChecked(True)      # opt-in since #1090
+        dlg._locations_cb.setChecked(False)
         _run(dlg, qtbot)
 
-        assert _codes(_db_by_name(manager, "AllCH").path) == ["GC1AAA"]
+        assert _codes(_db_by_name(manager, "Found").path) == ["GC1AAA"]
         assert _codes(_db_by_name(manager, "Holidays").path) == ["GC2BBB"]
         assert _codes(manager.active_path) == []      # active DB untouched
         assert signals == {"completed": 1, "dbs": 2}   # one per created database
@@ -445,7 +480,7 @@ class TestGsakImportDialogRun:
         # … and the whole temp folder is gone afterwards
         assert dlg._temp_dir is None
         assert not path.exists() and not path.parent.parent.exists()
-        assert "'AllCH → AllCH'" in dlg._log.toPlainText()
+        assert "'Found → Found'" in dlg._log.toPlainText()
 
     def test_distances_are_calculated_for_each_target_database(
             self, dlg, manager, tmp_path, qtbot):
@@ -457,10 +492,10 @@ class TestGsakImportDialogRun:
         from opensak.gui.settings import get_settings
         active_before = db_settings.read_file(manager.active_path)
 
-        dlg.set_path(_backup(tmp_path, {"AllCH": "GC1AAA"}, with_settings=False))
+        dlg.set_path(_backup(tmp_path, {"Found": "GC1AAA"}, with_settings=False))
         _run(dlg, qtbot)
 
-        path = _db_by_name(manager, "AllCH").path
+        path = _db_by_name(manager, "Found").path
         lat, lon = get_settings().home_for_db_file(path)
         conn = sqlite3.connect(path)
         try:
@@ -729,3 +764,158 @@ class TestGsakImportDialogMisc:
         worker.wait.assert_called()
         assert not temp.exists()
         assert dlg._jobs == []
+
+
+# ── #1001: user locations from gsak.db3 ──────────────────────────────────────
+
+def _locations_backup(tmp_path: Path, locations: str, dbs: dict[str, str] | None = None) -> Path:
+    """Backup zip whose gsak.db3 is a real Settings table with an LO row."""
+    settings_db = tmp_path / "settings_src" / "gsak.db3"
+    settings_db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(settings_db)
+    try:
+        conn.execute("CREATE TABLE Settings (Type TEXT, Description TEXT, Data TEXT)")
+        conn.execute("INSERT INTO Settings VALUES ('LO', 'Location', ?)", (locations,))
+        conn.commit()
+    finally:
+        conn.close()
+    archive = tmp_path / "GSAKAuto1.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for name, code in (dbs or {}).items():
+            zf.write(_gsak_db(tmp_path / "src" / name / "sqlite.db3", code), f"{name}/sqlite.db3")
+        zf.write(settings_db, "gsak.db3")
+    return archive
+
+
+@pytest.fixture
+def auto_location_import(monkeypatch):
+    """Let the location preview 'click' Import as soon as it is shown."""
+    from opensak.gui.dialogs import gsak_location_import_dialog as ldlg
+    shown = []
+
+    def _exec(self):
+        shown.append([loc.name for loc in self.checked_locations()])
+        self._import()
+
+    monkeypatch.setattr(ldlg.GsakLocationImportDialog, "exec", _exec)
+    return shown
+
+
+@pytest.mark.usefixtures("sync_workers")
+class TestGsakImportDialogLocations:
+    def test_checkbox_shown_but_unticked_with_gsak_db3(self, dlg, tmp_path):
+        # #1090: opt-in when the backup also holds cache databases.
+        dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        assert not dlg._locations_cb.isHidden() and not dlg._locations_cb.isChecked()
+
+    def test_checkbox_hidden_without_gsak_db3(self, dlg, tmp_path):
+        dlg.set_path(_backup(tmp_path, {"A": "GC1"}, with_settings=False))
+        assert dlg._locations_cb.isHidden()
+
+    def test_locations_alone_enable_import(self, dlg, tmp_path):
+        dlg.set_path(_backup(tmp_path, {"A": "GC1"}))
+        dlg._locations_cb.setChecked(True)
+        dlg._check_all(False)
+        dlg._filters_cb.setChecked(False)
+        assert dlg._import_btn.isEnabled()
+        dlg._locations_cb.setChecked(False)
+        assert dlg._import_btn.isEnabled() is False
+
+    def test_locations_and_filters_share_one_unpacked_gsak_db3(
+            self, dlg, tmp_path, qtbot, monkeypatch, auto_location_import):
+        from opensak.gui.settings import get_settings
+        filter_calls = []
+        monkeypatch.setattr(dlg, "_run_filter_import",
+                            lambda p: filter_calls.append(p.exists()))
+        emitted = []
+        dlg.locations_imported.connect(lambda: emitted.append(True))
+
+        dlg.set_path(_locations_backup(
+            tmp_path, "# comment\nZurich,47.371722, 8.537466\nBroken, nonsense\n"
+                      "Paris,N48° 51.767 E2° 19.886", {"A": "GC1AAA"}))
+        dlg._filters_cb.setChecked(True)      # opt-in since #1090
+        dlg._locations_cb.setChecked(True)
+        _run(dlg, qtbot)
+
+        assert auto_location_import == [["Zurich", "Paris"]]
+        assert [p.name for p in get_settings().home_points] == ["Zurich", "Paris"]
+        assert filter_calls == [True]
+        assert emitted == [True]
+        log = dlg._log.toPlainText()
+        assert gdlg.tr("gsak_location_import_result", added=2, updated=0, skipped=0) in log
+        assert gdlg.tr("gsak_location_import_invalid_line", line=3, text="Broken, nonsense",
+                       error=gdlg.tr("gsak_location_import_error_bad_coord")) in log
+        assert dlg._temp_dir is None
+
+    def test_unticked_locations_are_not_imported(
+            self, dlg, tmp_path, qtbot, monkeypatch, auto_location_import):
+        from opensak.gui.settings import get_settings
+        monkeypatch.setattr(dlg, "_run_filter_import", lambda p: None)
+        dlg.set_path(_locations_backup(tmp_path, "Zurich,47.371722, 8.537466"))
+        dlg._locations_cb.setChecked(False)
+        _run(dlg, qtbot)
+        assert auto_location_import == []
+        assert get_settings().home_points == []
+
+    def test_cancelled_preview_is_logged(self, dlg, tmp_path, qtbot, monkeypatch):
+        from opensak.gui.dialogs import gsak_location_import_dialog as ldlg
+        monkeypatch.setattr(ldlg.GsakLocationImportDialog, "exec", lambda self: 0)
+        dlg.set_path(_locations_backup(tmp_path, "Zurich,47.371722, 8.537466"))
+        dlg._filters_cb.setChecked(False)
+        emitted = []
+        dlg.locations_imported.connect(lambda: emitted.append(True))
+        _run(dlg, qtbot)
+        assert gdlg.tr("gsak_location_import_cancelled") in dlg._log.toPlainText()
+        assert emitted == []
+
+    def test_no_locations_in_gsak_is_logged(self, dlg, tmp_path, qtbot, monkeypatch):
+        from opensak.gui.dialogs import gsak_location_import_dialog as ldlg
+        monkeypatch.setattr(ldlg.GsakLocationImportDialog, "exec",
+                            lambda self: pytest.fail("preview shown for an empty list"))
+        dlg.set_path(_locations_backup(tmp_path, "# only comments\n"))
+        dlg._filters_cb.setChecked(False)
+        _run(dlg, qtbot)
+        assert gdlg.tr("gsak_location_import_none") in dlg._log.toPlainText()
+
+    def test_unreadable_gsak_db3_is_logged(self, dlg, tmp_path, qtbot, monkeypatch):
+        monkeypatch.setattr(gdlg, "tr", lambda key, **kw: key)
+        dlg.set_path(_backup(tmp_path, {}))     # gsak.db3 is not a database
+        dlg._filters_cb.setChecked(False)
+        _run(dlg, qtbot)
+        assert "gsak_location_import_failed" in dlg._log.toPlainText()
+
+    def test_picking_gsak_db3_itself_imports_only_its_locations(
+            self, dlg, manager, tmp_path, qtbot, monkeypatch, auto_location_import):
+        # The crash reported on #1001: gsak.db3 was queued as a cache
+        # database and the notes pre-scan died on the missing CacheMemo.
+        from opensak.gui.settings import get_settings
+        monkeypatch.setattr(dlg, "_run_filter_import", lambda p: None)
+        settings_db = tmp_path / "gsak" / "gsak.db3"
+        settings_db.parent.mkdir(parents=True)
+        conn = sqlite3.connect(settings_db)
+        conn.execute("CREATE TABLE Settings (Type TEXT, Description TEXT, Data TEXT)")
+        conn.execute("INSERT INTO Settings VALUES ('LO', 'Location', 'Zurich,47.37, 8.54')")
+        conn.commit()
+        conn.close()
+        known = [db.name for db in manager.databases]
+
+        dlg.set_path(settings_db)
+        assert dlg._table.rowCount() == 0
+        assert not dlg._locations_cb.isHidden() and dlg._import_btn.isEnabled()
+        _run(dlg, qtbot)
+
+        assert [p.name for p in get_settings().home_points] == ["Zurich"]
+        assert [db.name for db in manager.databases] == known   # nothing created
+        assert settings_db.exists()                               # user's file kept
+
+    def test_foreign_db3_is_reported_not_crashing(self, dlg, tmp_path, qtbot, monkeypatch):
+        monkeypatch.setattr(gdlg, "tr", lambda key, **kw: key)
+        other = tmp_path / "data" / "Odd" / "sqlite.db3"
+        other.parent.mkdir(parents=True)
+        conn = sqlite3.connect(other)
+        conn.execute("CREATE TABLE Something (x)")
+        conn.commit()
+        conn.close()
+        dlg.set_path(other)
+        _run(dlg, qtbot)
+        assert "import_failed" in dlg._log.toPlainText()

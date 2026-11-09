@@ -517,6 +517,49 @@ class TestReloadCachesFull:
         assert [c.gc_code for c in reloaded] == [c.gc_code for c in caches]
         assert reloaded[0].encoded_hints == f"Hint {count - 1}"
 
+    def test_iter_caches_full_loads_one_chunk_at_a_time(self, tmp_path, monkeypatch):
+        # #1075: exporting 100,000+ caches ran out of memory with every
+        # fully loaded cache held at once. iter_caches_full() only queries
+        # the next chunk once the previous one has been consumed.
+        from sqlalchemy import event
+        from opensak.db.database import iter_caches_full
+
+        monkeypatch.setattr(database, "RELOAD_CHUNK_SIZE", 2)
+        init_db(db_path=tmp_path / "iter.db")
+        with get_session() as s:
+            s.add_all(
+                Cache(gc_code=f"GCIT{i}", name=f"It {i}", cache_type="Traditional Cache",
+                      latitude=55.0, longitude=12.0, encoded_hints=f"Hint {i}")
+                for i in range(5)
+            )
+        with get_session() as s:
+            caches = s.query(Cache).order_by(Cache.gc_code).all()
+        caches.insert(1, SimpleNamespace(id=None, gc_code="FAKE"))
+
+        queries = 0
+
+        def _count(conn, cursor, statement, *args):
+            nonlocal queries
+            if "FROM caches" in statement:
+                queries += 1
+
+        engine = get_engine()
+        event.listen(engine, "before_cursor_execute", _count)
+        try:
+            it = iter_caches_full(caches)
+            first = next(it)
+            after_first = queries
+            rest = list(it)
+        finally:
+            event.remove(engine, "before_cursor_execute", _count)
+
+        assert after_first == 1
+        assert queries == 3  # chunks of 2 over 6 input objects
+        reloaded = [first, *rest]
+        assert [c.gc_code for c in reloaded] == [c.gc_code for c in caches]
+        assert reloaded[1] is caches[1]  # non-cache objects pass through
+        assert reloaded[0].encoded_hints == "Hint 0"
+
 
 # ── Location provenance columns (issue #60 phase 3) ──────────────────────────
 

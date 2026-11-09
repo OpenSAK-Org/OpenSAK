@@ -66,6 +66,19 @@ SQLAlchemy models, without going via GPX.
       any Trackables a cache already had from an earlier *GPX* import with
       whatever GSAK currently has for that cache.
 
+── Issue #1139 (#1028 step 2) ────────────────────────────────────────────────
+    - Caches.LastUserDate/MacroFlag/MacroSort/IsOwner/Symbol -> the new
+      Cache.last_user_update/macro_flag/macro_sort/is_owner/symbol columns.
+    - Corrected.kType -> UserNote.corrected_source (gui -> "user",
+      macro -> "macro", api -> "import").
+    - GSAK's own dates are kept instead of the time of this import:
+      Created -> imported_at, LastGPXDate -> last_gpx_update, UserNoteDate
+      -> UserNote.updated_at. GSAK writes them in the computer's local time;
+      they are stored as naive UTC like every timestamp OpenSAK records
+      (#1097), and a date without a time is taken as local midnight.
+    All of these columns are read only when present, so a GSAK database
+    (or test fixture) without them imports as before.
+
 Deliberately NOT imported yet (later sessions per #469 plan):
     - Custom/CustomLocal, Ignore (out of scope / #473)
     - Cache.find_count (issue #517 prep column) — GSAK's own FoundCount
@@ -86,13 +99,14 @@ same as the GPX importer's ``_upsert_cache``.
 
 from __future__ import annotations
 
+import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, update
 from sqlalchemy.orm import Session
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
@@ -104,6 +118,14 @@ from opensak.importer import (
 )
 from opensak.utils.constants import ATTRIBUTES
 from opensak.utils.constants import FOUND_LOG_TYPES
+from opensak.lang import tr
+from opensak.utils import flags
+from opensak.utils.timestamps import local_to_utc, utc_now
+
+if TYPE_CHECKING:
+    from opensak.importer.gsak_custom_fields import CustomFieldImportResult
+
+logger = logging.getLogger(__name__)
 
 
 # ── GSAK CacheType single-letter code -> OpenSAK cache_type string ──────────
@@ -328,6 +350,22 @@ def _d(value) -> Optional[datetime]:
     return None
 
 
+def _col(row: sqlite3.Row, name: str):
+    """Value of column *name*, or None when this GSAK database has no such
+    column (older or partial databases, and the test fixtures)."""
+    return row[name] if name in row.keys() else None
+
+
+def _utc(value) -> Optional[datetime]:
+    """A GSAK date/time (local time on the user's computer) as naive UTC."""
+    return local_to_utc(_d(value))
+
+
+# GSAK's Corrected.kType -> UserNote.corrected_source (#1139). Anything else
+# (blank, or a value a later GSAK version adds) stays None, "unknown".
+_CORRECTED_SOURCE_MAP = {"gui": "user", "macro": "macro", "api": "import"}
+
+
 def _attribute_name_lookup() -> dict[int, str]:
     """
     Build an ``{attribute_id: English display name}`` map.
@@ -359,6 +397,8 @@ class GsakImportResult(ImportResult):
         self.note_images_replaced: int = 0
         self.trackables: int = 0
         self.encoding_fallbacks: int = 0
+        # Custom fields (#1028), when the companion database is on; else None.
+        self.custom_fields: Optional["CustomFieldImportResult"] = None
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -401,7 +441,7 @@ def find_gsak_db3_in_zip(path: Path) -> Path:
 # ── Multi-database GSAK backups ──────────────────────────────────────────────
 #
 # A GSAK backup .zip ("File → Backup") holds one folder per GSAK database,
-# each with its own ``sqlite.db3`` (e.g. ``AllCH/sqlite.db3``), plus GSAK's
+# each with its own ``sqlite.db3`` (e.g. ``Found/sqlite.db3``), plus GSAK's
 # settings database ``gsak.db3`` (saved filters etc.) at the root. The folder
 # name *is* the GSAK database name, so it doubles as the OpenSAK database
 # name the import dialog proposes.
@@ -450,6 +490,26 @@ def _gsak_db_name_for_file(db3_path: Path) -> str:
     return db3_path.stem
 
 
+def _is_gsak_settings_db(path: Path) -> bool:
+    """True when *path* is GSAK's settings database rather than a cache
+    database: named gsak.db3, or holding a Settings table but no Caches
+    (a renamed copy). Anything unreadable counts as a cache database, so
+    the import reports it as before."""
+    if path.name.lower() == GSAK_SETTINGS_DB_NAME:
+        return True
+    if not path.is_file():
+        return False
+    from contextlib import closing
+    try:
+        uri = f"file:{path.as_posix()}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            tables = {name.lower() for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    except sqlite3.Error:
+        return False
+    return "settings" in tables and "caches" not in tables
+
+
 def list_gsak_backup(path: Path) -> GsakBackupContents:
     """List the GSAK cache databases (and gsak.db3) in *path* without
     unpacking anything.
@@ -459,12 +519,17 @@ def list_gsak_backup(path: Path) -> GsakBackupContents:
     root is named after the zip itself) — or a single database file, which
     becomes the only entry. For a single file, a ``gsak.db3`` in the GSAK
     install it belongs to (``<gsak>/data/<name>/sqlite.db3``) is picked up
-    too, so its filters can be offered alongside.
+    too, so its filters can be offered alongside. A single file that is
+    gsak.db3 itself lists no databases, only the settings database (#1001).
     """
     path = Path(path)
     contents = GsakBackupContents(path)
 
     if not contents.is_zip:
+        if _is_gsak_settings_db(path):
+            # gsak.db3 itself: no caches, only what gsak.db3 offers.
+            contents.settings_path = path
+            return contents
         size = path.stat().st_size if path.exists() else 0
         contents.databases.append(
             GsakBackupDatabase(_gsak_db_name_for_file(path), size, path=path)
@@ -501,6 +566,39 @@ def list_gsak_backup(path: Path) -> GsakBackupContents:
                 contents.settings_member = info.filename
                 settings_depth = len(parts)
 
+    contents.databases.sort(key=lambda db: db.name.lower())
+    return contents
+
+
+def list_gsak_folder(path: Path) -> GsakBackupContents:
+    """List the GSAK cache databases (and gsak.db3) of a GSAK folder on disk.
+
+    *path* is either a GSAK install / data location (``gsak.db3`` next to a
+    ``data`` folder holding ``<name>/sqlite.db3`` — e.g. ``%AppData%\\gsak``),
+    its ``data`` folder itself, or the folder of a single database (one
+    ``sqlite.db3`` in it). Only those levels are searched, never deeper, so a
+    stray copy in some subfolder is not picked up.
+    """
+    path = Path(path)
+    contents = GsakBackupContents(path)
+    data_dir = path / "data"
+    if (path / GSAK_CACHE_DB_NAME).is_file():
+        db_files = [path / GSAK_CACHE_DB_NAME]
+        settings_candidates = [path.parent.parent / GSAK_SETTINGS_DB_NAME,
+                               path.parent / GSAK_SETTINGS_DB_NAME]
+    else:
+        base = data_dir if data_dir.is_dir() else path
+        db_files = [d / GSAK_CACHE_DB_NAME for d in base.iterdir()
+                    if d.is_dir() and (d / GSAK_CACHE_DB_NAME).is_file()]
+        settings_candidates = [path / GSAK_SETTINGS_DB_NAME,
+                               path.parent / GSAK_SETTINGS_DB_NAME]
+    for db3 in db_files:
+        contents.databases.append(
+            GsakBackupDatabase(db3.parent.name, db3.stat().st_size, path=db3)
+        )
+    contents.settings_path = next(
+        (c for c in settings_candidates if c.is_file()), None
+    )
     contents.databases.sort(key=lambda db: db.name.lower())
     return contents
 
@@ -696,15 +794,23 @@ def _load_corrected_by_code(conn: sqlite3.Connection) -> dict[str, dict]:
     matched the cache's own GSAK-exported GPX for the same cache), so the
     Corrected table is the more reliable source.
     """
-    cur = conn.execute("""
-        SELECT kCode, kBeforeLat, kBeforeLon, kAfterLat, kAfterLon FROM Corrected
+    # Issue #1139: kType (how the correction was made) is read when present.
+    has_ktype = any(
+        r[1] == "kType" for r in conn.execute("PRAGMA table_info(Corrected)")
+    )
+    cur = conn.execute(f"""
+        SELECT kCode, kBeforeLat, kBeforeLon, kAfterLat, kAfterLon
+               {", kType" if has_ktype else ""}
+        FROM Corrected
     """)
     by_code: dict[str, dict] = {}
     for row in cur.fetchall():
         after_lat, after_lon = _f(row["kAfterLat"]), _f(row["kAfterLon"])
         if after_lat is None or after_lon is None:
             continue
-        entry = {"corrected_lat": after_lat, "corrected_lon": after_lon}
+        entry: dict = {"corrected_lat": after_lat, "corrected_lon": after_lon}
+        ktype = (_s(row["kType"]) or "").lower() if has_ktype else ""
+        entry["corrected_source"] = _CORRECTED_SOURCE_MAP.get(ktype)
         before_lat, before_lon = _f(row["kBeforeLat"]), _f(row["kBeforeLon"])
         if before_lat is not None and before_lon is not None:
             entry["original_lat"] = before_lat
@@ -845,6 +951,17 @@ def _row_to_cache_data(row: sqlite3.Row) -> Optional[dict]:
 
         # ── Issue #538 ────────────────────────────────────────────────────
         "trackables": trackables,
+
+        # ── Issue #1139 (#1028 step 2): small columns ──────────────────────
+        "last_user_update": _utc(_col(row, "LastUserDate")),
+        "macro_flag":       _b(_col(row, "MacroFlag")),
+        "macro_sort":       _s(_col(row, "MacroSort")),
+        "is_owner":         _b(_col(row, "IsOwner")),
+        "symbol":           _s(_col(row, "Symbol")),
+        # GSAK's own dates, used instead of the time of this import.
+        "_gsak_created":        _utc(_col(row, "Created")),
+        "_gsak_last_gpx":       _utc(_col(row, "LastGPXDate")),
+        "_gsak_user_note_date": _utc(_col(row, "UserNoteDate")),
     }
 
 
@@ -931,10 +1048,21 @@ def _upsert_cache_from_gsak(
         "user_flag", "user_sort", "premium_only",
         "user_data_1", "user_data_2", "user_data_3", "user_data_4",
         "favorite_points",
+        # Issue #1139: also the user's / their macros' own data.
+        "last_user_update", "macro_flag", "macro_sort", "is_owner", "symbol",
     ):
         setattr(cache, field, data.get(field))
 
     cache.source_file = source_file
+
+    # ── Issue #1139: GSAK's Created is when the cache was first seen. Keep
+    # the earlier of it and an existing imported_at, so a cache that was
+    # already in OpenSAK before never looks newer than it is. ─────────────
+    gsak_created = data.get("_gsak_created")
+    if gsak_created is not None:
+        current = cache.imported_at.replace(tzinfo=None) if cache.imported_at else None
+        if current is None or gsak_created < current:
+            cache.imported_at = gsak_created
 
     # Attributes
     for a in attr_rows:
@@ -1020,7 +1148,7 @@ def _upsert_cache_from_gsak(
         log_id = lg["log_id"]
         if log_id in seen_log_ids:
             if warnings is not None:
-                warnings.append(f"{gc_code}: dropped duplicate log id {log_id!r}")
+                warnings.append(tr("gsak_warn_duplicate_log", gc_code=gc_code, log_id=log_id))
             continue
         seen_log_ids.add(log_id)
         log_mappings.append({
@@ -1068,10 +1196,12 @@ def _upsert_cache_from_gsak(
         for lg in _recent
     ) or None
 
-    # ── Issue #716: last_gpx_update — local timestamp of this import pass,
-    # set unconditionally (even for locked caches — it reflects import
-    # activity, not listing content, same as source_file above) ───────────
-    cache.last_gpx_update = datetime.now()
+    # ── Issue #716: last_gpx_update — set unconditionally (even for locked
+    # caches — it reflects import activity, not listing content, same as
+    # source_file above). Issue #1139: GSAK's own LastGPXDate when it has
+    # one, so "not refreshed since …" keeps meaning the last real refresh;
+    # otherwise the time of this import. Naive UTC either way (#1097). ────
+    cache.last_gpx_update = data.get("_gsak_last_gpx") or utc_now()
 
     # ── Issue #552: cached count of the user's own found-type logs ──────────
     # GSAK databases hold the full log history (unlike a PQ's 5-log window),
@@ -1100,6 +1230,11 @@ def _upsert_cache_from_gsak(
             note.corrected_lat = corrected["corrected_lat"]
             note.corrected_lon = corrected["corrected_lon"]
             note.is_corrected = True
+            note.corrected_source = corrected.get("corrected_source")
+        # Issue #1139: GSAK's UserNoteDate instead of the time of this
+        # import (set explicitly, so the column's onupdate doesn't fire).
+        if data.get("_gsak_user_note_date") is not None:
+            note.updated_at = data["_gsak_user_note_date"]
         if note_text is not None:
             note.note = note_text
             if data.get("note_images_replaced"):
@@ -1110,6 +1245,24 @@ def _upsert_cache_from_gsak(
                     )
 
     return cache, created
+
+
+def _restore_last_user_update(session: Session, caches: list[tuple[Cache, dict]]) -> None:
+    """Put GSAK's LastUserDate back after the batch is flushed (#1140).
+
+    Writing the user fields and notes fires the database's last_user_update
+    triggers, which stamp "now" — right for an edit, wrong for an import
+    that carries the user's own date (or none). Set explicitly afterwards;
+    last_user_update is not a column the triggers watch, so this sticks."""
+    if not caches:
+        return
+    session.flush()
+    # ORM bulk UPDATE by primary key: one executemany, no unit of work.
+    session.execute(
+        update(Cache),
+        [{"id": cache.id, "last_user_update": data.get("last_user_update")}
+         for cache, data in caches],
+    )
 
 
 def _flush_gsak_batch(
@@ -1137,6 +1290,9 @@ def _flush_gsak_batch(
                 cache, created, len(attr_rows), corrected is not None,
                 data.get("note_text") is not None, data.get("note_images_replaced", 0),
             ))
+        _restore_last_user_update(
+            session, [(p[0], d[0]) for p, d in zip(pending, batch)]
+        )
         sp.commit()
     except Exception:
         sp.rollback()
@@ -1176,6 +1332,7 @@ def _flush_gsak_batch_isolated(
                 session, data, attr_rows, wpt_rows, log_rows, corrected,
                 attr_names, source, existing_ids, result.warnings,
             )
+            _restore_last_user_update(session, [(cache, data)])
             cell.commit()
             if created:
                 result.created += 1
@@ -1193,7 +1350,8 @@ def _flush_gsak_batch_isolated(
             result.note_images_replaced += data.get("note_images_replaced", 0)
         except Exception as e:
             cell.rollback()
-            result.errors.append(f"DB error for {data.get('gc_code', '?')} in {source}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
 
@@ -1202,6 +1360,7 @@ def import_gsak_db(
     session: Session,
     progress_cb=None,
     batch_size: int = 200,
+    settings_db: Optional[Path] = None,
 ) -> GsakImportResult:
     """
     Import a GSAK ``sqlite.db3`` file directly into OpenSAK (scope:
@@ -1217,19 +1376,23 @@ def import_gsak_db(
         Called as ``progress_cb(done, total)`` after each batch.
     batch_size : int
         Caches per SAVEPOINT batch (see :func:`_flush_gsak_batch`).
+    settings_db : Path, optional
+        GSAK's ``gsak.db3``, for the definitions of global custom fields.
+        Custom fields are imported only while the ``companion-db`` feature
+        flag is on (importer/gsak_custom_fields.py).
     """
     result = GsakImportResult()
     db_path = Path(db_path)
 
     if not db_path.exists():
-        result.errors.append(f"GSAK database not found: {db_path}")
+        result.errors.append(tr("gsak_err_db_not_found", path=db_path))
         return result
 
     try:
         fallback_counter = [0]
         conn = _open_readonly(db_path, fallback_counter)
     except sqlite3.Error as e:
-        result.errors.append(f"Could not open GSAK database: {e}")
+        result.errors.append(tr("gsak_err_cannot_open", error=e))
         return result
 
     try:
@@ -1244,6 +1407,7 @@ def import_gsak_db(
         _enter_bulk_import_pragmas(session)
 
         batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]] = []
+        codes: list[str] = []
         done = 0
         source = str(db_path)
 
@@ -1253,9 +1417,10 @@ def import_gsak_db(
             done += 1
             if data is None:
                 result.skipped += 1
-                result.warnings.append(f"Skipped row with missing code/coords near row {done}")
+                result.warnings.append(tr("gsak_warn_skipped_row", row=done))
             else:
                 gc_code = data["gc_code"]
+                codes.append(gc_code)
                 batch.append((
                     data,
                     attrs_by_code.get(gc_code, []),
@@ -1275,9 +1440,32 @@ def import_gsak_db(
             _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result)
             session.commit()
 
+        if flags.companion_db:
+            _import_custom_fields(conn, session, codes, settings_db, result)
+
     finally:
         _exit_bulk_import_pragmas(session)
         conn.close()
 
     result.encoding_fallbacks = fallback_counter[0]
     return result
+
+
+def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: list[str],
+                          settings_db: Optional[Path], result: GsakImportResult) -> None:
+    """Custom fields into the target's companion database, after the caches
+    are committed. A failure is reported; the caches stay imported."""
+    from opensak.db.companion import CompanionError
+    from opensak.db.custom_fields import CustomFieldError
+    from opensak.importer.gsak_custom_fields import import_custom_fields
+
+    target = session.get_bind().engine.url.database
+    if not target:
+        return
+    try:
+        result.custom_fields = import_custom_fields(conn, Path(target), codes, settings_db)
+    except (sqlite3.Error, OSError, CompanionError, CustomFieldError) as exc:
+        logger.warning("GSAK import: custom fields not imported", exc_info=True)
+        result.errors.append(f"Custom fields not imported: {exc}")
+        return
+    result.warnings.extend(result.custom_fields.messages)

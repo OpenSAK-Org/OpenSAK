@@ -18,11 +18,15 @@ Windows junctions) cannot lead out of a permitted folder. When folders are
 nested, the most specific entry decides — a sub-folder listed without
 rights therefore blocks it even if a parent folder is permitted.
 
-Every file a macro writes goes through safe_write(): it refuses a target
-with more than one hard link (resolve() cannot see through those, so a
-link in a permitted folder could otherwise lead to e.g. opensak.json) and
+Every file a macro writes goes through safe_write() (or
+safe_write_stream(), for a file written piece by piece, e.g. a large
+export): it refuses a target with more than one hard link (resolve()
+cannot see through those, so a link in a permitted folder could otherwise
+lead to e.g. opensak.json) and
 writes to a temporary file first, which then replaces the target. The
-check is repeated right before the replace.
+check is repeated right before the replace. A copy is such a write
+(safe_copy()); a delete (safe_delete()) needs write access too, refuses
+a link and repeats the check right before the delete.
 
 A filesystem root (/, a drive such as C:\\ or a network share such as
 \\\\server\\share) is never a permitted folder, since it would open the
@@ -32,23 +36,31 @@ opensak.json (edited by hand) is ignored.
 When no listed folder grants an access, check_access() raises
 FolderNotApproved, and the runtime asks the user (through OpenSAK's own
 dialog, never through the macro) to approve the file's folder for this run
-only or permanently. Protected data and roots are never offered.
+only or permanently. Protected data and roots are never offered. Both
+answers belong to the running macro only: a permanent one is stored with
+it (db_access.py, #1091), so the list here holds just the folders the user
+listed in Settings, shared by all macros, and those older versions added.
 
 OpenSAK's own data can never be read or written by a macro, whatever the
 list says (see protected_reason()): opensak.json, bootstrap.json, the
 Geocaching.com token, the data and database folders (except the macros
 folder inside the data folder) and SQLite files (.db, .db3, .sqlite,
-.sqlite3 and their -wal/-shm/-journal files) anywhere.
+.sqlite3 and their -wal/-shm/-journal files) anywhere — except the macro's
+own database (opensak.macro_db()), which still needs write access to its
+folder like any other file.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import Iterable, Optional
+from typing import IO, Any, Callable, Iterable, Optional, TypeVar
+
+T = TypeVar("T")
 
 STORE_KEY = "macros.folder_permissions"
 
@@ -85,10 +97,23 @@ class FolderPermission:
         )
 
 
+_WINDOWS_VAR = re.compile(r"%([^%/\\\s]+)%")
+
+
+def expand_path(path: str | Path) -> Path:
+    """Expand ~ and environment variables. %NAME% is expanded on every
+    platform (os.path.expandvars only does that on Windows), so a path such
+    as "%APPDATA%/gsak" works wherever the variable is set; unknown
+    variables are left as they are."""
+    text = os.path.expandvars(os.path.expanduser(str(path)))
+    text = _WINDOWS_VAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), text)
+    return Path(text)
+
+
 def resolve_path(path: str | Path) -> Path:
     """Expand ~ and environment variables, make absolute and resolve
     "..", "." and symlinks."""
-    return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+    return expand_path(path).resolve()
 
 
 def is_root_folder(path: str | Path) -> bool:
@@ -241,13 +266,16 @@ def _protected_locations() -> tuple[list[Path], list[Path]]:
     return folders, files
 
 
-def protected_reason(target: Path) -> Optional[str]:
+def protected_reason(target: Path, allow_database: bool = False) -> Optional[str]:
     """Why the resolved *target* is off limits to macros, or None.
 
     Checked before the folder list, so no Settings entry can open
     OpenSAK's settings, credentials or databases to a macro.
+    *allow_database*: *target* is the macro's own database
+    (opensak.macro_db()), which may be an SQLite file; everything else
+    still applies, OpenSAK's data folders included.
     """
-    if _is_sqlite_file(target):
+    if _is_sqlite_file(target) and not allow_database:
         return "it is a database file"
     if target.name.lower().startswith("opensak.json"):
         return "it is OpenSAK's settings file"
@@ -258,6 +286,11 @@ def protected_reason(target: Path) -> Optional[str]:
         macros = macros_dir()
     except Exception:
         macros = None
+    # Each macro reads its own saved settings through opensak.settings only,
+    # never another macro's through the file functions (#983).
+    from opensak.macro.settings import SETTINGS_DIRNAME
+    if macros is not None and target.is_relative_to(macros / SETTINGS_DIRNAME):
+        return "it holds the saved settings of macros — use opensak.settings"
     for folder in folders:
         if not target.is_relative_to(folder):
             continue
@@ -271,6 +304,63 @@ def protected_reason(target: Path) -> Optional[str]:
         ):
             continue
         return f"it is inside OpenSAK's data folder {folder}"
+    return None
+
+
+# ── Writes: allowed file types, never an autostart location ─────────────────
+
+# Shell start-up files in the home folder: a line added there runs at the
+# next login or terminal.
+_SHELL_RC_FILES = (
+    ".bashrc", ".bash_profile", ".bash_login", ".profile",
+    ".zshrc", ".zprofile", ".zshenv", ".zlogin",
+)
+
+
+def _autostart_locations() -> tuple[list[Path], list[Path]]:
+    """(folders, files) where a written file runs at the next login."""
+    home = Path.home()
+    folders = [home / ".config" / "autostart", home / "Library" / "LaunchAgents"]
+    for var in ("APPDATA", "PROGRAMDATA"):
+        base = os.environ.get(var)
+        if base:
+            folders.append(
+                Path(base) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            )
+    files = [home / name for name in _SHELL_RC_FILES]
+    resolved: tuple[list[Path], list[Path]] = ([], [])
+    for source, target in ((folders, resolved[0]), (files, resolved[1])):
+        for path in source:
+            try:
+                target.append(resolve_path(path))
+            except (OSError, RuntimeError):
+                pass
+    return resolved
+
+
+def _folded(path: Path) -> PurePath:
+    # Windows and macOS file names are case-insensitive by default.
+    return PurePath(str(path).casefold())
+
+
+def write_denied_reason(
+    target: Path, allowed_suffixes: Optional[Iterable[str]] = None
+) -> Optional[str]:
+    """Why a macro may not write the resolved *target*, beyond
+    protected_reason(), or None: an autostart location, or (with
+    *allowed_suffixes*, e.g. {".html", ".txt"}) a file type the writing
+    function does not produce."""
+    folded = _folded(target)
+    folders, files = _autostart_locations()
+    if any(folded == _folded(f) for f in files) or any(
+        folded.is_relative_to(_folded(f)) for f in folders
+    ):
+        return "it is an autostart location"
+    if allowed_suffixes is not None:
+        allowed = sorted({s.lower() for s in allowed_suffixes})
+        # A ":" would name an NTFS alternate data stream ("a.html:x.bat").
+        if ":" in target.name or target.suffix.lower() not in allowed:
+            return f"only these file types can be written: {' '.join(allowed)}"
     return None
 
 
@@ -328,11 +418,15 @@ def check_access(
     path: str | Path,
     write: bool = False,
     permissions: Optional[Iterable[FolderPermission]] = None,
+    allow_database: bool = False,
+    allowed_suffixes: Optional[Iterable[str]] = None,
 ) -> Path:
     """Return the resolved *path* if a permitted folder grants the access.
 
     Raises FolderAccessDenied otherwise. *permissions* defaults to the
-    saved list (load_permissions()).
+    saved list (load_permissions()); *allow_database* as for
+    protected_reason(). A write is also refused for an autostart location,
+    and for a suffix not in *allowed_suffixes* (see write_denied_reason()).
     """
     if permissions is None:
         permissions = load_permissions()
@@ -341,7 +435,9 @@ def check_access(
     except (OSError, RuntimeError) as exc:   # RuntimeError: symlink loop
         raise FolderAccessDenied(f"cannot resolve {path}: {exc}") from None
     kind = "write" if write else "read"
-    reason = protected_reason(target)
+    reason = protected_reason(target, allow_database)
+    if reason is None and write:
+        reason = write_denied_reason(target, allowed_suffixes)
     if reason is not None:
         raise FolderAccessDenied(f"macros may not {kind} {target} — {reason}")
     entry = _matching_entry(target, permissions)
@@ -396,7 +492,9 @@ def with_grant(
 
 
 def grant_permanently(folder: Path, write: bool) -> None:
-    """Add read (or write) on *folder* to the list saved in Settings."""
+    """Add read (or write) on *folder* to the list saved in Settings, for
+    all macros. (A folder approved while a macro runs is stored with that
+    macro instead, see db_access.grant_folder().)"""
     save_permissions(with_grant(load_permissions(), folder, write))
 
 
@@ -419,11 +517,134 @@ def safe_write(
     data: bytes | str,
     permissions: Optional[Iterable[FolderPermission]] = None,
     encoding: str = "utf-8",
+    allowed_suffixes: Optional[Iterable[str]] = None,
 ) -> Path:
-    """Write *data* to *path* for a macro and return the resolved path.
+    """Write *data* to *path* for a macro and return the resolved path
+    (see safe_write_stream)."""
+    payload = data.encode(encoding) if isinstance(data, str) else data
+    return safe_write_stream(path, lambda f: f.write(payload), permissions,
+                             allowed_suffixes=allowed_suffixes)[0]
 
-    The only way macro API functions may write files:
-      * check_access(write=True), so the deny list and folder list apply;
+
+def _refuse_link(path: str | Path, kind: str) -> None:
+    """Raise if *path* itself (not a folder above it) is a symbolic link or
+    junction: resolve() follows it, so removing the resolved path would
+    remove the file it points to, not the link."""
+    try:
+        unresolved = Path(os.path.abspath(expand_path(path)))
+        is_link = unresolved.is_symlink() or (
+            hasattr(unresolved, "is_junction") and unresolved.is_junction()
+        )
+    except OSError:
+        is_link = False
+    if is_link:
+        raise FolderAccessDenied(f"macros may not {kind} {path} — it is a link")
+
+
+def safe_copy(
+    source: Path,
+    path: str | Path,
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    allowed_suffixes: Optional[Iterable[str]] = None,
+    max_bytes: Optional[int] = None,
+) -> Path:
+    """Copy the already read-checked, resolved file *source* to *path* for a
+    macro through safe_write_stream() (so every check of a write applies)
+    and return the resolved target. The modification time is kept."""
+    st = source.stat()
+    if max_bytes is not None and st.st_size > max_bytes:
+        raise FolderAccessDenied(
+            f"macros may not copy {source} — it is larger than "
+            f"{max_bytes // (1024 * 1024)} MB"
+        )
+    # resolve() so that a target naming the source through another path is caught.
+    if resolve_path(path) == source:
+        raise FolderAccessDenied(f"macros may not copy {source} onto itself")
+
+    def copy(f: IO[Any]) -> None:
+        import shutil
+
+        with open(source, "rb") as src:
+            shutil.copyfileobj(src, f, 1024 * 1024)
+
+    final = safe_write_stream(path, copy, permissions, allowed_suffixes=allowed_suffixes)[0]
+    try:
+        os.utime(final, ns=(st.st_atime_ns, st.st_mtime_ns))
+    except OSError:
+        pass
+    return final
+
+
+def safe_delete(
+    path: str | Path,
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    allowed_suffixes: Optional[Iterable[str]] = None,
+    folder: bool = False,
+) -> bool:
+    """Delete the file (or with *folder*, the empty folder) *path* for a
+    macro; False if there is nothing to delete.
+
+    Deleting is writing: check_access(write=True) applies, with the deny
+    list, autostart locations and *allowed_suffixes* (files only). A link
+    is refused (see _refuse_link), and the check is repeated right before
+    the delete, as in safe_write_stream(). Never deletes a folder that is
+    not empty. Raises FolderAccessDenied or OSError.
+    """
+    if permissions is not None:
+        permissions = list(permissions)    # iterated twice
+    suffixes = None if folder or allowed_suffixes is None else tuple(allowed_suffixes)
+    kind = "delete the folder" if folder else "delete"
+    _refuse_link(path, kind)
+    target = check_access(path, write=True, permissions=permissions,
+                          allowed_suffixes=suffixes)
+    if not target.exists():
+        return False
+    if folder != target.is_dir():
+        what = "a folder" if target.is_dir() else "not a folder"
+        raise FolderAccessDenied(f"macros may not {kind} {target} — it is {what}")
+    if folder:
+        if _is_root(target):
+            raise FolderAccessDenied(f"macros may not {kind} {target} — it is a drive")
+        listed = load_permissions() if permissions is None else permissions
+        for perm in listed:
+            try:
+                same = resolve_path(perm.path) == target
+            except (OSError, RuntimeError):
+                same = False
+            if same:
+                raise FolderAccessDenied(
+                    f"macros may not {kind} {target} — it is a folder in "
+                    "Settings → Folder permissions"
+                )
+    _refuse_link(path, kind)
+    final = check_access(path, write=True, permissions=permissions, allowed_suffixes=suffixes)
+    if final != target:
+        raise FolderAccessDenied(
+            f"macros may not {kind} {path} — the path changed (now {final})"
+        )
+    if folder:
+        os.rmdir(final)     # fails for a folder that is not empty
+    else:
+        os.remove(final)
+    return True
+
+
+def safe_write_stream(
+    path: str | Path,
+    write: Callable[[IO[Any]], T],
+    permissions: Optional[Iterable[FolderPermission]] = None,
+    binary: bool = True,
+    encoding: str = "utf-8",
+    allowed_suffixes: Optional[Iterable[str]] = None,
+) -> tuple[Path, T]:
+    """Call *write(f)* to write *path* for a macro; return the resolved path
+    and what *write* returned. *f* is a binary file, or with
+    ``binary=False`` a text file in *encoding* with the platform's newlines.
+
+    The only way macro API functions may write files (safe_write() for data
+    already in memory):
+      * check_access(write=True), so the deny list and folder list apply
+        (and *allowed_suffixes*, the file types the caller produces);
       * a target with more than one hard link is refused;
       * the data goes to a temporary file in the same folder, which then
         replaces the target with os.replace(). The rename swaps the folder
@@ -438,18 +659,24 @@ def safe_write(
     """
     if permissions is not None:
         permissions = list(permissions)    # iterated twice
-    target = check_access(path, write=True, permissions=permissions)
+    if allowed_suffixes is not None:
+        allowed_suffixes = tuple(allowed_suffixes)
+    target = check_access(
+        path, write=True, permissions=permissions, allowed_suffixes=allowed_suffixes
+    )
     _refuse_hard_link(target)
-    payload = data.encode(encoding) if isinstance(data, str) else data
 
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_name(f".{target.name}.{secrets.token_hex(4)}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o666)
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(payload)
-        final = check_access(path, write=True, permissions=permissions)
+        with (os.fdopen(fd, "wb") if binary else os.fdopen(fd, "w", encoding=encoding)) as f:
+            result = write(f)
+        final = check_access(
+            path, write=True, permissions=permissions,
+            allowed_suffixes=allowed_suffixes,
+        )
         if final != target:
             raise FolderAccessDenied(
                 f"macros may not write {path} — the path changed while writing "
@@ -465,4 +692,4 @@ def safe_write(
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    return final
+    return final, result

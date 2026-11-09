@@ -12,7 +12,10 @@ sidste gemmes via save_related(), da de ligger i egne tabeller.
 """
 
 from __future__ import annotations
+import logging
+import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QDate
@@ -28,7 +31,10 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.date_format import apply_date_format
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
+from opensak.db import custom_fields
 from opensak.db.models import Cache, UserNote, Waypoint
+from opensak.gui.custom_field_format import type_label
+from opensak.utils import flags
 from opensak.lang import tr
 from opensak.coords import format_coords, parse_coords
 from opensak.gui.settings import get_settings
@@ -36,12 +42,11 @@ from opensak.gui.theme import hint_style
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 from opensak.utils.constants import (
-    CACHE_TYPES, CONTAINER_SIZES, VALID_DT, CUSTOM_WP_TYPES, KNOWN_PREFIXES,
+    CACHE_TYPES, CHILD_WP_TYPES, CONTAINER_SIZES, VALID_DT, CUSTOM_WP_TYPES, KNOWN_PREFIXES,
 )
 
-# Waypoint-typer til child-waypoint-dialogens (redigerbare) type-dropdown —
-# de kendte Groundspeak/GSAK-typer i deres første forekomst-rækkefølge.
-CHILD_WP_TYPES: list[str] = list(dict.fromkeys(KNOWN_PREFIXES.values()))
+
+logger = logging.getLogger(__name__)
 
 # Waypoint-kolonner som child-waypoint-dialogen kan redigere.
 _WP_FIELDS = (
@@ -107,6 +112,134 @@ class OptionalDateEdit(QWidget):
 
     def clear(self) -> None:
         self._check.setChecked(False)
+
+
+class CustomFieldsForm(QWidget):
+    """
+    The custom fields (#1028) of the active database, one input per field:
+    a checkbox for a boolean, a date field that can be "not set", text for
+    the rest (several lines when the GSAK definition is taller than one).
+    Shows the stored value, or the default for a cache nobody changed.
+    Only changed fields are written (save()). Empty without the companion-db
+    feature flag or without fields.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.fields: list[custom_fields.Field] = []
+        self._db_path: Optional[Path] = None
+        self._inputs: dict[str, QWidget] = {}
+        self._original: dict[str, object] = {}
+        if flags.companion_db:
+            from opensak.db.manager import get_db_manager
+            active = get_db_manager().active_path
+            if active is not None:
+                self._db_path = Path(active)
+                try:
+                    self.fields = custom_fields.fields(self._db_path)
+                except Exception:
+                    logger.warning("edit dialog: custom fields not loaded", exc_info=True)
+        form = QFormLayout(self)
+        form.setSpacing(8)
+        for f in self.fields:
+            widget: QWidget
+            if f.type == custom_fields.TYPE_BOOLEAN:
+                widget = QCheckBox()
+            elif f.type == custom_fields.TYPE_DATE:
+                widget = OptionalDateEdit()
+            elif f.type == custom_fields.TYPE_STRING and (f.height or 0) > 1:
+                widget = QTextEdit()
+                widget.setAcceptRichText(False)
+                widget.setMaximumHeight(min(200, 22 * (f.height or 1)))
+            else:
+                widget = QLineEdit()
+                if f.type != custom_fields.TYPE_STRING:
+                    widget.setMaximumWidth(160)
+            widget.setToolTip(tr("wp_custom_tooltip", type=type_label(f.type)))
+            self._inputs[f.name] = widget
+            form.addRow(f"{f.name}:", widget)
+        self.load(None)
+
+    def load(self, gc_code: Optional[str]) -> None:
+        """Show the values of *gc_code* (the defaults for None, a new cache)."""
+        values: dict[str, object] = {}
+        if gc_code and self.fields and self._db_path is not None:
+            try:
+                values = custom_fields.read_values(self._db_path, [gc_code]).get(gc_code, {})
+            except Exception:
+                logger.warning("edit dialog: custom values of %s not loaded", gc_code,
+                               exc_info=True)
+        for f in self.fields:
+            value = values.get(f.name, f.default_value)
+            self._set(f, value)
+        self._original = self._read()
+
+    def _set(self, f: custom_fields.Field, value: object) -> None:
+        widget = self._inputs[f.name]
+        if isinstance(widget, QCheckBox):
+            widget.setChecked(value not in (None, 0, "0", "", False))
+        elif isinstance(widget, OptionalDateEdit):
+            parsed = None
+            if isinstance(value, str) and value.strip():
+                try:
+                    parsed = datetime.fromisoformat(value.strip())
+                except ValueError:
+                    parsed = None
+            widget.set_value(parsed)
+        elif isinstance(widget, QTextEdit):
+            widget.setPlainText("" if value is None else str(value))
+        elif isinstance(widget, QLineEdit):
+            if isinstance(value, float) and value.is_integer():
+                value = int(value)
+            widget.setText("" if value is None else str(value))
+
+    def _read(self) -> dict[str, object]:
+        """What the inputs show, as entered (not parsed)."""
+        result: dict[str, object] = {}
+        for name, widget in self._inputs.items():
+            if isinstance(widget, QCheckBox):
+                result[name] = widget.isChecked()
+            elif isinstance(widget, OptionalDateEdit):
+                value = widget.value()
+                result[name] = value.date() if value is not None else None
+            elif isinstance(widget, QTextEdit):
+                result[name] = widget.toPlainText()
+            elif isinstance(widget, QLineEdit):
+                result[name] = widget.text().strip()
+        return result
+
+    def _changes(self) -> dict[str, object]:
+        """The changed fields, parsed; raises CustomFieldError."""
+        current = self._read()
+        by_name = {f.name: f for f in self.fields}
+        return {
+            name: custom_fields.parse_value(by_name[name], value)
+            for name, value in current.items()
+            if value != self._original.get(name)
+        }
+
+    def error(self) -> Optional[str]:
+        """A message about the first value that doesn't fit its field."""
+        try:
+            self._changes()
+        except custom_fields.CustomFieldError as exc:
+            return tr("wp_val_custom_invalid", error=exc)
+        return None
+
+    def save(self, gc_code: str) -> Optional[str]:
+        """Write the changed fields of *gc_code*; an error message on failure."""
+        if not self.fields or self._db_path is None:
+            return None
+        try:
+            changes = self._changes()
+            if changes:
+                custom_fields.write_values(self._db_path, [(gc_code, changes)])
+        except (custom_fields.CustomFieldError, custom_fields.CompanionError,
+                sqlite3.Error, OSError) as exc:
+            logger.warning("edit dialog: custom values of %s not saved: %s", gc_code, exc)
+            return tr("wp_custom_save_failed", error=exc)
+        self._original = self._read()
+        return None
 
 
 class WaypointDialog(QDialog):
@@ -210,6 +343,12 @@ class WaypointDialog(QDialog):
         # Ikke i scroll-area: tabellen scroller selv
         self._waypoints_tab_idx = self._tabs.addTab(
             self._build_waypoints_tab(), tr("detail_tab_waypoints"))
+        # #1028: only while the database has custom fields
+        self._custom_form = CustomFieldsForm()
+        self._custom_tab_idx = -1
+        if self._custom_form.fields:
+            self._custom_tab_idx = self._tabs.addTab(
+                self._wrap_in_scroll(self._custom_form), tr("wp_tab_custom"))
 
         layout.addWidget(self._tabs)
 
@@ -376,7 +515,7 @@ class WaypointDialog(QDialog):
 
         # Tomt felt = ukendt højde (None) — 0 m er en gyldig højde
         self._elevation = QLineEdit()
-        self._elevation.setPlaceholderText("m")
+        self._elevation.setPlaceholderText("m")  # i18n: ignore — unit symbol
         self._elevation.setMaximumWidth(120)
         form.addRow(_label("col_elevation"), self._elevation)
 
@@ -801,6 +940,9 @@ class WaypointDialog(QDialog):
         ]
         self._refresh_wp_table()
 
+        # Custom fields (#1028)
+        self._custom_form.load(gc)
+
     # ── Validation & accept ───────────────────────────────────────────────────
 
     def _validate_and_accept(self) -> None:
@@ -820,6 +962,13 @@ class WaypointDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(self, tr("warning"), tr("wp_val_elevation_invalid"))
                 return
+
+        error = self._custom_form.error()
+        if error is not None:
+            if self._custom_tab_idx >= 0:
+                self._tabs.setCurrentIndex(self._custom_tab_idx)
+            QMessageBox.warning(self, tr("warning"), error)
+            return
 
         if self._is_custom:
             self._validate_custom_and_accept()
@@ -906,15 +1055,25 @@ class WaypointDialog(QDialog):
         return [dict(wp) for wp in self._waypoints]
 
     def save_related(self, session, cache_row: Cache) -> None:
-        """Write UserNote and child waypoints for cache_row within session.
+        """Write UserNote and child waypoints for cache_row within session,
+        and recalculate its is_owner from the owner in the dialog.
 
         cache_row must be persistent (flushed) so it has an id. Its
         user_note and waypoints relationships are loaded lazily on access.
         """
+        # The owner may have been typed in: is_owner follows it (#1140).
+        from opensak.db.ownership import update_is_owner
+        update_is_owner(cache_row)
         self._save_user_note(session, cache_row)
         waypoints = self.get_waypoints_data()
         if waypoints is not None:
             self._save_waypoints(session, cache_row, waypoints)
+
+    def save_custom(self, gc_code: str) -> Optional[str]:
+        """Write the changed custom fields (#1028) of *gc_code*. Call it after
+        the cache is committed: they live in the companion database, which
+        is written second. Returns an error message, None when all is well."""
+        return self._custom_form.save(gc_code)
 
     def _save_user_note(self, session, cache_row: Cache) -> None:
         data = self.get_user_note_data()
@@ -925,9 +1084,15 @@ class WaypointDialog(QDialog):
             note = UserNote(cache_id=cache_row.id)
             session.add(note)
         note.note = data["note"]
+        # #1140: the correction is the user's own once they change it here;
+        # saving the dialog without touching it keeps the recorded source.
+        if (note.corrected_lat, note.corrected_lon) != (data["corrected_lat"], data["corrected_lon"]):
+            note.corrected_source = "user"
         note.corrected_lat = data["corrected_lat"]
         note.corrected_lon = data["corrected_lon"]
         note.is_corrected = data["corrected_lat"] is not None and data["corrected_lon"] is not None
+        if not note.is_corrected:
+            note.corrected_source = None
 
     @staticmethod
     def _save_waypoints(session, cache_row: Cache, waypoints: list[dict]) -> None:

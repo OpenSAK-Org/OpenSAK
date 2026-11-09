@@ -22,12 +22,14 @@ from opensak.macro.permissions import (
     approvable_folder,
     check_access,
     default_permissions,
+    expand_path,
     is_root_folder,
     load_permissions,
     protected_inside,
     protected_reason,
     resolve_path,
     safe_write,
+    safe_write_stream,
     save_permissions,
     with_grant,
 )
@@ -96,6 +98,19 @@ def test_load_skips_malformed_entries():
     get_store().set(STORE_KEY, ["junk", {"read": True}, {"path": "/ok", "read": 1}])
     assert load_permissions() == [FolderPermission("/ok", read=True, write=False)]
 
+
+
+def test_expand_path_expands_percent_variables_on_every_platform(tmp_path, monkeypatch):
+    # os.path.expandvars only knows %NAME% on Windows; use the POSIX one to
+    # check that "%APPDATA%/gsak" still works on Linux and macOS.
+    import posixpath
+    monkeypatch.setattr(os.path, "expandvars", posixpath.expandvars)
+    monkeypatch.setenv("OPENSAK_TEST_DIR", str(tmp_path))
+    assert expand_path("%OPENSAK_TEST_DIR%/gsak") == tmp_path / "gsak"
+    assert expand_path("$OPENSAK_TEST_DIR/gsak") == tmp_path / "gsak"
+    monkeypatch.delenv("OPENSAK_TEST_UNSET", raising=False)
+    assert expand_path("%OPENSAK_TEST_UNSET%/gsak") == Path("%OPENSAK_TEST_UNSET%/gsak")
+    assert expand_path("100% sure/50% off") == Path("100% sure/50% off")
 
 # ── OpenSAK's own data ───────────────────────────────────────────────────────
 
@@ -222,11 +237,11 @@ def test_safe_write_rechecks_before_replace(tmp_path, monkeypatch):
     real = perm_mod.check_access
     calls = []
 
-    def swapped(path, write=False, permissions=None):
+    def swapped(path, write=False, permissions=None, allowed_suffixes=None):
         calls.append(path)
         if len(calls) == 2:
-            return real(tmp_path / "elsewhere.gpx", write, permissions)
-        return real(path, write, permissions)
+            return real(tmp_path / "elsewhere.gpx", write, permissions, allowed_suffixes)
+        return real(path, write, permissions, allowed_suffixes)
 
     monkeypatch.setattr(perm_mod, "check_access", swapped)
     with pytest.raises(FolderAccessDenied, match="changed while writing"):
@@ -256,6 +271,43 @@ def test_safe_write_keeps_mode_of_overwritten_file(tmp_path):
 
 
 # ── check_access ─────────────────────────────────────────────────────────────
+
+def test_safe_write_stream_text_mode_and_result(tmp_path):
+    def write(f):
+        f.write("a\nä\n")
+        return 42
+
+    target, result = safe_write_stream(tmp_path / "a.gpx", write,
+                                       permissions=[_rw(tmp_path)], binary=False)
+    assert (target, result) == (tmp_path.resolve() / "a.gpx", 42)
+    assert target.read_bytes() == f"a{os.linesep}ä{os.linesep}".encode("utf-8")
+    assert _leftovers(tmp_path) == []
+
+
+def test_safe_write_stream_failure_keeps_old_file(tmp_path):
+    target = tmp_path / "a.gpx"
+    target.write_text("old", encoding="utf-8")
+
+    def write(f):
+        f.write(b"half")
+        raise ValueError("export failed")
+
+    with pytest.raises(ValueError):
+        safe_write_stream(target, write, permissions=[_rw(tmp_path)])
+    assert target.read_text(encoding="utf-8") == "old"
+    assert _leftovers(tmp_path) == []
+
+
+def test_safe_write_stream_checks_before_writing(tmp_path):
+    folder = tmp_path / "read_only"
+    folder.mkdir()
+    called = []
+    with pytest.raises(FolderAccessDenied):
+        safe_write_stream(folder / "a.gpx", called.append,
+                          permissions=[_rw(folder, write=False)])
+    assert called == []
+    assert list(folder.iterdir()) == []
+
 
 def test_read_and_write_are_checked_separately(tmp_path):
     perms = [_rw(tmp_path / "ro", write=False), _rw(tmp_path / "wo", read=False)]
@@ -439,7 +491,7 @@ def test_approve_once_reads_without_saving(tmp_path):
                tmp_path)
     assert out == ["1", "1"]
     host.approve_folder.assert_called_once_with(
-        resolve_path(tmp_path / "a.csv"), resolve_path(tmp_path), False)
+        resolve_path(tmp_path / "a.csv"), resolve_path(tmp_path), False, macro=None)
     assert get_store().get(STORE_KEY) is None
 
 
@@ -452,18 +504,37 @@ def test_approve_once_lasts_for_one_run_only(tmp_path):
     assert host.approve_folder.call_count == 2
 
 
-def test_approve_always_saves_the_folder(tmp_path):
+def test_approve_always_saves_the_folder_for_this_macro(tmp_path):
+    from opensak.macro import db_access
     (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
     save_permissions([_rw(tmp_path / "other")])
     host = _host(FolderApproval.ALWAYS)
     rt = MacroRuntime(host, output=lambda _: None)        # uses the saved list
-    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
-    assert load_permissions() == [
-        _rw(tmp_path / "other"),
-        FolderPermission(str(resolve_path(tmp_path)), read=True, write=False),
-    ]
-    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    source = 'opensak.read_csv("a.csv")'
+    macro, other = tmp_path / "reader.lua", tmp_path / "other.lua"
+    rt.run(source, base_dir=tmp_path, macro_path=macro)
+    # Stored with the macro (#1091), not in the list shared by all macros.
+    assert load_permissions() == [_rw(tmp_path / "other")]
+    [record] = db_access.approvals()
+    assert record.path == str(macro.resolve()) and not record.write
+    assert record.folders == (
+        FolderPermission(str(resolve_path(tmp_path)), read=True, write=False),)
+    rt.run(source, base_dir=tmp_path, macro_path=macro)
     host.approve_folder.assert_called_once()
+    # Another macro with the same code is asked on its own.
+    rt.run(source, base_dir=tmp_path, macro_path=other)
+    assert host.approve_folder.call_count == 2
+
+
+def test_unsaved_macro_gets_a_folder_for_one_run_only(tmp_path):
+    from opensak.macro import db_access
+    (tmp_path / "a.csv").write_text("code\nGC1\n", encoding="utf-8")
+    host = _host(FolderApproval.ALWAYS)          # the dialog does not offer it
+    rt = MacroRuntime(host, output=lambda _: None, folder_permissions=[])
+    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    rt.run('opensak.read_csv("a.csv")', base_dir=tmp_path)
+    assert host.approve_folder.call_count == 2
+    assert db_access.approvals() == [] and get_store().get(STORE_KEY) is None
 
 
 @pytest.mark.parametrize("answer", [FolderApproval.DENY, None, "always"])
@@ -607,6 +678,44 @@ def test_tab_hidden_without_lua_macros_flag(qtbot, monkeypatch):
     assert d._perm_table is None
 
 
+def test_macro_list_shown_without_lua_macro_write_flag(qtbot, monkeypatch):
+    """Folders allowed to a single macro (#1091) need the list too."""
+    from opensak.gui.dialogs import settings_dialog as sd
+    from opensak.utils import flags
+    monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
+    monkeypatch.setattr(flags, "lua_macros", True)
+    monkeypatch.setattr(flags, "lua_macro_write", False)
+    d = sd.SettingsDialog()
+    qtbot.addWidget(d)
+    assert d._perm_table is not None and d._db_write_list is not None
+    d._save()  # nothing changed, nothing stored
+
+
+def test_approved_macros_listed_by_name_and_removable(qtbot, monkeypatch, tmp_path):
+    from PySide6.QtCore import Qt
+    from opensak.gui.dialogs import settings_dialog as sd
+    from opensak.macro import db_access
+    from opensak.utils import flags
+    monkeypatch.setattr("opensak.api.geocaching.is_logged_in", lambda: False)
+    monkeypatch.setattr(flags, "lua_macros", True)
+    monkeypatch.setattr(flags, "lua_macro_write", True)
+    first = str((tmp_path / "a" / "first.lua").resolve())
+    second = str((tmp_path / "second.lua").resolve())
+    for path in (first, second):
+        db_access.approve(path, db_access.WriteApproval.ALWAYS, db_access.source_hash(""))
+    d = sd.SettingsDialog()
+    qtbot.addWidget(d)
+    items = [d._db_write_list.item(i) for i in range(d._db_write_list.count())]
+    assert [i.text().splitlines()[0] for i in items] == ["first.lua", "second.lua"]
+    assert [i.toolTip() for i in items] == [first, second]
+    d._db_write_list.setCurrentItem(items[0])
+    assert d._btn_db_write_remove.isEnabled()
+    d._on_remove_db_write()
+    d._save()
+    assert db_access.always_approved() == [second]
+    assert d._db_write_list.item(0).data(Qt.ItemDataRole.UserRole) == second
+
+
 def test_toggle_write_and_save(dlg):
     from PySide6.QtCore import Qt
     dlg._perm_table.item(1, dlg._PERM_COL_WRITE).setCheckState(Qt.CheckState.Checked)
@@ -694,10 +803,56 @@ def test_approval_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected)
 
     monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
     target = tmp_path / "<b>a</b>.gpx"
-    assert md.ask_folder_approval(None, target, tmp_path, write=True) is expected
+    macro = tmp_path / "macro.lua"
+    assert md.ask_folder_approval(None, target, tmp_path, write=True, macro=macro) is expected
     assert str(target) in seen["text"] and str(tmp_path) in seen["text"]
     assert seen["plain"] == md.Qt.TextFormat.PlainText
     assert seen["default"] == tr("macro_access_deny")
+
+
+@pytest.mark.parametrize("button, expected", [
+    ("macro_write_session", "SESSION"),
+    ("macro_access_always", "ALWAYS"),
+    ("macro_access_deny", "DENY"),
+    (None, "DENY"),                                   # closed / Escape
+])
+def test_macro_write_dialog_answers(qtbot, monkeypatch, tmp_path, button, expected):
+    from opensak.gui.dialogs import macro_dialog as md
+    from opensak.macro import WriteApproval
+    monkeypatch.setattr(md, "tr", lambda key, **kw: " | ".join([key, *kw.values()]))
+    seen = {}
+
+    def fake_exec(box):
+        seen["text"] = box.text()
+        seen["plain"] = box.textFormat()
+        seen["default"] = box.defaultButton().text()
+        if button:
+            next(b for b in box.buttons() if b.text() == md.tr(button)).click()
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    macro = tmp_path / "<b>m</b>.lua"
+    assert md.ask_macro_write_approval(None, macro) is WriteApproval[expected]
+    assert str(macro) in seen["text"] and macro.name in seen["text"]
+    assert seen["plain"] == md.Qt.TextFormat.PlainText
+    assert seen["default"] == md.tr("macro_access_deny")
+
+
+def test_macro_write_dialog_offers_no_always_for_an_unsaved_macro(qtbot, monkeypatch):
+    from opensak.gui.dialogs import macro_dialog as md
+    from opensak.lang import tr
+    seen = {}
+
+    def fake_exec(box):
+        seen["text"] = box.text()
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    md.ask_macro_write_approval(None, None)
+    assert seen["text"] == tr("macro_write_msg_unsaved")
+    assert tr("macro_access_always") not in seen["buttons"]
+    assert tr("macro_write_session") in seen["buttons"]
 
 
 @pytest.mark.parametrize("answer, checked", [("Yes", True), ("No", False)])
@@ -753,3 +908,20 @@ def test_choose_file_dialog(monkeypatch, tmp_path, save, title, picked):
                               "macro_choose_save" if save else "macro_choose_open")
     assert (title in caption) and start == str(tmp_path)
     assert file_filter == "macro_choose_all_files"
+
+
+def test_unsaved_macro_cannot_be_allowed_a_folder_always(qtbot, monkeypatch, tmp_path):
+    from opensak.gui.dialogs import macro_dialog as md
+    monkeypatch.setattr(md, "tr", lambda key, **kw: key)
+    seen = {}
+
+    def fake_exec(box):
+        seen["buttons"] = [b.text() for b in box.buttons()]
+        seen["hint"] = box.informativeText()
+        return 0
+
+    monkeypatch.setattr(md.QMessageBox, "exec", fake_exec)
+    assert md.ask_folder_approval(None, tmp_path / "a.gpx", tmp_path, write=False) \
+        is FolderApproval.DENY
+    assert "macro_access_always" not in seen["buttons"]
+    assert seen["hint"] == "macro_access_hint_unsaved"

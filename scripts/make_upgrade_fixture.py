@@ -137,8 +137,9 @@ def main() -> int:
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)
-        for folder in ("install", "databases"):
-            shutil.copytree(root / folder, out / folder)
+        for folder in ("install", "databases", "backup"):
+            if (root / folder).is_dir():   # backup/: v1.21.0+ only (#1193)
+                shutil.copytree(root / folder, out / folder)
         shutil.copy2(bootstraps[0], out / "bootstrap.json")
         shutil.copy2(root / "expected.json", out / "expected.json")
 

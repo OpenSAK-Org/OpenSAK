@@ -33,10 +33,12 @@ def _language():
 # ── validate_backup_dir with folders that aren't saved yet ───────────────────
 
 class TestValidateWithChosenFolders:
-    def test_inside_a_chosen_database_folder_is_refused(self, tmp_path):
+    def test_the_chosen_database_folder_itself_is_refused(self, tmp_path):
+        # #1032: a folder *inside* it is allowed (after a warning in the GUI).
         db = tmp_path / "new_db"
         with pytest.raises(BackupError, match="database folder"):
-            validate_backup_dir(db / "backups", db_dir=db)
+            validate_backup_dir(db, db_dir=db)
+        validate_backup_dir(db / "backups", db_dir=db)
 
     def test_inside_a_chosen_install_folder_is_refused(self, tmp_path):
         install = tmp_path / "new_install"
@@ -52,7 +54,7 @@ class TestValidateWithChosenFolders:
 
     def test_without_arguments_the_folders_in_use_are_checked(self):
         with pytest.raises(BackupError):
-            validate_backup_dir(ss.get_db_dir() / "backups")
+            validate_backup_dir(ss.get_db_dir())
 
 
 # ── Welcome Wizard ────────────────────────────────────────────────────────────
@@ -111,14 +113,14 @@ class TestWizardPage:
         warnings.assert_not_called()
         assert wizard._current == wizard._backup_page_index + 1
 
-    def test_next_with_a_folder_inside_the_chosen_database_folder_stays(
+    def test_next_with_the_chosen_database_folder_itself_stays(
         self, wizard, warnings, tmp_path
     ):
         # Checked against the database folder chosen on the page before,
         # which isn't saved yet.
         wizard._db_row.set_path(tmp_path / "my_dbs")
         _go_to(wizard, wizard._backup_page_index)
-        wizard._backup_row.set_path(tmp_path / "my_dbs" / "backups")
+        wizard._backup_row.set_path(tmp_path / "my_dbs")
         wizard._go_next()
         assert warnings.call_args.args[2] == tr("backup_folder_invalid")
         assert wizard._current == wizard._backup_page_index
@@ -127,8 +129,8 @@ class TestWizardPage:
         self, wizard, warnings, tmp_path, monkeypatch
     ):
         # Backup page passed, then the database folder changed so that it
-        # now contains the backup folder.
-        wizard._backup_row.set_path(tmp_path / "data" / "backups")
+        # now is the backup folder.
+        wizard._backup_row.set_path(tmp_path / "data")
         wizard._db_row.set_path(tmp_path / "data")
         saved = []
         monkeypatch.setattr(wizard, "_save_all", lambda **k: saved.append(k))
@@ -199,7 +201,7 @@ class TestSettingsRow:
         monkeypatch.setattr(sd.QMessageBox, "warning", warn)
         accept = MagicMock()
         monkeypatch.setattr(settings_dlg, "accept", accept)
-        settings_dlg._backup_dir_row.set_path(ss.get_db_dir() / "backups")
+        settings_dlg._backup_dir_row.set_path(ss.get_db_dir())
         settings_dlg._save()
         assert warn.call_args.args[2] == tr("backup_folder_invalid")
         accept.assert_not_called()
@@ -211,7 +213,7 @@ class TestSettingsRow:
         warn = MagicMock()
         monkeypatch.setattr(sd.QMessageBox, "warning", warn)
         monkeypatch.setattr(settings_dlg, "accept", MagicMock())
-        settings_dlg._backup_dir_row.set_path(tmp_path / "data" / "backups")
+        settings_dlg._backup_dir_row.set_path(tmp_path / "data")
         settings_dlg._db_dir_row.set_path(tmp_path / "data")
         settings_dlg._save()
         warn.assert_called_once()

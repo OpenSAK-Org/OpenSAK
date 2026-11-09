@@ -137,4 +137,4 @@ def move_bundle_to_trash(bundle: Path) -> None:
         raise OSError(f"refusing to remove unexpected path: {bundle}")
     if not _qt_move_to_trash(bundle) or bundle.exists():
         raise OSError(f"could not move {bundle} to the Trash")
-    log.debug("OpenSAK-bundle flyttet til papirkurven: %s", bundle)
+    log.debug("OpenSAK bundle moved to the Trash: %s", bundle)

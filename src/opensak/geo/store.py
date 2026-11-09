@@ -144,6 +144,28 @@ class BoundaryStore:
             feature_index=int(row["feature_index"]),
         )
 
+    def regions_with_boxes(
+        self, layer: str
+    ) -> list[tuple[Region, tuple[float, float, float, float]]]:
+        """Every region of *layer* with its R-Tree box (min_lat, max_lat,
+        min_lon, max_lon) — for drawing maps, which need all regions of an
+        area rather than the ones at one point."""
+        name = self._layer(layer)
+        cur = self._conn().execute(
+            f"SELECT r.id, r.name, r.parent, r.pack, r.feature_index, "
+            f"b.min_lat, b.max_lat, b.min_lon, b.max_lon "
+            f"FROM region_{name} r JOIN rtree_{name} b ON b.id = r.id"
+        )
+        return [
+            (
+                Region(id=int(row["id"]), name=str(row["name"]), parent=row["parent"],
+                       pack=str(row["pack"]), feature_index=int(row["feature_index"])),
+                (float(row["min_lat"]), float(row["max_lat"]),
+                 float(row["min_lon"]), float(row["max_lon"])),
+            )
+            for row in cur.fetchall()
+        ]
+
     def geometry(self, layer: str, region: Region) -> dict[str, Any]:
         # Stage 2 input: the region's GeoJSON geometry, lazily loaded and cached.
         pack = self._load_pack(layer, region.pack)
@@ -167,7 +189,7 @@ class BoundaryStore:
             raise FileNotFoundError(pack)
         if cached is None:
             path = self.data_dir / _LAYER_DIR[self._layer(layer)] / pack
-            if not path.is_file() and layer == "county":
+            if not path.is_file():
                 # On-demand fetch: county packs are not bundled, downloaded lazily.
                 # This is now mostly a fallback — ReverseGeocodeWorker's
                 # pre-fetch phase (see packs.fetch_packs) already downloads
@@ -175,8 +197,11 @@ class BoundaryStore:
                 # branch normally only fires for a pack the pre-fetch phase
                 # itself failed to get (e.g. it appeared mid-run, or the
                 # pre-fetch phase was skipped/failed and this is the retry).
+                # State and country packs are bundled and updated with
+                # boundaries.db (packs.apply_update), so for them it is only a
+                # fallback for a file that is missing anyway (#1226).
                 if is_debug_enabled("geo"):
-                    log.debug("fetching county pack: %s", pack)
+                    log.debug("fetching %s pack: %s", layer, pack)
                 from opensak.geo import packs as _packs
                 _packs.fetch_pack(pack, path.parent)
             if not path.is_file():

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QKeySequence
 from PySide6.QtCore import Qt
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -28,6 +29,7 @@ _DEFAULTS: dict[str, str] = {
     "trip_planner":      "Ctrl+T",
     "coord_converter":   "Ctrl+K",
     "projection":        "Ctrl+P",
+    "autofit_columns":   "Ctrl+Alt+W",
 }
 
 
@@ -38,6 +40,7 @@ class ShortcutsDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("shortcuts_dialog_title"))
         self.setMinimumWidth(400)
         self._registry = registry

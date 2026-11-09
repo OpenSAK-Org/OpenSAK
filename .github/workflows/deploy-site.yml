@@ -50,6 +50,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
+      # #1168: for a version tag, don't deploy a site whose User Guide
+      # doesn't match the tag (same gate as build.yml's version-check job).
+      # Plain pushes to main and manual runs from a branch skip this.
+      - name: Check tag matches __version__
+        if: github.ref_type == 'tag'
+        run: python3 scripts/bump_version.py --check-tag "${{ github.ref_name }}"
+
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5

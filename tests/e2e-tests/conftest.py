@@ -1,5 +1,7 @@
 # tests/e2e-tests/conftest.py — shared fixtures for e2e GUI tests.
 
+import gc
+
 import pytest
 
 pytest.importorskip("pytestqt")
@@ -67,6 +69,10 @@ def _make_window(qtbot, tmp_path, monkeypatch, *, name: str, seed: bool):
     finally:
         window.close()
         mgr_module._manager = None
+        # Collect the window's Qt objects here, on the GUI thread. Otherwise
+        # the garbage collector may run in the next test's RefreshWorker
+        # thread and free them there, which crashes Qt.
+        gc.collect()
 
 
 @pytest.fixture

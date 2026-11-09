@@ -51,22 +51,10 @@ _PROTECTION_MARKERS = (
 #
 # The five highest-content dialogs (trip_dialog.py, column_dialog.py,
 # welcome_wizard.py, import_dialog.py, gps_dialog.py) were fixed directly
-# alongside settings_dialog.py rather than listed here — see #811.
-KNOWN_UNPROTECTED: dict[str, str] = {
-    "boundary_packs_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "checksum_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "coord_converter_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "corrected_coords_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "distance_bearing_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "file_export_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "found_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "kml_export_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "mark_found_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "midpoint_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "move_caches_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "projection_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-    "shortcuts_dialog.py": "#811 follow-up — not yet triaged, tracked in #816",
-}
+# alongside settings_dialog.py rather than listed here — see #811. The
+# remaining 13 follow-ups were fixed in #816, so the list is empty: keep it
+# that way unless a gap is a conscious, tracked decision.
+KNOWN_UNPROTECTED: dict[str, str] = {}
 
 
 def _strip_comments(source: str) -> str:
@@ -154,18 +142,16 @@ class TestDialogHeightPolicy:
             f"now — remove them from the allowlist: {now_fixed}"
         )
 
-    def test_known_unprotected_list_matches_current_gap_count(self):
+    def test_known_unprotected_list_is_empty(self):
         """
-        A soft trip-wire, not a hard requirement: if this count changes,
-        it's worth a second look at *why* (a dialog fixed without being
-        removed from the list is already caught above; this additionally
-        catches a *new* dialog silently added straight into the allowlist
-        instead of being protected from the start).
+        Every dialog is protected since #816. This catches a *new* dialog
+        silently added straight into the allowlist instead of being
+        protected from the start — a dialog fixed without being removed
+        from the list is already caught above.
         """
-        assert len(KNOWN_UNPROTECTED) == 13, (
-            f"KNOWN_UNPROTECTED has {len(KNOWN_UNPROTECTED)} entries, "
-            "expected 14. If you just fixed one, remove its entry "
-            "(caught above too) and update this count. If you just added "
-            "a new dialog straight into the allowlist instead of "
-            "protecting it, please protect it instead."
+        assert not KNOWN_UNPROTECTED, (
+            f"KNOWN_UNPROTECTED has entries again: {sorted(KNOWN_UNPROTECTED)}. "
+            "Protect the dialog with clamp_dialog_height_to_screen() instead "
+            "of adding it to the allowlist, unless that gap is a conscious, "
+            "tracked decision (then change this test too)."
         )

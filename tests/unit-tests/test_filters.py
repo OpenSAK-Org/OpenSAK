@@ -1091,24 +1091,28 @@ class TestDateFilter:
         assert not f.matches(_cache(found_date=None, last_log_date=datetime(2026, 9, 1)))
 
     def test_time_bounds_on_datetime_fields(self):
+        # creation_date/last_gpx_update are recorded timestamps stored as UTC
+        # (#1097), so the stored values are the local times converted to UTC.
+        from opensak.utils.timestamps import local_to_utc as utc
         at = datetime(2026, 9, 14, 13, 45)
         before = DateFilter("creation_date", "on_or_before", date1=at)
         after = DateFilter("last_gpx_update", "on_or_after", date1=at)
         equal = DateFilter("changed_date", "equal", date1=at)
-        assert before.matches(_cache(imported_at=datetime(2026, 9, 14, 13, 45, 59)))
-        assert not before.matches(_cache(imported_at=datetime(2026, 9, 14, 13, 46)))
-        assert after.matches(_cache(last_gpx_update=at))
-        assert not after.matches(_cache(last_gpx_update=datetime(2026, 9, 14, 13, 44, 59)))
+        assert before.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 13, 45, 59))))
+        assert not before.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 13, 46))))
+        assert after.matches(_cache(last_gpx_update=utc(at)))
+        assert not after.matches(_cache(last_gpx_update=utc(datetime(2026, 9, 14, 13, 44, 59))))
         assert equal.matches(_cache(last_updated=datetime(2026, 9, 14, 13, 45, 30)))
         assert not equal.matches(_cache(last_updated=datetime(2026, 9, 14, 13, 46)))
 
     def test_time_bounds_between_in_either_order(self):
+        from opensak.utils.timestamps import local_to_utc as utc
         f = DateFilter("creation_date", "between", date1=datetime(2026, 9, 14, 18, 0),
                        date2=datetime(2026, 9, 14, 8, 30))
-        assert f.matches(_cache(imported_at=datetime(2026, 9, 14, 8, 30)))
-        assert f.matches(_cache(imported_at=datetime(2026, 9, 14, 18, 0, 59)))
-        assert not f.matches(_cache(imported_at=datetime(2026, 9, 14, 8, 29, 59)))
-        assert not f.matches(_cache(imported_at=datetime(2026, 9, 14, 18, 1)))
+        assert f.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 8, 30))))
+        assert f.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 18, 0, 59))))
+        assert not f.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 8, 29, 59))))
+        assert not f.matches(_cache(imported_at=utc(datetime(2026, 9, 14, 18, 1))))
 
     def test_time_dropped_on_date_only_fields(self):
         f = DateFilter("hidden_date", "equal", date1=datetime(2026, 9, 14, 13, 45))

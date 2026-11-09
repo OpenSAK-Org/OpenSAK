@@ -4,5 +4,6 @@ src/opensak/utils/run_cli.py — Entry point for the `opensak` CLI command.
 
 
 def main() -> None:
-    from opensak.app import main as _main
-    _main()
+    # A headless command (`opensak import …`, #937) or the GUI.
+    from opensak.cli import entry
+    entry()

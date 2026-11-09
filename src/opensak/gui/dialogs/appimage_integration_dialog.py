@@ -57,14 +57,14 @@ def _integrate_with_feedback(parent: QWidget | None) -> None:
     """Udfør integrationen og vis resultatet (succes eller fejlbesked)."""
     result = appimage.integrate_appimage()
     if result.success:
-        log.debug("AppImage integreret via førstegangs-dialog: %s", result.installed_path)
+        log.debug("AppImage integrated via first-run dialog: %s", result.installed_path)
         QMessageBox.information(
             parent,
             tr("appimage_integrate_success_title"),
             tr("appimage_integrate_success_msg"),
         )
     else:
-        log.warning("AppImage-integration fejlede fra dialog: %s", result.error)
+        log.warning("AppImage integration from dialog failed: %s", result.error)
         QMessageBox.warning(
             parent,
             tr("appimage_integrate_error_title"),

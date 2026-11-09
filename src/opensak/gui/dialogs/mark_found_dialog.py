@@ -24,6 +24,7 @@ from PySide6.QtGui import QFont
 
 from opensak.gui.date_format import apply_date_format
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
 
@@ -36,6 +37,7 @@ class MarkFoundDialog(QDialog):
         current_date: Optional[date] = None, parent=None,
     ):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self._gc_code = gc_code
         self._date: Optional[date] = None
         self._initial_date = current_date

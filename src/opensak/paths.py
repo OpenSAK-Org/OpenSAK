@@ -220,7 +220,7 @@ def _is_unsafe_to_delete(path: Path) -> bool:
 
 def _remove_path(path: Path) -> None:
     if _is_unsafe_to_delete(path):
-        log.warning("Springer over mistænkelig sti ved data-oprydning: %s", path)
+        log.warning("Skipping suspicious path during data cleanup: %s", path)
         return
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path, ignore_errors=True)
@@ -251,7 +251,7 @@ def _remove_keyring_entry(username: str) -> None:
     except ImportError:
         return
     if not credentials.delete_password(username):
-        log.warning("Kunne ikke slette PQ Email-kodeord fra OS-keyring")
+        log.warning("Could not delete PQ email password from OS keyring")
 
 
 def purge_user_data() -> None:

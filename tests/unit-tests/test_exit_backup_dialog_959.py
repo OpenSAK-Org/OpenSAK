@@ -80,7 +80,10 @@ class TestFolderAvailable:
 
 @pytest.fixture
 def boxes():
-    with patch.object(ebd, "QMessageBox") as box:
+    # The folder check (#1032) lives in its own module; patch it there too.
+    from opensak.gui.dialogs import backup_folder_check
+    with patch.object(ebd, "QMessageBox") as box, \
+            patch.object(backup_folder_check, "QMessageBox", box):
         yield box
 
 
@@ -143,7 +146,7 @@ class TestPrompt:
     def test_unsuitable_folder_is_refused(self, qtbot, tmp_path, boxes):
         p = ExitBackupPrompt(tmp_path / "b", show_dont_ask=True)
         qtbot.addWidget(p)
-        assert p.choose_folder(get_install_dir() / "backups") is False
+        assert p.choose_folder(get_install_dir()) is False
         assert p.folder() == tmp_path / "b"
         assert boxes.warning.call_args.args[2] == tr("backup_folder_invalid")
 

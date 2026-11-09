@@ -71,6 +71,25 @@ class TestPerDbKeys:
 
 # ── home points list ─────────────────────────────────────────────────────────────
 
+class TestSortHomePoints:
+    """Centre-point drop-downs: ★ Home first, then A–Z (#1001 follow-up)."""
+
+    def test_home_first_then_alphabetical(self):
+        from opensak.gui.settings import sort_home_points
+        points = [HomePoint("zug", 1, 1), HomePoint("Bern", 1, 1),
+                  HomePoint("★ Home", 1, 1), HomePoint("aarau", 1, 1),
+                  HomePoint("Zürich", 1, 1), HomePoint("Ölten", 1, 1)]
+        assert [p.name for p in sort_home_points(points)] == [
+            "★ Home", "aarau", "Bern", "Ölten", "zug", "Zürich",
+        ]
+
+    def test_without_home_and_empty(self):
+        from opensak.gui.settings import sort_home_points
+        assert sort_home_points([]) == []
+        assert [p.name for p in sort_home_points([HomePoint("B", 1, 1),
+                                                  HomePoint("A", 1, 1)])] == ["A", "B"]
+
+
 class TestHomePoints:
     def test_empty_by_default(self, s):
         assert s.home_points == []
@@ -190,7 +209,7 @@ class TestDisplay:
         assert "openstreetmap.org" in s.get_maps_url(55.0, 12.0)
 
 
-# ── window state / search / nominatim / paths ─────────────────────────────────────
+# ── window state / search / paths ─────────────────────────────────────
 
 class TestMisc:
     def test_window_state_roundtrip(self, s):
@@ -208,10 +227,6 @@ class TestMisc:
         s.search_debounce_ms = 250
         assert s.search_min_chars == 3
         assert s.search_debounce_ms == 250
-
-    def test_nominatim(self, s):
-        s.nominatim_enabled = True
-        assert s.nominatim_enabled is True
 
     def test_last_import_dir(self, s):
         assert s.last_import_dir  # defaults to home

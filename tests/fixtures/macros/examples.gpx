@@ -1,0 +1,368 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  tests/fixtures/macros/examples.gpx — the small test database the example
+  macros run against (test_example_macros_1202.py) and whose values the
+  schema test checks (test_macro_db_schema_1202.py). Imported with the GPX
+  importer, with "Tester" (member id 999) as the account in Settings.
+
+  Two countries with two states each; finds, a DNF run and own hides by
+  Tester; a mystery whose listing holds coordinates and a formula
+  (puzzle_helper.lua); a multi with waypoints; attributes and trackables.
+  Add caches rather than change these: the tests count on them.
+-->
+<gpx xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.0"
+     creator="Groundspeak Pocket Query" xmlns="http://www.topografix.com/GPX/1/0"
+     xmlns:groundspeak="http://www.groundspeak.com/cache/1/0/1">
+  <name>Example macros</name>
+  <time>2026-01-31T08:00:00Z</time>
+
+  <wpt lat="46.948" lon="7.4474">
+    <time>2019-04-12T00:00:00</time>
+    <name>GCEX001</name>
+    <desc>Bear Pit by Ursus, Traditional Cache (1.5/2)</desc>
+    <url>https://coord.info/GCEX001</url>
+    <urlname>Bear Pit</urlname>
+    <sym>Geocache Found</sym>
+    <type>Geocache|Traditional Cache</type>
+    <groundspeak:cache id="9001" archived="False" available="True">
+      <groundspeak:name>Bear Pit</groundspeak:name>
+      <groundspeak:placed_by>Ursus</groundspeak:placed_by>
+      <groundspeak:owner id="501">Ursus</groundspeak:owner>
+      <groundspeak:type>Traditional Cache</groundspeak:type>
+      <groundspeak:container>Small</groundspeak:container>
+      <groundspeak:attributes>
+        <groundspeak:attribute id="1" inc="1">Dogs</groundspeak:attribute>
+        <groundspeak:attribute id="6" inc="1">Recommended for kids</groundspeak:attribute>
+      </groundspeak:attributes>
+      <groundspeak:difficulty>1.5</groundspeak:difficulty>
+      <groundspeak:terrain>2</groundspeak:terrain>
+      <groundspeak:country>Switzerland</groundspeak:country>
+      <groundspeak:state>Bern</groundspeak:state>
+      <groundspeak:county>Bern-Mittelland</groundspeak:county>
+      <groundspeak:short_description html="False">Near the bears.</groundspeak:short_description>
+      <groundspeak:long_description html="True">&lt;p&gt;A quick find in the old town.&lt;/p&gt;</groundspeak:long_description>
+      <groundspeak:encoded_hints>Behind the sign</groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10011">
+          <groundspeak:date>2025-05-10T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">Quick find, TFTC.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10012">
+          <groundspeak:date>2024-08-01T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="601">Hiker</groundspeak:finder>
+          <groundspeak:text encoded="False">Found it.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+      <groundspeak:travelbugs>
+        <groundspeak:travelbug id="7001" ref="TBEX01">
+          <groundspeak:name>Racing Snail</groundspeak:name>
+        </groundspeak:travelbug>
+      </groundspeak:travelbugs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="47.3769" lon="8.5417">
+    <time>2020-06-01T00:00:00</time>
+    <name>GCEX002</name>
+    <desc>Lake Walk by Nixe, Multi-cache (2.5/3)</desc>
+    <url>https://coord.info/GCEX002</url>
+    <urlname>Lake Walk</urlname>
+    <sym>Geocache Found</sym>
+    <type>Geocache|Multi-cache</type>
+    <groundspeak:cache id="9002" archived="False" available="True">
+      <groundspeak:name>Lake Walk</groundspeak:name>
+      <groundspeak:placed_by>Nixe</groundspeak:placed_by>
+      <groundspeak:owner id="502">Nixe</groundspeak:owner>
+      <groundspeak:type>Multi-cache</groundspeak:type>
+      <groundspeak:container>Regular</groundspeak:container>
+      <groundspeak:attributes>
+        <groundspeak:attribute id="1" inc="0">Dogs</groundspeak:attribute>
+      </groundspeak:attributes>
+      <groundspeak:difficulty>2.5</groundspeak:difficulty>
+      <groundspeak:terrain>3</groundspeak:terrain>
+      <groundspeak:country>Switzerland</groundspeak:country>
+      <groundspeak:state>Zürich</groundspeak:state>
+      <groundspeak:county>Zürich</groundspeak:county>
+      <groundspeak:short_description html="False">Three stages along the lake.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Start at the parking.</groundspeak:long_description>
+      <groundspeak:encoded_hints></groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10021">
+          <groundspeak:date>2025-08-02T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">Nice walk.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+  <wpt lat="47.3701" lon="8.5401">
+    <name>PKEX002</name>
+    <desc>Parking Area</desc>
+    <sym>Parking Area</sym>
+    <type>Waypoint|Parking Area</type>
+    <cmt>Park at the lake.</cmt>
+  </wpt>
+  <wpt lat="47.3721" lon="8.5455">
+    <name>S1EX002</name>
+    <desc>Stage 1</desc>
+    <sym>Stages of a Multicache</sym>
+    <type>Waypoint|Stages of a Multicache</type>
+    <cmt>Count the windows.</cmt>
+  </wpt>
+
+  <wpt lat="46.95" lon="7.43">
+    <time>2021-03-03T00:00:00</time>
+    <name>GCEX003</name>
+    <desc>Number Garden by Puzzler, Unknown Cache (4/1.5)</desc>
+    <url>https://coord.info/GCEX003</url>
+    <urlname>Number Garden</urlname>
+    <sym>Geocache</sym>
+    <type>Geocache|Unknown Cache</type>
+    <groundspeak:cache id="9003" archived="False" available="True">
+      <groundspeak:name>Number Garden</groundspeak:name>
+      <groundspeak:placed_by>Puzzler</groundspeak:placed_by>
+      <groundspeak:owner id="503">Puzzler</groundspeak:owner>
+      <groundspeak:type>Unknown Cache</groundspeak:type>
+      <groundspeak:container>Micro</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>4</groundspeak:difficulty>
+      <groundspeak:terrain>1.5</groundspeak:terrain>
+      <groundspeak:country>Switzerland</groundspeak:country>
+      <groundspeak:state>Bern</groundspeak:state>
+      <groundspeak:county>Bern-Mittelland</groundspeak:county>
+      <groundspeak:short_description html="False">Count the flowers.</groundspeak:short_description>
+      <groundspeak:long_description html="True">&lt;p&gt;The cache is not at the posted coordinates.&lt;/p&gt;&lt;p&gt;The final is at N46 5A.BCD E007 2E.FGH, where A = the number of benches.&lt;/p&gt;&lt;p&gt;Check your answer near N46 57.123 E007 26.456.&lt;/p&gt;&lt;!-- old final: N46 56.900 E007 25.900 --&gt;</groundspeak:long_description>
+      <groundspeak:encoded_hints>Under the bench</groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10031">
+          <groundspeak:date>2025-02-14T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Didn't find it</groundspeak:type>
+          <groundspeak:finder id="602">Seeker</groundspeak:finder>
+          <groundspeak:text encoded="False">No luck.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10032">
+          <groundspeak:date>2024-09-20T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Didn't find it</groundspeak:type>
+          <groundspeak:finder id="601">Hiker</groundspeak:finder>
+          <groundspeak:text encoded="False">Searched for an hour.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10033">
+          <groundspeak:date>2024-06-01T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Didn't find it</groundspeak:type>
+          <groundspeak:finder id="604">Walker</groundspeak:finder>
+          <groundspeak:text encoded="False">Muggles everywhere.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10034">
+          <groundspeak:date>2024-01-01T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="603">Solver</groundspeak:finder>
+          <groundspeak:text encoded="False">Great puzzle.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="48.1372" lon="11.5756">
+    <time>2018-07-07T00:00:00</time>
+    <name>GCEX004</name>
+    <desc>Beer Garden by Tester, Traditional Cache (1/1)</desc>
+    <url>https://coord.info/GCEX004</url>
+    <urlname>Beer Garden</urlname>
+    <sym>Geocache</sym>
+    <type>Geocache|Traditional Cache</type>
+    <groundspeak:cache id="9004" archived="False" available="True">
+      <groundspeak:name>Beer Garden</groundspeak:name>
+      <groundspeak:placed_by>Tester</groundspeak:placed_by>
+      <groundspeak:owner id="999">Tester</groundspeak:owner>
+      <groundspeak:type>Traditional Cache</groundspeak:type>
+      <groundspeak:container>Small</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>1</groundspeak:difficulty>
+      <groundspeak:terrain>1</groundspeak:terrain>
+      <groundspeak:country>Germany</groundspeak:country>
+      <groundspeak:state>Bayern</groundspeak:state>
+      <groundspeak:county>München</groundspeak:county>
+      <groundspeak:short_description html="False">My first hide.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Cheers.</groundspeak:long_description>
+      <groundspeak:encoded_hints>Table 7</groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10041">
+          <groundspeak:date>2025-06-21T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="601">Hiker</groundspeak:finder>
+          <groundspeak:text encoded="False">Prost!</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10042">
+          <groundspeak:date>2024-07-04T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="602">Seeker</groundspeak:finder>
+          <groundspeak:text encoded="False">TFTC</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10043">
+          <groundspeak:date>2023-03-01T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Owner Maintenance</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">New logbook.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10044">
+          <groundspeak:date>2018-07-10T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="603">Solver</groundspeak:finder>
+          <groundspeak:text encoded="False">FTF!</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="47.8095" lon="13.055">
+    <time>2017-05-05T00:00:00</time>
+    <name>GCEX005</name>
+    <desc>Salt Rock by Geologist, Earthcache (2/2.5)</desc>
+    <url>https://coord.info/GCEX005</url>
+    <urlname>Salt Rock</urlname>
+    <sym>Geocache</sym>
+    <type>Geocache|Earthcache</type>
+    <groundspeak:cache id="9005" archived="True" available="False">
+      <groundspeak:name>Salt Rock</groundspeak:name>
+      <groundspeak:placed_by>Geologist</groundspeak:placed_by>
+      <groundspeak:owner id="505">Geologist</groundspeak:owner>
+      <groundspeak:type>Earthcache</groundspeak:type>
+      <groundspeak:container>Other</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>2</groundspeak:difficulty>
+      <groundspeak:terrain>2.5</groundspeak:terrain>
+      <groundspeak:country>Germany</groundspeak:country>
+      <groundspeak:state>Bayern</groundspeak:state>
+      <groundspeak:county>Berchtesgadener Land</groundspeak:county>
+      <groundspeak:short_description html="False">Layers of salt.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Answer the questions.</groundspeak:long_description>
+      <groundspeak:encoded_hints></groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10051">
+          <groundspeak:date>2022-10-10T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Archive</groundspeak:type>
+          <groundspeak:finder id="505">Geologist</groundspeak:finder>
+          <groundspeak:text encoded="False">Area closed.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="46.9511" lon="7.4386">
+    <time>2025-09-13T00:00:00</time>
+    <name>GCEX006</name>
+    <desc>Autumn Meeting by Ursus, Event Cache (1/1)</desc>
+    <url>https://coord.info/GCEX006</url>
+    <urlname>Autumn Meeting</urlname>
+    <sym>Geocache Found</sym>
+    <type>Geocache|Event Cache</type>
+    <groundspeak:cache id="9006" archived="False" available="True">
+      <groundspeak:name>Autumn Meeting</groundspeak:name>
+      <groundspeak:placed_by>Ursus</groundspeak:placed_by>
+      <groundspeak:owner id="501">Ursus</groundspeak:owner>
+      <groundspeak:type>Event Cache</groundspeak:type>
+      <groundspeak:container>Other</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>1</groundspeak:difficulty>
+      <groundspeak:terrain>1</groundspeak:terrain>
+      <groundspeak:country>Switzerland</groundspeak:country>
+      <groundspeak:state>Bern</groundspeak:state>
+      <groundspeak:county>Bern-Mittelland</groundspeak:county>
+      <groundspeak:short_description html="False">Meet and greet.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Bring a pen.</groundspeak:long_description>
+      <groundspeak:encoded_hints></groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10061">
+          <groundspeak:date>2025-09-13T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Attended</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">Nice evening.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="48.7758" lon="9.1829">
+    <time>2022-02-22T00:00:00</time>
+    <name>GCEX007</name>
+    <desc>Car Museum by Tester, Letterbox Hybrid (3/2)</desc>
+    <url>https://coord.info/GCEX007</url>
+    <urlname>Car Museum</urlname>
+    <sym>Geocache</sym>
+    <type>Geocache|Letterbox Hybrid</type>
+    <groundspeak:cache id="9007" archived="False" available="False">
+      <groundspeak:name>Car Museum</groundspeak:name>
+      <groundspeak:placed_by>Tester</groundspeak:placed_by>
+      <groundspeak:owner id="999">Tester</groundspeak:owner>
+      <groundspeak:type>Letterbox Hybrid</groundspeak:type>
+      <groundspeak:container>Regular</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>3</groundspeak:difficulty>
+      <groundspeak:terrain>2</groundspeak:terrain>
+      <groundspeak:country>Germany</groundspeak:country>
+      <groundspeak:state>Baden-Württemberg</groundspeak:state>
+      <groundspeak:county>Stuttgart</groundspeak:county>
+      <groundspeak:short_description html="False">Stamp inside.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Follow the clues.</groundspeak:long_description>
+      <groundspeak:encoded_hints></groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10071">
+          <groundspeak:date>2025-11-02T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="602">Seeker</groundspeak:finder>
+          <groundspeak:text encoded="False">Lovely stamp.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10072">
+          <groundspeak:date>2025-12-01T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Temporarily Disable Listing</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">Museum closed for the winter.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+
+  <wpt lat="47.0502" lon="8.3093">
+    <time>2023-08-08T00:00:00</time>
+    <name>GCEX008</name>
+    <desc>Old Bridge by Nixe, Traditional Cache (2/2)</desc>
+    <url>https://coord.info/GCEX008</url>
+    <urlname>Old Bridge</urlname>
+    <sym>Geocache</sym>
+    <type>Geocache|Traditional Cache</type>
+    <groundspeak:cache id="9008" archived="False" available="True">
+      <groundspeak:name>Old Bridge</groundspeak:name>
+      <groundspeak:placed_by>Nixe</groundspeak:placed_by>
+      <groundspeak:owner id="502">Nixe</groundspeak:owner>
+      <groundspeak:type>Traditional Cache</groundspeak:type>
+      <groundspeak:container>Micro</groundspeak:container>
+      <groundspeak:attributes/>
+      <groundspeak:difficulty>2</groundspeak:difficulty>
+      <groundspeak:terrain>2</groundspeak:terrain>
+      <groundspeak:country>Switzerland</groundspeak:country>
+      <groundspeak:state>Luzern</groundspeak:state>
+      <groundspeak:county>Luzern</groundspeak:county>
+      <groundspeak:short_description html="False">Under the old bridge.</groundspeak:short_description>
+      <groundspeak:long_description html="False">Mind the water.</groundspeak:long_description>
+      <groundspeak:encoded_hints>Magnetic</groundspeak:encoded_hints>
+      <groundspeak:logs>
+        <groundspeak:log id="10081">
+          <groundspeak:date>2025-10-10T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Didn't find it</groundspeak:type>
+          <groundspeak:finder id="999">Tester</groundspeak:finder>
+          <groundspeak:text encoded="False">Too many people around.</groundspeak:text>
+        </groundspeak:log>
+        <groundspeak:log id="10082">
+          <groundspeak:date>2025-04-04T00:00:00Z</groundspeak:date>
+          <groundspeak:type>Found it</groundspeak:type>
+          <groundspeak:finder id="601">Hiker</groundspeak:finder>
+          <groundspeak:text encoded="False">Got it.</groundspeak:text>
+        </groundspeak:log>
+      </groundspeak:logs>
+    </groundspeak:cache>
+  </wpt>
+</gpx>

@@ -13,13 +13,16 @@ import pytest
 
 from opensak.db.corrected_coords import set_corrected_coords
 from opensak.db.database import get_session
-from opensak.db.models import Cache, UserNote
+from opensak.db.models import Cache, UserNote, Waypoint
 from opensak.export.file_export_settings import FileExportProfile, FileExportSettings
+from opensak.export.poi_export_settings import PoiExportProfile, PoiExportSettings
 from opensak.filters.engine import (
     CacheTypeFilter, DifficultyFilter, FilterProfile, FilterSet, GcCodeFilter,
     NotFoundFilter, apply_filters_auto,
 )
-from opensak.macro import FolderApproval, MacroError, MacroRuntime, build_filterset
+from opensak.macro import (
+    FolderApproval, MacroError, MacroRuntime, WriteApproval, build_filterset,
+)
 from opensak.macro import cache_data
 from opensak.macro.permissions import FolderPermission
 
@@ -47,6 +50,9 @@ class FakeHost:
 
     def filter_name(self):
         return self.applied[-1][1] if self.applied else ""
+
+    def active_filterset(self):
+        return self.applied[-1][0] if self.applied else FilterSet()
 
     def set_sort(self, sort):
         self.sort = sort
@@ -80,8 +86,19 @@ class FakeHost:
     def end_macro(self):
         self.ended = getattr(self, "ended", 0) + 1
 
-    def approve_folder(self, target, folder, write):
+    def approve_folder(self, target, folder, write, macro=None):
         return FolderApproval.DENY
+
+    write_answer = WriteApproval.SESSION
+
+    def approve_macro_write(self, macro, change=None, editing=False):
+        self.write_asked = getattr(self, "write_asked", [])
+        self.write_asked.append(macro)
+        return self.write_answer
+
+    def caches_changed(self, codes, added):
+        self.changed = getattr(self, "changed", [])
+        self.changed.append((list(codes), added))
 
 
 class DbHost(FakeHost):
@@ -104,8 +121,20 @@ class DbHost(FakeHost):
         with get_session() as s:
             return apply_filters_auto(s, self.filterset)
 
+    def clear_filter(self):
+        super().clear_filter()
+        self.filterset, self.label = FilterSet(), ""
+        self.selected = set()
+
+    def cache_count(self):
+        with get_session() as s:
+            return len(apply_filters_auto(s, self.filterset))
+
     def filter_name(self):
         return self.label
+
+    def active_filterset(self):
+        return self.filterset
 
     def set_corrected_coords(self, gc_code, lat, lon):
         return set_corrected_coords(gc_code, lat, lon)
@@ -359,6 +388,66 @@ def test_empty_result_keeps_previous_selection():
     assert host.selected == {"GCMAC3"}
 
 
+def test_save_and_restore_filter():
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ codes = {"GCMAC1", "GCMAC2"}, label = "Mine" }
+        local saved = opensak.save_filter()
+        assert(type(saved) == "string")
+        opensak.filter{ codes = "GCMAC5" }
+        print(opensak.restore_filter(saved), opensak.filter_name())
+    """, host=host)
+    assert out == ["2	Mine"]
+    assert host.selected == {"GCMAC1", "GCMAC2"}
+
+
+def test_restore_filter_saved_without_filter_clears_it():
+    host = DbHost()
+    _, out = _run("""
+        local saved = opensak.save_filter()
+        opensak.filter{ codes = "GCMAC5" }
+        print(opensak.restore_filter(saved), opensak.filter_name() == "")
+    """, host=host)
+    assert out == [f"{host.cache_count()}	true"]
+    assert host.cleared == 1 and len(host.filterset) == 0
+
+
+def test_restore_filter_with_no_match_keeps_view():
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ codes = "GCNOPE" }
+        local saved = opensak.save_filter()
+        opensak.filter{ codes = "GCMAC3" }
+        print(opensak.restore_filter(saved))
+    """, host=host)
+    # "GCNOPE" never matched, so nothing was active when saving
+    assert out == [str(host.cache_count())]
+
+
+def test_saved_filter_round_trips_nested_sets():
+    fs, label = build_filterset({"mode": "OR", "found": True,
+                                 "difficulty": [1, 2], "where": "terrain > 1"},
+                                lambda v: [])
+    host = FakeHost()
+    host.applied.append((fs, label))
+    _, out = _run("print(opensak.save_filter())", host=host)
+    _run(f"opensak.restore_filter({out[0]!r})", host=host)
+    assert host.applied[-1][0].to_dict() == fs.to_dict()
+
+
+@pytest.mark.parametrize("arg, msg", [
+    ("nil", "expects a string returned by opensak.save_filter"),
+    ("42", "expects a string returned by opensak.save_filter"),
+    ('"not json"', "expects a string returned by opensak.save_filter"),
+    ("'{\"mode\":\"AND\"}'", "expects a string returned by opensak.save_filter"),
+    ("'{\"opensak_filter\":1,\"filter\":[]}'", "expects a string returned"),
+    ("'{\"opensak_filter\":99,\"filter\":{}}'", "saved by a newer OpenSAK"),
+])
+def test_restore_filter_rejects_bad_input(arg, msg):
+    with pytest.raises(MacroError, match=msg):
+        _run(f"opensak.restore_filter({arg})")
+
+
 # ── Corrected coordinates / CSV ──────────────────────────────────────────────
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "macros" / "examples"
@@ -526,6 +615,135 @@ def test_confirm_returns_host_answer():
         _run("opensak.confirm()")
 
 
+def _run_in(folder, source, **kwargs):
+    out: list[str] = []
+    host = FakeHost()
+    MacroRuntime(host, output=out.append, folder_permissions=_rw(folder), **kwargs).run(
+        source, chunk_name="main.lua", base_dir=folder)
+    return host, out
+
+
+def test_run_macro_passes_arguments_and_returns_results(tmp_path):
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "add.lua").write_text(
+        "﻿local a, b = ...\nreturn a + b, opensak.run_macro('twice', a)\n",
+        encoding="utf-8")
+    # relative to the called macro's folder, not the caller's
+    (tmp_path / "lib" / "twice.lua").write_text("return (...) * 2", encoding="utf-8")
+    (tmp_path / "rows.csv").write_text("code\nGC1\n", encoding="utf-8")
+    _, out = _run_in(tmp_path, """
+        print(opensak.run_macro("lib/add.lua", 2, 3))
+        print(opensak.run_macro("lib/add", 1, 1))
+        print(opensak.read_csv("rows.csv")[1].code)  -- folder restored
+    """)
+    assert out == ["5\t4", "2\t2", "GC1"]
+
+
+def test_run_macro_switches_the_macro_file(tmp_path):
+    # Per-macro state (saved settings, #983) must be the called macro's own,
+    # not shared with its caller.
+    (tmp_path / "child.lua").write_text("opensak.run_macro('leaf')", encoding="utf-8")
+    (tmp_path / "leaf.lua").write_text("return 1", encoding="utf-8")
+    (tmp_path / "rows.csv").write_text("code\nGC1\n", encoding="utf-8")
+    seen: list = []
+
+    class Runtime(MacroRuntime):
+        def _readable_file(self, path):
+            seen.append(self._macro_path)
+            return super()._readable_file(path)
+
+    Runtime(FakeHost(), output=lambda _: None, folder_permissions=_rw(tmp_path)).run(
+        'opensak.run_macro("child") opensak.read_csv("rows.csv")',
+        chunk_name="main.lua", base_dir=tmp_path)
+    assert seen == [None, tmp_path / "child.lua", None]
+
+
+def test_run_macro_has_its_own_globals(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        "print(secret, type(opensak), type(string.format), _G.secret)\n"
+        "leaked = true\nprint = nil\nreturn opensak.filter{ found = false }",
+        encoding="utf-8")
+    host, out = _run_in(tmp_path, """
+        secret = 42
+        local count = opensak.run_macro("child")
+        print(count, leaked, secret)
+        opensak.run_macro("child")
+    """)
+    assert out == ["nil\ttable\tfunction\tnil", "3\tnil\t42",
+                   "nil\ttable\tfunction\tnil"]
+    assert len(host.applied) == 2 and host.ended == 1
+
+
+def test_run_macro_errors(tmp_path):
+    (tmp_path / "boom.lua").write_text("\nerror('boom')", encoding="utf-8")
+    (tmp_path / "bad.lua").write_text("this is not lua", encoding="utf-8")
+    (tmp_path / "self.lua").write_text("opensak.run_macro('self')", encoding="utf-8")
+    (tmp_path / "bytecode.lua").write_bytes(b"\x1bLua")
+    with pytest.raises(MacroError, match="boom.lua:2: boom"):
+        _run_in(tmp_path, 'opensak.run_macro("boom")')
+    _, out = _run_in(tmp_path, 'print(pcall(opensak.run_macro, "boom"))')
+    assert out == ["false\tboom.lua:2: boom"]
+    with pytest.raises(MacroError, match="bad.lua:1"):
+        _run_in(tmp_path, 'opensak.run_macro("bad")')
+    with pytest.raises(MacroError, match="binary chunk"):
+        _run_in(tmp_path, 'opensak.run_macro("bytecode")')
+    with pytest.raises(MacroError, match="macro not found"):
+        _run_in(tmp_path, 'opensak.run_macro("nope")')
+    with pytest.raises(MacroError, match="expects a macro file"):
+        _run_in(tmp_path, "opensak.run_macro()")
+    with pytest.raises(MacroError, match="10 levels deep"):
+        _run_in(tmp_path, 'opensak.run_macro("self")')
+
+
+def test_run_macro_shares_the_instruction_limit(tmp_path):
+    (tmp_path / "loop.lua").write_text("while true do end", encoding="utf-8")
+    with pytest.raises(MacroError, match="instruction limit"):
+        _run_in(tmp_path, 'while true do pcall(opensak.run_macro, "loop") end',
+                instruction_limit=100_000)
+
+
+def test_run_macro_needs_folder_permission(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "child.lua").write_text("return 1", encoding="utf-8")
+    with pytest.raises(MacroError, match="denied by the user"):
+        MacroRuntime(FakeHost(), output=lambda _: None, folder_permissions=[]).run(
+            f'opensak.run_macro([[{other / "child.lua"}]])')
+
+
+def test_exit_in_a_called_macro_ends_the_caller_too(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        'print("child")\nopensak.exit(6)\nprint("not reached")', encoding="utf-8")
+    out: list[str] = []
+    runtime = MacroRuntime(FakeHost(), output=out.append,
+                           folder_permissions=_rw(tmp_path))
+    code = runtime.run(
+        'pcall(opensak.run_macro, "child") print("not reached") while true do end',
+        chunk_name="main.lua", base_dir=tmp_path)
+    assert code == 6
+    assert out == ["child"]
+
+
+def test_cancel_in_a_called_macro_ends_the_caller_too(tmp_path):
+    (tmp_path / "child.lua").write_text(
+        'print("child")\npcall(opensak.confirm, "go?")\nprint("not reached")',
+        encoding="utf-8")
+    out: list[str] = []
+    host = FakeHost()
+    runtime = MacroRuntime(host, output=out.append, folder_permissions=_rw(tmp_path))
+
+    def confirm(message):
+        runtime.cancel()        # the user cancels while the child's dialog is open
+        return False
+
+    host.confirm = confirm
+    with pytest.raises(MacroError, match="macro cancelled"):
+        runtime.run('pcall(opensak.run_macro, "child") print("not reached")',
+                    chunk_name="main.lua", base_dir=tmp_path)
+    assert out == ["child"]
+    assert host.ended == 1
+
+
 def test_end_macro_called_once_after_run_even_on_error():
     host, _ = _run('opensak.set_corrected("GC1", 47, 8) opensak.clear_corrected("GC2")')
     assert host.ended == 1
@@ -535,17 +753,22 @@ def test_end_macro_called_once_after_run_even_on_error():
     assert host.ended == 1
 
 
-@pytest.mark.parametrize("n, row_refreshes, full_reloads", [(3, 3, 0), (51, 0, 1)])
-def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
+@pytest.mark.parametrize("n, added, row_refreshes, full_reloads", [
+    (3, False, 3, 0), (51, False, 0, 1),
+    (3, True, 0, 1),     # inserted caches are not in the table model yet
+])
+def test_mainwindow_batches_macro_refresh(n, added, row_refreshes, full_reloads):
     from types import SimpleNamespace
     from opensak.gui import mainwindow as mw
 
-    calls = {"row": [], "full": 0, "detail": []}
+    calls = {"row": [], "full": 0, "detail": [], "info": 0}
     win = SimpleNamespace(
         _macro_changed_codes={f"GC{i}" for i in range(n)},
         _macro_caches_removed=False,
+        _macro_caches_added=added,
         _on_corrected_coords_changed=calls["row"].append,
         _refresh_cache_list=lambda: calls.__setitem__("full", calls["full"] + 1),
+        _update_info_bar=lambda: calls.__setitem__("info", calls["info"] + 1),
         _detail_panel=SimpleNamespace(_current_gc_code="GC1",
                                       show_cache=calls["detail"].append),
         _load_full_cache=lambda code: code,
@@ -554,8 +777,9 @@ def test_mainwindow_batches_macro_refresh(n, row_refreshes, full_reloads):
 
     assert len(calls["row"]) == row_refreshes
     assert calls["full"] == full_reloads
+    assert calls["info"] == (1 if row_refreshes else 0)
     assert calls["detail"] == (["GC1"] if full_reloads else [])
-    assert win._macro_changed_codes == set()
+    assert win._macro_changed_codes == set() and win._macro_caches_added is False
 
 
 def test_mainwindow_reloads_once_after_macro_moved_caches():
@@ -566,6 +790,7 @@ def test_mainwindow_reloads_once_after_macro_moved_caches():
     win = SimpleNamespace(
         _macro_changed_codes={"GC1"},
         _macro_caches_removed=True,
+        _macro_caches_added=True,
         _on_corrected_coords_changed=calls["row"].append,
         _on_caches_moved=lambda: calls.__setitem__("moved", calls["moved"] + 1),
     )
@@ -711,7 +936,7 @@ def test_sql_connection_is_read_only_even_without_authorizer(monkeypatch):
 
     from opensak.db.database import get_engine
     from opensak.macro import sql
-    monkeypatch.setattr(sql, "_authorizer", lambda *a: sqlite3.SQLITE_OK)
+    monkeypatch.setattr(sql, "_read_authorizer", lambda names: lambda *a: sqlite3.SQLITE_OK)
     db = sql.ReadOnlyDatabase(get_engine().url.database)
     try:
         db.query("PRAGMA query_only = OFF")
@@ -816,6 +1041,24 @@ def test_cache_returns_snapshot_with_api_field_names(full_cache):
     ]
 
 
+def test_cache_returns_the_gsak_columns(full_cache):
+    with get_session() as s:
+        cache = s.query(Cache).filter_by(gc_code="GCACC1").one()
+        cache.is_owner, cache.macro_flag, cache.macro_sort = True, True, "b"
+        cache.symbol = "Geocache Found"
+        cache.user_note.corrected_source = "import"
+    with get_session() as s:     # after the trigger stamped the correction
+        s.query(Cache).filter_by(gc_code="GCACC1").one().last_user_update =             datetime(2026, 10, 1, 7, 8, 9)
+    _, out = _run("""
+        local c = opensak.cache("GCACC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source, c.last_user_update)
+        c = opensak.cache("GCMAC1")
+        print(c.owned, c.macro_flag, c.macro_sort, c.symbol, c.corrected_source)
+    """)
+    assert out == ["true	true	b	Geocache Found	import	2026-10-01T07:08:09",
+                   "false	false	nil	nil	nil"]
+
+
 def test_every_cache_field_is_loaded(full_cache):
     with get_session() as s:
         (record,) = cache_data.load_records(s, ["GCACC1"])
@@ -850,6 +1093,47 @@ def test_caches_with_filter_keys_leaves_view_unchanged():
     """, host=host)
     assert out == [f"GCMAC{i}	code,difficulty" for i in (1, 2, 3, 5)]
     assert host.selected == set() and host.label == ""
+
+
+# Issue #1254: a codes list above SQLite's 32,766 bound variables failed with
+# "too many SQL variables".
+LONG_CODES_LUA = """
+    local codes = {"GCMAC1", "GCMAC3"}
+    for i = 1, 40000 do codes[#codes + 1] = string.format("GCX%05d", i) end
+"""
+
+
+def test_caches_with_long_code_list():
+    host = DbHost()
+    _, out = _run(LONG_CODES_LUA + """
+        for c in opensak.caches{ codes = codes, fields = {"code"} } do print(c.code) end
+    """, host=host)
+    assert out == ["GCMAC1", "GCMAC3"]
+
+
+def test_filter_with_long_code_list():
+    host = DbHost()
+    _, out = _run(LONG_CODES_LUA + """
+        print(opensak.filter{ codes = codes })
+    """, host=host)
+    assert out == ["2"]
+    assert host.selected == {"GCMAC1", "GCMAC3"}
+
+
+def test_caches_fields_keep_active_filter_but_filter_keys_search_whole_db():
+    # As the help of opensak.caches says (discussion #1248): `fields` alone
+    # still loops over the active filter, filter keys do not narrow it.
+    host = DbHost()
+    _, out = _run("""
+        opensak.filter{ type = "Traditional", code = "GCMAC" }
+        local codes = {}
+        for c in opensak.caches{ fields = {"difficulty"} } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+        codes = {}
+        for c in opensak.caches{ code = "GCMAC", found = false } do codes[#codes + 1] = c.code end
+        print(table.concat(codes, ","))
+    """, host=host)
+    assert out == ["GCMAC1,GCMAC2,GCMAC4", "GCMAC1,GCMAC2,GCMAC3,GCMAC5"]
 
 
 def test_caches_loads_in_chunks(monkeypatch):
@@ -889,7 +1173,7 @@ def test_sql_connection_is_closed_after_run():
     host = FakeHost()
     runtime = MacroRuntime(host, output=lambda _: None)
     runtime.run('opensak.sql("SELECT 1")')
-    assert runtime._sql_db is None
+    assert runtime._sql_write_db is None
 
 
 def test_current_and_selected_follow_host():
@@ -1027,7 +1311,7 @@ def test_export_file_asks_before_writing_to_unapproved_folder(
     asked = []
 
     class Host(DbHost):
-        def approve_folder(self, target, folder, write):
+        def approve_folder(self, target, folder, write, macro=None):
             asked.append((folder, write))
             return answer
 
@@ -1043,25 +1327,136 @@ def test_export_file_asks_before_writing_to_unapproved_folder(
     assert (folder / "x.gpx").exists() is written
 
 
+# ── POI export ───────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def poi_cache(seed):
+    """A cache with a parking and a trailhead waypoint."""
+    with get_session() as s:
+        cache = Cache(gc_code="GCPOI1", name="Poi cache", cache_type="Traditional Cache",
+                      latitude=46.5, longitude=7.5, difficulty=2.0, terrain=1.5,
+                      placed_by="Placer")
+        s.add(cache)
+        s.flush()
+        for prefix, wp_type in (("PK", "Parking Area"), ("TR", "Trailhead")):
+            s.add(Waypoint(cache_id=cache.id, prefix=prefix, wp_type=wp_type,
+                           name=wp_type, latitude=46.51, longitude=7.51))
+
+
+def _poi_runtime(tmp_path, host=None, **settings):
+    """Runtime with a POI export setting "Garmin POI" (writing to
+    tmp_path/out unless *settings* say otherwise) and write permission for
+    tmp_path."""
+    settings.setdefault("folder", str(tmp_path / "out"))
+    PoiExportProfile("Garmin POI", PoiExportSettings(**settings)).save(tmp_path / "poi_settings")
+    out: list[str] = []
+    runtime = MacroRuntime(
+        host or DbHost(), output=out.append,
+        profiles_dir=tmp_path / "filters",
+        poi_settings_dir=tmp_path / "poi_settings",
+        folder_permissions=[FolderPermission(str(tmp_path), read=True, write=True)],
+    )
+    return runtime, out
+
+
+def test_export_poi_writes_caches_and_waypoints(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, file_name="{filter}_{count}", name="{code} {type}")
+    runtime.run("""
+        opensak.filter{ code = "GCPOI", label = "Poi" }
+        local files, n = opensak.export_poi("Garmin POI")
+        print(#files, files[1], n)
+    """)
+    target = (tmp_path / "out" / "Poi_3.gpi").resolve()
+    assert out == [f"1	{target}	3"]
+    data = target.read_bytes()
+    assert data[8:16] == b"GRMREC00"
+    for name in (b"GCPOI1 Traditional Cache", b"PKPOI1 Parking Area", b"TRPOI1 Trailhead"):
+        assert name in data
+
+
+def test_export_poi_one_file_per_waypoint_type(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, file_name="x", split_by_type=True)
+    runtime.run(f"""
+        opensak.filter{{ code = "GCPOI" }}
+        local files, n = opensak.export_poi("Garmin POI", {str(tmp_path / "split")!r})
+        print(table.concat(files, "|"), n)
+    """)
+    folder = (tmp_path / "split").resolve()
+    names = ("x.gpi", "x - Parking Area.gpi", "x - Trailhead.gpi")
+    assert out == ["|".join(str(folder / name) for name in names) + "	3"]
+
+
+@pytest.mark.parametrize("if_exists, answer, written", [
+    ("overwrite", None, True),
+    ("skip", None, False),
+    ("ask", True, True),
+    ("ask", False, False),
+])
+def test_export_poi_if_exists(tmp_path, poi_cache, if_exists, answer, written):
+    target = tmp_path / "out" / "x.gpi"
+    target.parent.mkdir()
+    target.write_bytes(b"old")
+    host = DbHost()
+    host.answer = answer
+    runtime, out = _poi_runtime(tmp_path, host, file_name="x", if_exists=if_exists)
+    runtime.run("""
+        opensak.filter{ code = "GCPOI" }
+        print(opensak.export_poi("Garmin POI") ~= nil)
+    """)
+    assert out == [str(written).lower()]
+    assert (target.read_bytes() != b"old") is written
+    assert len(getattr(host, "asked", [])) == (1 if if_exists == "ask" else 0)
+
+
+@pytest.mark.parametrize("call, folder, msg", [
+    ("opensak.export_poi()", None, "expects the name"),
+    ('opensak.export_poi("Missing")', None, "no saved POI export setting"),
+    ('opensak.export_poi("Garmin POI", 5)', None, "folder must be"),
+    ('opensak.export_poi("Garmin POI")', "", "has no folder"),
+    ('opensak.export_poi("Garmin POI")', "<outside>", "may not write"),
+])
+def test_export_poi_rejects_bad_setup(tmp_path, tmp_path_factory, poi_cache, call, folder, msg):
+    settings = {}
+    if folder is not None:
+        settings["folder"] = (str(tmp_path_factory.mktemp("no_permission"))
+                              if folder == "<outside>" else folder)
+    runtime, _ = _poi_runtime(tmp_path, **settings)
+    with pytest.raises(MacroError, match=msg):
+        runtime.run(f'opensak.filter{{ code = "GCPOI" }} {call}')
+    if folder:
+        assert not list(Path(settings["folder"]).iterdir())
+
+
+def test_export_poi_writes_nothing_without_points(tmp_path, poi_cache):
+    runtime, out = _poi_runtime(tmp_path, waypoints_only=True)
+    runtime.run("""
+        opensak.filter{ type = "Multi-cache" }
+        print(opensak.export_poi("Garmin POI"))
+    """)
+    assert out == ["nil"]
+    assert not (tmp_path / "out").exists()
+
+
+def test_export_poi_checks_icon_permission(tmp_path, tmp_path_factory, poi_cache):
+    icon = tmp_path_factory.mktemp("icons") / "icon.bmp"
+    icon.write_bytes(b"x")
+    runtime, _ = _poi_runtime(tmp_path, icon=str(icon))
+    with pytest.raises(MacroError, match="may not read"):
+        runtime.run('opensak.filter{ code = "GCPOI" } opensak.export_poi("Garmin POI")')
+
+
+def test_export_poi_reports_unreadable_icon(tmp_path, poi_cache):
+    icon = tmp_path / "icon.bmp"
+    icon.write_bytes(b"x")
+    runtime, _ = _poi_runtime(tmp_path, icon=str(icon))
+    with pytest.raises(MacroError, match="not a readable image"):
+        runtime.run('opensak.filter{ code = "GCPOI" } opensak.export_poi("Garmin POI")')
+    assert not (tmp_path / "out").exists()
+
+
 # ── Example: export_filters_to_gpx.lua ───────────────────────────────────────
 
 EXPORT_EXAMPLE = EXAMPLES / "export_filters_to_gpx.lua"
-
-# The filters named in the example's FILTERS list, narrowed to the seeded caches.
-_EXAMPLE_FILTERS = {
-    "Traditionals": "Traditional Cache",
-    "Multi-caches": "Multi-cache",
-    "Mysteries": "Unknown Cache",
-}
-
-
-def _save_example_filters(tmp_path, names=tuple(_EXAMPLE_FILTERS)):
-    for name in names:
-        fs = FilterSet(mode="AND")
-        fs.add(CacheTypeFilter([_EXAMPLE_FILTERS[name]]))
-        fs.add(GcCodeFilter("GCMAC"))
-        FilterProfile(name, fs).save(tmp_path / "filters")
-
 
 @pytest.fixture
 def example_temp_dir(tmp_path, monkeypatch):
@@ -1073,57 +1468,36 @@ def example_temp_dir(tmp_path, monkeypatch):
 
 
 def _run_export_example(runtime):
-    runtime.run(EXPORT_EXAMPLE.read_text(encoding="utf-8"), base_dir=EXAMPLES)
+    """Run the example with its filters narrowed to the seeded GCMAC caches."""
+    script = EXPORT_EXAMPLE.read_text(encoding="utf-8")
+    assert script.count("{ label = ") == 3
+    script = script.replace("{ label = ", '{ code = "GCMAC", label = ')
+    runtime.run(script, base_dir=EXAMPLES)
 
 
 def test_export_example_writes_one_file_per_filter(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path)
-    runtime, out = _export_runtime(tmp_path, folder="", file_name="{filter}",
-                                   if_exists="overwrite")
+    runtime, out = _export_runtime(tmp_path)
 
     _run_export_example(runtime)
 
     out_dir = tmp_path / "out"
     assert sorted(p.name for p in out_dir.iterdir()) == [
-        "Multi-caches.gpx", "Mysteries.gpx", "Traditionals.gpx"]
-    assert _exported(out_dir / "Traditionals.gpx") == {"GCMAC1", "GCMAC2", "GCMAC4"}
+        "Easy traditionals.gpx", "Multi-caches.gpx"]
+    assert _exported(out_dir / "Easy traditionals.gpx") == {"GCMAC1", "GCMAC4"}
     assert _exported(out_dir / "Multi-caches.gpx") == {"GCMAC3"}
-    assert _exported(out_dir / "Mysteries.gpx") == {"GCMAC5"}
-    assert out[0] == f"Traditionals: 3 caches → {(out_dir / 'Traditionals.gpx').resolve()}"
-    assert out[-1] == f"Done: 3 exported, 0 skipped (folder: {out_dir})"
+    assert out[0] == ("Easy traditionals: 2 caches → "
+                      f"{(out_dir / 'Easy traditionals.gpx').resolve()}")
+    assert "Solved mysteries: no caches match — skipped" in out
+    assert out[-1] == f"Done: 2 exported, 1 skipped (folder: {out_dir})"
 
 
-def test_export_example_skips_unsaved_and_empty_filters(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path, ("Traditionals",))
-    FilterProfile("Mysteries", FilterSet().add(GcCodeFilter("GCNOMATCH"))).save(
-        tmp_path / "filters")
-    runtime, out = _export_runtime(tmp_path, file_name="{filter}")
-
-    _run_export_example(runtime)
-
-    assert "Multi-caches: no saved filter with this name — skipped" in out
-    assert "Mysteries: no caches match — skipped" in out
-    assert out[-1] == f"Done: 1 exported, 2 skipped (folder: {example_temp_dir})"
-    assert [p.name for p in (tmp_path / "out").iterdir()] == ["Traditionals.gpx"]
-
-
-def test_export_example_reports_existing_file(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path, ("Traditionals",))
-    (tmp_path / "out" / "Traditionals.gpx").write_text("old", encoding="utf-8")
-    runtime, out = _export_runtime(tmp_path, file_name="{filter}", if_exists="skip")
+def test_export_example_overwrites_existing_file(tmp_path, example_temp_dir):
+    (tmp_path / "out" / "Multi-caches.gpx").write_text("old", encoding="utf-8")
+    runtime, _ = _export_runtime(tmp_path)
 
     _run_export_example(runtime)
 
-    assert "Traditionals: file exists — not overwritten" in out
-    assert (tmp_path / "out" / "Traditionals.gpx").read_text(encoding="utf-8") == "old"
-
-
-def test_export_example_stops_when_file_name_lacks_filter(tmp_path, example_temp_dir):
-    _save_example_filters(tmp_path)
-    runtime, _ = _export_runtime(tmp_path, file_name="caches", if_exists="overwrite")
-
-    with pytest.raises(MacroError, match="Traditionals and Multi-caches both exported to"):
-        _run_export_example(runtime)
+    assert _exported(tmp_path / "out" / "Multi-caches.gpx") == {"GCMAC3"}
 
 
 # ── More filter keys, filter_name, sort ──────────────────────────────────────
@@ -1170,6 +1544,19 @@ def test_date_keys():
                                                datetime(2026, 9, 1, 18, 30))
 
 
+def test_macro_flag_key():
+    from opensak.filters.engine import MacroFlagFilter
+    (on,) = _filters("macro_flag = true")._filters
+    (off,) = _filters("macro_flag = false")._filters
+    assert isinstance(on, MacroFlagFilter) and (on.flagged, off.flagged) == (True, False)
+
+
+def test_last_user_update_date_key():
+    (date,) = _filters('last_user_update = {"2026-10-01T08:00", nil}')._filters
+    assert (date.field, date.op, date.date1) == ("last_user_update", "on_or_after",
+                                                 datetime(2026, 10, 1, 8, 0))
+
+
 def test_text_keys_attributes_codes_and_mode():
     fs = _filters('user_data2 = "solved", note = "x", placed_by = "P", text = "Brücke", '
                   'attributes = {"Dogs", "-night cache", 13}, codes = {"gc1", "GC2"}, mode = "or"')
@@ -1185,10 +1572,12 @@ def test_near_point_and_owned():
     from opensak.gui.settings import HomePoint, get_settings
     settings = get_settings()
     settings.home_points = [HomePoint("Cabin", 46.5, 7.5)]
-    settings.gc_username = "Me"
+    from opensak.filters.engine import IsOwnerFilter
     owned, near = _filters('near = { point = "Cabin", km = 3 }, owned = true')._filters
     assert (near.lat, near.lon, near.op, near.dist1_km) == (46.5, 7.5, "at_most", 3.0)
-    assert (owned.text, owned.op) == ("Me", "equals")
+    assert isinstance(owned, IsOwnerFilter) and owned.owned is True
+    (not_owned,) = _filters("owned = false")._filters
+    assert not_owned.owned is False
     (near,) = _filters("near = { lat = 47, lon = 8, km = 1 }")._filters
     assert (near.lat, near.lon) == (47.0, 8.0)
 
@@ -1202,7 +1591,7 @@ def test_near_point_and_owned():
     ('attributes = "Unicorns"', "unknown attribute 'Unicorns'"),
     ('near = { point = "Nowhere", km = 1 }', "no centre point named 'Nowhere'"),
     ("near = { lat = 47, lon = 8 }", "near needs km"),
-    ("owned = true", "username in Settings"),
+    ("owned = 1", "owned must be true or false"),
     ('mode = "XOR", found = true', 'mode must be "AND" or "OR"'),
     ('polygon = "missing.kml"', "macro is not allowed|cannot read"),
 ])
@@ -1245,6 +1634,8 @@ def test_sort_reaches_host():
     assert (host.sort.field, host.sort.ascending) == ("difficulty", False)
     host, _ = _run('opensak.sort("hidden")')
     assert (host.sort.field, host.sort.ascending) == ("hidden_date", True)
+    host, _ = _run('opensak.sort("macro_sort", "desc")')
+    assert (host.sort.field, host.sort.ascending) == ("macro_sort", False)
 
 
 @pytest.mark.parametrize("call, msg", [
@@ -1387,3 +1778,131 @@ def test_export_gpx_rejects_bad_input(tmp_path, export_cache, spec, msg):
     with pytest.raises(MacroError, match=msg):
         _export_gpx(tmp_path, spec)
     assert not (tmp_path / "out").exists()
+
+
+# ── Every file a macro writes goes through safe_write() ──────────────────────
+
+class _WriteGuard:
+    """While a macro runs: every file under tmp_path opened for writing
+    outside permissions.safe_write_stream() — which safe_write() uses too —
+    (*outside*), and every file it wrote (*safe*)."""
+
+    def __init__(self, tmp_path, monkeypatch):
+        import builtins
+        import io
+        import os
+
+        from opensak.macro import permissions as perm_mod
+        from opensak.macro import runtime as runtime_mod
+
+        self.root = tmp_path.resolve()
+        self.safe: list[Path] = []
+        self.outside: list[Path] = []
+        self._armed = False
+        self._inside = 0
+        real_stream, real_open, real_os_open = perm_mod.safe_write_stream, io.open, os.open
+        write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT
+
+        def safe_write_stream(*args, **kwargs):
+            self._inside += 1
+            try:
+                written, result = real_stream(*args, **kwargs)
+            finally:
+                self._inside -= 1
+            self.safe.append(written)
+            return written, result
+
+        def guarded_open(file, mode="r", *args, **kwargs):
+            if any(c in str(mode) for c in "wax+"):
+                self._record(file)
+            return real_open(file, mode, *args, **kwargs)
+
+        def guarded_os_open(path, flags, *args, **kwargs):
+            if flags & write_flags:
+                self._record(path)
+            return real_os_open(path, flags, *args, **kwargs)
+
+        # safe_write() calls the module's safe_write_stream; the runtime
+        # holds its own reference.
+        monkeypatch.setattr(perm_mod, "safe_write_stream", safe_write_stream)
+        monkeypatch.setattr(runtime_mod, "safe_write_stream", safe_write_stream)
+        monkeypatch.setattr(io, "open", guarded_open)
+        monkeypatch.setattr(builtins, "open", guarded_open)
+        monkeypatch.setattr(os, "open", guarded_os_open)
+
+    def _record(self, file):
+        if not self._armed or self._inside or isinstance(file, int):
+            return
+        path = Path(file).resolve()
+        if path.is_relative_to(self.root):
+            self.outside.append(path)
+
+    def run(self, runtime, source):
+        self._armed = True
+        try:
+            runtime.run(source)
+        finally:
+            self._armed = False
+
+
+@pytest.mark.parametrize("kind, call", [
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.gpx" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.loc" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.ggz" }'),
+    ("gpx", 'opensak.export_gpx{ path = OUT .. "/x.kml" }'),
+    ("file:gpx", 'opensak.export_file("GPX Export")'),
+    ("file:loc", 'opensak.export_file("GPX Export")'),
+    ("file:ggz", 'opensak.export_file("GPX Export")'),
+    ("poi", 'opensak.export_poi("Garmin POI")'),
+])
+def test_macro_file_writes_go_through_safe_write(
+        tmp_path, monkeypatch, export_cache, poi_cache, kind, call):
+    out_dir = tmp_path / "out"
+    if kind == "poi":
+        runtime, _ = _poi_runtime(tmp_path)
+    elif kind.startswith("file:"):
+        runtime, _ = _export_runtime(tmp_path, fmt=kind[5:], file_name="x")
+    else:
+        runtime, _ = _export_runtime(tmp_path)
+    guard = _WriteGuard(tmp_path, monkeypatch)
+    guard.run(runtime, f"""
+        OUT = {str(out_dir).replace(chr(92), "/")!r}
+        opensak.filter{{ codes = {{"GCEXP1", "GCPOI1"}} }}
+        {call}
+    """)
+    written = sorted(p.resolve() for p in out_dir.iterdir())
+    assert written, "the call wrote no file"
+    assert guard.outside == []
+    assert sorted(guard.safe) == written
+
+
+def test_runtime_writes_files_only_through_safe_write():
+    """runtime.py never writes a file itself, and hands every export writer
+    from opensak.export a save= hook (MacroRuntime._safe_saver)."""
+    import ast
+    import inspect
+
+    from opensak.macro import runtime as runtime_mod
+
+    tree = ast.parse(inspect.getsource(runtime_mod))
+    writers = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("opensak.export")
+        for alias in node.names
+        if alias.name.startswith(("write_", "export_"))
+    }
+    assert {"write_export_file", "write_poi_export"} <= writers
+    forbidden = {"open", "fdopen", "write_text", "write_bytes", "mkstemp", "NamedTemporaryFile",
+                 "copy", "copy2", "copyfile", "copyfileobj", "copytree", "move", "write_export"}
+    problems = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name in forbidden:
+            problems.append(f"line {node.lineno}: {name}() writes outside safe_write")
+        if name in writers and not any(k.arg == "save" for k in node.keywords):
+            problems.append(f"line {node.lineno}: {name}() without save=")
+    assert problems == []

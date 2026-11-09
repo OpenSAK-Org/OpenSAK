@@ -66,6 +66,10 @@ def _isolated_app_paths(tmp_path, monkeypatch):
     import opensak.db.manager as dbmanager
     import opensak.logger as logmod
     import opensak.settings_store as ss
+    from opensak.macro import db_access
+
+    # Macro write approvals "until OpenSAK closes" live in the process.
+    db_access.reset_session()
 
     # Ikke pre-oprettet: nogle tests (fx test_gives_up_after_all_retries_...)
     # tjekker at tmp_path er helt tom efter en operation. Rigtig kode

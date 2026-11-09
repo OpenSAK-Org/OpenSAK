@@ -7,11 +7,15 @@ implementeres og vedligeholdes ét sted.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, Iterator
 
+from PySide6.QtCore import QObject, QPoint, Qt, QThread, SIGNAL, SLOT
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QPushButton,
-    QSizePolicy, QWidget,
+    QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QProgressDialog,
+    QPushButton, QSizePolicy, QWidget,
 )
 
 from opensak.lang import tr
@@ -57,6 +61,116 @@ def clamp_dialog_height_to_screen(
         dialog.setMaximumHeight(int(screen.availableGeometry().height() * max_fraction))
 
 
+
+# ── Remembered dialog size/position (issue #1030) ────────────────────────────
+
+_GEOMETRY_KEY_PREFIX = "dialog_geometry."
+
+
+def remember_dialog_geometry(dialog: QDialog, key: str) -> None:
+    """
+    Restore *dialog*'s last size, position and maximized state, and save
+    them again whenever it closes (issue #1030).
+
+    Stored as plain numbers under ``dialog_geometry.<key>`` in opensak.json
+    rather than Qt's opaque saveGeometry() blob, so the restore can be
+    checked against the screens that exist *now*. A remembered geometry is
+    never trusted blindly (GeePa67's point on #1030): a laptop that was on a
+    big external monitor last time may be on its own small screen today.
+
+    - The size is capped to the available area of the screen it lands on,
+      so the dialog never opens bigger than the screen, and any maximum
+      size the dialog already has (e.g. clamp_dialog_height_to_screen)
+      still applies.
+    - The position is kept only if the remembered window's centre is on a
+      screen that is connected now, and is then nudged back inside that
+      screen's available area, so the title bar can always be reached.
+    - If that screen is gone, only the (capped) size is restored and Qt
+      places the dialog as usual, centred over its parent.
+
+    Call this once at the end of __init__, after the content is built and
+    after any clamp_dialog_height_to_screen() call.
+    """
+    from opensak.settings_store import get_store
+
+    store_key = _GEOMETRY_KEY_PREFIX + key
+    _apply_saved_geometry(dialog, get_store().get(store_key))
+
+    def _save(_result: int = 0) -> None:
+        snapshot = _geometry_snapshot(dialog, get_store().get(store_key))
+        if snapshot is not None:
+            get_store().set(store_key, snapshot)
+
+    dialog.finished.connect(_save)
+
+
+def _geometry_snapshot(dialog: QDialog, previous: Any) -> dict[str, Any] | None:
+    """The values to store for *dialog* as it closes."""
+    if dialog.isMaximized():
+        # A maximized window's own geometry is just "the whole screen" —
+        # keep the last normal size/position so un-maximizing next time
+        # goes back to something sensible.
+        if not isinstance(previous, dict):
+            return {"maximized": True}
+        return {**previous, "maximized": True}
+    frame = dialog.frameGeometry()
+    return {
+        "x": frame.x(),
+        "y": frame.y(),
+        "w": dialog.width(),
+        "h": dialog.height(),
+        "maximized": False,
+    }
+
+
+def _apply_saved_geometry(dialog: QDialog, data: Any) -> None:
+    """Apply a stored geometry dict, clamped to the screens connected now."""
+    if not isinstance(data, dict):
+        return
+    try:
+        w, h = int(data["w"]), int(data["h"])
+    except (KeyError, TypeError, ValueError):
+        w = h = 0
+    try:
+        x, y = int(data["x"]), int(data["y"])
+        has_pos = True
+    except (KeyError, TypeError, ValueError):
+        x = y = 0
+        has_pos = False
+
+    if w > 0 and h > 0:
+        # Which screen was the dialog on? Judge by its centre; if that
+        # monitor isn't connected any more, fall back to the parent's
+        # screen (or the primary one) and drop the old position.
+        screen = (
+            QGuiApplication.screenAt(QPoint(x + w // 2, y + h // 2))
+            if has_pos else None
+        )
+        if screen is None:
+            has_pos = False
+            parent = dialog.parentWidget()
+            screen = parent.screen() if parent is not None else None
+            if screen is None:
+                screen = QApplication.primaryScreen()
+
+        if screen is not None:
+            avail = screen.availableGeometry()
+            w = min(w, avail.width())
+            h = min(h, avail.height())
+            dialog.resize(w, h)
+            if has_pos:
+                # Use the size the dialog really got (min/max sizes may
+                # have adjusted it) and keep the top-left — where the title
+                # bar is — on screen.
+                real_w, real_h = dialog.width(), dialog.height()
+                x = max(avail.left(), min(x, avail.right() + 1 - real_w))
+                y = max(avail.top(), min(y, avail.bottom() + 1 - real_h))
+                dialog.move(x, y)
+
+    if data.get("maximized") is True:
+        dialog.setWindowState(dialog.windowState() | Qt.WindowState.WindowMaximized)
+
+
 class DirRow(QWidget):
     """
     En linje med en read-only sti og en Gennemse-knap.
@@ -83,7 +197,11 @@ class DirRow(QWidget):
             self._btn.clicked.connect(self._browse)
 
     def _browse(self) -> None:
-        current = Path(self._edit.text())
+        from opensak.backup.backupset import nearest_existing_dir
+        # #1032: a folder that doesn't exist yet (e.g. the default backup
+        # folder, created on first use) makes Qt open an unrelated folder,
+        # especially on Windows — start at its nearest existing parent.
+        current = nearest_existing_dir(Path(self._edit.text()))
         chosen = QFileDialog.getExistingDirectory(
             self,
             tr("wizard_choose_dir"),
@@ -103,3 +221,89 @@ class DirRow(QWidget):
     def set_path(self, path: Path) -> None:
         """Opdater den viste sti programmatisk (fx ved annullering/reset)."""
         self._edit.setText(str(path))
+
+
+@contextmanager
+def busy_box(parent: QWidget | None, text: str, title: str) -> Iterator[None]:
+    """Modal "please wait" box plus wait cursor around blocking work in the
+    GUI thread, so a step that takes seconds doesn't look like a frozen
+    window. The bar is indeterminate and has no cancel button."""
+    progress = QProgressDialog(text, "", 0, 0, parent)
+    progress.setWindowTitle(title)
+    progress.setCancelButton(None)
+    progress.setWindowModality(Qt.WindowModality.WindowModal)
+    progress.setMinimumDuration(0)
+    progress.show()
+    QApplication.processEvents()
+    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    try:
+        yield
+    finally:
+        QApplication.restoreOverrideCursor()
+        progress.close()
+
+
+# ── Background workers of a dialog (#1265) ────────────────────────────────────
+#
+# Deleting a QThread whose run() hasn't returned aborts the whole process
+# ("QThread: Destroyed while thread is still running"). A dialog opened with
+# exec() is deleted as soon as its caller returns, and its workers with it —
+# whether they are its children or only referenced by it. So a dialog with a
+# worker must not close while the worker runs (WorkerGuardMixin), or must
+# hand the worker over first (keep_worker_alive).
+
+
+def worker_running(*workers: QThread | None) -> bool:
+    """True while one of *workers* (None allowed) is still running. A worker
+    whose C++ object deleteLater() has already destroyed counts as done."""
+    for worker in workers:
+        if worker is None:
+            continue
+        try:
+            if worker.isRunning():
+                return True
+        except RuntimeError:
+            continue
+    return False
+
+
+def keep_worker_alive(worker: QThread | None, owner: QObject | None) -> None:
+    """Let a running *worker* outlive the dialog that started it: it moves
+    to *owner* (e.g. the main window; the application if None) and deletes
+    itself once its run() has returned. Its signals to the dialog are
+    disconnected when the dialog is deleted."""
+    if worker is None or not worker_running(worker):
+        return
+    worker.setParent(owner or QApplication.instance())
+    # By signature: many workers shadow QThread.finished with a Signal of
+    # their own, which run() emits before it has returned.
+    QObject.connect(worker, SIGNAL("finished()"), worker, SLOT("deleteLater()"))
+
+
+class WorkerGuardMixin:
+    """A dialog that doesn't close while its background worker runs (#1265).
+
+    Escape, a Close or Cancel button and the window's close button all end
+    in done() (Escape never reaches closeEvent(), which is why guards there
+    didn't help). While one of _guarded_workers() runs, done() calls
+    _close_while_running() instead of closing: nothing by default, so the
+    request is ignored; a dialog whose job can already be cancelled cancels
+    it there.
+
+    Use it before QDialog in the bases: ``class X(WorkerGuardMixin, QDialog)``.
+    A slot that closes the dialog on a worker's own completion signal (sent
+    from run(), so the thread may still be finishing) waits for the worker
+    first.
+    """
+
+    def _guarded_workers(self) -> tuple[QThread | None, ...]:
+        return (getattr(self, "_worker", None),)
+
+    def _close_while_running(self) -> None:
+        """Called instead of closing while a guarded worker runs."""
+
+    def done(self, result: int) -> None:
+        if worker_running(*self._guarded_workers()):
+            self._close_while_running()
+            return
+        super().done(result)  # type: ignore[misc]

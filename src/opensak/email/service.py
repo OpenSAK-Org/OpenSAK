@@ -81,7 +81,7 @@ def _import_zip_bytes(zip_bytes: bytes, target_db_path: Path | None) -> "ImportR
     session_for() — den globale engine (init_db()) røres ikke, så
     GUI-tråden kan ikke ramme den forkerte database imens.
     """
-    from opensak.db.database import get_session, session_for
+    from opensak.db.database import get_session, optimize_database, session_for
     from opensak.db.manager import get_db_manager
     from opensak.importer import import_zip
 
@@ -94,7 +94,9 @@ def _import_zip_bytes(zip_bytes: bytes, target_db_path: Path | None) -> "ImportR
         with (session_for(target_db_path)
               if other_db and target_db_path is not None
               else get_session()) as session:
-            return import_zip(zip_path, session)
+            result = import_zip(zip_path, session)
+        optimize_database(target_db_path if other_db else None)   # #1048
+        return result
 
 
 def scan_and_import(

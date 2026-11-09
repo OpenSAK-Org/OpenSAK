@@ -12,14 +12,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
-from sqlalchemy import bindparam, create_engine, text
+from sqlalchemy import Table, bindparam, create_engine, select, text, update
 from sqlalchemy.orm import sessionmaker
 
 from opensak.db.database import get_session
 from opensak.db.models import Cache
+from opensak.lang import tr
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.types import GcCode
+
+
+# GC codes per SELECT/UPDATE round (#1095). Well below SQLite's limit on
+# bound parameters, large enough to keep the number of round trips small.
+_CHUNK_SIZE = 500
 
 
 @dataclass
@@ -32,9 +39,9 @@ class UpdateResult:
 
     def __str__(self) -> str:
         return (
-            f"  Opdateret til fundet : {self.updated}\n"
-            f"  Allerede fundet      : {self.already}\n"
-            f"  Ikke i denne DB      : {self.not_found}"
+            f"  Marked as found : {self.updated}\n"
+            f"  Already found   : {self.already}\n"
+            f"  Not in this DB  : {self.not_found}"
         )
 
 
@@ -98,7 +105,7 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
                         # '2009-08-12 19:00:00.000000' (mellemrum, ikke T, med µs)
                         # datetime.fromisoformat() håndterer alle varianter i Python 3.7+
                         try:
-                            raw = str(log_date_raw).strip().rstrip("Z").replace("T", " ")
+                            raw = str(log_date_raw).strip().removesuffix("Z").replace("T", " ")
                             # Fjern overskydende mikrosekunder hvis nødvendigt
                             found_dates[gc] = datetime.fromisoformat(raw).replace(
                                 tzinfo=timezone.utc
@@ -108,7 +115,7 @@ def get_found_gc_codes(reference_db_path: Path) -> dict[GcCode, datetime | None]
 
             return found_dates
     except Exception as e:
-        raise RuntimeError(f"Kunne ikke læse reference database: {e}")
+        raise RuntimeError(f"Could not read reference database: {e}") from e
     finally:
         engine.dispose()
 
@@ -132,36 +139,69 @@ def update_found_from_reference(reference_db_path: Path) -> UpdateResult:
     try:
         found_map = get_found_gc_codes(reference_db_path)
     except RuntimeError as e:
-        result.errors.append(str(e))
+        result.errors.append(tr("found_err_read_ref", error=e.__cause__ or e))
         return result
 
     if not found_map:
-        result.errors.append("Ingen caches fundet i reference databasen")
+        result.errors.append(tr("found_err_no_caches"))
         return result
 
-    # Opdater aktiv database
+    # Opdater aktiv database.
+    #
+    # Issue #1095: this used to load every cache in the active database as
+    # an ORM object and change them one by one. Now it works on the
+    # reference DB's GC codes in chunks: one SELECT per chunk tells which
+    # codes exist here and which are already found, then two bulk UPDATEs
+    # write the changes without loading any rows. Semantics are unchanged:
+    #   - not yet found        → found = 1, found_date = ref date (may be
+    #                            NULL), counted as `updated`
+    #   - already found        → found_date overwritten only when the ref
+    #                            DB has a date, counted as `already`
+    #   - in ref, not here     → counted as `not_found`
+    # Counts come from the SELECT, not from rowcount (unreliable for
+    # executemany across drivers). Everything still runs in one transaction.
+    # Declarative __table__ is typed as FromClause; update() needs a Table.
+    caches = cast(Table, Cache.__table__)
+    found_date_type = caches.c.found_date.type
+    mark_found = (
+        update(caches)
+        .where(caches.c.gc_code == bindparam("gc"))
+        .values(found=True, found_date=bindparam("d", type_=found_date_type))
+    )
+    set_found_date = (
+        update(caches)
+        .where(caches.c.gc_code == bindparam("gc"))
+        .values(found_date=bindparam("d", type_=found_date_type))
+    )
+
+    codes = list(found_map)
     with get_session() as session:
-        # Hent alle caches i aktiv database der matcher
-        all_caches = session.query(Cache).all()
+        for start in range(0, len(codes), _CHUNK_SIZE):
+            chunk = codes[start:start + _CHUNK_SIZE]
+            rows = session.execute(
+                select(caches.c.gc_code, caches.c.found)
+                .where(caches.c.gc_code.in_(chunk))
+            ).all()
 
-        for cache in all_caches:
-            if cache.gc_code in found_map:
-                found_date = found_map[cache.gc_code]
-                if cache.found:
-                    # Allerede markeret — opdatér/overskriv found_date hvis
-                    # reference-databasen har en dato (altid mere præcis end None)
-                    if found_date:
-                        cache.found_date = found_date
-                    result.already += 1
-                else:
-                    cache.found = True
-                    cache.found_date = found_date
-                    result.updated += 1
-            # Vi tæller ikke not_found her da de fleste PQ databaser
-            # kun har et udsnit af alle fundne caches
+            not_yet: list[str] = []
+            already: list[str] = []
+            for gc_code, found in rows:
+                (already if found else not_yet).append(gc_code)
 
-        # Tæl hvor mange GC koder i reference DB ikke er i aktiv DB
-        active_codes = {c.gc_code for c in all_caches}
-        result.not_found = len(found_map.keys() - active_codes)
+            result.updated += len(not_yet)
+            result.already += len(already)
+            result.not_found += len(chunk) - len(rows)
+
+            if not_yet:
+                session.execute(
+                    mark_found,
+                    [{"gc": gc, "d": found_map[gc]} for gc in not_yet],
+                )
+            dated = [gc for gc in already if found_map[gc] is not None]
+            if dated:
+                session.execute(
+                    set_found_date,
+                    [{"gc": gc, "d": found_map[gc]} for gc in dated],
+                )
 
     return result

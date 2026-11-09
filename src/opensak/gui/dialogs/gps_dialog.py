@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 # Issue #656 (CheminerWill's follow-up suggestion): remember the "use
 # database name as filename" checkbox state across exports/sessions.
@@ -86,10 +86,13 @@ class ExportWorker(QThread):
 
     def run(self) -> None:
         try:
-            from opensak.db.database import reload_caches_full
+            from opensak.db.database import iter_caches_full
             from opensak.gps.garmin import is_mtp_device
-            caches = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
-            caches = reload_caches_full(caches)
+            selected = self.caches[:self.max_caches] if self.max_caches > 0 else self.caches
+            # #1075: reloaded and written a chunk at a time, so a large
+            # export never holds every fully loaded cache in memory.
+            caches = iter_caches_full(selected)
+            total = len(selected)
             cb = make_progress_cb(self.progress.emit)
 
             is_device = (
@@ -104,25 +107,25 @@ class ExportWorker(QThread):
                 from opensak.gps.garmin import export_ggz_to_device, export_ggz_to_file
                 if is_device:
                     result = export_ggz_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
                     )
                 else:
                     result = export_ggz_to_file(
                         caches,
                         self.device_path / f"{self.filename}.ggz",
-                        progress_cb=cb,
+                        progress_cb=cb, total=total,
                     )
             else:
                 from opensak.gps.garmin import export_to_device, export_to_file
                 if is_device:
                     result = export_to_device(
-                        caches, self.device_path, self.filename, progress_cb=cb
+                        caches, self.device_path, self.filename, progress_cb=cb, total=total,
                     )
                 else:
                     result = export_to_file(
                         caches,
                         self.device_path / f"{self.filename}.gpx",
-                        progress_cb=cb,
+                        progress_cb=cb, total=total,
                     )
 
             self.finished.emit(result)
@@ -131,7 +134,7 @@ class ExportWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class GpsExportDialog(QDialog):
+class GpsExportDialog(WorkerGuardMixin, QDialog):
     """Dialog til at eksportere caches til GPS enhed."""
 
     def __init__(self, parent=None, caches=None):
@@ -150,15 +153,12 @@ class GpsExportDialog(QDialog):
         self._setup_ui()
         self._scan_devices()
 
-    def closeEvent(self, event) -> None:
-        """Afbryd igangværende MTP-overførsler når dialogen lukkes."""
-        from opensak.gps.garmin import cancel_mtp_transfer
-        cancel_mtp_transfer()
-        for worker in (self._worker, self._delete_worker):
-            if worker is not None and worker.isRunning():
-                worker.quit()
-                worker.wait(2000)
-        super().closeEvent(event)
+    def _guarded_workers(self):
+        # #1265: Escape, Close and the window's close button are ignored
+        # while old files are deleted or the caches are sent. The close
+        # button used to cancel an MTP copy and wait 2 s for the worker,
+        # then close anyway, which aborted OpenSAK on a longer transfer.
+        return (self._worker, self._delete_worker)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -295,11 +295,7 @@ class GpsExportDialog(QDialog):
 
         # Slet eksisterende filer (kun relevant ved eksport direkte til enhed)
         self._cb_delete_gpx = QCheckBox(tr("gps_delete_cb"))
-        self._cb_delete_gpx.setToolTip(
-            "Sletter alle eksisterende filer af samme format (GPX eller GGZ)\n"
-            "i den relevante Garmin-mappe på enheden, inden den nye fil uploades.\n"
-            "Virker kun ved eksport direkte til GPS."
-        )
+        self._cb_delete_gpx.setToolTip(tr("gps_delete_cb_tip"))
         opt_layout.addWidget(self._cb_delete_gpx)
 
         content_layout.addWidget(opt_group)
@@ -415,9 +411,9 @@ class GpsExportDialog(QDialog):
         ext_up = ext.upper()
         path, _ = QFileDialog.getSaveFileName(
             self,
-            f"Gem {ext_up} fil",
+            tr("gps_save_file_title", fmt=ext_up),
             str(Path.home()),
-            f"{ext_up} filer (*.{ext})",
+            tr("gps_file_filter", fmt=ext_up, ext=ext),
         )
         if path:
             p = Path(path)

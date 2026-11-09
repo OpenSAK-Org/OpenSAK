@@ -1,0 +1,1485 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Generated from src/opensak/macro/runtime.py by scripts/generate_macro_api_docs.py — do not edit by hand. -->
+<!-- OpenSAK Lua macro API, version 4. Reference: docs/macros/api.md -->
+<NotepadPlus>
+	<AutoComplete language="Lua">
+		<Environment ignoreCase="no" startFunc="(" stopFunc=")" paramSeparator="," terminal=";" additionalWordChar="." />
+		<KeyWord name="_G" />
+		<KeyWord name="_VERSION" />
+		<KeyWord name="and" />
+		<KeyWord name="assert" func="yes">
+			<Overload retVal="any" descr="Raise an error with message if v is false or nil; otherwise return all&#x0a;arguments.&#x0a;Returns any — All arguments.">
+				<Param name="v: any" />
+				<Param name="[message: any]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="break" />
+		<KeyWord name="coroutine" />
+		<KeyWord name="coroutine.close" func="yes">
+			<Overload retVal="boolean, any" descr="Close a suspended or dead coroutine.&#x0a;Returns boolean, any — true, or false and the error.">
+				<Param name="co: thread" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.create" func="yes">
+			<Overload retVal="thread" descr="A new coroutine running f.&#x0a;Returns thread — The coroutine.">
+				<Param name="f: function" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.isyieldable" func="yes">
+			<Overload retVal="boolean" descr="Whether the running code can yield.&#x0a;Returns boolean — true if it can yield.">
+				<Param name="[co: thread]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.resume" func="yes">
+			<Overload retVal="boolean, any" descr="Start or continue co; the arguments are passed to its function or returned by&#x0a;its yield.&#x0a;Returns boolean, any — true and the yielded values, or false and the error.">
+				<Param name="co: thread" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.running" func="yes">
+			<Overload retVal="thread, boolean" descr="The running coroutine.&#x0a;Returns thread, boolean — The coroutine and whether it is the main one.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.status" func="yes">
+			<Overload retVal="string" descr="&quot;running&quot;, &quot;suspended&quot;, &quot;normal&quot; or &quot;dead&quot;.&#x0a;Returns string — The status.">
+				<Param name="co: thread" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.wrap" func="yes">
+			<Overload retVal="function" descr="A function that resumes a new coroutine running f on each call; errors are&#x0a;raised.&#x0a;Returns function — The resuming function.">
+				<Param name="f: function" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="coroutine.yield" func="yes">
+			<Overload retVal="any" descr="Suspend the running coroutine; the arguments are returned by resume.&#x0a;Returns any — The values passed to the next resume.">
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="do" />
+		<KeyWord name="else" />
+		<KeyWord name="elseif" />
+		<KeyWord name="end" />
+		<KeyWord name="error" func="yes">
+			<Overload descr="Raise an error with message. level 1 (default) adds the position of the caller&#x0a;of the current function, 0 none.">
+				<Param name="message: any" />
+				<Param name="[level: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="false" />
+		<KeyWord name="for" />
+		<KeyWord name="function" />
+		<KeyWord name="getmetatable" func="yes">
+			<Overload retVal="table?" descr="The metatable of object (its __metatable field if set).&#x0a;Returns table? — The metatable.">
+				<Param name="object: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="goto" />
+		<KeyWord name="if" />
+		<KeyWord name="in" />
+		<KeyWord name="ipairs" func="yes">
+			<Overload retVal="fun(): integer, any" descr="Iterate over t[1], t[2], ... up to the first nil: `for i, v in ipairs(t) do`.&#x0a;Returns fun(): integer, any — Iterator for a generic `for`.">
+				<Param name="t: table" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="local" />
+		<KeyWord name="math" />
+		<KeyWord name="math.abs" func="yes">
+			<Overload retVal="number" descr="Absolute value.&#x0a;Returns number — |x|.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.acos" func="yes">
+			<Overload retVal="number" descr="Arc cosine, in radians.&#x0a;Returns number — The angle.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.asin" func="yes">
+			<Overload retVal="number" descr="Arc sine, in radians.&#x0a;Returns number — The angle.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.atan" func="yes">
+			<Overload retVal="number" descr="Arc tangent of y/x, in radians, using the signs of both for the quadrant (x&#x0a;defaults to 1).&#x0a;Returns number — The angle.">
+				<Param name="y: number" />
+				<Param name="[x: number]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.ceil" func="yes">
+			<Overload retVal="integer" descr="Smallest integer &gt;= x.&#x0a;Returns integer — Rounded up.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.cos" func="yes">
+			<Overload retVal="number" descr="Cosine of an angle in radians.&#x0a;Returns number — cos(x).">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.deg" func="yes">
+			<Overload retVal="number" descr="Radians to degrees.&#x0a;Returns number — Degrees.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.exp" func="yes">
+			<Overload retVal="number" descr="e to the power x.&#x0a;Returns number — e^x.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.floor" func="yes">
+			<Overload retVal="integer" descr="Largest integer &lt;= x.&#x0a;Returns integer — Rounded down.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.fmod" func="yes">
+			<Overload retVal="number" descr="Remainder of x / y, rounded towards zero.&#x0a;Returns number — The remainder.">
+				<Param name="x: number" />
+				<Param name="y: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.huge" />
+		<KeyWord name="math.log" func="yes">
+			<Overload retVal="number" descr="Logarithm of x to base (default e).&#x0a;Returns number — The logarithm.">
+				<Param name="x: number" />
+				<Param name="[base: number]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.max" func="yes">
+			<Overload retVal="number" descr="The largest argument.&#x0a;Returns number — The maximum.">
+				<Param name="x: number" />
+				<Param name="...: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.maxinteger" />
+		<KeyWord name="math.min" func="yes">
+			<Overload retVal="number" descr="The smallest argument.&#x0a;Returns number — The minimum.">
+				<Param name="x: number" />
+				<Param name="...: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.mininteger" />
+		<KeyWord name="math.modf" func="yes">
+			<Overload retVal="number, number" descr="Integral and fractional part of x.&#x0a;Returns number, number — Integral part and fraction.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.pi" />
+		<KeyWord name="math.rad" func="yes">
+			<Overload retVal="number" descr="Degrees to radians.&#x0a;Returns number — Radians.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.random" func="yes">
+			<Overload retVal="number" descr="Without arguments a float in [0, 1); with m an integer in [1, m]; with m and n&#x0a;an integer in [m, n].&#x0a;Returns number — The random number.">
+				<Param name="[m: integer]" />
+				<Param name="[n: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.randomseed" func="yes">
+			<Overload descr="Seed the random generator (without arguments with a random seed).">
+				<Param name="x: number" />
+				<Param name="[y: number]" />
+			</Overload>
+			<Overload descr="Seed the random generator (without arguments with a random seed).">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.sin" func="yes">
+			<Overload retVal="number" descr="Sine of an angle in radians.&#x0a;Returns number — sin(x).">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.sqrt" func="yes">
+			<Overload retVal="number" descr="Square root.&#x0a;Returns number — The root.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.tan" func="yes">
+			<Overload retVal="number" descr="Tangent of an angle in radians.&#x0a;Returns number — tan(x).">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.tointeger" func="yes">
+			<Overload retVal="integer?" descr="x as an integer if it has an exact integer value.&#x0a;Returns integer? — The integer, or nil.">
+				<Param name="x: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.type" func="yes">
+			<Overload retVal="string?" descr="&quot;integer&quot;, &quot;float&quot;, or nil if x is no number.&#x0a;Returns string? — The number type.">
+				<Param name="x: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="math.ult" func="yes">
+			<Overload retVal="boolean" descr="Whether m &lt; n as unsigned integers.&#x0a;Returns boolean — true if m &lt; n.">
+				<Param name="m: integer" />
+				<Param name="n: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="next" func="yes">
+			<Overload retVal="any, any" descr="The key after key in t and its value; nil at the end. next(t) == nil means t is&#x0a;empty.&#x0a;Returns any, any — Next key and value.">
+				<Param name="t: table" />
+				<Param name="[key: any]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="nil" />
+		<KeyWord name="not" />
+		<KeyWord name="opensak" />
+		<KeyWord name="opensak.api_version" func="yes">
+			<Overload retVal="integer" descr="The API version of this OpenSAK build. Each function lists the version it was&#x0a;added in.&#x0a;Returns integer — The API version.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.attach" func="yes">
+			<Overload retVal="string" descr="Attach another OpenSAK database read-only to the SQL functions, under a schema&#x0a;name, so one opensak.sql() or sql_write() statement can read it together with&#x0a;the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN&#x0a;found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays&#x0a;refused. Nothing can write to an attached database: the file is opened read-&#x0a;only, and SQL that would change it is refused. Without `schema`, the name is&#x0a;made from the database name: lower case, `_` for anything but letters and digits&#x0a;(&quot;Found 2020&quot; → `found_2020`). The schema name must be letters, digits and `_`;&#x0a;`main`, `temp`, `macro`, `companion` and names starting with `opensak_` are&#x0a;reserved. The active database cannot be attached, and neither can a database&#x0a;twice. Attaching the same database under the same name again does nothing.&#x0a;SQLite allows 10 attached databases at once, opensak.macro_db() included. The&#x0a;database is not updated to the current schema, so one last opened by an older&#x0a;OpenSAK version may lack columns; `opensak.columns(&quot;&lt;schema&gt;.caches&quot;)` shows&#x0a;what is there. Each attach prints a line in the macro output. Cannot be called&#x0a;inside opensak.transaction(). Stays attached after opensak.switch_database(),&#x0a;unless the database becomes the active one. Everything is detached when the&#x0a;macro ends. A macro started with opensak.run_macro() sees its caller's attached&#x0a;databases; what it attaches or detaches is undone when it returns. The&#x0a;database's companion database (opensak.companion()) is attached with it, read-&#x0a;only, as `&lt;schema&gt;_companion`, if it has one, and detached with it. See Several&#x0a;databases in one query.&#x0a;Returns string — The schema name.">
+				<Param name="name: string" />
+				<Param name="[schema: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.attached" func="yes">
+			<Overload retVal="{schema: string, name: string, path: string, opensak: boolean, companion: boolean}[]" descr="The databases attached with opensak.attach(), in the order they were attached.&#x0a;`opensak` is always true: only OpenSAK databases can be attached so far.&#x0a;Returns {schema: string, name: string, path: string, opensak: boolean,&#x0a;companion: boolean}[] — One table per attached database. `companion`: it is the&#x0a;companion database of the database attached as `name`.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.attributes" func="yes">
+			<Overload retVal="opensak.Attribute[]?" descr="The attributes of a cache, each with its `id` for opensak.update_attribute() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Attribute[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.cache" func="yes">
+			<Overload retVal="opensak.Cache?" descr="One cache as a table (see Cache fields). It is a snapshot: changing it changes&#x0a;nothing in the database.&#x0a;Returns opensak.Cache? — The cache, or nil if it is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.cache_type" func="yes">
+			<Overload retVal="string?, string?" descr="Convert a cache type between GSAK's one-letter code and its name, like GSAK's&#x0a;CacheType(): *value* is a letter (&quot;T&quot;), a full name (&quot;Traditional Cache&quot;) or a&#x0a;short one (&quot;Traditional&quot;), in any case.&#x0a;Returns string?, string? — The cache type and its GSAK letter (nil if it has&#x0a;none); nil if the type is unknown.">
+				<Param name="value: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.cache_types" func="yes">
+			<Overload retVal="{name: string, code: string?}[]" descr="All cache types OpenSAK knows, with GSAK's one-letter code where GSAK has one,&#x0a;e.g. for a form's choice list or `filter{ type = … }`.&#x0a;Returns {name: string, code: string?}[] — One table per cache type.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.caches" func="yes">
+			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without filter keys (nothing, or only `fields`): the caches of the active&#x0a;filter, in grid order. With filter keys (see Filter keys): every cache of the&#x0a;database matching them, sorted by name. Filter keys search the whole database,&#x0a;they do not narrow the active filter; the view and the active filter stay&#x0a;unchanged. To pick some caches of the active filter, loop without filter keys&#x0a;and test the fields in the loop. `all = true`: every cache of the database,&#x0a;sorted by name, whatever the active filter shows. `database` reads another&#x0a;database, without switching: its caches matching the filter keys, or all of&#x0a;them, sorted by name. `fields` limits the fields loaded (`code` is always&#x0a;included), which makes loops over many caches faster. Caches are loaded in&#x0a;chunks, so large databases do not hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
+				<Param name="[spec: opensak.CachesSpec]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.center" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="The active centre point, which distances and bearings are measured from. `name`&#x0a;is the saved centre point's name, the label of a centre set from coordinates or&#x0a;a cache, or &quot;&quot; when none was chosen; `saved` tells whether it is one of&#x0a;opensak.centers().&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The active&#x0a;centre point.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.centers" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, active: boolean}[]" descr="The saved centre points (Settings → User locations, with ★ Home from your&#x0a;geocaching.com home location first), as in the centre drop-down. `filter{ near =&#x0a;{ point = name, km = … } }` filters by one.&#x0a;Returns {name: string, lat: number, lon: number, active: boolean}[] — One table&#x0a;per saved centre point.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart" />
+		<KeyWord name="opensak.chart.bar" func="yes">
+			<Overload retVal="string" descr="A bar chart of *rows* as an SVG string, for an HTML page (opensak.html.page,&#x0a;opensak.write_text) or a .svg file. Each row is a table; `x` names its category&#x0a;field (default &quot;key&quot;) and `y` its value field (default &quot;count&quot;), nil counts as&#x0a;0. `horizontal = true` draws the bars from the left, for long category names.&#x0a;Text and grid lines take the colour of the surrounding page; the bars use the&#x0a;CSS variable --chart-color, else `color`. Each bar shows its value as tooltip;&#x0a;`labels` also writes it on the bar (default: up to 16 bars). With a list of&#x0a;fields as `y`, the bars are stacked, one segment per field, with a legend&#x0a;(`names` instead of the field names; at most 8); a matrix from&#x0a;opensak.stats.pivot gives one stacked bar per matrix row, e.g. finds per year&#x0a;and cache type. At most 5000 rows.&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]|opensak.Matrix" />
+				<Param name="[options: {x?: string, y?: string|string[], title?: string, width?: number, height?: number, color?: string, horizontal?: boolean, labels?: boolean, names?: string[]}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.heatmap" func="yes">
+			<Overload retVal="string" descr="A grid chart of a matrix (see opensak.stats.pivot) as an SVG string: one cell&#x0a;per row × column value, the darker the larger, e.g. finds per difficulty ×&#x0a;terrain. `labels = false` leaves the numbers out of the cells; `row_title` and&#x0a;`col_title` name the two fields.&#x0a;Returns string — The chart as SVG.">
+				<Param name="matrix: opensak.Matrix" />
+				<Param name="[options: {title?: string, width?: number, color?: string, labels?: boolean, row_title?: string, col_title?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.line" func="yes">
+			<Overload retVal="string" descr="A line chart of *rows* in their order as an SVG string, like opensak.chart.bar:&#x0a;`x` the label on the x axis (evenly spaced, e.g. months), `y` the value. `area =&#x0a;true` fills below the line. The value of the last point is written next to it&#x0a;unless `labels = false`. Each point shows its value as tooltip.&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {x?: string, y?: string, title?: string, width?: number, height?: number, color?: string, area?: boolean, labels?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.map" func="yes">
+			<Overload retVal="string" descr="A map of countries, states or counties as an SVG string, each region coloured by&#x0a;a value — e.g. finds per country from opensak.stats.group. `key` names the field&#x0a;with the region name (default &quot;key&quot;), `value` the number (default &quot;count&quot;),&#x0a;`layer` the kind of region: &quot;country&quot; (default), &quot;state&quot; or &quot;county&quot;. `within`&#x0a;(a country name or a list) limits a state or county map to those countries;&#x0a;without it the countries the regions are in are shown. `extent = &quot;all&quot;` shows&#x0a;every region of the layer instead of zooming to the ones with a value. Names are&#x0a;matched ignoring case, accents and punctuation; those that match no region are&#x0a;listed below the map. The outlines are those of Update location (offline, no&#x0a;internet needed; county outlines are downloaded per country on first use, like&#x0a;there). Without the boundary data the map is a short note instead.&#x0a;Returns string — The map as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {key?: string, value?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, extent?: string, legend?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.points" func="yes">
+			<Overload retVal="string" descr="A dot map as an SVG string: one dot per row at its coordinates (fields `lat` and&#x0a;`lon`), over the outlines of `layer` (&quot;country&quot;, &quot;state&quot; or &quot;county&quot;), zoomed to&#x0a;the dots or to the `within` countries. `label` names the field shown as tooltip.&#x0a;At most 50000 rows; dots on the same pixel are drawn once.&#x0a;Returns string — The map as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {lat?: string, lon?: string, label?: string, layer?: string, within?: string|string[], title?: string, width?: number, height?: number, color?: string, radius?: number}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.chart.rose" func="yes">
+			<Overload retVal="string" descr="A rose (polar area) chart of *rows* as an SVG string: one sector per row, in row&#x0a;order clockwise from the top, e.g. finds per compass direction (N, NE, E, …).&#x0a;The area of a sector grows with its value; `x` names the label field, `y` the&#x0a;value (as for opensak.chart.bar).&#x0a;Returns string — The chart as SVG.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {x?: string, y?: string, title?: string, width?: number, color?: string, labels?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.choose" func="yes">
+			<Overload retVal="string|number?" descr="Let the user pick one item of a list.&#x0a;Returns string|number? — The item picked, or nil if cancelled.">
+				<Param name="prompt: string" />
+				<Param name="options: (string|number)[]" />
+				<Param name="[default: string|number]" />
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.choose_file" func="yes">
+			<Overload retVal="string?" descr="Let the user pick a file in a file dialog. The picked file may be used for the&#x0a;rest of this run without a folder permission: read with mode &quot;open&quot; (the&#x0a;default), written with mode &quot;save&quot;. OpenSAK's own settings and database files&#x0a;cannot be picked. The dialog starts in the macro file's folder.&#x0a;Returns string? — Full path of the picked file, or nil if cancelled.">
+				<Param name="[title: string]" />
+				<Param name="[filter: string]" />
+				<Param name="[mode: &quot;open&quot;|&quot;save&quot;]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.choose_folder" func="yes">
+			<Overload retVal="string?" descr="Let the user pick a folder in a folder dialog. The macro may then read and write&#x0a;files in it for the rest of this run, without a folder permission. OpenSAK's own&#x0a;folders and whole drives cannot be picked.&#x0a;Returns string? — Full path of the folder, or nil if cancelled.">
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.clear_corrected" func="yes">
+			<Overload retVal="boolean" descr="Remove the corrected coordinates of a cache. To change many caches, run the loop&#x0a;inside opensak.transaction(): much faster, and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
+				<Param name="code: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.clear_filter" func="yes">
+			<Overload descr="Remove the active filter, so all caches are shown again.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.codes" func="yes">
+			<Overload retVal="string[]" descr="The GC codes of the caches of the active filter, in grid order. Cheaper than&#x0a;opensak.caches() when only the codes are needed. To read fields of these caches,&#x0a;loop over opensak.caches{ fields = {...} } rather than calling opensak.cache()&#x0a;for each code: it loads only the fields asked for, many caches at a time.&#x0a;Returns string[] — GC codes.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.columns" func="yes">
+			<Overload retVal="{name: string, type: string, required: boolean}[]" descr="The columns of a table or view of the active database (or the one named by the&#x0a;`database` option): all of them, also those Database tables for macros leaves&#x0a;out, which may change in any version.&#x0a;Returns {name: string, type: string, required: boolean}[] — Column names and SQL&#x0a;types, in table order; `required`: NOT NULL without a default, so an INSERT must&#x0a;give it.">
+				<Param name="table: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.companion" func="yes">
+			<Overload retVal="string" descr="Make sure the active database has a companion database — a second SQLite file&#x0a;next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to&#x0a;the SQL functions as schema `companion`. It is shared by all macros: every macro&#x0a;reads every table in it, and creates, changes and drops its own tables, indexes&#x0a;and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE&#x0a;companion.&lt;name&gt; …`). Like opensak.macro_db() this needs no approval to change&#x0a;databases, but opensak.sql_write() still asks for it, as it may change caches.&#x0a;OpenSAK records the macro's file as the owner of every table and view it&#x0a;creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables&#x0a;without an owner are read-only. A moved or renamed macro is a new owner. A table&#x0a;with a `gc_code` column is cache-linked: its rows belong to caches, several per&#x0a;cache if needed, and follow them — they are deleted with the cache, and copied&#x0a;or moved with it to another database (opensak.set_companion_table() changes&#x0a;that). Triggers are refused. The file follows its database when it is renamed,&#x0a;copied, moved, deleted or backed up. Once it exists, every macro run has it&#x0a;attached without this call. The first call creates the file and prints its path&#x0a;in the macro output; it cannot do that inside opensak.transaction(), and the&#x0a;macro must be saved, as its tables belong to its file. See The companion&#x0a;database.&#x0a;Returns string — The path of the companion database file.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.companion_tables" func="yes">
+			<Overload retVal="opensak.CompanionTable[]" descr="The tables and views in the active database's companion database (see&#x0a;opensak.companion()), sorted by name, with their owner. Empty while it has none.&#x0a;Returns opensak.CompanionTable[] — One table per table or view.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.confirm" func="yes">
+			<Overload retVal="boolean" descr="Ask the user a Yes/No question.&#x0a;Returns boolean — true on Yes.">
+				<Param name="message: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords" />
+		<KeyWord name="opensak.coords.bearing" func="yes">
+			<Overload retVal="number" descr="Initial bearing from the first point to the second.&#x0a;Returns number — Degrees, 0 = North, clockwise.">
+				<Param name="lat1: number" />
+				<Param name="lon1: number" />
+				<Param name="lat2: number" />
+				<Param name="lon2: number" />
+			</Overload>
+			<Overload retVal="number" descr="Initial bearing from the first point to the second.&#x0a;Returns number — Degrees, 0 = North, clockwise.">
+				<Param name="a: string" />
+				<Param name="b: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.distance" func="yes">
+			<Overload retVal="number" descr="Great-circle distance between two points.&#x0a;Returns number — Distance in km.">
+				<Param name="lat1: number" />
+				<Param name="lon1: number" />
+				<Param name="lat2: number" />
+				<Param name="lon2: number" />
+			</Overload>
+			<Overload retVal="number" descr="Great-circle distance between two points.&#x0a;Returns number — Distance in km.">
+				<Param name="a: string" />
+				<Param name="b: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.format" func="yes">
+			<Overload retVal="string" descr="Format coordinates. Formats: `&quot;dmm&quot;` (default), `&quot;dms&quot;`, `&quot;dd&quot;`, `&quot;utm&quot;`,&#x0a;`&quot;mgrs&quot;`, `&quot;ch1903&quot;` (Swiss LV03), `&quot;ch1903+&quot;` (Swiss LV95), `&quot;rd&quot;` (Dutch RD),&#x0a;`&quot;osgb&quot;` (British National Grid), `&quot;sweref99&quot;` (SWEREF 99 TM), `&quot;gk&quot;` (German&#x0a;Gauss-Krüger), `&quot;olc&quot;` (Plus Code), `&quot;geohash&quot;` and `&quot;maidenhead&quot;`. Aliases:&#x0a;`&quot;lv03&quot;`, `&quot;lv95&quot;`, `&quot;bng&quot;`, `&quot;sweref&quot;`, `&quot;gauss-krueger&quot;`, `&quot;pluscode&quot;`,&#x0a;`&quot;qth&quot;`. The national grids are only meaningful in and around their country;&#x0a;`&quot;osgb&quot;` and `&quot;utm&quot;` raise an error where they are not defined.&#x0a;Returns string — E.g. &quot;N47 22.123  E008 32.456&quot; or &quot;32T E 465123 N 5247123&quot;.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+				<Param name="[fmt: string]" />
+			</Overload>
+			<Overload retVal="string" descr="Format coordinates. Formats: `&quot;dmm&quot;` (default), `&quot;dms&quot;`, `&quot;dd&quot;`, `&quot;utm&quot;`,&#x0a;`&quot;mgrs&quot;`, `&quot;ch1903&quot;` (Swiss LV03), `&quot;ch1903+&quot;` (Swiss LV95), `&quot;rd&quot;` (Dutch RD),&#x0a;`&quot;osgb&quot;` (British National Grid), `&quot;sweref99&quot;` (SWEREF 99 TM), `&quot;gk&quot;` (German&#x0a;Gauss-Krüger), `&quot;olc&quot;` (Plus Code), `&quot;geohash&quot;` and `&quot;maidenhead&quot;`. Aliases:&#x0a;`&quot;lv03&quot;`, `&quot;lv95&quot;`, `&quot;bng&quot;`, `&quot;sweref&quot;`, `&quot;gauss-krueger&quot;`, `&quot;pluscode&quot;`,&#x0a;`&quot;qth&quot;`. The national grids are only meaningful in and around their country;&#x0a;`&quot;osgb&quot;` and `&quot;utm&quot;` raise an error where they are not defined.&#x0a;Returns string — E.g. &quot;N47 22.123  E008 32.456&quot; or &quot;32T E 465123 N 5247123&quot;.">
+				<Param name="coords: string" />
+				<Param name="[fmt: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.inside" func="yes">
+			<Overload retVal="boolean" descr="Whether a point lies inside a polygon. The polygon is either a file (GPX&#x0a;track/route/waypoints, KML, or a text file with one coordinate per line; read&#x0a;permission needed, relative paths are resolved against the macro file's folder)&#x0a;or a table of points, each a coordinate string, `{lat, lon}` or `{lat = ..., lon&#x0a;= ...}`. Edges are straight lines in latitude/longitude, as in the line/polygon&#x0a;filter.&#x0a;Returns boolean — true if the point is inside.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+				<Param name="polygon: string|table" />
+			</Overload>
+			<Overload retVal="boolean" descr="Whether a point lies inside a polygon. The polygon is either a file (GPX&#x0a;track/route/waypoints, KML, or a text file with one coordinate per line; read&#x0a;permission needed, relative paths are resolved against the macro file's folder)&#x0a;or a table of points, each a coordinate string, `{lat, lon}` or `{lat = ..., lon&#x0a;= ...}`. Edges are straight lines in latitude/longitude, as in the line/polygon&#x0a;filter.&#x0a;Returns boolean — true if the point is inside.">
+				<Param name="coords: string" />
+				<Param name="polygon: string|table" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.location" func="yes">
+			<Overload retVal="{country: string?, state: string?, county: string?}?" descr="Offline reverse geocoding with the boundary data used by Update location. A&#x0a;field is nil where no region matches.&#x0a;Returns {country: string?, state: string?, county: string?}? — nil if the&#x0a;boundary data is not installed.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+			</Overload>
+			<Overload retVal="{country: string?, state: string?, county: string?}?" descr="Offline reverse geocoding with the boundary data used by Update location. A&#x0a;field is nil where no region matches.&#x0a;Returns {country: string?, state: string?, county: string?}? — nil if the&#x0a;boundary data is not installed.">
+				<Param name="coords: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.midpoint" func="yes">
+			<Overload retVal="number, number" descr="The point halfway between two points (along the great circle).&#x0a;Returns number, number — Latitude and longitude of the midpoint.">
+				<Param name="lat1: number" />
+				<Param name="lon1: number" />
+				<Param name="lat2: number" />
+				<Param name="lon2: number" />
+			</Overload>
+			<Overload retVal="number, number" descr="The point halfway between two points (along the great circle).&#x0a;Returns number, number — Latitude and longitude of the midpoint.">
+				<Param name="a: string" />
+				<Param name="b: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.parse" func="yes">
+			<Overload retVal="number?, number?, string?" descr="Parse a coordinate string. Without `fmt` the format is detected:&#x0a;latitude/longitude (DMM, DMS, decimal degrees), UTM, MGRS, British grid letters&#x0a;(&quot;TQ 30268 79642&quot;), Plus Codes, Maidenhead locators, geohashes (5+ characters&#x0a;mixing letters and digits) and the Swiss, Dutch, Swedish and German grids as&#x0a;number pairs, which are only accepted inside their country. Pass `fmt` to read&#x0a;one format only — needed for numeric British grid positions, short geohashes and&#x0a;to rule out a wrong guess. Formats: `&quot;latlon&quot;`, `&quot;utm&quot;`, `&quot;mgrs&quot;`, `&quot;ch1903&quot;`,&#x0a;`&quot;rd&quot;`, `&quot;osgb&quot;`, `&quot;sweref99&quot;`, `&quot;gk&quot;`, `&quot;olc&quot;`, `&quot;geohash&quot;`, `&quot;maidenhead&quot;`&#x0a;(`&quot;latlon&quot;` covers DD, DMM and DMS; every name `opensak.coords.format` takes&#x0a;works too).&#x0a;Returns number?, number?, string? — Latitude, longitude and the format that was&#x0a;read, or nil if the text cannot be parsed.">
+				<Param name="text: string" />
+				<Param name="[fmt: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.coords.project" func="yes">
+			<Overload retVal="number, number" descr="Waypoint projection: the point a given distance away in a given direction.&#x0a;Returns number, number — Latitude and longitude of the projected point.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+				<Param name="bearing: number" />
+				<Param name="km: number" />
+			</Overload>
+			<Overload retVal="number, number" descr="Waypoint projection: the point a given distance away in a given direction.&#x0a;Returns number, number — Latitude and longitude of the projected point.">
+				<Param name="coords: string" />
+				<Param name="bearing: number" />
+				<Param name="km: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.copy_caches" func="yes">
+			<Overload retVal="integer" descr="Like opensak.move_caches(), but the caches stay in the active database.&#x0a;Returns integer — Number of caches copied.">
+				<Param name="target: string" />
+				<Param name="[options: opensak.TransferOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.copy_file" func="yes">
+			<Overload retVal="string?" descr="Copy a file (GSAK's FileCopy) and return the file written. *target* is a file,&#x0a;or a folder (existing, or ending in `/`) to copy into under the same name.&#x0a;Relative paths are resolved against the macro file's folder. The source's folder&#x0a;needs read permission and the target's folder write permission; for an&#x0a;unapproved one the user is asked first. Only these file types can be written:&#x0a;.txt .csv .tsv .html .htm .svg .md .json .gpx .loc .kml .kmz .ggz .zip .xml .log&#x0a;.jpg .jpeg .png .gif .webp .pdf — no programs or scripts. An existing target is&#x0a;replaced, the same way opensak.write_text() replaces a file, unless `if_exists =&#x0a;&quot;skip&quot;`. The modification time is kept. At most 1 GB.&#x0a;Returns string? — The file written (full path); nil if skipped.">
+				<Param name="source: string" />
+				<Param name="target: string" />
+				<Param name="[options: {if_exists?: &quot;overwrite&quot;|&quot;skip&quot;}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.count" func="yes">
+			<Overload retVal="integer" descr="The number of caches matching the active filter.&#x0a;Returns integer — Number of caches shown.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.create_database" func="yes">
+			<Overload retVal="string" descr="Create a new, empty database in the default database folder and add it to the&#x0a;list. The active database does not change. Fails if the name is taken or its&#x0a;file already exists. The macro needs permission to change databases.&#x0a;Returns string — The name actually used (surrounding spaces removed).">
+				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.create_folder" func="yes">
+			<Overload retVal="string" descr="Create a folder, with any missing folders above it, and return it. A relative&#x0a;path is resolved against the macro file's folder. The folder it goes into needs&#x0a;write permission; for an unapproved one the user is asked first. A folder that&#x0a;exists already is fine.&#x0a;Returns string — The folder (full path).">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.current" func="yes">
+			<Overload retVal="opensak.Cache?" descr="The cache selected in the grid.&#x0a;Returns opensak.Cache? — The cache, or nil if no row is selected.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.custom_fields" func="yes">
+			<Overload retVal="opensak.CustomField[]" descr="The custom fields of the active database (or of `database`), by position: user-&#x0a;defined fields per cache, as in GSAK, with `name`, `type` (&quot;string&quot;, &quot;integer&quot;,&#x0a;&quot;real&quot;, &quot;date&quot; or &quot;boolean&quot;), `default`, `scope` (&quot;local&quot;: this database;&#x0a;&quot;global&quot;: every database), `origin` (&quot;gsak&quot; when imported from GSAK, else&#x0a;&quot;opensak&quot;) and `expression` (GSAK's display expression, if any). Their values&#x0a;are the `custom` field of a cache. See Custom fields.&#x0a;Returns opensak.CustomField[] — One table per field; empty while there are none.">
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.database" func="yes">
+			<Overload retVal="string" descr="The name of the active database.&#x0a;Returns string — Database name.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.database_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a database with this name is in the database list (exact, case-sensitive&#x0a;match).&#x0a;Returns boolean — true if it exists.">
+				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.databases" func="yes">
+			<Overload retVal="{name: string, path: string, active: boolean, size_mb: number}[]" descr="All databases in OpenSAK's database list, sorted by name.&#x0a;Returns {name: string, path: string, active: boolean, size_mb: number}[] — One&#x0a;table per database.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.date" />
+		<KeyWord name="opensak.date.diff" func="yes">
+			<Overload retVal="integer" descr="Whole days from date *a* to date *b* (negative if *b* is earlier). Dates are&#x0a;&quot;YYYY-MM-DD&quot; strings (a time after it is ignored) or seconds since the epoch.&#x0a;Returns integer — Days.">
+				<Param name="a: string|number" />
+				<Param name="b: string|number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.date.format" func="yes">
+			<Overload retVal="string" descr="Format seconds since the epoch (e.g. from `os.time()` or `opensak.date.parse()`)&#x0a;in local time.&#x0a;Returns string — The formatted date.">
+				<Param name="t: number" />
+				<Param name="[fmt: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.date.parse" func="yes">
+			<Overload retVal="integer?" descr="Parse a date into seconds since the epoch, the same kind of value as&#x0a;`os.time()`. Without a format, ISO 8601 (`&quot;2026-10-06&quot;`,&#x0a;`&quot;2026-10-06T14:30:00Z&quot;`) and `&quot;06.10.2026 [14:30[:00]]&quot;` are understood. Times&#x0a;without a zone are local time.&#x0a;Returns integer? — Seconds since the epoch, or nil if the text does not parse.">
+				<Param name="text: string" />
+				<Param name="[fmt: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.date.period" func="yes">
+			<Overload retVal="string" descr="The period a date falls in, named as opensak.stats.group names it: &quot;day&quot;&#x0a;(&quot;2026-10-06&quot;), &quot;week&quot; (&quot;2026-W41&quot;), &quot;month&quot; (&quot;2026-10&quot;), &quot;year&quot; (&quot;2026&quot;) or&#x0a;&quot;weekday&quot; (&quot;Tue&quot;). For a field of your own to group or pivot by, e.g. the year ×&#x0a;month table of your finds.&#x0a;Returns string — The period.">
+				<Param name="date: string|number" />
+				<Param name="period: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.define_custom_field" func="yes">
+			<Overload retVal="opensak.CustomField" descr="Define a custom field in the active database: `name` (letters, digits and `_`,&#x0a;not a cache column or an SQL keyword), `type`, optionally `default` (shown for&#x0a;every cache nobody set), `scope` (&quot;local&quot;, the default, or &quot;global&quot; for every&#x0a;database) and `expression`: SQL the cache list shows instead of the value, e.g.&#x0a;`nullif(Finds, -1)` (filters and macros keep using the value). A field of that&#x0a;name and type already there is returned unchanged, so a macro can define its&#x0a;fields on every run; another type is an error. Needs the user's permission like&#x0a;opensak.update(). See Custom fields.&#x0a;Returns opensak.CustomField — The field, as opensak.custom_fields() lists it.">
+				<Param name="field: opensak.CustomFieldDefinition" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete" func="yes">
+			<Overload retVal="boolean|integer" descr="Delete caches from the active database, each with its logs, waypoints,&#x0a;attributes, trackables and user note, like Waypoint → Delete cache. Takes one GC&#x0a;code, or a list of them, e.g. opensak.codes() for the caches of the active&#x0a;filter. Deleted caches cannot be restored from inside OpenSAK (only from a&#x0a;backup); at the end of the run the macro output says how many caches were&#x0a;deleted. The cache list and map drop them after the macro. Locked caches are&#x0a;deleted too: the lock only protects from imports. Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns boolean|integer — For one code: false if the cache is not in the&#x0a;database. For a list: the number of caches deleted.">
+				<Param name="code: string" />
+			</Overload>
+			<Overload retVal="boolean|integer" descr="Delete caches from the active database, each with its logs, waypoints,&#x0a;attributes, trackables and user note, like Waypoint → Delete cache. Takes one GC&#x0a;code, or a list of them, e.g. opensak.codes() for the caches of the active&#x0a;filter. Deleted caches cannot be restored from inside OpenSAK (only from a&#x0a;backup); at the end of the run the macro output says how many caches were&#x0a;deleted. The cache list and map drop them after the macro. Locked caches are&#x0a;deleted too: the lock only protects from imports. Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns boolean|integer — For one code: false if the cache is not in the&#x0a;database. For a list: the number of caches deleted.">
+				<Param name="codes: string[]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_attribute" func="yes">
+			<Overload retVal="boolean" descr="Delete a attribute from the active database. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns boolean — false if there is no attribute with this id.">
+				<Param name="id: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_custom_field" func="yes">
+			<Overload retVal="boolean" descr="Delete a custom field of the active database; a global one is deleted from every&#x0a;database. Its values are kept until the user removes them in Tools → Custom&#x0a;fields, so defining it again (same name and type) does not bring them back.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no such field.">
+				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_file" func="yes">
+			<Overload retVal="boolean" descr="Delete a file (GSAK's FileErase). A relative path is resolved against the macro&#x0a;file's folder. Its folder needs write permission; for an unapproved one the user&#x0a;is asked first. Only the file types opensak.copy_file() writes can be deleted,&#x0a;never a folder, a link or OpenSAK's own files.&#x0a;Returns boolean — false if the file did not exist.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_folder" func="yes">
+			<Overload retVal="boolean" descr="Delete an empty folder; a folder with anything in it is an error, so delete its&#x0a;files first. The folder it is in needs write permission. A folder listed in&#x0a;Settings → Folder permissions is never deleted.&#x0a;Returns boolean — false if the folder did not exist.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_log" func="yes">
+			<Overload retVal="boolean" descr="Delete a log from the active database. OpenSAK updates the cache's log counts&#x0a;and dates. Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no log with this id.">
+				<Param name="id: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_trackable" func="yes">
+			<Overload retVal="boolean" descr="Delete a trackable from the active database. OpenSAK updates the cache's&#x0a;trackable count. Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no trackable with this id.">
+				<Param name="id: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.delete_waypoint" func="yes">
+			<Overload retVal="boolean" descr="Delete a waypoint from the active database. OpenSAK updates the cache's waypoint&#x0a;count. Needs the user's permission like opensak.update().&#x0a;Returns boolean — false if there is no waypoint with this id.">
+				<Param name="id: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.description" func="yes">
+			<Overload retVal="{short: string?, long: string?, html: boolean}?" descr="The listing description of a cache. Not part of the cache table because it can&#x0a;be large.&#x0a;Returns {short: string?, long: string?, html: boolean}? — Short and long&#x0a;description and whether they are HTML; nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.detach" func="yes">
+			<Overload descr="Detach a database attached with opensak.attach(). Optional: everything is&#x0a;detached when the macro ends. Cannot be called inside opensak.transaction().">
+				<Param name="schema: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.exit" func="yes">
+			<Overload descr="End the macro right away. pcall cannot catch it, and it is not an error: the&#x0a;macro window shows the code, and `opensak --run-macro` exits with it.">
+				<Param name="[code: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.export_file" func="yes">
+			<Overload retVal="string?, integer?" descr="Export the caches of the active filter with a saved export setting (File →&#x0a;Export → GPX/LOC/GGZ: format, folder, file name, if the file exists, corrected&#x0a;coordinates, max. caches). The file name variables are filled in as in the&#x0a;dialog, {filter} with the name of the active filter and {center} with the active&#x0a;centre point. The file goes into *folder* if given, else into the setting's&#x0a;folder. That folder needs write permission (Settings → Folder permissions); for&#x0a;an unapproved one the user is asked first. Nothing is written when no cache with&#x0a;coordinates is shown, or when the file exists and the setting says skip (or ask,&#x0a;and the user answers No).&#x0a;Returns string?, integer? — The file written and the number of caches in it; nil&#x0a;if nothing was written.">
+				<Param name="setting: string" />
+				<Param name="[folder: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.export_gpx" func="yes">
+			<Overload retVal="string?, integer?" descr="Export the caches of the active filter without a saved export setting. `path` is&#x0a;the file to write; its name may use the variables of the export dialog&#x0a;({database}, {filter}, {center}, {date}, {count}, ...), and a relative path is&#x0a;resolved against the macro file's folder. Its folder needs write permission,&#x0a;like opensak.export_file(). `rename(c)` and `description(c)` are called with&#x0a;each cache table (see Cache fields) and return the name and the waypoint&#x0a;description to write (nil keeps the default). With `target = &quot;device&quot;`, the file&#x0a;goes into the GPX or GGZ folder of the connected Garmin device instead (`path`&#x0a;is then only the file name; MTP devices are not supported yet). Nothing is&#x0a;written when no cache with coordinates is shown, or when the file exists and&#x0a;`if_exists` says skip (or ask, and the user answers No).&#x0a;Returns string?, integer? — The file written and the number of caches in it; nil&#x0a;if nothing was written.">
+				<Param name="spec: opensak.ExportSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.export_poi" func="yes">
+			<Overload retVal="string[]?, integer?" descr="Export the caches of the active filter and/or their child waypoints as Garmin&#x0a;POI files (.gpi) with a saved POI export setting (File → Export Garmin POI:&#x0a;folder, file name, if the file exists, which points, name/description/extra&#x0a;templates, category, proximity alert, icon, max. points). The file name&#x0a;variables are filled in as in the dialog. With &quot;one file per waypoint type&quot; a&#x0a;file is written for the caches and one for every waypoint type. The files go&#x0a;into *folder* if given, else into the setting's folder, which needs write&#x0a;permission (Settings → Folder permissions); for an unapproved one the user is&#x0a;asked first. An existing file is skipped when the setting says skip (or ask, and&#x0a;the user answers No).&#x0a;Returns string[]?, integer? — The files written and the number of POIs in them;&#x0a;nil if nothing was written.">
+				<Param name="setting: string" />
+				<Param name="[folder: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.file_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a file exists (false for a folder). A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission, like&#x0a;opensak.read_text().&#x0a;Returns boolean — true if the file exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.file_info" func="yes">
+			<Overload retVal="{name: string, path: string, dir: boolean, size: integer, modified: integer}?" descr="Size and modification time of one file or folder, as in opensak.list_dir(); nil&#x0a;if it does not exist. A relative path is resolved against the macro file's&#x0a;folder. The folder needs read permission.&#x0a;Returns {name: string, path: string, dir: boolean, size: integer, modified:&#x0a;integer}? — nil if there is nothing at *path*.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.filter" func="yes">
+			<Overload retVal="integer" descr="Build a filter from the given keys (see Filter keys; combined with AND unless&#x0a;`mode = &quot;OR&quot;`) and apply it. Usually called with table syntax: `opensak.filter{&#x0a;... }`. When nothing matches, the view is left unchanged.&#x0a;Returns integer — Number of matching caches (0 = view unchanged).">
+				<Param name="spec: opensak.FilterSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.filter_name" func="yes">
+			<Overload retVal="string" descr="The name of the active filter: the `label` of opensak.filter{}, a profile name,&#x0a;or &quot;&quot; when no filter is active. The same as the {filter} variable of an export&#x0a;file name.&#x0a;Returns string — The filter name; &quot;&quot; for none.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.filter_profile" func="yes">
+			<Overload retVal="integer" descr="Apply a saved filter profile.&#x0a;Returns integer — Number of matching caches.">
+				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.folder_exists" func="yes">
+			<Overload retVal="boolean" descr="Whether a folder exists. A relative path is resolved against the macro file's&#x0a;folder. The folder containing it needs read permission.&#x0a;Returns boolean — true if the folder exists.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.form" func="yes">
+			<Overload retVal="table&lt;string, any&gt;?, string?" descr="Show a dialog built from a table (see Forms) and wait until it is closed. Fields&#x0a;with a value come back in a table keyed by their `id`. Callbacks such as&#x0a;`on_change` run while the form stays open and can change it through the handle&#x0a;they get. Without `buttons` the form has OK and Cancel. Tools → Form designer in&#x0a;the macro window builds forms visually and imports GSAK forms.&#x0a;Returns table&lt;string, any&gt;?, string? — The values by field id and the id of the&#x0a;button (or `exit_on_change` field, or &quot;timeout&quot;) that closed the form; nil if it&#x0a;was cancelled.">
+				<Param name="spec: opensak.FormSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.geo" />
+		<KeyWord name="opensak.geo.outlines" func="yes">
+			<Overload retVal="table?, string[]?" descr="The outlines of countries, states or counties (`layer`) as a GeoJSON&#x0a;FeatureCollection (a table), e.g. for a map drawn by the macro itself or for&#x0a;another program. Like opensak.chart.map, `rows` puts the value (field `value`,&#x0a;default &quot;count&quot;) of each row into the properties of the region its field `key`&#x0a;(default &quot;key&quot;) names — matched ignoring case, accents and punctuation —&#x0a;`within` limits the countries and `extent = &quot;all&quot;` shows all regions instead of&#x0a;zooming to the ones with a value. `around` (rows with `lat`/`lon`) zooms to&#x0a;those points instead, `box` (`{min_lon, min_lat, max_lon, max_lat}`, e.g. the&#x0a;`bbox` of another collection) to an area. The outlines are clipped to the area&#x0a;and simplified for a map about `detail` pixels wide (default 800). Every feature&#x0a;has `properties.name` (and `country` for states and counties). The second value&#x0a;lists the names that match no region. nil if the boundary data is not installed.&#x0a;Returns table?, string[]? — The FeatureCollection and the names without a&#x0a;region.">
+				<Param name="[layer: string]" />
+				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string, extent?: string, around?: table[], lat?: string, lon?: string, box?: number[], detail?: number}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.geo.regions" func="yes">
+			<Overload retVal="{name: string, country?: string}[]?, string[]?" descr="The regions of a layer (&quot;country&quot;, &quot;state&quot; or &quot;county&quot;) in the boundary data&#x0a;used by Update location and opensak.chart.map, one row per name: `{name =}`, for&#x0a;states and counties also `country`. `within` limits them to one country or a&#x0a;list. With `rows` (e.g. finds per state from opensak.stats.group) the rows are&#x0a;matched to the regions like opensak.chart.map does — the field `key` (default&#x0a;&quot;key&quot;) names the region, ignoring case, accents and punctuation — and a region&#x0a;named by rows gets the sum of their field `value` (default &quot;count&quot;); the second&#x0a;value then lists the names that match no region. With it a macro can say &quot;18 of&#x0a;26 cantons&quot;. nil if the boundary data is not installed.&#x0a;Returns {name: string, country?: string}[]?, string[]? — The regions, sorted&#x0a;(with `rows`: and the names that match none).">
+				<Param name="[layer: string]" />
+				<Param name="[options: {within?: string|string[], rows?: table[], key?: string, value?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.get_url" func="yes">
+			<Overload retVal="string, opensak.UrlInfo" descr="Download a web page or file (GSAK's GetUrl), e.g. to check a puzzle answer&#x0a;online or fetch a list before working with it. GET only, over http or https; no&#x0a;cookies, no custom headers, and no user name or password in the URL. Before a&#x0a;macro first contacts a web site (host), the user is asked: this time only,&#x0a;always (for this macro, listed in Settings → Folder permissions) or deny. Each&#x0a;redirect (at most 5) is checked the same way. A host on the local network (a&#x0a;router, a NAS) is asked about separately. geocaching.com, coord.info and&#x0a;Groundspeak's other sites (waymarking.com, wherigo.com, ...) can never be&#x0a;contacted: their terms of use don't allow automated access. List the hosts in&#x0a;the macro's `Network:` header so users see them before running it; the header&#x0a;approves nothing by itself. An HTTP error status (404, 500) is no error: check&#x0a;`info.status`. A failed request (no answer, too large, refused) raises an error,&#x0a;which `pcall` catches. At most 200 requests per run, and at least 1 s between&#x0a;two requests to the same host.&#x0a;Returns string, opensak.UrlInfo — The body, as text decoded with the charset the&#x0a;server names (UTF-8 if none; invalid bytes replaced) or, with `binary`, as&#x0a;bytes; and `{ status, content_type, url }`, `url` being the address after&#x0a;redirects.">
+				<Param name="url: string" />
+				<Param name="[options: opensak.GetUrlOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html" />
+		<KeyWord name="opensak.html.columns" func="yes">
+			<Overload retVal="string" descr="Put HTML parts (e.g. two tables) side by side; on a narrow window they go one&#x0a;below the other.&#x0a;Returns string — HTML.">
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.escape" func="yes">
+			<Overload retVal="string" descr="*value* as text for HTML: `&amp; &lt; &gt; &quot; '` are escaped, nil becomes &quot;&quot;, 3.0 becomes&#x0a;&quot;3&quot;.&#x0a;Returns string — Escaped text.">
+				<Param name="value: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.matrix" func="yes">
+			<Overload retVal="string" descr="A matrix (from opensak.stats.pivot) as an HTML table: the values of the two&#x0a;fields as headings, each cell shaded by its value. `percent = true` shows each&#x0a;cell as a share of all, `totals = true` adds a total row and column, `shade =&#x0a;false` leaves the colours out; `row_title` and `col_title` name the fields,&#x0a;`color` (&quot;#rrggbb&quot;) the shading. Inline styles only, so the shading also shows&#x0a;without the stylesheet of opensak.html.page.&#x0a;Returns string — HTML.">
+				<Param name="matrix: opensak.Matrix" />
+				<Param name="[options: {shade?: boolean, percent?: boolean, totals?: boolean, row_title?: string, col_title?: string, color?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.page" func="yes">
+			<Overload retVal="string" descr="A complete HTML page for opensak.write_text: `title` (also the heading),&#x0a;`subtitle`, the body — the strings in the list part of the table, and/or `body`&#x0a;— and `footer`. A built-in stylesheet with a light and a dark theme styles&#x0a;headings (`&lt;h2&gt;`), tables, tiles and columns; `css` is added after it. The body&#x0a;is put in as it is: build it from the html.* functions, or escape your own text&#x0a;with html.escape.&#x0a;Returns string — The page.">
+				<Param name="spec: {title?: string, subtitle?: string, css?: string, lang?: string, footer?: string, body?: string|string[], [integer]: string}" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.table" func="yes">
+			<Overload retVal="string" descr="*rows* as an HTML table (values escaped), e.g. the rows of opensak.sql() (GSAK's&#x0a;SqlToHtml). `columns` lists the fields to show, each a field name or `{field,&#x0a;heading}`; without it all fields are shown, sorted by name — a Lua table has no&#x0a;field order, so pass `columns` to keep the order of the query. Number columns&#x0a;are right-aligned. `link = { code = &quot;url&quot; }` turns the code cells into links to&#x0a;the row's url field (http/https only). `bars = {&quot;count&quot;}` adds a bar next to&#x0a;each value of those number fields, scaled to the largest (in `color`,&#x0a;&quot;#rrggbb&quot;). The bars use inline styles only, so they also show without the&#x0a;stylesheet of opensak.html.page.&#x0a;Returns string — HTML.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {columns?: (string|string[])[], link?: table&lt;string, string&gt;, caption?: string, bars?: string[], color?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.html.tiles" func="yes">
+			<Overload retVal="string" descr="Key figures as a row of tiles: a list of `{label =, value =}`.&#x0a;Returns string — HTML.">
+				<Param name="items: {label: string, value: any}[]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.import_gpx" func="yes">
+			<Overload retVal="opensak.GpxImportReport" descr="Import GPX files and Pocket Query zips without any question (like File → Import&#x0a;GPX / PQ zip, then Import) and return what was done. *source* is the name of an&#x0a;import setting saved in that dialog — its files, folders and target database are&#x0a;used — or else the path of a `.gpx` / `.zip` file or of a folder. A folder&#x0a;imports every GPX / zip file directly in it (not in subfolders), looked up at&#x0a;each run, so the folder Pocket Queries are downloaded to can be imported every&#x0a;night. A GPX file's waypoints file next to it is imported with it. A relative&#x0a;path is resolved against the macro file's folder, and environment variables such&#x0a;as `%USERPROFILE%` are expanded; the files need read permission. The caches go&#x0a;into `database` if given, else the setting's database, else the active one.&#x0a;Files and folders of a setting that no longer exist are left out and listed in&#x0a;`missing`; a file that fails is reported and the others are still imported.&#x0a;Cancel stops after the current file. Unlike the dialog, country and state are&#x0a;not looked up afterwards (reverse geocoding). The summary is printed (unless&#x0a;`quiet`) and written to the log file.&#x0a;Returns opensak.GpxImportReport — What was imported, per file.">
+				<Param name="source: string" />
+				<Param name="[options: opensak.GpxImportOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.import_gsak" func="yes">
+			<Overload retVal="opensak.GsakImportReport" descr="Import GSAK databases without any question (like File → Import GSAK database,&#x0a;with the answers given up front) and return what was done. *source* is a GSAK&#x0a;backup .zip, a GSAK folder (the install / data folder with `gsak.db3` and&#x0a;`data/&lt;name&gt;/sqlite.db3`, its `data` folder, or one database's folder), a single&#x0a;`.db3` cache database (just that database), or `gsak.db3` (only user locations&#x0a;and saved filters). A relative path is resolved against the macro file's folder,&#x0a;and environment variables such as `%APPDATA%` are expanded; the folder needs&#x0a;read permission. Each GSAK database goes into the OpenSAK database of the same&#x0a;name, created if missing, unless `target` says otherwise. For an OpenSAK&#x0a;database that exists, `if_exists` decides: `&quot;skip&quot;` (default), `&quot;merge&quot;` (new&#x0a;caches added, existing ones updated, locked caches kept) or `&quot;overwrite&quot;`&#x0a;(emptied first). `filters` and `locations` also import the saved filters and&#x0a;user locations of `gsak.db3`; `true` skips the ones whose name exists when&#x0a;`if_exists` is `&quot;skip&quot;` and replaces them otherwise. Embedded note images are&#x0a;replaced by placeholders without asking. A database that fails is reported and&#x0a;the others are still imported. The summary is printed (unless `quiet`) and&#x0a;written to the log file.&#x0a;Returns opensak.GsakImportReport — What was imported, per database.">
+				<Param name="source: string" />
+				<Param name="[options: opensak.GsakImportOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.in_transaction" func="yes">
+			<Overload retVal="boolean" descr="Whether the macro is inside opensak.transaction().&#x0a;Returns boolean — true inside opensak.transaction().">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.input" func="yes">
+			<Overload retVal="string?" descr="Ask for one line of text.&#x0a;Returns string? — The text entered, or nil if cancelled.">
+				<Param name="prompt: string" />
+				<Param name="[default: string]" />
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert" func="yes">
+			<Overload retVal="string" descr="Add a new cache to the active database. `code`, `name`, `type`, `lat` and `lon`&#x0a;are required; any other writable field may be given too (see Changing caches),&#x0a;and `custom` for custom fields. Fails if the code is already in the database.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns string — The cache code as stored (upper case).">
+				<Param name="fields: opensak.CacheInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_attribute" func="yes">
+			<Overload retVal="integer?" descr="Add a attribute to a cache in the active database; `attribute_id` required.&#x0a;Needs the user's permission like opensak.update().&#x0a;Returns integer? — The new attribute's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.AttributeInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_log" func="yes">
+			<Overload retVal="integer?" descr="Add a log to a cache in the active database; `type` required. OpenSAK updates&#x0a;the cache's log counts and dates. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new log's id; nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.LogInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_trackable" func="yes">
+			<Overload retVal="integer?" descr="Add a trackable to a cache in the active database. OpenSAK updates the cache's&#x0a;trackable count. Needs the user's permission like opensak.update().&#x0a;Returns integer? — The new trackable's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.TrackableInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.insert_waypoint" func="yes">
+			<Overload retVal="integer?" descr="Add a waypoint to a cache in the active database; `prefix`, `type` required.&#x0a;OpenSAK updates the cache's waypoint count. Needs the user's permission like&#x0a;opensak.update().&#x0a;Returns integer? — The new waypoint's id; nil if the cache is not in the&#x0a;database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.WaypointInsert" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.list_dir" func="yes">
+			<Overload retVal="{name: string, path: string, dir: boolean, size: integer, modified: integer}[]" descr="The files and folders in a folder (not in its subfolders), sorted by name. A&#x0a;relative path is resolved against the macro file's folder. The folder needs read&#x0a;permission; for an unapproved one the user is asked first. `pattern` keeps the&#x0a;names that match it, ignoring case: `*` stands for any text, `?` for one&#x0a;character. At most 10,000 entries. Each entry has `name`, `path` (full path),&#x0a;`dir` (true for a folder), `size` (bytes, 0 for a folder) and `modified`&#x0a;(seconds since the epoch, like `os.time()`).&#x0a;Returns {name: string, path: string, dir: boolean, size: integer, modified:&#x0a;integer}[] — One table per entry.">
+				<Param name="folder: string" />
+				<Param name="[pattern: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.log" func="yes">
+			<Overload descr="Write a message to OpenSAK's log file and the macro output. Run with `opensak&#x0a;--run-macro`, it goes to stderr while print() goes to stdout.">
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.logs" func="yes">
+			<Overload retVal="opensak.Log[]?" descr="The logs of a cache, each with its `id` for opensak.update_log() and the fields&#x0a;listed under Logs, waypoints, attributes and trackables. Missing data is nil.&#x0a;Returns opensak.Log[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.macro_db" func="yes">
+			<Overload retVal="string" descr="Attach the macro's own SQLite database — a file named after the macro file with&#x0a;the extension .db3, in the macro's folder, created if missing — to the SQL&#x0a;functions as schema `macro`. In it the macro has full access through&#x0a;opensak.sql(), sql_each() and sql_write(): CREATE, DROP, ALTER, INSERT, UPDATE&#x0a;and DELETE on `macro.&lt;name&gt;` tables, indexes, views and triggers, and `PRAGMA&#x0a;macro.user_version`. Its data stays between runs. One statement can read and&#x0a;write the active database and the macro database together, e.g. `INSERT INTO&#x0a;macro.seen SELECT gc_code FROM caches`; the rules for the active database stay&#x0a;the same. Unqualified names mean the active database first, so create with&#x0a;`macro.` in front. opensak.tables() lists its tables as `macro.&lt;name&gt;`. The&#x0a;macro's folder must be writable for macros, like any file a macro writes&#x0a;(Settings → Folder permissions; the macros folder is by default); otherwise&#x0a;OpenSAK asks the user to allow it, and a denial makes the call fail. The first&#x0a;call creates the file, even if nothing is written to it, and prints its path in&#x0a;the macro output. OpenSAK remembers the file, and its backups include it in&#x0a;`macro_databases/`, wherever it is. If the folder cannot be written the call&#x0a;fails; a read-only file can be read but not changed. Unlike opensak.update() it&#x0a;needs no approval to change databases (see Changing caches). Changes inside&#x0a;opensak.transaction() are kept or undone together with those of the active&#x0a;database. The SQL statement ATTACH itself stays refused. Cannot be called inside&#x0a;opensak.transaction(); stays attached after opensak.switch_database(). The macro&#x0a;must be saved, as the file is named after it. In a macro started with&#x0a;opensak.run_macro() it attaches the called macro's own file instead; the&#x0a;caller's file is attached again when the called macro returns.&#x0a;Returns string — The path of the macro database file.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.macro_flag" func="yes">
+			<Overload retVal="integer" descr="Set, clear or swap the macro flag (field `macro_flag`) of many caches at once,&#x0a;like GSAK's MACROFLAG: the caches of the active filter, the given GC code(s), or&#x0a;`{ all = true }` for every cache of the active database. The macro flag is the&#x0a;macros' own, separate from the user flag; filter with `filter{ macro_flag = true&#x0a;}`. Needs the user's permission like opensak.update().&#x0a;Returns integer — The number of caches whose flag changed.">
+				<Param name="action: &quot;set&quot;|&quot;clear&quot;|&quot;swap&quot;" />
+				<Param name="[caches: string|string[]|{all: true}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.macros_dir" func="yes">
+			<Overload retVal="string" descr="OpenSAK's macros folder (read permission by default), without a trailing&#x0a;separator.&#x0a;Returns string — Folder path.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.message" func="yes">
+			<Overload descr="Show a message with an OK button and wait until the user closes it.">
+				<Param name="text: string" />
+				<Param name="[title: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.move_caches" func="yes">
+			<Overload retVal="integer" descr="Move caches from the active database to another one, with all logs, waypoints,&#x0a;attributes, trackables and notes (like Database → Move caches). By default the&#x0a;caches of the active filter. When a cache already exists in the target,&#x0a;`if_exists` decides: `&quot;newer&quot;` (default) replaces it only if the active&#x0a;database's copy was imported later, `&quot;replace&quot;` always, `&quot;skip&quot;` never. A cache&#x0a;not written to the target stays in the active database. The macro needs&#x0a;permission to change databases.&#x0a;Returns integer — Number of caches moved.">
+				<Param name="target: string" />
+				<Param name="[options: opensak.TransferOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.move_file" func="yes">
+			<Overload retVal="string?" descr="Move or rename a file: like opensak.copy_file(), then the source is deleted, so&#x0a;its folder needs write permission too and it must be one of the file types&#x0a;listed there. Nothing is copied when the source may not be deleted.&#x0a;Returns string? — The new file (full path); nil if skipped (the source is then&#x0a;kept).">
+				<Param name="source: string" />
+				<Param name="target: string" />
+				<Param name="[options: {if_exists?: &quot;overwrite&quot;|&quot;skip&quot;}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.open" func="yes">
+			<Overload descr="Open a file in its default app, e.g. an HTML report in the browser, so a report&#x0a;macro can end by showing its result. A relative path is resolved against the&#x0a;macro file's folder. A file this run wrote (opensak.write_text,&#x0a;opensak.export_*, opensak.copy_file / move_file) or one in opensak.temp_dir()&#x0a;opens directly; for any other file the user is asked first. Only these file&#x0a;types: .html .htm .svg .txt .csv .tsv .md .json .gpx .kml .pdf — never a&#x0a;program, script or shortcut — and no URLs. At most 5 files per run. Needs the&#x0a;user interface.">
+				<Param name="path: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.profiles" func="yes">
+			<Overload retVal="string[]" descr="The names of all saved filter profiles.&#x0a;Returns string[] — Profile names.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.progress" func="yes">
+			<Overload retVal="opensak.Progress" descr="Open a progress window with a Cancel button, for long loops. `p:update(i [,&#x0a;text])` moves the bar to *i* of *total* and returns false once the user has&#x0a;pressed Cancel; `p:close()` closes the window (also done when the macro ends).&#x0a;Without *total* the bar just shows that work is going on.&#x0a;Returns opensak.Progress — The window.">
+				<Param name="title: string" />
+				<Param name="[total: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re" />
+		<KeyWord name="opensak.re.escape" func="yes">
+			<Overload retVal="string" descr="Escape every character that has a meaning in a regular expression, so the text&#x0a;matches literally (GSAK's RegExEscape), e.g. to search for a cache name in a&#x0a;pattern.&#x0a;Returns string — The escaped text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re.find" func="yes">
+			<Overload retVal="string?, string?..." descr="Search for the first match of a regular expression (Python syntax). Each call&#x0a;may run at most 2 s.&#x0a;Returns string?, string?... — The whole match followed by the captures (nil for&#x0a;a group that did not take part), or nil if there is no match.">
+				<Param name="text: string" />
+				<Param name="pattern: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re.findall" func="yes">
+			<Overload retVal="string[]|string[][]" descr="All non-overlapping matches. Without capture groups each item is the whole&#x0a;match, with one group it is the capture, with several it is an array of the&#x0a;captures.&#x0a;Returns string[]|string[][] — The matches.">
+				<Param name="text: string" />
+				<Param name="pattern: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re.match" func="yes">
+			<Overload retVal="boolean" descr="Whether the text contains a match. Use `^` and `$` to match the whole text.&#x0a;Returns boolean — true if the pattern matches.">
+				<Param name="text: string" />
+				<Param name="pattern: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re.replace" func="yes">
+			<Overload retVal="string, integer" descr="Replace matches. In a replacement string, `\1` or `\g&lt;name&gt;` insert a capture. A&#x0a;replacement function gets the whole match and the captures and returns the new&#x0a;text (nil or false keeps the match).&#x0a;Returns string, integer — The new text and the number of replacements.">
+				<Param name="text: string" />
+				<Param name="pattern: string" />
+				<Param name="repl: string|fun(match: string, ...: string?): any" />
+				<Param name="[count: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.re.split" func="yes">
+			<Overload retVal="string[]" descr="Split the text at every non-empty match.&#x0a;Returns string[] — The pieces between the matches.">
+				<Param name="text: string" />
+				<Param name="pattern: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.read_csv" func="yes">
+			<Overload retVal="table&lt;string, string&gt;[]" descr="Read a CSV file (UTF-8) into an array of rows keyed by the header line. A&#x0a;relative path is resolved against the macro file's folder. If the file's folder&#x0a;has no read permission (Settings → Folder permissions), OpenSAK asks the user to&#x0a;allow it for this run or always. The file may be at most 10 MB.&#x0a;Returns table&lt;string, string&gt;[] — One table per data row, keyed by header.">
+				<Param name="path: string" />
+				<Param name="[sep: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.read_text" func="yes">
+			<Overload retVal="string" descr="Read a whole text file, of any file type. A relative path is resolved against&#x0a;the macro file's folder. The folder needs read permission; for an unapproved one&#x0a;the user is asked first. UTF-8 unless `encoding` says otherwise (`&quot;utf-8&quot;`,&#x0a;`&quot;latin-1&quot;`, `&quot;cp1252&quot;`); a UTF-8 byte order mark is removed and line endings&#x0a;become `&quot;\n&quot;`. At most 10 MB.&#x0a;Returns string — The file's text.">
+				<Param name="path: string" />
+				<Param name="[options: {encoding?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.refresh" func="yes">
+			<Overload descr="Redraw the cache list, detail panel and map now. Changes a macro makes are&#x0a;otherwise shown when it ends.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.restore_filter" func="yes">
+			<Overload retVal="integer" descr="Apply a filter saved with opensak.save_filter(), like GSAK's RestoreFilter(). As&#x0a;with opensak.filter{}, the view is left unchanged when nothing matches. A filter&#x0a;saved while none was active clears the filter.&#x0a;Returns integer — Number of matching caches (0 = view unchanged, unless the&#x0a;saved filter was empty).">
+				<Param name="saved: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.resync" func="yes">
+			<Overload retVal="integer" descr="Recalculate now the columns OpenSAK maintains itself (distance and bearing, log,&#x0a;waypoint and trackable counts, log dates) for the caches changed so far in the&#x0a;open opensak.transaction(). Inside a transaction they are recalculated only&#x0a;once, just before the commit, which makes many writes much faster; until then&#x0a;opensak.cache, sql and the like still see the old values. Call resync() when a&#x0a;later read inside the transaction depends on them. Outside a transaction it does&#x0a;nothing, as every write is recalculated before its own commit.&#x0a;Returns integer — Number of caches recalculated (0 outside a transaction).">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.run_macro" func="yes">
+			<Overload retVal="any..." descr="Run another macro and wait until it has finished, e.g. to chain several macros&#x0a;from one control macro. A relative path is looked up in the folder of the&#x0a;calling macro, and `.lua` is added when the name has no extension. The called&#x0a;macro gets its own global variables; values are passed as extra arguments (read&#x0a;them with `...`) and come back as its return values. An error in it stops the&#x0a;calling macro too, unless caught with `pcall`. Macros run this way share the&#x0a;run's limits, sleep time and folder approvals; they may call each other at most&#x0a;10 levels deep.&#x0a;Returns any... — What the macro returns.">
+				<Param name="file: string" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.save_filter" func="yes">
+			<Overload retVal="string" descr="The active filter (with its name, and any quick filter or search box) as a&#x0a;string, to put back later with opensak.restore_filter() — e.g. to leave the&#x0a;user's filter as it was after the macro filtered for its own work. Like GSAK's&#x0a;SaveFilter(). The sort order is not included. The string can be stored with&#x0a;opensak.settings.save(); don't build or change it.&#x0a;Returns string — The saved filter; when no filter is active, restoring it clears&#x0a;the filter.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.select" func="yes">
+			<Overload retVal="boolean" descr="Select a cache in the cache list and show it in the detail panel and on the map,&#x0a;like a click on its row.&#x0a;Returns boolean — false if the cache is not among the caches of the active&#x0a;filter.">
+				<Param name="code: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.selected" func="yes">
+			<Overload retVal="string[]" descr="The GC codes of the rows selected in the grid.&#x0a;Returns string[] — GC codes; empty if nothing is selected.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.set_center" func="yes">
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="name: string" />
+			</Overload>
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="lat: number" />
+				<Param name="lon: number" />
+				<Param name="[name: string]" />
+			</Overload>
+			<Overload retVal="{name: string, lat: number, lon: number, saved: boolean}" descr="Change the active centre point, like the centre drop-down in the toolbar (GSAK's&#x0a;Centre): a saved centre point by name, or coordinates with an optional name to&#x0a;show. Coordinates are not saved as a user location. Distance and bearing of&#x0a;every cache in the active database are recalculated and stored, so the macro&#x0a;needs permission to change the database, and it cannot be used inside&#x0a;opensak.transaction(). The centre stays when the macro ends.&#x0a;Returns {name: string, lat: number, lon: number, saved: boolean} — The new&#x0a;centre point, as opensak.center() returns it.">
+				<Param name="coords: string" />
+				<Param name="[name: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.set_companion_table" func="yes">
+			<Overload retVal="opensak.CompanionTable" descr="Change how OpenSAK treats one of the macro's own tables or views in the&#x0a;companion database (see opensak.companion()). `linked = false`: the rows stay&#x0a;where they are when caches are deleted, copied or moved, even with a `gc_code`&#x0a;column. `linked = true` or `code_column`: the table is cache-linked by that&#x0a;column (default `gc_code`), which must exist. `description` is shown with the&#x0a;table in OpenSAK. Keys left out stay as they are. Create the table first.&#x0a;Returns opensak.CompanionTable — The table, as opensak.companion_tables() lists&#x0a;it.">
+				<Param name="spec: opensak.CompanionTableSpec" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.set_corrected" func="yes">
+			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many&#x0a;caches, run the loop inside opensak.transaction(): much faster, and undone&#x0a;completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="lat: number|string" />
+				<Param name="lon: number|string" />
+			</Overload>
+			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many&#x0a;caches, run the loop inside opensak.transaction(): much faster, and undone&#x0a;completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="coords: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.settings" />
+		<KeyWord name="opensak.settings.clear" func="yes">
+			<Overload descr="Remove this macro's saved settings, so the next opensak.settings.load() returns&#x0a;an empty table.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.settings.load" func="yes">
+			<Overload retVal="table" descr="The settings this macro saved with opensak.settings.save(), or an empty table on&#x0a;the first run. Each macro has its own settings, kept per macro file in the&#x0a;`settings` folder of the macros folder; no other macro can read them. A renamed&#x0a;macro starts with empty settings, and an unsaved macro has none.&#x0a;Returns table — The saved settings; empty if there are none.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.settings.save" func="yes">
+			<Overload descr="Save settings for the next run of this macro, replacing the saved ones. Strings,&#x0a;numbers, booleans and nested tables can be saved; a table needs string keys, or&#x0a;1, 2, 3, … for a list. Functions and cyclic tables are refused, and the settings&#x0a;may take up at most 1 MB.">
+				<Param name="settings: table" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.sleep" func="yes">
+			<Overload descr="Pause the macro. One pause lasts at most 10 s and all pauses of a run together&#x0a;at most 60 s; a cancelled macro stops at its next pause.">
+				<Param name="ms: number" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.sort" func="yes">
+			<Overload descr="Sort the cache list, like a click on a column header. opensak.caches() and&#x0a;opensak.codes() then return the caches in this order. Fields: `name`, `code`,&#x0a;`type`, `container`, `difficulty`, `terrain`, `hidden`, `placed_by`, `country`,&#x0a;`state`, `county`, `found`, `found_date`, `dnf`, `dnf_date`, `ftf`, `archived`,&#x0a;`premium`, `distance`, `bearing`, `favorite_points`, `trackable_count`,&#x0a;`user_flag`, `locked`, `user_sort`, `user_data1`, `user_data2`, `user_data3`,&#x0a;`user_data4`, `macro_sort`. `macro_sort` has no column in the cache list, so no&#x0a;column header shows the sort; it compares as text, so pad numbers (&quot;0042&quot;).">
+				<Param name="field: string" />
+				<Param name="[direction: &quot;asc&quot;|&quot;desc&quot;]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.sql" func="yes">
+			<Overload retVal="table&lt;string, any&gt;[]" descr="Run a read-only SQL query (SQLite) against the active database (or the one named&#x0a;by the `database` option) and return all rows. Only reading statements are&#x0a;allowed, except on TEMP tables: a macro may create, fill, change and drop its&#x0a;own TEMP tables, views and indexes (`CREATE TEMP TABLE ...`) and use them in any&#x0a;query, opensak.sql_write() included. They are never stored in the database and&#x0a;are gone when the macro ends or calls opensak.switch_database(); changes to them&#x0a;inside opensak.transaction() are undone with it. A TEMP table may not take the&#x0a;name of a table of the database. The tables and columns macros may rely on, and&#x0a;the format of their values, are listed in Database tables for macros;&#x0a;opensak.tables() and opensak.columns() list everything there is. Use `AS` to&#x0a;name computed columns. NULL values are nil. At most 100,000 rows; use&#x0a;opensak.sql_each() for more. A query is aborted after 60 s.&#x0a;Returns table&lt;string, any&gt;[] — One table per row, keyed by column name.">
+				<Param name="query: string" />
+				<Param name="[params: table]" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.sql_each" func="yes">
+			<Overload retVal="fun(): table&lt;string, any&gt;?" descr="Like opensak.sql(), but returns an iterator for a generic `for` that fetches the&#x0a;rows in chunks — for results of any size. The tables and columns to rely on are&#x0a;listed in Database tables for macros.&#x0a;Returns fun(): table&lt;string, any&gt;? — Iterator for a generic `for`.">
+				<Param name="query: string" />
+				<Param name="[params: table]" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.sql_write" func="yes">
+			<Overload retVal="integer" descr="Run one INSERT, UPDATE or DELETE statement (SQLite) against the active database&#x0a;— the power tool for bulk work, changing many rows with one statement. For a&#x0a;single cache or row, prefer `opensak.update()`, `insert{}`, `delete()`,&#x0a;`insert_&lt;x&gt;()`, `update_&lt;x&gt;()` and `delete_&lt;x&gt;()`, which check each field and&#x0a;need no knowledge of the schema (see Changing caches). Only the cache tables can&#x0a;be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`,&#x0a;`waypoints`), and an UPDATE may not set the keys or the columns OpenSAK&#x0a;maintains itself (see Changing caches). Deleting a cache also deletes its logs,&#x0a;waypoints, attributes, trackables and user note, as opensak.delete() does.&#x0a;Locked caches are changed and deleted like any other (add `AND locked = 0` to&#x0a;leave them alone). REPLACE (`INSERT OR REPLACE`, `REPLACE INTO`, …) is refused,&#x0a;as it would delete those too; to update or insert, use `INSERT … ON CONFLICT&#x0a;(gc_code) DO UPDATE SET …`. OpenSAK recalculates distances, counts and log dates&#x0a;of the caches the statement touched — inside opensak.transaction() once at its&#x0a;end (see opensak.resync()). An INSERT only needs the real data: the columns&#x0a;opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`,&#x0a;`latitude` and `longitude` for a cache (see Changing caches); every other column&#x0a;gets its default. Each statement is committed on its own (or with the&#x0a;surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and&#x0a;the like are refused; use opensak.transaction(). Needs the user's permission&#x0a;like opensak.update().&#x0a;Returns integer — Number of rows inserted, updated or deleted (without the rows&#x0a;deleted along with a cache).">
+				<Param name="query: string" />
+				<Param name="[params: table]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats" />
+		<KeyWord name="opensak.stats.every" func="yes">
+			<Overload retVal="table[]" descr="Every *step*-th row of *rows*, e.g. every 1000th find (sort the rows first, see&#x0a;opensak.stats.sort): copies with the row number in `n`. The first and the last&#x0a;row are included unless `first = false` / `last = false`. With `date = field`,&#x0a;`days` holds the days since the previous row picked.&#x0a;Returns table[] — Copies of the picked rows.">
+				<Param name="rows: table[]" />
+				<Param name="step: integer" />
+				<Param name="[options: {first?: boolean, last?: boolean, date?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.fill" func="yes">
+			<Overload retVal="table[]" descr="*rows* sorted by the period in field `key` (default &quot;key&quot;), with a row added for&#x0a;each missing &quot;day&quot;, &quot;month&quot; (default) or &quot;year&quot; between the first and the last&#x0a;row, or between `from` and `to`. Number fields of an added row are 0. Use it&#x0a;before a chart or table over time, so months without finds still take their&#x0a;place.&#x0a;Returns table[] — New rows.">
+				<Param name="rows: table[]" />
+				<Param name="[options: {key?: string, period?: string, from?: string, to?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.group" func="yes">
+			<Overload retVal="{key: any, count: integer, distinct?: integer, sum?: number}[]" descr="Count *rows* per value of the field *by* and return one row per group: `{key =,&#x0a;count =}`, sorted by key. Rows can come from opensak.caches(), opensak.sql() or&#x0a;opensak.read_csv(); rows whose *by* is nil are left out. Options: `period`&#x0a;groups a date field (&quot;YYYY-MM-DD&quot; or os.time() seconds) by &quot;day&quot;, &quot;week&quot;&#x0a;(&quot;2026-W41&quot;), &quot;month&quot; (&quot;2026-10&quot;), &quot;year&quot; or &quot;weekday&quot; (&quot;Mon&quot;…&quot;Sun&quot;, sorted&#x0a;Monday first). `count_distinct = field` adds `distinct`, the number of different&#x0a;values of that field per group; `sum = field` adds `sum`. `sort = &quot;count&quot;` (or&#x0a;&quot;sum&quot;) puts the largest group first. `top = n` keeps n groups and puts the rest&#x0a;into one group named `other` (default &quot;Other&quot;).&#x0a;Returns {key: any, count: integer, distinct?: integer, sum?: number}[] — One row&#x0a;per group.">
+				<Param name="rows: table[]" />
+				<Param name="by: string" />
+				<Param name="[options: {period?: string, count_distinct?: string, sum?: string, sort?: string, top?: integer, other?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.pivot" func="yes">
+			<Overload retVal="opensak.Matrix" descr="Count *rows* per pair of values of two fields, e.g. difficulty × terrain.&#x0a;Returns `{rows =, cols =, cells =, max =, total =, filled =}`: `rows` and `cols`&#x0a;are the values of the two fields (sorted), `cells[i][j]` the count for rows[i]&#x0a;and cols[j], `filled` the number of cells that are not 0. The options `rows` and&#x0a;`cols` give the values and their order instead (other values are left out); `sum&#x0a;= field` adds up that field instead of counting. For opensak.html.matrix.&#x0a;Returns opensak.Matrix — The matrix.">
+				<Param name="rows: table[]" />
+				<Param name="row_field: string" />
+				<Param name="col_field: string" />
+				<Param name="[options: {rows?: any[], cols?: any[], sum?: string}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.running" func="yes">
+			<Overload retVal="table[]" descr="Copies of *rows* with the running total of *field* (default &quot;count&quot;) in *into*&#x0a;(default &quot;total&quot;), e.g. the total number of finds at the end of each month.&#x0a;Returns table[] — New rows.">
+				<Param name="rows: table[]" />
+				<Param name="[field: string]" />
+				<Param name="[into: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.sort" func="yes">
+			<Overload retVal="table[]" descr="A new list of *rows* sorted by the fields in turn; &quot;-field&quot; sorts largest first.&#x0a;nil values come last. Faster than table.sort with a compare function, and&#x0a;stable: rows with equal fields keep their order.&#x0a;Returns table[] — The same rows in the new order.">
+				<Param name="rows: table[]" />
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.streaks" func="yes">
+			<Overload retVal="{days: integer, longest?: opensak.Run, gap?: opensak.Run, last?: opensak.Run}" descr="Runs of days in a date field: `days` (the number of different days), `longest`&#x0a;(most days in a row with at least one row, e.g. your longest caching streak),&#x0a;`gap` (most days in a row without, between the first and the last day) and&#x0a;`last` (the run that ends on the last day). Each run is `{days =, first =, last&#x0a;=}`; `gap` is nil if there is none.&#x0a;Returns {days: integer, longest?: opensak.Run, gap?: opensak.Run, last?:&#x0a;opensak.Run} — The runs.">
+				<Param name="rows: table[]" />
+				<Param name="field: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.stats.summary" func="yes">
+			<Overload retVal="{count: integer, distinct: integer, min?: any, max?: any, sum?: number, mean?: number, median?: number}" descr="Key figures of *field* over *rows* (nil values left out): `count`, `distinct`,&#x0a;`min` and `max` (also for dates and text), and for numbers `sum`, `mean` and&#x0a;`median`.&#x0a;Returns {count: integer, distinct: integer, min?: any, max?: any, sum?: number,&#x0a;mean?: number, median?: number} — The figures.">
+				<Param name="rows: table[]" />
+				<Param name="field: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.switch_database" func="yes">
+			<Overload descr="Make another database the active one, as the toolbar dropdown does. The active&#x0a;filter is cleared.">
+				<Param name="name: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.tables" func="yes">
+			<Overload retVal="string[]" descr="The tables and views of the active database (or the one named by the `database`&#x0a;option), for use with opensak.sql(). The macro's TEMP tables and views are&#x0a;included.&#x0a;Returns string[] — Table and view names, sorted.">
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.temp_dir" func="yes">
+			<Overload retVal="string" descr="OpenSAK's folder inside the system temp folder (read and write permission by&#x0a;default), without a trailing separator. &quot;/&quot; works as separator on every&#x0a;platform.&#x0a;Returns string — Folder path.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text" />
+		<KeyWord name="opensak.text.base64_decode" func="yes">
+			<Overload retVal="string" descr="Decode Base64 (GSAK's MimeDecode); white space and line breaks in it are&#x0a;ignored. Invalid Base64 is an error.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.base64_encode" func="yes">
+			<Overload retVal="string" descr="Base64-encode text (GSAK's MimeEncode).&#x0a;Returns string — The Base64 text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.csv_split" func="yes">
+			<Overload retVal="string[]" descr="Split one CSV line into its fields (GSAK's CsvGet): a field in double quotes may&#x0a;contain the separator, and `&quot;&quot;` inside quotes is one quote. For a whole file use&#x0a;opensak.read_csv().&#x0a;Returns string[] — The fields.">
+				<Param name="line: string" />
+				<Param name="[sep: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.digit_sum" func="yes">
+			<Overload retVal="integer" descr="Cross sum: the sum of all digits; other characters are ignored.&#x0a;Returns integer — Sum of the digits.">
+				<Param name="n: number|string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.gc_to_id" func="yes">
+			<Overload retVal="integer?" descr="The number behind a geocaching.com code (GSAK's GsCodeToNum): up to GCFFFF the&#x0a;code is hexadecimal, from GCG000 on it is base 31. Works for TB, GL and other&#x0a;two-letter prefixes too; any case.&#x0a;Returns integer? — The number; nil if *code* is not a geocaching.com code.">
+				<Param name="code: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.html_decode" func="yes">
+			<Overload retVal="string" descr="Decode HTML entities such as `&amp;amp;`, `&amp;auml;` and `&amp;#228;` and keep everything&#x0a;else, tags included (GSAK's EntityDecode). opensak.text.html_to_text() also&#x0a;removes the tags.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.html_to_text" func="yes">
+			<Overload retVal="string" descr="Turn HTML (e.g. a cache description) into plain text: tags removed, entities&#x0a;decoded, block elements and `&lt;br&gt;` become line breaks.&#x0a;Returns string — The text.">
+				<Param name="html: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.id_to_gc" func="yes">
+			<Overload retVal="string" descr="The geocaching.com code for a number (GSAK's NumToGsCode), the reverse of&#x0a;opensak.text.gc_to_id().&#x0a;Returns string — The code.">
+				<Param name="id: integer" />
+				<Param name="[prefix: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.lower" func="yes">
+			<Overload retVal="string" descr="Lower case for all letters, not only ASCII (see opensak.text.upper()).&#x0a;Returns string — The text in lower case.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.normalize_name" func="yes">
+			<Overload retVal="string" descr="Make a string safe as a database or file name on every platform: characters such&#x0a;as `\ / : * ? &quot; &lt; &gt; |` become `_`, white space is collapsed, leading/trailing&#x0a;dots and spaces are removed and the length is limited to 100. Never empty.&#x0a;Returns string — The safe name.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.rot13" func="yes">
+			<Overload retVal="string" descr="ROT13 as used for hints. Text in [square brackets] stays unchanged, like on&#x0a;geocaching.com.&#x0a;Returns string — The decoded (or encoded) text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.sub" func="yes">
+			<Overload retVal="string" descr="Like `string.sub`, but counting characters instead of bytes, so it never cuts an&#x0a;ü or é in half (GSAK's Left, Right and SubStr). Positions start at 1; negative&#x0a;ones count from the end; both ends are included. `utf8.len(s)` gives the number&#x0a;of characters.&#x0a;Returns string — The characters from i to j.">
+				<Param name="text: string" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.trim" func="yes">
+			<Overload retVal="string" descr="Remove white space at the start and end, including line breaks and Unicode&#x0a;spaces such as the no-break space that `%s` in a Lua pattern does not match&#x0a;(GSAK's Alltrim).&#x0a;Returns string — The trimmed text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.upper" func="yes">
+			<Overload retVal="string" descr="Upper case for all letters, not only ASCII: `string.upper` and `s:upper()` leave&#x0a;ä, é, ø … as they are. ß becomes SS.&#x0a;Returns string — The text in upper case.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.url_decode" func="yes">
+			<Overload retVal="string" descr="Decode `%XX` sequences, and `+` as a space as in a query string.&#x0a;Returns string — The decoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.url_encode" func="yes">
+			<Overload retVal="string" descr="Percent-encode text for a URL, e.g. a search term in a link: everything except&#x0a;letters, digits and `-._~` becomes `%XX` of its UTF-8 bytes (GSAK's HttpEncode).&#x0a;Returns string — The encoded text.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.text.word_value" func="yes">
+			<Overload retVal="integer" descr="Letter value sum (A=1 … Z=26). Accents are dropped (Ä counts as A); other&#x0a;characters are ignored.&#x0a;Returns integer — Sum of the letter values.">
+				<Param name="text: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.trackables" func="yes">
+			<Overload retVal="opensak.Trackable[]?" descr="The trackables of a cache, each with its `id` for opensak.update_trackable() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Trackable[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.transaction" func="yes">
+			<Overload retVal="any..." descr="Run *fn* as one transaction: every change it makes to the active database&#x0a;(opensak.update, insert, delete, sql_write, set_corrected, clear_corrected and&#x0a;the functions for logs, waypoints, ...) is kept when *fn* returns, and all of it&#x0a;is undone if *fn* raises an error, which opensak.transaction() then raises&#x0a;again. Many changes in one transaction are also faster than the same changes&#x0a;committed one by one. Inside *fn*, opensak.cache, caches, sql and the like see&#x0a;the changes already made, except the columns OpenSAK maintains (counts, log&#x0a;dates, distance), which are recalculated once before the commit or when&#x0a;opensak.resync() is called; everything else in OpenSAK, exports included, sees&#x0a;them only afterwards. A transaction inside another one is undone on its own on&#x0a;an error, and kept with the outer one otherwise. opensak.switch_database,&#x0a;move_caches and copy_caches cannot be used inside. Needs the user's permission&#x0a;like opensak.update(). A macro that ends inside a transaction (e.g. cancelled)&#x0a;keeps none of it.&#x0a;Returns any... — What *fn* returns.">
+				<Param name="fn: fun()" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). Before a macro's first change, OpenSAK asks the user&#x0a;to allow that macro (see Changing caches). To change many caches, run the loop&#x0a;inside opensak.transaction(): much faster, and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="fields: opensak.CacheUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_attribute" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a attribute in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no attribute with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.AttributeUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_log" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a log in the active database; only the given fields change, and&#x0a;`false` clears a field that is not required or a boolean. Needs the user's&#x0a;permission like opensak.update().&#x0a;Returns boolean — false if there is no log with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.LogUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_trackable" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a trackable in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no trackable with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.TrackableUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.update_waypoint" func="yes">
+			<Overload retVal="boolean" descr="Change fields of a waypoint in the active database; only the given fields&#x0a;change, and `false` clears a field that is not required or a boolean. Needs the&#x0a;user's permission like opensak.update().&#x0a;Returns boolean — false if there is no waypoint with this id.">
+				<Param name="id: integer" />
+				<Param name="fields: opensak.WaypointUpdate" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.version" func="yes">
+			<Overload retVal="string" descr="The OpenSAK version this macro runs in.&#x0a;Returns string — Version, e.g. &quot;1.21.0-beta.3&quot;.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoint_type" func="yes">
+			<Overload retVal="string?, string?" descr="The waypoint type for a type name (any case) or a waypoint prefix (&quot;PK&quot;, &quot;S1&quot;,&#x0a;&quot;F&quot;), with its usual prefix (GSAK's ChildType).&#x0a;Returns string?, string? — The waypoint type and its usual prefix; nil if it is&#x0a;unknown.">
+				<Param name="value: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoint_types" func="yes">
+			<Overload retVal="{name: string, prefix: string}[]" descr="The child waypoint types, as in the waypoint dialog, each with its usual prefix&#x0a;— e.g. for opensak.insert_waypoint().&#x0a;Returns {name: string, prefix: string}[] — One table per waypoint type.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.waypoints" func="yes">
+			<Overload retVal="opensak.Waypoint[]?" descr="The waypoints of a cache, each with its `id` for opensak.update_waypoint() and&#x0a;the fields listed under Logs, waypoints, attributes and trackables. Missing data&#x0a;is nil.&#x0a;Returns opensak.Waypoint[]? — nil if the cache is not in the database.">
+				<Param name="code: string" />
+				<Param name="[options: opensak.ReadOptions]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="opensak.write_text" func="yes">
+			<Overload retVal="string" descr="Write *text* to a file as UTF-8 and return the file written. A relative path is&#x0a;resolved against the macro file's folder. The folder needs write permission (the&#x0a;OpenSAK temp folder, opensak.temp_dir(), has it by default); for an unapproved&#x0a;one the user is asked first. Only these file types can be written: .txt .csv&#x0a;.tsv .html .htm .svg .md .json. An existing file is replaced, or extended with&#x0a;`append = true`. At most 20 MB.&#x0a;Returns string — The file written (full path).">
+				<Param name="path: string" />
+				<Param name="text: string" />
+				<Param name="[options: {append?: boolean}]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="or" />
+		<KeyWord name="os" />
+		<KeyWord name="os.clock" func="yes">
+			<Overload retVal="number" descr="CPU time used by OpenSAK, in seconds.&#x0a;Returns number — Seconds.">
+			</Overload>
+		</KeyWord>
+		<KeyWord name="os.date" func="yes">
+			<Overload retVal="string|table" descr="Format a time (default now) with a strftime format; &quot;*t&quot; returns a table, a&#x0a;leading &quot;!&quot; uses UTC.&#x0a;Returns string|table — The formatted date.">
+				<Param name="[format: string]" />
+				<Param name="[time: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="os.time" func="yes">
+			<Overload retVal="integer" descr="Seconds since the epoch, now or for a table {year, month, day, hour, min, sec}.&#x0a;Returns integer — Seconds since the epoch.">
+				<Param name="[t: table]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="pairs" func="yes">
+			<Overload retVal="fun(): any, any" descr="Iterate over all keys of t, in no particular order: `for k, v in pairs(t) do`.&#x0a;Returns fun(): any, any — Iterator for a generic `for`.">
+				<Param name="t: table" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="pcall" func="yes">
+			<Overload retVal="boolean, any" descr="Call f in protected mode: errors are caught.&#x0a;Returns boolean, any — true and the results, or false and the error.">
+				<Param name="f: function" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="print" func="yes">
+			<Overload descr="Write the arguments, separated by tabs, to the macro output pane.">
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="rawequal" func="yes">
+			<Overload retVal="boolean" descr="Whether a and b are equal, without calling __eq.&#x0a;Returns boolean — true if equal.">
+				<Param name="a: any" />
+				<Param name="b: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="rawget" func="yes">
+			<Overload retVal="any" descr="t[k] without calling __index.&#x0a;Returns any — The value.">
+				<Param name="t: table" />
+				<Param name="k: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="rawlen" func="yes">
+			<Overload retVal="integer" descr="Length of a table or string without calling __len.&#x0a;Returns integer — The length.">
+				<Param name="v: table|string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="rawset" func="yes">
+			<Overload retVal="table" descr="Set t[k] = v without calling __newindex.&#x0a;Returns table — t.">
+				<Param name="t: table" />
+				<Param name="k: any" />
+				<Param name="v: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="repeat" />
+		<KeyWord name="return" />
+		<KeyWord name="select" func="yes">
+			<Overload retVal="any" descr="With a number n: the arguments from the n-th on (negative counts from the end).&#x0a;With &quot;#&quot;: the number of arguments.&#x0a;Returns any — Arguments or their count.">
+				<Param name="n: integer|&quot;#&quot;" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="setmetatable" func="yes">
+			<Overload retVal="table" descr="Set the metatable of t (nil removes it). __gc is not allowed in macros.&#x0a;Returns table — t.">
+				<Param name="t: table" />
+				<Param name="mt: table?" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string" />
+		<KeyWord name="string.byte" func="yes">
+			<Overload retVal="integer..." descr="Byte values of s[i] to s[j] (default i = 1, j = i).&#x0a;Returns integer... — The byte values.">
+				<Param name="s: string" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.char" func="yes">
+			<Overload retVal="string" descr="A string from byte values.&#x0a;Returns string — The string.">
+				<Param name="...: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.dump" func="yes">
+			<Overload retVal="string" descr="The binary chunk of a Lua function.&#x0a;Returns string — The bytecode.">
+				<Param name="f: function" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.find" func="yes">
+			<Overload retVal="integer?, integer?, string?..." descr="First match of pattern in s from init; plain turns off pattern matching.&#x0a;Returns integer?, integer?, string?... — Start, end and the captures, or nil.">
+				<Param name="s: string" />
+				<Param name="pattern: string" />
+				<Param name="[init: integer]" />
+				<Param name="[plain: boolean]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.format" func="yes">
+			<Overload retVal="string" descr="Format the arguments like C printf: %d %i %u %c %x %X %o %e %f %g %q %s %a %%,&#x0a;with flags, width and precision.&#x0a;Returns string — The formatted text.">
+				<Param name="fmt: string" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.gmatch" func="yes">
+			<Overload retVal="fun(): string?..." descr="Iterate over the matches of pattern in s: `for word in s:gmatch(&quot;%a+&quot;) do`.&#x0a;Returns fun(): string?... — Iterator returning the captures.">
+				<Param name="s: string" />
+				<Param name="pattern: string" />
+				<Param name="[init: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.gsub" func="yes">
+			<Overload retVal="string, integer" descr="Replace matches of pattern; repl is a string (%1 = capture), a table or a&#x0a;function.&#x0a;Returns string, integer — The new text and the number of replacements.">
+				<Param name="s: string" />
+				<Param name="pattern: string" />
+				<Param name="repl: string|table|function" />
+				<Param name="[n: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.len" func="yes">
+			<Overload retVal="integer" descr="Length in bytes (same as #s).&#x0a;Returns integer — The length.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.lower" func="yes">
+			<Overload retVal="string" descr="s in lower case.&#x0a;Returns string — The text.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.match" func="yes">
+			<Overload retVal="string?..." descr="The captures of the first match of pattern (the whole match without captures).&#x0a;Returns string?... — The captures, or nil.">
+				<Param name="s: string" />
+				<Param name="pattern: string" />
+				<Param name="[init: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.pack" func="yes">
+			<Overload retVal="string" descr="Pack values into a binary string by fmt.&#x0a;Returns string — The binary string.">
+				<Param name="fmt: string" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.packsize" func="yes">
+			<Overload retVal="integer" descr="Size of a string.pack result for fmt.&#x0a;Returns integer — Size in bytes.">
+				<Param name="fmt: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.rep" func="yes">
+			<Overload retVal="string" descr="s repeated n times, separated by sep.&#x0a;Returns string — The text.">
+				<Param name="s: string" />
+				<Param name="n: integer" />
+				<Param name="[sep: string]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.reverse" func="yes">
+			<Overload retVal="string" descr="s reversed (byte by byte).&#x0a;Returns string — The text.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.sub" func="yes">
+			<Overload retVal="string" descr="The part of s from i to j (default end); negative positions count from the end.&#x0a;Returns string — The substring.">
+				<Param name="s: string" />
+				<Param name="i: integer" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.unpack" func="yes">
+			<Overload retVal="any..." descr="Unpack values from a binary string by fmt.&#x0a;Returns any... — The values and the next position.">
+				<Param name="fmt: string" />
+				<Param name="s: string" />
+				<Param name="[pos: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="string.upper" func="yes">
+			<Overload retVal="string" descr="s in upper case.&#x0a;Returns string — The text.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table" />
+		<KeyWord name="table.concat" func="yes">
+			<Overload retVal="string" descr="Join t[i] to t[j] (strings or numbers) with sep.&#x0a;Returns string — The joined text.">
+				<Param name="t: table" />
+				<Param name="[sep: string]" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.insert" func="yes">
+			<Overload descr="Append value to t, or insert it at pos and move the following elements up.">
+				<Param name="t: table" />
+				<Param name="value: any" />
+			</Overload>
+			<Overload descr="Append value to t, or insert it at pos and move the following elements up.">
+				<Param name="t: table" />
+				<Param name="pos: integer" />
+				<Param name="value: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.move" func="yes">
+			<Overload retVal="table" descr="Copy a1[f..e] to a2[t..] (default a2 = a1).&#x0a;Returns table — a2.">
+				<Param name="a1: table" />
+				<Param name="f: integer" />
+				<Param name="e: integer" />
+				<Param name="t: integer" />
+				<Param name="[a2: table]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.pack" func="yes">
+			<Overload retVal="table" descr="A table with the arguments and n = their count.&#x0a;Returns table — {..., n = count}.">
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.remove" func="yes">
+			<Overload retVal="any" descr="Remove and return t[pos] (default the last element), moving the following&#x0a;elements down.&#x0a;Returns any — The removed value.">
+				<Param name="t: table" />
+				<Param name="[pos: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.sort" func="yes">
+			<Overload descr="Sort t in place; comp(a, b) returns true when a comes first (default &lt;).">
+				<Param name="t: table" />
+				<Param name="[comp: fun(a: any, b: any): boolean]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="table.unpack" func="yes">
+			<Overload retVal="any..." descr="t[i], ..., t[j] as separate values (default 1 to #t).&#x0a;Returns any... — The values.">
+				<Param name="t: table" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="then" />
+		<KeyWord name="tonumber" func="yes">
+			<Overload retVal="number?" descr="Convert v to a number; with base (2-36) parse an integer numeral in that base.&#x0a;Returns number? — The number, or nil if v cannot be converted.">
+				<Param name="v: any" />
+				<Param name="[base: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="tostring" func="yes">
+			<Overload retVal="string" descr="Convert v to a string (uses __tostring if set).&#x0a;Returns string — The text.">
+				<Param name="v: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="true" />
+		<KeyWord name="type" func="yes">
+			<Overload retVal="string" descr="The type of v: &quot;nil&quot;, &quot;number&quot;, &quot;string&quot;, &quot;boolean&quot;, &quot;table&quot;, &quot;function&quot;,&#x0a;&quot;thread&quot; or &quot;userdata&quot;.&#x0a;Returns string — The type name.">
+				<Param name="v: any" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="until" />
+		<KeyWord name="utf8" />
+		<KeyWord name="utf8.char" func="yes">
+			<Overload retVal="string" descr="A UTF-8 string from code points.&#x0a;Returns string — The string.">
+				<Param name="...: integer" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="utf8.charpattern" />
+		<KeyWord name="utf8.codepoint" func="yes">
+			<Overload retVal="integer..." descr="Code points of the characters from byte i to j.&#x0a;Returns integer... — The code points.">
+				<Param name="s: string" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="utf8.codes" func="yes">
+			<Overload retVal="fun(): integer, integer" descr="Iterate over the characters: `for pos, code in utf8.codes(s) do`.&#x0a;Returns fun(): integer, integer — Iterator: byte position and code point.">
+				<Param name="s: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="utf8.len" func="yes">
+			<Overload retVal="integer?" descr="Number of UTF-8 characters from byte i to j.&#x0a;Returns integer? — The count, or nil and the position of an invalid byte.">
+				<Param name="s: string" />
+				<Param name="[i: integer]" />
+				<Param name="[j: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="utf8.offset" func="yes">
+			<Overload retVal="integer?" descr="Byte position of the n-th character (counted from i).&#x0a;Returns integer? — The byte position.">
+				<Param name="s: string" />
+				<Param name="n: integer" />
+				<Param name="[i: integer]" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="warn" func="yes">
+			<Overload descr="Emit a warning built from the arguments (all strings).">
+				<Param name="msg: string" />
+				<Param name="...: string" />
+			</Overload>
+		</KeyWord>
+		<KeyWord name="while" />
+		<KeyWord name="xpcall" func="yes">
+			<Overload retVal="boolean, any" descr="Like pcall, but on error handler is called with the error and its result is&#x0a;returned.&#x0a;Returns boolean, any — true and the results, or false and the handler's result.">
+				<Param name="f: function" />
+				<Param name="handler: function" />
+				<Param name="...: any" />
+			</Overload>
+		</KeyWord>
+	</AutoComplete>
+</NotepadPlus>

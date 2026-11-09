@@ -33,6 +33,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 📧 **Pocket Queries by e-mail** — fetch PQ ZIP attachments straight from your own IMAP mailbox; the password is kept in your OS keyring, never in plain text
 - 🔁 **Import GSAK databases** — read a GSAK database directly, including personal notes, corrected coordinates, child waypoints, attributes and the full log history — or every database in a GSAK backup `.zip` at once
 - 🧮 **Import GSAK filters** — turn your saved GSAK filters into OpenSAK filter profiles
+- ⏰ **Scheduled imports** — `opensak import gpx` and `opensak import gsak` import without opening a window, so Task Scheduler, launchd, systemd or cron can refresh a database every morning
 - 🗄️ **Multiple databases** — keep regions separate (e.g. Zealand, Bornholm, Cyprus), move caches between them, and move or copy whole databases to any folder; each database keeps its own home location, columns and sort order
 - 📍 **Home points** — save multiple named home points (Home, Cottage, Hotel…) and switch instantly from the toolbar
 - ✅ **Update finds** from a reference database (e.g. your "My Finds" PQ)
@@ -73,6 +74,7 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - 🧩 **Child waypoints** — parking spots, trail heads, and stages imported from GPX, shown on the map and in a dedicated tab; caches with waypoints show in **bold** in the list
 - 🔒 **Lock caches** — freeze a cache's core fields (name, type, coordinates, D/T, owner, status, descriptions, hint…) against being overwritten by a later re-import
 - 📍 **Corrected coordinates** — store solved puzzle coordinates per cache; used in GPS export and shown on map
+- 🏷️ **Custom fields** — your own Yes/No, number, text and date fields per cache, as in GSAK: brought along by the GSAK import, shown as columns, filtered on, and used by macros
 - ✏️ **Add / edit / delete** caches manually — including owner, dates, elevation, user data 1–4, personal note and child waypoints
 
 ### Right-click Menu
@@ -97,6 +99,11 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 - **⊕ Midpoint** — find the great-circle midpoint between two coordinates
 - **📏 Distance & Bearing** — distance and azimuth between two coordinates
 - All tools open pre-filled with the currently selected cache's coordinates
+
+### Lua Macros
+- 🧩 **Automate OpenSAK** with Lua macros — filter, change and export caches, build reports, or run a whole routine with one click; OpenSAK's successor to GSAK macros
+- 🛡️ **You decide what a macro may do** — OpenSAK asks before a macro changes your caches, uses a folder or contacts a web site
+- 📚 **Shared macros** in the [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) repository — download one, or share your own · [Macro API reference](docs/macros/api.md)
 
 ### Installation & Updates
 - 🪟 **Windows** — available from the [Microsoft Store](https://apps.microsoft.com/detail/9p4nbmm84h2d) (free, signed, updates itself automatically), or as a direct download from GitHub
@@ -131,8 +138,10 @@ A modern, cross-platform geocaching management tool for **Linux**, **Windows** a
 | [Uninstalling](docs/Uninstalling-OpenSAK.md) | What OpenSAK creates on disk, and how to remove it |
 | [Getting Started](docs/getting-started.md) | First launch, importing, filtering, GPS export, multiple databases |
 | [Filter Reference](docs/filters.md) | All filter types across 10 tabs, text operators, AND/OR logic, invert, filter profiles |
-| [Update Locations](docs/update-location.md) | Filling in country/state/county via offline and online reverse geocoding |
+| [Update Locations](docs/update-location.md) | Filling in country/state/county from offline boundary data |
 | [Keyboard Shortcuts](docs/keyboard-shortcuts.md) | Full shortcut reference |
+| [Macro API](docs/macros/api.md) | Every `opensak.*` function for Lua macros, with examples |
+| [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros) | Macros shared by other users, and how to share your own |
 | [Feature Flags](docs/feature-flags.md) | Developer feature flag system |
 | [CLI --version flag](docs/cli-version-flag.md) | Print version or run a specific release |
 | [Roadmap](docs/ROADMAP.md) | Planned features and priorities |

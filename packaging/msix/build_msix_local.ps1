@@ -29,6 +29,11 @@ param(
     [string]$PublisherDisplayName = "OpenSAK Dev Test",
     [string]$DisplayName = "OpenSAK",
     [string]$Version = "1.17.2.0",
+    # Command name of the console program's App Execution Alias (#937).
+    # Default: "opensak-beta.exe" when -DisplayName ends in "Beta", else
+    # "opensak.exe" - so a beta and a stable install don't claim the same
+    # name (README.md "Command line (App Execution Alias)").
+    [string]$CliAlias = "",
     [switch]$SkipBuild,
     [switch]$InstallAfterBuild
 )
@@ -40,6 +45,11 @@ Set-Location $RepoRoot
 $MsixDir = "$RepoRoot\packaging\msix"
 $StagingDir = "$RepoRoot\build\msix-staging"
 $OutputMsix = "$RepoRoot\dist\OpenSAK-$Version-prototype.msix"
+# opensak.spec builds both: the windowed app and its console twin (#937).
+$RequiredExes = @("opensak.exe", "opensak-cli.exe")
+if (-not $CliAlias) {
+    $CliAlias = if ($DisplayName -match "Beta$") { "opensak-beta.exe" } else { "opensak.exe" }
+}
 
 # ------------------------------------------------------------------
 # 1. Build the PyInstaller dist (same as build.yml's Windows job)
@@ -50,13 +60,17 @@ if (-not $SkipBuild) {
     pip install -e . pyinstaller
     python scripts\fetch_boundary_baseline.py
     pyinstaller opensak.spec --clean --noconfirm
-    if (-not (Test-Path "$RepoRoot\dist\OpenSAK\opensak.exe")) {
-        throw "PyInstaller build did not produce dist\OpenSAK\opensak.exe"
+    foreach ($exe in $RequiredExes) {
+        if (-not (Test-Path "$RepoRoot\dist\OpenSAK\$exe")) {
+            throw "PyInstaller build did not produce dist\OpenSAK\$exe"
+        }
     }
 } else {
     Write-Host "==> Skipping PyInstaller build (-SkipBuild)" -ForegroundColor Yellow
-    if (-not (Test-Path "$RepoRoot\dist\OpenSAK\opensak.exe")) {
-        throw "dist\OpenSAK\opensak.exe not found - remove -SkipBuild to build it first."
+    foreach ($exe in $RequiredExes) {
+        if (-not (Test-Path "$RepoRoot\dist\OpenSAK\$exe")) {
+            throw "dist\OpenSAK\$exe not found - remove -SkipBuild to build it first."
+        }
     }
 }
 
@@ -85,6 +99,9 @@ $manifest = $manifest.Replace("__PUBLISHER_DISPLAY_NAME__", $PublisherDisplayNam
 $manifest = $manifest.Replace("__DISPLAY_NAME__", $DisplayName)
 $manifest = $manifest.Replace("__VERSION__", $Version)
 $manifest = $manifest.Replace("__EXE_RELATIVE_PATH__", "OpenSAK\opensak.exe")
+$manifest = $manifest.Replace("__CLI_EXE_RELATIVE_PATH__", "OpenSAK\opensak-cli.exe")
+$manifest = $manifest.Replace("__CLI_ALIAS__", $CliAlias)
+Write-Host "    Command-line alias: $CliAlias" -ForegroundColor Cyan
 Set-Content -Path "$StagingDir\AppxManifest.xml" -Value $manifest -Encoding UTF8
 
 # ------------------------------------------------------------------

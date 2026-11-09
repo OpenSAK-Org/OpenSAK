@@ -6,12 +6,14 @@ It talks to OpenSAK through the global `opensak` table; see runtime.py for
 the available functions.
 """
 
+from opensak.macro.db_access import WriteApproval
 from opensak.macro.permissions import FolderPermission, check_access
 from opensak.macro.runtime import (
-    FolderApproval, MacroError, MacroHost, MacroRuntime, build_filterset,
+    FolderApproval, MacroBusy, MacroError, MacroHost, MacroRuntime, build_filterset,
+    macro_running,
 )
 
 __all__ = [
-    "FolderApproval", "FolderPermission", "MacroError", "MacroHost", "MacroRuntime",
-    "build_filterset", "check_access",
+    "FolderApproval", "FolderPermission", "MacroBusy", "MacroError", "MacroHost",
+    "MacroRuntime", "WriteApproval", "build_filterset", "check_access", "macro_running",
 ]

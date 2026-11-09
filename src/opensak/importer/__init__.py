@@ -83,6 +83,20 @@ def _bool_attr(element, xpath: str, ns: dict = NS) -> bool:
     return False
 
 
+def _parse_gsak_date(raw: Optional[str]) -> Optional[datetime]:
+    """Parse a GSAK extension date such as <gsak:UserFound>2026-06-04</...>
+    (date only, GSAK's own calendar date). Returned as a naive midnight
+    datetime, as the GSAK database importer stores FoundByMeDate. Empty or
+    unparseable text gives None."""
+    raw = (raw or "").strip()
+    if len(raw) < 10:
+        return None
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
     """Parse ISO 8601 datetime strings from GPX files into UTC datetimes.
 
@@ -496,9 +510,11 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     # sym-is-absent guard below (which exists to protect OpenSAK's own
     # re-exports) wrongly blocks the log-based fallback.
     #
-    # OpenSAK's own export (garmin.py) only ever writes <gsak:UserNote>
-    # inside <gsak:wptExtension> — never any of GSAK's other per-cache
-    # fields. So the presence of any of those OTHER fields (already parsed
+    # OpenSAK's own export (garmin.py) only ever writes <gsak:UserNote> and
+    # <gsak:UserFound> (#1145) inside <gsak:wptExtension> — never any of
+    # GSAK's other per-cache fields. Keep both OUT of _GSAK_ONLY_TAGS, or
+    # OpenSAK's own re-exports would be taken for GSAK files. So the
+    # presence of any of those OTHER fields (already parsed
     # a little further down for issue #269/#521/#129/#73) is a reliable
     # fingerprint that this wpt genuinely came from GSAK itself, as opposed
     # to OpenSAK's own re-export or a raw geocaching.com Pocket Query
@@ -600,6 +616,9 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
     gsak_user_data_4: Optional[str] = None
     gsak_fav_points: Optional[int] = None
     gsak_user_note: Optional[str] = None
+    # Issue #1145: GSAK's found-by-me date (<gsak:UserFound>, "YYYY-MM-DD").
+    # Written by GSAK and by OpenSAK's own export (garmin.py).
+    gsak_user_found: Optional[datetime] = None
 
     # Issue #521: the official Groundspeak GPX schema has no <county> element
     # at all (only country/state) — GSAK adds its own <gsak:County> inside
@@ -667,6 +686,10 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             note_el = gsak_ext.find(f"{{{gsak_uri}}}UserNote")
             if note_el is not None and note_el.text and note_el.text.strip():
                 gsak_user_note = note_el.text.strip()
+
+            gsak_user_found = _parse_gsak_date(
+                gsak_ext.findtext(f"{{{gsak_uri}}}UserFound")
+            )
 
             county_el = gsak_ext.find(f"{{{gsak_uri}}}County")
             if county_el is not None and county_el.text and county_el.text.strip():
@@ -750,7 +773,10 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
         "gsak_user_data_4":  gsak_user_data_4,
         "gsak_fav_points":   gsak_fav_points,
         "gsak_user_note":    gsak_user_note,
+        "gsak_user_found":   gsak_user_found,
         "found_by_me":       found_by_me,
+        # Issue #1140: the waypoint symbol as given (GSAK's Symbol column).
+        "symbol":            sym_raw.strip() if sym_raw and sym_raw.strip() else None,
     }
 
 
@@ -760,6 +786,7 @@ from opensak.utils.constants import KNOWN_PREFIXES as _KNOWN_PREFIXES
 from opensak.utils.constants import KNOWN_SINGLE_PREFIXES as _KNOWN_SINGLE_PREFIXES
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.constants import FTF_TAG_PATTERN
+from opensak.lang import tr
 
 
 def _parse_extra_wpt(wpt_el) -> Optional[dict]:
@@ -1118,6 +1145,16 @@ def _upsert_cache(
     if data.get("gc_cache_id"):
         cache.gc_cache_id = data["gc_cache_id"]
 
+    # ── Issue #1140: symbol and is_owner ─────────────────────────────────
+    # <sym> only when the source has one (a .loc file doesn't), so an empty
+    # source never wipes a value from an earlier GPX or GSAK import.
+    if data.get("symbol"):
+        cache.symbol = data["symbol"]
+    # is_owner follows the account in Settings — from the cache's current
+    # owner, so a locked cache is judged by the owner it kept.
+    from opensak.db.ownership import update_is_owner
+    update_is_owner(cache)
+
     cache.source_file = source_file
 
     # Attributes
@@ -1144,11 +1181,40 @@ def _upsert_cache(
     # match updates that row in place, anything new is added, and rows for
     # log_id's simply absent from *this* file are left exactly as they were.
     existing_logs_by_id: dict[Optional[str], Log] = {}
+    # Issue #1255: the GSAK database importer stores logs as
+    # f"{gc_code}_{lLogId}" (GSAK's lLogId is only unique per cache), while
+    # GPX carries the gc.com log id alone. gsak_logs_by_plain_id maps the
+    # plain id back to such a row, so a GPX import updates it instead of
+    # adding a second copy. The row keeps its GSAK-style log_id: rewriting
+    # it could hit the UNIQUE constraint on logs.log_id, and the next import
+    # finds it through this map again either way.
+    gsak_logs_by_plain_id: dict[str, Log] = {}
     if existing is not None:
         existing_logs_by_id = {
             lg.log_id: lg
             for lg in session.query(Log).filter_by(cache_id=cache.id).all()
         }
+        gsak_prefix = f"{cache.gc_code}_"
+        for prefixed_id, lg in list(existing_logs_by_id.items()):
+            if not prefixed_id or not prefixed_id.startswith(gsak_prefix):
+                continue
+            plain_id = prefixed_id[len(gsak_prefix):]
+            if not plain_id.isdigit():
+                continue  # GSAK's dummy ids (-2, 0, ...) never match a GPX log
+            plain_row = existing_logs_by_id.get(plain_id)
+            if plain_row is None:
+                gsak_logs_by_plain_id[plain_id] = lg
+                continue
+            # A pair left by an earlier import (before #1255): keep the GPX
+            # row, carry over what only the GSAK row has, drop the GSAK row.
+            if plain_row.latitude is None and plain_row.longitude is None:
+                plain_row.latitude = lg.latitude
+                plain_row.longitude = lg.longitude
+            plain_row.logged_by_owner = bool(
+                plain_row.logged_by_owner or lg.logged_by_owner
+            )
+            session.delete(lg)
+            del existing_logs_by_id[prefixed_id]
 
     DUMMY_LOG_IDS = {"0", None, ""}
     seen_log_ids_this_file: set[str] = set()
@@ -1169,6 +1235,8 @@ def _upsert_cache(
         seen_log_ids_this_file.add(log_id)
 
         existing_log = existing_logs_by_id.get(log_id)
+        if existing_log is None and log_id is not None:
+            existing_log = gsak_logs_by_plain_id.get(log_id)  # #1255
         if existing_log is not None:
             existing_log.log_type = lg["log_type"]
             existing_log.log_date = lg["log_date"]
@@ -1324,8 +1392,16 @@ def _upsert_cache(
             if found_logs:
                 found_log = min(found_logs, key=lambda lg: lg["log_date"])
 
-        if found_log and found_log.get("log_date"):
-            cache.found_date = found_log["log_date"]
+        # Issue #1145: GSAK's <gsak:UserFound> (also written by OpenSAK's own
+        # export) is the found date as the user set it, so it wins over the
+        # log-based guess. The user's own found log is still used when it
+        # is from the same day, since it also carries the time.
+        user_found = data.get("gsak_user_found")
+        log_date = found_log.get("log_date") if found_log else None
+        if user_found and not (log_date and log_date.date() == user_found.date()):
+            cache.found_date = user_found
+        elif log_date:
+            cache.found_date = log_date
 
     # ── Derive dnf_date, first_to_find from logs (issue #33, #58, #114) ────────
     # These are only set/updated when a fresh import brings logs in.
@@ -1537,7 +1613,8 @@ def _flush_cache_batch_isolated(
                 result.updated += 1
         except Exception as e:
             cell.rollback()
-            result.errors.append(f"DB error for {data.get('gc_code', '?')} in {source}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
 
@@ -1694,13 +1771,13 @@ def _parse_gpx_to_data(
                         if extra is not None:
                             extra_wpts.append(extra)
                 except Exception as e:
-                    errors.append(f"Parse error in {gpx_path.name}: {e}")
+                    errors.append(tr("import_err_parse", file=gpx_path.name, error=e))
                 finally:
                     elem.clear()
                     while elem.getprevious() is not None:
                         del elem.getparent()[0]
     except Exception as e:
-        errors.append(f"Fatal parse error in {gpx_path.name}: {e}")
+        errors.append(tr("import_err_fatal_parse", file=gpx_path.name, error=e))
 
     # Parse companion waypoints file
     companion_data = None
@@ -1709,7 +1786,7 @@ def _parse_gpx_to_data(
             wpts_tree = _parse_xml(wpts_path)
             companion_data = _parse_extra_waypoints(wpts_tree)
         except Exception as e:
-            errors.append(f"Waypoints file error: {e}")
+            errors.append(tr("import_err_waypoints", file=wpts_path.name, error=e))
 
     return caches, extra_wpts, companion_data, errors
 
@@ -1781,7 +1858,7 @@ def import_gpx(
                         else:
                             result.skipped += 1
                 except Exception as e:
-                    result.errors.append(f"Error in {source}: {e}")
+                    result.errors.append(tr("import_err_parse", file=source, error=e))
                     result.skipped += 1
                 finally:
                     # CRITICAL: Clear the element and its preceding siblings from memory
@@ -1822,11 +1899,11 @@ def import_gpx(
                 result.waypoints += _link_extra_waypoints(db_session, extra_data)
                 db_session.commit()
             except Exception as e:
-                result.errors.append(f"Waypoints file error: {e}")
+                result.errors.append(tr("import_err_waypoints", file=wpts_path.name, error=e))
 
     except Exception as e:
         db_session.rollback()
-        result.errors.append(f"Fatal error importing {source}: {e}")
+        result.errors.append(tr("import_err_fatal", file=source, error=e))
     finally:
         _exit_bulk_import_pragmas(db_session)
         db_session.close()
@@ -1848,7 +1925,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
     overall_result = ImportResult()
 
     if not zipfile.is_zipfile(zip_path):
-        overall_result.errors.append(f"{zip_path.name} is not a valid zip file")
+        overall_result.errors.append(tr("import_err_bad_zip", file=zip_path.name))
         return overall_result
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1862,7 +1939,7 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
         gpx_files  = [f for f in all_gpx if f not in set(companions)]
 
         if not gpx_files:
-            overall_result.errors.append("No .gpx file found in zip")
+            overall_result.errors.append(tr("import_err_no_gpx"))
             return overall_result
 
         # Step 1: Parse all main GPX files in parallel (pure CPU, no DB).
@@ -1917,7 +1994,8 @@ def import_zip(zip_path: Path, session: Session | None = None, progress_cb=None)
                     overall_result.waypoints += _link_extra_waypoints(db_session, companion_data)
                     db_session.commit()
                 except Exception as e:
-                    overall_result.errors.append(f"Waypoints file error ({companion_path.name}): {e}")
+                    overall_result.errors.append(
+                        tr("import_err_waypoints", file=companion_path.name, error=e))
 
         except Exception:
             db_session.rollback()
@@ -1938,15 +2016,12 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
     result = ImportResult()
     source = loc_path.name
 
-    result.warnings.append(
-        ".loc filer indeholder kun koordinater og navn — "
-        "importér en GPX fil for at få fuld cacheinformation"
-    )
+    result.warnings.append(tr("import_loc_warning"))
 
     try:
         tree = _parse_xml(loc_path)
     except etree.XMLSyntaxError as e:
-        result.errors.append(f"XML parse error i {loc_path.name}: {e}")
+        result.errors.append(tr("import_err_fatal_parse", file=loc_path.name, error=e))
         return result
 
     root = tree.getroot()
@@ -1955,7 +2030,7 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
         try:
             data = _parse_loc_waypoint(wpt_el)
         except Exception as e:
-            result.errors.append(f"Parse error: {e}")
+            result.errors.append(tr("import_err_parse", file=source, error=e))
             result.skipped += 1
             continue
 
@@ -1970,7 +2045,8 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
             else:
                 result.updated += 1
         except Exception as e:
-            result.errors.append(f"DB fejl for {data.get('gc_code', '?')}: {e}")
+            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+                                     source=source, error=e))
             result.skipped += 1
 
     return result

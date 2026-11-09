@@ -5,6 +5,10 @@ Qt-free, so both the Move/Copy Caches dialog (in a worker thread) and Lua
 macros (opensak.move_caches / copy_caches) use it. Both databases get
 private sessions (session_for): the app-wide engine is never swapped, so
 the GUI keeps reading the active database while a transfer runs.
+
+Rows of the caches in the source's companion database (#1034) go along:
+they are copied to the target's companion after the caches are committed
+there, and (when moving) deleted from the source with the caches.
 """
 
 from __future__ import annotations
@@ -12,6 +16,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+from sqlalchemy import update
+
+from opensak.db import companion
+from opensak.utils import flags
 
 # What to do when a cache already exists in the target database.
 IF_EXISTS = ("replace", "skip", "newer")
@@ -122,6 +131,14 @@ def _insert_snapshot(session, snap: dict) -> None:
 
     if snap["_user_note"]:
         session.add(UserNote(cache_id=new_cache.id, **snap["_user_note"]))
+        # #1140: inserting the note fires the last_user_update trigger, which
+        # stamps "now" — a copy keeps the source's date instead.
+        session.flush()
+        session.execute(
+            update(Cache).where(Cache.id == new_cache.id)
+            .values(last_user_update=snap.get("last_user_update"))
+            .execution_options(synchronize_session=False)
+        )
 
 
 def _import_time(last_gpx_update: Optional[datetime], imported_at: Optional[datetime]):
@@ -156,10 +173,9 @@ def transfer_caches(
     written to the target are deleted from the source — a skipped cache
     stays where it is. Returns the number of caches written.
     """
-    from opensak.db.database import session_for
-    from opensak.db.models import (
-        Cache, Log, Attribute, Trackable, Waypoint, UserNote,
-    )
+    from opensak.db.cache_delete import delete_caches
+    from opensak.db.database import optimize_database, session_for
+    from opensak.db.models import Cache
     from sqlalchemy.orm import joinedload, selectinload
 
     if if_exists not in IF_EXISTS:
@@ -211,23 +227,22 @@ def transfer_caches(
                 _insert_snapshot(session, snap)
                 written.append(code)
 
+        # ── 2b. Their rows in the companion database (#1034) ──────────────
+        # After the target's commit, so a crash leaves at most rows missing
+        # in the target, never rows without their cache; the source still
+        # has them until step 3.
+        if written and flags.companion_db:
+            companion.copy_rows(source_db_path, target_db_path, written)
+
         # ── 3. Delete from source DB (move only) ──────────────────────────
         if not copy_only and written:
             with session_for(source_db_path) as session:
-                cache_ids = [
-                    row[0]
-                    for row in session.query(Cache.id)
-                    .filter(Cache.gc_code.in_(written))
-                    .all()
-                ]
-                if cache_ids:
-                    for model in (Log, Attribute, Trackable, Waypoint, UserNote):
-                        session.query(model).filter(
-                            model.cache_id.in_(cache_ids)
-                        ).delete(synchronize_session=False)
-                    session.query(Cache).filter(
-                        Cache.id.in_(cache_ids)
-                    ).delete(synchronize_session=False)
+                delete_caches(session, written)
 
         written_total += len(written)
+    if written_total:
+        # #1048: fresh planner statistics after a bulk change.
+        optimize_database(target_db_path)
+        if not copy_only:
+            optimize_database(source_db_path)
     return written_total

@@ -22,6 +22,7 @@ from PySide6.QtGui import QFont
 from opensak.coords import format_coords, parse_coords
 from opensak.utils.types import CoordFormat
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 
 
 def _midpoint(lat1: float, lon1: float, lat2: float, lon2: float) -> tuple[float, float]:
@@ -48,6 +49,7 @@ class MidpointDialog(QDialog):
 
     def __init__(self, lat: float | None = None, lon: float | None = None, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("mid_title"))
         self.setMinimumWidth(500)
         self.setWindowFlags(
@@ -116,11 +118,11 @@ class MidpointDialog(QDialog):
 
         maps_row = QHBoxLayout()
         maps_row.addWidget(QLabel(tr("coord_conv_open_in")))
-        self._osm_btn = QPushButton("OpenStreetMap")
+        self._osm_btn = QPushButton("OpenStreetMap")  # i18n: ignore — product name
         self._osm_btn.setEnabled(False)
         self._osm_btn.clicked.connect(self._open_osm)
         maps_row.addWidget(self._osm_btn)
-        self._gmaps_btn = QPushButton("Google Maps")
+        self._gmaps_btn = QPushButton("Google Maps")  # i18n: ignore — product name
         self._gmaps_btn.setEnabled(False)
         self._gmaps_btn.clicked.connect(self._open_gmaps)
         maps_row.addWidget(self._gmaps_btn)

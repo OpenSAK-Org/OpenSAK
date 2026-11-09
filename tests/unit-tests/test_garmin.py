@@ -28,6 +28,7 @@ from opensak.gps.garmin import (
     debug_scan,
     delete_gpx_files,
     export_ggz_to_device,
+    export_ggz_to_file,
     export_to_device,
     export_to_file,
     find_garmin_devices,
@@ -37,6 +38,9 @@ from opensak.gps.garmin import (
     get_garmin_ggz_path,
     get_garmin_gpx_path,
     is_mtp_device,
+    write_ggz,
+    write_gpx,
+    write_loc,
 )
 
 
@@ -875,6 +879,32 @@ class TestExportToFile:
         result = export_to_file([c_valid, c_null], output)
         assert result.cache_count == 1
 
+    def test_streams_from_a_generator(self, tmp_path):
+        # #1075: the GPS dialog hands over iter_caches_full() and the total.
+        output = tmp_path / "out.gpx"
+        seen = []
+        caches = (_cache(gc_code=f"GC{i}", cache_id=i) for i in range(3))
+        result = export_to_file(caches, output, progress_cb=lambda d, t: seen.append((d, t)),
+                                total=3)
+        assert result.success and result.cache_count == 3
+        assert seen[-1] == (3, 3)
+        assert "GC2" in output.read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("export", [export_to_file, export_ggz_to_file])
+    def test_failure_keeps_existing_file(self, tmp_path, export):
+        # #1075: writing streams into a temporary file, so a failure halfway
+        # neither truncates the previous export nor leaves a partial file.
+        def caches():
+            yield _cache(gc_code="GC1")
+            raise RuntimeError("halfway")
+        output = tmp_path / "out.gpx"
+        output.write_bytes(b"previous export")
+        result = export(caches(), output, total=2)
+        assert result.success is False
+        assert "halfway" in result.error
+        assert output.read_bytes() == b"previous export"
+        assert list(tmp_path.iterdir()) == [output]
+
 
 # ── export_to_device ──────────────────────────────────────────────────────────
 
@@ -1245,6 +1275,76 @@ class TestGenerateGgz:
         )
 
 
+# ── streaming writers (#1075) ─────────────────────────────────────────────────
+
+def _no_time(text: str) -> str:
+    import re
+    return re.sub(r"<time>[^<]*</time>", "<time/>", text)
+
+
+class TestStreamingWriters:
+    """write_gpx/write_loc/write_ggz stream one cache at a time, from any
+    iterable, instead of building the whole document in memory (#1075)."""
+
+    def _caches(self):
+        return [
+            _cache(gc_code="GC1", logs=[_log()], waypoints=[_child_wpt()],
+                   user_note=_note(note="n")),
+            _cache(gc_code="GC2", cache_type="Parking Area"),
+            _cache(gc_code="GCNOCOORD", latitude=None),
+        ]
+
+    def test_write_gpx_matches_generate_gpx_from_a_generator(self):
+        caches = self._caches()
+        buf = io.StringIO()
+        count = write_gpx(buf, (c for c in caches), total=len(caches))
+        assert count == 2
+        assert _no_time(buf.getvalue()) == _no_time(generate_gpx(caches))
+        ET.fromstring(buf.getvalue().split("\n", 1)[1])  # well-formed
+
+    def test_write_loc_matches_generate_loc_from_a_generator(self):
+        caches = self._caches()
+        buf = io.StringIO()
+        count = write_loc(buf, (c for c in caches), total=len(caches))
+        assert count == 2
+        assert buf.getvalue() == generate_loc(caches)
+        ET.fromstring(buf.getvalue().split("\n", 1)[1])
+
+    def test_write_loc_empty_is_a_valid_document(self):
+        out = generate_loc([])
+        assert ET.fromstring(out.split("\n", 1)[1]).tag == "loc"
+
+    def test_write_ggz_from_a_generator(self):
+        caches = self._caches()
+        buf = io.BytesIO()
+        seen = []
+        count = write_ggz(buf, (c for c in caches), total=len(caches),
+                          progress_cb=lambda d, t: seen.append((d, t)))
+        assert count == 2
+        assert seen[-1] == (3, 3)
+        entries = _ggz_entries(buf.getvalue())
+        gpx_bytes = entries["data/opensak_export.gpx"]
+        index = ET.fromstring(entries["index/com/garmin/geocaches/v0/index.xml"].decode("utf-8"))
+        ns = {"g": "http://www.opencaching.com/xmlschemas/ggz/1/0"}
+        assert index.find("g:file/g:crc", ns).text == f"{zipfile.crc32(gpx_bytes) & 0xFFFFFFFF:08X}"
+        codes = [g.find("g:code", ns).text for g in index.iter(f"{{{ns['g']}}}gch")]
+        assert codes == ["GC1", "GC2"]
+
+    def test_progress_runs_while_writing(self):
+        # Each cache is written before the next one is read, so nothing
+        # forces the whole input into memory.
+        written_before = []
+        buf = io.StringIO()
+
+        def caches():
+            for c in self._caches():
+                written_before.append(len(buf.getvalue()))
+                yield c
+
+        write_gpx(buf, caches(), total=3)
+        assert written_before[0] < written_before[1] < written_before[2]
+
+
 # ── device scanning ───────────────────────────────────────────────────────────
 
 class TestDeviceScan:
@@ -1337,7 +1437,7 @@ class TestErrorPaths:
 
     def test_export_to_device_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "opensak.gps.garmin.generate_gpx",
+            "opensak.gps.garmin.write_gpx",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("nope")),
         )
         result = export_to_device([_cache()], tmp_path / "dev")
@@ -1345,7 +1445,7 @@ class TestErrorPaths:
 
     def test_export_to_file_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr(
-            "opensak.gps.garmin.generate_gpx",
+            "opensak.gps.garmin.write_gpx",
             lambda *a, **k: (_ for _ in ()).throw(RuntimeError("nope")),
         )
         result = export_to_file([_cache()], tmp_path / "out.gpx")

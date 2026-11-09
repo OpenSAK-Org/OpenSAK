@@ -244,6 +244,34 @@ class TestCoordFeedback:
 # ── home points ───────────────────────────────────────────────────────────────
 
 class TestHomePoints:
+    @pytest.mark.parametrize("point_size", [None, 17])
+    def test_points_table_shows_enough_rows(self, qtbot, settings, point_size):
+        # #1146: the table was capped at 160 px, which left room for only
+        # 2-3 locations with a larger system font. Its height is now set in
+        # rows, so the minimum always fits POINTS_TABLE_MIN_ROWS rows.
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        old_font = app.font()
+        if point_size:
+            big = app.font()
+            big.setPointSize(point_size)
+            app.setFont(big)
+        try:
+            settings.home_points = [HomePoint(f"P{i}", 55.0 + i / 100, 12.0)
+                                    for i in range(15)]
+            d = SettingsDialog()
+            qtbot.addWidget(d)
+            table = d._points_table
+            row_h = table.verticalHeader().defaultSectionSize()
+            assert row_h >= table.fontMetrics().height()
+            header = table.horizontalHeader().sizeHint().height()
+            rows_at_min = (table.minimumHeight() - header) // row_h
+            rows_at_max = (table.maximumHeight() - header) // row_h
+            assert rows_at_min >= SettingsDialog.POINTS_TABLE_MIN_ROWS >= 5
+            assert rows_at_max <= SettingsDialog.POINTS_TABLE_MAX_ROWS
+        finally:
+            app.setFont(old_font)
+
     def test_add_requires_name(self, dlg, monkeypatch):
         warn = MagicMock()
         monkeypatch.setattr(sd.QMessageBox, "warning", warn)

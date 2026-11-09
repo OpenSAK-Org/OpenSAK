@@ -35,13 +35,32 @@ def _is_prerelease(version: str) -> bool:
     return "-" in version
 
 
-_RELEASE_DEFAULTS: dict[str, bool] = {
-    "reverse-geocoding": True,
-    "map-popout": True,
-    # Lua macros (#938): on in beta builds only, so the POC cannot reach a
-    # stable release before the API (#938 step 4) is settled.
-    "lua-macros": _is_prerelease(__version__),
-}
+def _release_defaults(prerelease: bool) -> dict[str, bool]:
+    """The built-in flag values of a beta (*prerelease*) or stable build."""
+    return {
+        "reverse-geocoding": True,
+        "map-popout": True,
+        # Lua macros (#938): stable since v1.22.0, macro API 4 (#1190).
+        "lua-macros": True,
+        # Macros changing the active database (opensak.update, insert,
+        # sql_write, transaction, ...): stable since v1.22.0 (#1190).
+        "lua-macro-write": True,
+        # Companion database per cache database (#1034), which custom fields
+        # (#1028) live in: stable since v1.22.0 (#1190).
+        "companion-db": True,
+        # Macros contacting web sites (opensak.get_url, #1079): beta-only for
+        # one more release cycle (v1.22.0 plan, D1), so it does not hold up
+        # the stable macro release.
+        "lua-macro-net": prerelease,
+    }
+
+
+_RELEASE_DEFAULTS: dict[str, bool] = _release_defaults(_is_prerelease(__version__))
+
+# The flags that are off in a stable release, whatever this build is: what
+# they gate is beta-only (e.g. for macro.metadata.beta_only_names()).
+BETA_ONLY: frozenset[str] = frozenset(
+    name for name, on in _release_defaults(False).items() if not on)
 
 
 def _parse_argv() -> dict[str, bool]:
@@ -84,3 +103,6 @@ _flags = _load()
 reverse_geocoding: bool    = _flags["reverse-geocoding"]
 map_popout: bool           = _flags["map-popout"]
 lua_macros: bool           = _flags["lua-macros"]
+lua_macro_write: bool      = _flags["lua-macro-write"]
+companion_db: bool         = _flags["companion-db"]
+lua_macro_net: bool        = _flags["lua-macro-net"]

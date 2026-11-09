@@ -224,6 +224,14 @@ right thing. Worth checking these first if a submission gets stuck:
   Import-Certificate -FilePath "$env:TEMP\<cert>.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
   Import-Certificate -FilePath "$env:TEMP\<cert>.cer" -CertStoreLocation Cert:\LocalMachine\Root
   ```
+- **No second `<Application>` without a Start Menu entry.** Uploading the
+  v1.22.0-beta.12 package (#1192) failed with "Package acceptance
+  validation error: … specifies a headless app. You don't have permission
+  to create a headless app" — caused by the command-line app `OpenSAKCLI`
+  with `AppListEntry="none"` (#937). Sideloading never shows this; only
+  Partner Center checks it. Allowing it needs a `HeadlessAppBypass`
+  waiver from Microsoft, so the alias is now an extension of the main
+  application instead (see "Command line (App Execution Alias)").
 - **Free-text fields have undocumented character limits.** The
   "Why do you need runFullTrust" justification on the Submission
   options page silently truncated/rejected a ~700-character answer
@@ -296,6 +304,76 @@ or `-DisplayName` if building with `build_msix_local.ps1` directly
 runs). No manual step needed for the common case — publishing a beta
 tag names it "OpenSAK Beta" automatically; publishing a stable tag names
 it plain "OpenSAK" again.
+
+## Command line (App Execution Alias)
+
+Issue #937: scripts and the Task Scheduler call OpenSAK from the command
+line (`opensak import gpx …`, `opensak --run-macro …`). Without help, an
+MSIX app can't be started that way: its folder under `C:\Program
+Files\WindowsApps` is not readable, and starting `opensak.exe` from there
+directly would run it without package identity (other AppData). The
+manifest therefore gives the `OpenSAK` application an
+`windows.appExecutionAlias` extension with its own `Executable`:
+
+- It runs `opensak-cli.exe`, which `opensak.spec` builds next to
+  `opensak.exe`: the same program as a **console** program. A shell waits
+  for it, shows its output and gets its exit code. An alias to the
+  windowed `opensak.exe` would only start it.
+- It is an extension of the one application, not a second
+  `<Application>` with `AppListEntry="none"`: Partner Center rejects such
+  a "headless app" (see "Known Partner Center quirks"). Windows Terminal
+  ships `wt.exe` the same way.
+- A `uap5:AppExecutionAlias` with `desktop4:Subsystem="console"` puts the
+  command in `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on the
+  user's `PATH`. Users can turn it off under Settings → Apps → Advanced
+  app settings → App execution aliases.
+- **Alias name:** `opensak.exe` for a stable release, `opensak-beta.exe`
+  for a beta, so a beta and a stable install don't claim the same command.
+  `build-msix.yml` derives it from `__version__` in the same way as the
+  display name; `build_msix_local.ps1 -CliAlias` sets it explicitly
+  (default: from `-DisplayName`).
+- A process started through the alias has package identity, so it sees
+  the same virtualized AppData (settings, databases, macro approvals) as
+  the Store GUI. The zip install keeps separate data; `--db <path>` reaches
+  a database file in either.
+- A bare `opensak` (or `opensak <file>`) is a call for the GUI: the
+  shell shouldn't wait for it. `opensak-cli.exe` then starts `opensak.exe`
+  next to it with the same arguments, detached (no console, its own
+  Ctrl+C group), and exits 0 at once (#1180). Commands (`import …`),
+  `--help` and `--run-macro` stay in `opensak-cli.exe`, so the shell keeps
+  waiting for their output and exit code. A process started from the
+  package's folder runs in the package too, so this GUI has the same
+  AppData as the one from the Start Menu.
+- In the Task Scheduler, the program is
+  `%LOCALAPPDATA%\Microsoft\WindowsApps\opensak.exe` (or
+  `opensak-beta.exe`).
+
+### Sideload checklist for the alias
+
+Run together with the Lupa / MSIX check for stable (agreed in #937), on a
+sideloaded build (`build_msix_local.ps1 -InstallAfterBuild`):
+
+- [ ] `opensak --run-macro x.lua` is found through the alias
+- [ ] From cmd / PowerShell: the shell waits, the exit code is correct
+      (`echo %ERRORLEVEL%` / `$LASTEXITCODE`), and output appears
+- [ ] A bare `opensak` returns the prompt at once and opens the window;
+      that GUI uses the same AppData (databases, settings) as the one
+      from the Start Menu
+- [ ] `opensak import gpx <folder> --db <name>` imports, with the summary
+      on stdout and in the log file
+- [ ] From an editor (VS Code task, NppExec): output and the exit code come
+      through when the output is redirected
+- [ ] The CLI started through the alias reaches the macro pipe of the Store
+      GUI (`--run-macro` while the GUI is open)
+- [ ] It sees the same databases and macro approvals as the GUI
+- [ ] Lupa loads from the package
+- [ ] ~~Beta and stable installed side by side~~ — not possible with the
+      Store package: beta and stable share the identity `AgreeDK.OpenSAK`,
+      so one replaces the other. The alias names only keep a zip install's
+      own command line apart from the Store one
+- [ ] Task Scheduler with the alias path: "Run only when user is logged
+      on" works; check whether "Run whether user is logged on or not"
+      works with a packaged app, and document it as unsupported if not
 
 ## Version numbering
 

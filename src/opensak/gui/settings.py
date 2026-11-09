@@ -35,6 +35,20 @@ class HomePoint:
         return f"HomePoint({self.name!r}, {self.lat}, {self.lon})"
 
 
+def sort_home_points(points: list[HomePoint]) -> list[HomePoint]:
+    """Order for the centre-point drop-downs: ★ Home first, then A–Z,
+    ignoring case and accents ("Zürich" sorts as "Zurich")."""
+    import unicodedata
+
+    def key(p: HomePoint) -> tuple[str, str]:
+        plain = "".join(c for c in unicodedata.normalize("NFKD", p.name)
+                        if not unicodedata.combining(c))
+        return plain.casefold(), p.name
+
+    home = [p for p in points if p.name == "★ Home"]
+    return home + sorted((p for p in points if p.name != "★ Home"), key=key)
+
+
 class AppSettings:
     """
     Typed getters/setters over settings_store.
@@ -657,6 +671,14 @@ class AppSettings:
     def map_popout_geometry(self, value) -> None:
         get_store().set("window.map_popout_geometry", value)
 
+    @property
+    def map_draw_dialog_geometry(self):
+        return get_store().get("window.map_draw_dialog_geometry", None)
+
+    @map_draw_dialog_geometry.setter
+    def map_draw_dialog_geometry(self, value) -> None:
+        get_store().set("window.map_draw_dialog_geometry", value)
+
     # ── Search thresholds ─────────────────────────────────────────────────────
 
     @property
@@ -694,19 +716,6 @@ class AppSettings:
     @quick_where_history.setter
     def quick_where_history(self, value: list[str]) -> None:
         get_store().set("search.where_history", list(value))
-
-    # ── Location refinement ───────────────────────────────────────────────────
-
-    @property
-    def nominatim_enabled(self) -> bool:
-        val = get_store().get("location.nominatim_enabled", False)
-        if isinstance(val, bool):
-            return val
-        return str(val).lower() in ("true", "1", "yes")
-
-    @nominatim_enabled.setter
-    def nominatim_enabled(self, value: bool) -> None:
-        get_store().set("location.nominatim_enabled", bool(value))
 
     # ── Last used paths ───────────────────────────────────────────────────────
 

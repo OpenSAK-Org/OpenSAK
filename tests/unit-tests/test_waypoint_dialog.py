@@ -514,6 +514,26 @@ class TestSaveRelated:
         assert new.parent_gc_code == cache.gc_code
         assert db_session.get(Cache, cache.id).waypoint_count == 2
 
+    @pytest.mark.parametrize("finder_id, username, before, expected", [
+        ("", "Me", False, True),       # the typed owner is the account
+        ("42", "", True, False),       # finder ID set, owner ID differs
+        ("", "", True, True),          # no account: left as it is
+    ])
+    def test_is_owner_follows_the_owner(self, qtbot, db_session, make_cache, monkeypatch,
+                                        finder_id, username, before, expected):
+        cache = make_cache()
+        cache.is_owner = before
+        db_session.add(cache)
+        db_session.commit()
+        dlg = WaypointDialog(cache=cache)
+        qtbot.addWidget(dlg)
+        cache.owner_name = " me "            # as _edit_waypoint_from_cache() sets get_data()
+        monkeypatch.setattr("opensak.gui.settings.get_settings",
+                            lambda: SimpleNamespace(gc_finder_id=finder_id, gc_username=username))
+        dlg.save_related(db_session, cache)
+        db_session.commit()
+        assert cache.is_owner is expected
+
     def test_no_empty_user_note_created(self, qtbot, db_session, make_cache):
         from opensak.db.models import UserNote
         cache = make_cache()

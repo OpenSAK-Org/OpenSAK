@@ -71,6 +71,8 @@ Note that `main` is GitHub's default branch for this repo, so a plain `git clone
 
 Please keep pull requests focused — one feature or fix per PR makes review much easier.
 
+**Changing the Lua macro API?** Don't commit `docs/macros/api.md` or the editor files in `macros/types/` — they are generated from `src/opensak/macro/runtime.py`, and two PRs that both commit them always conflict. After your PR is merged, the *Macro API docs* workflow regenerates them and opens (or updates) a PR on `bot/macro-api-docs`. To get up-to-date editor files while you work, run `python scripts/generate_macro_api_docs.py` locally and leave them out of your commit (`git restore docs/macros/api.md macros/types/`). A new generated file goes into `GENERATED_FILES` in `src/opensak/macro/api_docs.py`, under `macros/types/`.
+
 ---
 
 ## Development Setup

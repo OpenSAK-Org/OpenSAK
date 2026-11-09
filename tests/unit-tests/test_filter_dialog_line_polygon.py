@@ -208,3 +208,91 @@ class TestAddPoints:
         dlg._lp_text.setPlainText("55.0, 10.0")
         dlg._load_points_file()
         assert dlg._lp_text.toPlainText() == "55.0, 10.0"
+
+
+# ── "Draw on map…" (MapDrawDialog mocked) ─────────────────────────────────────
+
+class FakeDrawDialog:
+    """Stands in for MapDrawDialog: records how it was opened and returns
+    a fixed drawing."""
+    opened: list = []
+    result = ("polygon", [(55.0, 10.0), (55.0, 11.0), (56.0, 10.5)])
+    accept = True
+
+    def __init__(self, parent, mode, points, caches, center):
+        FakeDrawDialog.opened.append(dict(mode=mode, points=points, caches=caches,
+                                          center=center))
+
+    def exec(self):
+        from PySide6.QtWidgets import QDialog
+        return QDialog.DialogCode.Accepted if self.accept else QDialog.DialogCode.Rejected
+
+    def mode(self):
+        return self.result[0]
+
+    def points(self):
+        return self.result[1]
+
+
+@pytest.fixture
+def fake_draw(monkeypatch):
+    FakeDrawDialog.opened = []
+    FakeDrawDialog.accept = True
+    monkeypatch.setattr("opensak.gui.dialogs.map_draw_dialog.MapDrawDialog", FakeDrawDialog)
+    return FakeDrawDialog
+
+
+class TestDrawOnMap:
+    def test_round_trip(self, dlg, fake_draw):
+        dlg._lp_text.setPlainText("55.0, 10.0\nW,GC12345")
+        dlg._draw_lp_on_map()
+        [opened] = fake_draw.opened
+        assert opened["mode"] == "line"
+        assert opened["points"] == [(55.0, 10.0), (55.5, 10.5)]  # W,code resolved
+        lines = dlg._lp_text.toPlainText().splitlines()
+        assert lines == ["# mode: polygon", "55.000000, 10.000000",
+                         "55.000000, 11.000000", "56.000000, 10.500000"]
+        assert dlg._lp_mode() == "polygon"
+        [f] = _lp_filters(dlg._build_filterset())
+        assert f.mode == "polygon" and f.points == fake_draw.result[1]
+
+    def test_cancel_changes_nothing(self, dlg, fake_draw):
+        fake_draw.accept = False
+        dlg._lp_text.setPlainText("55.0, 10.0")
+        dlg._draw_lp_on_map()
+        assert dlg._lp_text.toPlainText() == "55.0, 10.0"
+        assert dlg._lp_mode() == "line"
+
+    def test_unreadable_lines_block(self, dlg, fake_draw, monkeypatch):
+        warning = MagicMock()
+        monkeypatch.setattr(fd.QMessageBox, "warning", warning)
+        dlg._lp_text.setPlainText("55.0, 10.0\nnonsense")
+        dlg._draw_lp_on_map()
+        warning.assert_called_once()
+        assert fake_draw.opened == []
+        assert dlg._lp_text.toPlainText() == "55.0, 10.0\nnonsense"
+
+    def test_map_caches_and_current_cache_passed(self, qtbot, fake_draw):
+        caches = [SimpleNamespace(gc_code="GC1")]
+        current = SimpleNamespace(latitude=47.0, longitude=8.0, user_note=None)
+        d = FilterDialog(map_caches=caches, current_cache=current)
+        qtbot.addWidget(d)
+        d._draw_lp_on_map()
+        [opened] = fake_draw.opened
+        assert opened["caches"] == caches
+        assert opened["center"] == (47.0, 8.0)
+
+    def test_initial_tab(self, qtbot):
+        d = FilterDialog(initial_tab="line_polygon")
+        qtbot.addWidget(d)
+        assert d._tabs.currentWidget() is d._line_polygon_tab
+
+    def test_initial_tab_with_shape_filter(self, qtbot):
+        # What the main map's "Filter by this shape" opens.
+        text = "# mode: points\n55.000000, 10.000000"
+        fs = FilterSet().add(LinePolygonFilter([(55.0, 10.0)], "points", 2.0, text=text))
+        d = FilterDialog(current_filterset=fs, initial_tab="line_polygon")
+        qtbot.addWidget(d)
+        assert d._tabs.currentWidget() is d._line_polygon_tab
+        assert d._lp_text.toPlainText() == text
+        assert d._lp_mode() == "points"

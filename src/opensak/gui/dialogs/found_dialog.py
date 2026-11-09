@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from opensak.db.manager import get_db_manager
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 
 
@@ -38,7 +39,7 @@ class UpdateWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class FoundUpdaterDialog(QDialog):
+class FoundUpdaterDialog(WorkerGuardMixin, QDialog):
     """
     Dialog der lader brugeren opdatere 'fundet' status i den aktive
     database baseret på en reference database (f.eks. Mine Fund).
@@ -48,6 +49,7 @@ class FoundUpdaterDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("found_dialog_title"))
         self.setMinimumWidth(520)
         self._worker: UpdateWorker | None = None
@@ -66,7 +68,7 @@ class FoundUpdaterDialog(QDialog):
 
         # ── Aktiv database ────────────────────────────────────────────────────
         manager = get_db_manager()
-        active_name = manager.active.name if manager.active else "Ingen"
+        active_name = manager.active.name if manager.active else tr("found_no_active_db")
         active_lbl = QLabel(f"<b>{tr('found_active_db')}</b> {active_name}")
         active_lbl.setStyleSheet("color: #1565c0;")
         layout.addWidget(active_lbl)
@@ -88,7 +90,7 @@ class FoundUpdaterDialog(QDialog):
         for db in other_dbs:
             self._db_combo.addItem(db.name, db.path)
         if not other_dbs:
-            self._db_combo.addItem("(Ingen andre databaser)")
+            self._db_combo.addItem(tr("found_no_other_dbs"))
             self._db_combo.setEnabled(False)
         ref_layout.addWidget(self._db_combo)
 
@@ -186,7 +188,8 @@ class FoundUpdaterDialog(QDialog):
 
         lines = [
             tr("found_completed") + "\n",
-            str(result),
+            tr("found_summary", updated=result.updated, already=result.already,
+               not_found=result.not_found),
         ]
         if result.errors:
             lines.append(f"\n{tr('found_errors')}")

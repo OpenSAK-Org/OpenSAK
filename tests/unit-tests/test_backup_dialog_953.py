@@ -151,7 +151,10 @@ def manager(qapp, tmp_path):
 
 @pytest.fixture
 def boxes():
-    with patch.object(bdlg, "QMessageBox") as box:
+    # The folder check (#1032) lives in its own module; patch it there too.
+    from opensak.gui.dialogs import backup_folder_check
+    with patch.object(bdlg, "QMessageBox") as box, \
+            patch.object(backup_folder_check, "QMessageBox", box):
         yield box
 
 
@@ -188,10 +191,22 @@ class TestBackupDialog:
 
     def test_unsuitable_folder_is_refused_with_a_reason(self, dlg, boxes):
         before = dlg.folder()
-        assert dlg.choose_folder(get_install_dir() / "backups") is False
+        assert dlg.choose_folder(get_install_dir()) is False
         assert dlg.folder() == before
         boxes.warning.assert_called_once()
         assert boxes.warning.call_args.args[2] == tr("backup_folder_invalid")
+
+    @pytest.mark.parametrize("answer", [True, False])
+    def test_folder_inside_install_folder_asks_first(self, dlg, monkeypatch, answer):
+        # #1032: allowed after "Use this folder", not after "Choose another".
+        from opensak.gui.dialogs import backup_folder_check
+        ask = MagicMock(return_value=answer)
+        monkeypatch.setattr(backup_folder_check, "_ask_use_inside", ask)
+        before = dlg.folder()
+        target = get_install_dir() / "backups"
+        assert dlg.choose_folder(target) is answer
+        assert dlg.folder() == (target if answer else before)
+        ask.assert_called_once()
 
     def test_suitable_folder_is_used(self, dlg, tmp_path):
         assert dlg.choose_folder(tmp_path / "usb") is True

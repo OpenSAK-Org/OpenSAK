@@ -21,9 +21,33 @@ env:
 jobs:
 
   # ============================================================
+  # Version gate (#1168) — the tag must match __version__
+  # ============================================================
+  # v1.22.0-beta.8 was tagged before scripts/bump_version.py had been run,
+  # so the app inside the "beta.8" build still reported itself as beta.7.
+  # Published, that would have caused an update loop (the update check
+  # offers beta.8, the installed app says beta.7, offers it again). This
+  # job fails in seconds, before the tests and every build job, so nothing
+  # is built or released on a mismatch. It also runs
+  # `bump_version.py --check`, so the User Guide's hard-coded version
+  # references must match too. Skipped for manual runs from a branch.
+  version-check:
+    name: "Check tag matches __version__"
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare tag with __version__ and the User Guide
+        run: python3 scripts/bump_version.py --check-tag "${{ github.ref_name }}"
+
+  # ============================================================
   # Tests — single gate; every build job runs only after this
   # ============================================================
   test:
+    needs: version-check
+    # Run after a passing version check, or when it was skipped (manual
+    # run from a branch), but never after a failed or cancelled one.
+    if: ${{ !failure() && !cancelled() }}
     uses: ./.github/workflows/tests.yml
 
   # ============================================================
@@ -73,6 +97,23 @@ jobs:
             exit 1
           }
           Write-Host "OK: no compiled SQLAlchemy modules in the Windows bundle"
+      # Issue #937: opensak-cli.exe is the console twin of opensak.exe, for
+      # scripts and the Task Scheduler (exit code and output in a shell).
+      - name: Verify both executables are bundled (issue #937)
+        shell: pwsh
+        run: |
+          foreach ($exe in "opensak.exe", "opensak-cli.exe") {
+            if (-not (Test-Path "dist/OpenSAK/$exe")) {
+              Write-Host "::error::dist/OpenSAK/$exe is missing"
+              exit 1
+            }
+          }
+          & dist/OpenSAK/opensak-cli.exe import --help
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::opensak-cli.exe import --help exited with $LASTEXITCODE"
+            exit 1
+          }
+          Get-ChildItem dist/OpenSAK -Filter "opensak*.exe" | ForEach-Object { Write-Host ("{0}: {1:N1} MB" -f $_.Name, ($_.Length / 1MB)) }
       - name: Create ZIP
         shell: powershell
         run: Compress-Archive -Path dist/OpenSAK -DestinationPath dist/OpenSAK-${{ github.ref_name }}-Windows.zip
@@ -148,7 +189,12 @@ jobs:
           PYTHONPATH: src
       - name: Download appimagetool
         run: |
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          # Retry: GitHub release downloads fail now and then on the runner
+          # (wget exit code 4 = network failure), which used to fail the
+          # whole Linux build.
+          curl -fsSL --retry 5 --retry-delay 15 --retry-all-errors \
+            -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
       - name: Build AppDir
         run: python3 scripts/make_appdir.py

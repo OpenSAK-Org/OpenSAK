@@ -8,9 +8,14 @@ import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
+from opensak import bootstrap
+from opensak.bootstrap import migrate_legacy_db as _migrate_legacy_db
 from opensak.gui.icon import get_app_icon
 
 if TYPE_CHECKING:
+    from datetime import date
+
+    from PySide6.QtGui import QPixmap
     from PySide6.QtWidgets import QSplashScreen, QApplication
     from PySide6.QtCore import QTranslator
 
@@ -85,57 +90,17 @@ def _install_qt_translator(app: "QApplication", lang_code: str) -> None:
             lang_code, qt_locale,
         )
 
-def _migrate_legacy_db() -> None:
+def _splash_pixmap(since: str | None = None) -> "QPixmap":
+    """Tegn splash pixmap programmatisk — ingen billedfil nødvendig.
+
+    *since* (#1130) is an optional extra line under the version number,
+    e.g. "Using OpenSAK since 3 May 2026 — day 175". Without it the
+    splash looks exactly as before.
     """
-    Migrer gammel opensak.db til Default.db.
-
-    Scenarier:
-    - opensak.db eksisterer, Default.db ikke → omdøb
-    - Begge eksisterer → slet den tomme Default.db, behold opensak.db
-    - Kun Default.db → ingenting at gøre
-    """
-    from opensak.config import get_app_data_dir
-    app_dir = get_app_data_dir()
-    legacy = app_dir / "opensak.db"
-    default = app_dir / "Default.db"
-
-    if legacy.exists() and not default.exists():
-        # Simpel migration
-        legacy.rename(default)
-        print(f"Migrerede {legacy.name} → {default.name}")
-
-    elif legacy.exists() and default.exists():
-        # Begge eksisterer — tjek hvilken der er størst (har data)
-        legacy_size = legacy.stat().st_size
-        default_size = default.stat().st_size
-        if legacy_size > default_size:
-            # opensak.db har data, Default.db er tom — erstat
-            default.unlink()
-            # Slet også WAL/SHM filer for Default hvis de findes
-            for ext in [".db-shm", ".db-wal"]:
-                p = app_dir / f"Default{ext}"
-                if p.exists():
-                    p.unlink()
-            legacy.rename(default)
-            print(f"Migrerede {legacy.name} → {default.name} (erstattede tom Default.db)")
-        else:
-            # Default.db har data — slet den tomme opensak.db
-            legacy.unlink()
-            for ext in [".db-shm", ".db-wal"]:
-                p = app_dir / f"opensak{ext}"
-                if p.exists():
-                    p.unlink()
-            print(f"Slettede tom {legacy.name}")
-
-
-def _make_splash(app) -> "QSplashScreen":
-    """Opret og vis en splash screen med OpenSAK navn og loading tekst."""
-    from PySide6.QtWidgets import QSplashScreen
     from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
     from PySide6.QtCore import Qt
     from opensak import __version__
 
-    # Tegn splash pixmap programmatisk — ingen billedfil nødvendig
     W, H = 420, 220
     pix = QPixmap(W, H)
     pix.fill(QColor("#1e2a3a"))
@@ -166,14 +131,53 @@ def _make_splash(app) -> "QSplashScreen":
     painter.drawText(0, 120, W, 30, Qt.AlignmentFlag.AlignCenter,
                      f"v{__version__}")
 
+    # "Using OpenSAK since … — day N" (#1130), like GSAK's splash
+    if since:
+        font_since = QFont("Sans Serif", 9)
+        font_since.setItalic(True)
+        painter.setFont(font_since)
+        painter.setPen(QColor("#7ab8f5"))
+        painter.drawText(0, 143, W, 24, Qt.AlignmentFlag.AlignCenter, since)
+
     # Loading tekst placeholder (opdateres via showMessage)
     painter.end()
+    return pix
 
-    splash = QSplashScreen(pix, Qt.WindowType.WindowStaysOnTopHint)
+
+def _make_splash(app) -> "QSplashScreen":
+    """Opret og vis en splash screen med OpenSAK navn og loading tekst."""
+    from PySide6.QtWidgets import QSplashScreen
+    from PySide6.QtGui import QFont
+    from PySide6.QtCore import Qt
+
+    splash = QSplashScreen(_splash_pixmap(), Qt.WindowType.WindowStaysOnTopHint)
     splash.setFont(QFont("Sans Serif", 9))
     splash.show()
     app.processEvents()
     return splash
+
+
+def _show_using_since_on_splash(splash, first: "date") -> None:
+    """Issue #1130: redraw the splash with "Using OpenSAK since <date> —
+    day N" under the version number, in the user's language and date
+    format (same text as Help → About, #1050). Any problem just leaves the
+    splash as it is — this is decoration, never a reason to fail startup.
+    """
+    try:
+        from opensak.gui.date_format import format_date
+        from opensak.gui.settings import get_settings
+        from opensak.lang import tr
+        from opensak.usage import day_number
+
+        since = tr(
+            "about_using_since",
+            date=format_date(first, get_settings().date_format),
+            day=day_number(first),
+        )
+        splash.setPixmap(_splash_pixmap(since))
+    except Exception:
+        logger.warning("startup: could not show first-start date on splash",
+                       exc_info=True)
 
 
 def _apply_version_override() -> None:
@@ -245,6 +249,13 @@ def main() -> None:
 
     _apply_version_override()
 
+    # #1013: --run-macro hands the macro to the running OpenSAK and exits —
+    # before any of the GUI start-up below.
+    from opensak.utils.run_macro import main as run_macro_main
+    run_macro_code = run_macro_main(sys.argv[1:])
+    if run_macro_code is not None:
+        sys.exit(run_macro_code)
+
     # Disable GPU acceleration for QtWebEngine — prevents black rendering
     # on Windows systems where GPU/OpenGL drivers are incomplete or virtual.
     # This affects map and description panels rendered via QWebEngineView.
@@ -272,9 +283,14 @@ def main() -> None:
 
     # Initialiser logging-systemet FØRST (issue #232) — så vi kan logge
     # alt der sker under resten af opstarten, inkl. migration og wizard.
-    from opensak.logger import setup_logging
-    setup_logging()
+    log_path = bootstrap.setup_logging()
     logger.info("startup: main() begin, version=%s", _ver)
+
+    # Catch crashes from here on: uncaught exceptions get a report dialog
+    # instead of vanishing (no console in a windowed build), and a hard
+    # crash of the last session is detected so it can be reported below.
+    from opensak import crash_report
+    crash_report.install(log_path.parent)
     _startup_t0 = time.monotonic()
 
     # Kør macOS-sti-migreringen (issue #825) FØR NOGET ANDET rører
@@ -298,17 +314,13 @@ def main() -> None:
     # hjem-koordinater så ud til at være forsvundet efter opdatering.
     #
     # Ingen effekt på Windows/Linux (funktionen er selv et no-op der).
-    from opensak.settings_store import (
-        get_store, migrate_from_qsettings, migrate_macos_default_paths,
-        is_first_run, mark_wizard_completed, repair_corrupted_bool_keys,
-    )
-    migrate_macos_default_paths()
+    from opensak.settings_store import is_first_run
+    bootstrap.migrate_paths()
 
     # #987: a settings restore chosen in the last run is applied now, after
     # the path migration and before anything reads the settings (the theme
     # below is the first) — the running app could otherwise overwrite it.
-    from opensak.backup.settings_restore import apply_pending_settings_restore
-    settings_restore_result = apply_pending_settings_restore()
+    settings_restore_result = bootstrap.apply_pending_settings_restore()
 
     # Anvend Fusion stil + platform-tilpasset font + brugertema
     # (gøres FØR nogen vinduer oprettes så alt arver paletten korrekt).
@@ -331,20 +343,13 @@ def main() -> None:
         app.processEvents()
 
     # Indlæs sprog FØR noget UI oprettes
-    splash_msg("Indlæser sprog...")
+    # Not translated: the language is not loaded yet.
+    splash_msg("Loading language...")
     # Kør én-gangs migration fra QSettings → opensak.json (issue #209)
-    did_migrate = migrate_from_qsettings(get_store())
-    # Reparér evt. boolean-værdier korrumperet af en tidligere bug i
-    # _flush() — kører altid, uafhængigt af om migration var nødvendig,
-    # så også brugere af tidligere 1.14.0-beta-builds får det rettet.
-    repair_corrupted_bool_keys(get_store())
-    # Eksisterende installation (migreret fra QSettings) → wizard er ikke nødvendig
-    if did_migrate:
-        mark_wizard_completed()
+    bootstrap.migrate_settings()
     from opensak.config import get_language
-    from opensak.lang import load_language
-    load_language(get_language())
-    _install_qt_translator(app, get_language())
+    from opensak.lang import load_language, tr as _tr
+    _install_qt_translator(app, bootstrap.load_language())
 
     # Vis velkomst-wizard ved første opstart (issue #210)
     if is_first_run():
@@ -358,15 +363,20 @@ def main() -> None:
         app.processEvents()
 
     # Migrer gammel database hvis nødvendigt
-    splash_msg("Kontrollerer database...")
+    splash_msg(_tr("splash_checking_db"))
     logger.info("startup: checking legacy db (+%.2fs)", time.monotonic() - _startup_t0)
     _migrate_legacy_db()
 
     # Initialiser database manager — åbner samme DB som sidst
-    splash_msg("Indlæser database...")
+    splash_msg(_tr("splash_loading_db"))
     logger.info("startup: loading database (+%.2fs)", time.monotonic() - _startup_t0)
     from opensak.db.manager import get_db_manager
+    from opensak.db.database import set_progress_callback
     manager = get_db_manager()
+    # #1033: a schema update (and the VACUUM after it) can take a while on a
+    # large database — say so on the splash screen.
+    _db_steps = {"migrating": "db_progress_migrating", "compacting": "db_progress_compacting"}
+    set_progress_callback(lambda step: splash_msg(_tr(_db_steps.get(step, step))))
     try:
         manager.ensure_active_initialised()
     except Exception as e:
@@ -399,7 +409,22 @@ def main() -> None:
             )
         QMessageBox.critical(None, tr("startup_db_error_title"), message)
         sys.exit(1)
+    finally:
+        set_progress_callback(None)
     logger.info("startup: database loaded (+%.2fs)", time.monotonic() - _startup_t0)
+    # #937: a headless `opensak import` refuses the database open here.
+    manager.hold_active_lock()
+
+    # #1050: record when OpenSAK was first started (for Help → About). Only
+    # does real work once — later starts just read the stored date.
+    from opensak.usage import ensure_first_started
+    try:
+        first = ensure_first_started(db.path for db in manager.databases)
+    except Exception:
+        logger.warning("startup: could not record first-start date", exc_info=True)
+    else:
+        # #1130: show it on the splash too, like GSAK.
+        _show_using_since_on_splash(splash, first)
 
     # #1012: keep the LuaLS stub and .luarc.json in the macros folder
     # current, so an external editor completes opensak.* after an update.
@@ -413,7 +438,7 @@ def main() -> None:
                            exc_info=True)
 
     # Opret hovedvindue
-    splash_msg("Starter OpenSAK...")
+    splash_msg(_tr("splash_starting"))
     logger.info("startup: building main window (+%.2fs)", time.monotonic() - _startup_t0)
     try:
         from opensak.gui.mainwindow import MainWindow
@@ -429,25 +454,51 @@ def main() -> None:
         raise
     logger.info("startup: main window built (+%.2fs total)", time.monotonic() - _startup_t0)
 
+    # #1013: accept macros sent by `opensak --run-macro` (e.g. from an editor).
+    # Kept alive by this local until app.exec() returns.
+    macro_server = None
+    if flags.lua_macros:
+        from opensak.gui.macro_server import MacroServer
+        macro_server = MacroServer(window)
+        macro_server.start()
+
     # Vent til cache-tabellen er loadet før splash lukkes
     def _close_splash():
         splash.finish(window)
 
     from PySide6.QtCore import QTimer
     QTimer.singleShot(400, _close_splash)
-    # Issue #549: after the splash has gone, tell the user if the active
-    # database was backed up before being migrated during startup.
-    QTimer.singleShot(500, window.show_premigration_backup_notices)
-    # Issue #1045: the last active database was unavailable (e.g. a removed
-    # USB drive) and startup fell back to another one.
-    QTimer.singleShot(550, window.show_database_fallback_notice)
+
+    # After the splash has gone, show the startup notices one after another.
+    # Each is modal, so separate timers would fire inside the first dialog's
+    # event loop and stack the others on top of it.
+    startup_notices = [
+        # Issue #549: the active database was backed up before being
+        # migrated during startup.
+        window.show_premigration_backup_notices,
+        # Issue #1045: the last active database was unavailable (e.g. a
+        # removed USB drive) and startup fell back to another one.
+        window.show_database_fallback_notice,
+    ]
     if settings_restore_result is not None:
-        QTimer.singleShot(
-            600, lambda: window.show_settings_restore_notice(settings_restore_result)
+        startup_notices.append(
+            lambda: window.show_settings_restore_notice(settings_restore_result)
         )
+    startup_notices.append(lambda: crash_report.show_previous_crash_notice(window))
+
+    def _show_startup_notices():
+        for notice in startup_notices:
+            try:
+                notice()
+            except Exception:
+                # Report it, but don't let one broken notice hide the rest.
+                sys.excepthook(*sys.exc_info())
+
+    QTimer.singleShot(500, _show_startup_notices)
 
     window.show()
     exit_code = app.exec()
+    manager.release_active_lock()
     # #959: if the window closed with everything backed up, record the backup
     # state again now that the database has been checkpointed on dispose —
     # otherwise the checkpoint itself would count as a change at the next exit.

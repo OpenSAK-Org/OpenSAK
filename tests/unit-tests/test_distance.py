@@ -274,6 +274,79 @@ def test_dispatcher_uses_vincenty_when_set(monkeypatch):
     assert d == pytest.approx(expected, abs=1e-9)
 
 
+# ── explicit method= (#1096) ──────────────────────────────────────────────────
+#
+# Core/headless callers (Lua macros) pass the method explicitly instead of
+# relying on opensak.gui.settings. An explicit method must win over the
+# setting, and must not read the setting at all.
+
+_A = (55.6761, 12.5683)
+_B = (56.1629, 10.2039)
+
+
+@pytest.mark.parametrize("setting", ["haversine", "vincenty"])
+def test_explicit_haversine_ignores_setting(monkeypatch, setting):
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", setting)
+    assert distance_km(*_A, *_B, method="haversine") == pytest.approx(
+        _haversine_km(*_A, *_B), abs=1e-9)
+
+
+@pytest.mark.parametrize("setting", ["haversine", "vincenty"])
+def test_explicit_vincenty_ignores_setting(monkeypatch, setting):
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", setting)
+    assert distance_km(*_A, *_B, method="vincenty") == pytest.approx(
+        _vincenty_km(*_A, *_B), abs=1e-9)
+
+
+@pytest.mark.parametrize("method", ["haversine", "vincenty"])
+def test_batch_explicit_method_ignores_setting(monkeypatch, method):
+    from opensak.gui import settings as smod
+    other = "vincenty" if method == "haversine" else "haversine"
+    monkeypatch.setattr(smod.get_settings(), "distance_method", other)
+    lats = [p[0] for p in SAMPLE_POINTS]
+    lons = [p[1] for p in SAMPLE_POINTS]
+    scalar = _vincenty_km if method == "vincenty" else _haversine_km
+    batch = distance_km_batch(*_A, lats, lons, method=method)
+    for i, (la, lo) in enumerate(SAMPLE_POINTS):
+        assert float(batch[i]) == pytest.approx(scalar(*_A, la, lo), abs=1e-6)
+
+
+def test_explicit_method_never_reads_the_setting(monkeypatch):
+    import opensak.filters.engine as eng
+
+    def _boom():
+        raise AssertionError("distance_method_setting() must not be called")
+
+    monkeypatch.setattr(eng, "distance_method_setting", _boom)
+    eng.distance_km(*_A, *_B, method="vincenty")
+    eng.distance_km_batch(*_A, [_B[0]], [_B[1]], method="haversine")
+
+
+def test_none_falls_back_to_setting(monkeypatch):
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", "vincenty")
+    assert distance_km(*_A, *_B, method=None) == pytest.approx(
+        _vincenty_km(*_A, *_B), abs=1e-9)
+    batch = distance_km_batch(*_A, [_B[0]], [_B[1]], method=None)
+    assert float(batch[0]) == pytest.approx(_vincenty_km(*_A, *_B), abs=1e-9)
+
+
+def test_unknown_stored_setting_still_means_haversine(monkeypatch):
+    from opensak.gui import settings as smod
+    monkeypatch.setattr(smod.get_settings(), "distance_method", "something-old")
+    assert distance_km(*_A, *_B) == pytest.approx(_haversine_km(*_A, *_B), abs=1e-9)
+
+
+@pytest.mark.parametrize("bad", ["Vincenty", "great-circle", ""])
+def test_unknown_explicit_method_rejected(bad):
+    with pytest.raises(ValueError):
+        distance_km(*_A, *_B, method=bad)
+    with pytest.raises(ValueError):
+        distance_km_batch(*_A, [_B[0]], [_B[1]], method=bad)
+
+
 # ── recalculate_distances() DB population ─────────────────────────────────────
 
 @pytest.fixture()

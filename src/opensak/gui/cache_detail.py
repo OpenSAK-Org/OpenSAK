@@ -20,8 +20,13 @@ from PySide6.QtGui import QFont
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 
+import logging
+
+from opensak.db import custom_fields
 from opensak.db.models import Cache
+from opensak.gui.custom_field_format import format_value as format_custom_value
 from opensak.lang import tr
+from opensak.utils import flags
 from opensak.coords import format_coords
 from opensak.gui.settings import get_settings
 from opensak.gui.date_format import format_date
@@ -29,6 +34,8 @@ from opensak.gui.theme import hint_style, hint_text_color
 from opensak.gui.icon_provider import get_cache_type_pixmap_composite, get_corrected_coords_icon
 from opensak.utils.types import TEXT_SIZE_MAP
 from opensak.hint_detect import split_hint, render_hint_breaks
+
+logger = logging.getLogger(__name__)
 
 
 def _format_date(d: datetime) -> str:
@@ -395,6 +402,15 @@ class CacheDetailPanel(QWidget):
         note_layout.addWidget(self._note_editor)
         self._tabs.addTab(note_widget, tr("detail_tab_notes"))
 
+        # ── #1028: custom fields, read-only (edited in the Edit cache dialog) ──
+        custom_widget = QWidget()
+        custom_layout = QVBoxLayout(custom_widget)
+        custom_layout.setContentsMargins(0, 4, 0, 0)
+        self._custom_browser = QTextBrowser()
+        custom_layout.addWidget(self._custom_browser)
+        self._custom_tab = self._tabs.addTab(custom_widget, tr("filter_tab_custom"))
+        self._tabs.setTabVisible(self._custom_tab, False)
+
         layout.addWidget(self._tabs)
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
@@ -591,6 +607,8 @@ class CacheDetailPanel(QWidget):
         self._tb_browser.setPlainText("")
         self._tabs.setTabText(5, tr("col_trackables"))
         self._tabs.setTabVisible(6, False)
+        self._custom_browser.setPlainText("")
+        self._tabs.setTabVisible(self._custom_tab, False)
         self.waypoints_tab_hidden.emit()
 
     def show_cache(self, cache: Cache) -> None:
@@ -727,6 +745,32 @@ class CacheDetailPanel(QWidget):
 
         # Trackables
         self._render_trackables(cache)
+
+        # Custom fields
+        self._render_custom(cache)
+
+    def _render_custom(self, cache: Cache) -> None:
+        """The cache's custom fields (#1028), shown as in the cache list;
+        the tab is hidden while the database has none."""
+        values = custom_fields.EMPTY_VALUES
+        if flags.companion_db and cache.gc_code:
+            try:
+                values = custom_fields.active_values(codes=[cache.gc_code])
+            except Exception:
+                logger.warning("detail panel: custom values not loaded", exc_info=True)
+        self._tabs.setTabVisible(self._custom_tab, bool(values.fields))
+        if not values.fields:
+            self._custom_browser.setPlainText("")
+            return
+        rows = []
+        for f in values.fields:
+            text = format_custom_value(f, values.display(cache.gc_code, f.name),
+                                       values.by_expression(f.name), grid=False)
+            rows.append(
+                f"<tr><td style='padding-right:12px'><b>{html.escape(f.name)}</b></td>"
+                f"<td>{html.escape(text).replace(chr(10), '<br>')}</td></tr>"
+            )
+        self._custom_browser.setHtml(f"<table cellspacing='4'>{''.join(rows)}</table>")
 
     def _render_logs(self, cache: Cache) -> None:
         logs = sorted(

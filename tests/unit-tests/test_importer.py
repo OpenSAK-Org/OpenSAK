@@ -525,7 +525,10 @@ def test_sanitized_reader_handles_chunk_borders(tmp_path, chunk_size):
     assert out == b"abc&amp;d&#xE9;efg"
 
 
-def test_import_gpx_companion_wpts_file_error(tmp_path):
+def test_import_gpx_companion_wpts_file_error(tmp_path, monkeypatch):
+    import opensak.lang as lang
+    from opensak.lang.en import STRINGS
+    monkeypatch.setattr(lang, "_translations", STRINGS)
     init_db(db_path=tmp_path / "comp.db")
     gpx = write_gpx(tmp_path, "main.gpx", SAMPLE_GPX)
     bad_wpts = write_gpx(tmp_path, "main-wpts.gpx", "definitely not xml <<<")
@@ -535,7 +538,10 @@ def test_import_gpx_companion_wpts_file_error(tmp_path):
 
 # ── import_zip edge paths ─────────────────────────────────────────────────────
 
-def test_import_zip_no_gpx_in_archive(tmp_path):
+def test_import_zip_no_gpx_in_archive(tmp_path, monkeypatch):
+    import opensak.lang as lang
+    from opensak.lang.en import STRINGS
+    monkeypatch.setattr(lang, "_translations", STRINGS)
     z = make_zip(tmp_path, "no_gpx.zip", {"readme.txt": "hello"})
     result = import_zip(z)
     assert any("No .gpx" in e for e in result.errors)

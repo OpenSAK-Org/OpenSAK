@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from opensak.db.transfer import transfer_caches
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 
 class _MoveWorker(QThread):
@@ -56,7 +57,7 @@ class _MoveWorker(QThread):
         self.finished.emit(count)
 
 
-class MoveCachesDialog(QDialog):
+class MoveCachesDialog(WorkerGuardMixin, QDialog):
     """Dialog that lets the user move or copy caches to another database."""
 
     caches_moved = Signal()
@@ -70,6 +71,7 @@ class MoveCachesDialog(QDialog):
         copy_only: bool = False,
     ):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self._copy_only = copy_only
         self._title_key = "copy_caches_title" if copy_only else "move_caches_title"
         self.setWindowTitle(tr(self._title_key))
@@ -88,7 +90,8 @@ class MoveCachesDialog(QDialog):
         layout.setSpacing(10)
 
         # ── Scope selection ───────────────────────────────────────────────
-        scope_lbl = QLabel(tr("move_caches_scope_label"))
+        scope_key = "copy_caches_scope_label" if self._copy_only else "move_caches_scope_label"
+        scope_lbl = QLabel(tr(scope_key))
         layout.addWidget(scope_lbl)
 
         self._scope_group = QButtonGroup(self)
@@ -194,7 +197,8 @@ class MoveCachesDialog(QDialog):
             QMessageBox.information(
                 self,
                 tr(self._title_key),
-                tr("move_caches_none_selected"),
+                tr("copy_caches_none_selected" if self._copy_only
+                   else "move_caches_none_selected"),
             )
             return
 
@@ -250,6 +254,10 @@ class MoveCachesDialog(QDialog):
             tr(done_key, count=count),
         )
         self.caches_moved.emit()
+        # Sent from run(), which returns right after it — wait for that, or
+        # the guard (#1265) would refuse to close.
+        if self._worker is not None:
+            self._worker.wait()
         self.accept()
 
     def _on_error(self, message: str) -> None:
@@ -259,6 +267,7 @@ class MoveCachesDialog(QDialog):
         QMessageBox.critical(
             self,
             tr(self._title_key),
-            tr("move_caches_error", message=message),
+            tr("copy_caches_error" if self._copy_only else "move_caches_error",
+               message=message),
         )
 

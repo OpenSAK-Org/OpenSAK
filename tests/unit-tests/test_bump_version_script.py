@@ -183,3 +183,63 @@ class TestMainCLI:
         with pytest.raises(SystemExit) as exc:
             bv.main()
         assert exc.value.code == 1
+
+
+# ── --check-tag (CI release gate, #1168) ────────────────────────────────────
+
+class TestCheckTag:
+    def test_matching_tag_passes(self, bv, capsys):
+        assert bv.check_tag("v1.0.0-beta.1") is True
+        assert "matches" in capsys.readouterr().out
+
+    def test_tag_without_leading_v_passes(self, bv):
+        assert bv.check_tag("1.0.0-beta.1") is True
+
+    def test_full_ref_passes(self, bv):
+        assert bv.check_tag("refs/tags/v1.0.0-beta.1") is True
+
+    def test_detects_the_exact_beta8_bug(self, bv, capsys):
+        # v1.22.0-beta.8: tag pushed before bump_version.py was run, so
+        # __init__.py still said the previous beta.
+        assert bv.check_tag("v1.0.0-beta.2") is False
+        out = capsys.readouterr().out
+        assert "v1.0.0-beta.2" in out
+        assert "1.0.0-beta.1" in out
+        assert "bump_version.py" in out
+
+    def test_stable_tag_does_not_match_beta_version(self, bv):
+        assert bv.check_tag("v1.0.0") is False
+
+    def test_matching_tag_but_stale_user_guide_fails(self, bv):
+        # __init__.py edited by hand: tag matches, but the User Guide still
+        # references the previous version, so --check fails.
+        bv.set_init_version("1.0.0-beta.2")
+        assert bv.check_tag("v1.0.0-beta.2") is False
+
+    def test_never_writes_to_either_file(self, bv):
+        before_init = bv.INIT_PY.read_text(encoding="utf-8")
+        before_guide = bv.USER_GUIDE.read_text(encoding="utf-8")
+        bv.check_tag("v1.0.0-beta.2")
+        bv.check_tag("v1.0.0-beta.1")
+        assert bv.INIT_PY.read_text(encoding="utf-8") == before_init
+        assert bv.USER_GUIDE.read_text(encoding="utf-8") == before_guide
+
+    def test_cli_exits_zero_on_match(self, bv, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", "--check-tag", "v1.0.0-beta.1"])
+        with pytest.raises(SystemExit) as exc:
+            bv.main()
+        assert exc.value.code == 0
+
+    def test_cli_exits_nonzero_on_mismatch(self, bv, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", "--check-tag", "v1.0.0-beta.2"])
+        with pytest.raises(SystemExit) as exc:
+            bv.main()
+        assert exc.value.code == 1
+        assert bv.get_init_version() == "1.0.0-beta.1"  # never bumps
+
+    def test_cli_check_tag_without_value_prints_usage(self, bv, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["bump_version.py", "--check-tag"])
+        with pytest.raises(SystemExit) as exc:
+            bv.main()
+        assert exc.value.code == 1
+        assert bv.get_init_version() == "1.0.0-beta.1"

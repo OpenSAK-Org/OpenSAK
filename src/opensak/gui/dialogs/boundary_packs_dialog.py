@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.lang import tr
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -68,11 +69,12 @@ class _CheckUpdateWorker(QThread):
 
 # ── Download-all dialog ───────────────────────────────────────────────────────
 
-class BoundaryDownloadDialog(QDialog):
+class BoundaryDownloadDialog(WorkerGuardMixin, QDialog):
     """Progress dialog for downloading all county packs from OpenSAK-Data."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("boundary_dl_title"))
         self.setMinimumWidth(400)
         self._worker: _DownloadAllWorker | None = None
@@ -134,27 +136,26 @@ class BoundaryDownloadDialog(QDialog):
         self._worker = None
 
     def _on_cancel(self) -> None:
-        if self._worker and self._worker.isRunning():
+        self.reject()
+
+    def _close_while_running(self) -> None:
+        # #1265: Cancel, Escape and the window's close button request the
+        # cancel, as Cancel did before. The dialog used to wait 2 s for the
+        # worker and close anyway, which aborted OpenSAK; now it stays open
+        # until the worker is done.
+        if self._worker is not None:
             self._worker.request_cancel()
             self._status.setText(tr("boundary_dl_cancelled"))
-            self._worker.wait(2000)
-            self._worker = None
-        self.close()
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.request_cancel()
-            self._worker.wait(2000)
-        super().closeEvent(event)
 
 
 # ── Check-for-updates dialog ──────────────────────────────────────────────────
 
-class BoundaryCheckDialog(QDialog):
+class BoundaryCheckDialog(WorkerGuardMixin, QDialog):
     """Checks for boundary data updates and optionally applies them."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        clamp_dialog_height_to_screen(self, parent)
         self.setWindowTitle(tr("boundary_check_title"))
         self.setMinimumWidth(380)
         self._worker: _CheckUpdateWorker | None = None
@@ -229,10 +230,11 @@ class BoundaryCheckDialog(QDialog):
     def _on_apply_done(self, count: int) -> None:
         self._bar.setVisible(False)
         self._close_btn.setEnabled(True)
-        self._status.setText(tr("boundary_check_done", count=count))
+        if count:
+            self._status.setText(tr("boundary_check_done", count=count))
+        else:
+            # apply_update() is all or nothing (#1226): no file means it
+            # couldn't fetch everything and changed nothing. Offer it again.
+            self._status.setText(tr("boundary_apply_failed"))
+            self._apply_btn.setVisible(True)
         self._worker = None
-
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(2000)
-        super().closeEvent(event)

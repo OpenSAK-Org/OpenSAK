@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Optional, cast
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QSplitter, QVBoxLayout,
@@ -18,17 +18,18 @@ from PySide6.QtWidgets import (
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.refresh_worker import RefreshWorker
+from opensak.db import custom_fields
 from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
     FilterSet, SortSpec, apply_filters_auto, get_nearby_caches, effective_coords,
-    AvailableFilter, NotFoundFilter, CacheTypeFilter,
+    AvailableFilter, NotFoundFilter, IsOwnerFilter, CacheTypeFilter,
     DifficultyFilter, TerrainFilter
 )
 from opensak.gui.cache_table import CacheTableView
 from opensak.gui.cache_detail import CacheDetailPanel
 from opensak.coords import format_coords
-from opensak.gui.settings import get_settings
+from opensak.gui.settings import get_settings, sort_home_points
 from opensak.lang import tr
 from opensak.gui.theme import hint_style
 from opensak.utils.types import GcCode
@@ -200,6 +201,22 @@ class InfoBar(QFrame):
 # Up to this many caches changed by one macro run are refreshed row by row;
 # more trigger a single full reload of the cache list (see end_macro()).
 _MACRO_ROW_REFRESH_LIMIT = 50
+# opensak.refresh() waits at most this long for the reloaded list.
+_MACRO_REFRESH_WAIT_S = 10.0
+
+
+def _find_line_polygon_filter(filterset: FilterSet):
+    """The first LinePolygonFilter in *filterset* (nested sets included),
+    or None. The filter dialog builds at most one."""
+    from opensak.filters.engine import LinePolygonFilter
+    for f in filterset._filters:
+        if isinstance(f, LinePolygonFilter):
+            return f
+        if isinstance(f, FilterSet):
+            found = _find_line_polygon_filter(f)
+            if found is not None:
+                return found
+    return None
 
 
 class MainWindow(QMainWindow):
@@ -238,12 +255,16 @@ class MainWindow(QMainWindow):
         # Start time per refresh generation, for the timing log lines in
         # _on_refresh_result(). Popped when the result (or error) comes back.
         self._refresh_started_at: dict[int, float] = {}
-        # GC codes whose corrected coordinates a running Lua macro changed;
-        # refreshed in one go by end_macro() instead of once per call.
+        # GC codes whose data a running Lua macro changed; refreshed in one
+        # go by end_macro() instead of once per call.
         self._macro_changed_codes: set[GcCode] = set()
-        # A running macro moved caches out of the active database; the view
-        # is reloaded once by end_macro().
+        # A running macro moved caches out of the active database, or added
+        # caches to it; the view is reloaded once by end_macro().
         self._macro_caches_removed = False
+        self._macro_caches_added = False
+        # opensak.select() of a cache the list is still being reloaded for:
+        # selected when that reload arrives (_on_refresh_result()).
+        self._macro_pending_select: Optional[str] = None
         # Issue #558: the toolbar Where box's expression currently in
         # effect — only set once validated on Enter, so a half-typed
         # expression never leaks into refreshes triggered elsewhere.
@@ -254,6 +275,8 @@ class MainWindow(QMainWindow):
         self._setup_toolbar()
         self._setup_shortcut_registry()
         self._apply_saved_shortcuts()
+        self._macro_shortcut_actions: list[QAction] = []
+        self._apply_macro_shortcuts()
         self._setup_search_bar()
         self._setup_statusbar()
         self._restore_state()
@@ -326,8 +349,9 @@ class MainWindow(QMainWindow):
 
         # Map widget
         from opensak.gui.map_widget import MapWidget
-        self._map_widget = MapWidget()
+        self._map_widget = MapWidget(draw_button=True)
         self._map_widget.cache_selected.connect(self._on_map_cache_selected)
+        self._map_widget.filter_by_shape_requested.connect(self._filter_by_map_shape)
         self._map_widget.set_corrected_requested.connect(self._on_set_corrected_from_map)
         self._map_widget.maximize_requested.connect(self._toggle_maximize_map)
         self._map_widget.popout_requested.connect(self._toggle_popout_map)
@@ -395,10 +419,6 @@ class MainWindow(QMainWindow):
         self._act_gsak_import.triggered.connect(self._open_gsak_import_dialog)
         file_menu.addAction(self._act_gsak_import)
 
-        self._act_gsak_filter_import = QAction(tr("action_gsak_filter_import"), self)
-        self._act_gsak_filter_import.triggered.connect(self._open_gsak_filter_import_dialog)
-        file_menu.addAction(self._act_gsak_filter_import)
-
         self._act_pq_email_check = QAction(tr("action_pq_email_check"), self)
         self._act_pq_email_check.triggered.connect(self._open_pq_email_check_dialog)
         file_menu.addAction(self._act_pq_email_check)
@@ -413,6 +433,10 @@ class MainWindow(QMainWindow):
         act_kml_export = QAction(tr("action_kml_export"), self)
         act_kml_export.triggered.connect(self._open_kml_export)
         file_menu.addAction(act_kml_export)
+
+        act_poi_export = QAction(tr("action_poi_export"), self)
+        act_poi_export.triggered.connect(self._open_poi_export)
+        file_menu.addAction(act_poi_export)
 
         file_menu.addSeparator()
 
@@ -525,6 +549,11 @@ class MainWindow(QMainWindow):
         act_columns.triggered.connect(self._open_column_chooser)
         view_menu.addAction(act_columns)
 
+        self._act_autofit_columns = QAction(tr("action_autofit_columns"), self)
+        self._act_autofit_columns.setShortcut(QKeySequence("Ctrl+Alt+W"))
+        self._act_autofit_columns.triggered.connect(self._autofit_columns)
+        view_menu.addAction(self._act_autofit_columns)
+
         view_menu.addSeparator()
 
         self._act_maximize_map = QAction(tr("action_maximize_map"), self)
@@ -595,14 +624,26 @@ class MainWindow(QMainWindow):
         act_dist_bearing.triggered.connect(self._open_dist_bearing)
         gc_tools_menu.addAction(act_dist_bearing)
 
-        # ── Macros (Lua, proof of concept) ────────────────────────────────────
+        # #1028: define the active database's custom fields
+        self._custom_fields_sep = gc_tools_menu.addSeparator()
+        self._custom_fields_sep.setVisible(flags.companion_db)
+        self._act_custom_fields = QAction(tr("action_custom_fields"), self)
+        self._act_custom_fields.triggered.connect(self._open_custom_fields)
+        self._act_custom_fields.setVisible(flags.companion_db)
+        gc_tools_menu.addAction(self._act_custom_fields)
+
+        # ── Macros (Lua) ──────────────────────────────────────────────────────
         macros_menu = menubar.addMenu(tr("menu_macros"))
-        # Beta-only until the macro API is settled (#938 step 4).
+        # On in every build since v1.22.0; features.json can still turn it off.
         macros_menu.menuAction().setVisible(flags.lua_macros)
 
         act_run_macro = QAction(tr("action_run_macro"), self)
         act_run_macro.triggered.connect(self._open_macro_dialog)
         macros_menu.addAction(act_run_macro)
+
+        act_macro_manager = QAction(tr("action_macro_manager"), self)
+        act_macro_manager.triggered.connect(self._open_macro_manager)
+        macros_menu.addAction(act_macro_manager)
 
         from opensak.macro.examples import list_examples
         examples_menu = macros_menu.addMenu(tr("menu_macro_examples"))
@@ -611,6 +652,12 @@ class MainWindow(QMainWindow):
             act.triggered.connect(lambda _=False, n=name: self._open_macro_example(n))
             examples_menu.addAction(act)
         examples_menu.setEnabled(not examples_menu.isEmpty())
+
+        # #1173: the shared macro repository, in the browser.
+        macros_menu.addSeparator()
+        self._act_find_macros = QAction(tr("action_find_more_macros"), self)
+        self._act_find_macros.triggered.connect(self._open_macros_repo)
+        macros_menu.addAction(self._act_find_macros)
 
         # ── Hjælp ─────────────────────────────────────────────────────────────
         help_menu = menubar.addMenu(tr("menu_help"))
@@ -921,7 +968,7 @@ class MainWindow(QMainWindow):
         row.addWidget(gc_lbl)
 
         self._search_gc = QLineEdit()
-        self._search_gc.setPlaceholderText("GC12345")
+        self._search_gc.setPlaceholderText("GC12345")  # i18n: ignore — GC code example
         self._search_gc.setFixedWidth(110)
         self._search_gc.setClearButtonEnabled(True)
         self._search_gc.textChanged.connect(self._on_search_changed)
@@ -1033,6 +1080,43 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+        # #1232: the dialog only signals a switch or a rename, but deleting,
+        # removing from the list, opening, scanning the folder, copying and
+        # moving change the list too: the toolbar dropdown must show it.
+        self._reload_db_combo()
+
+    def _open_custom_fields(self) -> None:
+        """Tools → Custom fields… (#1028): define the active database's fields."""
+        from opensak.db.manager import get_db_manager
+        from opensak.gui.dialogs.custom_fields_dialog import CustomFieldsDialog
+        active = get_db_manager().active
+        if active is None:
+            return
+        dlg = CustomFieldsDialog(active.path, active.name, self)
+        dlg.fields_changed.connect(self._on_custom_fields_changed)
+        dlg.exec()
+
+    def _on_custom_fields_changed(self, renames: list) -> None:
+        """Fields were defined, changed or deleted: renamed fields keep their
+        column in the cache list, and the list shows the new definitions."""
+        from opensak.gui.dialogs.column_dialog import (
+            custom_column_id, get_column_widths, get_visible_columns,
+            set_column_widths, set_visible_columns,
+        )
+        if renames:
+            visible, widths = list(get_visible_columns()), dict(get_column_widths())
+            for old, new in renames:
+                old_id, new_id = custom_column_id(old), custom_column_id(new)
+                visible = [new_id if c == old_id else c for c in visible]
+                if old_id in widths:
+                    widths[new_id] = widths.pop(old_id)
+            set_visible_columns(visible)
+            set_column_widths(widths)
+        self._cache_table.reload_columns()
+        self._cache_table._model.reload_custom()
+        current = self._cache_table.selected_cache()
+        if current is not None:
+            self._on_found_status_changed(current.gc_code)
 
     def _open_backup_dialog(self) -> None:
         """File → Back up now… (issue #953)."""
@@ -1089,6 +1173,14 @@ class MainWindow(QMainWindow):
             from opensak.db.database import recalculate_distances, distances_up_to_date
             if not distances_up_to_date(s.home_lat, s.home_lon):
                 recalculate_distances(s.home_lat, s.home_lon)
+        # The rows still loaded in the table belong to the previous database.
+        # Empty the table before switching to the new database's columns: if
+        # the new database shows the Hints/Notes column and the old rows are
+        # LightweightCache (the fast path used when the old database had
+        # those columns off), the very next repaint crashed with
+        # AttributeError (encoded_hints). The real rows are fetched by
+        # _refresh_cache_list (via reload_map below), with the new columns.
+        self._cache_table.load_caches([], custom_fields.EMPTY_VALUES)
         # Genindlæs kolonner for den nye database (issue #199)
         self._cache_table.reload_columns()
         # Issue #607 (opfølgning): genindlæs comboen for den nye database —
@@ -1107,13 +1199,39 @@ class MainWindow(QMainWindow):
         # Issue #549: opening the database may just have migrated it.
         self.show_premigration_backup_notices()
 
+    def show_companion_notices(self) -> None:
+        """
+        Tell the user about companion databases (#1034) that opening a
+        database could not use: a damaged one (moved aside), one of another
+        database, or one from a newer OpenSAK. A no-op when there are none.
+        """
+        from opensak.db import companion
+        notices = companion.take_notices()
+        if not notices:
+            return
+        keys = {
+            companion.NOTICE_CORRUPT: "companion_corrupt_msg",
+            companion.NOTICE_FOREIGN: "companion_foreign_msg",
+            companion.NOTICE_NEWER: "companion_newer_msg",
+        }
+        text = "\n\n".join(
+            tr(keys[n.kind], file=n.db_path.name, path=str(n.path))
+            for n in notices if n.kind in keys
+        )
+        if text:
+            QMessageBox.warning(self, tr("companion_notice_title"), text)
+
     def show_premigration_backup_notices(self) -> None:
         """
         Tell the user about databases that were backed up before a schema
         migration (issue #549), so the backup isn't a silent background
         action they never find out about. Called after startup and after
         switching databases; a no-op when no backup was made.
+
+        Also shows what opening the database found about its companion
+        database (#1034, show_companion_notices()).
         """
+        self.show_companion_notices()
         from opensak.backup.premigration import take_notices
         notices = take_notices()
         if not notices:
@@ -1159,7 +1277,7 @@ class MainWindow(QMainWindow):
         so the active database stays selected throughout.
         """
         from opensak.backup.premigration import take_notices
-        from opensak.db.database import migrate_databases
+        from opensak.db.database import migrate_databases, set_progress_callback
         progress = QProgressDialog(
             tr("premigration_apply_all_progress"), "", 0, len(pending), self
         )
@@ -1168,17 +1286,26 @@ class MainWindow(QMainWindow):
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         failed = []
+        current = ""
+
+        def _step(step: str) -> None:
+            # #1033: the VACUUM after the update can take a while.
+            if step == "compacting":
+                progress.setLabelText(current + "\n" + tr("db_progress_compacting"))
+                QApplication.processEvents()
+
+        set_progress_callback(_step)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             for i, db in enumerate(pending):
-                progress.setLabelText(
-                    tr("premigration_apply_all_progress_db", name=db.name)
-                )
+                current = tr("premigration_apply_all_progress_db", name=db.name)
+                progress.setLabelText(current)
                 progress.setValue(i)
                 QApplication.processEvents()
                 failed += migrate_databases([db.path])
             progress.setValue(len(pending))
         finally:
+            set_progress_callback(None)
             QApplication.restoreOverrideCursor()
             progress.close()
 
@@ -1187,22 +1314,34 @@ class MainWindow(QMainWindow):
             tr("premigration_apply_all_done", count=len(pending) - len(failed))
         ]
         backups = take_notices()
+        details = ""
         if backups:
-            parts.append(tr("premigration_apply_all_backups") + "\n" + "\n".join(
+            # With many databases the full per-file list made the box taller
+            # than the screen, pushing the OK button out of reach. Show only
+            # the backup folder(s) here and the full list under
+            # "Show Details...", which scrolls.
+            folders = dict.fromkeys(str(n.backup_path.parent) for n in backups)
+            parts.append(
+                tr("premigration_apply_all_backups") + "\n" + "\n".join(folders)
+            )
+            details = "\n".join(
                 f"{names.get(n.db_path, n.db_path.name)}: {n.backup_path}"
                 for n in backups
-            ))
+            )
         if failed:
             parts.append(tr("premigration_apply_all_failed") + "\n" + "\n".join(
                 f"{names.get(path, path.name)}: {err}" for path, err in failed
             ))
-            QMessageBox.warning(
-                self, tr("premigration_backup_title"), "\n\n".join(parts)
-            )
-        else:
-            QMessageBox.information(
-                self, tr("premigration_backup_title"), "\n\n".join(parts)
-            )
+        msg = QMessageBox(self)
+        msg.setIcon(
+            QMessageBox.Icon.Warning if failed else QMessageBox.Icon.Information
+        )
+        msg.setWindowTitle(tr("premigration_backup_title"))
+        msg.setText("\n\n".join(parts))
+        if details:
+            msg.setDetailedText(details)
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def show_database_fallback_notice(self) -> None:
         """
@@ -1495,6 +1634,11 @@ class MainWindow(QMainWindow):
             if worker.isRunning():
                 worker.quit()
                 worker.wait(500)
+        # #1048: fresh planner statistics for the next start. After the
+        # exit backup; app.py records the backup state only afterwards, so
+        # this doesn't count as a change.
+        from opensak.db.database import optimize_database
+        optimize_database()
         # Tear down the map's WebEngine page before its profile while the event
         # loop is still alive. The map's QWebEngineProfile/QWebEnginePage are
         # parent-less; relying on aboutToQuit (which fires only at app exit) means
@@ -1593,6 +1737,7 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_result(
         self, generation: int, table_caches: list, map_caches: list,
+        custom_values: object = None,
     ) -> None:
         """GUI-thread continuation of _refresh_cache_list() — see RefreshWorker."""
         QApplication.restoreOverrideCursor()
@@ -1605,12 +1750,19 @@ class MainWindow(QMainWindow):
             len(table_caches), time.monotonic() - _t0,
         )
 
-        self._cache_table.load_caches(table_caches)
+        self._cache_table.load_caches(
+            table_caches,
+            custom_values if isinstance(custom_values, custom_fields.Values) else None,
+        )
+        if self._macro_pending_select:
+            code, self._macro_pending_select = self._macro_pending_select, None
+            self._cache_table.select_by_gc_code(code)
         logger.info(
             "mainwindow: cache_table.load_caches done (+%.2fs)",
             time.monotonic() - _t0,
         )
         if get_settings().map_enabled:
+            self._update_map_filter_shape()
             self._map_widget.load_caches(map_caches)
             logger.info(
                 "mainwindow: map_widget.load_caches done (+%.2fs)",
@@ -1750,12 +1902,14 @@ class MainWindow(QMainWindow):
 
         if idx == 1:   # Ikke fundne / Not found
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 2:  # Fundne / Found
             from opensak.filters.engine import FoundFilter
             fs.add(FoundFilter())
         elif idx == 3:  # Tilgængelige ikke fundne / Available not found
             fs.add(AvailableFilter())
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 4:  # Traditional let / Traditional easy
             fs.add(CacheTypeFilter(["Traditional Cache"]))
             fs.add(DifficultyFilter(max_difficulty=2.0))
@@ -1765,11 +1919,20 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import ArchivedFilter
             fs.add(ArchivedFilter())
 
+        for search_filter in self._search_box_filters():
+            fs.add(search_filter)
+
+        return fs
+
+    def _search_box_filters(self) -> list:
+        """The filters for the toolbar search boxes (GC code / Name / Where)."""
+        filters: list = []
+
         # GC-nummer søgefelt (søger kun i GC kode)
         gc_search = self._search_gc.text().strip()
         if gc_search:
             from opensak.filters.engine import GcCodeFilter
-            fs.add(GcCodeFilter(gc_search))
+            filters.append(GcCodeFilter(gc_search))
 
         # Navn-søgefelt — matcher kun på navn (GSAK-style, issue #86)
         # Issue #80 introduced a combined Name+GC code search here, but
@@ -1778,14 +1941,27 @@ class MainWindow(QMainWindow):
         name_search = self._search_box.text().strip()
         if name_search:
             from opensak.filters.engine import NameFilter
-            fs.add(NameFilter(name_search))
+            filters.append(NameFilter(name_search))
 
         # Quick "Where" box (issue #558) — only the validated expression
         if self._where_sql_applied:
             from opensak.filters.engine import WhereClauseFilter
-            fs.add(WhereClauseFilter(self._where_sql_applied))
+            filters.append(WhereClauseFilter(self._where_sql_applied))
 
-        return fs
+        return filters
+
+    def _with_search_boxes(self, filterset: FilterSet) -> FilterSet:
+        """*filterset* AND the toolbar search boxes: what the list shows once
+        *filterset* is active, as _show_filter_result() resets the preset."""
+        filters = self._search_box_filters()
+        if not filters:
+            return filterset
+        combined = FilterSet(mode="AND")
+        if len(filterset) > 0:
+            combined.add(filterset)
+        for search_filter in filters:
+            combined.add(search_filter)
+        return combined
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1951,11 +2127,8 @@ class MainWindow(QMainWindow):
 
     def _update_quick_search_state(self) -> None:
         """Sync the Clear button and the profile dropdown's 'None' / 'Active
-        (unsaved)' entry with the toolbar search boxes."""
-        if self._has_quick_search():
-            self._set_clear_filter_active(True)
-        elif not self._active_filter_name:
-            self._set_clear_filter_active(False)
+        (unsaved)' entry with the filters in effect."""
+        self._set_clear_filter_active(self._has_active_filter())
         self._update_filter_combo_placeholder()
 
     def _on_search_changed(self, text: str) -> None:
@@ -1989,7 +2162,7 @@ class MainWindow(QMainWindow):
         return min_chars, debounce_ms
 
     def _on_quick_filter_changed(self, index: int) -> None:
-        self._update_filter_combo_placeholder()
+        self._update_quick_search_state()
         self._refresh_cache_list()
 
     # ── Quick "Where" box (issue #558) ────────────────────────────────────────
@@ -2059,17 +2232,22 @@ class MainWindow(QMainWindow):
     # ── Drag & drop ───────────────────────────────────────────────────────────
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        """Accept drag if it contains GPX or ZIP files."""
+        """Accept drag if it contains GPX or ZIP files, or folders."""
+        from pathlib import Path
+
         mime = event.mimeData()
         if mime.hasUrls():
             paths = [u.toLocalFile() for u in mime.urls()]
-            if any(p.lower().endswith((".gpx", ".zip", ".loc")) for p in paths):
+            if any(
+                p.lower().endswith((".gpx", ".zip", ".loc")) or (p and Path(p).is_dir())
+                for p in paths
+            ):
                 event.acceptProposedAction()
                 return
         event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        """Open import dialog with dropped GPX/ZIP files pre-loaded."""
+        """Open import dialog with dropped GPX/ZIP files or folders pre-loaded."""
         from pathlib import Path
         from opensak.gui.dialogs.import_dialog import ImportDialog
 
@@ -2082,14 +2260,14 @@ class MainWindow(QMainWindow):
             Path(u.toLocalFile())
             for u in event.mimeData().urls()
             if u.toLocalFile().lower().endswith((".gpx", ".zip", ".loc"))
+            or (u.toLocalFile() and Path(u.toLocalFile()).is_dir())
         ]
         if not paths:
             event.ignore()
             return
 
         event.acceptProposedAction()
-        dlg = ImportDialog(self)
-        dlg.add_files(paths)
+        dlg = ImportDialog(self, paths=paths)
         dlg.import_completed.connect(self._refresh_after_import)
         dlg.exec()
 
@@ -2115,19 +2293,20 @@ class MainWindow(QMainWindow):
         )
         dlg.databases_changed.connect(self._reload_db_combo)
         dlg.filters_imported.connect(self._on_filter_profiles_imported)
+        dlg.locations_imported.connect(self._on_home_points_imported)
+        dlg.views_imported.connect(self._populate_column_view_combo)
         dlg.exec()
 
-    def _open_gsak_filter_import_dialog(self) -> None:
-        """Import GSAK's saved filters as OpenSAK filter profiles.
-
-        Unlike the cache import next to it this touches no cache data, so the
-        cache list and map are left alone — only the toolbar's profile
-        dropdown has to pick up the new profiles.
-        """
-        from opensak.gui.dialogs.gsak_filter_import_dialog import GsakFilterImportDialog
-        dlg = GsakFilterImportDialog(self)
-        dlg.import_completed.connect(self._on_filter_profiles_imported)
-        dlg.exec()
+    def _on_home_points_imported(self) -> None:
+        """Issue #1001: GSAK's user locations were added to the list. Only
+        an overwritten active location moves the centre — recalculate then."""
+        self._reload_home_combo()
+        s = get_settings()
+        if s.home_lat and s.home_lon:
+            from opensak.db.database import recalculate_distances, distances_up_to_date
+            if not distances_up_to_date(s.home_lat, s.home_lon):
+                recalculate_distances(s.home_lat, s.home_lon)
+                self._refresh_cache_list()
 
     def _on_filter_profiles_imported(self) -> None:
         self._populate_filter_profile_combo(select_name=self._active_filter_name or None)
@@ -2233,10 +2412,17 @@ class MainWindow(QMainWindow):
             # goes through _on_home_changed() — so distances must be
             # recalculated explicitly here, or the persisted Cache.distance
             # column stays stale until the next manual home-point switch.
+            # Only when something actually changed, though: a full pass takes
+            # seconds on a large database, and most Settings changes don't
+            # touch the centre point or the distance method.
             s = get_settings()
             if s.home_lat and s.home_lon:
-                from opensak.db.database import recalculate_distances
-                recalculate_distances(s.home_lat, s.home_lon)
+                from opensak.db.database import recalculate_distances, distances_up_to_date
+                if not distances_up_to_date(s.home_lat, s.home_lon):
+                    from opensak.gui.dialogs.widgets import busy_box
+                    with busy_box(self, tr("recalculating_distances"),
+                                  tr("settings_dialog_title")):
+                        recalculate_distances(s.home_lat, s.home_lon)
             self._update_map_visibility()
             if s.map_enabled:
                 # No point reloading the map page (tiles/JS) if it's not
@@ -2283,6 +2469,7 @@ class MainWindow(QMainWindow):
             ("projection",        "shortcut_projection",        [self._act_projection]),
             ("maximize_map",      "shortcut_maximize_map",      [self._act_maximize_map]),
             ("popout_map",        "shortcut_popout_map",        [self._act_popout_map]),
+            ("autofit_columns",   "shortcut_autofit_columns",   [self._act_autofit_columns]),
         ]
 
     def _apply_saved_shortcuts(self) -> None:
@@ -2322,7 +2509,7 @@ class MainWindow(QMainWindow):
         gemt hjemmepunkt eller en ny cache.
         """
         s = get_settings()
-        points = s.home_points
+        points = sort_home_points(s.home_points)
         active = s.active_home_name
         self._home_combo.blockSignals(True)
         self._home_combo.clear()
@@ -2416,10 +2603,15 @@ class MainWindow(QMainWindow):
         """
         if cache.latitude is None or cache.longitude is None:
             return
-        from opensak.gui.settings import get_settings, HomePoint
-        s = get_settings()
+        from opensak.gui.settings import HomePoint
         label = f"📍 {cache.gc_code} — {cache.name}".strip(" —")
-        point = HomePoint(label, cache.latitude, cache.longitude)
+        self._activate_center(HomePoint(label, cache.latitude, cache.longitude))
+
+    def _activate_center(self, point) -> None:
+        """Make *point* (a HomePoint, saved or not) the active centre: store
+        it, show it in the drop-down, pan the map and recalculate and store
+        distance and bearing for every cache."""
+        s = get_settings()
         s.set_active_home(point)
         self._reload_home_combo()
         self._map_widget.pan_to_location(point.lat, point.lon, point.name)
@@ -2526,6 +2718,8 @@ class MainWindow(QMainWindow):
                 session.add(cache)
                 session.flush()   # save_related() har brug for cache.id
                 dlg.save_related(session, cache)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662: a newly added cache/custom waypoint had no
             # distance/bearing computed, so it sorted to the bottom of the
             # list (as if distance were unset) until the user switched the
@@ -2543,6 +2737,11 @@ class MainWindow(QMainWindow):
             self._statusbar.showMessage(
                 tr("status_cache_added", gc_code=data["gc_code"]), 3000
             )
+
+    def _report_custom_save(self, error: Optional[str]) -> None:
+        """Show why the Edit cache dialog's custom fields weren't saved."""
+        if error:
+            QMessageBox.warning(self, tr("warning"), error)
 
     def _edit_waypoint(self) -> None:
         cache = self._cache_table.selected_cache()
@@ -2579,6 +2778,8 @@ class MainWindow(QMainWindow):
                             setattr(c, field, value)
                     # UserNote (note + korrigerede koordinater) og child-waypoints
                     dlg.save_related(session, c)
+            # #1028: custom fields live in the companion, written second
+            self._report_custom_save(dlg.save_custom(data["gc_code"]))
             # Issue #662 follow-up: same stale-distance issue as adding a
             # new cache — editing coordinates left Cache.distance/bearing
             # unchanged until the center/home point was switched away and
@@ -2692,27 +2893,11 @@ class MainWindow(QMainWindow):
 
     def _bulk_delete_caches(self, gc_codes: list[str]) -> None:
         """Delete caches and all child records by GC codes (bulk SQL)."""
-        from opensak.db.models import (
-            Cache as CacheModel, Log, Attribute, Trackable, Waypoint, UserNote,
-        )
-        # #1041: chunked to stay under SQLite's bound-parameter limit when
-        # deleting a large filter.
+        from opensak.db.cache_delete import delete_caches
+        from opensak.db.database import optimize_database
         with get_session() as session:
-            for i in range(0, len(gc_codes), 500):
-                chunk = gc_codes[i:i + 500]
-                cache_ids = [
-                    row[0] for row in
-                    session.query(CacheModel.id).filter(
-                        CacheModel.gc_code.in_(chunk)
-                    ).all()
-                ]
-                if cache_ids:
-                    session.query(Log).filter(Log.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                    session.query(Attribute).filter(Attribute.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                    session.query(Trackable).filter(Trackable.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                    session.query(Waypoint).filter(Waypoint.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                    session.query(UserNote).filter(UserNote.cache_id.in_(cache_ids)).delete(synchronize_session=False)
-                    session.query(CacheModel).filter(CacheModel.id.in_(cache_ids)).delete(synchronize_session=False)
+            delete_caches(session, gc_codes)
+        optimize_database()   # #1048
 
     def _set_flag_for_filtered(self, flagged: bool) -> None:
         """Issue #293: set or clear the user flag on every cache in the
@@ -2816,7 +3001,7 @@ class MainWindow(QMainWindow):
         from opensak.db.manager import get_db_manager
         manager = get_db_manager()
         if not manager.active:
-            print("DEBUG save: ingen aktiv database")
+            print("DEBUG save: no active database")
             return
         path = manager.active.path
         for suffix, value in (
@@ -2835,7 +3020,7 @@ class MainWindow(QMainWindow):
         from opensak.filters.engine import FilterProfile
         manager = get_db_manager()
         if not manager.active:
-            print("DEBUG load: ingen aktiv database")
+            print("DEBUG load: no active database")
             return
         path = manager.active.path
 
@@ -2855,7 +3040,7 @@ class MainWindow(QMainWindow):
             # et sort-felt denne version ikke kender endnu (fixes crash on
             # startup, se #498). Falder tilbage til default og retter den
             # gemte værdi, så det ikke gentager sig ved næste opstart.
-            print(f"DEBUG load: ukendt sort-felt {field!r} ignoreret ({e}); bruger 'name'")
+            print(f"DEBUG load: unknown sort field {field!r} ignored ({e}); using 'name'")
             field = "name"
             self._current_sort = SortSpec(field, ascending=ascending)
             db_settings.set_value(
@@ -2884,11 +3069,11 @@ class MainWindow(QMainWindow):
                             self._populate_filter_profile_combo(select_name=profile.name)
                         return
                 except Exception as e:
-                    print(f"DEBUG load: fejl ved indlæsning af {path}: {e}")
+                    print(f"DEBUG load: error loading {path}: {e}")
         # Ingen gemt profil — nulstil filter
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
-        self._set_clear_filter_active(False)
+        self._set_clear_filter_active(self._has_active_filter())
         if hasattr(self, "_filter_lbl"):
             self._filter_lbl.setText("")
         if hasattr(self, "_filter_profile_combo"):
@@ -2919,7 +3104,8 @@ class MainWindow(QMainWindow):
             return
         self._show_filter_dialog(self._current_filterset, self._active_filter_name)
 
-    def _show_filter_dialog(self, filterset, active_name: str) -> None:
+    def _show_filter_dialog(self, filterset, active_name: str,
+                            initial_tab: Optional[str] = None) -> None:
         """Åbn "Set filter"-dialogen forudfyldt med et givet filterset/navn.
 
         Delt af den normale menu-indgang (_open_filter_dialog) og af
@@ -2930,18 +3116,58 @@ class MainWindow(QMainWindow):
         dlg = FilterDialog(
             self, filterset, active_name,
             current_cache=self._cache_table.selected_cache(),
+            map_caches=self._map_widget.loaded_caches(),
+            initial_tab=initial_tab,
         )
         dlg.filter_applied.connect(self._on_filter_applied)
         dlg.profile_deleted.connect(self._on_profile_deleted)
         dlg.profile_saved.connect(self._on_profile_saved)
         dlg.exec()
 
+    def _update_map_filter_shape(self) -> None:
+        """Show the active filter's line/polygon shape on the map (or remove
+        it when the active filter has none)."""
+        lp = _find_line_polygon_filter(self._current_filterset)
+        if lp is None:
+            self._map_widget.set_filter_shape(None)
+        else:
+            self._map_widget.set_filter_shape(lp.mode, lp.points)
+
+    def _filter_by_map_shape(self, mode: str, points: list) -> None:
+        """"Filter by this shape" on the map: open "Set filter" with the
+        active filter's criteria plus the drawn shape in the Line/Polygon
+        tab. The distance and "Exclude" of an active line/polygon filter are
+        kept; it is the shape that is replaced."""
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        from opensak.filters.engine import FilterSet, LinePolygonFilter
+        from opensak.filters.line_polygon import format_points_text
+        from opensak.gui.dialogs.filter_dialog import _LP_DEFAULT_DISTANCE
+        active = self._current_filterset
+        filterset = FilterSet(active.mode, active.negate)
+        distance_km = _LP_DEFAULT_DISTANCE * (1.60934 if get_settings().use_miles else 1.0)
+        exclude = False
+        for f in active._filters:
+            if isinstance(f, LinePolygonFilter):
+                distance_km, exclude = f.distance_km, f.exclude
+            else:
+                filterset.add(f)
+        try:
+            filterset.add(LinePolygonFilter(
+                points, mode, distance_km, exclude=exclude,
+                text=format_points_text(mode, points),
+            ))
+        except ValueError:
+            return  # too few points — the map only offers this for valid shapes
+        self._show_filter_dialog(filterset, "", initial_tab="line_polygon")
+
     def _on_filter_applied(self, filterset, sort, profile_name: str) -> None:
         with get_session() as session:
             # `sort` from the dialog is always SortSpec("name") — ignore it
             # and keep the user's column sort for this database.
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
 
@@ -2960,7 +3186,8 @@ class MainWindow(QMainWindow):
         self._show_filter_result(filterset, profile_name, caches)
 
     def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
-        """Make *filterset* the active filter and show its (non-empty) *caches*.
+        """Make *filterset* the active filter and show its (non-empty) *caches*,
+        queried with _with_search_boxes().
 
         Shared by the "Set filter" dialog and Lua macros (opensak.filter).
         """
@@ -2970,11 +3197,17 @@ class MainWindow(QMainWindow):
         self._set_clear_filter_active(True)
         label = profile_name if profile_name else tr("filter_active_label")
         self._filter_lbl.setText(f"🔍 {label}")
+        # Signals blocked: *caches* is already the result without a preset.
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
-            self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
+            self._update_map_filter_shape()
+            self._map_widget.load_caches(
+                self._fetch_map_caches(self._with_search_boxes(filterset), caches)
+            )
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -3009,7 +3242,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
-            self._set_clear_filter_active(self._has_quick_search())
+            self._set_clear_filter_active(self._has_active_filter())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
             self._refresh_cache_list()
@@ -3051,6 +3284,9 @@ class MainWindow(QMainWindow):
         self._where_combo.blockSignals(False)
         self._where_sql_applied = ""
         self._set_where_error(None)
+        self._quick_filter.blockSignals(True)
+        self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -3064,6 +3300,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+
+    def _has_active_filter(self) -> bool:
+        """True if any filter is in effect: a saved profile, an unsaved
+        filter, a search box or a quick-filter preset (issue #1242)."""
+        return bool(self._active_filter_name) or self._has_unsaved_active_filter()
 
     def _has_unsaved_active_filter(self) -> bool:
         """True if a filter is currently in effect that isn't a saved profile.
@@ -3154,22 +3395,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
         self._filter_lbl.setText(f"🔍 {profile.name}")
+        # Signals blocked so the preset reset doesn't refresh as well (#1242).
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
-        with get_session() as session:
-            caches = apply_filters_auto(
-                session, profile.filterset, self._current_sort,
-                columns=self._visible_table_columns(),
-            )
-        self._cache_table.load_caches(caches)
-        if get_settings().map_enabled:
-            self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
-        count = self._cache_table.row_count()
-        if count == 1:
-            self._count_lbl.setText(tr("count_cache_single"))
-        else:
-            self._count_lbl.setText(tr("count_caches", count=count))
-        self._statusbar.showMessage(tr("status_filter_result", count=count), 3000)
-        self._update_info_bar()
+        self._quick_filter.blockSignals(False)
+        self._refresh_cache_list()
 
     def _open_column_chooser(self) -> None:
         if self._trip_planner_active():
@@ -3197,6 +3427,10 @@ class MainWindow(QMainWindow):
             if (self._visible_table_columns() & {"hints", "notes"}
                     and self._cache_table._model.has_lightweight_caches()):
                 self._refresh_table_only()
+
+    def _autofit_columns(self) -> None:
+        """Size every cache-list column to fit its contents (Ctrl+Alt+W)."""
+        self._cache_table.autofit_columns()
 
     def _populate_column_view_combo(self) -> None:
         """Genindlæs alle gemte Column Views i toolbar-dropdown (#607).
@@ -3248,7 +3482,7 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.column_dialog import (
             ALWAYS_VISIBLE, ColumnView,
             set_visible_columns, set_column_widths,
-            set_container_display, set_type_display,
+            set_container_display, set_type_display, set_applied_view_name,
         )
         try:
             view = ColumnView.load(path)
@@ -3261,6 +3495,7 @@ class MainWindow(QMainWindow):
         set_column_widths(view.widths)
         set_container_display(view.container_display)
         set_type_display(view.type_display)
+        set_applied_view_name(view.name)
         self._cache_table.reload_columns()
         # Issue #658 follow-up — same reasoning as _open_column_chooser():
         # reload_columns() doesn't refetch data, so a view that turns on
@@ -3306,6 +3541,29 @@ class MainWindow(QMainWindow):
             return
         from opensak.gui.dialogs.file_export_dialog import FileExportDialog
         dlg = FileExportDialog(
+            caches, parent=self, filter_name=self._active_filter_name,
+            center_name=get_settings().active_home_name or "",
+        )
+        dlg.exec()
+
+    def _open_poi_export(self) -> None:
+        if self._trip_planner_active():
+            self._warn_trip_planner_active()
+            return
+        caches = [
+            self._cache_table._model.cache_at(i)
+            for i in range(self._cache_table.row_count())
+        ]
+        caches = [c for c in caches if c is not None]
+        if not caches:
+            QMessageBox.information(
+                self,
+                tr("kml_no_caches_title"),
+                tr("kml_no_caches_msg"),
+            )
+            return
+        from opensak.gui.dialogs.poi_export_dialog import PoiExportDialog
+        dlg = PoiExportDialog(
             caches, parent=self, filter_name=self._active_filter_name,
             center_name=get_settings().active_home_name or "",
         )
@@ -3379,6 +3637,101 @@ class MainWindow(QMainWindow):
         self._macro_dialog.raise_()
         self._macro_dialog.activateWindow()
 
+    def _macro_manager_instance(self):
+        """The Macro manager window, created (hidden) on first use: macro
+        shortcuts run through it, so their output is there to look at."""
+        from opensak.gui.dialogs.macro_manager import MacroManagerDialog
+        if getattr(self, "_macro_manager", None) is None:
+            self._macro_manager = MacroManagerDialog(
+                host=self, parent=self,
+                taken_shortcuts=self._taken_shortcuts,
+                shortcuts_changed=self._apply_macro_shortcuts,
+                edit_macro=self._edit_macro,
+            )
+        return self._macro_manager
+
+    def _open_macro_manager(self) -> None:
+        manager = self._macro_manager_instance()
+        manager.reload()
+        manager.show()
+        manager.raise_()
+        manager.activateWindow()
+
+    def _edit_macro(self, path, error: Optional[str] = None) -> None:
+        """Open macro *path* in the editor (asking about unsaved changes
+        there), marking the line of the Lua *error* if given."""
+        self._open_macro_dialog()
+        if self._macro_dialog.open_path(path) and error:
+            self._macro_dialog.show_error(error)
+
+    def _apply_macro_shortcuts(self) -> None:
+        """(Re)create the main window actions behind the macro shortcuts
+        set in the Macro manager."""
+        from pathlib import Path
+        from opensak.macro.shortcuts import macro_shortcuts
+        from opensak.utils import flags
+        for act in self._macro_shortcut_actions:
+            self.removeAction(act)
+            act.deleteLater()
+        self._macro_shortcut_actions = []
+        if not flags.lua_macros:
+            return
+        for path, seq in macro_shortcuts().items():
+            act = QAction(path.stem, self)
+            act.setShortcut(QKeySequence(seq))
+            act.setData(str(path))
+            act.triggered.connect(lambda _=False, p=Path(path): self._run_macro_shortcut(p))
+            self.addAction(act)
+            self._macro_shortcut_actions.append(act)
+
+    def _taken_shortcuts(self, exclude) -> dict[str, str]:
+        """Shortcuts in use in the main window (portable text → the action
+        or macro using it), except that of macro *exclude*."""
+        from pathlib import Path
+        from PySide6.QtGui import QShortcut
+        from opensak.macro.metadata import read_metadata
+        portable = QKeySequence.SequenceFormat.PortableText
+        taken: dict[str, str] = {}
+        for act in self.findChildren(QAction):
+            if act in self._macro_shortcut_actions:
+                if Path(act.data()) == Path(exclude):
+                    continue
+                label = read_metadata(Path(act.data())).name
+            else:
+                label = act.text().replace("&&", "\0").replace("&", "").replace("\0", "&")
+            for seq in act.shortcuts():
+                taken.setdefault(seq.toString(portable), label.strip())
+        for shortcut in self.findChildren(QShortcut):
+            if not shortcut.key().isEmpty():
+                taken.setdefault(shortcut.key().toString(portable), shortcut.whatsThis() or "OpenSAK")
+        return {k: v for k, v in taken.items() if k}
+
+    def _run_macro_shortcut(self, path) -> None:
+        """Run a macro from its shortcut. The output goes to the Macro
+        manager; with that window closed, the status bar says the macro
+        finished, and an error is shown with the choice to edit the macro."""
+        manager = self._macro_manager_instance()
+        if manager.isVisible():
+            manager.select_path(path)
+            manager.run_path(path)
+            return
+        error = manager.run_path(path, parent=self)
+        if error is None:
+            self._statusbar.showMessage(tr("macro_mgr_shortcut_done", name=path.name), 5000)
+            return
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("macro_mgr_title"),
+                          tr("macro_mgr_shortcut_failed", name=path.name), parent=self)
+        box.setInformativeText(error)
+        btn_edit = box.addButton(tr("edit"), QMessageBox.ButtonRole.AcceptRole)
+        btn_output = box.addButton(tr("macro_mgr_show_output"), QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if box.clickedButton() is btn_edit:
+            self._edit_macro(path, error)
+        elif box.clickedButton() is btn_output:
+            self._open_macro_manager()
+            manager.select_path(path)
+
     def _open_macro_example(self, name: str) -> None:
         """Copy a shipped example into the macros folder and open the copy."""
         self._open_macro_dialog()
@@ -3389,7 +3742,7 @@ class MainWindow(QMainWindow):
         leaves the current view untouched and returns 0."""
         with get_session() as session:
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
         if caches:
@@ -3422,6 +3775,11 @@ class MainWindow(QMainWindow):
         """MacroHost: name of the active filter ("" = none)."""
         return self._active_filter_name
 
+    def active_filterset(self) -> FilterSet:
+        """MacroHost: the whole active filter, quick filter and search boxes
+        included (opensak.save_filter)."""
+        return self._build_active_filterset()
+
     def set_sort(self, sort) -> None:
         """MacroHost: sort the list like a column-header click. filtered_caches()
         reads _current_sort, so the new order applies to it at once."""
@@ -3438,6 +3796,12 @@ class MainWindow(QMainWindow):
         """MacroHost: name of the active centre point ("" = none)."""
         return get_settings().active_home_name or ""
 
+    def set_center(self, name: str, lat: float, lon: float) -> None:
+        """MacroHost: make (lat, lon) the active centre, shown as *name*,
+        like a choice in the centre drop-down."""
+        from opensak.gui.settings import HomePoint
+        self._activate_center(HomePoint(name, lat, lon))
+
     def set_corrected_coords(self, gc_code, lat, lon) -> bool:
         """MacroHost: set (or clear, with lat/lon = None) corrected coordinates.
 
@@ -3445,7 +3809,7 @@ class MainWindow(QMainWindow):
         importing a large CSV would otherwise reload the table row, map pin
         and detail panel for every single row."""
         from opensak.db.corrected_coords import set_corrected_coords
-        if not set_corrected_coords(gc_code, lat, lon):
+        if not set_corrected_coords(gc_code, lat, lon, source="macro"):
             return False
         self._macro_changed_codes.add(gc_code)
         return True
@@ -3468,6 +3832,7 @@ class MainWindow(QMainWindow):
             # Pending refreshes belong to the previous database.
             self._macro_changed_codes.clear()
             self._macro_caches_removed = False
+            self._macro_caches_added = False
             self._on_database_switched(db)
         self._clear_filter()
 
@@ -3491,9 +3856,22 @@ class MainWindow(QMainWindow):
         rows = sorted(i.row() for i in self._cache_table.selectionModel().selectedRows())
         return [c.gc_code for c in map(model.cache_at, rows) if c is not None]
 
+    def _macro_dialog_parent(self):
+        """Parent for a dialog a macro opens: the macro window if it is
+        open, else the main window — brought to the front, since a macro run
+        from an editor (#1013) starts while OpenSAK is in the background."""
+        parent = getattr(self, "_macro_dialog", None)
+        if parent is None or not parent.isVisible():
+            parent = self
+        if parent.isMinimized():
+            parent.showNormal()
+        parent.raise_()
+        parent.activateWindow()
+        return parent
+
     def confirm(self, message: str) -> bool:
         """MacroHost: Yes/No question, on top of the macro dialog."""
-        parent = getattr(self, "_macro_dialog", None) or self
+        parent = self._macro_dialog_parent()
         reply = QMessageBox.question(
             parent,
             tr("macro_title"),
@@ -3503,34 +3881,162 @@ class MainWindow(QMainWindow):
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def approve_folder(self, target, folder, write: bool):
-        """MacroHost: ask whether the macro may use *folder* (OpenSAK's own
-        dialog, on top of the macro dialog)."""
+    def caches_changed(self, codes, added: bool) -> None:
+        """MacroHost: a macro changed (or, with *added*, inserted) caches;
+        refreshed once in end_macro() like set_corrected_coords()."""
+        self._macro_changed_codes.update(codes)
+        if added:
+            self._macro_caches_added = True
+
+    def approve_macro_write(self, macro, change=None, editing: bool = False):
+        """MacroHost: ask whether the macro file *macro* (None: unsaved) may
+        change the databases (OpenSAK's own dialog, on top of the macro
+        dialog). A run from an external editor (*editing*) brings OpenSAK to
+        the front first, as the user is working in the other editor."""
+        from opensak.gui.dialogs.macro_dialog import ask_macro_write_approval
+        if editing:
+            parent = self._macro_dialog_parent()
+        else:
+            parent = getattr(self, "_macro_dialog", None) or self
+        return ask_macro_write_approval(parent, macro, change, editing)
+
+    def approve_folder(self, target, folder, write: bool, macro=None):
+        """MacroHost: ask whether the macro file *macro* may use *folder*
+        (OpenSAK's own dialog, on top of the macro dialog)."""
         from opensak.gui.dialogs.macro_dialog import ask_folder_approval
-        parent = getattr(self, "_macro_dialog", None) or self
-        return ask_folder_approval(parent, target, folder, write)
+        parent = self._macro_dialog_parent()
+        return ask_folder_approval(parent, target, folder, write, macro)
+
+    def approve_host(self, host, macro=None, local: bool = False, secure: bool = True,
+                     declared: bool = False):
+        """MacroHost: ask whether the macro file *macro* may contact the web
+        site *host* (OpenSAK's own dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_host_approval
+        parent = self._macro_dialog_parent()
+        return ask_host_approval(parent, host, macro, local, secure, declared)
+
+    def confirm_declarations(self, macro, info, added, first: bool, editing: bool = False):
+        """MacroHost: show what the macro file *macro* declares before it
+        first runs (OpenSAK's own dialog, on top of the macro dialog)."""
+        from opensak.gui.dialogs.macro_manager import ask_declarations
+        parent = self._macro_dialog_parent()
+        return ask_declarations(parent, macro, info, added, first)
+
+    def approve_macro_change(self, macro, change, editing: bool = False):
+        """MacroHost: ask whether the changed macro file *macro* may have
+        again what it was allowed (OpenSAK's own dialog, on top of the
+        macro dialog)."""
+        from opensak.gui.dialogs.macro_dialog import ask_macro_change
+        parent = self._macro_dialog_parent()
+        return ask_macro_change(parent, macro, change, editing)
 
     def choose_file(self, title: str, file_filter: str, save: bool, start_dir):
         """MacroHost: file dialog for opensak.choose_file(), on top of the
         macro dialog."""
         from opensak.gui.dialogs.macro_dialog import choose_file_for_macro
-        parent = getattr(self, "_macro_dialog", None) or self
+        parent = self._macro_dialog_parent()
         return choose_file_for_macro(parent, title, file_filter, save, start_dir)
 
+    def _macro_parent(self) -> QWidget:
+        """Parent of the dialogs a macro opens: the macro window if open."""
+        return getattr(self, "_macro_dialog", None) or self
+
+    def message(self, text: str, title: str) -> None:
+        """MacroHost: opensak.message()."""
+        from opensak.gui.dialogs.macro_form import show_message
+        show_message(self._macro_parent(), text, title)
+
+    def input(self, prompt: str, default: str, title: str) -> Optional[str]:
+        """MacroHost: opensak.input()."""
+        from opensak.gui.dialogs.macro_form import ask_text
+        return ask_text(self._macro_parent(), prompt, default, title)
+
+    def choose(self, prompt: str, options: list[str], default: int, title: str) -> Optional[int]:
+        """MacroHost: opensak.choose()."""
+        from opensak.gui.dialogs.macro_form import ask_choice
+        return ask_choice(self._macro_parent(), prompt, options, default, title)
+
+    def choose_folder(self, title: str, start_dir):
+        """MacroHost: opensak.choose_folder() and the Browse button of a
+        form's folder field."""
+        from opensak.gui.dialogs.macro_form import choose_folder_for_macro
+        return choose_folder_for_macro(self._macro_parent(), title, start_dir)
+
+    def show_form(self, form, events):
+        """MacroHost: opensak.form{}."""
+        from opensak.gui.dialogs.macro_form import FormDialog
+        dialog = FormDialog(form, events, self._macro_parent())
+        try:
+            return dialog.run()
+        finally:
+            dialog.deleteLater()
+
+    def progress(self, title: str, total: int):
+        """MacroHost: opensak.progress()."""
+        from opensak.gui.dialogs.macro_form import MacroProgress
+        return MacroProgress(self._macro_parent(), title, total)
+
+    def select_cache(self, gc_code: str) -> bool:
+        """MacroHost: opensak.select() — like a click on the cache's row.
+        After a filter change the list may still be reloading; the cache is
+        then selected once the reload arrives."""
+        if self._cache_table.select_by_gc_code(gc_code):
+            return True
+        from opensak.filters.engine import GcCodeFilter
+        query = FilterSet(mode="AND")
+        active = self._build_active_filterset()
+        if active is not None and len(active):
+            query.add(active)
+        query.add(GcCodeFilter(gc_code, op="in_list"))
+        with get_session() as session:
+            found = bool(apply_filters_auto(session, query))
+        if found and self._refresh_started_at:
+            self._macro_pending_select = gc_code
+        return found
+
+    def open_file(self, path) -> bool:
+        """MacroHost: opensak.open() — the file in its default app."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def refresh(self) -> None:
+        """MacroHost: opensak.refresh() — apply the deferred refreshes and
+        reload the list, waiting (up to _MACRO_REFRESH_WAIT_S) until the new
+        list is shown, since the macro keeps the GUI thread busy."""
+        self.end_macro()
+        self._refresh_cache_list()
+        generation = self._refresh_generation
+        deadline = time.monotonic() + _MACRO_REFRESH_WAIT_S
+        while generation in self._refresh_started_at and time.monotonic() < deadline:
+            QApplication.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+
+    def locations_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() changed the user locations."""
+        self._on_home_points_imported()
+
+    def filter_profiles_changed(self) -> None:
+        """MacroHost: opensak.import_gsak() wrote filter profiles."""
+        self._on_filter_profiles_imported()
+
     def end_macro(self) -> None:
-        """MacroHost: refresh what the macro's corrected-coordinate changes
-        affect. A handful of caches get the same per-cache refresh as the
-        other entry points; beyond that, one full reload of table and map is
-        cheaper than updating each row (refresh_cache_row() scans the whole
-        model and _load_full_cache() loads logs etc. per call)."""
+        """MacroHost: refresh what the macro's cache changes affect. A
+        handful of caches get the same per-cache refresh as the other entry
+        points; beyond that, or when caches were added (new rows are not in
+        the table model yet), one full reload of table and map is cheaper
+        than updating each row (refresh_cache_row() scans the whole model
+        and _load_full_cache() loads logs etc. per call)."""
         changed, self._macro_changed_codes = self._macro_changed_codes, set()
+        added, self._macro_caches_added = self._macro_caches_added, False
         if self._macro_caches_removed:
             self._macro_caches_removed = False
             self._on_caches_moved()
             return
-        if len(changed) <= _MACRO_ROW_REFRESH_LIMIT:
+        if not added and len(changed) <= _MACRO_ROW_REFRESH_LIMIT:
             for gc_code in sorted(changed):
                 self._on_corrected_coords_changed(gc_code)
+            if changed:
+                self._update_info_bar()
             return
         self._refresh_cache_list()
         current = getattr(self._detail_panel, "_current_gc_code", None)
@@ -3632,11 +4138,19 @@ class MainWindow(QMainWindow):
 
     def _show_about(self) -> None:
         from opensak import __version__
-        QMessageBox.about(
-            self,
-            tr("about_title"),
-            tr("about_text", version=__version__),
-        )
+        from opensak.gui.date_format import format_date
+        from opensak.usage import day_number, first_started
+        text = tr("about_text", version=__version__)
+        # Issue #1050: "Using OpenSAK since <date> — day N", like GSAK.
+        first = first_started()
+        if first is not None:
+            since = tr(
+                "about_using_since",
+                date=format_date(first, get_settings().date_format),
+                day=day_number(first),
+            )
+            text += f"<p><i>{since}</i></p>"
+        QMessageBox.about(self, tr("about_title"), text)
 
     def _open_user_guide(self) -> None:
         """Open the online User Guide in the default browser."""
@@ -3651,6 +4165,13 @@ class MainWindow(QMainWindow):
         from opensak import __version__
         from opensak.updater import changelog_url_for_version
         QDesktopServices.openUrl(QUrl(changelog_url_for_version(__version__)))
+
+    def _open_macros_repo(self) -> None:
+        """Open the shared macro repository, OpenSAK-Macros (#1173)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        from opensak.macro.metadata import MACROS_REPO_URL
+        QDesktopServices.openUrl(QUrl(MACROS_REPO_URL))
 
     def _open_support_page(self) -> None:
         """Open the Open Collective support/sponsor page in the default browser."""
@@ -3850,8 +4371,11 @@ class MainWindow(QMainWindow):
                 tr("update_appimage_upgrade_button"), QMessageBox.ButtonRole.AcceptRole
             )
         elif can_self_download:
+            # Escape "&" — Qt would otherwise eat it as a mnemonic marker
+            # ("Download & Install" rendered as "Download _Install").
             btn_primary = msg.addButton(
-                tr("update_download_button"), QMessageBox.ButtonRole.AcceptRole
+                tr("update_download_button").replace("&", "&&"),
+                QMessageBox.ButtonRole.AcceptRole,
             )
         else:
             btn_primary = msg.addButton(
@@ -3985,11 +4509,11 @@ class MainWindow(QMainWindow):
             suppress_exit_backup()
             self.close()
 
-        _ERROR_MESSAGES = {
-            "unsupported_platform": "unsupported platform",
-            "asset_not_found": "no matching release asset found",
-            "checksum_unavailable": "checksum verification unavailable for this release",
-            "checksum_mismatch": "downloaded file failed checksum verification",
+        _ERROR_KEYS = {
+            "unsupported_platform": "update_err_unsupported_platform",
+            "asset_not_found": "update_err_asset_not_found",
+            "checksum_unavailable": "update_err_checksum_unavailable",
+            "checksum_mismatch": "update_err_checksum_mismatch",
         }
 
         def _on_error(error: str) -> None:
@@ -3997,7 +4521,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 tr("update_download_error_title"),
-                tr("update_download_error_msg", error=_ERROR_MESSAGES.get(error, error)),
+                tr("update_download_error_msg", error=tr(_ERROR_KEYS[error]) if error in _ERROR_KEYS else error),
             )
 
         self._self_update_worker.progress.connect(_on_progress)

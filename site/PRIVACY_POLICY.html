@@ -50,7 +50,7 @@
 <main>
   <p class="doc-label">// Legal</p>
   <h1>Privacy Policy</h1>
-  <p class="effective">Effective date: September 29, 2026</p>
+  <p class="effective">Effective date: October 25, 2026</p>
 
   <h2>1. Overview</h2>
   <p>OpenSAK is a free, open source desktop application for managing geocaching data locally on your own computer. It runs on Windows, Linux, and macOS.</p>
@@ -89,12 +89,16 @@
   <p>If you set up <strong>Pocket Queries by e-mail</strong>, your mail server, port, security setting and username are stored in OpenSAK's settings file. The <strong>password</strong> is stored in your operating system's secure credential store (macOS Keychain, Windows Credential Manager, or the Secret Service keyring on Linux) — never in plain text.</p>
   <p>OpenSAK connects <strong>only to the mail server you entered</strong>, over an encrypted connection, and verifies the server's certificate before sending your password. Nothing from your mailbox is sent anywhere else.</p>
 
+  <h3>2.5 Logs and crash reports</h3>
+  <p>OpenSAK keeps a log file (opensak.log and opensak.log.previous) in its application data directory. To notice crashes it also keeps session.lock while it runs and, after a hard crash, crash_native.log in the same place. None of these files leave your device on their own.</p>
+  <p>After an unexpected error or a crash, OpenSAK shows a crash report dialog with the <strong>exact text</strong> that would be shared, with your home folder path, your computer's user name, e-mail addresses and access tokens removed. Other details, such as cache or database names, may still appear. The report is shared <strong>only if you choose to</strong>: <strong>Report on GitHub</strong> opens a prefilled issue that you submit yourself (GitHub's privacy statement applies), and <strong>Send e-mail</strong> opens a prefilled message to hello@opensak.com in your own mail program. Nothing is sent automatically.</p>
+
   <hr class="rule">
 
   <h2>3. Data We Do Not Collect</h2>
   <ul>
     <li>Usage statistics or analytics</li>
-    <li>Crash reports or error telemetry</li>
+    <li>Crash reports or error telemetry (a crash report is only shared when you send it yourself, see 2.5)</li>
     <li>Your location or GPS data</li>
     <li>Your name or email address</li>
     <li>Any data about how you use the application</li>
@@ -117,6 +121,8 @@
   <p>Unless you turn it off (<strong>Settings → Advanced → Check for updates automatically</strong>), OpenSAK asks GitHub's public API at startup which release is the newest — no personal data beyond what any web request includes, such as your IP address. The Microsoft Store version skips this check. <strong>Download &amp; Install</strong> and <strong>Upgrade now</strong> download the new version and its checksum file from OpenSAK's release page on GitHub. See <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">GitHub's privacy statement</a>.</p>
   <h3>5.4 Boundary data (OpenSAK-Data)</h3>
   <p>Country, state and county lookup works offline. Only when you download boundary packs or check for boundary data updates does OpenSAK fetch files from the OpenSAK-Data release page on GitHub.</p>
+  <h3>5.5 Lua macros contacting web sites (beta)</h3>
+  <p>In beta builds, a Lua macro can download web pages or files. It only contacts a web site after you allowed that site for that macro, when OpenSAK asks. The request goes directly to that site and includes what any web request does, such as your IP address, plus whatever the macro puts in the address — which could include data from your databases. OpenSAK sends no cookies and no login data of its own. Only allow sites you trust; the site's own privacy policy applies. Sites you allowed always are listed in <strong>Settings → Folder permissions</strong>, where you can remove them. Macros can never contact geocaching.com or Groundspeak's other sites (coord.info, waymarking.com, wherigo.com).</p>
 
   <hr class="rule">
 

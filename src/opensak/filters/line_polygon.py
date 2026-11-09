@@ -6,6 +6,8 @@ Pure helpers (no Qt, no database) shared by LinePolygonFilter in engine.py and
 the filter dialog:
 
   parse_points_text()  the dialog's point list → [(lat, lon), …]
+  format_points_text() a (map-drawn) shape → the dialog's point list
+  detect_mode()        the "# mode: …" line format_points_text() writes
   read_points_file()   GPX / KML / plain-text file → [(lat, lon), …]
   LineShape            "is this coordinate on/near the shape?" queries
 
@@ -35,6 +37,9 @@ LP_MIN_POINTS: dict[str, int] = {"line": 2, "polygon": 3, "points": 1}
 
 # "W,GC12345" — take the coordinates of a cache/waypoint from the database.
 _CODE_LINE_RE = re.compile(r"^[Ww]\s*,\s*(\S+)$")
+
+# "# mode: polygon" — the comment line format_points_text() starts with.
+_MODE_LINE_RE = re.compile(r"^\s*#\s*mode\s*:\s*(\w+)\s*$", re.IGNORECASE)
 
 # Long segments are indexed as sub-arcs of at most this length, so a
 # latitude/longitude box around each piece stays a safe superset of the arc
@@ -86,6 +91,32 @@ def parse_points_text(
         else:
             points.append(point)
     return points, bad
+
+
+def format_point(point: Point) -> str:
+    """One point as a point-list line: "lat, lon" with 6 decimals."""
+    return f"{point[0]:.6f}, {point[1]:.6f}"
+
+
+def format_points_text(mode: str, points: list[Point]) -> str:
+    """A shape as the dialog's point list: a "# mode: <mode>" comment line
+    (ignored by parse_points_text(), read back by detect_mode()), then one
+    format_point() line per point. A polygon is written open — LineShape
+    closes it — so its first point is not repeated at the end."""
+    if mode not in LP_MODES:
+        raise ValueError(f"mode must be one of {LP_MODES}, got {mode!r}")
+    return "\n".join([f"# mode: {mode}"] + [format_point(p) for p in points])
+
+
+def detect_mode(text: str) -> Optional[str]:
+    """The mode named by the first "# mode: <mode>" line in *text*, or None
+    when there is no such line or it names no known mode."""
+    for line in text.splitlines():
+        m = _MODE_LINE_RE.match(line)
+        if m:
+            mode = m.group(1).lower()
+            return mode if mode in LP_MODES else None
+    return None
 
 
 def _local_name(tag: str) -> str:

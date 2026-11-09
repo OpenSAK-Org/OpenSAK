@@ -45,10 +45,16 @@ def ask_uninstall_choice(parent: QWidget | None) -> bool | None:
 
     # Ekstra, eksplicit bekræftelse for det destruktive valg — sletning af
     # alle caches/databaser/indstillinger kan ikke fortrydes.
+    text = tr("appimage_uninstall_purge_confirm_msg")
+    # #1032: a backup folder inside OpenSAK's folders goes too — say so.
+    from opensak.backup.backupset import backup_dir_removed_on_purge
+    backup_dir = backup_dir_removed_on_purge()
+    if backup_dir is not None:
+        text += "\n\n" + tr("appimage_uninstall_purge_backup_note", path=str(backup_dir))
     confirm = QMessageBox.warning(
         parent,
         tr("appimage_uninstall_purge_confirm_title"),
-        tr("appimage_uninstall_purge_confirm_msg"),
+        text,
         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         QMessageBox.StandardButton.No,
     )
