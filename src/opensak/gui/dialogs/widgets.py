@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QObject, QPoint, Qt, QThread, SIGNAL, SLOT
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QHBoxLayout, QLineEdit, QProgressDialog,
@@ -241,3 +241,69 @@ def busy_box(parent: QWidget | None, text: str, title: str) -> Iterator[None]:
     finally:
         QApplication.restoreOverrideCursor()
         progress.close()
+
+
+# ── Background workers of a dialog (#1265) ────────────────────────────────────
+#
+# Deleting a QThread whose run() hasn't returned aborts the whole process
+# ("QThread: Destroyed while thread is still running"). A dialog opened with
+# exec() is deleted as soon as its caller returns, and its workers with it —
+# whether they are its children or only referenced by it. So a dialog with a
+# worker must not close while the worker runs (WorkerGuardMixin), or must
+# hand the worker over first (keep_worker_alive).
+
+
+def worker_running(*workers: QThread | None) -> bool:
+    """True while one of *workers* (None allowed) is still running. A worker
+    whose C++ object deleteLater() has already destroyed counts as done."""
+    for worker in workers:
+        if worker is None:
+            continue
+        try:
+            if worker.isRunning():
+                return True
+        except RuntimeError:
+            continue
+    return False
+
+
+def keep_worker_alive(worker: QThread | None, owner: QObject | None) -> None:
+    """Let a running *worker* outlive the dialog that started it: it moves
+    to *owner* (e.g. the main window; the application if None) and deletes
+    itself once its run() has returned. Its signals to the dialog are
+    disconnected when the dialog is deleted."""
+    if worker is None or not worker_running(worker):
+        return
+    worker.setParent(owner or QApplication.instance())
+    # By signature: many workers shadow QThread.finished with a Signal of
+    # their own, which run() emits before it has returned.
+    QObject.connect(worker, SIGNAL("finished()"), worker, SLOT("deleteLater()"))
+
+
+class WorkerGuardMixin:
+    """A dialog that doesn't close while its background worker runs (#1265).
+
+    Escape, a Close or Cancel button and the window's close button all end
+    in done() (Escape never reaches closeEvent(), which is why guards there
+    didn't help). While one of _guarded_workers() runs, done() calls
+    _close_while_running() instead of closing: nothing by default, so the
+    request is ignored; a dialog whose job can already be cancelled cancels
+    it there.
+
+    Use it before QDialog in the bases: ``class X(WorkerGuardMixin, QDialog)``.
+    A slot that closes the dialog on a worker's own completion signal (sent
+    from run(), so the thread may still be finishing) waits for the worker
+    first.
+    """
+
+    def _guarded_workers(self) -> tuple[QThread | None, ...]:
+        return (getattr(self, "_worker", None),)
+
+    def _close_while_running(self) -> None:
+        """Called instead of closing while a guarded worker runs."""
+
+    def done(self, result: int) -> None:
+        if worker_running(*self._guarded_workers()):
+            self._close_while_running()
+            return
+        super().done(result)  # type: ignore[misc]

@@ -513,6 +513,12 @@ class ColumnChooserDialog(QDialog):
         # unscrolled, same failure mode as the Settings dialog.
         clamp_dialog_height_to_screen(self, parent)
         self._visible = set(get_visible_columns())
+        # Issue #1144: the saved view the user picked in the combo, if any.
+        # OK then applies the whole view — its column order and widths, not
+        # only which columns are checked — like the toolbar dropdown does.
+        # Stays None for the preselected view (#996): that one already
+        # matches the active database.
+        self._picked_view: Optional[ColumnView] = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -682,6 +688,7 @@ class ColumnChooserDialog(QDialog):
 
     def _on_view_selected(self, index: int) -> None:
         self._update_view_buttons()
+        self._picked_view = None
         path = self._view_combo.currentData()
         if path is None:
             return
@@ -690,6 +697,7 @@ class ColumnChooserDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, tr("error"), tr("column_view_load_error", error=e))
             return
+        self._picked_view = view
         self._apply_view_to_ui(view)
 
     def _apply_view_to_ui(self, view: ColumnView) -> None:
@@ -709,7 +717,13 @@ class ColumnChooserDialog(QDialog):
         self._type_display_combo.setCurrentIndex(type_idx)
 
     def _current_checked_columns(self) -> list[str]:
-        old_order = get_visible_columns()
+        # #1144: a picked view sets the order; otherwise keep the active
+        # database's order (its drag order). Checking or unchecking columns
+        # afterwards works the same either way.
+        if self._picked_view is not None:
+            old_order = list(self._picked_view.visible_columns)
+        else:
+            old_order = get_visible_columns()
         checked: set[str] = {
             self._list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(self._list.count())
@@ -754,7 +768,7 @@ class ColumnChooserDialog(QDialog):
         view = ColumnView(
             name=name,
             visible_columns=self._current_checked_columns(),
-            widths=dict(get_column_widths()),
+            widths=self._widths_to_apply(),
             container_display=self._container_display_combo.currentData(),
             type_display=self._type_display_combo.currentData(),
         )
@@ -809,10 +823,20 @@ class ColumnChooserDialog(QDialog):
             tr("column_view_default_set_msg", name=view_name)
         )
 
+    def _widths_to_apply(self) -> dict[str, int]:
+        """Column widths OK applies: the picked view's (#1144), else the
+        active database's current ones."""
+        if self._picked_view is not None:
+            return dict(self._picked_view.widths)
+        return dict(get_column_widths())
+
     def _save_and_accept(self) -> None:
         visible = self._current_checked_columns()
 
         set_visible_columns(visible)
+        if self._picked_view is not None:
+            # #1144: same as the toolbar dropdown — the view's widths too.
+            set_column_widths(self._widths_to_apply())
         set_container_display(self._container_display_combo.currentData())
         set_type_display(self._type_display_combo.currentData())
         if self._view_combo.currentData() is not None:

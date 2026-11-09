@@ -22,7 +22,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from opensak.db.transfer import transfer_caches
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 
 class _MoveWorker(QThread):
@@ -57,7 +57,7 @@ class _MoveWorker(QThread):
         self.finished.emit(count)
 
 
-class MoveCachesDialog(QDialog):
+class MoveCachesDialog(WorkerGuardMixin, QDialog):
     """Dialog that lets the user move or copy caches to another database."""
 
     caches_moved = Signal()
@@ -254,6 +254,10 @@ class MoveCachesDialog(QDialog):
             tr(done_key, count=count),
         )
         self.caches_moved.emit()
+        # Sent from run(), which returns right after it — wait for that, or
+        # the guard (#1265) would refuse to close.
+        if self._worker is not None:
+            self._worker.wait()
         self.accept()
 
     def _on_error(self, message: str) -> None:
