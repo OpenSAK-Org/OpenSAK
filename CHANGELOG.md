@@ -13,59 +13,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   logs and descriptions when the database can answer it alone. Where they
   are still needed (regular expressions, OR filters), each cache's
   descriptions are no longer repeated once per log.
-- **Macros and custom fields on in stable builds (#1190)** — the
-  `lua-macros`, `lua-macro-write` and `companion-db` feature flags are on
-  in stable builds too, so the **Macros** menu, the macro write API,
-  **Tools → Custom fields…** and the companion database are part of
-  v1.22.0. `lua-macro-net` stays beta-only. The macro API reference and
-  the GSAK comparison mark only `opensak.get_url()` as beta; the notes
-  follow the stable defaults of the flags, so the docs are the same
-  whichever build generates them.
-- **User Guide for the stable release (#1191)** — *Macros* is no longer
-  a draft for beta builds: it notes that web sites are still beta-only,
-  shows a header with `Requires-API: 4` and `Permissions:`, explains the
-  `Permissions` and `Network` lines, and has a new part, *Macros and new
-  OpenSAK versions*, on what API 4 promises and what to do when a macro
-  needs a newer API. *Custom Fields* and the Filter dialog's *Custom* tab
-  lose "(beta)", and the companion file is explained in plain words.
-  *Importing from the Command Line* gets a systemd timer example next to
-  cron.
-
-### Fixed
-
-- **Deleted database still in the database list (#1232)** — after
-  deleting a database in **Manage databases**, the database dropdown in
-  the toolbar still listed it until you switched database or restarted
-  OpenSAK. The same happened after *Remove from list*, *Open existing…*,
-  *Scan database folder*, *Copy* and *Move*. The dropdown is now
-  refreshed whenever Manage databases closes. Reported by ianwok.
-- **Boundary data updates bring new and changed state packs (#1226)** —
-  *Check for boundary data updates* only refreshed `boundaries.db` and the
-  county packs already downloaded. A state pack that was new or changed
-  in a dataset release never arrived, so the new `boundaries.db` pointed
-  into files the install didn't have, or into an old one: states could
-  come out blank or with the wrong name until the boundary data was
-  deleted. The update now also brings every state pack (and
-  `world.geojson`) that is missing or differs from the release, checked
-  against the release's checksums. It is all or nothing: everything is
-  downloaded first, and if a file can't be fetched nothing is changed and
-  the dialog says so and offers the update again. A missing state pack is
-  also fetched when it's needed, as county packs already were. Needed
-  before the next OpenSAK-Data release, which adds Switzerland's cantons
-  (#788).
 
 ---
 
-## [1.22.0-beta.11] — 2026-10-28
+## [1.22.0] — 2026-11-09
 
-> Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
-> the import can now bring along **your saved GSAK views** as column views,
-> and **View → Auto-fit column widths** sizes the cache list's columns to
-> their contents. **Backups include your macros**, and sorting on a custom
-> field column works. Beta testers get the macro API that v1.22.0 will
-> ship as **API 4**: the database tables a macro reads are part of it, and
-> renaming or removing anything now goes through a deprecation period.
-> From here until v1.22.0, only fixes go in.
+> First stable release of the 1.22.0 cycle. Replaces the `1.22.0-beta.1`
+> … `1.22.0-beta.17` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: **Lua macros** — OpenSAK's
+> successor to GSAK macros, with a macro manager, editor, forms and a
+> stable macro API; **custom fields as in GSAK**, brought along by the GSAK
+> import; **import from the command line**, so a scheduled task can refresh
+> a database overnight; **database maintenance** and much faster filters
+> and map on large databases; **backups that include your macros**; and a
+> **GSAK import** that now also brings your saved views, user locations,
+> custom fields and GSAK's own dates.
 >
 > **Upgrading from 1.21.0:** the first time you open each database, OpenSAK
 > updates it to a new format and first saves an untouched copy of it (see
