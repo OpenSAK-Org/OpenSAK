@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 )
 
 from opensak.db.models import Cache
-from opensak.filters.engine import _haversine_km
+from opensak.filters.engine import (
+    _haversine_km, _parse_last_four_logs, sort_by_last_four_logs,
+)
 from opensak.gui.settings import get_settings
 from opensak.gui.date_format import format_date
 from opensak.coords import format_coords, format_lat, format_lon, format_lat, format_lon
@@ -503,22 +505,6 @@ class SizeBarDelegate(QStyledItemDelegate):
         sh = super().sizeHint(option, index)
         sh.setHeight(max(sh.height(), 20))
         return sh
-
-
-def _parse_last_four_logs(raw: str) -> list[tuple[str, str, str]]:
-    """Parse the "date\\ttype\\tfinder" per-line format _upsert_cache() writes
-    into last_four_logs. Returns (date_str, log_type, finder) tuples, most
-    recent first — malformed/partial lines are silently skipped rather than
-    raising, since this is display-only data derived from the DB, not
-    user input."""
-    if not raw:
-        return []
-    out = []
-    for line in raw.split("\n"):
-        fields = line.split("\t")
-        if len(fields) == 3:
-            out.append((fields[0], fields[1], fields[2]))
-    return out
 
 
 class LastFourLogsDelegate(QStyledItemDelegate):
@@ -1423,6 +1409,9 @@ class CacheTableModel(QAbstractTableModel):
             self._caches.sort(key=lambda c: c.last_found_date or datetime.min, reverse=reverse)
         elif col == "last_gpx_update":
             self._caches.sort(key=lambda c: c.last_gpx_update or datetime.min, reverse=reverse)
+        elif col == "last_four_logs":
+            # Issue #1154: by the pattern the squares show, not the stored text
+            sort_by_last_four_logs(self._caches, reverse=reverse)
         elif col == "last_user_update":
             self._caches.sort(
                 key=lambda c: getattr(c, "last_user_update", None) or datetime.min,
