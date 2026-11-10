@@ -345,6 +345,9 @@ class MainWindow(QMainWindow):
 
         self._detail_panel = CacheDetailPanel()
         self._detail_panel.corrected_coords_changed.connect(self._on_corrected_coords_changed)
+        # #1241: a boolean custom field switched in one place shows in the other
+        self._detail_panel.custom_values_changed.connect(self._cache_table.refresh_custom)
+        self._cache_table.custom_value_changed.connect(self._detail_panel.refresh_custom)
         self._bottom_splitter.addWidget(self._detail_panel)
 
         # Map widget

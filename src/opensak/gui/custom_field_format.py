@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from opensak.db.custom_fields import TYPE_BOOLEAN, TYPE_DATE, TYPE_INTEGER, TYPE_REAL, Field
 from opensak.gui.date_format import format_date
@@ -56,6 +56,18 @@ def _date(value: Any) -> str:
     return "" if value is None else str(value)
 
 
+def is_true(value: Any) -> bool:
+    """Whether a stored boolean value is true."""
+    return value not in (None, 0, "0", "", False)
+
+
+def toggles(field: Optional[Field], by_expression: bool) -> bool:
+    """Whether a click switches *field* on or off where it is shown
+    (#1241): a boolean whose shown value is the stored one, not an
+    expression's result."""
+    return field is not None and field.type == TYPE_BOOLEAN and not by_expression
+
+
 def format_value(field: Field, value: Any, by_expression: bool, grid: bool = True) -> str:
     """*value* of *field* as text. *by_expression*: *value* is the result
     of the field's expression (shown as it is). In the grid a true boolean
@@ -66,7 +78,7 @@ def format_value(field: Field, value: Any, by_expression: bool, grid: bool = Tru
     if by_expression:
         return _number(value) if isinstance(value, float) else str(value)
     if field.type == TYPE_BOOLEAN:
-        truthy = value not in (0, "0", "", False)
+        truthy = is_true(value)
         if grid:
             return "✓" if truthy else ""
         return tr("yes") if truthy else tr("no")
