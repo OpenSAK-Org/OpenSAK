@@ -4,7 +4,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.1] — Unreleased
+## [1.23.0-beta.1] — 2026-11-10
+
+> Headline: **first beta after v1.22.0.** GSAK database import is 6–8×
+> faster, and overwriting a database no longer touches it until the
+> import has succeeded. Text filters are faster, yes/no custom fields can
+> be switched with one click, the import summary says which cache failed,
+> and **Help → Community** shows where other OpenSAK users are.
 
 ### Added
 
@@ -21,20 +27,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   over descriptions, logs or notes no longer loads every matching cache's
   logs and descriptions when the database can answer it alone. Where they
   are still needed (regular expressions, OR filters), each cache's
-  descriptions are no longer repeated once per log.
+  descriptions are no longer repeated once per log. Contributed by
+  nagisml.
 
 - **Macro editor follows the text size setting (#1246)** — the code in
   the Lua macro editor used the system's fixed-width font at its default
   size, which could be hard to read. It now follows **Settings → Text and
   icon size**: Small, Medium or Large. An editor that is already open
-  changes size as soon as the setting is saved.
+  changes size as soon as the setting is saved. Contributed by nagisml.
 
 - **Yes/no custom fields can be switched where the cache is shown
   (#1241)** — until now a boolean custom field could only be changed in
   **Edit cache**. In the detail panel's *Custom* tab it is now a check box
   that is saved when you click it, and in the cache list a single click on
   the column switches it, as for the user flag, FTF and locked columns.
-  Fields calculated from an expression stay read-only.
+  Fields calculated from an expression stay read-only. Contributed by
+  nagisml.
 
 - **GSAK database import 6–8× faster (#1231)** — importing a large GSAK
   database took 8–10 minutes; a 150,000-cache database now imports in
@@ -43,7 +51,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   import has succeeded, so a failed import leaves your database as it
   was. It needs room for a second copy of the database while it runs.
   On overwrite, macro data stored for the old caches is removed; custom
-  fields from GSAK are imported again.
+  fields from GSAK are imported again. Contributed by nagisml.
 
 - **Import summary names what failed (#465)** — a cache or waypoint that
   could not be read now shows its code and its line in the file, instead
@@ -51,7 +59,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   lists, it says how many more. A database error no longer fills the
   summary with the SQL statement and the cache's data. Every failing
   cache, with the full details, is written to the log file. Requested by
-  C3GPS.
+  C3GPS, contributed by nagisml.
 
 ### Fixed
 
@@ -63,6 +71,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   recent DNFs at the top; within a pattern the most recently logged cache
   comes first. A filter's saved sort on this field, which was ignored,
   now gives the same order. The squares themselves are unchanged.
+  Contributed by nagisml.
 
 - **GPS devices mounted at a path with a space (#1094)** — on Linux, a
   device mounted outside `/media`, `/run/media` and `/mnt` was not found
