@@ -20,6 +20,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   icon size**: Small, Medium or Large. An editor that is already open
   changes size as soon as the setting is saved.
 
+- **Yes/no custom fields can be switched where the cache is shown
+  (#1241)** — until now a boolean custom field could only be changed in
+  **Edit cache**. In the detail panel's *Custom* tab it is now a check box
+  that is saved when you click it, and in the cache list a single click on
+  the column switches it, as for the user flag, FTF and locked columns.
+  Fields calculated from an expression stay read-only.
+
 ### Fixed
 
 - **Last four logs column sorted by date, not by its squares (#1154)** —
