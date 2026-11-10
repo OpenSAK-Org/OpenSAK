@@ -11,13 +11,17 @@ pytest.importorskip("pytestqt")
 
 from opensak.gui.dialogs import import_dialog as idlg
 from opensak.gui.dialogs.import_dialog import ImportWorker, ImportDialog
+from opensak.importer import ImportResult
 from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
 from opensak.lang import tr
 
 
 def _result(created=1, updated=0, waypoints=0, skipped=0, errors=None):
-    return SimpleNamespace(created=created, updated=updated, waypoints=waypoints,
-                           skipped=skipped, errors=errors or [])
+    result = ImportResult()
+    result.created, result.updated = created, updated
+    result.waypoints, result.skipped = waypoints, skipped
+    result.errors = errors or []
+    return result
 
 
 @contextlib.contextmanager
