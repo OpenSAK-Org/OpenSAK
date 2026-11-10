@@ -1036,11 +1036,19 @@ def _enter_bulk_import_pragmas(session: Session) -> None:
     never corrupt the file) and removes those fsyncs. A larger page cache cuts
     B-tree page churn while thousands of rows are inserted.
 
+    Issue #1231: no automatic WAL checkpoints either. By default SQLite copies
+    the WAL back into the database whenever it passes 1000 pages, with an
+    fsync each time — hundreds of times in a large import (58 s of a 119 s
+    re-import of 150k caches). :func:`_exit_bulk_import_pragmas` checkpoints
+    once instead (9 s). Meanwhile the WAL grows to roughly the size of what
+    was written.
+
     These are connection-level settings and the connection is pooled and reused,
     so :func:`_exit_bulk_import_pragmas` MUST restore them once the import ends.
     """
     session.execute(_sa_text("PRAGMA synchronous=NORMAL"))
     session.execute(_sa_text("PRAGMA cache_size=-65536"))  # ~64 MB page cache
+    session.execute(_sa_text("PRAGMA wal_autocheckpoint=0"))
     session.commit()
 
 
@@ -1050,12 +1058,17 @@ def _exit_bulk_import_pragmas(session: Session) -> None:
     Called from the importer's ``finally`` block, so the session may have just
     committed or been rolled back. We roll back first to guarantee a clean state,
     then re-apply the defaults; any failure here is swallowed so it never masks a
-    real import error.
+    real import error. The WAL is checkpointed and truncated here, so it
+    doesn't stay at the size of the whole import on the still-open
+    connection of the active database.
     """
     try:
         session.rollback()
         session.execute(_sa_text("PRAGMA synchronous=FULL"))
         session.execute(_sa_text("PRAGMA cache_size=-2000"))  # SQLite default
+        session.execute(_sa_text("PRAGMA wal_autocheckpoint=1000"))  # SQLite default
+        session.commit()
+        session.execute(_sa_text("PRAGMA wal_checkpoint(TRUNCATE)"))
         session.commit()
     except Exception:
         pass

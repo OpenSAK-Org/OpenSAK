@@ -262,6 +262,13 @@ def write_file(path: Path, values: dict[str, Any]) -> None:
         _reset_cache()
 
 
+def reload() -> None:
+    """Forget the active database's cached values because its file was
+    replaced underneath (overwrite import, #1231); the next access reads
+    them again."""
+    _reset_cache()
+
+
 def _reset_cache() -> None:
     """Forget cached values; the next access reloads them (also for tests)."""
     global _cache_engine, _cache

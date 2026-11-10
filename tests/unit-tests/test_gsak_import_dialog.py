@@ -115,18 +115,28 @@ class TestGsakImportWorker:
         w.run()
         assert inits == []
 
-    def test_run_replace_clears_target_first(self, monkeypatch):
+    def test_run_replace_builds_a_fresh_file(self, monkeypatch):
+        # #1231: an overwrite goes through gsak_replace (fresh file, swapped
+        # in) — for the active database too — and reports the caches it
+        # replaced.
         self._patch_common(monkeypatch)
         calls = []
-        monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
-                            lambda session: calls.append("clear") or 7)
+
+        def fake_replacing(path, target, progress_cb=None, **_kw):
+            calls.append(("replace", target))
+            r = _result()
+            r.cleared = 7
+            return r
+
+        monkeypatch.setattr("opensak.importer.gsak_replace.import_gsak_db_replacing",
+                            fake_replacing)
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
-                            lambda path, session, progress_cb=None, **_kw: calls.append("import") or _result())
+                            lambda *a, **k: pytest.fail("merge import used for an overwrite"))
         w = GsakImportWorker(Path("/gsak.db3"), replace=True)
         cleared = []
         w.cleared.connect(cleared.append)
         w.run()
-        assert calls == ["clear", "import"]
+        assert calls == [("replace", Path("/active.db"))]
         assert cleared == [7]
 
     def test_run_updates_distances_of_target(self, monkeypatch):
@@ -170,11 +180,30 @@ class TestGsakImportWorker:
         GsakImportWorker._update_distances(Path("/other.db"))  # must not raise
         assert "could not update distances" in caplog.text
 
+    def test_run_into_empty_target_builds_a_fresh_file(self, monkeypatch, tmp_path):
+        # #1231: a target without caches (a new database) has nothing to keep,
+        # so it takes the fresh-file path too — without a "cleared" message.
+        from opensak.db.database import dispose_engine, init_db
+
+        target = tmp_path / "New.db"
+        init_db(db_path=target)
+        dispose_engine(target)
+        self._patch_common(monkeypatch)
+        calls = []
+        monkeypatch.setattr("opensak.importer.gsak_replace.import_gsak_db_replacing",
+                            lambda path, t, progress_cb=None, **_kw: calls.append(t) or _result())
+        w = GsakImportWorker(Path("/gsak.db3"), target_db_path=target)
+        cleared = []
+        w.cleared.connect(cleared.append)
+        w.run()
+        assert calls == [target]
+        assert cleared == []
+
     def test_run_without_replace_does_not_clear(self, monkeypatch):
         self._patch_common(monkeypatch)
         calls = []
-        monkeypatch.setattr("opensak.importer.gsak_importer.clear_opensak_cache_data",
-                            lambda session: calls.append("clear") or 0)
+        monkeypatch.setattr("opensak.importer.gsak_replace.import_gsak_db_replacing",
+                            lambda *a, **k: calls.append("replace"))
         monkeypatch.setattr("opensak.importer.gsak_importer.import_gsak_db",
                             lambda path, session, progress_cb=None, **_kw: _result())
         GsakImportWorker(Path("/gsak.db3")).run()

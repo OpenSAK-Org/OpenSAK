@@ -99,14 +99,15 @@ same as the GPX importer's ``_upsert_cache``.
 
 from __future__ import annotations
 
+import gc
 import logging
 import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, NamedTuple, Optional, cast
 
-from sqlalchemy import inspect, update
+from sqlalchemy import Table, bindparam, select, text
 from sqlalchemy.orm import Session
 
 from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoint
@@ -342,6 +343,14 @@ def _d(value) -> Optional[datetime]:
     raw = _s(value)
     if raw is None:
         return None
+    # Issue #1231: fromisoformat() is ~10x faster than strptime() for the two
+    # formats GSAK writes; anything else (or a value it rejects) still goes
+    # through strptime, so the accepted inputs stay exactly the same.
+    if (len(raw) == 10 or (len(raw) == 19 and raw[10] == " ")) and raw[4] == raw[7] == "-":
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
             return datetime.strptime(raw, fmt)
@@ -399,6 +408,10 @@ class GsakImportResult(ImportResult):
         self.encoding_fallbacks: int = 0
         # Custom fields (#1028), when the companion database is on; else None.
         self.custom_fields: Optional["CustomFieldImportResult"] = None
+        # GC codes of the caches written, in GSAK's order.
+        self.codes: list[str] = []
+        # Overwrite import (#1231): caches the target held before.
+        self.cleared: Optional[int] = None
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -973,386 +986,484 @@ _CACHE_JOIN_SQL = """
 """
 
 
-def _upsert_cache_from_gsak(
+# Scalar listing fields — left untouched on a locked cache (#202).
+_LISTING_FIELDS = (
+    "name", "cache_type", "container", "latitude", "longitude",
+    "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
+    "hidden_date", "last_updated", "available", "archived",
+    "country", "state", "county",
+    "short_description", "short_desc_html",
+    "long_description", "long_desc_html",
+    "encoded_hints", "url",
+    "gc_note", "elevation", "color", "guid", "watch", "gc_cache_id",
+)
+
+# Personal/status fields are not subject to the lock — mirrors GPX import
+# behaviour, where a re-import can still bring in a newer found/DNF/
+# favourite-points state without unlocking the listing data.
+_PERSONAL_FIELDS = (
+    "found", "found_date", "dnf", "dnf_date", "first_to_find",
+    "user_flag", "user_sort", "premium_only",
+    "user_data_1", "user_data_2", "user_data_3", "user_data_4",
+    "favorite_points",
+    # Issue #1139: also the user's / their macros' own data.
+    "last_user_update", "macro_flag", "macro_sort", "is_owner", "symbol",
+)
+
+_NOTE_FIELDS = ("note", "corrected_lat", "corrected_lon", "is_corrected", "corrected_source", "updated_at")
+
+# One cache of a batch: (data, attr_rows, wpt_rows, log_rows, corrected).
+_GsakBatchItem = tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]
+
+
+def _table(model) -> Table:
+    """The Core table of *model* (declarative ``__table__`` is typed as FromClause)."""
+    return cast(Table, model.__table__)
+
+
+class _WrittenCache(NamedTuple):
+    """What _write_gsak_batch() stored for one cache, for the result counters."""
+    gc_code: str
+    cache_id: int
+    created: bool
+    waypoints: int
+    attributes: int
+    logs: int
+    trackables: int
+    corrected: bool
+    note: bool
+    note_images: int
+
+
+def _update_by_id(session: Session, table: Table, rows: list[dict]) -> None:
+    """UPDATE *table* by primary key, one executemany per distinct set of
+    columns. Each row holds ``_id`` plus the columns to set."""
+    groups: dict[tuple[str, ...], list[dict]] = {}
+    for row in rows:
+        groups.setdefault(tuple(sorted(row)), []).append(row)
+    for group in groups.values():
+        session.execute(table.update().where(table.c.id == bindparam("_id")), group)
+
+
+def _note_values(data: dict, corrected: Optional[dict]) -> dict:
+    """The UserNote columns this import sets for a cache (#469 + #472)."""
+    values: dict = {}
+    if corrected is not None:
+        values["corrected_lat"] = corrected["corrected_lat"]
+        values["corrected_lon"] = corrected["corrected_lon"]
+        values["is_corrected"] = True
+        values["corrected_source"] = corrected.get("corrected_source")
+    # Issue #1139: GSAK's UserNoteDate instead of the time of this import.
+    if data.get("_gsak_user_note_date") is not None:
+        values["updated_at"] = data["_gsak_user_note_date"]
+    if data.get("note_text") is not None:
+        values["note"] = data["note_text"]
+    return values
+
+
+def _write_gsak_batch(
     session: Session,
-    data: dict,
-    attr_rows: list[dict],
-    wpt_rows: list[dict],
-    log_rows: list[dict],
-    corrected: Optional[dict],
+    batch: list[_GsakBatchItem],
     attr_names: dict[int, str],
     source_file: str,
     existing_ids: dict[str, int],
-    warnings: Optional[list[str]] = None,
-) -> tuple[Cache, bool]:
+    user: tuple[str, str],
+    warnings: list[str],
+) -> list[_WrittenCache]:
     """
-    Insert or update a Cache row from parsed GSAK data.
+    Insert or update the caches of *batch* from parsed GSAK data.
 
     Same as the GPX importer's ``_upsert_cache``: Waypoints, Attributes,
     Logs and (as of #538) Trackables are all rebuilt (delete + recreate) on
     every re-import of a given cache.
+
+    Issue #1231: written as a few Core statements per batch (one DELETE per
+    child table, one executemany per table) instead of ORM objects flushed
+    per cache. On a 150k-cache database the ORM unit of work was 55–60 % of
+    the import, and attributes alone went in as a million single-row INSERTs.
+    No ORM objects are created here, so nothing lands in the identity map.
     """
-    gc_code = data["gc_code"]
-    cid = existing_ids.get(gc_code)
-    existing = session.get(Cache, cid) if cid is not None else None
-    created = existing is None
+    from opensak.utils.utils import count_own_found_logs
 
-    if existing is None:
-        cache = Cache(gc_code=gc_code)
-        session.add(cache)
-        # New cache: honour GSAK's own Lock flag as our `locked`.
-        cache.locked = data["_gsak_lock"]
-    else:
-        cache = existing
-        session.query(Waypoint).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        session.query(Attribute).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        session.query(Log).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        session.query(Trackable).filter_by(cache_id=cache.id).delete(synchronize_session=False)
-        cache.waypoint_count = 0
-        session.flush()
+    finder_id, username = user
+    caches = _table(Cache)
 
-    # ── Issue #202: Lock a cache ──────────────────────────────────────────
-    # A locked cache (set in OpenSAK itself, or inherited from GSAK's own
-    # Lock flag on first import) keeps its scalar fields untouched.
-    if existing is None or not cache.locked:
-        for field in (
-            "name", "cache_type", "container", "latitude", "longitude",
-            "difficulty", "terrain", "placed_by", "owner_name", "owner_id",
-            "hidden_date", "last_updated", "available", "archived",
-            "country", "state", "county",
-            "short_description", "short_desc_html",
-            "long_description", "long_desc_html",
-            "encoded_hints", "url",
-            "gc_note", "elevation", "color", "guid", "watch", "gc_cache_id",
-        ):
-            setattr(cache, field, data.get(field))
+    # ── Existing caches: their lock / imported_at / note, then clear children
+    known = [existing_ids[item[0]["gc_code"]] for item in batch
+             if item[0]["gc_code"] in existing_ids]
+    old_caches: dict[int, Any] = {}
+    old_notes: dict[int, Any] = {}
+    if known:
+        old_caches = {r.id: r for r in session.execute(
+            select(caches.c.id, caches.c.locked, caches.c.imported_at)
+            .where(caches.c.id.in_(known)))}
+    if old_caches:
+        ids = list(old_caches)
+        for model in (Waypoint, Attribute, Log, Trackable):
+            table = _table(model)
+            session.execute(table.delete().where(table.c.cache_id.in_(ids)))
+        notes = _table(UserNote)
+        old_notes = {r.cache_id: r for r in session.execute(
+            select(notes.c.id, notes.c.cache_id, *(notes.c[f] for f in _NOTE_FIELDS))
+            .where(notes.c.cache_id.in_(ids)))}
 
-        # Issue #614: Caches.Latitude/Longitude reflect the *corrected*
-        # position for a solved cache — replace with the true original/
-        # posted coordinates from the Corrected table so the primary
-        # cache.latitude/longitude always matches the cache's listed
-        # location, mirroring how the GPX importer handles GSAK's own
-        # LatBeforeCorrect/LonBeforeCorrect extension fields.
-        if corrected is not None:
-            orig_lat = corrected.get("original_lat")
-            orig_lon = corrected.get("original_lon")
-            if orig_lat is not None and orig_lon is not None:
-                cache.latitude = orig_lat
-                cache.longitude = orig_lon
+    # ── Cache rows + everything derived from the child rows ──────────────────
+    new_rows: list[dict] = []
+    update_rows: list[dict] = []
+    planned: list[tuple] = []
+    for data, attr_rows, wpt_rows, log_rows, corrected in batch:
+        gc_code = data["gc_code"]
+        cid = existing_ids.get(gc_code)
+        old = old_caches.get(cid) if cid is not None else None
+        row: dict = {}
 
-    # Personal/status fields are not subject to the lock — mirrors GPX
-    # import behaviour, where a re-import can still bring in a newer
-    # found/DNF/favourite-points state without unlocking the listing data.
-    for field in (
-        "found", "found_date", "dnf", "dnf_date", "first_to_find",
-        "user_flag", "user_sort", "premium_only",
-        "user_data_1", "user_data_2", "user_data_3", "user_data_4",
-        "favorite_points",
-        # Issue #1139: also the user's / their macros' own data.
-        "last_user_update", "macro_flag", "macro_sort", "is_owner", "symbol",
-    ):
-        setattr(cache, field, data.get(field))
+        # ── Issue #202: Lock a cache ──────────────────────────────────────
+        # A locked cache (set in OpenSAK itself, or inherited from GSAK's own
+        # Lock flag on first import) keeps its scalar fields untouched.
+        if old is None or not old.locked:
+            for field in _LISTING_FIELDS:
+                row[field] = data.get(field)
 
-    cache.source_file = source_file
+            # Issue #614: Caches.Latitude/Longitude reflect the *corrected*
+            # position for a solved cache — replace with the true original/
+            # posted coordinates from the Corrected table so the primary
+            # cache.latitude/longitude always matches the cache's listed
+            # location, mirroring how the GPX importer handles GSAK's own
+            # LatBeforeCorrect/LonBeforeCorrect extension fields.
+            if corrected is not None:
+                orig_lat = corrected.get("original_lat")
+                orig_lon = corrected.get("original_lon")
+                if orig_lat is not None and orig_lon is not None:
+                    row["latitude"] = orig_lat
+                    row["longitude"] = orig_lon
 
-    # ── Issue #1139: GSAK's Created is when the cache was first seen. Keep
-    # the earlier of it and an existing imported_at, so a cache that was
-    # already in OpenSAK before never looks newer than it is. ─────────────
-    gsak_created = data.get("_gsak_created")
-    if gsak_created is not None:
-        current = cache.imported_at.replace(tzinfo=None) if cache.imported_at else None
-        if current is None or gsak_created < current:
-            cache.imported_at = gsak_created
+        for field in _PERSONAL_FIELDS:
+            row[field] = data.get(field)
+        row["source_file"] = source_file
 
-    # Attributes
-    for a in attr_rows:
-        session.add(Attribute(
-            cache=cache,
-            attribute_id=a["attribute_id"],
-            name=attr_names.get(a["attribute_id"]),
-            is_on=a["is_on"],
-        ))
-
-    # Waypoints
-    # Issue #536: dedup by wp_code (GSAK's own per-cache waypoint code,
-    # cCode), matching the uq_waypoint_cache_wp_code constraint — not by
-    # prefix+name, which real GSAK databases can legitimately repeat across
-    # distinct waypoints on the same cache (e.g. several stages a user
-    # happened to name identically). A waypoint with no wp_code is never
-    # treated as a duplicate of another (mirrors SQL's own NULL-is-distinct
-    # behaviour for the unique index) — only a genuine repeated non-empty
-    # wp_code is dropped here (query is ORDER BY cCode, so this is
-    # deterministic) rather than failing the whole cache's import.
-    seen_wpt_codes: set[str] = set()
-    added_wpt_count = 0
-    for w in wpt_rows:
-        code = w["wp_code"]
-        if code is not None:
-            if code in seen_wpt_codes:
-                if warnings is not None:
+        # Waypoints
+        # Issue #536: dedup by wp_code (GSAK's own per-cache waypoint code,
+        # cCode), matching the uq_waypoint_cache_wp_code constraint — not by
+        # prefix+name, which real GSAK databases can legitimately repeat across
+        # distinct waypoints on the same cache (e.g. several stages a user
+        # happened to name identically). A waypoint with no wp_code is never
+        # treated as a duplicate of another (mirrors SQL's own NULL-is-distinct
+        # behaviour for the unique index) — only a genuine repeated non-empty
+        # wp_code is dropped here (query is ORDER BY cCode, so this is
+        # deterministic) rather than failing the whole cache's import.
+        seen_wpt_codes: set[str] = set()
+        waypoints: list[dict] = []
+        for w in wpt_rows:
+            code = w["wp_code"]
+            if code is not None:
+                if code in seen_wpt_codes:
                     warnings.append(
                         f"{gc_code}: dropped duplicate waypoint {code!r} "
                         f"(wp_code already used by another waypoint on this cache)"
                     )
-                continue
-            seen_wpt_codes.add(code)
-        session.add(Waypoint(
-            cache=cache,
-            prefix=w["prefix"],
-            wp_type=w["wp_type"],
-            name=w["name"],
-            comment=w["comment"],
-            latitude=w["latitude"],
-            longitude=w["longitude"],
-            parent_gc_code=gc_code,
-            wp_code=w["wp_code"],
-            url=w["url"],
-            wp_date=w["wp_date"],
-            created_by_user=w["created_by_user"],
-            wp_flag=w["wp_flag"],
-        ))
-        added_wpt_count += 1
-    cache.waypoint_count = added_wpt_count
+                    continue
+                seen_wpt_codes.add(code)
+            waypoints.append({
+                "prefix":          w["prefix"],
+                "wp_type":         w["wp_type"],
+                "name":            w["name"],
+                "comment":         w["comment"],
+                "latitude":        w["latitude"],
+                "longitude":       w["longitude"],
+                "parent_gc_code":  gc_code,
+                "wp_code":         w["wp_code"],
+                "url":             w["url"],
+                "wp_date":         w["wp_date"],
+                "created_by_user": w["created_by_user"],
+                "wp_flag":         w["wp_flag"],
+            })
+        row["waypoint_count"] = len(waypoints)
 
-    # ── Issue #538: Trackables ──────────────────────────────────────────────
-    trackable_rows = data.get("trackables", [])
-    for t in trackable_rows:
-        session.add(Trackable(
-            cache=cache,
-            name=t["name"],
-            ref=t["ref"],
-            tracking_code=t["tracking_code"],
-        ))
-    cache.trackable_count = len(trackable_rows)
+        # ── Issue #538: Trackables ────────────────────────────────────────
+        trackables = data.get("trackables", [])
+        row["trackable_count"] = len(trackables)
 
-    # bulk_insert_mappings below needs a real cache.id — guaranteed for
-    # existing caches, but a brand-new cache only gets one on flush.
-    if cache.id is None:
-        session.flush()
-
-    # Logs
-    # log_id is built as f"{gc_code}_{lLogId}" in _load_logs_by_parent, which
-    # is verified unique per (parent, lLogId) pair — but guard with a seen-set
-    # anyway (defence in depth, e.g. if a future GSAK version's data doesn't
-    # hold that invariant) so a collision drops the duplicate instead of
-    # crashing the whole cache via the logs.log_id UNIQUE constraint.
-    #
-    # Uses bulk_insert_mappings rather than per-row session.add(Log(...)) —
-    # on the 1.1M-log real database, individual ORM object creation took
-    # ~185s total; bulk_insert_mappings bypasses per-object unit-of-work
-    # tracking for a large, uniform, insert-only batch like this.
-    seen_log_ids: set[str] = set()
-    log_dates: list[datetime] = []
-    log_mappings: list[dict] = []
-    for lg in log_rows:
-        log_id = lg["log_id"]
-        if log_id in seen_log_ids:
-            if warnings is not None:
+        # Logs
+        # log_id is built as f"{gc_code}_{lLogId}" in _load_logs_by_parent,
+        # which is verified unique per (parent, lLogId) pair — but guard with a
+        # seen-set anyway (defence in depth, e.g. if a future GSAK version's
+        # data doesn't hold that invariant) so a collision drops the duplicate
+        # instead of crashing the whole cache via the logs.log_id UNIQUE
+        # constraint.
+        seen_log_ids: set[str] = set()
+        log_dates: list[datetime] = []
+        logs: list[dict] = []
+        for lg in log_rows:
+            log_id = lg["log_id"]
+            if log_id in seen_log_ids:
                 warnings.append(tr("gsak_warn_duplicate_log", gc_code=gc_code, log_id=log_id))
-            continue
-        seen_log_ids.add(log_id)
-        log_mappings.append({
-            "cache_id":        cache.id,
-            "log_id":          log_id,
-            "log_type":        lg["log_type"],
-            "log_date":        lg["log_date"],
-            "finder":          lg["finder"],
-            "finder_id":       lg["finder_id"],
-            "text":            lg["text"],
-            "text_encoded":    lg["text_encoded"],
-            "latitude":        lg["latitude"],
-            "longitude":       lg["longitude"],
-            "logged_by_owner": lg["logged_by_owner"],
-        })
-        if lg["log_date"] is not None:
-            log_dates.append(lg["log_date"])
+                continue
+            seen_log_ids.add(log_id)
+            logs.append({
+                "log_id":          log_id,
+                "log_type":        lg["log_type"],
+                "log_date":        lg["log_date"],
+                "finder":          lg["finder"],
+                "finder_id":       lg["finder_id"],
+                "text":            lg["text"],
+                "text_encoded":    lg["text_encoded"],
+                "latitude":        lg["latitude"],
+                "longitude":       lg["longitude"],
+                "logged_by_owner": lg["logged_by_owner"],
+            })
+            if lg["log_date"] is not None:
+                log_dates.append(lg["log_date"])
 
-    if log_mappings:
-        session.bulk_insert_mappings(inspect(Log), log_mappings)
+        # ── Issue #87/#186: cached log_count / last_log_date for fast UI display
+        row["log_count"] = len(seen_log_ids)
+        row["last_log_date"] = max(log_dates) if log_dates else None
 
-    # ── Issue #87/#186: cached log_count / last_log_date for fast UI display
-    cache.log_count = len(seen_log_ids)
-    cache.last_log_date = max(log_dates) if log_dates else None
+        # ── Issue #716: last_found_date (most recent found-type log by ANY
+        # finder, unlike found_date which is the current user's own log). GSAK
+        # databases carry full log history and log_rows is fully rebuilt each
+        # import (not merged like the GPX importer), so this reads directly
+        # from log_rows rather than a merged existing_logs set. ─────────────
+        found_log_dates = [
+            lg["log_date"] for lg in log_rows
+            if lg["log_type"] in FOUND_LOG_TYPES and lg["log_date"] is not None
+        ]
+        row["last_found_date"] = max(found_log_dates) if found_log_dates else None
 
-    # ── Issue #716: last_found_date (most recent found-type log by ANY
-    # finder, unlike found_date which is the current user's own log). GSAK
-    # databases carry full log history and log_rows is fully rebuilt each
-    # import (not merged like the GPX importer), so this reads directly
-    # from log_rows rather than a merged existing_logs set. ─────────────────
-    found_log_dates = [
-        lg["log_date"] for lg in log_rows
-        if lg["log_type"] in FOUND_LOG_TYPES and lg["log_date"] is not None
-    ]
-    cache.last_found_date = max(found_log_dates) if found_log_dates else None
+        # ── Issue #716: last_four_logs (cached summary — logs relationship is
+        # not loaded in the grid, same reasoning as last_log_date above) ──────
+        _recent = sorted(
+            (lg for lg in log_rows if lg["log_date"] is not None),
+            key=lambda lg: lg["log_date"], reverse=True,
+        )[:4]
+        row["last_four_logs"] = "\n".join(
+            f"{lg['log_date'].strftime('%Y-%m-%dT%H:%M:%S')}\t{lg['log_type']}\t{lg['finder'] or ''}"
+            for lg in _recent
+        ) or None
 
-    # ── Issue #716: last_four_logs (cached summary — logs relationship is
-    # not loaded in the grid, same reasoning as last_log_date above) ──────
-    _recent = sorted(
-        (lg for lg in log_rows if lg["log_date"] is not None),
-        key=lambda lg: lg["log_date"], reverse=True,
-    )[:4]
-    cache.last_four_logs = "\n".join(
-        f"{lg['log_date'].strftime('%Y-%m-%dT%H:%M:%S')}\t{lg['log_type']}\t{lg['finder'] or ''}"
-        for lg in _recent
-    ) or None
+        # ── Issue #716: last_gpx_update — set unconditionally (even for locked
+        # caches — it reflects import activity, not listing content, same as
+        # source_file above). Issue #1139: GSAK's own LastGPXDate when it has
+        # one, so "not refreshed since …" keeps meaning the last real refresh;
+        # otherwise the time of this import. Naive UTC either way (#1097). ──
+        row["last_gpx_update"] = data.get("_gsak_last_gpx") or utc_now()
 
-    # ── Issue #716: last_gpx_update — set unconditionally (even for locked
-    # caches — it reflects import activity, not listing content, same as
-    # source_file above). Issue #1139: GSAK's own LastGPXDate when it has
-    # one, so "not refreshed since …" keeps meaning the last real refresh;
-    # otherwise the time of this import. Naive UTC either way (#1097). ────
-    cache.last_gpx_update = data.get("_gsak_last_gpx") or utc_now()
+        # ── Issue #552: cached count of the user's own found-type logs ──────
+        # GSAK databases hold the full log history (unlike a PQ's 5-log
+        # window), so this is the most reliable source for the "found N
+        # times" count on relocatable/multi-visit caches. See
+        # count_own_found_logs() for the finder_id/username matching rules
+        # (mirrors found_date/FTF derivation).
+        row["found_log_count"] = count_own_found_logs(log_rows, finder_id, username)
 
-    # ── Issue #552: cached count of the user's own found-type logs ──────────
-    # GSAK databases hold the full log history (unlike a PQ's 5-log window),
-    # so this is the most reliable source for the "found N times" count on
-    # relocatable/multi-visit caches. See count_own_found_logs() for the
-    # finder_id/username matching rules (mirrors found_date/FTF derivation).
-    from opensak.gui.settings import get_settings
-    from opensak.utils.utils import count_own_found_logs
-    _sett = get_settings()
-    cache.found_log_count = count_own_found_logs(
-        log_rows, _sett.gc_finder_id, _sett.gc_username
+        # ── Issue #1139: GSAK's Created is when the cache was first seen. Keep
+        # the earlier of it and an existing imported_at, so a cache that was
+        # already in OpenSAK before never looks newer than it is. ───────────
+        gsak_created = data.get("_gsak_created")
+        if old is None:
+            row["gc_code"] = gc_code
+            # New cache: honour GSAK's own Lock flag as our `locked`.
+            row["locked"] = data["_gsak_lock"]
+            row["imported_at"] = gsak_created if gsak_created is not None else utc_now()
+            new_rows.append(row)
+        else:
+            row["_id"] = old.id
+            if gsak_created is not None:
+                current = old.imported_at.replace(tzinfo=None) if old.imported_at else None
+                if current is None or gsak_created < current:
+                    row["imported_at"] = gsak_created
+            update_rows.append(row)
+
+        if data.get("note_images_replaced"):
+            warnings.append(
+                f"{gc_code}: replaced {data['note_images_replaced']} embedded "
+                f"image reference(s) in the personal note with placeholders"
+            )
+        planned.append((data, old, attr_rows, waypoints, trackables, logs, corrected))
+
+    # ── Write the caches; new ones get their ids back by gc_code ────────────
+    # Matched by the unique gc_code rather than by parameter order: SQLite
+    # can't guarantee RETURNING order for a multi-row INSERT, so
+    # sort_by_parameter_order would make SQLAlchemy insert one row at a time.
+    new_ids: dict[str, int] = {}
+    if new_rows:
+        new_ids = {code: cid for cid, code in session.execute(
+            caches.insert().returning(caches.c.id, caches.c.gc_code), new_rows,
+        )}
+    if update_rows:
+        _update_by_id(session, caches, update_rows)
+
+    # ── Children, user notes and the per-cache result ───────────────────────
+    attributes: list[dict] = []
+    waypoint_rows: list[dict] = []
+    trackable_rows: list[dict] = []
+    log_rows_all: list[dict] = []
+    note_inserts: list[dict] = []
+    note_updates: list[dict] = []
+    written: list[_WrittenCache] = []
+    for data, old, attr_rows, waypoints, trackables, logs, corrected in planned:
+        cache_id = old.id if old is not None else new_ids[data["gc_code"]]
+        attributes.extend({
+            "cache_id":     cache_id,
+            "attribute_id": a["attribute_id"],
+            "name":         attr_names.get(a["attribute_id"]),
+            "is_on":        a["is_on"],
+        } for a in attr_rows)
+        for w in waypoints:
+            w["cache_id"] = cache_id
+        waypoint_rows.extend(waypoints)
+        trackable_rows.extend({
+            "cache_id":      cache_id,
+            "name":          t["name"],
+            "ref":           t["ref"],
+            "tracking_code": t["tracking_code"],
+        } for t in trackables)
+        for lg in logs:
+            lg["cache_id"] = cache_id
+        log_rows_all.extend(logs)
+
+        # UserNote: corrected coordinates + personal note text (#469 + #472).
+        # Always overwritten on import — same rebuild-every-time policy as
+        # Waypoints/Attributes/Logs, per Allan's call that a merge/protect-
+        # existing-note strategy isn't worth the complexity for what's mostly a
+        # one-time GSAK-to-OpenSAK migration, not a repeated two-way sync.
+        has_note = data.get("note_text") is not None
+        if corrected is not None or has_note:
+            values = _note_values(data, corrected)
+            old_note = old_notes.get(cache_id) if old is not None else None
+            if old_note is None:
+                note_inserts.append({
+                    "cache_id":         cache_id,
+                    "note":             values.get("note"),
+                    "corrected_lat":    values.get("corrected_lat"),
+                    "corrected_lon":    values.get("corrected_lon"),
+                    "is_corrected":     values.get("is_corrected", False),
+                    "corrected_source": values.get("corrected_source"),
+                    "updated_at":       values.get("updated_at") or utc_now(),
+                })
+            else:
+                # Only what really changed, as the ORM did: an unchanged note
+                # keeps its updated_at; a changed one without a GSAK date
+                # gets the time of this import (the column's onupdate).
+                changed = {k: v for k, v in values.items() if getattr(old_note, k) != v}
+                if changed:
+                    changed.setdefault("updated_at", utc_now())
+                    changed["_id"] = old_note.id
+                    note_updates.append(changed)
+
+        written.append(_WrittenCache(
+            gc_code=data["gc_code"], cache_id=cache_id, created=old is None,
+            waypoints=len(waypoints), attributes=len(attr_rows), logs=len(logs),
+            trackables=len(trackables), corrected=corrected is not None,
+            note=has_note, note_images=data.get("note_images_replaced", 0),
+        ))
+
+    for model, rows in ((Attribute, attributes), (Waypoint, waypoint_rows),
+                        (Trackable, trackable_rows), (Log, log_rows_all)):
+        if rows:
+            session.execute(_table(model).insert(), rows)
+    if note_inserts:
+        session.execute(_table(UserNote).insert(), note_inserts)
+    if note_updates:
+        _update_by_id(session, _table(UserNote), note_updates)
+
+    _restore_last_user_update(
+        session, [(w.cache_id, item[0].get("last_user_update")) for w, item in zip(written, batch)]
     )
-
-    # UserNote: corrected coordinates + personal note text (#469 + #472).
-    # Always overwritten on import — same rebuild-every-time policy as
-    # Waypoints/Attributes/Logs, per Allan's call that a merge/protect-
-    # existing-note strategy isn't worth the complexity for what's mostly a
-    # one-time GSAK-to-OpenSAK migration, not a repeated two-way sync.
-    note_text = data.get("note_text")
-    if corrected is not None or note_text is not None:
-        note = cache.user_note
-        if note is None:
-            note = UserNote(cache=cache)
-            session.add(note)
-        if corrected is not None:
-            note.corrected_lat = corrected["corrected_lat"]
-            note.corrected_lon = corrected["corrected_lon"]
-            note.is_corrected = True
-            note.corrected_source = corrected.get("corrected_source")
-        # Issue #1139: GSAK's UserNoteDate instead of the time of this
-        # import (set explicitly, so the column's onupdate doesn't fire).
-        if data.get("_gsak_user_note_date") is not None:
-            note.updated_at = data["_gsak_user_note_date"]
-        if note_text is not None:
-            note.note = note_text
-            if data.get("note_images_replaced"):
-                if warnings is not None:
-                    warnings.append(
-                        f"{gc_code}: replaced {data['note_images_replaced']} embedded "
-                        f"image reference(s) in the personal note with placeholders"
-                    )
-
-    return cache, created
+    return written
 
 
-def _restore_last_user_update(session: Session, caches: list[tuple[Cache, dict]]) -> None:
-    """Put GSAK's LastUserDate back after the batch is flushed (#1140).
+def _restore_last_user_update(session: Session, caches: list[tuple[int, Optional[datetime]]]) -> None:
+    """Put GSAK's LastUserDate back after the batch is written (#1140).
 
     Writing the user fields and notes fires the database's last_user_update
     triggers, which stamp "now" — right for an edit, wrong for an import
     that carries the user's own date (or none). Set explicitly afterwards;
-    last_user_update is not a column the triggers watch, so this sticks."""
+    last_user_update is not a column the triggers watch, so this sticks.
+    ``caches`` holds ``(cache id, GSAK's LastUserDate)`` pairs."""
     if not caches:
         return
-    session.flush()
-    # ORM bulk UPDATE by primary key: one executemany, no unit of work.
+    table = _table(Cache)
     session.execute(
-        update(Cache),
-        [{"id": cache.id, "last_user_update": data.get("last_user_update")}
-         for cache, data in caches],
+        table.update().where(table.c.id == bindparam("_id")),
+        [{"_id": cid, "last_user_update": value} for cid, value in caches],
     )
+
+
+def _count_written(result: GsakImportResult, written: list[_WrittenCache],
+                   existing_ids: dict[str, int]) -> None:
+    for w in written:
+        if w.created:
+            result.created += 1
+            existing_ids[w.gc_code] = w.cache_id
+        else:
+            result.updated += 1
+        result.waypoints += w.waypoints
+        result.attributes += w.attributes
+        result.logs += w.logs
+        result.trackables += w.trackables
+        if w.corrected:
+            result.corrected += 1
+        if w.note:
+            result.notes += 1
+        result.note_images_replaced += w.note_images
 
 
 def _flush_gsak_batch(
     session: Session,
-    batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]],
+    batch: list[_GsakBatchItem],
     attr_names: dict[int, str],
     source: str,
     existing_ids: dict[str, int],
     result: GsakImportResult,
+    user: tuple[str, str] = ("", ""),
 ) -> None:
     """Persist a batch under one SAVEPOINT, falling back to per-cache isolation
-    on failure — mirrors the GPX importer's ``_flush_cache_batch``."""
+    on failure — mirrors the GPX importer's ``_flush_cache_batch``. Warnings
+    of a batch are only kept once it is written, so a replayed batch doesn't
+    report them twice."""
     if not batch:
         return
 
     sp = session.begin_nested()
+    warnings: list[str] = []
     try:
-        pending: list[tuple[Cache, bool, int, bool, bool, int]] = []
-        for data, attr_rows, wpt_rows, log_rows, corrected in batch:
-            cache, created = _upsert_cache_from_gsak(
-                session, data, attr_rows, wpt_rows, log_rows, corrected,
-                attr_names, source, existing_ids, result.warnings,
-            )
-            pending.append((
-                cache, created, len(attr_rows), corrected is not None,
-                data.get("note_text") is not None, data.get("note_images_replaced", 0),
-            ))
-        _restore_last_user_update(
-            session, [(p[0], d[0]) for p, d in zip(pending, batch)]
-        )
+        written = _write_gsak_batch(session, batch, attr_names, source, existing_ids,
+                                    user, warnings)
         sp.commit()
     except Exception:
         sp.rollback()
-        _flush_gsak_batch_isolated(session, batch, attr_names, source, existing_ids, result)
+        _flush_gsak_batch_isolated(session, batch, attr_names, source, existing_ids,
+                                   result, user)
         return
-
-    for cache, created, n_attrs, had_corrected, had_note, n_images in pending:
-        if created:
-            result.created += 1
-            existing_ids[cache.gc_code] = cache.id
-        else:
-            result.updated += 1
-        result.waypoints += cache.waypoint_count
-        result.attributes += n_attrs
-        result.logs += cache.log_count
-        result.trackables += cache.trackable_count
-        if had_corrected:
-            result.corrected += 1
-        if had_note:
-            result.notes += 1
-        result.note_images_replaced += n_images
+    result.warnings.extend(warnings)
+    _count_written(result, written, existing_ids)
 
 
 def _flush_gsak_batch_isolated(
     session: Session,
-    batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]],
+    batch: list[_GsakBatchItem],
     attr_names: dict[int, str],
     source: str,
     existing_ids: dict[str, int],
     result: GsakImportResult,
+    user: tuple[str, str] = ("", ""),
 ) -> None:
     """Replay a batch one cache at a time so a single bad cache only skips itself."""
-    for data, attr_rows, wpt_rows, log_rows, corrected in batch:
+    for item in batch:
         cell = session.begin_nested()
+        warnings: list[str] = []
         try:
-            cache, created = _upsert_cache_from_gsak(
-                session, data, attr_rows, wpt_rows, log_rows, corrected,
-                attr_names, source, existing_ids, result.warnings,
-            )
-            _restore_last_user_update(session, [(cache, data)])
+            written = _write_gsak_batch(session, [item], attr_names, source, existing_ids,
+                                        user, warnings)
             cell.commit()
-            if created:
-                result.created += 1
-                existing_ids[cache.gc_code] = cache.id
-            else:
-                result.updated += 1
-            result.waypoints += cache.waypoint_count
-            result.attributes += len(attr_rows)
-            result.logs += cache.log_count
-            result.trackables += cache.trackable_count
-            if corrected is not None:
-                result.corrected += 1
-            if data.get("note_text") is not None:
-                result.notes += 1
-            result.note_images_replaced += data.get("note_images_replaced", 0)
         except Exception as e:
             cell.rollback()
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
+            result.errors.append(tr("import_err_db", gc_code=item[0].get("gc_code", "?"),
                                      source=source, error=e))
             result.skipped += 1
+            continue
+        result.warnings.extend(warnings)
+        _count_written(result, written, existing_ids)
 
 
 def import_gsak_db(
@@ -1361,6 +1472,8 @@ def import_gsak_db(
     progress_cb=None,
     batch_size: int = 200,
     settings_db: Optional[Path] = None,
+    scratch: bool = False,
+    custom_fields: bool = True,
 ) -> GsakImportResult:
     """
     Import a GSAK ``sqlite.db3`` file directly into OpenSAK (scope:
@@ -1380,6 +1493,12 @@ def import_gsak_db(
         GSAK's ``gsak.db3``, for the definitions of global custom fields.
         Custom fields are imported only while the ``companion-db`` feature
         flag is on (importer/gsak_custom_fields.py).
+    scratch : bool
+        The target is a new file that is thrown away if the import fails
+        (importer/gsak_replace.py): no durability while writing it.
+    custom_fields : bool
+        False leaves the custom fields to the caller (gsak_replace.py imports
+        them only once the new file is in place).
     """
     result = GsakImportResult()
     db_path = Path(db_path)
@@ -1395,7 +1514,20 @@ def import_gsak_db(
         result.errors.append(tr("gsak_err_cannot_open", error=e))
         return result
 
+    # Issue #1231: the GSAK tables are loaded into millions of dicts that stay
+    # alive until the end, and every full garbage collection walked them all
+    # again for nothing (~60 s on a 150k-cache database). So no collection
+    # while loading, then the loaded data is frozen (never scanned again) and
+    # collection resumes for what each batch leaves behind — switching it
+    # off for the whole import let that pile up (+1.7 GB peak memory).
+    gc_was_enabled = gc.isenabled()
+    gc.disable()
+    frozen = False
     try:
+        from opensak.gui.settings import get_settings
+        _sett = get_settings()
+        user = (_sett.gc_finder_id, _sett.gc_username)
+
         total = conn.execute("SELECT COUNT(*) FROM Caches").fetchone()[0]
         wpts_by_parent = _load_waypoints_by_parent(conn)
         attrs_by_code = _load_attributes_by_code(conn)
@@ -1404,9 +1536,21 @@ def import_gsak_db(
         attr_names = _attribute_name_lookup()
 
         existing_ids = _load_existing_gc_map(session)
+        gc.freeze()
+        frozen = True
+        if gc_was_enabled:
+            gc.enable()
         _enter_bulk_import_pragmas(session)
+        if scratch:
+            # Journal in memory (savepoint rollbacks still work, unlike
+            # journal_mode=OFF) and no fsync: a crash only loses a file that
+            # gets deleted anyway. _exit_bulk_import_pragmas restores
+            # synchronous; the connection is disposed with its engine.
+            session.execute(text("PRAGMA journal_mode=MEMORY"))
+            session.execute(text("PRAGMA synchronous=OFF"))
+            session.commit()
 
-        batch: list[tuple[dict, list[dict], list[dict], list[dict], Optional[dict]]] = []
+        batch: list[_GsakBatchItem] = []
         codes: list[str] = []
         done = 0
         source = str(db_path)
@@ -1429,7 +1573,8 @@ def import_gsak_db(
                     corrected_by_code.get(gc_code),
                 ))
                 if len(batch) >= batch_size:
-                    _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result)
+                    _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result,
+                                      user)
                     session.commit()
                     batch = []
 
@@ -1437,21 +1582,28 @@ def import_gsak_db(
                 progress_cb(done, total)
 
         if batch:
-            _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result)
+            _flush_gsak_batch(session, batch, attr_names, source, existing_ids, result, user)
             session.commit()
 
-        if flags.companion_db:
-            _import_custom_fields(conn, session, codes, settings_db, result)
+        result.codes = codes
+        if flags.companion_db and custom_fields:
+            target = session.get_bind().engine.url.database
+            if target:
+                _import_custom_fields(conn, Path(target), codes, settings_db, result)
 
     finally:
         _exit_bulk_import_pragmas(session)
         conn.close()
+        if frozen:
+            gc.unfreeze()
+        if gc_was_enabled:
+            gc.enable()
 
     result.encoding_fallbacks = fallback_counter[0]
     return result
 
 
-def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: list[str],
+def _import_custom_fields(conn: sqlite3.Connection, target: Path, codes: list[str],
                           settings_db: Optional[Path], result: GsakImportResult) -> None:
     """Custom fields into the target's companion database, after the caches
     are committed. A failure is reported; the caches stay imported."""
@@ -1459,11 +1611,8 @@ def _import_custom_fields(conn: sqlite3.Connection, session: Session, codes: lis
     from opensak.db.custom_fields import CustomFieldError
     from opensak.importer.gsak_custom_fields import import_custom_fields
 
-    target = session.get_bind().engine.url.database
-    if not target:
-        return
     try:
-        result.custom_fields = import_custom_fields(conn, Path(target), codes, settings_db)
+        result.custom_fields = import_custom_fields(conn, target, codes, settings_db)
     except (sqlite3.Error, OSError, CompanionError, CustomFieldError) as exc:
         logger.warning("GSAK import: custom fields not imported", exc_info=True)
         result.errors.append(f"Custom fields not imported: {exc}")
