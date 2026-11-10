@@ -27,6 +27,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the column switches it, as for the user flag, FTF and locked columns.
   Fields calculated from an expression stay read-only.
 
+- **GSAK database import 6–8× faster (#1231)** — importing a large GSAK
+  database took 8–10 minutes; a 150,000-cache database now imports in
+  just over a minute, with exactly the same data. *Overwrite* now builds
+  the new database next to the old one and swaps it in only when the
+  import has succeeded, so a failed import leaves your database as it
+  was. It needs room for a second copy of the database while it runs.
+  On overwrite, macro data stored for the old caches is removed; custom
+  fields from GSAK are imported again.
+
 ### Fixed
 
 - **Last four logs column sorted by date, not by its squares (#1154)** —
