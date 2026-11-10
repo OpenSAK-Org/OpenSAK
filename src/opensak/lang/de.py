@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Einstellungen…",
     "action_found_update":          "⟳  Funde aus Referenz-Datenbank aktualisieren",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Makro ausführen (Lua)…",
     "action_find_more_macros":      "Weitere Makros finden…",
-    "macro_title":                  "Makro (Lua) — Proof of Concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Öffnen…",
     "macro_btn_run":                "▶  Ausführen",
     "macro_open_title":             "Lua-Makro öffnen",

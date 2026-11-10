@@ -360,14 +360,20 @@ class TestImportDialog:
         assert fired == [True]
         assert dlg._import_btn.isEnabled() is True
 
-    def test_close_event_waits_for_workers(self, dlg):
+    def test_close_while_workers_run_keeps_dialog_open(self, dlg):
+        # #1265: closing used to block on the workers' wait() (and Escape
+        # skipped that entirely). Now the dialog stays open, the location
+        # lookup is cancelled and nothing blocks the GUI thread.
+        dlg.show()
         dlg._worker = SimpleNamespace(isRunning=lambda: True, wait=MagicMock())
         dlg._geo_worker = SimpleNamespace(
             isRunning=lambda: True, request_cancel=MagicMock(), wait=MagicMock()
         )
         dlg.close()
-        assert dlg._worker is None
-        assert dlg._geo_worker is None
+        assert dlg.isVisible()
+        dlg._geo_worker.request_cancel.assert_called_once_with()
+        dlg._worker.wait.assert_not_called()
+        dlg._geo_worker.wait.assert_not_called()
 
     # ── Issue #802: Close button responsiveness ─────────────────────────────
 

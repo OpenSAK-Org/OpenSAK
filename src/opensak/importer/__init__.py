@@ -1039,11 +1039,19 @@ def _enter_bulk_import_pragmas(session: Session) -> None:
     never corrupt the file) and removes those fsyncs. A larger page cache cuts
     B-tree page churn while thousands of rows are inserted.
 
+    Issue #1231: no automatic WAL checkpoints either. By default SQLite copies
+    the WAL back into the database whenever it passes 1000 pages, with an
+    fsync each time — hundreds of times in a large import (58 s of a 119 s
+    re-import of 150k caches). :func:`_exit_bulk_import_pragmas` checkpoints
+    once instead (9 s). Meanwhile the WAL grows to roughly the size of what
+    was written.
+
     These are connection-level settings and the connection is pooled and reused,
     so :func:`_exit_bulk_import_pragmas` MUST restore them once the import ends.
     """
     session.execute(_sa_text("PRAGMA synchronous=NORMAL"))
     session.execute(_sa_text("PRAGMA cache_size=-65536"))  # ~64 MB page cache
+    session.execute(_sa_text("PRAGMA wal_autocheckpoint=0"))
     session.commit()
 
 
@@ -1053,12 +1061,17 @@ def _exit_bulk_import_pragmas(session: Session) -> None:
     Called from the importer's ``finally`` block, so the session may have just
     committed or been rolled back. We roll back first to guarantee a clean state,
     then re-apply the defaults; any failure here is swallowed so it never masks a
-    real import error.
+    real import error. The WAL is checkpointed and truncated here, so it
+    doesn't stay at the size of the whole import on the still-open
+    connection of the active database.
     """
     try:
         session.rollback()
         session.execute(_sa_text("PRAGMA synchronous=FULL"))
         session.execute(_sa_text("PRAGMA cache_size=-2000"))  # SQLite default
+        session.execute(_sa_text("PRAGMA wal_autocheckpoint=1000"))  # SQLite default
+        session.commit()
+        session.execute(_sa_text("PRAGMA wal_checkpoint(TRUNCATE)"))
         session.commit()
     except Exception:
         pass
@@ -1184,11 +1197,40 @@ def _upsert_cache(
     # match updates that row in place, anything new is added, and rows for
     # log_id's simply absent from *this* file are left exactly as they were.
     existing_logs_by_id: dict[Optional[str], Log] = {}
+    # Issue #1255: the GSAK database importer stores logs as
+    # f"{gc_code}_{lLogId}" (GSAK's lLogId is only unique per cache), while
+    # GPX carries the gc.com log id alone. gsak_logs_by_plain_id maps the
+    # plain id back to such a row, so a GPX import updates it instead of
+    # adding a second copy. The row keeps its GSAK-style log_id: rewriting
+    # it could hit the UNIQUE constraint on logs.log_id, and the next import
+    # finds it through this map again either way.
+    gsak_logs_by_plain_id: dict[str, Log] = {}
     if existing is not None:
         existing_logs_by_id = {
             lg.log_id: lg
             for lg in session.query(Log).filter_by(cache_id=cache.id).all()
         }
+        gsak_prefix = f"{cache.gc_code}_"
+        for prefixed_id, lg in list(existing_logs_by_id.items()):
+            if not prefixed_id or not prefixed_id.startswith(gsak_prefix):
+                continue
+            plain_id = prefixed_id[len(gsak_prefix):]
+            if not plain_id.isdigit():
+                continue  # GSAK's dummy ids (-2, 0, ...) never match a GPX log
+            plain_row = existing_logs_by_id.get(plain_id)
+            if plain_row is None:
+                gsak_logs_by_plain_id[plain_id] = lg
+                continue
+            # A pair left by an earlier import (before #1255): keep the GPX
+            # row, carry over what only the GSAK row has, drop the GSAK row.
+            if plain_row.latitude is None and plain_row.longitude is None:
+                plain_row.latitude = lg.latitude
+                plain_row.longitude = lg.longitude
+            plain_row.logged_by_owner = bool(
+                plain_row.logged_by_owner or lg.logged_by_owner
+            )
+            session.delete(lg)
+            del existing_logs_by_id[prefixed_id]
 
     DUMMY_LOG_IDS = {"0", None, ""}
     seen_log_ids_this_file: set[str] = set()
@@ -1209,6 +1251,8 @@ def _upsert_cache(
         seen_log_ids_this_file.add(log_id)
 
         existing_log = existing_logs_by_id.get(log_id)
+        if existing_log is None and log_id is not None:
+            existing_log = gsak_logs_by_plain_id.get(log_id)  # #1255
         if existing_log is not None:
             existing_log.log_type = lg["log_type"]
             existing_log.log_date = lg["log_date"]

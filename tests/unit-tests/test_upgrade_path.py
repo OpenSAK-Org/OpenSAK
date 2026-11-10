@@ -335,6 +335,18 @@ def test_second_start_migrates_nothing(installed, monkeypatch):
 
 # ── What the 1.22.0 cycle adds on top of an upgraded database (#1193) ────────
 
+# Migration 28 (#1140) adds the last_user_update triggers and sets is_owner.
+# A fixture written by 1.22.0 or later is already at schema 28, so opening it
+# runs no migration 28: its data was written with the triggers in place, and
+# is_owner isn't recalculated on open. These two tests only apply to
+# fixtures from before 1.22.0.
+_MIGRATION_28 = 28
+
+
+def _skip_unless_migration_28_runs(expected: dict) -> None:
+    if expected["schema_version_before"] >= _MIGRATION_28:
+        pytest.skip("fixture already has schema 28, so migration 28 doesn't run")
+
 def _open_all(root: Path, expected: dict) -> Any:
     manager, _ = _start_app()
     for name in expected["databases"]:
@@ -346,6 +358,7 @@ def test_user_update_triggers_stamp_after_the_upgrade(installed):
     """Migration 28 (#1140): the triggers exist, the migration itself stamps
     nothing, and a user change afterwards is stamped."""
     root, expected = installed
+    _skip_unless_migration_28_runs(expected)
     from opensak.db.database import _USER_UPDATE_TRIGGERS
 
     _open_all(root, expected)
@@ -372,6 +385,7 @@ def test_is_owner_follows_the_account_after_the_upgrade(installed):
     """Migration 28 (#1140): is_owner from the account in Settings, which the
     fixture has (user.gc_username / user.gc_finder_id)."""
     root, expected = installed
+    _skip_unless_migration_28_runs(expected)
     store = json.loads((root / "install" / "opensak.json").read_text(encoding="utf-8"))
     username = store.get("user.gc_username")
     if not username:

@@ -15,7 +15,7 @@ from opensak.filters.engine import (
     ArchivedFilter, AttributeFilter, AvailabilityFilter, AvailableFilter,
     CacheTypeFilter, ContainerFilter, CountryFilter, DifficultyFilter,
     DistanceFilter, FilterSet, FoundFilter, HasTrackableFilter,
-    LightweightCache, NonPremiumFilter, NotFoundFilter, PlacedByFilter,
+    LightweightCache, NameFilter, NonPremiumFilter, NotFoundFilter, PlacedByFilter,
     PremiumFilter, SortSpec, TerrainFilter, TextSearchFilter,
     WhereClauseFilter, apply_filters, apply_filters_auto, apply_filters_lightweight,
 )
@@ -94,6 +94,15 @@ def assert_lightweight_parity(fs, sort=None):
 def test_parity_no_filter():
     assert_lightweight_parity(None)
     assert_lightweight_parity(FilterSet())
+
+
+@pytest.mark.parametrize("op", ["contains", "not_contains"])
+@pytest.mark.parametrize("scope", ["search_description", "search_logs", "search_notes", "search_hint"])
+def test_parity_text_search(op, scope):
+    # Issue #1225: pushed into SQL on the Core select() as well.
+    flags = dict.fromkeys(("search_description", "search_logs", "search_notes", "search_hint"), False)
+    flags[scope] = True
+    assert_lightweight_parity(FilterSet().add(TextSearchFilter("widget", op=op, **flags)))
 
 
 def test_parity_cache_type():
@@ -200,25 +209,36 @@ class TestFallbackToFullOrm:
         assert len(result) == 1
         assert isinstance(result[0], Cache)
 
-    def test_text_search_with_logs_falls_back(self):
+    def test_regex_text_search_falls_back(self):
+        # A regex has no SQL form: matches() must read the logs.
+        with get_session() as s:
+            fs = FilterSet().add(TextSearchFilter("special w.dget", op="regex"))
+            result = apply_filters_lightweight(s, fs)
+        assert [c.gc_code for c in result] == ["GCL0001"]
+        assert isinstance(result[0], Cache)
+
+    def test_text_search_in_or_group_falls_back(self):
+        # Left to Python in an OR set, so matches() must read the logs.
+        with get_session() as s:
+            fs = FilterSet(mode="OR")
+            fs.add(TextSearchFilter("special widget"))
+            fs.add(NameFilter("Beta"))
+            result = apply_filters_lightweight(s, fs)
+        assert {c.gc_code for c in result} == {"GCL0001", "GCL0002"}
+        assert isinstance(result[0], Cache)
+
+    def test_text_search_with_logs_uses_lightweight_path(self):
+        # Issue #1225: fully handled in SQL, so nothing needs the logs.
         with get_session() as s:
             fs = FilterSet().add(TextSearchFilter("special widget", search_logs=True))
             result = apply_filters_lightweight(s, fs)
-        assert len(result) == 1
-        assert isinstance(result[0], Cache)
+        assert [c.gc_code for c in result] == ["GCL0001"]
+        assert isinstance(result[0], LightweightCache)
 
-    def test_text_search_notes_only_falls_back(self):
-        # Issue #752: search_notes was missing from _filterset_relationship_
-        # needs() entirely, so a TextSearchFilter scoped to *only* User
-        # Notes (description/logs/hint all False — the exact scope a user
-        # gets by unchecking the filter dialog's other text-search boxes)
-        # fell through with every _RelationshipNeeds flag False. That sent
-        # it down the fast Core select() path, where TextSearchFilter's
-        # notes exists() subquery — written for, and only ever exercised
-        # against, apply_filters()'s ORM Query — raised
-        # sqlalchemy.exc.InvalidRequestError ("no FROM clauses due to auto-
-        # correlation") instead of returning a result. This must now fall
-        # back to the full ORM path instead, same as description/logs/hint.
+    def test_text_search_notes_only_uses_lightweight_path(self):
+        # Issue #752: the notes exists() subquery raised InvalidRequestError
+        # ("no FROM clauses due to auto-correlation") on the Core select(),
+        # which already outerjoins UserNote. It now correlates explicitly.
         with get_session() as s:
             fs = FilterSet().add(TextSearchFilter(
                 "specialwidget",
@@ -228,8 +248,7 @@ class TestFallbackToFullOrm:
             result = apply_filters_lightweight(s, fs)  # must not raise
         assert len(result) == 1
         assert result[0].gc_code == "GCL0001"
-        assert isinstance(result[0], Cache)
-        assert not isinstance(result[0], LightweightCache)
+        assert isinstance(result[0], LightweightCache)
 
     def test_text_search_notes_only_matches_apply_filters_auto(self):
         # Same scenario through the actual GUI entry point (apply_filters_
