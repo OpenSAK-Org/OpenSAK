@@ -1531,6 +1531,137 @@ def test_gsak_reimport_updates_found_log_count(db_session, tmp_path):
     )
 
 
+# ── Issue #1255: GPX import after a GSAK database import ─────────────────────
+# The GSAK importer stores logs as f"{gc_code}_{lLogId}", the GPX importer
+# uses the gc.com log id alone. A GPX/PQ import of a cache that came in
+# through the GSAK importer must update its logs, not add a second copy.
+
+
+def _gsak_log(parent: str, log_id: int, **overrides) -> dict:
+    row = {
+        "lParent": parent,
+        "lLogId": log_id,
+        "lType": "Found it",
+        "lBy": "Finder",
+        "lDate": "2025-05-23",
+        "lTime": "13:39:18",
+        "lLat": "",
+        "lLon": "",
+        "lEncoded": 0,
+        "lownerid": 1,
+        "lHasHtml": 0,
+        "lIsowner": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+def _gpx_for(tmp_path, name: str, gc_code: str, logs: list[dict]):
+    from tests.data import build_gpx, cache_wpt, write_gpx
+    return write_gpx(tmp_path, name, build_gpx(cache_wpt(gc_code, gs_id=1, logs=logs)))
+
+
+def _gpx_log(log_id: str, text: str = "From the PQ") -> dict:
+    return {"id": log_id, "type": "Found it", "date": "2025-05-23T21:39:18Z",
+            "finder": "Finder", "finder_id": "1", "text": text}
+
+
+def test_gpx_import_updates_log_from_gsak_import(db_session, tmp_path):
+    from opensak.importer import import_gpx
+    db = _make_gsak_db(tmp_path / "gsak.db3", logs=[_gsak_log("GC1TEST", 1300073624)])
+    import_gsak_db(db, db_session)
+    db_session.commit()
+
+    import_gpx(_gpx_for(tmp_path, "pq.gpx", "GC1TEST", [_gpx_log("1300073624")]), db_session)
+    db_session.commit()
+
+    logs = db_session.query(Log).all()
+    assert len(logs) == 1
+    assert logs[0].log_id == "GC1TEST_1300073624"  # kept, found again next time
+    assert logs[0].text == "From the PQ"
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    assert cache.log_count == 1
+
+    # A second import of the same file still finds it.
+    import_gpx(_gpx_for(tmp_path, "pq2.gpx", "GC1TEST", [_gpx_log("1300073624")]), db_session)
+    db_session.commit()
+    assert db_session.query(Log).count() == 1
+
+
+def test_gpx_then_gsak_then_gpx_keeps_one_log(db_session, tmp_path):
+    # Reverse direction: the GSAK import rebuilds the cache's logs with its
+    # own ids, and the next GPX import must match those again.
+    from opensak.importer import import_gpx
+    import_gpx(_gpx_for(tmp_path, "a.gpx", "GC1TEST", [_gpx_log("777")]), db_session)
+    db_session.commit()
+    db = _make_gsak_db(tmp_path / "gsak.db3", logs=[_gsak_log("GC1TEST", 777)])
+    import_gsak_db(db, db_session)
+    db_session.commit()
+    import_gpx(_gpx_for(tmp_path, "b.gpx", "GC1TEST", [_gpx_log("777")]), db_session)
+    db_session.commit()
+
+    assert [lg.log_id for lg in db_session.query(Log).all()] == ["GC1TEST_777"]
+
+
+def test_gpx_import_collapses_existing_duplicate_pair(db_session, tmp_path):
+    # Databases imported before the fix already hold both rows. The next GPX
+    # import of the cache keeps the GPX row, with what only GSAK had.
+    from opensak.importer import import_gpx
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        logs=[_gsak_log("GC1TEST", 555, lLat="55.1", lLon="12.2", lIsowner=1)],
+    )
+    import_gsak_db(db, db_session)
+    db_session.commit()
+    cache = db_session.query(Cache).filter_by(gc_code="GC1TEST").one()
+    db_session.add(Log(cache_id=cache.id, log_id="555", log_type="Found it",
+                       finder="Finder", log_date=datetime(2025, 5, 23, 21, 39, 18)))
+    db_session.commit()
+    assert db_session.query(Log).count() == 2
+
+    # This file doesn't even contain log 555: the pair is collapsed anyway.
+    import_gpx(_gpx_for(tmp_path, "pq.gpx", "GC1TEST", [_gpx_log("999", "New")]), db_session)
+    db_session.commit()
+
+    by_id = {lg.log_id: lg for lg in db_session.query(Log).all()}
+    assert set(by_id) == {"555", "999"}
+    assert by_id["555"].latitude == pytest.approx(55.1)
+    assert by_id["555"].longitude == pytest.approx(12.2)
+    assert by_id["555"].logged_by_owner is True
+    db_session.refresh(cache)
+    assert cache.log_count == 2
+
+
+def test_gsak_log_of_another_cache_is_not_matched(db_session, tmp_path):
+    # GSAK's lLogId is only unique per cache, so the match stays per cache.
+    from opensak.importer import import_gpx
+    db = _make_gsak_db(
+        tmp_path / "gsak.db3",
+        caches=[{"Code": "GC1TEST"}, {"Code": "GC2TEST"}],
+        memos=[{"Code": "GC1TEST"}, {"Code": "GC2TEST"}],
+        logs=[_gsak_log("GC2TEST", 42)],
+    )
+    import_gsak_db(db, db_session)
+    db_session.commit()
+
+    import_gpx(_gpx_for(tmp_path, "pq.gpx", "GC1TEST", [_gpx_log("42")]), db_session)
+    db_session.commit()
+
+    rows = {(lg.cache.gc_code, lg.log_id) for lg in db_session.query(Log).all()}
+    assert rows == {("GC2TEST", "GC2TEST_42"), ("GC1TEST", "42")}
+
+
+def test_gsak_dummy_log_id_is_left_alone(db_session, tmp_path):
+    from opensak.importer import import_gpx
+    db = _make_gsak_db(tmp_path / "gsak.db3", logs=[_gsak_log("GC1TEST", -2, lType="Write note")])
+    import_gsak_db(db, db_session)
+    db_session.commit()
+
+    import_gpx(_gpx_for(tmp_path, "pq.gpx", "GC1TEST", [_gpx_log("2")]), db_session)
+    db_session.commit()
+
+    assert {lg.log_id for lg in db_session.query(Log).all()} == {"GC1TEST_-2", "2"}
+
 # ── Issue #1231: bulk writes, date fast path, GC switched off ────────────────
 
 

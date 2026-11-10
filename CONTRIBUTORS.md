@@ -21,9 +21,10 @@ Listed alphabetically by first name.
 | Brian Anderson | [@blazerat](https://github.com/blazerat) | Move/copy caches between databases, full screen & popout map, MTP support for newer Garmin devices |
 | Fabio Sa | [@Fabio-A-Sa](https://github.com/Fabio-A-Sa) | CI/CD pipeline, API improvements, testing coverage, Portuguese translation (`lang/pt.py`) |
 | Hans Blom | [@hansblom](https://github.com/hansblom) | Swedish translation (`lang/se.py`) |
+| Jahnavi-HJ | [@Jahnavi-HJ](https://github.com/Jahnavi-HJ) | English code comments (`logger.py`) |
 | Michal Gavlík | — | Czech translation (`lang/cs.py`) |
 | n3oklan | [@n3oklan](https://github.com/n3oklan) | Missing translation strings (cs, fr, da) |
-| nagisml | [@nagisml](https://github.com/nagisml) | Lua macro system (editor, API and examples), GSAK filter parity (text and date operators, Logs, Child Waypoints and Trackables tabs, Invert filter, filter highlighting, Quick Where), GSAK backup and filter import, export settings, "Apply to all databases", expanded Edit Cache dialog, Swiss German translation (`lang/de_CH.py`), GPX import and GSAK import fixes |
+| nagisml | [@nagisml](https://github.com/nagisml) | Lua macro system (editor, form designer, macro manager, API and examples), custom fields and companion database, command-line import, database maintenance, Garmin POI export, coordinate grid formats, GSAK filter parity (text and date operators, Logs, Child Waypoints and Trackables tabs, Invert filter, filter highlighting, Quick Where), GSAK backup and filter import, export settings, "Apply to all databases", expanded Edit Cache dialog, Swiss German translation (`lang/de_CH.py`), GPX import and GSAK import fixes |
 | Pierre Lejeune | [@theyoungstone](https://github.com/theyoungstone) | French translation (`lang/fr.py`) |
 | Surfoo | [@Surfoo](https://github.com/Surfoo) | French translation fixes |
 | The0x4f | [@The0x4f](https://github.com/The0x4f) | SUSE-compatible installation |
@@ -38,13 +39,18 @@ Thank you to the testers whose reports shaped each release.
 
 | Name | GitHub | Contribution |
 |------|--------|--------------|
+| Allyn56 | — | GSAK import suggestions |
 | Bob Long | — | macOS beta testing |
+| C3GPS | — | Backup folder feedback |
 | ChemeinerWill | — | Column view and cache list reports and suggestions |
+| dstein766 | — | Column view reports |
 | GarenKreiz | [@GarenKreiz](https://github.com/GarenKreiz) | Large-database export and date format reports |
-| GeePa67 | — | Backup and macro editor reports, compressed backups suggestion |
+| GeePa67 | — | Backup, macro and form reports, compressed backups suggestion |
 | Hans Blom | [@hansblom](https://github.com/hansblom) | Windows beta testing |
+| ianwok | — | Database list, column sorting and backup reports, macros-in-backup suggestion |
 | Jimbo-DK | — | Pocket Queries by e-mail — real-world testing |
 | Mike Wood | [@lignumaqua](https://github.com/lignumaqua) | macOS beta testing (in-app updates), GSAK expertise and data |
+| McMellow | — | GSAK found-date round-trip report |
 | pjacklam | — | Coordinate input suggestions |
 
 ---

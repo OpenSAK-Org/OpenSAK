@@ -189,7 +189,7 @@ class BoundaryStore:
             raise FileNotFoundError(pack)
         if cached is None:
             path = self.data_dir / _LAYER_DIR[self._layer(layer)] / pack
-            if not path.is_file() and layer == "county":
+            if not path.is_file():
                 # On-demand fetch: county packs are not bundled, downloaded lazily.
                 # This is now mostly a fallback — ReverseGeocodeWorker's
                 # pre-fetch phase (see packs.fetch_packs) already downloads
@@ -197,8 +197,11 @@ class BoundaryStore:
                 # branch normally only fires for a pack the pre-fetch phase
                 # itself failed to get (e.g. it appeared mid-run, or the
                 # pre-fetch phase was skipped/failed and this is the retry).
+                # State and country packs are bundled and updated with
+                # boundaries.db (packs.apply_update), so for them it is only a
+                # fallback for a file that is missing anyway (#1226).
                 if is_debug_enabled("geo"):
-                    log.debug("fetching county pack: %s", pack)
+                    log.debug("fetching %s pack: %s", layer, pack)
                 from opensak.geo import packs as _packs
                 _packs.fetch_pack(pack, path.parent)
             if not path.is_file():

@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Funktioner-menu
     "action_settings":              "&Indstillinger…",
     "action_found_update":          "⟳  Opdater fund fra reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Kør makro (Lua)…",
     "action_find_more_macros":      "Find flere makroer…",
-    "macro_title":                  "Makro (Lua) — proof of concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Åbn…",
     "macro_btn_run":                "▶  Kør",
     "macro_open_title":             "Åbn Lua-makro",
@@ -812,6 +812,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Anvender opdatering…",
     "boundary_check_done":          "✓ Opdatering anvendt — {count} fil(er) opdateret.",
     "boundary_check_failed":        "Opdateringstjek mislykkedes — ingen netværksforbindelse.",
+    "boundary_apply_failed":        "Opdateringen kunne ikke anvendes — ikke alle filer kunne hentes. Intet er ændret; prøv igen senere.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny database",

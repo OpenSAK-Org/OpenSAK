@@ -34,6 +34,7 @@ from opensak.export.poi_export_settings import (
     PROXIMITY_UNITS, PoiExportProfile, PoiExportSettings,
 )
 from opensak.gui.dialogs.file_export_dialog import SavedSettingsDialog, _ElidedLabel
+from opensak.gui.dialogs.widgets import WorkerGuardMixin
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.lang import tr
 
@@ -65,7 +66,7 @@ class _PlanWorker(QThread):
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
-class PoiExportDialog(SavedSettingsDialog):
+class PoiExportDialog(WorkerGuardMixin, SavedSettingsDialog):
     """Dialog for exporting filtered caches as Garmin POI files."""
 
     _profile_cls = PoiExportProfile

@@ -257,7 +257,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.caches" func="yes">
-			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without arguments: the caches of the active filter, in grid order. With filter&#x0a;keys (see Filter keys): the caches matching them, sorted by name; the view and&#x0a;the active filter stay unchanged. `all = true`: every cache of the database,&#x0a;sorted by name, whatever the active filter shows. `database` reads another&#x0a;database, without switching: its caches matching the filter keys, or all of&#x0a;them, sorted by name. `fields` limits the fields loaded (`code` is always&#x0a;included), which makes loops over many caches faster. Caches are loaded in&#x0a;chunks, so large databases do not hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
+			<Overload retVal="fun(): opensak.Cache?" descr="Iterate over caches, one table per cache (see Cache fields), in a generic `for`.&#x0a;Without filter keys (nothing, or only `fields`): the caches of the active&#x0a;filter, in grid order. With filter keys (see Filter keys): every cache of the&#x0a;database matching them, sorted by name. Filter keys search the whole database,&#x0a;they do not narrow the active filter; the view and the active filter stay&#x0a;unchanged. To pick some caches of the active filter, loop without filter keys&#x0a;and test the fields in the loop. `all = true`: every cache of the database,&#x0a;sorted by name, whatever the active filter shows. `database` reads another&#x0a;database, without switching: its caches matching the filter keys, or all of&#x0a;them, sorted by name. `fields` limits the fields loaded (`code` is always&#x0a;included), which makes loops over many caches faster. Caches are loaded in&#x0a;chunks, so large databases do not hit the memory limit.&#x0a;Returns fun(): opensak.Cache? — Iterator for a generic `for`.">
 				<Param name="[spec: opensak.CachesSpec]" />
 			</Overload>
 		</KeyWord>
@@ -327,7 +327,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.clear_corrected" func="yes">
-			<Overload retVal="boolean" descr="Remove the corrected coordinates of a cache.&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Remove the corrected coordinates of a cache. To change many caches, run the loop&#x0a;inside opensak.transaction(): much faster, and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 			</Overload>
 		</KeyWord>
@@ -336,7 +336,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.codes" func="yes">
-			<Overload retVal="string[]" descr="The GC codes of the caches of the active filter, in grid order. Cheaper than&#x0a;opensak.caches() when only the codes are needed.&#x0a;Returns string[] — GC codes.">
+			<Overload retVal="string[]" descr="The GC codes of the caches of the active filter, in grid order. Cheaper than&#x0a;opensak.caches() when only the codes are needed. To read fields of these caches,&#x0a;loop over opensak.caches{ fields = {...} } rather than calling opensak.cache()&#x0a;for each code: it loads only the fields asked for, many caches at a time.&#x0a;Returns string[] — GC codes.">
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.columns" func="yes">
@@ -905,12 +905,12 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.set_corrected" func="yes">
-			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees).&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many&#x0a;caches, run the loop inside opensak.transaction(): much faster, and undone&#x0a;completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="lat: number|string" />
 				<Param name="lon: number|string" />
 			</Overload>
-			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees).&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Set corrected coordinates, either as decimal degrees or as one coordinate string&#x0a;in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many&#x0a;caches, run the loop inside opensak.transaction(): much faster, and undone&#x0a;completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="coords: string" />
 			</Overload>
@@ -1130,7 +1130,7 @@
 			</Overload>
 		</KeyWord>
 		<KeyWord name="opensak.update" func="yes">
-			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). Before a macro's first change, OpenSAK asks the user&#x0a;to allow that macro (see Changing caches).&#x0a;Returns boolean — false if the cache is not in the database.">
+			<Overload retVal="boolean" descr="Change fields of a cache in the active database. The keys are cache field names&#x0a;(see Changing caches); only the given fields change. `false` clears a field that&#x0a;is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or&#x0a;`log_count`, cannot be written. Locked caches can be changed too: the lock only&#x0a;protects from imports. `custom` changes custom fields: a table of field name →&#x0a;value (see Custom fields). Before a macro's first change, OpenSAK asks the user&#x0a;to allow that macro (see Changing caches). To change many caches, run the loop&#x0a;inside opensak.transaction(): much faster, and undone completely on an error.&#x0a;Returns boolean — false if the cache is not in the database.">
 				<Param name="code: string" />
 				<Param name="fields: opensak.CacheUpdate" />
 			</Overload>

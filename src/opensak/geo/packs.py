@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import os
@@ -173,8 +174,7 @@ def fetch_baseline(data_dir: Path, manifest: dict | None = None) -> bool:
         return True
 
     def _fetch_one(filename: str) -> None:
-        dest_dir = data_dir / ("countries" if filename == "world.geojson" else "states")
-        fetch_pack(filename, dest_dir)
+        fetch_pack(filename, _baseline_dir(data_dir, filename))
 
     with ThreadPoolExecutor(max_workers=min(BASELINE_FETCH_WORKERS, len(baseline))) as executor:
         list(executor.map(_fetch_one, baseline))
@@ -208,32 +208,84 @@ def apply_update(
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[str]:
     """
-    Atomically apply a data update from manifest.
-    Downloads new boundaries.db and any locally-cached county packs that changed.
-    Returns list of filenames that were updated.
-    Caches not yet downloaded are skipped (they will fetch the new version on demand).
+    Apply a data update from manifest, all or nothing (#1226).
+    Returns the list of filenames that were updated; empty if the update
+    could not be applied, in which case nothing was changed.
+
+    Updated together, because boundaries.db stores a pack and a feature
+    index for every region, so it must never point into an old pack:
+      * boundaries.db;
+      * the baseline (manifest["baseline"]: world.geojson and the state
+        packs) — each file that is missing locally or differs from the
+        manifest, so a new or changed state pack arrives with the db;
+      * the county packs already cached locally that differ. County packs
+        not cached are skipped; they are fetched on demand later, in the
+        new version.
+
+    Everything is downloaded to temporary files first and checked against
+    the manifest's sha256 where it gives one. If boundaries.db or a
+    baseline file can't be fetched, the temporary files are removed and the
+    local data stays as it was; the manifest isn't saved and the dataset
+    version in boundaries.db is unchanged, so the update is offered again.
+    A cached county pack that can't be fetched is deleted instead of being
+    left stale: the on-demand fetch gets the new version when it's needed.
+    Only then are the files moved into place, boundaries.db last.
     """
-    updated: list[str] = []
-    packs_info: dict = manifest.get("packs", {})
     counties_dir = data_dir / "counties"
-
-    if _fetch_file_atomic("boundaries.db", data_dir):
-        updated.append("boundaries.db")
-        if progress_cb:
-            progress_cb("boundaries.db")
-
-    for filename, info in packs_info.items():
+    required: list[tuple[str, Path, str]] = [("boundaries.db", data_dir, "")]
+    for filename, info in manifest.get("baseline", {}).items():
+        dest_dir = _baseline_dir(data_dir, filename)
+        if _needs_update(dest_dir / filename, info):
+            required.append((filename, dest_dir, _sha256_of(info)))
+    optional: list[tuple[str, Path, str]] = []
+    for filename, info in manifest.get("packs", {}).items():
         local = counties_dir / filename
-        if not local.is_file():
-            continue  # not locally cached — will fetch fresh on next demand
-        remote_ver = str(info.get("version", ""))
-        if remote_ver and remote_ver != _local_pack_version(local):
-            if fetch_pack(filename, counties_dir):
-                updated.append(filename)
-                if progress_cb:
-                    progress_cb(filename)
+        if local.is_file() and _needs_update(local, info):
+            optional.append((filename, counties_dir, _sha256_of(info)))
 
-    _save_manifest(data_dir, manifest)
+    items = required + optional
+    staged: list[Path | None] = [None] * len(items)
+    # progress_cb runs in the calling thread (a QThread's run(), which emits
+    # a Qt signal from it), as in fetch_packs().
+    with ThreadPoolExecutor(max_workers=min(BASELINE_FETCH_WORKERS, len(items))) as executor:
+        futures = {executor.submit(_download_to_temp, *item): i for i, item in enumerate(items)}
+        for future in as_completed(futures):
+            i = futures[future]
+            staged[i] = future.result()
+            if staged[i] is not None and progress_cb:
+                progress_cb(items[i][0])
+
+    failed = [item[0] for item, tmp in zip(required, staged) if tmp is None]
+    if failed:
+        log.warning("boundary update not applied, could not fetch: %s", ", ".join(failed))
+        for tmp in staged:
+            if tmp is not None:
+                _unlink(tmp)
+        return []
+
+    updated: list[str] = []
+    # boundaries.db (first in required) goes in last
+    order = list(range(1, len(items))) + [0]
+    for i in order:
+        filename, dest_dir, _sha = items[i]
+        tmp = staged[i]
+        dest = dest_dir / filename
+        if tmp is None:  # a county pack: drop it, fetched on demand later
+            log.info("boundary update: could not fetch %s, removed the old copy", filename)
+            _unlink(dest)
+            continue
+        try:
+            os.replace(tmp, dest)
+        except OSError as exc:
+            log.warning("boundary update: could not replace %s: %s", dest, exc)
+            _unlink(tmp)
+            if i != 0:
+                _unlink(dest)  # never keep a pack the new db doesn't match
+            continue
+        updated.append(filename)
+
+    if "boundaries.db" in updated:
+        _save_manifest(data_dir, manifest)
     return updated
 
 
@@ -267,6 +319,73 @@ def _fetch_file_atomic(filename: str, dest_dir: Path) -> bool:
         log.debug("file fetch failed (%s): %s", filename, exc)
         return False
     return _atomic_write(dest_dir, filename, data)
+
+
+def _baseline_dir(data_dir: Path, filename: str) -> Path:
+    """Where a baseline file lives: world.geojson in countries/, state packs in states/."""
+    return data_dir / ("countries" if filename == "world.geojson" else "states")
+
+
+def _sha256_of(info: object) -> str:
+    sha = info.get("sha256", "") if isinstance(info, dict) else ""
+    return str(sha).lower()
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _needs_update(local: Path, info: object) -> bool:
+    """True if the local pack is missing or differs from the manifest entry
+    *info*: by sha256 when the manifest gives one (catches any change), else
+    by the version stored in the pack's features."""
+    if not local.is_file():
+        return True
+    sha = _sha256_of(info)
+    if sha:
+        try:
+            return _file_sha256(local) != sha
+        except OSError:
+            return True
+    remote_ver = str(info.get("version", "")) if isinstance(info, dict) else ""
+    return bool(remote_ver) and remote_ver != _local_pack_version(local)
+
+
+def _download_to_temp(filename: str, dest_dir: Path, sha256: str = "") -> Path | None:
+    """Download *filename* to a temporary file in dest_dir (same file system,
+    so os.replace() can move it into place). Checked against *sha256* if
+    given. Returns the temporary file, or None on any failure."""
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(
+            _asset_url(filename), timeout=DOWNLOAD_TIMEOUT, context=SSL_CONTEXT
+        ) as resp:
+            data = resp.read()
+    except _FETCH_ERRORS as exc:
+        log.debug("file fetch failed (%s): %s", filename, exc)
+        return None
+    if sha256 and hashlib.sha256(data).hexdigest() != sha256:
+        log.warning("boundary update: %s does not match the manifest's sha256", filename)
+        return None
+    try:
+        fd, tmp = tempfile.mkstemp(dir=dest_dir, prefix=".tmp_")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    except OSError as exc:
+        log.debug("temp write failed (%s): %s", filename, exc)
+        return None
+    return Path(tmp)
+
+
+def _unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _local_dataset_version(data_dir: Path) -> str:

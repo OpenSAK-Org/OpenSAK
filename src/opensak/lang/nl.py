@@ -95,10 +95,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Instellingen…",
     "action_found_update":          "⟳  Vondsten bijwerken vanuit referentiedatabase…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Macro uitvoeren (Lua)…",
     "action_find_more_macros":      "Meer macro’s zoeken…",
-    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Openen…",
     "macro_btn_run":                "▶  Uitvoeren",
     "macro_open_title":             "Lua-macro openen",
@@ -815,6 +815,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Update wordt toegepast…",
     "boundary_check_done":          "✓ Update toegepast — {count} bestand(en) bijgewerkt.",
     "boundary_check_failed":        "Updatecontrole mislukt — geen netwerkverbinding.",
+    "boundary_apply_failed":        "De update kon niet worden toegepast — niet alle bestanden konden worden gedownload. Er is niets gewijzigd; probeer het later opnieuw.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nieuwe database",

@@ -19,7 +19,7 @@ from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
 from opensak.gui.settings import get_settings, HomePoint
 from opensak.gui.dialogs.widgets import (
-    DirRow, clamp_dialog_height_to_screen, remember_dialog_geometry,
+    DirRow, clamp_dialog_height_to_screen, keep_worker_alive, remember_dialog_geometry,
 )
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.gui.theme import hint_style
@@ -110,6 +110,7 @@ class SettingsDialog(QDialog):
         clamp_dialog_height_to_screen(self, parent)
         self._oauth_worker        = None
         self._profile_worker      = None
+        self._pq_email_worker: _ImapTestWorker | None = None
         self._editing_original_name: str | None = None   # Issue #157
         self._setup_ui()
         self._load()
@@ -1805,6 +1806,15 @@ class SettingsDialog(QDialog):
         return confirm_backup_folder(
             self, new_backup_dir, title=tr("wizard_backup_dir_title"), db_dir=new_db_dir,
         )
+
+    def done(self, result: int) -> None:
+        # #1265: OK, Cancel, Escape and the window's close button all end
+        # here. The dialog is deleted right after it closes, and a worker
+        # still running (connection test, login, profile) with it, which
+        # aborts OpenSAK — hand it to the main window until it is done.
+        for worker in (self._pq_email_worker, self._oauth_worker, self._profile_worker):
+            keep_worker_alive(worker, self.parent())
+        super().done(result)
 
     def _save(self) -> None:
         # Auto-commit any in-progress home-point edit when the user clicks OK

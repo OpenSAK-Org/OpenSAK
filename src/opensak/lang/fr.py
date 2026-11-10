@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Paramètres…",
     "action_found_update":          "⟳  Mettre à jour les caches trouvées depuis la base de données de référence…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Exécuter une macro (Lua)…",
     "action_find_more_macros":      "Trouver d’autres macros…",
-    "macro_title":                  "Macro (Lua) — preuve de concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Ouvrir…",
     "macro_btn_run":                "▶  Exécuter",
     "macro_open_title":             "Ouvrir une macro Lua",
@@ -813,6 +813,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Application de la mise à jour…",
     "boundary_check_done":          "✓ Mise à jour appliquée — {count} fichier(s) mis à jour.",
     "boundary_check_failed":        "Échec de la vérification des mises à jour — pas de connexion réseau.",
+    "boundary_apply_failed":        "La mise à jour n'a pas pu être appliquée — certains fichiers n'ont pas pu être téléchargés. Rien n'a été modifié ; réessayez plus tard.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nouvelle base de données",

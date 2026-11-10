@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 
 # Issue #656 (CheminerWill's follow-up suggestion): remember the "use
 # database name as filename" checkbox state across exports/sessions.
@@ -134,7 +134,7 @@ class ExportWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class GpsExportDialog(QDialog):
+class GpsExportDialog(WorkerGuardMixin, QDialog):
     """Dialog til at eksportere caches til GPS enhed."""
 
     def __init__(self, parent=None, caches=None):
@@ -153,15 +153,12 @@ class GpsExportDialog(QDialog):
         self._setup_ui()
         self._scan_devices()
 
-    def closeEvent(self, event) -> None:
-        """Afbryd igangværende MTP-overførsler når dialogen lukkes."""
-        from opensak.gps.garmin import cancel_mtp_transfer
-        cancel_mtp_transfer()
-        for worker in (self._worker, self._delete_worker):
-            if worker is not None and worker.isRunning():
-                worker.quit()
-                worker.wait(2000)
-        super().closeEvent(event)
+    def _guarded_workers(self):
+        # #1265: Escape, Close and the window's close button are ignored
+        # while old files are deleted or the caches are sent. The close
+        # button used to cancel an MTP copy and wait 2 s for the worker,
+        # then close anyway, which aborted OpenSAK on a longer transfer.
+        return (self._worker, self._delete_worker)
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)

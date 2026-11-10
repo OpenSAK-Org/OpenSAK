@@ -139,6 +139,38 @@ def test_toggle_comment_is_one_undo_step(editor):
     assert editor.toPlainText() == "a()\nb()"
 
 
+# ── Font size (issue #1246) ──────────────────────────────────────────────────
+
+def _set_text_size(monkeypatch, size):
+    from types import SimpleNamespace
+    from opensak.gui.dialogs import macro_editor
+    monkeypatch.setattr(macro_editor, "get_settings", lambda: SimpleNamespace(text_size=size))
+
+
+@pytest.mark.parametrize("size", ["small", "medium", "large"])
+def test_editor_font_follows_text_size(qtbot, monkeypatch, size):
+    from opensak.gui.dialogs.macro_editor import INDENT, CodeEditor
+    from opensak.utils.types import TEXT_SIZE_MAP, TextSize
+    _set_text_size(monkeypatch, TextSize(size))
+    e = CodeEditor()
+    qtbot.addWidget(e)
+    assert e.font().pointSize() == TEXT_SIZE_MAP[TextSize(size)]["editor"]
+    assert e.tabStopDistance() == e.fontMetrics().horizontalAdvance(" ") * len(INDENT)
+
+
+def test_editor_refresh_sizes_grows_font_and_margin(qtbot, monkeypatch):
+    from opensak.gui.dialogs.macro_editor import CodeEditor
+    from opensak.utils.types import TEXT_SIZE_MAP, TextSize
+    _set_text_size(monkeypatch, TextSize.SMALL)
+    e = CodeEditor()
+    qtbot.addWidget(e)
+    small_margin = e.viewportMargins().left()
+    _set_text_size(monkeypatch, TextSize.LARGE)
+    e.refresh_sizes()
+    assert e.font().pointSize() == TEXT_SIZE_MAP[TextSize.LARGE]["editor"]
+    assert e.viewportMargins().left() > small_margin
+
+
 def test_tab_indents_selection_and_backtab_dedents(editor, qtbot):
     editor.setPlainText("a()\nb()")
     _select_all(editor)

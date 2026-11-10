@@ -643,12 +643,17 @@ function opensak.profiles() end
 ---@return opensak.Cache? # The cache, or nil if it is not in the database.
 function opensak.cache(code, options) end
 
----Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+---Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without filter keys (nothing, or only `fields`): the caches of the active filter, in grid order. With filter keys (see Filter keys): every cache of the database matching them, sorted by name. Filter keys search the whole database, they do not narrow the active filter; the view and the active filter stay unchanged. To pick some caches of the active filter, loop without filter keys and test the fields in the loop. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 ---
 ---Since API version 2. Changed in API version 3: added `all`. Changed in API version 4: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 ---
 ---```lua
 ---for c in opensak.caches() do print(c.code, c.name) end
+----- the active filter's caches with corrected coordinates:
+---for c in opensak.caches{ fields = {"corrected"} } do
+---    if c.corrected then print(c.code) end
+---end
+----- found caches in Switzerland, whatever the active filter shows:
 ---for c in opensak.caches{ found = true, country = "Switzerland",
 ---                         fields = {"difficulty", "terrain"} } do
 ---    print(c.code, c.difficulty, c.terrain)
@@ -657,7 +662,7 @@ function opensak.cache(code, options) end
 ---    print(c.code, c.corrected and c.corrected.lat)
 ---end
 ---```
----@param spec? opensak.CachesSpec Filter keys, `all`, `database` and/or `fields`; nothing = the active filter.
+---@param spec? opensak.CachesSpec Filter keys, `all`, `database` and/or `fields`; nothing, or only `fields` = the active filter.
 ---@return fun(): opensak.Cache? # Iterator for a generic `for`.
 function opensak.caches(spec) end
 
@@ -682,7 +687,7 @@ function opensak.current() end
 ---@return string[] # GC codes; empty if nothing is selected.
 function opensak.selected() end
 
----The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed.
+---The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed. To read fields of these caches, loop over opensak.caches{ fields = {...} } rather than calling opensak.cache() for each code: it loads only the fields asked for, many caches at a time.
 ---
 ---Since API version 2.
 ---
@@ -1011,7 +1016,7 @@ function opensak.copy_caches(target, options) end
 ---
 ---```lua
 ---local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
----  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+---  databases = {"Found", "Holidays"}, if_exists = "merge",
 ---  locations = true })
 ---for _, db in ipairs(r.databases) do
 ---  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
@@ -1038,7 +1043,7 @@ function opensak.import_gsak(source, options) end
 ---@return opensak.GpxImportReport # What was imported, per file.
 function opensak.import_gpx(source, options) end
 
----Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 1.
 ---
@@ -1053,7 +1058,7 @@ function opensak.import_gpx(source, options) end
 ---@overload fun(code: string, coords: string): boolean
 function opensak.set_corrected(code, lat, lon) end
 
----Remove the corrected coordinates of a cache.
+---Remove the corrected coordinates of a cache. To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 1.
 ---
@@ -1064,7 +1069,7 @@ function opensak.set_corrected(code, lat, lon) end
 ---@return boolean # false if the cache is not in the database.
 function opensak.clear_corrected(code) end
 
----Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+---Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 3. Changed in API version 4: `custom` changes custom fields.
 ---
@@ -1365,12 +1370,12 @@ function opensak.sql_write(query, params) end
 ---
 ---```lua
 ---local n = opensak.transaction(function()
----    local n = 0
+---    local count = 0
 ---    for c in opensak.caches{ found = true, fields = {"code"} } do
 ---        opensak.update(c.code, { user_flag = true })
----        n = n + 1
+---        count = count + 1
 ---    end
----    return n
+---    return count
 ---end)
 ---print(n .. " caches flagged")
 ----- error() inside the function undoes everything it changed:

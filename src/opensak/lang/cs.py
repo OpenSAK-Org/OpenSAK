@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Nastavení…",
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Spustit makro (Lua)…",
     "action_find_more_macros":      "Najít další makra…",
-    "macro_title":                  "Makro (Lua) — ověření konceptu",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
     "macro_open_title":             "Otevřít makro Lua",
@@ -812,6 +812,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "Aktualizaci nelze použít — nepodařilo se stáhnout všechny soubory. Nic nebylo změněno; zkuste to později znovu.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nová databáze",

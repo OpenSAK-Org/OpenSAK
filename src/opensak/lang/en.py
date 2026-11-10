@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Settings…",
     "action_found_update":          "⟳  Update finds from reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Run macro (Lua)…",
     "action_find_more_macros":      "Find more macros…",
-    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Open…",
     "macro_btn_run":                "▶  Run",
     "macro_open_title":             "Open Lua macro",
@@ -811,6 +811,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "The update could not be applied — not every file could be downloaded. Nothing was changed; please try again later.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "New database",

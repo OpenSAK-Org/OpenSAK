@@ -23,7 +23,7 @@ from opensak.db.database import get_session, db_health_check
 from opensak.db.models import Cache
 from opensak.filters.engine import (
     FilterSet, SortSpec, apply_filters_auto, get_nearby_caches, effective_coords,
-    AvailableFilter, NotFoundFilter, CacheTypeFilter,
+    AvailableFilter, NotFoundFilter, IsOwnerFilter, CacheTypeFilter,
     DifficultyFilter, TerrainFilter
 )
 from opensak.gui.cache_table import CacheTableView
@@ -345,6 +345,9 @@ class MainWindow(QMainWindow):
 
         self._detail_panel = CacheDetailPanel()
         self._detail_panel.corrected_coords_changed.connect(self._on_corrected_coords_changed)
+        # #1241: a boolean custom field switched in one place shows in the other
+        self._detail_panel.custom_values_changed.connect(self._cache_table.refresh_custom)
+        self._cache_table.custom_value_changed.connect(self._detail_panel.refresh_custom)
         self._bottom_splitter.addWidget(self._detail_panel)
 
         # Map widget
@@ -1080,6 +1083,10 @@ class MainWindow(QMainWindow):
         dlg.database_switched.connect(self._on_database_switched)
         dlg.database_renamed.connect(self._on_database_renamed)
         dlg.exec()
+        # #1232: the dialog only signals a switch or a rename, but deleting,
+        # removing from the list, opening, scanning the folder, copying and
+        # moving change the list too: the toolbar dropdown must show it.
+        self._reload_db_combo()
 
     def _open_custom_fields(self) -> None:
         """Tools → Custom fields… (#1028): define the active database's fields."""
@@ -1169,6 +1176,14 @@ class MainWindow(QMainWindow):
             from opensak.db.database import recalculate_distances, distances_up_to_date
             if not distances_up_to_date(s.home_lat, s.home_lon):
                 recalculate_distances(s.home_lat, s.home_lon)
+        # The rows still loaded in the table belong to the previous database.
+        # Empty the table before switching to the new database's columns: if
+        # the new database shows the Hints/Notes column and the old rows are
+        # LightweightCache (the fast path used when the old database had
+        # those columns off), the very next repaint crashed with
+        # AttributeError (encoded_hints). The real rows are fetched by
+        # _refresh_cache_list (via reload_map below), with the new columns.
+        self._cache_table.load_caches([], custom_fields.EMPTY_VALUES)
         # Genindlæs kolonner for den nye database (issue #199)
         self._cache_table.reload_columns()
         # Issue #607 (opfølgning): genindlæs comboen for den nye database —
@@ -1890,12 +1905,14 @@ class MainWindow(QMainWindow):
 
         if idx == 1:   # Ikke fundne / Not found
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 2:  # Fundne / Found
             from opensak.filters.engine import FoundFilter
             fs.add(FoundFilter())
         elif idx == 3:  # Tilgængelige ikke fundne / Available not found
             fs.add(AvailableFilter())
             fs.add(NotFoundFilter())
+            fs.add(IsOwnerFilter(False))
         elif idx == 4:  # Traditional let / Traditional easy
             fs.add(CacheTypeFilter(["Traditional Cache"]))
             fs.add(DifficultyFilter(max_difficulty=2.0))
@@ -1905,11 +1922,20 @@ class MainWindow(QMainWindow):
             from opensak.filters.engine import ArchivedFilter
             fs.add(ArchivedFilter())
 
+        for search_filter in self._search_box_filters():
+            fs.add(search_filter)
+
+        return fs
+
+    def _search_box_filters(self) -> list:
+        """The filters for the toolbar search boxes (GC code / Name / Where)."""
+        filters: list = []
+
         # GC-nummer søgefelt (søger kun i GC kode)
         gc_search = self._search_gc.text().strip()
         if gc_search:
             from opensak.filters.engine import GcCodeFilter
-            fs.add(GcCodeFilter(gc_search))
+            filters.append(GcCodeFilter(gc_search))
 
         # Navn-søgefelt — matcher kun på navn (GSAK-style, issue #86)
         # Issue #80 introduced a combined Name+GC code search here, but
@@ -1918,14 +1944,27 @@ class MainWindow(QMainWindow):
         name_search = self._search_box.text().strip()
         if name_search:
             from opensak.filters.engine import NameFilter
-            fs.add(NameFilter(name_search))
+            filters.append(NameFilter(name_search))
 
         # Quick "Where" box (issue #558) — only the validated expression
         if self._where_sql_applied:
             from opensak.filters.engine import WhereClauseFilter
-            fs.add(WhereClauseFilter(self._where_sql_applied))
+            filters.append(WhereClauseFilter(self._where_sql_applied))
 
-        return fs
+        return filters
+
+    def _with_search_boxes(self, filterset: FilterSet) -> FilterSet:
+        """*filterset* AND the toolbar search boxes: what the list shows once
+        *filterset* is active, as _show_filter_result() resets the preset."""
+        filters = self._search_box_filters()
+        if not filters:
+            return filterset
+        combined = FilterSet(mode="AND")
+        if len(filterset) > 0:
+            combined.add(filterset)
+        for search_filter in filters:
+            combined.add(search_filter)
+        return combined
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -2091,11 +2130,8 @@ class MainWindow(QMainWindow):
 
     def _update_quick_search_state(self) -> None:
         """Sync the Clear button and the profile dropdown's 'None' / 'Active
-        (unsaved)' entry with the toolbar search boxes."""
-        if self._has_quick_search():
-            self._set_clear_filter_active(True)
-        elif not self._active_filter_name:
-            self._set_clear_filter_active(False)
+        (unsaved)' entry with the filters in effect."""
+        self._set_clear_filter_active(self._has_active_filter())
         self._update_filter_combo_placeholder()
 
     def _on_search_changed(self, text: str) -> None:
@@ -2129,7 +2165,7 @@ class MainWindow(QMainWindow):
         return min_chars, debounce_ms
 
     def _on_quick_filter_changed(self, index: int) -> None:
-        self._update_filter_combo_placeholder()
+        self._update_quick_search_state()
         self._refresh_cache_list()
 
     # ── Quick "Where" box (issue #558) ────────────────────────────────────────
@@ -2402,6 +2438,8 @@ class MainWindow(QMainWindow):
                 self._detail_panel.show_cache(full)
             else:
                 self._detail_panel.refresh_sizes()
+            if getattr(self, "_macro_dialog", None) is not None:
+                self._macro_dialog.refresh_sizes()
 
     # ── Tastaturgenveje ────────────────────────────────────────────────────────
 
@@ -3040,7 +3078,7 @@ class MainWindow(QMainWindow):
         # Ingen gemt profil — nulstil filter
         self._current_filterset = FilterSet()
         self._active_filter_name = ""
-        self._set_clear_filter_active(False)
+        self._set_clear_filter_active(self._has_active_filter())
         if hasattr(self, "_filter_lbl"):
             self._filter_lbl.setText("")
         if hasattr(self, "_filter_profile_combo"):
@@ -3134,7 +3172,7 @@ class MainWindow(QMainWindow):
             # `sort` from the dialog is always SortSpec("name") — ignore it
             # and keep the user's column sort for this database.
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
 
@@ -3153,7 +3191,8 @@ class MainWindow(QMainWindow):
         self._show_filter_result(filterset, profile_name, caches)
 
     def _show_filter_result(self, filterset, profile_name: str, caches: list) -> None:
-        """Make *filterset* the active filter and show its (non-empty) *caches*.
+        """Make *filterset* the active filter and show its (non-empty) *caches*,
+        queried with _with_search_boxes().
 
         Shared by the "Set filter" dialog and Lua macros (opensak.filter).
         """
@@ -3163,12 +3202,17 @@ class MainWindow(QMainWindow):
         self._set_clear_filter_active(True)
         label = profile_name if profile_name else tr("filter_active_label")
         self._filter_lbl.setText(f"🔍 {label}")
+        # Signals blocked: *caches* is already the result without a preset.
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._populate_filter_profile_combo(select_name=profile_name)
         self._cache_table.load_caches(caches)
         if get_settings().map_enabled:
             self._update_map_filter_shape()
-            self._map_widget.load_caches(self._fetch_map_caches(filterset, caches))
+            self._map_widget.load_caches(
+                self._fetch_map_caches(self._with_search_boxes(filterset), caches)
+            )
         count = self._cache_table.row_count()
         if count == 1:
             self._count_lbl.setText(tr("count_cache_single"))
@@ -3203,7 +3247,7 @@ class MainWindow(QMainWindow):
         if name and name == self._active_filter_name:
             self._current_filterset = FilterSet()
             self._active_filter_name = ""
-            self._set_clear_filter_active(self._has_quick_search())
+            self._set_clear_filter_active(self._has_active_filter())
             self._filter_lbl.setText("")
             self._populate_filter_profile_combo(select_name=None)
             self._refresh_cache_list()
@@ -3245,6 +3289,9 @@ class MainWindow(QMainWindow):
         self._where_combo.blockSignals(False)
         self._where_sql_applied = ""
         self._set_where_error(None)
+        self._quick_filter.blockSignals(True)
+        self._quick_filter.setCurrentIndex(0)
+        self._quick_filter.blockSignals(False)
         self._set_clear_filter_active(False)
         self._filter_lbl.setText("")
         self._populate_filter_profile_combo(select_name=None)
@@ -3258,6 +3305,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._refresh_cache_list()
         self._statusbar.showMessage(tr("status_filter_reset"), 3000)
+
+    def _has_active_filter(self) -> bool:
+        """True if any filter is in effect: a saved profile, an unsaved
+        filter, a search box or a quick-filter preset (issue #1242)."""
+        return bool(self._active_filter_name) or self._has_unsaved_active_filter()
 
     def _has_unsaved_active_filter(self) -> bool:
         """True if a filter is currently in effect that isn't a saved profile.
@@ -3348,23 +3400,11 @@ class MainWindow(QMainWindow):
         self._save_sort_for_active_db()
         self._set_clear_filter_active(True)
         self._filter_lbl.setText(f"🔍 {profile.name}")
+        # Signals blocked so the preset reset doesn't refresh as well (#1242).
+        self._quick_filter.blockSignals(True)
         self._quick_filter.setCurrentIndex(0)
-        with get_session() as session:
-            caches = apply_filters_auto(
-                session, profile.filterset, self._current_sort,
-                columns=self._visible_table_columns(),
-            )
-        self._cache_table.load_caches(caches)
-        if get_settings().map_enabled:
-            self._update_map_filter_shape()
-            self._map_widget.load_caches(self._fetch_map_caches(profile.filterset, caches))
-        count = self._cache_table.row_count()
-        if count == 1:
-            self._count_lbl.setText(tr("count_cache_single"))
-        else:
-            self._count_lbl.setText(tr("count_caches", count=count))
-        self._statusbar.showMessage(tr("status_filter_result", count=count), 3000)
-        self._update_info_bar()
+        self._quick_filter.blockSignals(False)
+        self._refresh_cache_list()
 
     def _open_column_chooser(self) -> None:
         if self._trip_planner_active():
@@ -3447,7 +3487,7 @@ class MainWindow(QMainWindow):
         from opensak.gui.dialogs.column_dialog import (
             ALWAYS_VISIBLE, ColumnView,
             set_visible_columns, set_column_widths,
-            set_container_display, set_type_display,
+            set_container_display, set_type_display, set_applied_view_name,
         )
         try:
             view = ColumnView.load(path)
@@ -3460,6 +3500,7 @@ class MainWindow(QMainWindow):
         set_column_widths(view.widths)
         set_container_display(view.container_display)
         set_type_display(view.type_display)
+        set_applied_view_name(view.name)
         self._cache_table.reload_columns()
         # Issue #658 follow-up — same reasoning as _open_column_chooser():
         # reload_columns() doesn't refetch data, so a view that turns on
@@ -3706,7 +3747,7 @@ class MainWindow(QMainWindow):
         leaves the current view untouched and returns 0."""
         with get_session() as session:
             caches = apply_filters_auto(
-                session, filterset, self._current_sort,
+                session, self._with_search_boxes(filterset), self._current_sort,
                 columns=self._visible_table_columns(),
             )
         if caches:

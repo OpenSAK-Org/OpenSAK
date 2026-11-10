@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from opensak.db.manager import get_db_manager
 from opensak.lang import tr
-from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
+from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.theme import hint_style
 
 
@@ -39,7 +39,7 @@ class UpdateWorker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class FoundUpdaterDialog(QDialog):
+class FoundUpdaterDialog(WorkerGuardMixin, QDialog):
     """
     Dialog der lader brugeren opdatere 'fundet' status i den aktive
     database baseret på en reference database (f.eks. Mine Fund).
