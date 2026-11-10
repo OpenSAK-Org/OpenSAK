@@ -14,6 +14,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   are still needed (regular expressions, OR filters), each cache's
   descriptions are no longer repeated once per log.
 
+- **Macro editor follows the text size setting (#1246)** — the code in
+  the Lua macro editor used the system's fixed-width font at its default
+  size, which could be hard to read. It now follows **Settings → Text and
+  icon size**: Small, Medium or Large. An editor that is already open
+  changes size as soon as the setting is saved.
+
 ### Fixed
 
 - **Last four logs column sorted by date, not by its squares (#1154)** —
