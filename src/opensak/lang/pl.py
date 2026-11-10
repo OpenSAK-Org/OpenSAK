@@ -322,6 +322,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Otwórz plik dziennika",
     "action_open_previous_log_file": "Otwórz dziennik z ostatniego uruchomienia",
     "action_support_opensak": "♥  Wesprzyj OpenSAK…",
+    "menu_community":              "Społeczność",
+    "action_community_facebook":   "OpenSAK na Facebooku",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK na forum GSAK",
+    "action_community_new_issue":  "Zgłoś błąd lub zaproponuj funkcję",
     "log_file_not_found": "Nie znaleziono pliku dziennika: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────

@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Abrir ficheiro de registo",
     "action_open_previous_log_file": "Abrir registo do último arranque",
     "action_support_opensak": "♥  Apoiar o OpenSAK…",
+    "menu_community":              "Comunidade",
+    "action_community_facebook":   "OpenSAK no Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK no fórum GSAK",
+    "action_community_new_issue":  "Reportar um erro ou sugerir uma funcionalidade",
     "log_file_not_found": "Ficheiro de registo ainda não encontrado: {path}",
 
     # ── Atalhos de teclado dialog ─────────────────────────────────────────────

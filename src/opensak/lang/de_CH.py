@@ -321,6 +321,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Protokolldatei öffnen",
     "action_open_previous_log_file": "Protokoll vom letzten Neustart öffnen",
     "action_support_opensak": "♥  OpenSAK unterstützen…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK auf Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK im GSAK-Forum",
+    "action_community_new_issue":  "Fehler melden oder Funktion vorschlagen",
     "log_file_not_found": "Protokolldatei noch nicht gefunden: {path}",
 
     # ── Tastaturkürzel-Dialog ─────────────────────────────────────────────────

@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Åbn logfil",
     "action_open_previous_log_file": "Åbn log fra forrige genstart",
     "action_support_opensak": "♥  Støt OpenSAK…",
+    "menu_community":              "Fællesskab",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forummet",
+    "action_community_new_issue":  "Rapportér en fejl eller foreslå en funktion",
     "log_file_not_found": "Logfil ikke fundet endnu: {path}",
 
     # ── Tastaturgenveje-dialog ────────────────────────────────────────────────

@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Öppna loggfil",
     "action_open_previous_log_file": "Öppna logg från senaste omstart",
     "action_support_opensak": "♥  Stöd OpenSAK…",
+    "menu_community":              "Gemenskap",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forumet",
+    "action_community_new_issue":  "Rapportera ett fel eller föreslå en funktion",
     "log_file_not_found": "Loggfilen hittades inte än: {path}",
 
     # ── Tangentbordsgenvägar-dialog ───────────────────────────────────────────

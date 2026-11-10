@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QStatusBar,
     QToolBar, QPushButton, QComboBox, QApplication,
     QSizePolicy, QMessageBox, QWidgetAction, QStackedWidget,
-    QProgressDialog
+    QProgressDialog, QMenu
 )
 
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
@@ -711,6 +711,17 @@ class MainWindow(QMainWindow):
         help_menu.addAction(act_file_locations)
 
         help_menu.addSeparator()
+
+        # Issue #1230: where other users are. Users who came through GitHub
+        # or the GSAK forum may never hear of the Facebook group, and some
+        # aren't on Facebook at all, so all channels are offered together.
+        from opensak.utils.community import COMMUNITY_LINKS
+        self._community_menu = QMenu(tr("menu_community"), self)
+        for key, url in COMMUNITY_LINKS:
+            act = QAction(tr(key), self)
+            act.triggered.connect(lambda _=False, u=url: self._open_community_link(u))
+            self._community_menu.addAction(act)
+        help_menu.addMenu(self._community_menu)
 
         act_support = QAction(tr("action_support_opensak"), self)
         act_support.triggered.connect(self._open_support_page)
@@ -4177,6 +4188,12 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QUrl
         from opensak.macro.metadata import MACROS_REPO_URL
         QDesktopServices.openUrl(QUrl(MACROS_REPO_URL))
+
+    def _open_community_link(self, url: str) -> None:
+        """Open one of the Help → Community links in the browser (#1230)."""
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl(url))
 
     def _open_support_page(self) -> None:
         """Open the Open Collective support/sponsor page in the default browser."""

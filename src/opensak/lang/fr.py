@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Ouvrir le fichier journal",
     "action_open_previous_log_file": "Ouvrir le journal du dernier redémarrage",
     "action_support_opensak": "♥  Soutenir OpenSAK…",
+    "menu_community":              "Communauté",
+    "action_community_facebook":   "OpenSAK sur Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK sur le forum GSAK",
+    "action_community_new_issue":  "Signaler un bug ou proposer une fonctionnalité",
     "log_file_not_found": "Fichier journal introuvable : {path}",
 
     # ── Raccourcis clavier dialog ─────────────────────────────────────────────

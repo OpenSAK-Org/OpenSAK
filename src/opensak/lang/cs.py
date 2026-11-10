@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Otevřít soubor protokolu",
     "action_open_previous_log_file": "Otevřít protokol z posledního spuštění",
     "action_support_opensak": "♥  Podpořit OpenSAK…",
+    "menu_community":              "Komunita",
+    "action_community_facebook":   "OpenSAK na Facebooku",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK na fóru GSAK",
+    "action_community_new_issue":  "Nahlásit chybu nebo navrhnout funkci",
     "log_file_not_found": "Soubor protokolu ještě nebyl nalezen: {path}",
 
     # ── Klávesové zkratky dialog ──────────────────────────────────────────────

@@ -323,6 +323,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Logbestand openen",
     "action_open_previous_log_file": "Log van vorige herstart openen",
     "action_support_opensak": "♥  OpenSAK steunen…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK op Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK op het GSAK-forum",
+    "action_community_new_issue":  "Fout melden of functie voorstellen",
     "log_file_not_found": "Logbestand nog niet gevonden: {path}",
 
     # ── Sneltoetsen-dialog ────────────────────────────────────────────────────

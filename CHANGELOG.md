@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.23.0-beta.1] — Unreleased
 
+### Added
+
+- **Help → Community (#1230)** — a new submenu with the places where other
+  OpenSAK users are: the OpenSAK group on Facebook, GitHub Discussions,
+  the OpenSAK section of the GSAK forum, and reporting a bug or requesting
+  a feature on GitHub. Each opens in your browser. Users who found OpenSAK
+  through GitHub or the GSAK forum often never heard of the Facebook group,
+  and not everyone is on Facebook.
+
 ### Changed
 
 - **Faster text search in filters (#1225)** — a filter with a Text Search
@@ -54,6 +63,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   recent DNFs at the top; within a pattern the most recently logged cache
   comes first. A filter's saved sort on this field, which was ignored,
   now gives the same order. The squares themselves are unchanged.
+
+- **GPS devices mounted at a path with a space (#1094)** — on Linux, a
+  device mounted outside `/media`, `/run/media` and `/mnt` was not found
+  when its mount point had a space or a letter outside ASCII in it, because
+  the mount lists write those characters as escape codes. They are now
+  decoded first. A database moved on startup from an old OpenSAK version
+  is now written to the log file instead of only to the console.
 
 ---
 

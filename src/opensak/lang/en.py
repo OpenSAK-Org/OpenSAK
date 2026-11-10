@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Open log file",
     "action_open_previous_log_file": "Open log from last restart",
     "action_support_opensak": "♥  Support OpenSAK…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK on Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK on the GSAK forum",
+    "action_community_new_issue":  "Report a bug or request a feature",
     "log_file_not_found": "Log file not found yet: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
