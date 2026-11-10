@@ -9,7 +9,7 @@ from __future__ import annotations
 
 # The group's permanent URL, not a share link: non-members can still see
 # the group page and ask to join.
-FACEBOOK_GROUP_URL = "https://www.facebook.com/groups/opensak"
+FACEBOOK_GROUP_URL = "https://www.facebook.com/groups/2062154441232996"
 DISCUSSIONS_URL = "https://github.com/OpenSAK-Org/OpenSAK/discussions"
 # OpenSAK's own section of the GSAK forum, under "Not strictly GSAK, but
 # related": the pinned announcements and the users' own topics.

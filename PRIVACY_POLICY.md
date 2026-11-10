@@ -179,7 +179,7 @@ OpenSAK is developed and maintained by Allan, Denmark.
 If you have questions about this Privacy Policy or how OpenSAK handles data, please reach out via:
 
 - **GitHub Issues:** https://github.com/OpenSAK-Org/opensak/issues
-- **Facebook community:** [OpenSAK — Open Source Geocache Manager](https://www.facebook.com/groups/opensak)
+- **Facebook community:** [OpenSAK — Open Source Geocache Manager](https://www.facebook.com/groups/2062154441232996)
 - **Website:** https://opensak.com
 
 ---
