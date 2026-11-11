@@ -413,6 +413,24 @@ class AppSettings:
     def map_max_caches(self, value: int) -> None:
         get_store().set("display.map_max_caches", max(0, int(value)))
 
+    @property
+    def map_tile_cache_mb(self) -> int:
+        """#1111: size cap (MB) of the map's on-disk tile cache, so viewed
+        map areas still show offline (see gui/map_profile.py). 0 turns the
+        disk cache off (memory only, as before #1111). Read when the map
+        profile is created, so a change takes effect after a restart.
+        Global (not per-database), matching map_enabled above.
+        """
+        val = get_store().get("display.map_tile_cache_mb", 200)
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            return 200
+
+    @map_tile_cache_mb.setter
+    def map_tile_cache_mb(self, value: int) -> None:
+        get_store().set("display.map_tile_cache_mb", max(0, int(value)))
+
     # ── Split-screen kort: nærliggende caches (issue #718) ──────────────────────
     #
     # Per database (samme mønster som home_lat/home_lon ovenfor) — en tæt

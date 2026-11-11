@@ -13,8 +13,8 @@ rules, so the assets come from a custom scheme instead:
     opensak://assets/leaflet/leaflet.js  →  assets/web/leaflet/leaflet.js
 
 The scheme must be registered before the QApplication is created
-(register_scheme(), called from app.main()); the handler is installed per
-QWebEngineProfile (install_handler()).
+(register_scheme(), called from app.main()); the handler is installed on the
+shared map profile (install_handler(), called from map_profile.py).
 """
 
 from __future__ import annotations
