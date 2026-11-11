@@ -4,6 +4,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.23.0-beta.2] — Unreleased
+
+### Fixed
+
+- **No long waits without a network connection (#1111)** — once a
+  request finds the network unreachable (no connection, DNS failure,
+  timeout), OpenSAK stops making automatic requests for five minutes
+  instead of waiting for each one to time out: the update check at
+  startup, the boundary data download on first run, and the county packs
+  fetched while importing or updating locations. Caches whose county
+  could not be looked up keep an empty county; *Update waypoint
+  locations* fills it in later. *Help → Check for updates* and the
+  boundary pack dialogs still try every time, and any request that gets
+  through ends the pause. Contributed by nagisml.
+
+---
+
 ## [1.23.0-beta.1] — 2026-11-10
 
 > Headline: **first beta after v1.22.0.** GSAK database import is 6–8×
