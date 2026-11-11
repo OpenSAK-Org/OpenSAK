@@ -102,6 +102,8 @@ class MapBridge(QObject):
     draw_clicked = Signal()
     # Drawn shape changed: '{"mode": …, "points": [[lat, lon], …]}'
     shape_changed = Signal(str)
+    # Clustering switched on/off with the map button (#1087)
+    clustering_toggled = Signal(bool)
 
     @Slot(str)
     def on_cache_clicked(self, gc_code: GcCode) -> None:
@@ -132,6 +134,11 @@ class MapBridge(QObject):
     def on_shape_changed(self, shape_json: str) -> None:
         """Called from JavaScript when the user draws, edits or removes the shape."""
         self.shape_changed.emit(shape_json)
+
+    @Slot(bool)
+    def on_clustering_toggled(self, on: bool) -> None:
+        """Called from JavaScript when the clustering button is clicked."""
+        self.clustering_toggled.emit(on)
 
 
 # ── HTML template med Leaflet.js ──────────────────────────────────────────────
@@ -227,6 +234,24 @@ MAP_HTML = """<!DOCTYPE html>
     font-family: sans-serif;
     white-space: nowrap;
   }
+  .leaflet-control-mapactions a.clustering-on {
+    background: #ffe0b2;
+    color: #e65100;
+  }
+  .leaflet-tooltip.cache-label {
+    padding: 0 4px;
+    font-size: 11px;
+    font-family: sans-serif;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.85);
+    border: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .leaflet-tooltip.cache-label::before { display: none; }
+  .cache-labels-hidden .leaflet-tooltip.cache-label { display: none; }
   .leaflet-control-nearbylabel {
     background: #fff;
     padding: 4px 10px;
@@ -293,14 +318,96 @@ tileLayer.on('tileload', function() {
 });
 
 // ── Marker cluster gruppe ─────────────────────────────────────────────────────
-var clusterGroup = L.markerClusterGroup({
-    maxClusterRadius: 40,
-    showCoverageOnHover: false,
-    chunkedLoading: true,
-    chunkInterval: 200,
-    chunkDelay: 10
-});
+// Issue #1087: every construction (here, in loadCaches and in
+// setClustering) goes through makeClusterGroup(), so the settings can't
+// drift between them. With clustering switched off (the map button),
+// disableClusteringAtZoom 0 puts every marker straight on the top level,
+// while the group's API (addLayers, zoomToShowLayer, getBounds,
+// chunkProgress) stays the same.
+var clusteringOn = MAP_CLUSTERING_ON;
+
+function makeClusterGroup(extra) {
+    var options = {
+        showCoverageOnHover: false,
+        chunkedLoading: true,
+        chunkInterval: 200,
+        chunkDelay: 10
+    };
+    if (clusteringOn) {
+        options.maxClusterRadius = MAP_CLUSTER_RADIUS;
+    } else {
+        options.disableClusteringAtZoom = 0;
+    }
+    return L.markerClusterGroup(L.extend(options, extra));
+}
+
+var clusterGroup = makeClusterGroup();
 map.addLayer(clusterGroup);
+
+// Regroup the markers already on the map — no reload, the view stays.
+function setClustering(on) {
+    clusteringOn = !!on;
+    var layers = Object.keys(markers).map(function(code) { return markers[code]; });
+    clusterGroup.clearLayers();
+    map.removeLayer(clusterGroup);
+    clusterGroup = makeClusterGroup();
+    map.addLayer(clusterGroup);
+    if (layers.length > 0) clusterGroup.addLayers(layers);
+}
+
+L.Control.Clustering = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function(map) {
+        var container = L.DomUtil.create('div', 'leaflet-control-mapactions leaflet-bar');
+        var btn = L.DomUtil.create('a', clusteringOn ? 'clustering-on' : '', container);
+        btn.innerHTML = '⁂';
+        btn.title = MAP_TIP_CLUSTERING;
+        btn.href = '#';
+        btn.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', function(e) {
+            L.DomEvent.preventDefault(e);
+            setClustering(!clusteringOn);
+            if (clusteringOn) {
+                L.DomUtil.addClass(btn, 'clustering-on');
+            } else {
+                L.DomUtil.removeClass(btn, 'clustering-on');
+            }
+            if (bridge) bridge.on_clustering_toggled(clusteringOn);
+        });
+        return container;
+    }
+});
+
+// ── Issue #1087: cache labels ─────────────────────────────────────────────────
+// A permanent tooltip under each pin with its name or GC code
+// (MAP_LABEL_MODE 'name' / 'gc_code', 'off' = none). Hidden below
+// LABEL_MIN_ZOOM, where they would only cover each other.
+var LABEL_MIN_ZOOM = 13;
+
+function bindCacheLabel(marker, c) {
+    if (MAP_LABEL_MODE === 'off') return;
+    var text = MAP_LABEL_MODE === 'gc_code' ? c.gc_code : c.name;
+    if (!text) return;
+    marker.bindTooltip(escapeHtml(text), {
+        permanent: true,
+        direction: 'bottom',
+        offset: [0, 14],
+        className: 'cache-label',
+        interactive: false
+    });
+}
+
+function updateLabelVisibility() {
+    var container = map.getContainer();
+    if (map.getZoom() < LABEL_MIN_ZOOM) {
+        L.DomUtil.addClass(container, 'cache-labels-hidden');
+    } else {
+        L.DomUtil.removeClass(container, 'cache-labels-hidden');
+    }
+}
+map.on('zoomend', updateLabelVisibility);
+updateLabelVisibility();
 
 // ── State ─────────────────────────────────────────────────────────────────────
 var markers = {};          // gc_code → marker
@@ -375,6 +482,7 @@ L.Control.MapActions = L.Control.extend({
 if (MAP_ACTIONS_ENABLED) {
     new L.Control.MapActions().addTo(map);
 }
+new L.Control.Clustering().addTo(map);   // issue #1087, below the actions
 
 // ── Draw tool (Line/Polygon filter) ──────────────────────────────────────────
 //
@@ -619,12 +727,7 @@ function loadCaches(caches) {
 
     // Recreate the cluster group to avoid stale internal state from clearLayers()
     map.removeLayer(clusterGroup);
-    clusterGroup = L.markerClusterGroup({
-        maxClusterRadius: 40,
-        showCoverageOnHover: false,
-        chunkedLoading: true,
-        chunkInterval: 200,
-        chunkDelay: 10,
+    clusterGroup = makeClusterGroup({
         chunkProgress: function(processed, total) {
             // Issue #630: chunkedLoading adds markers to the map in
             // background chunks (via requestAnimationFrame/setTimeout)
@@ -654,6 +757,7 @@ function loadCaches(caches) {
         });
 
         marker.bindPopup(cachePopupHtml(c));
+        bindCacheLabel(marker, c);
 
         marker.on('click', function() {
             if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -942,6 +1046,7 @@ function updateCacheMarker(c) {
     });
 
     marker.bindPopup(cachePopupHtml(c));
+    bindCacheLabel(marker, c);
 
     marker.on('click', function() {
         if (bridge) bridge.on_cache_clicked(c.gc_code);
@@ -1032,6 +1137,7 @@ class MapWidget(QWidget):
             self._bridge.popout_clicked.connect(self.popout_requested)
             self._bridge.draw_clicked.connect(self._show_draw_menu)
             self._bridge.shape_changed.connect(self._on_shape_changed)
+            self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
             self._ready = False
             layout.addWidget(QLabel("Map disabled (headless test mode)"))  # i18n: ignore — tests only
             return
@@ -1057,6 +1163,7 @@ class MapWidget(QWidget):
         self._bridge.popout_clicked.connect(self.popout_requested)
         self._bridge.draw_clicked.connect(self._show_draw_menu)
         self._bridge.shape_changed.connect(self._on_shape_changed)
+        self._bridge.clustering_toggled.connect(self._on_clustering_toggled)
         self._channel.registerObject("bridge", self._bridge)
         self._page.setWebChannel(self._channel)
 
@@ -1128,12 +1235,20 @@ class MapWidget(QWidget):
             cb()
 
     def _html_options(self) -> dict:
+        # Issue #1087: clustering and labels are read here, so the reload
+        # after Settings → OK (reload_map) applies them to the open map.
+        from opensak.gui.settings import get_settings
+        s = get_settings()
         return {"map_actions": self._map_actions, "draw_button": self._draw_button,
-                "auto_fit_caches": self._auto_fit_caches}
+                "auto_fit_caches": self._auto_fit_caches,
+                "clustering": s.map_clustering, "cluster_radius": s.map_cluster_radius,
+                "label_mode": s.map_labels}
 
     @staticmethod
     def _render_map_html(lat: float, lon: float, *, map_actions: bool = True,
-                         draw_button: bool = False, auto_fit_caches: bool = True) -> str:
+                         draw_button: bool = False, auto_fit_caches: bool = True,
+                         clustering: bool = True, cluster_radius: int = 40,
+                         label_mode: str = "off") -> str:
         """Render MAP_HTML template with dynamic values and localized tooltips."""
         import opensak.utils.flags as flags
         html = MAP_HTML.replace("INIT_LAT", str(lat))
@@ -1143,6 +1258,9 @@ class MapWidget(QWidget):
         html = html.replace("MAP_ACTIONS_ENABLED", "true" if map_actions else "false")
         html = html.replace("MAP_DRAW_BUTTON", "true" if draw_button else "false")
         html = html.replace("AUTO_FIT_CACHES", "true" if auto_fit_caches else "false")
+        html = html.replace("MAP_CLUSTERING_ON", "true" if clustering else "false")
+        html = html.replace("MAP_CLUSTER_RADIUS", str(max(1, int(cluster_radius))))
+        html = html.replace("MAP_LABEL_MODE", _js_inline_arg(label_mode))
         html = html.replace("GEOMAN_LANG", _js_inline_arg(_geoman_lang()))
         # Issue #806: HINT_TEXT_COLOR is a template token, not a JS symbol —
         # it must be resolved to a literal hex value here in Python before
@@ -1164,6 +1282,9 @@ class MapWidget(QWidget):
         )
         html = html.replace("MAP_TIP_DRAW", _js_inline_arg(tr("map_draw_tooltip")))
         html = html.replace("MAP_TILES_OFFLINE", _js_inline_arg(tr("map_tiles_offline")))
+        html = html.replace(
+            "MAP_TIP_CLUSTERING", _js_inline_arg(tr("map_clustering_tooltip"))
+        )
         return html
 
     def _run_js(self, js: str) -> None:
@@ -1438,6 +1559,12 @@ class MapWidget(QWidget):
     def set_view(self, lat: float, lon: float, zoom: int = 13) -> None:
         if self._ready:
             self._run_js(f"setView({lat}, {lon}, {int(zoom)})")
+
+    def _on_clustering_toggled(self, on: bool) -> None:
+        """The map button already regrouped the pins; remember the choice
+        for the next map load (#1087)."""
+        from opensak.gui.settings import get_settings
+        get_settings().map_clustering = on
 
     def _on_shape_changed(self, shape_json: str) -> None:
         parsed = _parse_shape_json(shape_json)

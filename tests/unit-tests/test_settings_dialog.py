@@ -212,6 +212,26 @@ class TestConstruction:
         settings.map_max_caches = -5
         assert settings.map_max_caches == 0
 
+    def test_map_cluster_and_labels_defaults(self, dlg):
+        # #1087: defaults keep today's map.
+        assert dlg._map_cluster_radius.currentData() == 40
+        assert dlg._map_labels.currentData() == "off"
+
+    def test_map_cluster_radius_has_no_off_entry(self, dlg):
+        # Off is the button on the map, not a radius.
+        radii = [dlg._map_cluster_radius.itemData(i)
+                 for i in range(dlg._map_cluster_radius.count())]
+        assert radii == [10, 20, 40, 50, 80, 100]
+
+    def test_map_cluster_and_labels_save_on_accept(self, qtbot, settings):
+        d = SettingsDialog()
+        qtbot.addWidget(d)
+        d._map_cluster_radius.setCurrentIndex(d._map_cluster_radius.findData(100))
+        d._map_labels.setCurrentIndex(d._map_labels.findData("name"))
+        d._save()
+        assert settings.map_cluster_radius == 100
+        assert settings.map_labels == "name"
+
 
 # ── coordinate / home-location feedback ───────────────────────────────────────
 
