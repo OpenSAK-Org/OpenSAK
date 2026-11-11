@@ -926,6 +926,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Ask whether to back up",
     "settings_backup_on_exit_always": "Always back up",
     "settings_backup_on_exit_never": "Never back up",
+    "settings_backup_on_exit_every_days": "Back up automatically every few days",
+    "settings_backup_every_days_label": "Days between automatic backups:",
     "settings_backup_keep_auto_label": "Automatic backups to keep:",
     "settings_backup_compress_label": "Compress backups (smaller, but slower)",
     "settings_backup_compress_hint": "A compressed backup is one zip file and usually takes about a third of the space, but large backups take noticeably longer. Applies to new backups; existing ones are left as they are.",

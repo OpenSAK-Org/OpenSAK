@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.23.0-beta.2] — Unreleased
 
+### Added
+
+- **Back up automatically every few days (#1240)** — a fourth choice for
+  *When OpenSAK closes* in **Settings → Advanced → Backups**. OpenSAK then
+  backs up on close without asking, but only when something has changed
+  and the last backup of all databases is at least the chosen number of
+  days old (5 by default); otherwise it just closes. A backup of all
+  databases with **File → Back up now…** also restarts the count; a
+  backup of only some of them doesn't. A failed or cancelled backup is
+  tried again at the next close. Suggested by nagisml.
+
 ### Fixed
 
 - **No long waits without a network connection (#1111)** — once a

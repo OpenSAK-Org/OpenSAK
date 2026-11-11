@@ -928,6 +928,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Demander s'il faut sauvegarder",
     "settings_backup_on_exit_always": "Toujours sauvegarder",
     "settings_backup_on_exit_never": "Ne jamais sauvegarder",
+    "settings_backup_on_exit_every_days": "Sauvegarder automatiquement tous les N jours",
+    "settings_backup_every_days_label": "Jours entre deux sauvegardes automatiques :",
     "settings_backup_keep_auto_label": "Sauvegardes automatiques à conserver :",
     "settings_backup_compress_label": "Compresser les sauvegardes (plus petites, mais plus lentes)",
     "settings_backup_compress_hint": "Une sauvegarde compressée est un seul fichier zip et occupe généralement environ un tiers de la place, mais les grosses sauvegardes prennent nettement plus de temps. S'applique aux nouvelles sauvegardes ; les existantes restent telles quelles.",

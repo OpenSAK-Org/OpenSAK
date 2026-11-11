@@ -927,6 +927,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Spørg om der skal tages backup",
     "settings_backup_on_exit_always": "Tag altid backup",
     "settings_backup_on_exit_never": "Tag aldrig backup",
+    "settings_backup_on_exit_every_days": "Tag automatisk backup med nogle dages mellemrum",
+    "settings_backup_every_days_label": "Dage mellem automatiske backups:",
     "settings_backup_keep_auto_label": "Automatiske backups der gemmes:",
     "settings_backup_compress_label": "Komprimér backups (mindre, men langsommere)",
     "settings_backup_compress_hint": "En komprimeret backup er én zip-fil og fylder typisk omkring en tredjedel, men store backups tager mærkbart længere tid. Gælder nye backups; eksisterende bliver som de er.",

@@ -34,7 +34,9 @@ from opensak.backup.backupset import (
     validate_backup_dir,
     write_backup_set,
 )
-from opensak.backup.exit_state import record_backup_state
+from opensak.backup.exit_state import (
+    is_full_backup, record_backup_state, record_full_backup,
+)
 from opensak.gui.dialogs.backup_folder_check import confirm_backup_folder
 from opensak.gui.dialogs.widgets import clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
@@ -284,6 +286,10 @@ class BackupDialog(QDialog):
         # ticked are recorded; a change to an unticked one still counts.
         try:
             record_backup_state(self._backing_up)
+            # #1240: only a backup of every database restarts the
+            # "every X days" count; a backup of some of them doesn't.
+            if is_full_backup(self._backing_up):
+                record_full_backup()
         except Exception:
             logger.warning("backup: could not record the backup state", exc_info=True)
         text = tr("backup_done_msg", path=str(result.backup_set.path))

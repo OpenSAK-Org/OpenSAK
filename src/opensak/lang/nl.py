@@ -930,6 +930,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Vragen of er een back-up moet worden gemaakt",
     "settings_backup_on_exit_always": "Altijd een back-up maken",
     "settings_backup_on_exit_never": "Nooit een back-up maken",
+    "settings_backup_on_exit_every_days": "Om de paar dagen automatisch een back-up maken",
+    "settings_backup_every_days_label": "Dagen tussen automatische back-ups:",
     "settings_backup_keep_auto_label": "Automatische back-ups bewaren:",
     "settings_backup_compress_label": "Back-ups comprimeren (kleiner, maar trager)",
     "settings_backup_compress_hint": "Een gecomprimeerde back-up is één zip-bestand en neemt meestal ongeveer een derde van de ruimte in, maar grote back-ups duren merkbaar langer. Geldt voor nieuwe back-ups; bestaande blijven zoals ze zijn.",

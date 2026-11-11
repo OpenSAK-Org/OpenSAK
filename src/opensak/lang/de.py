@@ -928,6 +928,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Fragen, ob gesichert werden soll",
     "settings_backup_on_exit_always": "Immer sichern",
     "settings_backup_on_exit_never": "Nie sichern",
+    "settings_backup_on_exit_every_days": "Alle paar Tage automatisch sichern",
+    "settings_backup_every_days_label": "Tage zwischen automatischen Sicherungen:",
     "settings_backup_keep_auto_label": "Automatische Sicherungen behalten:",
     "settings_backup_compress_label": "Sicherungen komprimieren (kleiner, aber langsamer)",
     "settings_backup_compress_hint": "Eine komprimierte Sicherung ist eine einzige ZIP-Datei und braucht meist etwa ein Drittel des Platzes, große Sicherungen dauern aber deutlich länger. Gilt für neue Sicherungen; vorhandene bleiben unverändert.",

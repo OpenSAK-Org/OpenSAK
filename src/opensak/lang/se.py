@@ -927,6 +927,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Fråga om säkerhetskopiering",
     "settings_backup_on_exit_always": "Säkerhetskopiera alltid",
     "settings_backup_on_exit_never": "Säkerhetskopiera aldrig",
+    "settings_backup_on_exit_every_days": "Säkerhetskopiera automatiskt med några dagars mellanrum",
+    "settings_backup_every_days_label": "Dagar mellan automatiska säkerhetskopior:",
     "settings_backup_keep_auto_label": "Automatiska säkerhetskopior att behålla:",
     "settings_backup_compress_label": "Komprimera säkerhetskopior (mindre, men långsammare)",
     "settings_backup_compress_hint": "En komprimerad säkerhetskopia är en enda zip-fil och tar oftast ungefär en tredjedel av utrymmet, men stora säkerhetskopior tar märkbart längre tid. Gäller nya säkerhetskopior; befintliga lämnas som de är.",

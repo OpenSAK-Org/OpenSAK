@@ -709,9 +709,19 @@ class SettingsDialog(QDialog):
             (exit_state.ON_EXIT_ASK,    "settings_backup_on_exit_ask"),
             (exit_state.ON_EXIT_ALWAYS, "settings_backup_on_exit_always"),
             (exit_state.ON_EXIT_NEVER,  "settings_backup_on_exit_never"),
+            (exit_state.ON_EXIT_EVERY_DAYS, "settings_backup_on_exit_every_days"),
         ):
             self._backup_on_exit_combo.addItem(tr(key), value)
         backup_form.addRow(tr("settings_backup_on_exit_label"), self._backup_on_exit_combo)
+
+        # #1240: the number of days, shown only for "every few days".
+        self._backup_every_days: QSpinBox = QSpinBox()
+        self._backup_every_days.setRange(exit_state.MIN_EVERY_DAYS, exit_state.MAX_EVERY_DAYS)
+        backup_form.addRow(tr("settings_backup_every_days_label"), self._backup_every_days)
+        self._backup_form = backup_form
+        self._backup_on_exit_combo.currentIndexChanged.connect(
+            lambda _i: self._update_backup_every_days_visible()
+        )
 
         self._backup_keep_auto: QSpinBox = QSpinBox()
         self._backup_keep_auto.setRange(1, 99)
@@ -1487,6 +1497,12 @@ class SettingsDialog(QDialog):
         self._gc_logout_btn.setEnabled(False)
         self._gc_refresh_btn.setEnabled(False)
 
+    def _update_backup_every_days_visible(self) -> None:
+        """#1240: the days box only matters for "every few days"."""
+        from opensak.backup import exit_state
+        show = self._backup_on_exit_combo.currentData() == exit_state.ON_EXIT_EVERY_DAYS
+        self._backup_form.setRowVisible(self._backup_every_days, show)
+
     def _refresh_gc_status_on_open(self) -> None:
         """Tjek login-status når dialogen åbnes."""
         from opensak.api.geocaching import is_logged_in, GC_CLIENT_ID
@@ -1784,6 +1800,8 @@ class SettingsDialog(QDialog):
         from opensak.backup.backupset import get_compress, get_keep_auto
         idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
         self._backup_on_exit_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._backup_every_days.setValue(exit_state.get_every_days())
+        self._update_backup_every_days_visible()
         self._backup_keep_auto.setValue(get_keep_auto())
         self._backup_compress_cb.setChecked(get_compress())
         idx = self._distance_method_combo.findData(s.distance_method)
@@ -1883,6 +1901,7 @@ class SettingsDialog(QDialog):
         from opensak.backup.backupset import KEEP_AUTO_KEY
         from opensak.settings_store import get_store as _get_store
         exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
+        exit_state.set_every_days(self._backup_every_days.value())
         _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
         from opensak.backup.backupset import COMPRESS_KEY, get_compress
         if self._backup_compress_cb.isChecked() != get_compress():

@@ -928,6 +928,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Pytaj, czy utworzyć kopię",
     "settings_backup_on_exit_always": "Zawsze twórz kopię",
     "settings_backup_on_exit_never": "Nigdy nie twórz kopii",
+    "settings_backup_on_exit_every_days": "Twórz kopię automatycznie co kilka dni",
+    "settings_backup_every_days_label": "Dni między kopiami automatycznymi:",
     "settings_backup_keep_auto_label": "Liczba zachowanych kopii automatycznych:",
     "settings_backup_compress_label": "Kompresuj kopie zapasowe (mniejsze, ale wolniejsze)",
     "settings_backup_compress_hint": "Skompresowana kopia zapasowa to jeden plik zip i zwykle zajmuje około jednej trzeciej miejsca, ale duże kopie trwają zauważalnie dłużej. Dotyczy nowych kopii; istniejące pozostają bez zmian.",

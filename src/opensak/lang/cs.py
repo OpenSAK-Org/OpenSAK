@@ -927,6 +927,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Zeptat se, zda zálohovat",
     "settings_backup_on_exit_always": "Vždy zálohovat",
     "settings_backup_on_exit_never": "Nikdy nezálohovat",
+    "settings_backup_on_exit_every_days": "Zálohovat automaticky po několika dnech",
+    "settings_backup_every_days_label": "Dní mezi automatickými zálohami:",
     "settings_backup_keep_auto_label": "Ponechat automatických záloh:",
     "settings_backup_compress_label": "Komprimovat zálohy (menší, ale pomalejší)",
     "settings_backup_compress_hint": "Komprimovaná záloha je jeden soubor zip a obvykle zabere asi třetinu místa, velké zálohy ale trvají znatelně déle. Platí pro nové zálohy; stávající zůstanou beze změny.",

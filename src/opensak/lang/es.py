@@ -928,6 +928,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Preguntar si hacer copia",
     "settings_backup_on_exit_always": "Hacer siempre copia",
     "settings_backup_on_exit_never": "No hacer nunca copia",
+    "settings_backup_on_exit_every_days": "Hacer copia automática cada pocos días",
+    "settings_backup_every_days_label": "Días entre copias automáticas:",
     "settings_backup_keep_auto_label": "Copias automáticas a conservar:",
     "settings_backup_compress_label": "Comprimir copias de seguridad (más pequeñas, pero más lentas)",
     "settings_backup_compress_hint": "Una copia comprimida es un solo archivo zip y suele ocupar alrededor de un tercio del espacio, pero las copias grandes tardan bastante más. Se aplica a las copias nuevas; las existentes se quedan como están.",
