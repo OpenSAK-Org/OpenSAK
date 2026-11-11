@@ -4,7 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.23.0-beta.2] — Unreleased
+## [1.23.0-beta.2] — 2026-11-11
+
+> Headline: **the map works offline.** Leaflet is bundled and the tiles
+> you have viewed are kept on disk, so the map works without a
+> connection, and OpenSAK no longer waits for each network request to
+> time out. New on the map: clustering on/off, cache labels and
+> separation circles; selecting a cache now centres the map and keeps
+> your zoom. Also automatic backups every few days, type icons for
+> disabled and archived caches, and a clearer Welcome Wizard.
 
 ### Added
 
