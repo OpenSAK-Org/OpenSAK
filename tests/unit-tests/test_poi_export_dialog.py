@@ -86,6 +86,7 @@ def test_do_export_starts_worker_and_saves_last_used(qtbot, monkeypatch, tmp_pat
             captured.update(caches=caches, folder=folder, settings=settings)
             self.planned = MagicMock()
             self.error = MagicMock()
+            self.cancelled = MagicMock()
 
         def start(self):
             captured["started"] = True

@@ -1960,6 +1960,10 @@ STRINGS: dict[str, str] = {
     "copy_caches_confirm":                     "Skopiować {count} skrytek do {target}?",
     "move_caches_done":                        "Pomyślnie przeniesiono {count} skrytek.",
     "copy_caches_done":                        "Pomyślnie skopiowano {count} skrytek.",
+    "import_cancelled":                        "Import anulowany. Skrytki zaimportowane do tej pory zostają zachowane.",
+    "export_cancelled":                        "Eksport anulowany.",
+    "move_caches_cancelled":                   "Anulowano — do tej pory przeniesiono {count} skrytek.",
+    "copy_caches_cancelled":                   "Anulowano — do tej pory skopiowano {count} skrytek.",
     "move_caches_error":                       "Wystąpił błąd podczas przenoszenia skrytek:\n{message}",
     "copy_caches_error":                       "Wystąpił błąd podczas kopiowania skrytek:\n{message}",
 

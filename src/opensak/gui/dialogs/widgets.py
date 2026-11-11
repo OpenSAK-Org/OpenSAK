@@ -287,8 +287,8 @@ class WorkerGuardMixin:
     in done() (Escape never reaches closeEvent(), which is why guards there
     didn't help). While one of _guarded_workers() runs, done() calls
     _close_while_running() instead of closing: nothing by default, so the
-    request is ignored; a dialog whose job can already be cancelled cancels
-    it there.
+    request is ignored; a dialog whose job can be cancelled cancels it
+    there and closes normally once the worker is done.
 
     Use it before QDialog in the bases: ``class X(WorkerGuardMixin, QDialog)``.
     A slot that closes the dialog on a worker's own completion signal (sent

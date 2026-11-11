@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from sqlalchemy import update
 
@@ -164,6 +164,7 @@ def transfer_caches(
     target_db_path: Path,
     copy_only: bool = False,
     if_exists: str = "replace",
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> int:
     """Copy (or move) *gc_codes* from the source to the target database.
 
@@ -172,6 +173,10 @@ def transfer_caches(
     later (if_exists="newer"). When moving, only the caches actually
     written to the target are deleted from the source — a skipped cache
     stays where it is. Returns the number of caches written.
+
+    *should_cancel* (#1265) is asked before each chunk, never inside one:
+    a chunk written to the target is always deleted from the source too, so
+    cancelling a move never leaves caches in both databases.
     """
     from opensak.db.cache_delete import delete_caches
     from opensak.db.database import optimize_database, session_for
@@ -184,6 +189,8 @@ def transfer_caches(
     written_total = 0
     codes = list(dict.fromkeys(gc_codes))
     for start in range(0, len(codes), CHUNK_SIZE):
+        if should_cancel is not None and should_cancel():
+            break
         chunk = codes[start:start + CHUNK_SIZE]
 
         # ── 1. Load full caches from source DB ────────────────────────────

@@ -14,6 +14,7 @@ from opensak.gui.dialogs.import_dialog import ImportWorker, ImportDialog
 from opensak.importer import ImportResult
 from opensak.importer.gpx_import_settings import GpxImportProfile, GpxImportSettings
 from opensak.lang import tr
+from opensak.utils.cancel import CancelFlag
 
 
 def _result(created=1, updated=0, waypoints=0, skipped=0, errors=None):
@@ -37,9 +38,9 @@ class TestImportWorker:
                             lambda: SimpleNamespace(active_path=active_path))
         monkeypatch.setattr("opensak.db.database.get_session", _fake_session)
         monkeypatch.setattr("opensak.importer.import_gpx",
-                            lambda p, s, wpts_path=None, progress_cb=None: _result())
+                            lambda p, s, wpts_path=None, progress_cb=None, should_cancel=None: _result())
         monkeypatch.setattr("opensak.importer.import_zip",
-                            lambda p, s, progress_cb=None: _result(created=5))
+                            lambda p, s, progress_cb=None, should_cancel=None: _result(created=5))
         from opensak.utils.utils import ImportType
         return ImportType
 
@@ -115,7 +116,7 @@ class TestImportWorker:
         received = []
         monkeypatch.setattr(
             "opensak.importer.import_gpx",
-            lambda p, s, wpts_path=None, progress_cb=None: (
+            lambda p, s, wpts_path=None, progress_cb=None, should_cancel=None: (
                 received.append(wpts_path) or _result()
             ),
         )
@@ -140,7 +141,7 @@ class TestImportWorker:
         received = []
         monkeypatch.setattr(
             "opensak.importer.import_gpx",
-            lambda p, s, wpts_path=None, progress_cb=None: (
+            lambda p, s, wpts_path=None, progress_cb=None, should_cancel=None: (
                 received.append(wpts_path) or _result()
             ),
         )
@@ -246,6 +247,7 @@ class TestImportDialog:
                 self.deleteLater = MagicMock()
                 self.isRunning = MagicMock(return_value=False)
                 self.wait = MagicMock()
+                self.cancel = CancelFlag()
             def start(self):
                 started.append(True)
         monkeypatch.setattr(idlg, "ImportWorker", FakeWorker)
@@ -321,6 +323,7 @@ class TestImportDialog:
                 self.deleteLater = MagicMock()
                 self.isRunning = MagicMock(return_value=False)
                 self.wait = MagicMock()
+                self.cancel = CancelFlag()
                 self.request_cancel = MagicMock()
             def start(self):
                 started.append(True)
@@ -377,7 +380,8 @@ class TestImportDialog:
 
     # ── Issue #802: Close button responsiveness ─────────────────────────────
 
-    def test_start_import_disables_close_button(self, dlg, monkeypatch):
+    def test_start_import_turns_close_into_cancel(self, dlg, monkeypatch):
+        # #1265 (was #802: Close disabled): the import can be cancelled now.
         dlg.add_files([Path("/a.gpx")])
 
         class FakeWorker:
@@ -391,11 +395,13 @@ class TestImportDialog:
                 self.deleteLater = MagicMock()
                 self.isRunning = MagicMock(return_value=False)
                 self.wait = MagicMock()
+                self.cancel = CancelFlag()
             def start(self):
                 pass
         monkeypatch.setattr(idlg, "ImportWorker", FakeWorker)
         dlg._start_import()
-        assert dlg._close_btn.isEnabled() is False
+        assert dlg._close_btn.isEnabled() is True
+        assert dlg._close_btn.text() == tr("cancel")
 
     def test_on_all_done_reenables_close_when_no_geocoding(self, dlg, monkeypatch):
         from opensak.utils import flags
@@ -457,14 +463,16 @@ class TestImportDialog:
         # this minimal fake (which has no other QThread methods).
         geo.isRunning = lambda: False
 
-    def test_close_clicked_while_importing_does_not_close(self, dlg):
-        # Defensive guard: the import step has no cancel support, so a
-        # click while it's (somehow) still enabled must not close the
-        # dialog or block — it's a no-op.
-        worker = SimpleNamespace(isRunning=lambda: True)
+    def test_close_clicked_while_importing_cancels(self, dlg):
+        # #1265: Cancel during the import sets the worker's flag (the import
+        # stops after the batch in progress) — it must not close the dialog
+        # or block.
+        worker = SimpleNamespace(isRunning=lambda: True, cancel=CancelFlag())
         dlg._worker = worker
         dlg._geo_worker = None
         dlg._on_close_clicked()
+        assert worker.cancel.is_set()
+        assert dlg._close_btn.isEnabled() is False
         assert dlg.result() == 0  # dialog not closed/accepted
         # See comment in the geocoding test above re: teardown.
         worker.isRunning = lambda: False
@@ -579,9 +587,9 @@ class TestImportWorkerTotal:
                             lambda: SimpleNamespace(active_path=active_path))
         monkeypatch.setattr("opensak.db.database.get_session", _fake_session)
         monkeypatch.setattr("opensak.importer.import_gpx",
-                            lambda p, s, wpts_path=None, progress_cb=None: _result())
+                            lambda p, s, wpts_path=None, progress_cb=None, should_cancel=None: _result())
         monkeypatch.setattr("opensak.importer.import_zip",
-                            lambda p, s, progress_cb=None: _result(created=5))
+                            lambda p, s, progress_cb=None, should_cancel=None: _result(created=5))
         from opensak.utils.utils import ImportType
         monkeypatch.setattr("opensak.utils.utils.get_import_type",
                             lambda p: import_type_val)

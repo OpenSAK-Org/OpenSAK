@@ -295,6 +295,7 @@ class GsakFilterImportDialog(WorkerGuardMixin, QDialog):
         self._worker = None
         self._update_import_button()
 
+
     # ── Log helpers ──────────────────────────────────────────────────────────
 
     def _append_log(self, text: str) -> None:

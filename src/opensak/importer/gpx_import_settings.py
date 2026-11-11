@@ -118,14 +118,15 @@ def import_file(
     path: Path,
     session: "Session | None" = None,
     progress_cb: Optional[Callable[[int], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> "ImportResult":
     """Import one GPX file (with its companion waypoints file) or PQ zip
     into the database of *session* (default: the active one). Raises
-    ValueError for another file type."""
+    ValueError for another file type. *should_cancel*: see import_gpx()."""
     from opensak.importer import import_gpx, import_zip
     from opensak.utils.utils import ImportType, get_import_type
 
     if get_import_type(path) == ImportType.GPX:
         return import_gpx(path, session, wpts_path=companion_wpts(path),
-                          progress_cb=progress_cb)
-    return import_zip(path, session, progress_cb=progress_cb)
+                          progress_cb=progress_cb, should_cancel=should_cancel)
+    return import_zip(path, session, progress_cb=progress_cb, should_cancel=should_cancel)

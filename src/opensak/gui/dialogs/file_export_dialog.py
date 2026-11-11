@@ -29,6 +29,7 @@ from opensak.lang import tr
 from opensak.gui.dialogs.widgets import WorkerGuardMixin, clamp_dialog_height_to_screen
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from opensak.gui.dialogs import make_progress_cb
+from opensak.utils.cancel import CancelFlag, Cancelled
 from opensak.export.file_export_settings import (
     DEFAULT_FILE_NAME, FileExportProfile, FileExportSettings,
     expand_file_name,
@@ -207,9 +208,10 @@ class SavedSettingsDialog(QDialog):
 # ── Background worker ─────────────────────────────────────────────────────────
 
 class _ExportWorker(QThread):
-    finished = Signal(str)        # success message
-    error    = Signal(str)        # error message
-    progress = Signal(int, int)   # (done, total)
+    finished  = Signal(str)        # success message
+    error     = Signal(str)        # error message
+    progress  = Signal(int, int)   # (done, total)
+    cancelled = Signal()           # stopped by cancel; no file was written
 
     def __init__(self, caches: list, output_path: Path, fmt: str,
                  use_corrected: bool = True):
@@ -218,19 +220,22 @@ class _ExportWorker(QThread):
         self._output_path   = output_path
         self._fmt           = fmt          # "gpx" | "loc" | "ggz"
         self._use_corrected = use_corrected
+        self.cancel         = CancelFlag()
 
     def run(self) -> None:
         try:
             count = write_export_file(
                 self._caches, self._output_path, self._fmt,
                 use_corrected=self._use_corrected,
-                progress_cb=make_progress_cb(self.progress.emit),
+                progress_cb=make_progress_cb(self.progress.emit, self.cancel),
             )
             self.finished.emit(
                 tr("file_export_done_msg").format(
                     count=count, path=str(self._output_path)
                 )
             )
+        except Cancelled:
+            self.cancelled.emit()
         except Exception as exc:
             import traceback
             self.error.emit(traceback.format_exc())
@@ -357,12 +362,13 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._btn_export.setDefault(True)
         self._btn_export.clicked.connect(self._do_export)
 
-        btn_close = QPushButton(tr("close"))
-        btn_close.clicked.connect(self.reject)
+        # #1265: "Cancel" while an export runs (see _set_running).
+        self._btn_close = QPushButton(tr("close"))
+        self._btn_close.clicked.connect(self.reject)
 
         btn_row.addStretch()
         btn_row.addWidget(self._btn_export)
-        btn_row.addWidget(btn_close)
+        btn_row.addWidget(self._btn_close)
         layout.addLayout(btn_row)
 
     # ── Settings ──────────────────────────────────────────────────────────────
@@ -492,7 +498,7 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._log.setVisible(True)
         self._reset_progress()
         self._progress.setVisible(True)
-        self._btn_export.setEnabled(False)
+        self._set_running(True)
 
         # Only caches with coordinates are exported, so the limit counts those.
         caches = select_for_export(self._caches, self._spin_max.value())
@@ -504,7 +510,20 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
         self._worker.finished.connect(self._on_success)
         self._worker.error.connect(self._on_error)
         self._worker.progress.connect(self._on_progress)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.start()
+
+    def _set_running(self, running: bool) -> None:
+        """While the export runs, Close becomes Cancel (#1265)."""
+        self._btn_export.setEnabled(not running)
+        self._btn_close.setText(tr("cancel") if running else tr("close"))
+        self._btn_close.setEnabled(True)
+
+    def _close_while_running(self) -> None:
+        # Cancel, Escape and the window's close button stop the export.
+        if self._worker is not None:
+            self._worker.cancel.set()
+        self._btn_close.setEnabled(False)
 
     def _reset_progress(self) -> None:
         """Reset the bar to the indeterminate "running" state."""
@@ -522,11 +541,16 @@ class FileExportDialog(WorkerGuardMixin, SavedSettingsDialog):
 
     def _on_success(self, msg: str) -> None:
         self._progress.setVisible(False)
-        self._btn_export.setEnabled(True)
+        self._set_running(False)
         self._log.setPlainText("✓ " + msg)
+
+    def _on_cancelled(self) -> None:
+        self._progress.setVisible(False)
+        self._set_running(False)
+        self._log.setPlainText("– " + tr("export_cancelled"))
 
     def _on_error(self, msg: str) -> None:
         self._progress.setVisible(False)
-        self._btn_export.setEnabled(True)
+        self._set_running(False)
         self._log.setPlainText("✗ " + msg)
         QMessageBox.critical(self, tr("file_export_error_title"), msg)
