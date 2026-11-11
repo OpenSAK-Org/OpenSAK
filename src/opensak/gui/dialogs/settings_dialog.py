@@ -17,9 +17,11 @@ from PySide6.QtWidgets import (
 )
 from opensak.gui.icon import OpenSAKMessageBox as QMessageBox
 from PySide6.QtGui import QPixmap, QFont
-from opensak.gui.settings import get_settings, HomePoint
+from opensak.gui.settings import (
+    get_settings, HomePoint, MAP_CLUSTER_RADII, MAP_LABEL_MODES,
+)
 from opensak.gui.dialogs.widgets import (
-    DirRow, clamp_dialog_height_to_screen, remember_dialog_geometry,
+    DirRow, clamp_dialog_height_to_screen, keep_worker_alive, remember_dialog_geometry,
 )
 from opensak.lang import tr, AVAILABLE_LANGUAGES, current_language
 from opensak.gui.theme import hint_style
@@ -110,6 +112,7 @@ class SettingsDialog(QDialog):
         clamp_dialog_height_to_screen(self, parent)
         self._oauth_worker        = None
         self._profile_worker      = None
+        self._pq_email_worker: _ImapTestWorker | None = None
         self._editing_original_name: str | None = None   # Issue #157
         self._setup_ui()
         self._load()
@@ -128,8 +131,8 @@ class SettingsDialog(QDialog):
         self._tabs.addTab(self._build_gc_tab(),         tr("settings_tab_geocaching"))
         self._tabs.addTab(self._build_pq_email_tab(),   tr("settings_tab_pq_email"))
         self._tabs.addTab(self._build_advanced_tab(),   tr("settings_tab_advanced"))
-        # Lua macros are beta-only (same flag as the Macros menu), and so is
-        # the list of folders they may access.
+        # The list of folders Lua macros may access: shown with the same flag
+        # as the Macros menu.
         from opensak.utils import flags
         self._perm_table: QTableWidget | None = None
         self._perm_loaded: list = []
@@ -459,6 +462,37 @@ class SettingsDialog(QDialog):
 
         group_layout.addSpacing(8)
 
+        # Issue #1087: clustering radius and cache labels. Global; the map
+        # is reloaded after OK, so they apply to the open map (main and
+        # pop-out share the same MapWidget). Clustering itself is switched
+        # on/off with the button on the map.
+        cluster_row = QHBoxLayout()
+        cluster_row.addWidget(QLabel(tr("settings_map_cluster_label")))
+        self._map_cluster_radius = QComboBox()
+        for radius in MAP_CLUSTER_RADII:
+            self._map_cluster_radius.addItem(tr("settings_map_cluster_px", px=radius), radius)
+        cluster_row.addWidget(self._map_cluster_radius)
+        cluster_row.addStretch()
+        group_layout.addLayout(cluster_row)
+
+        labels_row = QHBoxLayout()
+        labels_row.addWidget(QLabel(tr("settings_map_labels_label")))
+        self._map_labels = QComboBox()
+        label_texts = {
+            "off":     tr("settings_map_labels_off"),
+            "name":    tr("col_name"),
+            "gc_code": tr("settings_map_labels_gc_code"),
+        }
+        for mode in MAP_LABEL_MODES:
+            self._map_labels.addItem(label_texts[mode], mode)
+        labels_row.addWidget(self._map_labels)
+        labels_row.addStretch()
+        group_layout.addLayout(labels_row)
+
+        cluster_note = QLabel(tr("settings_map_cluster_note"))
+        cluster_note.setWordWrap(True)
+        cluster_note.setStyleSheet(hint_style())
+        group_layout.addWidget(cluster_note)
         # Issue #1087: separation circles around physical caches — the map
         # button switches them on/off, 0 here hides them and the button.
         separation_row = QHBoxLayout()
@@ -510,6 +544,30 @@ class SettingsDialog(QDialog):
         nearby_note.setWordWrap(True)
         nearby_note.setStyleSheet(hint_style())
         group_layout.addWidget(nearby_note)
+
+        group_layout.addSpacing(8)
+
+        # #1111: on-disk tile cache, so viewed map areas still show offline
+        # (gui/map_profile.py). 0 = off.
+        tile_cache_row = QHBoxLayout()
+        tile_cache_row.addWidget(QLabel(tr("settings_map_tile_cache_label")))
+        self._map_tile_cache = QSpinBox()
+        self._map_tile_cache.setRange(0, 10000)
+        self._map_tile_cache.setSingleStep(50)
+        self._map_tile_cache.setSuffix(" MB")
+        self._map_tile_cache.setSpecialValueText(tr("settings_map_tile_cache_off"))
+        self._map_tile_cache.setFixedWidth(100)
+        tile_cache_row.addWidget(self._map_tile_cache)
+        self._map_tile_cache_clear_btn = QPushButton(tr("settings_map_tile_cache_clear"))
+        self._map_tile_cache_clear_btn.clicked.connect(self._clear_map_tile_cache)
+        tile_cache_row.addWidget(self._map_tile_cache_clear_btn)
+        tile_cache_row.addStretch()
+        group_layout.addLayout(tile_cache_row)
+
+        tile_cache_note = QLabel(tr("settings_map_tile_cache_note"))
+        tile_cache_note.setWordWrap(True)
+        tile_cache_note.setStyleSheet(hint_style())
+        group_layout.addWidget(tile_cache_note)
 
         layout.addWidget(group)
         layout.addStretch()
@@ -729,9 +787,19 @@ class SettingsDialog(QDialog):
             (exit_state.ON_EXIT_ASK,    "settings_backup_on_exit_ask"),
             (exit_state.ON_EXIT_ALWAYS, "settings_backup_on_exit_always"),
             (exit_state.ON_EXIT_NEVER,  "settings_backup_on_exit_never"),
+            (exit_state.ON_EXIT_EVERY_DAYS, "settings_backup_on_exit_every_days"),
         ):
             self._backup_on_exit_combo.addItem(tr(key), value)
         backup_form.addRow(tr("settings_backup_on_exit_label"), self._backup_on_exit_combo)
+
+        # #1240: the number of days, shown only for "every few days".
+        self._backup_every_days: QSpinBox = QSpinBox()
+        self._backup_every_days.setRange(exit_state.MIN_EVERY_DAYS, exit_state.MAX_EVERY_DAYS)
+        backup_form.addRow(tr("settings_backup_every_days_label"), self._backup_every_days)
+        self._backup_form = backup_form
+        self._backup_on_exit_combo.currentIndexChanged.connect(
+            lambda _i: self._update_backup_every_days_visible()
+        )
 
         self._backup_keep_auto: QSpinBox = QSpinBox()
         self._backup_keep_auto.setRange(1, 99)
@@ -1507,6 +1575,12 @@ class SettingsDialog(QDialog):
         self._gc_logout_btn.setEnabled(False)
         self._gc_refresh_btn.setEnabled(False)
 
+    def _update_backup_every_days_visible(self) -> None:
+        """#1240: the days box only matters for "every few days"."""
+        from opensak.backup import exit_state
+        show = self._backup_on_exit_combo.currentData() == exit_state.ON_EXIT_EVERY_DAYS
+        self._backup_form.setRowVisible(self._backup_every_days, show)
+
     def _refresh_gc_status_on_open(self) -> None:
         """Tjek login-status når dialogen åbnes."""
         from opensak.api.geocaching import is_logged_in, GC_CLIENT_ID
@@ -1768,6 +1842,11 @@ class SettingsDialog(QDialog):
         self._decode_hints_cb.setChecked(s.default_decode_hints)
         self._map_enabled_cb.setChecked(s.map_enabled)
         self._map_max_caches.setValue(s.map_max_caches)
+        self._map_tile_cache.setValue(s.map_tile_cache_mb)
+        idx = self._map_cluster_radius.findData(s.map_cluster_radius)
+        self._map_cluster_radius.setCurrentIndex(max(idx, 0))
+        idx = self._map_labels.findData(s.map_labels)
+        self._map_labels.setCurrentIndex(max(idx, 0))
         # Issue #1087 — stored in km, shown in the user's unit like the
         # nearby radius below.
         if s.use_miles:
@@ -1812,6 +1891,8 @@ class SettingsDialog(QDialog):
         from opensak.backup.backupset import get_compress, get_keep_auto
         idx = self._backup_on_exit_combo.findData(exit_state.get_on_exit())
         self._backup_on_exit_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._backup_every_days.setValue(exit_state.get_every_days())
+        self._update_backup_every_days_visible()
         self._backup_keep_auto.setValue(get_keep_auto())
         self._backup_compress_cb.setChecked(get_compress())
         idx = self._distance_method_combo.findData(s.distance_method)
@@ -1833,6 +1914,25 @@ class SettingsDialog(QDialog):
             return True
         return confirm_backup_folder(
             self, new_backup_dir, title=tr("wizard_backup_dir_title"), db_dir=new_db_dir,
+        )
+
+    def done(self, result: int) -> None:
+        # #1265: OK, Cancel, Escape and the window's close button all end
+        # here. The dialog is deleted right after it closes, and a worker
+        # still running (connection test, login, profile) with it, which
+        # aborts OpenSAK — hand it to the main window until it is done.
+        for worker in (self._pq_email_worker, self._oauth_worker, self._profile_worker):
+            keep_worker_alive(worker, self.parent())
+        super().done(result)
+
+    def _clear_map_tile_cache(self) -> None:
+        # #1111: takes effect at once, not on OK — like the other buttons.
+        from opensak.gui import map_profile
+        freed = map_profile.clear_cache()
+        QMessageBox.information(
+            self,
+            tr("settings_map_tile_cache_clear"),
+            tr("settings_map_tile_cache_cleared", size=f"{freed / (1024 * 1024):.1f}"),
         )
 
     def _save(self) -> None:
@@ -1875,6 +1975,9 @@ class SettingsDialog(QDialog):
         s.default_decode_hints = self._decode_hints_cb.isChecked()
         s.map_enabled = self._map_enabled_cb.isChecked()
         s.map_max_caches = self._map_max_caches.value()
+        s.map_tile_cache_mb = self._map_tile_cache.value()
+        s.map_cluster_radius = self._map_cluster_radius.currentData()
+        s.map_labels = self._map_labels.currentData()
         separation_val = self._map_separation_radius.value()
         s.map_separation_radius_km = (
             separation_val * 1.60934 if s.use_miles else separation_val
@@ -1906,6 +2009,7 @@ class SettingsDialog(QDialog):
         from opensak.backup.backupset import KEEP_AUTO_KEY
         from opensak.settings_store import get_store as _get_store
         exit_state.set_on_exit(self._backup_on_exit_combo.currentData())
+        exit_state.set_every_days(self._backup_every_days.value())
         _get_store().set(KEEP_AUTO_KEY, self._backup_keep_auto.value())
         from opensak.backup.backupset import COMPRESS_KEY, get_compress
         if self._backup_compress_cb.isChecked() != get_compress():

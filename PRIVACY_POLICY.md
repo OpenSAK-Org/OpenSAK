@@ -1,7 +1,7 @@
 # Privacy Policy — OpenSAK
 
 **Open Source Geocache Manager**
-*Effective date: October 25, 2026*
+*Effective date: November 11, 2026*
 
 ---
 
@@ -120,9 +120,11 @@ OpenSAK does not log, cache on any server, or share any data returned from the G
 The in-application map uses OpenStreetMap tiles to display the map background. When you view the map, your device fetches map tile images from OpenStreetMap servers. This is a standard web request and may include your IP address, as with any web browsing. OpenStreetMap's privacy policy is available at:
 https://wiki.osmfoundation.org/wiki/Privacy_Policy
 
+Map tiles you have viewed are kept in a cache on your own computer (in the OpenSAK data folder, up to the size set in **Settings → Map → Map tile cache**), so areas you viewed recently still show without an internet connection. Only tiles you actually viewed are stored; OpenSAK never downloads map areas in advance. The cache stays on your computer and is not sent anywhere.
+
 You can optionally configure OpenSAK to open cache locations in Google Maps or OpenStreetMap in your browser. This is triggered only by your explicit action and is subject to those services' own privacy policies.
 
-The map component itself (Leaflet and its marker-clustering plugin) is loaded from the unpkg.com content delivery network when the map is shown — again a standard web request.
+The map component itself (Leaflet and its marker-clustering and drawing plugins) is bundled with OpenSAK and loaded from your own computer; no content delivery network is contacted.
 
 ### 5.2 Garmin GPS devices
 
@@ -179,7 +181,7 @@ OpenSAK is developed and maintained by Allan, Denmark.
 If you have questions about this Privacy Policy or how OpenSAK handles data, please reach out via:
 
 - **GitHub Issues:** https://github.com/OpenSAK-Org/opensak/issues
-- **Facebook community:** [OpenSAK — Open Source Geocache Manager](https://www.facebook.com/groups/opensak)
+- **Facebook community:** [OpenSAK — Open Source Geocache Manager](https://www.facebook.com/groups/2062154441232996)
 - **Website:** https://opensak.com
 
 ---

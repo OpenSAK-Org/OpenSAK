@@ -11,6 +11,7 @@ Supports:
 
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -25,6 +26,8 @@ from opensak.db.models import Attribute, Cache, Log, Trackable, UserNote, Waypoi
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection, Engine
+
+logger = logging.getLogger(__name__)
 
 
 # ── XML namespace map used by Groundspeak Pocket Queries ─────────────────────
@@ -1036,11 +1039,19 @@ def _enter_bulk_import_pragmas(session: Session) -> None:
     never corrupt the file) and removes those fsyncs. A larger page cache cuts
     B-tree page churn while thousands of rows are inserted.
 
+    Issue #1231: no automatic WAL checkpoints either. By default SQLite copies
+    the WAL back into the database whenever it passes 1000 pages, with an
+    fsync each time — hundreds of times in a large import (58 s of a 119 s
+    re-import of 150k caches). :func:`_exit_bulk_import_pragmas` checkpoints
+    once instead (9 s). Meanwhile the WAL grows to roughly the size of what
+    was written.
+
     These are connection-level settings and the connection is pooled and reused,
     so :func:`_exit_bulk_import_pragmas` MUST restore them once the import ends.
     """
     session.execute(_sa_text("PRAGMA synchronous=NORMAL"))
     session.execute(_sa_text("PRAGMA cache_size=-65536"))  # ~64 MB page cache
+    session.execute(_sa_text("PRAGMA wal_autocheckpoint=0"))
     session.commit()
 
 
@@ -1050,12 +1061,17 @@ def _exit_bulk_import_pragmas(session: Session) -> None:
     Called from the importer's ``finally`` block, so the session may have just
     committed or been rolled back. We roll back first to guarantee a clean state,
     then re-apply the defaults; any failure here is swallowed so it never masks a
-    real import error.
+    real import error. The WAL is checkpointed and truncated here, so it
+    doesn't stay at the size of the whole import on the still-open
+    connection of the active database.
     """
     try:
         session.rollback()
         session.execute(_sa_text("PRAGMA synchronous=FULL"))
         session.execute(_sa_text("PRAGMA cache_size=-2000"))  # SQLite default
+        session.execute(_sa_text("PRAGMA wal_autocheckpoint=1000"))  # SQLite default
+        session.commit()
+        session.execute(_sa_text("PRAGMA wal_checkpoint(TRUNCATE)"))
         session.commit()
     except Exception:
         pass
@@ -1181,11 +1197,40 @@ def _upsert_cache(
     # match updates that row in place, anything new is added, and rows for
     # log_id's simply absent from *this* file are left exactly as they were.
     existing_logs_by_id: dict[Optional[str], Log] = {}
+    # Issue #1255: the GSAK database importer stores logs as
+    # f"{gc_code}_{lLogId}" (GSAK's lLogId is only unique per cache), while
+    # GPX carries the gc.com log id alone. gsak_logs_by_plain_id maps the
+    # plain id back to such a row, so a GPX import updates it instead of
+    # adding a second copy. The row keeps its GSAK-style log_id: rewriting
+    # it could hit the UNIQUE constraint on logs.log_id, and the next import
+    # finds it through this map again either way.
+    gsak_logs_by_plain_id: dict[str, Log] = {}
     if existing is not None:
         existing_logs_by_id = {
             lg.log_id: lg
             for lg in session.query(Log).filter_by(cache_id=cache.id).all()
         }
+        gsak_prefix = f"{cache.gc_code}_"
+        for prefixed_id, lg in list(existing_logs_by_id.items()):
+            if not prefixed_id or not prefixed_id.startswith(gsak_prefix):
+                continue
+            plain_id = prefixed_id[len(gsak_prefix):]
+            if not plain_id.isdigit():
+                continue  # GSAK's dummy ids (-2, 0, ...) never match a GPX log
+            plain_row = existing_logs_by_id.get(plain_id)
+            if plain_row is None:
+                gsak_logs_by_plain_id[plain_id] = lg
+                continue
+            # A pair left by an earlier import (before #1255): keep the GPX
+            # row, carry over what only the GSAK row has, drop the GSAK row.
+            if plain_row.latitude is None and plain_row.longitude is None:
+                plain_row.latitude = lg.latitude
+                plain_row.longitude = lg.longitude
+            plain_row.logged_by_owner = bool(
+                plain_row.logged_by_owner or lg.logged_by_owner
+            )
+            session.delete(lg)
+            del existing_logs_by_id[prefixed_id]
 
     DUMMY_LOG_IDS = {"0", None, ""}
     seen_log_ids_this_file: set[str] = set()
@@ -1206,6 +1251,8 @@ def _upsert_cache(
         seen_log_ids_this_file.add(log_id)
 
         existing_log = existing_logs_by_id.get(log_id)
+        if existing_log is None and log_id is not None:
+            existing_log = gsak_logs_by_plain_id.get(log_id)  # #1255
         if existing_log is not None:
             existing_log.log_type = lg["log_type"]
             existing_log.log_date = lg["log_date"]
@@ -1517,6 +1564,32 @@ def _upsert_cache(
     return cache, created
 
 
+def _wpt_code(wpt_el) -> Optional[str]:
+    """The code of a <wpt> for an error message, read as _parse_wpt does."""
+    gpx_ns = {"gpx": etree.QName(wpt_el).namespace or NS["gpx"]}
+    return _text(wpt_el, "gpx:name", gpx_ns) or _text(wpt_el, "gpx:n", gpx_ns)
+
+
+def _parse_error(file: str, code: Optional[str], line: Optional[int], exc: Exception) -> str:
+    """Log a record that could not be read (with traceback) and return the
+    summary line naming it, so it can be looked up in the source file (#465)."""
+    logger.warning("Could not read %s, line %s, %s", file, line, code, exc_info=exc)
+    return tr("import_err_parse", file=file, code=code or "?", line=line or "?", error=exc)
+
+
+def _db_error(data: dict, source: str, exc: Exception) -> str:
+    """Log a cache that could not be saved and return its summary line.
+
+    A SQLAlchemy error's text carries the whole statement and its parameters
+    (the cache description included): those go to the log, the summary only
+    gets the database's own message (#465).
+    """
+    gc_code = data.get("gc_code", "?")
+    logger.warning("Could not save %s from %s", gc_code, source, exc_info=exc)
+    return tr("import_err_db", gc_code=gc_code, source=source,
+              error=getattr(exc, "orig", None) or exc)
+
+
 def _flush_cache_batch(
     session: Session,
     batch: list[dict],
@@ -1582,8 +1655,7 @@ def _flush_cache_batch_isolated(
                 result.updated += 1
         except Exception as e:
             cell.rollback()
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
-                                     source=source, error=e))
+            result.errors.append(_db_error(data, source, e))
             result.skipped += 1
 
 
@@ -1678,6 +1750,9 @@ def _link_extra_waypoints(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+MAX_ERRORS_SHOWN = 5
+
+
 class ImportResult:
     """Summary of a GPX/LOC import operation."""
 
@@ -1693,6 +1768,14 @@ class ImportResult:
     def total(self) -> int:
         return self.created + self.updated
 
+    def errors_shown(self) -> list[str]:
+        """The errors for a summary: the first few, then how many more there are."""
+        shown = self.errors[:MAX_ERRORS_SHOWN]
+        hidden = len(self.errors) - len(shown)
+        if hidden:
+            shown.append(tr("import_errors_more", count=hidden))
+        return shown
+
     def __str__(self) -> str:
         lines = [
             f"  Caches created : {self.created}",
@@ -1705,7 +1788,7 @@ class ImportResult:
                 lines.append(f"  ⚠ {w}")
         if self.errors:
             lines.append(f"  Errors         : {len(self.errors)}")
-            for e in self.errors[:5]:
+            for e in self.errors_shown():
                 lines.append(f"    - {e}")
         return "\n".join(lines)
 
@@ -1740,7 +1823,7 @@ def _parse_gpx_to_data(
                         if extra is not None:
                             extra_wpts.append(extra)
                 except Exception as e:
-                    errors.append(tr("import_err_parse", file=gpx_path.name, error=e))
+                    errors.append(_parse_error(gpx_path.name, _wpt_code(elem), elem.sourceline, e))
                 finally:
                     elem.clear()
                     while elem.getprevious() is not None:
@@ -1827,7 +1910,7 @@ def import_gpx(
                         else:
                             result.skipped += 1
                 except Exception as e:
-                    result.errors.append(tr("import_err_parse", file=source, error=e))
+                    result.errors.append(_parse_error(source, _wpt_code(elem), elem.sourceline, e))
                     result.skipped += 1
                 finally:
                     # CRITICAL: Clear the element and its preceding siblings from memory
@@ -1999,7 +2082,9 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
         try:
             data = _parse_loc_waypoint(wpt_el)
         except Exception as e:
-            result.errors.append(tr("import_err_parse", file=source, error=e))
+            name_el = wpt_el.find("name")
+            code = name_el.get("id") if name_el is not None else None
+            result.errors.append(_parse_error(source, code, wpt_el.sourceline, e))
             result.skipped += 1
             continue
 
@@ -2014,8 +2099,7 @@ def import_loc(loc_path: Path, session: Session) -> ImportResult:
             else:
                 result.updated += 1
         except Exception as e:
-            result.errors.append(tr("import_err_db", gc_code=data.get("gc_code", "?"),
-                                     source=source, error=e))
+            result.errors.append(_db_error(data, source, e))
             result.skipped += 1
 
     return result

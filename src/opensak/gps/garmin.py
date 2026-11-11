@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
@@ -350,6 +351,26 @@ def _get_mount_points() -> list[Path]:
     return []
 
 
+# lsblk --raw writes unsafe characters, spaces included, as \xHH;
+# /proc/mounts writes space, tab, newline and backslash as octal (\040).
+_MOUNT_ESCAPE = re.compile(rb"\\(x[0-9a-fA-F]{2}|[0-3][0-7]{2})")
+
+
+def _unescape_mount(text: str) -> str:
+    """A mount point as lsblk --raw or /proc/mounts print it, as a real path
+    (#1094). Both escape single bytes, so a name with letters outside ASCII
+    comes out as several escapes; the result is decoded as UTF-8."""
+    if "\\" not in text:
+        return text
+
+    def _byte(m: re.Match[bytes]) -> bytes:
+        code = m.group(1)
+        return bytes([int(code[1:], 16) if code[:1] == b"x" else int(code, 8)])
+
+    raw = text.encode("utf-8", "surrogateescape")
+    return _MOUNT_ESCAPE.sub(_byte, raw).decode("utf-8", "replace")
+
+
 def _linux_mounts() -> list[Path]:
     """
     Find USB mount points på Linux.
@@ -375,7 +396,7 @@ def _linux_mounts() -> list[Path]:
             line = line.strip()
             if not line or line == "/":
                 continue
-            mount = Path(line)
+            mount = Path(_unescape_mount(line))
             if mount.is_dir() and _is_removable_path(mount):
                 candidates.add(mount)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -389,7 +410,7 @@ def _linux_mounts() -> list[Path]:
                 if len(parts) < 3:
                     continue
                 device, mountpoint, fstype = parts[0], parts[1], parts[2]
-                mount = Path(mountpoint)
+                mount = Path(_unescape_mount(mountpoint))
                 if mount.is_dir() and (
                     device.startswith("/dev/sd")
                     or device.startswith("/dev/sdb")
@@ -444,7 +465,8 @@ def _is_removable_path(path: Path) -> bool:
         )
         for line in result.stdout.splitlines():
             parts = line.strip().split()
-            if len(parts) == 2 and parts[0] == path_str and parts[1] == "1":
+            if (len(parts) == 2 and parts[1] == "1"
+                    and _unescape_mount(parts[0]) == path_str):
                 return True
     except Exception:
         pass

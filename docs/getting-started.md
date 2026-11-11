@@ -285,7 +285,11 @@ Want to add a new language? See [CONTRIBUTING.md](https://github.com/OpenSAK-Org
 → [github.com/OpenSAK-Org/opensak/issues](https://github.com/OpenSAK-Org/opensak/issues)
 
 **Questions and community discussion?**
-→ [OpenSAK Facebook Group](https://www.facebook.com/groups/opensak)
+→ [OpenSAK Facebook Group](https://www.facebook.com/groups/2062154441232996)
+→ [GitHub Discussions](https://github.com/OpenSAK-Org/OpenSAK/discussions)
+→ [OpenSAK section of the GSAK forum](https://forum.gsak.net/index.php?showforum=52)
+
+All of these are also in the app under **Help → Community**.
 
 **Full user guide?**
 → [opensak.com/user-guide.html](https://opensak.com/user-guide.html)

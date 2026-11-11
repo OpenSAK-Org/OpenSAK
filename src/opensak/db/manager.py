@@ -164,7 +164,9 @@ class DatabaseManager:
         if path.exists() and not new_path.exists():
             import shutil
             shutil.move(str(path), str(new_path))
-            print(f"Migration: moved database {path.name} → opensak/")
+            # #1094: the logger, not print() — stdout may not exist in a
+            # windowed build, and the log file is where we ask users to look.
+            logger.info("Migration: moved database %s → opensak/", path.name)
         elif path.exists() and new_path.exists():
             # Begge eksisterer — brug den nye, ignorer den gamle
             pass

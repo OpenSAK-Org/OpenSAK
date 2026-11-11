@@ -13,6 +13,13 @@ from typing import Any
 from opensak.utils.types import CoordFormat, DateFormat, TextSize
 from opensak.settings_store import get_store
 
+# Issue #1087: map clustering radius choices (pixels) and cache label
+# modes, offered on Settings → Map. Clustering itself is switched on/off
+# with the button on the map (map_clustering).
+MAP_CLUSTER_RADII: tuple[int, ...] = (10, 20, 40, 50, 80, 100)
+MAP_CLUSTER_RADIUS_DEFAULT = 40
+MAP_LABEL_MODES: tuple[str, ...] = ("off", "name", "gc_code")
+
 
 # ── Hjemmepunkt dataklasse ────────────────────────────────────────────────────
 
@@ -412,6 +419,65 @@ class AppSettings:
     @map_max_caches.setter
     def map_max_caches(self, value: int) -> None:
         get_store().set("display.map_max_caches", max(0, int(value)))
+
+    @property
+    def map_tile_cache_mb(self) -> int:
+        """#1111: size cap (MB) of the map's on-disk tile cache, so viewed
+        map areas still show offline (see gui/map_profile.py). 0 turns the
+        disk cache off (memory only, as before #1111). Read when the map
+        profile is created, so a change takes effect after a restart.
+        Global (not per-database), matching map_enabled above.
+        """
+        val = get_store().get("display.map_tile_cache_mb", 200)
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            return 200
+
+    @map_tile_cache_mb.setter
+    def map_tile_cache_mb(self, value: int) -> None:
+        get_store().set("display.map_tile_cache_mb", max(0, int(value)))
+
+    @property
+    def map_cluster_radius(self) -> int:
+        """Issue #1087: Leaflet.markercluster's maxClusterRadius in pixels,
+        one of MAP_CLUSTER_RADII, used while map_clustering is on. Default
+        40, the value hardcoded before #1087. Global, like map_max_caches."""
+        val = get_store().get("display.map_cluster_radius", MAP_CLUSTER_RADIUS_DEFAULT)
+        try:
+            val = int(val)
+        except (TypeError, ValueError):
+            return MAP_CLUSTER_RADIUS_DEFAULT
+        return val if val in MAP_CLUSTER_RADII else MAP_CLUSTER_RADIUS_DEFAULT
+
+    @map_cluster_radius.setter
+    def map_cluster_radius(self, value: int) -> None:
+        get_store().set("display.map_cluster_radius", int(value))
+
+    @property
+    def map_clustering(self) -> bool:
+        """Issue #1087: whether pins are grouped into clusters — the on/off
+        button on the map. On by default, so the map looks as before."""
+        val = get_store().get("display.map_clustering", True)
+        if isinstance(val, bool):
+            return val
+        return str(val).lower() in ("true", "1", "yes")
+
+    @map_clustering.setter
+    def map_clustering(self, value: bool) -> None:
+        get_store().set("display.map_clustering", bool(value))
+
+    @property
+    def map_labels(self) -> str:
+        """Issue #1087: permanent label under each cache pin on the map —
+        one of MAP_LABEL_MODES ("off", "name", "gc_code"). Default "off",
+        so the map looks as before. Global, like map_max_caches."""
+        val = get_store().get("display.map_labels", "off")
+        return val if val in MAP_LABEL_MODES else "off"
+
+    @map_labels.setter
+    def map_labels(self, value: str) -> None:
+        get_store().set("display.map_labels", value if value in MAP_LABEL_MODES else "off")
 
     @property
     def map_separation_radius_km(self) -> float:
