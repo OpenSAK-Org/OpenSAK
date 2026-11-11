@@ -56,7 +56,7 @@ The sandbox keeps the Lua 5.4 `string`, `table`, `math`, `utf8` and `coroutine` 
 | PurgeNote | ✅ | `update(code, {note=false, gc_note=false})` |
 | SaveFilter / RestoreFilter | ✅ | `save_filter()`, `restore_filter(saved)`; the sort order is not saved |
 | ReSync | ✅ | `resync()` |
-| ReSyncLogs | 🚫 | needs the geocaching.com API |
+| ReSyncLogs | ✅ | automatic: every `insert_log` / `delete_log` / `sql_write` on logs recalculates the log counts and dates; inside a `transaction()` they follow at commit or with `resync()` |
 | SetColor | ✅ partial | `update(code, {color=})` for the cache colour; no per-column colouring |
 | SQLGet / SQLNext / SQLGetClose | ✅ | `sql_each()` |
 | SQLQuote | ✅ | `?` / `:name` parameters make it unnecessary |

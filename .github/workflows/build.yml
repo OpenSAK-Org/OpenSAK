@@ -189,7 +189,12 @@ jobs:
           PYTHONPATH: src
       - name: Download appimagetool
         run: |
-          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          # Retry: GitHub release downloads fail now and then on the runner
+          # (wget exit code 4 = network failure), which used to fail the
+          # whole Linux build.
+          curl -fsSL --retry 5 --retry-delay 15 --retry-all-errors \
+            -o appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
       - name: Build AppDir
         run: python3 scripts/make_appdir.py

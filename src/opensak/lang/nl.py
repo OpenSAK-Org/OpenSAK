@@ -95,10 +95,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Instellingen…",
     "action_found_update":          "⟳  Vondsten bijwerken vanuit referentiedatabase…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Macro uitvoeren (Lua)…",
     "action_find_more_macros":      "Meer macro’s zoeken…",
-    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Openen…",
     "macro_btn_run":                "▶  Uitvoeren",
     "macro_open_title":             "Lua-macro openen",
@@ -323,6 +323,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Logbestand openen",
     "action_open_previous_log_file": "Log van vorige herstart openen",
     "action_support_opensak": "♥  OpenSAK steunen…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK op Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK op het GSAK-forum",
+    "action_community_new_issue":  "Fout melden of functie voorstellen",
     "log_file_not_found": "Logbestand nog niet gevonden: {path}",
 
     # ── Sneltoetsen-dialog ────────────────────────────────────────────────────
@@ -412,6 +417,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Overgeslagen:",
     "import_errors_header":         "Fouten ({count}):",
+    "import_errors_more":           "… en nog {count} (zie het logbestand)",
     "import_failed":                "✗ Import mislukt:",
     "import_again":                 "Opnieuw importeren",
     "import_target_db_label":                    "Importeren naar database:",
@@ -2112,7 +2118,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribuut-ID: {id}",
     "kml_export_description": "Geëxporteerd uit OpenSAK — {count} cache(s)",
     "import_err_db": "Databasefout voor {gc_code} in {source}: {error}",
-    "import_err_parse": "Leesfout in {file}: {error}",
+    "import_err_parse": "Leesfout in {file}, regel {line}, {code}: {error}",
     "import_err_fatal_parse": "Ernstige leesfout in {file}: {error}",
     "import_err_waypoints": "Fout in waypointbestand ({file}): {error}",
     "import_err_fatal": "Ernstige fout bij het importeren van {file}: {error}",

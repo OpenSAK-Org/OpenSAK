@@ -7,6 +7,7 @@ Supports corrected coordinates (user-solved mystery cache finals).
 from __future__ import annotations
 import html
 import re
+import sqlite3
 import webbrowser
 from datetime import datetime
 from opensak.utils.constants import LOG_COLOURS
@@ -14,7 +15,7 @@ from PySide6.QtCore import Qt, QUrl, Signal, QEvent, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTextBrowser, QTabWidget, QFrame, QSizePolicy,
-    QPushButton, QPlainTextEdit
+    QPushButton, QPlainTextEdit, QCheckBox, QFormLayout, QScrollArea, QMessageBox
 )
 from PySide6.QtGui import QFont
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -25,6 +26,7 @@ import logging
 from opensak.db import custom_fields
 from opensak.db.models import Cache
 from opensak.gui.custom_field_format import format_value as format_custom_value
+from opensak.gui.custom_field_format import is_true, toggles as toggles_custom
 from opensak.lang import tr
 from opensak.utils import flags
 from opensak.coords import format_coords
@@ -142,6 +144,7 @@ class CacheDetailPanel(QWidget):
     """Displays full details for a single selected cache."""
 
     corrected_coords_changed = Signal(str)  # gc_code
+    custom_values_changed = Signal(str)     # gc_code — a custom check box was saved (#1241)
     waypoints_tab_shown = Signal(str)       # JSON: [{lat, lon, prefix, wp_type, name}, ...]
     waypoints_tab_hidden = Signal()
 
@@ -402,13 +405,16 @@ class CacheDetailPanel(QWidget):
         note_layout.addWidget(self._note_editor)
         self._tabs.addTab(note_widget, tr("detail_tab_notes"))
 
-        # ── #1028: custom fields, read-only (edited in the Edit cache dialog) ──
+        # ── #1028: custom fields; booleans are check boxes that save at once
+        # (#1241), the rest is edited in the Edit cache dialog ──
         custom_widget = QWidget()
-        custom_layout = QVBoxLayout(custom_widget)
-        custom_layout.setContentsMargins(0, 4, 0, 0)
-        self._custom_browser = QTextBrowser()
-        custom_layout.addWidget(self._custom_browser)
-        self._custom_tab = self._tabs.addTab(custom_widget, tr("filter_tab_custom"))
+        self._custom_form = QFormLayout(custom_widget)
+        self._custom_form.setContentsMargins(6, 6, 6, 6)
+        self._custom_form.setVerticalSpacing(6)
+        custom_scroll = QScrollArea()
+        custom_scroll.setWidgetResizable(True)
+        custom_scroll.setWidget(custom_widget)
+        self._custom_tab = self._tabs.addTab(custom_scroll, tr("filter_tab_custom"))
         self._tabs.setTabVisible(self._custom_tab, False)
 
         layout.addWidget(self._tabs)
@@ -607,7 +613,7 @@ class CacheDetailPanel(QWidget):
         self._tb_browser.setPlainText("")
         self._tabs.setTabText(5, tr("col_trackables"))
         self._tabs.setTabVisible(6, False)
-        self._custom_browser.setPlainText("")
+        self._clear_custom()
         self._tabs.setTabVisible(self._custom_tab, False)
         self.waypoints_tab_hidden.emit()
 
@@ -747,30 +753,69 @@ class CacheDetailPanel(QWidget):
         self._render_trackables(cache)
 
         # Custom fields
-        self._render_custom(cache)
+        self._render_custom(cache.gc_code)
 
-    def _render_custom(self, cache: Cache) -> None:
+    def refresh_custom(self, gc_code: str) -> None:
+        """Show the custom values of *gc_code* again if it is the cache shown
+        (one was changed elsewhere, e.g. in the cache list, #1241)."""
+        if gc_code and gc_code == self._current_gc_code:
+            self._render_custom(gc_code)
+
+    def _clear_custom(self) -> None:
+        while self._custom_form.rowCount():
+            self._custom_form.removeRow(0)
+
+    def _render_custom(self, gc_code: str | None) -> None:
         """The cache's custom fields (#1028), shown as in the cache list;
-        the tab is hidden while the database has none."""
+        the tab is hidden while the database has none. A boolean field is a
+        check box that saves a change straight away (#1241), unless its
+        value comes from an expression."""
         values = custom_fields.EMPTY_VALUES
-        if flags.companion_db and cache.gc_code:
+        if flags.companion_db and gc_code:
             try:
-                values = custom_fields.active_values(codes=[cache.gc_code])
+                values = custom_fields.active_values(codes=[gc_code])
             except Exception:
                 logger.warning("detail panel: custom values not loaded", exc_info=True)
+        self._clear_custom()
         self._tabs.setTabVisible(self._custom_tab, bool(values.fields))
-        if not values.fields:
-            self._custom_browser.setPlainText("")
+        if not gc_code or not values.fields:
             return
-        rows = []
         for f in values.fields:
-            text = format_custom_value(f, values.display(cache.gc_code, f.name),
-                                       values.by_expression(f.name), grid=False)
-            rows.append(
-                f"<tr><td style='padding-right:12px'><b>{html.escape(f.name)}</b></td>"
-                f"<td>{html.escape(text).replace(chr(10), '<br>')}</td></tr>"
-            )
-        self._custom_browser.setHtml(f"<table cellspacing='4'>{''.join(rows)}</table>")
+            by_expression = values.by_expression(f.name)
+            name = QLabel(f"<b>{html.escape(f.name)}</b>")
+            value: QWidget
+            if toggles_custom(f, by_expression):
+                box = QCheckBox()
+                box.setChecked(is_true(values.raw(gc_code, f.name)))
+                box.toggled.connect(
+                    lambda checked, code=gc_code, field=f.name, box=box:
+                        self._save_custom_bool(code, field, checked, box))
+                value = box
+            else:
+                text = format_custom_value(f, values.display(gc_code, f.name),
+                                           by_expression, grid=False)
+                label = QLabel(text)
+                label.setTextFormat(Qt.TextFormat.PlainText)
+                label.setWordWrap(True)
+                label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                value = label
+            self._custom_form.addRow(name, value)
+
+    def _save_custom_bool(self, gc_code: str, name: str, checked: bool,
+                          box: QCheckBox) -> None:
+        """A boolean custom field's check box was clicked (#1241)."""
+        try:
+            custom_fields.write_active_values(gc_code, {name: checked})
+        except (custom_fields.CustomFieldError, custom_fields.CompanionError,
+                sqlite3.Error, OSError) as exc:
+            logger.warning("detail panel: custom value %s of %s not saved: %s",
+                           name, gc_code, exc)
+            box.blockSignals(True)
+            box.setChecked(not checked)
+            box.blockSignals(False)
+            QMessageBox.warning(self, tr("warning"), tr("wp_custom_save_failed", error=exc))
+            return
+        self.custom_values_changed.emit(gc_code)
 
     def _render_logs(self, cache: Cache) -> None:
         logs = sorted(

@@ -94,10 +94,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Ajustes…",
     "action_found_update":          "⟳  Actualizar encontradas desde base de referencia…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Ejecutar macro (Lua)…",
     "action_find_more_macros":      "Buscar más macros…",
-    "macro_title":                  "Macro (Lua) — prueba de concepto",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Abrir…",
     "macro_btn_run":                "▶  Ejecutar",
     "macro_open_title":             "Abrir macro Lua",
@@ -322,6 +322,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Abrir archivo de registro",
     "action_open_previous_log_file": "Abrir registro del último inicio",
     "action_support_opensak": "♥  Apoyar OpenSAK…",
+    "menu_community":              "Comunidad",
+    "action_community_facebook":   "OpenSAK en Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK en el foro de GSAK",
+    "action_community_new_issue":  "Informar de un error o sugerir una función",
     "log_file_not_found": "Aún no se encontró el archivo de registro: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
@@ -411,6 +416,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Omitidas:",
     "import_errors_header":         "Errores ({count}):",
+    "import_errors_more":           "… y {count} más (consulta el archivo de registro)",
     "import_failed":                "✗ Importación fallida:",
     "import_again":                 "Importar de nuevo",
     "import_target_db_label":                    "Importar a la base de datos:",
@@ -2115,7 +2121,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID del atributo: {id}",
     "kml_export_description": "Exportado desde OpenSAK — {count} caché(s)",
     "import_err_db": "Error de base de datos para {gc_code} en {source}: {error}",
-    "import_err_parse": "Error de lectura en {file}: {error}",
+    "import_err_parse": "Error de lectura en {file}, línea {line}, {code}: {error}",
     "import_err_fatal_parse": "Error grave de lectura en {file}: {error}",
     "import_err_waypoints": "Error en el archivo de waypoints ({file}): {error}",
     "import_err_fatal": "Error grave al importar {file}: {error}",
