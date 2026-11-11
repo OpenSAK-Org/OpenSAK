@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Settings…",
     "action_found_update":          "⟳  Update finds from reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Run macro (Lua)…",
     "action_find_more_macros":      "Find more macros…",
-    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Open…",
     "macro_btn_run":                "▶  Run",
     "macro_open_title":             "Open Lua macro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Open log file",
     "action_open_previous_log_file": "Open log from last restart",
     "action_support_opensak": "♥  Support OpenSAK…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK on Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK on the GSAK forum",
+    "action_community_new_issue":  "Report a bug or request a feature",
     "log_file_not_found": "Log file not found yet: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Skipped:",
     "import_errors_header":         "Errors ({count}):",
+    "import_errors_more":           "… and {count} more (see the log file)",
     "import_failed":                "✗ Import failed:",
     "import_again":                 "Import again",
     "import_target_db_label":                    "Import into database:",
@@ -811,6 +817,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "The update could not be applied — not every file could be downloaded. Nothing was changed; please try again later.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "New database",
@@ -2112,7 +2119,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribute ID: {id}",
     "kml_export_description": "Exported from OpenSAK — {count} cache(s)",
     "import_err_db": "Database error for {gc_code} in {source}: {error}",
-    "import_err_parse": "Parse error in {file}: {error}",
+    "import_err_parse": "Parse error in {file}, line {line}, {code}: {error}",
     "import_err_fatal_parse": "Fatal parse error in {file}: {error}",
     "import_err_waypoints": "Waypoints file error ({file}): {error}",
     "import_err_fatal": "Fatal error importing {file}: {error}",

@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Funktioner-menu
     "action_settings":              "&Indstillinger…",
     "action_found_update":          "⟳  Opdater fund fra reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Kør makro (Lua)…",
     "action_find_more_macros":      "Find flere makroer…",
-    "macro_title":                  "Makro (Lua) — proof of concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Åbn…",
     "macro_btn_run":                "▶  Kør",
     "macro_open_title":             "Åbn Lua-makro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Åbn logfil",
     "action_open_previous_log_file": "Åbn log fra forrige genstart",
     "action_support_opensak": "♥  Støt OpenSAK…",
+    "menu_community":              "Fællesskab",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forummet",
+    "action_community_new_issue":  "Rapportér en fejl eller foreslå en funktion",
     "log_file_not_found": "Logfil ikke fundet endnu: {path}",
 
     # ── Tastaturgenveje-dialog ────────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Sprunget over:",
     "import_errors_header":         "Fejl ({count}):",
+    "import_errors_more":           "… og {count} mere (se logfilen)",
     "import_failed":                "✗ Fejl under import:",
     "import_again":                 "Importer igen",
     "import_target_db_label":                    "Importer til database:",
@@ -812,6 +818,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Anvender opdatering…",
     "boundary_check_done":          "✓ Opdatering anvendt — {count} fil(er) opdateret.",
     "boundary_check_failed":        "Opdateringstjek mislykkedes — ingen netværksforbindelse.",
+    "boundary_apply_failed":        "Opdateringen kunne ikke anvendes — ikke alle filer kunne hentes. Intet er ændret; prøv igen senere.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny database",
@@ -2113,7 +2120,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Eksporteret fra OpenSAK — {count} cache(s)",
     "import_err_db": "Databasefejl for {gc_code} i {source}: {error}",
-    "import_err_parse": "Fejl ved læsning af {file}: {error}",
+    "import_err_parse": "Fejl ved læsning af {file}, linje {line}, {code}: {error}",
     "import_err_fatal_parse": "Alvorlig fejl ved læsning af {file}: {error}",
     "import_err_waypoints": "Fejl i waypoint-fil ({file}): {error}",
     "import_err_fatal": "Alvorlig fejl ved import af {file}: {error}",

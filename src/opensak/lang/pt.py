@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Definições…",
     "action_found_update":          "⟳  Atualizar caches encontradas da base de dados de referência…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Executar macro (Lua)…",
     "action_find_more_macros":      "Encontrar mais macros…",
-    "macro_title":                  "Macro (Lua) — prova de conceito",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Abrir…",
     "macro_btn_run":                "▶  Executar",
     "macro_open_title":             "Abrir macro Lua",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Abrir ficheiro de registo",
     "action_open_previous_log_file": "Abrir registo do último arranque",
     "action_support_opensak": "♥  Apoiar o OpenSAK…",
+    "menu_community":              "Comunidade",
+    "action_community_facebook":   "OpenSAK no Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK no fórum GSAK",
+    "action_community_new_issue":  "Reportar um erro ou sugerir uma funcionalidade",
     "log_file_not_found": "Ficheiro de registo ainda não encontrado: {path}",
 
     # ── Atalhos de teclado dialog ─────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Ignoradas:",
     "import_errors_header":         "Erros ({count}):",
+    "import_errors_more":           "… e mais {count} (consulte o ficheiro de registo)",
     "import_failed":                "✗ A importação falhou:",
     "import_again":                 "Importar novamente",
     "import_target_db_label":                    "Importar para a base de dados:",
@@ -812,6 +818,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "A aplicar atualização…",
     "boundary_check_done":          "✓ Atualização aplicada — {count} ficheiro(s) atualizado(s).",
     "boundary_check_failed":        "Falha na verificação de atualizações — sem ligação à rede.",
+    "boundary_apply_failed":        "Não foi possível aplicar a atualização — nem todos os ficheiros puderam ser transferidos. Nada foi alterado; tente novamente mais tarde.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nova base de dados",
@@ -2114,7 +2121,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID do atributo: {id}",
     "kml_export_description": "Exportado do OpenSAK — {count} cache(s)",
     "import_err_db": "Erro de base de dados para {gc_code} em {source}: {error}",
-    "import_err_parse": "Erro de leitura em {file}: {error}",
+    "import_err_parse": "Erro de leitura em {file}, linha {line}, {code}: {error}",
     "import_err_fatal_parse": "Erro grave de leitura em {file}: {error}",
     "import_err_waypoints": "Erro no ficheiro de waypoints ({file}): {error}",
     "import_err_fatal": "Erro grave ao importar {file}: {error}",

@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Paramètres…",
     "action_found_update":          "⟳  Mettre à jour les caches trouvées depuis la base de données de référence…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Exécuter une macro (Lua)…",
     "action_find_more_macros":      "Trouver d’autres macros…",
-    "macro_title":                  "Macro (Lua) — preuve de concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Ouvrir…",
     "macro_btn_run":                "▶  Exécuter",
     "macro_open_title":             "Ouvrir une macro Lua",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Ouvrir le fichier journal",
     "action_open_previous_log_file": "Ouvrir le journal du dernier redémarrage",
     "action_support_opensak": "♥  Soutenir OpenSAK…",
+    "menu_community":              "Communauté",
+    "action_community_facebook":   "OpenSAK sur Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK sur le forum GSAK",
+    "action_community_new_issue":  "Signaler un bug ou proposer une fonctionnalité",
     "log_file_not_found": "Fichier journal introuvable : {path}",
 
     # ── Raccourcis clavier dialog ─────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints :",
     "import_skipped":               "Ignorées :",
     "import_errors_header":         "Erreurs ({count}) :",
+    "import_errors_more":           "… et {count} de plus (voir le fichier journal)",
     "import_failed":                "✗ Échec de l'importation :",
     "import_again":                 "Importer à nouveau",
     "import_target_db_label":                    "Importer dans la base de données :",
@@ -813,6 +819,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Application de la mise à jour…",
     "boundary_check_done":          "✓ Mise à jour appliquée — {count} fichier(s) mis à jour.",
     "boundary_check_failed":        "Échec de la vérification des mises à jour — pas de connexion réseau.",
+    "boundary_apply_failed":        "La mise à jour n'a pas pu être appliquée — certains fichiers n'ont pas pu être téléchargés. Rien n'a été modifié ; réessayez plus tard.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nouvelle base de données",
@@ -2114,7 +2121,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID de l'attribut : {id}",
     "kml_export_description": "Exporté depuis OpenSAK — {count} cache(s)",
     "import_err_db": "Erreur de base de données pour {gc_code} dans {source} : {error}",
-    "import_err_parse": "Erreur de lecture dans {file} : {error}",
+    "import_err_parse": "Erreur de lecture dans {file}, ligne {line}, {code} : {error}",
     "import_err_fatal_parse": "Erreur de lecture fatale dans {file} : {error}",
     "import_err_waypoints": "Erreur dans le fichier de waypoints ({file}) : {error}",
     "import_err_fatal": "Erreur fatale lors de l'import de {file} : {error}",

@@ -4,58 +4,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.22.0-beta.11] — 2026-10-28
-
-> Headline: **the last feature beta before v1.22.0.** Coming from GSAK,
-> the import can now bring along **your saved GSAK views** as column views,
-> and **View → Auto-fit column widths** sizes the cache list's columns to
-> their contents. **Backups include your macros**, and sorting on a custom
-> field column works. Beta testers get the macro API that v1.22.0 will
-> ship as **API 4**: the database tables a macro reads are part of it, and
-> renaming or removing anything now goes through a deprecation period.
-> From here until v1.22.0, only fixes go in.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Import GSAK views as column views (#1209)** — **File → Import from GSAK
-  Database…** offers a third box, **Also import the saved GSAK views**,
-  next to filters and user locations. Each view saved in `gsak.db3`
-  becomes an OpenSAK column view with GSAK's column order and widths;
-  custom-field columns are kept when GSAK or the open database defines
-  the field, and columns OpenSAK has no equivalent for are left out and
-  listed in the import log. Contributed by nagisml.
-- **Auto-fit column widths (#1212)** — **View → Auto-fit column widths**
-  (Ctrl+W) sizes each visible column of the cache list to its contents
-  and header, at most 400 pixels wide so one long name doesn't push the
-  other columns off-screen, and remembers the widths. Columns with a
-  short header ("L4") can shrink to their data. The shortcut can be
-  changed in the Shortcuts dialog. Contributed by nagisml.
-- **Backups include your macros (#1137)** — every backup now holds the
-  macros folder: your own macros, the files next to them, each macro's
-  saved settings, and the macros' own databases (every SQLite file in the
-  folder is copied safely, also one no macro opened on this computer).
-  Example macros as shipped are left out, so a restore never puts an old
-  example over a newer one; an example you changed is kept. A change to
-  your macros counts when OpenSAK offers a backup on close. **File →
-  Restore from backup…** has **Also restore macros**, ticked for a backup
-  with macros: missing files come back, files that differ are listed so
-  you choose which to replace (the current one is kept as a `.bak`), and
-  a macro gets back what it was allowed to do if its code is exactly as
-  in the backup. Global custom field definitions were already in every
-  backup and come back with **Also restore settings**. Suggested by
-  ianwok.
-- **User Guide: Importing from the command line (#1191, #937)** — a new
-  subsection under *Importing Caches* explains `opensak import gpx` and
-  `opensak import gsak`: the most useful options, where the `opensak`
-  command is for each kind of install (Store alias, `opensak-cli.exe`,
-  the macOS app bundle, the AppImage), ready-to-use scheduling examples
-  for Windows Task Scheduler, macOS launchd and Linux cron, and the exit
-  codes.
+## [1.23.0-beta.2] — Unreleased
 
 ### Fixed
+
+- **No long waits without a network connection (#1111)** — once a
+  request finds the network unreachable (no connection, DNS failure,
+  timeout), OpenSAK stops making automatic requests for five minutes
+  instead of waiting for each one to time out: the update check at
+  startup, the boundary data download on first run, and the county packs
+  fetched while importing or updating locations. Caches whose county
+  could not be looked up keep an empty county; *Update waypoint
+  locations* fills it in later. *Help → Check for updates* and the
+  boundary pack dialogs still try every time, and any request that gets
+  through ends the pause. Contributed by nagisml.
 
 - **The map no longer needs unpkg.com (#1111)** — Leaflet 1.9.4,
   Leaflet.markercluster 1.5.3 and Leaflet-Geoman 2.19.3 are now bundled
@@ -64,829 +26,304 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the map used to stay completely blank; now the pins, clustering and
   map actions work offline (the map background still needs a
   connection). The licences are listed in `THIRD_PARTY_NOTICES.md`.
-- **Sorting on a custom field column (#1201)** — the first click on the
-  header of a custom field column (for example GSAK's `LFL`) showed
-  "OpenSAK ran into a problem", and the sort was never remembered for the
-  database. Custom field columns and the Lat/Lon columns now sort like
-  every other column, and the chosen sort comes back the next time the
-  database is opened. Reported by ianwok.
-- **"Enable online lookup for higher accuracy" removed from Settings
-  (#1208)** — the *Location refinement* box in Settings → Advanced
-  offered an online OpenStreetMap lookup that no longer exists: it was
-  removed together with the old location lookup when the boundary data
-  arrived, so ticking it did nothing. The box is gone, and
-  `docs/update-location.md` now describes the boundary-data lookup and
-  the boundary-pack menu items instead of the online pass.
-- **A bare `opensak` gives the prompt back on Windows (#1180)** — through
-  the Store's command-line alias, `opensak` without a command kept the
-  shell waiting until OpenSAK was closed. It now starts OpenSAK and
-  returns at once; `opensak import …`, `--help` and `--run-macro` still
-  wait for their result and exit code. Contributed by nagisml.
+  Contributed by nagisml.
 
-### In beta builds only
+---
 
-- **Links to shared macros (#1173)** — **Macros → Find more macros…**
-  opens [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros),
-  the repository of macros shared by users, in the browser, and an empty
-  Macro manager links to it too. The User Guide (section 29, "Finding and
-  sharing macros"), the macro API reference and the README explain how to
+## [1.23.0-beta.1] — 2026-11-10
+
+> Headline: **first beta after v1.22.0.** GSAK database import is 6–8×
+> faster, and overwriting a database no longer touches it until the
+> import has succeeded. Text filters are faster, yes/no custom fields can
+> be switched with one click, the import summary says which cache failed,
+> and **Help → Community** shows where other OpenSAK users are.
+
+### Added
+
+- **Help → Community (#1230)** — a new submenu with the places where other
+  OpenSAK users are: the OpenSAK group on Facebook, GitHub Discussions,
+  the OpenSAK section of the GSAK forum, and reporting a bug or requesting
+  a feature on GitHub. Each opens in your browser. Users who found OpenSAK
+  through GitHub or the GSAK forum often never heard of the Facebook group,
+  and not everyone is on Facebook.
+
+### Changed
+
+- **Faster text search in filters (#1225)** — a filter with a Text Search
+  over descriptions, logs or notes no longer loads every matching cache's
+  logs and descriptions when the database can answer it alone. Where they
+  are still needed (regular expressions, OR filters), each cache's
+  descriptions are no longer repeated once per log. Contributed by
+  nagisml.
+
+- **Macro editor follows the text size setting (#1246)** — the code in
+  the Lua macro editor used the system's fixed-width font at its default
+  size, which could be hard to read. It now follows **Settings → Text and
+  icon size**: Small, Medium or Large. An editor that is already open
+  changes size as soon as the setting is saved. Contributed by nagisml.
+
+- **Yes/no custom fields can be switched where the cache is shown
+  (#1241)** — until now a boolean custom field could only be changed in
+  **Edit cache**. In the detail panel's *Custom* tab it is now a check box
+  that is saved when you click it, and in the cache list a single click on
+  the column switches it, as for the user flag, FTF and locked columns.
+  Fields calculated from an expression stay read-only. Contributed by
+  nagisml.
+
+- **GSAK database import 6–8× faster (#1231)** — importing a large GSAK
+  database took 8–10 minutes; a 150,000-cache database now imports in
+  just over a minute, with exactly the same data. *Overwrite* now builds
+  the new database next to the old one and swaps it in only when the
+  import has succeeded, so a failed import leaves your database as it
+  was. It needs room for a second copy of the database while it runs.
+  On overwrite, macro data stored for the old caches is removed; custom
+  fields from GSAK are imported again. Contributed by nagisml.
+
+- **Import summary names what failed (#465)** — a cache or waypoint that
+  could not be read now shows its code and its line in the file, instead
+  of only the file name. When there are more errors than the summary
+  lists, it says how many more. A database error no longer fills the
+  summary with the SQL statement and the cache's data. Every failing
+  cache, with the full details, is written to the log file. Requested by
+  C3GPS, contributed by nagisml.
+
+### Fixed
+
+- **Last four logs column sorted by date, not by its squares (#1154)** —
+  sorting on the column followed the date of the newest log, so caches
+  showing the same squares didn't end up together. It now sorts by the
+  pattern the squares show, most recent log first: DNF, then found, then
+  other logs, then empty slots. Ascending puts caches with consecutive
+  recent DNFs at the top; within a pattern the most recently logged cache
+  comes first. A filter's saved sort on this field, which was ignored,
+  now gives the same order. The squares themselves are unchanged.
+  Contributed by nagisml.
+
+- **GPS devices mounted at a path with a space (#1094)** — on Linux, a
+  device mounted outside `/media`, `/run/media` and `/mnt` was not found
+  when its mount point had a space or a letter outside ASCII in it, because
+  the mount lists write those characters as escape codes. They are now
+  decoded first. A database moved on startup from an old OpenSAK version
+  is now written to the log file instead of only to the console.
+
+---
+
+## [1.22.0] — 2026-11-09
+
+> First stable release of the 1.22.0 cycle. Replaces the `1.22.0-beta.1`
+> … `1.22.0-beta.17` builds — see git history for the detailed
+> beta-by-beta log. Headlines of this cycle: **Lua macros** — OpenSAK's
+> successor to GSAK macros, with a macro manager, editor, forms and a
+> stable macro API; **custom fields as in GSAK**, brought along by the GSAK
+> import; **import from the command line**, so a scheduled task can refresh
+> a database overnight; **database maintenance** and much faster filters
+> and map on large databases; **backups that include your macros**; and a
+> **GSAK import** that now also brings your saved views, user locations,
+> custom fields and GSAK's own dates.
+>
+> **Upgrading from 1.21.0:** the first time you open each database, OpenSAK
+> updates it to a new format and first saves an untouched copy of it (see
+> *Before you upgrade* below). Texts new in this release are
+> machine-translated in all languages except Danish and English —
+> corrections from native speakers are very welcome.
+
+### Added
+
+- **Lua macros (#938)** — the **Macros** menu, until now only in beta
+  builds, is part of every build. Macros automate what you would otherwise
+  do by hand: filter, read and change caches, logs, waypoints and
+  attributes, export, import GPX and GSAK files, move caches between
+  databases, run SQL queries and build HTML reports with charts and maps of
+  your statistics. Highlights:
+  - **Macro manager** — lists your macros with name, version, author and
+    what each one declares it does (`Permissions:`), runs and edits them,
+    and gives a macro a keyboard shortcut.
+  - **Macro editor** with a **form designer** (GSAK forms can be imported
+    from a `.gsk` file), or write macros in VS Code, Notepad++ or UltraEdit
+    with auto-completion, and run them from there with
+    `opensak --run-macro`.
+  - **Dialogs, forms and progress bars** for your own macros, settings a
+    macro remembers between runs, and macros that run other macros.
+  - **You decide what a macro may do.** OpenSAK asks before a macro first
+    changes your databases, uses a folder outside the macros folder, or
+    opens a file; an "Always" approval belongs to that macro's exact code,
+    so a changed macro is asked again. Changes can be grouped in a
+    transaction and undone on error.
+  - **Example macros** to start from, among them *find_statistics*,
+    *database_statistics*, *region_coverage*, *owned_statistics*,
+    *sql_report*, *puzzle_helper*, *refile_by_country* and macros with
+    forms.
+  - **A stable macro API (API 4).** Functions, cache fields, header keys
+    and the database tables a macro reads keep their names and formats;
+    renaming or removing anything needs a new API version and a deprecation
+    period of at least one stable release. Full reference in
+    **Help → Lua API reference** and `docs/macros/api.md`, including a
+    comparison with GSAK's macro commands.
+
+  Contributed by nagisml.
+- **Shared macros (#1173)** — **Macros → Find more macros…** opens
+  [OpenSAK-Macros](https://github.com/OpenSAK-Org/OpenSAK-Macros), the
+  repository of macros shared by users. The User Guide explains how to
   install a macro from it and how to share your own.
-- **The database tables are part of the macro API (#1202)** — the macro
-  API reference has a new section, "Database tables for macros", listing
-  the tables and columns a macro can read with `opensak.sql()` and the
-  format of their values (dates, `0`/`1` booleans, units, cache, container
-  and log type names). From API 4 they keep their names and formats like
-  the functions do; columns are only added, and a structural change keeps
-  the old names as a view. Writes with `opensak.sql_write()`, OpenSAK's
-  `opensak_*` tables, indexes and the columns not listed are not covered.
-  A test keeps the list in step with the real database, also after
-  upgrading a database from an older release, and every example macro now
-  runs in CI against a small test database, once with the feature flags
-  of the coming stable release and once with all beta flags. Contributed
-  by nagisml.
-- **Deprecations in the macro API (#1185)** — from API 4, renaming or
-  removing a macro function, parameter, cache field or header key needs a
-  new API version and a deprecation period of at least one stable
-  release. A deprecated function still works, and its first call in a run
-  prints one line naming the macro line and what to use instead; a
-  deprecated header key is printed when the macro starts and marked in the
-  Macro manager. Calling a removed function stops the macro with a clear
-  message instead of "attempt to call a nil value". The API reference, the
-  VS Code stub (calls struck through) and the Notepad++ calltips show
-  deprecations, and the unit tests compare the API with the released one
-  (`tests/fixtures/macro_api_baseline.json`) so nothing is removed by
-  accident. Nothing is deprecated yet. Contributed by nagisml.
-- **Stable-release checks for shared macros** — for the OpenSAK-Macros
-  CI, next to the deprecation checks: `newest_stable_api()` gives the
-  newest macro API version a stable release has, so a macro asking for a
-  higher `Requires-API` can be refused, and `beta_only_names()` /
-  `find_beta_only()` list and find what only beta builds have (for now
-  `opensak.get_url()`, besides everything still behind a beta-only feature
-  flag). Both are taken from the function registry and the release
-  defaults of the feature flags, so they follow when a flag goes on in
-  stable. Contributed by nagisml.
-- **`opensak.companion_table{}` is now `opensak.set_companion_table{}`
-  (#1186)** — the name said "get one entry of `companion_tables()`", but
-  the function changes a table's settings. It takes the same table,
-  returns the same value and behaves the same; the old name is gone, with
-  no alias, as the companion functions are beta-only and API 4 isn't
-  stable yet. Macros that call it need the new name. Contributed by
-  nagisml.
-- **A remembered form starts the way the user left it (#1197)** — with
-  `remember = true` a form came back with last time's values, but not
-  with what its `on_change` callbacks had changed: choose GGZ in the
-  example from the API reference, and the next time "Unfound only" was
-  no longer greyed out. A form still remembers only values; when it
-  opens, `on_change` is now called for each field that got a remembered
-  value (in form order, before `on_open`, and without closing the form
-  for `exit_on_change`), so whatever it enables, hides or relabels is
-  set again. The example macros *find_with_form* and *export_with_form*
-  (now version 1.1, `Requires-API: 4`) rely on this instead of repeating
-  their `on_change` in `on_open`; the API reference lists it as a change
-  of `opensak.form` in API 4. Reported by GeePa67, contributed by nagisml.
-
-### For developers
-
-- **Upgrade-path tests for 1.21.0 → 1.22.0 (#1193)** — the upgrade tests
-  now cover database migration 28, the companion database, a backup set
-  made by 1.21.0 and a restore onto a clean install, from fixtures
-  generated by `scripts/make_upgrade_fixture.py`.
-
-## [1.22.0-beta.10] — 2026-10-26
-
-> Headline: **OpenSAK can import without a window** — `opensak import
-> gpx|gsak` lets Task Scheduler, cron or launchd refresh a database
-> overnight — and **Manage databases can check, optimize and compact a
-> database**, which also makes filters and the map much faster on large
-> databases. Beta testers get **custom fields as in GSAK**, imported from
-> GSAK with their values, macros that **download web pages**, and
-> **macro approvals tied to the macro's code**.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Import from the command line (#937)** — `opensak import gpx <files or
-  folders> --db "My Caches"` and `opensak import gsak <zip, folder or
-  sqlite.db3> --db "My Caches"` import without opening the window, so a
-  scheduled task can refresh a database overnight. They run the same
-  steps as the import dialog (locations and distances included), migrate
-  an older database after the usual backup, and never create a database.
-  `--move-imported-to` moves the files that imported without errors,
-  `--json` or `--quiet` set the output, and `--help` lists every option.
-  A run waits (`--wait`) or stops with its own exit code when the
-  database is open in OpenSAK, and a lock left by a crashed run is taken
-  over. A bare `opensak` starts OpenSAK as before. Contributed by
-  nagisml.
-- **`opensak-cli.exe` on Windows (#937)** — a console twin of
-  `opensak.exe` in the same folder, so cmd and PowerShell wait for it and
-  get its output and exit code, for `opensak import …` and `--run-macro`.
-  The Store package will get a command-line alias for it (`opensak` for
-  stable, `opensak-beta` for beta); this is not tested in a Store build
-  yet. Contributed by nagisml.
-- **Database maintenance (#1048)** — Manage databases has a new
-  *Maintenance…* button. For the selected database it shows the file and
-  WAL size, how much of the file is free space, the schema and SQLite
-  version and the number of caches, logs and waypoints. *Check* looks for
-  damage (*Thorough* for the full integrity check), *Optimize* refreshes
-  the statistics SQLite uses to plan queries, *Checkpoint* empties the WAL
-  file, and *Compact…* gives free space back to the disk (VACUUM): only
-  when it pays off, after checking the free disk space, and with a backup
-  first, ticked by default above 100 MB. It also works on the database
-  that is open. Contributed by nagisml.
-- **Faster filters and map on large databases (#1048)** — OpenSAK now
-  keeps SQLite's query statistics up to date by itself: when a database
-  is opened, closed or switched, after an update of its schema, and after
-  imports, deletes and moves. Until now no database had any, so SQLite
-  often chose a slow way to run a query; on a 1.4 GB database the map
-  query went from 0.5 s to 0.04 s. The first time takes a fraction of a
-  second on most databases, but on a very large one (tens of GB) the
-  first open can take several seconds, or more than 20 seconds from a
-  cold disk, while OpenSAK seems to hang. It is a one-off: after that it
-  takes about 10 ms at any size. Contributed by nagisml.
-
-### Changed
-
-- **Update Found from reference database is lighter (#1095)** — it no
-  longer loads every cache of the active database into memory, but
-  checks the reference database in chunks, with the same results.
-- **The splash screen shows how long you have used OpenSAK (#1130)** —
-  the same "Using OpenSAK since … — day N" line as Help → About. Suggested
-  by CheminerWill.
-
-### Fixed
-
-- **Locations after a GPX import into another database (#937)** — after
-  importing into a database other than the open one, the import dialog
-  filled in country, state and county for the open database instead of
-  the one imported into. Contributed by nagisml.
-- **Swedish translations (#1171)** — the texts for location refinement
-  and distance settings. Translations by hansblom.
-
-### In beta builds only
-
-- **Companion database (#1034, #1149)** — each database can get a
-  companion file next to it (`<name>.companion.db3`), created the first
-  time something is stored in it. It holds the custom fields and the
-  macros' own tables, so the database itself keeps its fixed layout. It
-  moves, copies, is deleted, backed up and restored together with its
-  database, rows for a cache follow that cache when it is deleted, moved
-  or copied, and a damaged companion is moved aside without ever
-  touching the database. On in beta builds (`companion-db`). Contributed
-  by nagisml.
-- **Companion data in the Maintenance dialog (#1149)** — with the
-  companion database on, *Maintenance…* also checks, optimizes and
-  compacts the database's companion file, and lists its tables per owner:
-  kind (per cache or free), rows and estimated size. A macro's table can
-  be emptied or dropped, a table whose macro file was moved or renamed
-  can be given to the macro's new file (*Reassign owner…*), and *Clean
-  up* removes rows of caches that are gone. OpenSAK's own tables (custom
-  fields) are shown but not changed there. A damaged companion can be
-  moved aside; the database itself is never touched. Contributed by
-  nagisml.
-- **Custom fields everywhere (#1028, #1149, #126, #821 item 5)** — with
-  the companion database on, your own fields per cache, as in GSAK:
-  *Tools → Custom fields…* adds, renames, retypes and deletes them, local
-  to one database or global for all. Each field can be a column in the
-  cache list (*Choose columns*), shows on the detail panel's *Custom*
-  tab and is edited on the *Custom fields* tab of *Edit cache*. The
-  Filter dialog has a *Custom* tab with the right conditions per type
-  (yes/no, text operators, numbers, dates), and Where clauses use the
-  fields by name. A field can have a display expression, such as
-  `nullif(GCFinds,-1)` (GSAK's are imported, your own are entered in
-  *Add…*/*Edit…* and checked on save), which the cache list shows;
-  filters and sorting use the stored value, as in GSAK. The GSAK filter import now brings over the *Custom* tab and
-  where clauses on custom fields, `Custom` and `CachesAll`. Macros read
-  them as `cache.custom`, change them with `opensak.update(code,
-  { custom = … })` and define them with `opensak.define_custom_field{}`.
+- **Custom fields (#1028, #126)** — your own Yes/No, text, number and date
+  fields per cache, as in GSAK, local to one database or global for all:
+  **Tools → Custom fields…** manages them, each can be a column in the cache
+  list, shows on the detail panel's *Custom* tab, is edited in *Edit cache*,
+  and the Filter dialog has a *Custom* tab. Macros read and change them too.
+  They are stored in a small companion file next to the database
+  (`<name>.companion.db3`), which is copied, moved, backed up and restored
+  together with it. Contributed by nagisml.
+- **GSAK import brings more along** — your **custom fields** with their
+  values and display expressions (#1028), your **saved GSAK views** as
+  column views (#1209), your **user locations** with a preview (#1001), and
+  GSAK's own **Created, Last GPX and user note dates** and small fields
+  such as MacroFlag and GPX symbol (#1139, #1140, #1141). Tested with a
+  2.5 GB GSAK backup of 21 databases. Contributed by nagisml.
+- **Import from the command line (#937)** — `opensak import gpx` and
+  `opensak import gsak` import without opening the window, so Windows Task
+  Scheduler, cron, systemd or launchd can refresh a database overnight. On
+  Windows, `opensak-cli.exe` is the console version; the Microsoft Store
+  install has the `opensak` command. The User Guide has scheduling
+  examples for every platform. Contributed by nagisml.
+- **Database maintenance (#1048)** — **Manage databases → Maintenance…**
+  shows a database's size, free space and contents, and can check it for
+  damage, optimize it, and compact it (with a backup first).
   Contributed by nagisml.
-- **Custom fields from GSAK (#1028, #1149)** — the GSAK import brings
-  over your custom fields: the definitions of each database and the
-  global ones from `gsak.db3`, the values of every cache, and GSAK's
-  display expressions. Fields are created where they are missing, and a
-  name that clashes with a cache column gets `_custom` appended. Tested
-  with a 2.5 GB GSAK backup of 21 databases and about 818,000 caches.
-  Contributed by nagisml.
-- **Macros share tables in the companion database (#1034)** — every
-  macro can read every table there, and change only the tables it
-  created itself; OpenSAK records which macro owns what. New:
-  `opensak.companion()`, `opensak.companion_table{}` and
-  `opensak.companion_tables()`. The example macros *dnf_stats* and
-  *dnf_alert* show one macro writing a table and another reading it.
-  Contributed by nagisml.
-- **Macro API version 4** — the companion and custom-field functions, and
-  the additions since beta.7 (`macro_flag()`, the new `filter{}`,
-  `sort{}` and cache fields), are API version 4. Macros that use them
-  should declare `Requires-API: 4`.
-- **Approvals belong to the macro's code (#1091)** — an "Always" approval
-  is now stored with the macro's file *and* a fingerprint of its code. A
-  macro replaced or changed outside OpenSAK's own editor is asked again,
-  once per run, with what changed (e.g. `1.0 → 1.1`, "it now also
-  declares: write"). Folder approvals given with "Always" now belong to
-  that macro only, not to every macro, and a macro started with
-  `run_macro()` no longer inherits its caller's folders. Edits in
-  OpenSAK's macro editor keep the approvals. For VS Code and other
-  external editors there is *While I edit it*, valid until OpenSAK
-  closes. Existing approvals are converted on the first start.
-  Contributed by nagisml.
-- **Macros can download web pages (#1079)** — `opensak.get_url()`, like
-  GSAK's GetUrl, e.g. to check a puzzle answer or fetch a data file.
-  OpenSAK asks before a macro first contacts a web site (*This time
-  only*, *Always* or *Deny*), and says when the site is on your local
-  network or the connection isn't encrypted. Only plain GET requests, no
-  cookies, at most 50 MB, and Geocaching.com, coord.info and Groundspeak's
-  other sites can never be contacted. On in beta builds only, on its own
-  flag (`lua-macro-net`). The privacy policy has a new section about it.
-  Contributed by nagisml.
-- **See what a macro declares before it first runs (#1079)** — the
-  `Permissions:` and `Network:` lines of a macro's header are shown
-  before its first run, and again when a new version declares more. This
-  approves nothing; OpenSAK still asks for every write, folder and web
-  site. Contributed by nagisml.
-
-### For developers
-
-- **Release builds check the tag (#1168)** — `build.yml` and
-  `deploy-site.yml` refuse to build when the tag doesn't match
-  `__version__`, via the new `scripts/bump_version.py --check-tag`.
-- **Distance method passed explicitly (#1096)** — `distance_km()` and
-  `distance_km_batch()` take the method as an argument, so
-  `filters/engine.py` no longer reads the GUI settings.
-- **`header_keys()`** in `opensak.macro.metadata` returns the keys a
-  macro header actually sets, for the OpenSAK-Macros checker.
-- **Unit-test timeout 45 minutes** — the Windows runner needs 18–26
-  minutes for the ~7,900 unit tests and hit the 30-minute limit once.
-
----
-
-## [1.22.0-beta.9] — 2026-10-24
-
-_1.22.0-beta.8 was tagged without its version bump and never released;
-its changes are part of this beta._
-
-> Headline: **found dates survive a round trip to GSAK** — a GPX export
-> now carries your found date, so GSAK no longer shows it blank — and
-> **GSAK's own dates and small fields are kept on import**. Settings
-> saves instantly again on large databases.
-
-### Changed
-
-- **GSAK's dates and small fields are kept (#1139, #1140, #1141)** — the
-  GSAK import keeps GSAK's Created, Last GPX date and user note date
-  instead of replacing them with the import time, and stores GSAK's Last
-  user update, MacroFlag, MacroSort, IsOwner and GPX symbol. OpenSAK keeps
-  them current itself: *Last user update* is set whenever you change a
-  user field (flag, sort, user data, lock, note or corrected
-  coordinates), and *owned* follows the geocaching.com account in
-  Settings. The Dates tab of the Filter dialog and the column chooser
-  have *Last user update*, the column chooser has *GPX symbol*, and the
-  GSAK filter importer understands these fields. Dates are stored in UTC
-  with seconds (#1097).
-- **"Map app" is now "External map viewer" (#1143)** — the setting only
-  chooses the website for "Open in …" in the cache list's right-click
-  menu and for clicked coordinates. A note under it now says so, and that
-  the built-in map always uses OpenStreetMap.
-- **More of your user locations are visible (#1146)** — the list in
-  Settings shows 6 to 10 locations before it scrolls, also with a larger
-  system font, instead of as few as 2.
-
-### Fixed
-
-- **GPX export keeps your found date (#1145)** — GSAK showed a blank
-  Found date for caches exported from OpenSAK whenever your own found log
-  wasn't in the file. The export now writes the date the way GSAK does
-  (`gsak:UserFound`), and OpenSAK reads it back too, so the date survives
-  GSAK → OpenSAK → GSAK. Reported by McMellow on the GSAK forum.
-- **Settings OK no longer freezes on large databases (#1148)** — OK
-  recalculated every cache's distance even when nothing that affects it
-  had changed (about 11 seconds on 42,000 caches). It now does so only
-  when the centre point or distance method changed, and shows a "please
-  wait" box for the steps that can still take a moment. Contributed by
-  nagisml.
-- **Renaming a database showed `{error}` (#1147)** — the error message
-  now shows the actual reason. Found by new tests that check every
-  translation's placeholders. Contributed by nagisml.
-
-### In beta builds only
-
-- **Macros can use GSAK's small fields (#1150)** — `opensak.cache()` and
-  `caches()` return `owned`, `macro_flag`, `macro_sort`, `symbol`,
-  `corrected_source` and `last_user_update`; macros can write
-  `macro_flag`, `macro_sort` and `symbol`. `opensak.macro_flag()` is
-  GSAK's MACROFLAG, and `filter{}` has `macro_flag` and
-  `last_user_update` keys. `filter{ owned = }` now uses the *owned* field,
-  so it can match more caches than before (e.g. with only a member ID in
-  Settings). Contributed by nagisml.
-- **Statistics of the caches you own (#813)** — the example macro
-  *owned_statistics* writes FindStatGen's owner part: the finds your
-  caches received per year and month, records (northernmost, most finds,
-  most favourite points, longest lifetime, …), finds and favourites per
-  cache, your top finders, your caches per type, size, difficulty and
-  terrain, the hide-date calendar and a map. It lists its known
-  limitations in its header. Contributed by nagisml.
-- **Macros declare their permissions (#938, #1079)** — the macro header
-  takes two new lines: `-- Permissions: write, read-files, write-files,
-  open, run-macros` (or `none`) and `-- Network:` with the web sites the
-  macro contacts. The Macro manager shows them in a new *Permissions*
-  column, with what each one means, and marks unknown words, entries
-  that are not host names and sites macros may never contact
-  (Geocaching.com, coord.info). This is information only: OpenSAK still
-  asks before every write, folder and web site access. The example
-  macros and the new-macro template declare theirs. Contributed by
-  nagisml.
-- **Macros ask before creating databases or moving caches (#1160)** —
-  `opensak.create_database()`, `move_caches()` and `copy_caches()`
-  changed databases without asking for the macro's write approval, unlike
-  the rest of the write API. They now ask first, and bad arguments fail
-  before the prompt. Contributed by nagisml.
-- **User Guide: Macros (beta) section** — a first draft describing the
-  Macros menu, the Macro Manager, folder permissions and write approval.
-
----
-
-## [1.22.0-beta.7] — 2026-10-21
-
-> Headline: **OpenSAK now speaks your language everywhere** — the splash
-> screen, compass directions, import errors and more no longer show
-> Danish or English regardless of your choice — and **every dialog fits
-> on small, high-DPI screens**. Beta testers get macros that **draw
-> charts and maps of your statistics**, **import GPX files** and
-> **copy, move and delete files**.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Changed
-
-- **Text follows the selected language everywhere (#1127)** — the
-  startup splash screen, the found-status updater, the compass directions
-  in Distance & bearing, the GPS and trip save dialogs, an attribute
-  tooltip, the KML export description, GPX/LOC/ZIP/GSAK import errors,
-  self-update errors and the Geocaching.com login page showed Danish or
-  English whatever language was chosen. They now use your language. Only
-  the very first splash message, "Loading language...", stays English,
-  because it appears before the language is loaded. Contributed by
-  nagisml.
-- **The log is in English (#1127)** — about 90 log and console messages
-  were in Danish. They are now English, so a log attached to a bug report
-  can be read by everyone. Contributed by nagisml.
-
-### Fixed
-
-- **Dialogs no longer run off small screens (#816)** — the last 13
-  dialogs (coordinate converter, midpoint, projection, distance & bearing,
-  checksum, corrected coordinates, mark found, found-status updater,
-  move/copy caches, file and KML export, keyboard shortcuts and the
-  boundary data dialogs) are now limited to the screen height, like the
-  others since #811. The coordinate converter is taller than that on a
-  1280×800 screen at 200 % scaling, so its content now scrolls while the
-  Close button stays in view.
-
-### In beta builds only
-
-- **Charts and maps in macro reports** — `opensak.chart.bar`, `line`,
-  `heatmap` and `rose` draw plain SVG charts, and `opensak.chart.map` /
-  `points` draw region and dot maps from the offline boundary data of
-  Update location. Charts follow the report page's light/dark theme. No
-  JavaScript and nothing leaves your computer. Contributed by nagisml.
-- **Statistics example macros** — *find_statistics* (key figures,
-  charts and maps of your finds), *database_statistics* (the same for all
-  caches in a database) and *region_coverage* (the states or countries
-  you have found a cache in, and the nearest cache still to find in each
-  missing one). Each lists its known limitations in its header.
-  Contributed by nagisml.
-- **More example macros** — *sql_report* (#810) runs your own SQL query
-  and shows the result as an HTML table, optionally once per value of a
-  loop query, like GSAK's SqlToHtml macro. *puzzle_helper* finds the
-  coordinates and formulas in a mystery listing (also those hidden in
-  the HTML), solves a formula from the letters you type, has digit sum,
-  word value and ROT13, and can save the result as a waypoint.
-  Contributed by nagisml.
-- **Open a report from a macro** — `opensak.open()` opens a file the
-  macro wrote, e.g. an HTML report in the browser. Only document types
-  (HTML, SVG, text, CSV, PDF, GPX, KML and similar), no web addresses,
-  at most 5 per run; a file the macro didn't write itself is shown to
-  you first. Contributed by nagisml.
-- **Import GPX and Pocket Query files from a macro (#937)** —
-  `opensak.import_gpx()` loads GPX files and PQ zips without any
-  questions, alongside `import_gsak()` from beta.6. Contributed by
-  nagisml.
-- **Macros can copy, move and delete files** — and create and delete
-  folders, through the same folder approval as other macro writes.
-  Links are refused, only empty folders can be deleted, and never a
-  drive or a folder from *Settings → Folder permissions*. Contributed by
-  nagisml.
-- **More GSAK-style macro functions** — centre points (`center()`,
-  `centers()`, `set_center()`, like GSAK's Centre), cache and waypoint
-  type lookups (GSAK's CacheType / ChildType), GC code ↔ number
-  (GsCodeToNum / NumToGsCode), and upper/lower case for all letters, not
-  only ASCII (#1015). The GSAK comparison in the macro docs is updated.
-  Contributed by nagisml.
-
-### For developers
-
-- **i18n guard tests (#1134)** — three new tests in `test_languages.py`
-  keep #1127 from slowly coming undone: no æ/ø/å in string literals
-  outside `lang/`, text passed to text-setting Qt calls (`setText`,
-  `QMessageBox.*`, `QLabel(...)`, …) must come from `tr()`, and every
-  `tr("key")` must exist in `en.py`. A legitimate untranslated literal
-  (a product name, a format sample) is marked inline with
-  `# i18n: ignore — <reason>`.
-- **Dialog height policy is complete (#816)** — `KNOWN_UNPROTECTED` in
-  `test_dialog_height_policy.py` is now empty, and a test keeps it that
-  way.
-- **Compass fallback** — `test_e2e_tools.py` failed when run on its own:
-  without a loaded language the compass translation gave one point
-  instead of eight. The compass now falls back to the English points,
-  and a new test checks that every language file has exactly eight.
-
----
-
-## [1.22.0-beta.6] — 2026-10-20
-
-> Headline: **draw a line, polygon or points on the map and filter by
-> it**, and the GPX import now **remembers its settings and imports
-> whole folders**. Beta testers get a **macro manager** and macros that
-> can **read files, list folders, import from GSAK and build HTML
-> reports with statistics**.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Draw a shape on the map to filter by it (#1089)** — the ✎ button in
-  the map controls (and the right-click menu) draws a polygon, line or
-  set of points; *Filter by this shape…* opens Set filter on the
-  Line/Polygon tab with the shape filled in, keeping the rest of the
-  active filter. The Line/Polygon tab also has *Draw on map…*. The
-  active filter's shape is shown on the map as a dashed outline, and
-  *Edit filter shape* loads it again for changes. Contributed by nagisml.
-- **GPX import remembers its settings and imports folders (#1110)** —
-  the GPX / Pocket Query import dialog has an *Import settings* box like
-  the export dialog: save the target database and file list under a
-  name, load it again, and the last import's settings come back when
-  the dialog opens. *Add folder…* (or dropping a folder on the main
-  window) imports every GPX and ZIP file directly in that folder; the
-  folder is read when the import starts, so a saved setting picks up
-  new files each time. Contributed by nagisml.
-- **How long have you used OpenSAK? (#1050)** — *Help → About* now
-  shows "Using OpenSAK since … — day N", like GSAK. Existing users are
-  counted from their oldest cache import. Thanks to CheminerWill for the
-  idea.
-
-### Changed
-
-- **Backup folder inside OpenSAK's folders (#1032)** — a backup folder
-  inside OpenSAK's data or database folder is now allowed after a
-  warning instead of refused: backups there survive a normal uninstall,
-  but are deleted if you choose to remove all OpenSAK data. You choose
-  *Use this folder* or *Choose another*, and are asked once per folder.
-  The data and database folders themselves, and the folders OpenSAK
-  copies into every backup, are still refused. When *Remove program and
-  all data* would delete your backup folder, its confirmation now says
-  so. Thanks to C3GPS and CheminerWill for the feedback.
-- **The Settings window remembers its size (#1030)** — size, position
-  and maximized state are restored the next time it opens. If the screen
-  it was on is no longer connected (a laptop off its external monitor),
-  it opens at the remembered size, made to fit, in the usual place.
-  Thanks to C3GPS, CheminerWill and GeePa67.
-
-### Fixed
-
-- **"Copy Caches" said "move" (#1107)** — the Copy Caches dialog asked
-  "Which caches to move", and its empty-selection and error messages
-  also said move. They now say copy. Thanks to ianwok for the report.
-- **Browse opens in the right folder (#1032)** — when the folder in the
-  box didn't exist yet (for example the default backup folder before the
-  first backup), Browse opened an unrelated folder, especially on
-  Windows. It now opens the nearest existing parent folder.
-- **About linked to the old repository** — *Help → About* still pointed
-  to `github.com/AgreeDK/opensak`; it now links to
-  `github.com/OpenSAK-Org/OpenSAK`.
-
-### In beta builds only
-
-- **Macro manager (#938)** — **Macros → Macro manager…** lists the
-  macros in your macros folder with name, description, version, author
-  and required API version, read from a short header at the top of each
-  macro (like GSAK's MacHeader). Run, edit, search, and give a macro a
-  keyboard shortcut that runs it from the main window. Contributed by
-  nagisml.
-- **Macros can read files and list folders (#1113, #1102)** —
-  `opensak.read_text()` reads a text file (UTF-8, or the Windows code
-  page older GSAK files often use), `file_exists()` / `folder_exists()`
-  check for a file or folder, and `list_dir()` lists a folder, e.g. all
-  `*.gpx` files in it. `opensak.write_text()` writes `.txt`, `.csv`,
-  `.html`, `.json` and similar files. As with other file access, you
-  approve each folder first. Contributed by nagisml.
-- **HTML reports and statistics in macros (#1114, #1116)** —
-  `opensak.html.*` turns query results into escaped HTML tables, key
-  figure tiles and a complete light/dark page (GSAK's SqlToHtml), and
-  `opensak.stats.*` groups, counts, pivots and finds streaks in rows,
-  with `html.matrix()` to show a pivot as a shaded table. All
-  calculations stay on your computer. Contributed by nagisml.
-- **GSAK import from a macro (#937)** — `opensak.import_gsak()` imports
-  a GSAK backup, folder or database without any questions and returns a
-  report, with options for which databases, where they go and what
-  happens to existing ones. New example macro *import_gsak_appdata*.
-  Contributed by nagisml.
-- **Save and restore the filter (#1115)** — `opensak.save_filter()` and
-  `restore_filter()`, like GSAK's SaveFilter/RestoreFilter, so a macro
-  can put your filter back the way it found it. Contributed by nagisml.
-- **Example macro "Refile by country" (#808)** — sorts the caches of the
-  active database into one database per country or state, shows the
-  plan first and has a dry-run option. Contributed by nagisml.
-- **Safer macro exports (#1101)** — every file a macro exports now goes
-  through the same checks as other macro writes: hard-linked files are
-  refused, the check is repeated just before the file is replaced, and
-  the file is replaced in one step. Macro writes are also always refused
-  in autostart locations. Contributed by nagisml.
-
-### For developers
-
-- **Regression test for clipped button labels (#928)** — the dialogs
-  fixed in #927 are built in every language, and each text button must
-  be at least as wide as its label needs; a second check scans the GUI
-  source for hardcoded widths on text buttons. On the Windows CI runner
-  the column dialog's Save button is narrower than its label in de,
-  de_CH and fr; those three cases are marked as a known failure on
-  Windows while it is looked into.
-- **CI pinned to Ubuntu 24.04 (#1108)** — GitHub is moving
-  `ubuntu-latest` to Ubuntu 26.04 gradually until 19 November, so the
-  test, type-check and screenshot jobs now run on `ubuntu-24.04` until
-  26.04 has been checked.
-- **A timing test no longer fails on slow runners** —
-  `test_cancel_interrupts_sleep` could lose its single cancel on a slow
-  Windows runner; it now keeps cancelling until the run ends.
-
----
-
-## [1.22.0-beta.5] — 2026-10-19
-
-> Headline: **big exports no longer run out of memory**, and OpenSAK now
-> **catches crashes and offers to report them**. Beta testers get Lua
-> macros that can **change, delete and join** cache data.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
-- **Crash reports (#1077)** — an unexpected error no longer disappears
-  silently: OpenSAK shows an "OpenSAK ran into a problem" dialog where
-  you can continue or quit, and it notices at the next start when the
-  previous session crashed. The dialog shows the exact report text, with
-  your home folder, user name, e-mail addresses and tokens removed, and
-  can open a prefilled GitHub issue or e-mail, copy the report or open
-  the log folder. **Nothing is sent automatically.** The privacy policy
-  has a new section on logs and crash reports. Contributed by nagisml.
-
-### Changed
-
-- **GSAK import: filters and user locations are opt-in (#1090)** — when
-  a GSAK backup also holds cache databases, the checkboxes for GSAK's
-  saved filters and user locations now start unticked, so refreshing your GSAK
-  databases doesn't re-import those settings every time. Picking
-  `gsak.db3` on its own still starts with both ticked. Thanks to Allyn56
-  for the suggestion.
-
-### Fixed
-
-- **Large exports no longer run out of memory (#1075)** — GPX, LOC and
-  GGZ exports (file, GPS device and POI) now write one cache at a time
-  instead of building the whole file in memory, so 100,000+ caches
-  export fine. A failed export also keeps the existing file instead of
-  leaving a truncated one. Contributed by nagisml.
-- **Why can't I delete this database? (#1082)** — *Delete permanently…*
-  is disabled for the active database, but the red button still looked
-  clickable. It now greys out properly and a tooltip says to switch to
-  another database first. Contributed by nagisml.
-- **Small hardening (#1094)** — the map's button tooltips can no longer
-  be broken by a translation containing quotes or backslashes, and
-  database migration messages now go to the log file instead of being
-  lost in windowed builds.
-
-### In beta builds only
-
-- **Macros can change caches (#1080, #1034)** — new write functions
-  `opensak.update()`, `insert()`, `insert_<x>()` / `update_<x>()` for
-  logs, waypoints, attributes and trackables, `sql_write()` for bulk
-  work, and `opensak.transaction()` to group changes and undo them on
-  error. Before a macro's first write, OpenSAK asks whether *this macro*
-  may change your databases (Deny / Until OpenSAK closes / Always);
-  approved macros are listed under Settings → Folder permissions.
-  `opensak.macro_db()` gives each macro its own database for working
-  data, which is included in backups. Behind the separate
-  `lua-macro-write` flag. Contributed by nagisml.
-- **Macros can delete (#1083, #1035)** — `opensak.delete()` removes
-  caches with all their logs, waypoints, attributes, trackables and
-  notes; `delete_log/waypoint/attribute/trackable()` remove single rows.
-  Deletes take part in transactions. Contributed by nagisml.
-- **Join several databases in one query (#1084, #1074)** —
-  `opensak.attach()` attaches another OpenSAK database read-only, so one
-  SQL statement can combine it with the active database — a controlled
-  replacement for GSAK's SQL ATTACH. Contributed by nagisml.
-
-### For developers
-
-- **Demo database generator (#1088)** — `tools/demo_db/make_demo_db.py`
-  builds a reproducible, fully made-up OpenSAK database for trying
-  macros and filters, taking screenshots and reproducing bugs without
-  sharing real data. Contributed by nagisml.
-
----
-
-## [1.22.0-beta.4] — 2026-10-16
-
-> Headline: **macros can talk to you** — beta testers get dialogs, forms
-> and progress bars for Lua macros, plus a **form designer** that can
-> also convert GSAK macro forms. For everyone: the GSAK import now has
-> **one menu entry** for databases, filters and user locations.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Changed
-
-- **GSAK import: one menu entry (#1067)** — *File → Import GSAK
-  Filters…* is gone; *File → Import from GSAK Database* already offers
-  your saved filters and user locations, and its dialog now explains what
-  a backup (.zip), a single database file (sqlite.db3) and `gsak.db3` on
-  its own each import. Contributed by nagisml.
-
-### Fixed
-
-- **Database update summary fits on the screen (#1071)** — after *Apply
-  to all databases*, the summary listed every backup file, so with many
-  databases the box grew taller than the screen and OK could not be
-  reached. It now names only the backup folder; the full list is under
-  *Show Details…*. Contributed by nagisml.
-
-### In beta builds only
-
-- **Macro dialogs and forms (#982)** — macros can now ask and tell the
-  user things: `opensak.message()`, `input()`, `choose()` and
-  `choose_folder()` for simple dialogs; `opensak.form{}` for a dialog
-  described as a Lua table, with 16 field types covering GSAK's form
-  controls, an automatic or GSAK-style absolute layout, and callbacks
-  (`on_change`, `on_click`, `validate`, …) that update the form while it
-  stays open; `opensak.progress()` for long loops with a Cancel button;
-  and `opensak.select()` / `opensak.refresh()` to show results in the
-  cache list while the macro runs. `remember = true` keeps a form's last
-  values (never passwords). New example macros *find_with_form*,
-  *export_with_form* and *corrected_coords_form*. Contributed by nagisml.
-- **Form designer (#982)** — **Tools → Form designer…** in the macro
-  window edits the `opensak.form{}` at the cursor, or inserts a new one,
-  on a GSAK-like canvas: add, drag and resize fields, align and size
-  tools, grid and snap, tab order, undo/redo and preview. It reads and
-  writes the Lua table without running the macro, and keeps callbacks as
-  written. GSAK forms can be pasted in or imported from a `.gsk` file,
-  with notes on what was changed. Contributed by nagisml.
-- **Clearer macro errors** — an error in any `opensak` function is now
-  reported at the macro line that called it (`macro.lua:12: …`).
-  Contributed by nagisml.
-
----
-
-## [1.22.0-beta.3] — 2026-10-15
-
-> Headline: a **database update** — the first start after upgrading
-> updates each database to schema 26 and then compacts it. Beta testers
-> can also now write macros in **Notepad++ or UltraEdit** with
-> auto-completion for the OpenSAK functions.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Changed
-
-- **Database update to schema 26 (#1033)** — required columns now also
-  have their default value stored in the database itself, not only in
-  OpenSAK's code, so a plain SQL `INSERT` only needs the real data. The
-  update rebuilds the main tables in one transaction (a failure leaves
-  the old schema untouched) and then compacts the database to give the
-  space back. On a large database this takes up to a minute; the splash
-  screen and **Apply to all databases** show what is happening. While it
-  runs, the database temporarily needs about 2½ times its size in free
-  disk space. As always, a backup copy is taken before the update.
-  Contributed by nagisml.
-
-### In beta builds only
-
-- **Macro editor support for Notepad++ and UltraEdit** — next to the
-  VS Code / Lua Language Server stub, OpenSAK now writes a Notepad++
-  auto-completion file and an UltraEdit wordfile for the macro API and
-  the standard Lua functions into `<macros>/types/` on every start.
-  Contributed by nagisml.
-
-### For developers
-
-- **Stable e2e tests** — the macro-server tests now delete their Qt
-  objects on the GUI thread, which fixes a rare `Fatal Python error:
-  Aborted` crash in full e2e runs. Contributed by nagisml.
-- **Tip:** use `xvfb-run -a` when running the e2e suite several times in a
-  row; without `-a`, the next run can fail with "Xvfb failed to start"
-  because the previous server still holds display `:99`.
-
----
-
-## [1.22.0-beta.2] — 2026-10-15
-
-> Headline: **export Garmin POI files (GPI)** straight from OpenSAK, and
-> the **Coordinate Converter now reads and writes eleven more formats** —
-> UTM, MGRS, the Swiss, Dutch, British, Swedish and German grids, Plus
-> Codes, Geohash and Maidenhead. Beta testers also get a big step for
-> macros: run them from your own editor, chain them, and let them remember
-> their settings.
->
-> The new texts are machine-translated in all languages except Danish and
-> English — corrections from native speakers are very welcome.
-
-### Added
-
+- **Backups include your macros (#1137)** — your own macros, their settings
+  and their databases go into every backup, and **Restore from backup…**
+  can bring them back, letting you choose which changed files to replace.
 - **Export Garmin POI files (#455)** — **File → Export Garmin POI (GPI)…**
-  writes a `.gpi` file you copy to the `Garmin/POI` folder of your GPS,
-  modelled on GSAK's Garmin POI dialog. Export caches, child waypoints or
-  both (all, flagged or unflagged), with templates for name, description
-  and extra text using `{variables}`, a category, a proximity alert, your
-  own BMP/PNG icon, a maximum number of points, and optionally one file
-  per waypoint type. Settings can be saved under a name, like the file
-  export. Contributed by nagisml.
-- **Coordinate Converter: grid and code formats** — besides the latitude/
-  longitude formats, the converter now shows UTM, MGRS, Swiss CH1903 and
-  CH1903+/LV95, Dutch RD, British National Grid (OSGB), SWEREF 99 TM,
-  German Gauss-Krüger, Plus Code (Open Location Code), Geohash and
-  Maidenhead, and reads all of them as input too. The input format is
-  detected automatically and shown; a national grid stays blank for
-  positions outside its country. Contributed by nagisml.
-
-### In beta builds only
-
-- **Run a macro from your own editor (#1013)** — `opensak --run-macro
-  path/to/macro.lua` sends a macro to the OpenSAK that is already open and
-  waits for it, so you can write macros in VS Code, Notepad++, UltraEdit
-  or IntelliJ and run them with a key there. Output and errors (with file
-  and line) appear in the editor. See `docs/macros/run-from-editor.md`.
-  Only one macro runs at a time. Contributed by nagisml.
-- **Macros remember their settings (#983)** — `opensak.settings.load()`,
-  `save()` and `clear()` keep a macro's options until the next run, like
-  GSAK's MacSettings. Each macro has its own settings, which other macros
-  can't read. New example macro *new_since_last_run*. Contributed by
-  nagisml.
-- **Macros can start other macros (#1039)** — `opensak.run_macro()` runs
-  another macro and waits for it, like GSAK's MACRO command. Each macro
-  keeps its own variables and settings; values are passed as arguments
-  and return values. Contributed by nagisml.
-- **More macro functions** — `opensak.exit()` and `opensak.log()`;
-  `opensak.export_poi()` for the new POI export; and the coordinate
-  functions accept and produce every format of the Coordinate Converter.
-  Errors now name the macro line they came from. The macro API is now
-  **version 3** (`opensak.api_version()`). Contributed by nagisml.
-- **Simpler example macros** — the examples no longer check the API
-  version first. Contributed by nagisml.
-
-### For developers
-
-- **Macro API docs are generated in CI (#1057)** — feature branches no
-  longer commit `docs/macros/api.md` or `macros/types/`; after a merge to
-  `beta`, the *Macro API docs* workflow regenerates them and opens one
-  rolling PR. `python scripts/generate_macro_api_docs.py --check` tells you
-  whether they are current. Contributed by nagisml.
-
----
-
-## [1.22.0-beta.1] — 2026-10-14
-
-> First beta of the 1.22.0 cycle. Headline: **bring your GSAK user
-> locations along** when you import from GSAK, and the **macro editor
-> notices when a macro is changed in another editor**.
-
-### Added
-
-- **GSAK import: user locations (#1001)** — when a GSAK backup contains
-  `gsak.db3`, the import offers **Also import the GSAK user locations**.
-  A preview lists every location with its status; invalid lines (missing
-  name, unreadable coordinates, duplicates) are shown with the reason and
-  skipped, and for names you already have you choose Overwrite or Skip.
-  Coordinates with decimal commas are understood. Any spelling of "Home"
-  is treated as OpenSAK's own ★ Home and not imported twice. Contributed by
-  nagisml.
+  writes a `.gpi` file for the `Garmin/POI` folder of your GPS, modelled on
+  GSAK's dialog, with templates, categories, proximity alerts and your own
+  icon. Contributed by nagisml.
+- **Coordinate Converter: eleven more formats** — UTM, MGRS, the Swiss,
+  Dutch, British, Swedish and German grids, Plus Codes, Geohash and
+  Maidenhead, both as input and output. Contributed by nagisml.
+- **Draw a shape on the map to filter by it (#1089)** — draw a polygon,
+  line or points on the map and filter the caches inside or near it.
+  Contributed by nagisml.
+- **GPX import remembers its settings and imports folders (#1110)** — save
+  the target database and file list under a name, and import every GPX and
+  ZIP file in a folder. Contributed by nagisml.
+- **Auto-fit column widths (#1212)** — **View → Auto-fit column widths**
+  (Ctrl+Alt+W) sizes the cache list's columns to their contents.
+  Contributed by nagisml.
+- **Crash reports (#1077)** — an unexpected error now shows an "OpenSAK ran
+  into a problem" dialog with a report you can copy or send as a GitHub
+  issue or e-mail, with personal details removed. **Nothing is sent
+  automatically.** Contributed by nagisml.
+- **How long have you used OpenSAK? (#1050, #1130)** — *Help → About* and
+  the splash screen show "Using OpenSAK since … — day N", like GSAK.
+  Suggested by CheminerWill.
 
 ### Changed
 
-- **Centre-location lists are sorted** — the centre-location drop-downs in
-  the toolbar and the filter's centre-point picker list ★ Home first, then
-  your locations A–Z, ignoring case and accents.
+- **Faster filters and map on large databases (#1048)** — OpenSAK now keeps
+  SQLite's query statistics up to date by itself; on a 1.4 GB database the
+  map query went from 0.5 s to 0.04 s. Contributed by nagisml.
+- **GSAK import: one menu entry (#1067, #1090)** — *File → Import GSAK
+  Filters…* is gone; *File → Import from GSAK Database* offers filters,
+  user locations and views, and when a backup also holds cache databases
+  these start unticked, so refreshing your databases doesn't re-import them
+  every time. Suggested by Allyn56.
+- **Your language everywhere (#1127)** — the splash screen, compass
+  directions, import errors, the login page and more no longer show Danish
+  or English whatever language you chose. The log file is in English, so a
+  log attached to a bug report can be read by everyone.
+- **Settings window remembers its size (#1030)**, more of your user
+  locations are visible before the list scrolls (#1146), and centre-location
+  lists are sorted with ★ Home first.
+- **Backup folder inside OpenSAK's folders (#1032)** is now allowed after a
+  warning instead of refused. Thanks to C3GPS and CheminerWill.
+- **"Map app" is now "External map viewer" (#1143)**, with a note that the
+  built-in map always uses OpenStreetMap.
+- **Update Found from reference database is lighter (#1095)** — it no
+  longer loads every cache into memory.
+- **The Microsoft Store lists all 11 languages.**
+
+### Fixed
+
+- **Large exports no longer run out of memory (#1075)** — GPX, LOC and GGZ
+  exports of 100,000+ caches work, and a failed export keeps the old file.
+- **Found dates survive a round trip to GSAK (#1145)** — GPX export now
+  writes your found date the way GSAK reads it. Reported by McMellow.
+- **Logs doubled after a GPX import into a GSAK-imported database (#1255)**
+  — and logs already doubled are merged back on the next import. Reported
+  by lignumaqua.
+- **OpenSAK closed when Escape was pressed during an import or export
+  (#1265)** — such dialogs now stay open until the work is done.
+- **Settings OK froze on large databases (#1148)** — distances are only
+  recalculated when the centre point or distance method changed.
+- **Dialogs no longer run off small, high-DPI screens (#816).**
+- **Column views (#1144, #1222)** — a view picked in *Choose Columns* now
+  comes back with its own order and widths, and the view you picked stays
+  selected when several views are identical. Reported by dstein766.
+- **Toolbar quick filters (#1242)** — *Not found* no longer lists your own
+  caches, ✕ and *None* reset every filter, and saved profiles combine with
+  the GC code, Name and Where boxes.
+- **Deleted database still in the database list (#1232).** Reported by
+  ianwok.
+- **Boundary data updates bring new and changed state packs (#1226)**, so
+  states no longer come out blank or wrongly named after an update.
+- **Long GC code lists failed with "too many SQL variables" (#1254).**
+- **Sorting on the Lat/Lon columns (#1201)** showed an error, and the sort
+  was not remembered. Reported by ianwok.
+- **Crash when switching to a database showing the Hints or Notes column
+  (#1264).**
+- **Locations after a GPX import into another database (#937)** were filled
+  in for the open database instead.
+- **"Enable online lookup" removed from Settings (#1208)** — the option no
+  longer did anything.
+- **Small fixes:** "Copy Caches" said "move" (#1107); Browse opened an
+  unrelated folder (#1032); *Help → About* linked to the old repository;
+  *Delete permanently…* looked clickable for the active database (#1082);
+  the database update summary could be taller than the screen (#1071);
+  renaming a database showed `{error}` (#1147); "Download & Install" lost
+  its "&" (#1218); the map's tooltips and migration messages were hardened
+  (#1094); Swedish translations by hansblom (#1171).
+
+### Before you upgrade
+
+- **Your databases are backed up first.** The first time 1.22.0 opens each
+  database, it saves an untouched copy (`<name>.pre-migration-schema25.db`,
+  in the *pre-migration* folder of your backup folder, or next to the
+  database if you haven't chosen one) and then updates
+  the database. The update rebuilds the main tables in one transaction and
+  compacts the database: on a large database this takes up to a minute,
+  and it temporarily needs about 2½ times the database's size in free disk
+  space. **Apply to all databases** updates the rest of your list in one go.
+- **The first open can take a few seconds more** on a very large database
+  (tens of GB) while OpenSAK builds its query statistics. It is a one-off.
+- **Going back to 1.21.0.** To go back to exactly how a database was before
+  the upgrade, use its pre-migration copy.
 
 ### In beta builds only
 
-- **Macro editor: changes made in another editor (#1014)** — when the open
-  macro is changed on disk, the editor reloads it if you have no unsaved
-  edits, or asks **Reload / Keep mine** if you do. A deleted or renamed file
-  can be saved again, and Save and Run never silently overwrite a newer
-  file on disk. Contributed by nagisml.
+- **Macros contacting web sites (#1079)** — `opensak.get_url()` stays in
+  beta builds for one more cycle. The macro API reference and the User
+  Guide mark it as beta.
+
+### For developers
+
+- **Macro API baseline (#1185, #1202)** — `tests/fixtures/macro_api_baseline.json`
+  and the database-table registry keep API 4 from changing by accident;
+  every example macro runs in CI, with the stable and the beta feature
+  flags. `newest_stable_api()` and `beta_only_names()` support the
+  OpenSAK-Macros checks.
+- **Upgrade-path tests for 1.21.0 → 1.22.0 (#1193)**, including a backup
+  set made by 1.21.0.
+- **Release builds check the tag (#1168)** with
+  `scripts/bump_version.py --check-tag`.
+- **i18n guard tests (#1134)** and a complete dialog-height policy (#816).
+- **Demo database generator (#1088)** — `tools/demo_db/make_demo_db.py`.
+- **Danish code comments translated to English** (#1249, by Jahnavi-HJ).
+
+Thanks to **nagisml** for the macro system, custom fields, the command-line
+import, database maintenance and most of this release; to **GeePa67**,
+**ianwok**, **lignumaqua**, **CheminerWill**, **Allyn56**, **C3GPS**,
+**dstein766**, **McMellow** and **hansblom** for reports, suggestions and
+translations; to **Jahnavi-HJ** for a first contribution; and to everyone
+who tested the betas.
 
 ---
 

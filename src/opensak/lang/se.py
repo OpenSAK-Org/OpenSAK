@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Inställningar…",
     "action_found_update":          "⟳  Uppdatera hittade från referensdatabasen…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Kör makro (Lua)…",
     "action_find_more_macros":      "Hitta fler makron…",
-    "macro_title":                  "Makro (Lua) — konceptbevis",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Öppna…",
     "macro_btn_run":                "▶  Kör",
     "macro_open_title":             "Öppna Lua-makro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Öppna loggfil",
     "action_open_previous_log_file": "Öppna logg från senaste omstart",
     "action_support_opensak": "♥  Stöd OpenSAK…",
+    "menu_community":              "Gemenskap",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forumet",
+    "action_community_new_issue":  "Rapportera ett fel eller föreslå en funktion",
     "log_file_not_found": "Loggfilen hittades inte än: {path}",
 
     # ── Tangentbordsgenvägar-dialog ───────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Överhoppade:",
     "import_errors_header":         "Fel ({count}):",
+    "import_errors_more":           "… och {count} till (se loggfilen)",
     "import_failed":                "✗ Import felade:",
     "import_again":                 "Importera igen",
     "import_target_db_label":                    "Importera till databas:",
@@ -812,6 +818,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Tillämpar uppdatering…",
     "boundary_check_done":          "✓ Uppdatering tillämpad — {count} fil(er) uppdaterade.",
     "boundary_check_failed":        "Uppdateringskontroll misslyckades — ingen nätverksanslutning.",
+    "boundary_apply_failed":        "Uppdateringen kunde inte tillämpas — alla filer kunde inte laddas ner. Inget har ändrats; försök igen senare.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny databas",
@@ -2113,7 +2120,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Exporterad från OpenSAK — {count} cache(r)",
     "import_err_db": "Databasfel för {gc_code} i {source}: {error}",
-    "import_err_parse": "Läsfel i {file}: {error}",
+    "import_err_parse": "Läsfel i {file}, rad {line}, {code}: {error}",
     "import_err_fatal_parse": "Allvarligt läsfel i {file}: {error}",
     "import_err_waypoints": "Fel i waypointfil ({file}): {error}",
     "import_err_fatal": "Allvarligt fel vid import av {file}: {error}",

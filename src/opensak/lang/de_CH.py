@@ -93,10 +93,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Einstellungen…",
     "action_found_update":          "⟳  Funde aus Referenz-Datenbank aktualisieren",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Makro ausführen (Lua)…",
     "action_find_more_macros":      "Weitere Makros finden…",
-    "macro_title":                  "Makro (Lua) — Proof of Concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Öffnen…",
     "macro_btn_run":                "▶  Ausführen",
     "macro_open_title":             "Lua-Makro öffnen",
@@ -321,6 +321,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Protokolldatei öffnen",
     "action_open_previous_log_file": "Protokoll vom letzten Neustart öffnen",
     "action_support_opensak": "♥  OpenSAK unterstützen…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK auf Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK im GSAK-Forum",
+    "action_community_new_issue":  "Fehler melden oder Funktion vorschlagen",
     "log_file_not_found": "Protokolldatei noch nicht gefunden: {path}",
 
     # ── Tastaturkürzel-Dialog ─────────────────────────────────────────────────
@@ -410,6 +415,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Wegpunkte:",
     "import_skipped":               "Übersprungen:",
     "import_errors_header":         "Fehler ({count}):",
+    "import_errors_more":           "… und {count} weitere (siehe Protokolldatei)",
     "import_failed":                "✗ Import fehlgeschlagen:",
     "import_again":                 "Import wiederholen",
     "import_target_db_label":                    "In Datenbank importieren:",
@@ -814,6 +820,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Aktualisierung wird angewendet…",
     "boundary_check_done":          "✓ Aktualisierung angewendet — {count} Datei(en) aktualisiert.",
     "boundary_check_failed":        "Aktualisierungsprüfung fehlgeschlagen — keine Netzwerkverbindung.",
+    "boundary_apply_failed":        "Das Update konnte nicht angewendet werden — nicht alle Dateien konnten heruntergeladen werden. Es wurde nichts geändert; bitte später nochmals versuchen.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Neue Datenbank",
@@ -2115,7 +2122,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Exportiert aus OpenSAK — {count} Cache(s)",
     "import_err_db": "Datenbankfehler bei {gc_code} in {source}: {error}",
-    "import_err_parse": "Fehler beim Lesen von {file}: {error}",
+    "import_err_parse": "Fehler beim Lesen von {file}, Zeile {line}, {code}: {error}",
     "import_err_fatal_parse": "Schwerer Fehler beim Lesen von {file}: {error}",
     "import_err_waypoints": "Fehler in der Wegpunktdatei ({file}): {error}",
     "import_err_fatal": "Schwerer Fehler beim Import von {file}: {error}",

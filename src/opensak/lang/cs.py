@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Nastavení…",
     "action_found_update":          "⟳  Aktualizovat nálezy z referenční databáze…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Spustit makro (Lua)…",
     "action_find_more_macros":      "Najít další makra…",
-    "macro_title":                  "Makro (Lua) — ověření konceptu",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otevřít…",
     "macro_btn_run":                "▶  Spustit",
     "macro_open_title":             "Otevřít makro Lua",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Otevřít soubor protokolu",
     "action_open_previous_log_file": "Otevřít protokol z posledního spuštění",
     "action_support_opensak": "♥  Podpořit OpenSAK…",
+    "menu_community":              "Komunita",
+    "action_community_facebook":   "OpenSAK na Facebooku",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK na fóru GSAK",
+    "action_community_new_issue":  "Nahlásit chybu nebo navrhnout funkci",
     "log_file_not_found": "Soubor protokolu ještě nebyl nalezen: {path}",
 
     # ── Klávesové zkratky dialog ──────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Trasové body:",
     "import_skipped":               "Přeskočené:",
     "import_errors_header":         "Chyby ({count}):",
+    "import_errors_more":           "… a dalších {count} (viz soubor protokolu)",
     "import_failed":                "✗ Import selhal:",
     "import_again":                 "Importovat znovu",
     "import_target_db_label":                    "Importovat do databáze:",
@@ -812,6 +818,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "Aktualizaci nelze použít — nepodařilo se stáhnout všechny soubory. Nic nebylo změněno; zkuste to později znovu.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nová databáze",
@@ -2109,7 +2116,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID atributu: {id}",
     "kml_export_description": "Exportováno z OpenSAK — počet keší: {count}",
     "import_err_db": "Chyba databáze u {gc_code} v {source}: {error}",
-    "import_err_parse": "Chyba při čtení {file}: {error}",
+    "import_err_parse": "Chyba při čtení {file}, řádek {line}, {code}: {error}",
     "import_err_fatal_parse": "Závažná chyba při čtení {file}: {error}",
     "import_err_waypoints": "Chyba v souboru waypointů ({file}): {error}",
     "import_err_fatal": "Závažná chyba při importu {file}: {error}",
