@@ -39,6 +39,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   map remembers your choice. The same button is on the split-screen map
   and the popped-out map. Contributed by nagisml.
 
+### Changed
+
+- **Disabled and archived caches keep their type icon (#594)** — in the
+  cache list every disabled or archived cache showed the same grey box,
+  so you couldn't tell a Multi from a Mystery. They now show their own
+  type icon, in grey for a disabled cache and grey and faded for an
+  archived one. Requested in the OpenSAK Facebook group.
+
 ### Fixed
 
 - **No long waits without a network connection (#1111)** — once a

@@ -32,6 +32,8 @@ from opensak.utils.utils import normalize_geocacher_name
 from opensak.utils.constants import FOUND_LOG_TYPES
 from opensak.utils.timestamps import utc_to_local
 from opensak.gui.icon_provider import (
+    STATUS_ARCHIVED,
+    STATUS_DISABLED,
     get_cache_type_icon,
     get_flag_icon,
     get_flag_placeholder_icon,
@@ -1067,11 +1069,11 @@ class CacheTableModel(QAbstractTableModel):
 
     @staticmethod
     def _type_icon_key(cache: Cache) -> str:
-        """Map a Cache object to an icon_provider key (cache type only, ikke status)."""
-        if cache.archived:
-            return "archived"
-        if not cache.available:
-            return "disabled"
+        """Map a Cache object to an icon_provider key (cache type only, ikke status).
+
+        Issue #594: disabled and archived caches keep their type here; the
+        status is shown by _type_icon_status() (a greyed icon) instead of
+        one generic icon for every type."""
         t = (cache.cache_type or "").lower()
         mapping = {
             "traditional cache":            "traditional",
@@ -1108,13 +1110,25 @@ class CacheTableModel(QAbstractTableModel):
         }
         return mapping.get(t, "unknown")
 
+    @staticmethod
+    def _type_icon_status(cache: Cache) -> str | None:
+        """Issue #594: how the type icon is drawn — archived wins over disabled."""
+        if cache.archived:
+            return STATUS_ARCHIVED
+        if not cache.available:
+            return STATUS_DISABLED
+        return None
+
     def _decoration_value(self, cache: Cache, col: str):
         """Return QIcon for columns that show icons."""
         if col == "cache_type":
             if get_type_display() == "text":
                 return None
             icon_size = TEXT_SIZE_MAP[get_settings().text_size]["grid_icon"]
-            return get_cache_type_icon(self._type_icon_key(cache), size=icon_size)
+            return get_cache_type_icon(
+                self._type_icon_key(cache), size=icon_size,
+                status=self._type_icon_status(cache),
+            )
         if col == "container":
             # "bar" mode: SizeBarDelegate paints the segments; returning an icon
             # here would cause super().paint() to draw it behind the first bar

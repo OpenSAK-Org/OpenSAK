@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
 
-from PySide6.QtGui import QIcon, QPixmap, QPainter
+from PySide6.QtGui import QIcon, QImage, QPixmap, QPainter
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtSvg import QSvgRenderer
 
@@ -562,7 +562,15 @@ def _get_dnf_overlay_svg() -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def get_cache_type_icon(cache_type: str, size: int = 32) -> QIcon:
+# Issue #594: a disabled or archived cache keeps its own type icon, drawn in
+# grey (disabled) or grey and faded (archived), instead of one generic icon.
+STATUS_DISABLED = "disabled"
+STATUS_ARCHIVED = "archived"
+_ARCHIVED_OPACITY = 0.45
+
+
+def get_cache_type_icon(cache_type: str, size: int = 32,
+                        status: str | None = None) -> QIcon:
     """
     Return QIcon for en cache type.
 
@@ -570,10 +578,39 @@ def get_cache_type_icon(cache_type: str, size: int = 32) -> QIcon:
     - En database streng som "Traditional Cache", "Multi-cache" osv.
     - En intern nøgle som "traditional", "multi" osv.
     - En status som "found", "dnf", "disabled", "archived"
+
+    status (#594): STATUS_DISABLED or STATUS_ARCHIVED draws the type icon in
+    grey, archived also faded; None (or anything else) draws it as it is.
     """
     key = _db_type_to_key(cache_type)
+    if status in (STATUS_DISABLED, STATUS_ARCHIVED):
+        return QIcon(_status_pixmap(key, size, status))
     svg = _get_svg_for_key(key)
     return QIcon(_svg_to_pixmap(svg, size))
+
+
+@lru_cache(maxsize=256)
+def _status_pixmap(key: str, size: int, status: str) -> QPixmap:
+    """
+    Issue #594: the type icon for *key* in greyscale, keeping its
+    transparency; for an archived cache also at reduced opacity. Cached like
+    get_map_pin_html(): there are only a few types, sizes and two statuses,
+    and the cache list asks for an icon on every repaint.
+    """
+    source = _svg_to_pixmap(_get_svg_for_key(key), size).toImage()
+    source = source.convertToFormat(QImage.Format.Format_ARGB32)
+    grey = source.convertToFormat(QImage.Format.Format_Grayscale8)
+    grey = grey.convertToFormat(QImage.Format.Format_ARGB32)
+    grey.setAlphaChannel(source.convertToFormat(QImage.Format.Format_Alpha8))
+
+    result = QPixmap(size, size)
+    result.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(result)
+    if status == STATUS_ARCHIVED:
+        painter.setOpacity(_ARCHIVED_OPACITY)
+    painter.drawImage(0, 0, grey)
+    painter.end()
+    return result
 
 
 def get_cache_size_icon(cache_size: str, size: int = 32) -> QIcon:
