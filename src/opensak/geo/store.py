@@ -59,6 +59,12 @@ def ensure_baseline_seeded(data_dir: Path | None = None) -> None:
         _copy_baseline(bundled, data_dir)
         return
 
+    # #1111: no network this session — don't wait for the download to time
+    # out; the next lookup after OFFLINE_RETRY_SECONDS tries again.
+    from opensak import net
+    if net.offline_detected():
+        log.debug("network unreachable — not downloading the boundary baseline now")
+        return
     from opensak.geo import packs
     packs.fetch_baseline(data_dir)
 
@@ -189,7 +195,7 @@ class BoundaryStore:
             raise FileNotFoundError(pack)
         if cached is None:
             path = self.data_dir / _LAYER_DIR[self._layer(layer)] / pack
-            if not path.is_file() and layer == "county":
+            if not path.is_file():
                 # On-demand fetch: county packs are not bundled, downloaded lazily.
                 # This is now mostly a fallback — ReverseGeocodeWorker's
                 # pre-fetch phase (see packs.fetch_packs) already downloads
@@ -197,10 +203,18 @@ class BoundaryStore:
                 # branch normally only fires for a pack the pre-fetch phase
                 # itself failed to get (e.g. it appeared mid-run, or the
                 # pre-fetch phase was skipped/failed and this is the retry).
-                if is_debug_enabled("geo"):
-                    log.debug("fetching county pack: %s", pack)
-                from opensak.geo import packs as _packs
-                _packs.fetch_pack(pack, path.parent)
+                # State and country packs are bundled and updated with
+                # boundaries.db (packs.apply_update), so for them it is only a
+                # fallback for a file that is missing anyway (#1226).
+                # #1111: skipped once a request this session found the
+                # network unreachable, instead of a full DOWNLOAD_TIMEOUT
+                # per missing pack.
+                from opensak import net
+                if not net.offline_detected():
+                    if is_debug_enabled("geo"):
+                        log.debug("fetching %s pack: %s", layer, pack)
+                    from opensak.geo import packs as _packs
+                    _packs.fetch_pack(pack, path.parent)
             if not path.is_file():
                 self._packs[cache_key] = _MISSING
                 raise FileNotFoundError(pack)

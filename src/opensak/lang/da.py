@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Funktioner-menu
     "action_settings":              "&Indstillinger…",
     "action_found_update":          "⟳  Opdater fund fra reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Kør makro (Lua)…",
     "action_find_more_macros":      "Find flere makroer…",
-    "macro_title":                  "Makro (Lua) — proof of concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Åbn…",
     "macro_btn_run":                "▶  Kør",
     "macro_open_title":             "Åbn Lua-makro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Åbn logfil",
     "action_open_previous_log_file": "Åbn log fra forrige genstart",
     "action_support_opensak": "♥  Støt OpenSAK…",
+    "menu_community":              "Fællesskab",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forummet",
+    "action_community_new_issue":  "Rapportér en fejl eller foreslå en funktion",
     "log_file_not_found": "Logfil ikke fundet endnu: {path}",
 
     # ── Tastaturgenveje-dialog ────────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Sprunget over:",
     "import_errors_header":         "Fejl ({count}):",
+    "import_errors_more":           "… og {count} mere (se logfilen)",
     "import_failed":                "✗ Fejl under import:",
     "import_again":                 "Importer igen",
     "import_target_db_label":                    "Importer til database:",
@@ -610,6 +616,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Radius for split-screen-kort:",
     "settings_map_nearby_max_caches_label": "Cache-grænse for split-screen-kort:",
     "settings_map_nearby_note":          "Styrer det individuelle cache-kort vist i split screen — viser caches inden for denne radius af den valgte cache, uafhængigt af oversigtskortets grænse ovenfor. En cirkel tegnes på kortet ved denne radius; hvis cache-grænsen nås inden for den, vises en label med hvor mange der er skjult. Gemmes per database.",
+    "settings_map_tile_cache_label":    "Kortfliser-cache:",
+    "settings_map_tile_cache_off":      "Fra",
+    "settings_map_tile_cache_clear":    "Ryd cache",
+    "settings_map_tile_cache_cleared":  "Kortfliser-cachen blev ryddet ({size} MB).",
+    "settings_map_tile_cache_note":     "Kortfliser, du har set, gemmes på denne computer, så kortbaggrunden også vises uden internetforbindelse — i omkring en uge efter, du sidst så området online. Træder i kraft efter genstart.",
     "map_disabled_placeholder":         "Kort deaktiveret\n\nSlå det til igen under Indstillinger → Kort.",
     "settings_group_language":      "Sprog / Language",
     "settings_language_label":      "Sprog:",
@@ -818,6 +829,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Anvender opdatering…",
     "boundary_check_done":          "✓ Opdatering anvendt — {count} fil(er) opdateret.",
     "boundary_check_failed":        "Opdateringstjek mislykkedes — ingen netværksforbindelse.",
+    "boundary_apply_failed":        "Opdateringen kunne ikke anvendes — ikke alle filer kunne hentes. Intet er ændret; prøv igen senere.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny database",
@@ -926,6 +938,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Spørg om der skal tages backup",
     "settings_backup_on_exit_always": "Tag altid backup",
     "settings_backup_on_exit_never": "Tag aldrig backup",
+    "settings_backup_on_exit_every_days": "Tag automatisk backup med nogle dages mellemrum",
+    "settings_backup_every_days_label": "Dage mellem automatiske backups:",
     "settings_backup_keep_auto_label": "Automatiske backups der gemmes:",
     "settings_backup_compress_label": "Komprimér backups (mindre, men langsommere)",
     "settings_backup_compress_hint": "En komprimeret backup er én zip-fil og fylder typisk omkring en tredjedel, men store backups tager mærkbart længere tid. Gælder nye backups; eksisterende bliver som de er.",
@@ -1527,6 +1541,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Sæt korrigerede koordinater",
     "map_ctx_corrected_set":        "✓ {gc_code} — korrigerede koordinater sat: {coords}",
     "map_draw_tooltip":             "Tegn en form til linje/polygon-filteret",
+    "map_tiles_offline":            "Offline – kortfliser er ikke tilgængelige",
     "map_clustering_tooltip":       "Klynger til/fra",
     "map_draw_polygon":             "Tegn polygon",
     "map_draw_line":                "Tegn linje",
@@ -2120,7 +2135,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Eksporteret fra OpenSAK — {count} cache(s)",
     "import_err_db": "Databasefejl for {gc_code} i {source}: {error}",
-    "import_err_parse": "Fejl ved læsning af {file}: {error}",
+    "import_err_parse": "Fejl ved læsning af {file}, linje {line}, {code}: {error}",
     "import_err_fatal_parse": "Alvorlig fejl ved læsning af {file}: {error}",
     "import_err_waypoints": "Fejl i waypoint-fil ({file}): {error}",
     "import_err_fatal": "Alvorlig fejl ved import af {file}: {error}",

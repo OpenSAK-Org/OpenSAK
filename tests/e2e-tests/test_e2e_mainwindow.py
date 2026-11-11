@@ -1397,6 +1397,7 @@ class TestFilters:
         seeded_window._filter_profile_combo.addItem("P1", userData=Path("/x/p.json"))
         idx = seeded_window._filter_profile_combo.count() - 1
         seeded_window._on_filter_profile_combo_changed(idx)
+        wait_for_refresh(seeded_window)
         assert seeded_window._cache_table.row_count() == 1
 
     def test_filter_profile_combo_changed_profile(self, seeded_window, monkeypatch):
@@ -1798,7 +1799,10 @@ class TestAboutUpdates:
         monkeypatch.setattr(
             seeded_window, "_start_self_download_update", lambda tag: started.append(tag)
         )
-        self._click_update_dialog_button(monkeypatch, tr("update_download_button"))
+        # The button label escapes "&" as "&&" so Qt doesn't eat it as a mnemonic (#1218).
+        self._click_update_dialog_button(
+            monkeypatch, tr("update_download_button").replace("&", "&&")
+        )
 
         seeded_window._on_update_available("v9.9.9", "http://example.com/release", manual=True)
 

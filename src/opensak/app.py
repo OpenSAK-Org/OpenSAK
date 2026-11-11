@@ -263,6 +263,11 @@ def main() -> None:
         "QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --disable-software-rasterizer"
     )
 
+    # The map loads its bundled Leaflet assets via opensak:// (#1111); the
+    # scheme has to be registered before the QApplication exists.
+    from opensak.gui.web_assets import register_scheme
+    register_scheme()
+
     app = QApplication(sys.argv)
     # #1015: QApplication sets the C locale from the system; keep numbers in
     # C library formatting (e.g. Lua macros) with a decimal point.

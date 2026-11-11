@@ -94,10 +94,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Ajustes…",
     "action_found_update":          "⟳  Actualizar encontradas desde base de referencia…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Ejecutar macro (Lua)…",
     "action_find_more_macros":      "Buscar más macros…",
-    "macro_title":                  "Macro (Lua) — prueba de concepto",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Abrir…",
     "macro_btn_run":                "▶  Ejecutar",
     "macro_open_title":             "Abrir macro Lua",
@@ -322,6 +322,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Abrir archivo de registro",
     "action_open_previous_log_file": "Abrir registro del último inicio",
     "action_support_opensak": "♥  Apoyar OpenSAK…",
+    "menu_community":              "Comunidad",
+    "action_community_facebook":   "OpenSAK en Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK en el foro de GSAK",
+    "action_community_new_issue":  "Informar de un error o sugerir una función",
     "log_file_not_found": "Aún no se encontró el archivo de registro: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
@@ -411,6 +416,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Omitidas:",
     "import_errors_header":         "Errores ({count}):",
+    "import_errors_more":           "… y {count} más (consulta el archivo de registro)",
     "import_failed":                "✗ Importación fallida:",
     "import_again":                 "Importar de nuevo",
     "import_target_db_label":                    "Importar a la base de datos:",
@@ -611,6 +617,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Radio del mapa en pantalla dividida:",
     "settings_map_nearby_max_caches_label": "Límite de cachés del mapa en pantalla dividida:",
     "settings_map_nearby_note":          "Controla el mapa individual de la caché mostrado en pantalla dividida — muestra las cachés dentro de este radio de la caché seleccionada, independientemente del límite del mapa general de arriba. Se dibuja un círculo en el mapa con este radio; si se alcanza el límite de cachés dentro de él, una etiqueta muestra cuántas están ocultas. Se guarda por base de datos.",
+    "settings_map_tile_cache_label":    "Caché de teselas del mapa:",
+    "settings_map_tile_cache_off":      "Desactivada",
+    "settings_map_tile_cache_clear":    "Vaciar caché",
+    "settings_map_tile_cache_cleared":  "Se ha vaciado la caché de teselas del mapa ({size} MB).",
+    "settings_map_tile_cache_note":     "Las teselas del mapa que ha visto se guardan en este equipo, de modo que el fondo del mapa se sigue mostrando sin conexión a internet — durante aproximadamente una semana desde la última vez que vio esa zona en línea. Se aplica tras reiniciar.",
     "map_disabled_placeholder":         "Mapa desactivado\n\nActívalo de nuevo en Ajustes → Mapa.",
     "settings_date_format_locale":  "Configuración regional del sistema",
     "settings_group_language":      "Idioma",
@@ -819,6 +830,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Aplicando actualización…",
     "boundary_check_done":          "✓ Actualización aplicada — {count} archivo(s) actualizado(s).",
     "boundary_check_failed":        "Error al buscar actualizaciones — sin conexión a la red.",
+    "boundary_apply_failed":        "No se pudo aplicar la actualización — no se pudieron descargar todos los archivos. No se ha cambiado nada; inténtelo de nuevo más tarde.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nueva base de datos",
@@ -927,6 +939,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Preguntar si hacer copia",
     "settings_backup_on_exit_always": "Hacer siempre copia",
     "settings_backup_on_exit_never": "No hacer nunca copia",
+    "settings_backup_on_exit_every_days": "Hacer copia automática cada pocos días",
+    "settings_backup_every_days_label": "Días entre copias automáticas:",
     "settings_backup_keep_auto_label": "Copias automáticas a conservar:",
     "settings_backup_compress_label": "Comprimir copias de seguridad (más pequeñas, pero más lentas)",
     "settings_backup_compress_hint": "Una copia comprimida es un solo archivo zip y suele ocupar alrededor de un tercio del espacio, pero las copias grandes tardan bastante más. Se aplica a las copias nuevas; las existentes se quedan como están.",
@@ -1528,6 +1542,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Establecer coordenadas corregidas",
     "map_ctx_corrected_set":        "✓ {gc_code} — coordenadas corregidas establecidas: {coords}",
     "map_draw_tooltip":             "Dibujar una forma para el filtro de línea/polígono",
+    "map_tiles_offline":            "Sin conexión – teselas del mapa no disponibles",
     "map_clustering_tooltip":       "Agrupación sí/no",
     "map_draw_polygon":             "Dibujar polígono",
     "map_draw_line":                "Dibujar línea",
@@ -2121,7 +2136,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID del atributo: {id}",
     "kml_export_description": "Exportado desde OpenSAK — {count} caché(s)",
     "import_err_db": "Error de base de datos para {gc_code} en {source}: {error}",
-    "import_err_parse": "Error de lectura en {file}: {error}",
+    "import_err_parse": "Error de lectura en {file}, línea {line}, {code}: {error}",
     "import_err_fatal_parse": "Error grave de lectura en {file}: {error}",
     "import_err_waypoints": "Error en el archivo de waypoints ({file}): {error}",
     "import_err_fatal": "Error grave al importar {file}: {error}",

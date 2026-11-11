@@ -1,0 +1,15 @@
+{
+  "name": "Solved mysteries",
+  "filterset": {
+    "mode": "AND",
+    "filters": [
+      {
+        "filter_type": "has_corrected"
+      }
+    ]
+  },
+  "sort": {
+    "field": "name",
+    "ascending": true
+  }
+}

@@ -421,19 +421,19 @@ def _gsak_db(path: Path, *codes: str) -> Path:
 
 def test_import_gsak_folder_into_one_database(capsys, tmp_path, nightly):
     root = tmp_path / "gsak"
-    _gsak_db(root / "data" / "AllCH" / "sqlite.db3", "GC1A", "GC1B")
+    _gsak_db(root / "data" / "Found" / "sqlite.db3", "GC1A", "GC1B")
     _gsak_db(root / "data" / "Holidays" / "sqlite.db3", "GC2A")
     before = {d.name for d in get_db_manager().databases}
     code, out, err = _run(capsys, "import", "gsak", str(root), "--db", "Nightly")
     assert code == EXIT_OK, err
     assert _codes(nightly.path) == ["GC1A", "GC1B", "GC2A"]
-    assert "AllCH → Nightly: merged" in out
+    assert "Found → Nightly: merged" in out
     assert {d.name for d in get_db_manager().databases} == before
 
 
 def test_import_gsak_selected_database_json(capsys, tmp_path, nightly):
     root = tmp_path / "gsak"
-    _gsak_db(root / "data" / "AllCH" / "sqlite.db3", "GC1A")
+    _gsak_db(root / "data" / "Found" / "sqlite.db3", "GC1A")
     _gsak_db(root / "data" / "Holidays" / "sqlite.db3", "GC2A")
     code, out, _ = _run(capsys, "import", "gsak", str(root), "--db", "Nightly",
                         "--gsak-db", "holidays", "--json")
@@ -466,7 +466,7 @@ def test_import_gsak_into_an_unlisted_database_file(capsys, tmp_path, nightly):
 
 def test_import_gsak_unknown_gsak_database_exits_2(capsys, tmp_path, nightly):
     root = tmp_path / "gsak"
-    _gsak_db(root / "data" / "AllCH" / "sqlite.db3", "GC1A")
+    _gsak_db(root / "data" / "Found" / "sqlite.db3", "GC1A")
     code, _, err = _run(capsys, "import", "gsak", str(root), "--db", "Nightly",
                         "--gsak-db", "Nope")
     assert code == EXIT_USAGE

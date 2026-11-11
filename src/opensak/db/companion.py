@@ -630,6 +630,33 @@ def delete_rows(db_path: Path, codes: Iterable[str]) -> int:
         conn.close()
 
 
+def clear_cache_rows(db_path: Path) -> int:
+    """
+    Delete every row of every cache-linked table in the companion of
+    *db_path*, on its own connection — its database's caches were all
+    replaced (overwrite import, #1231). Free tables and the registry stay.
+    Never raises; returns the number of rows deleted.
+    """
+    if not exists(db_path) or prepare(db_path) is not Status.OK:
+        return 0
+    try:
+        conn = _connect(companion_path(db_path))
+    except sqlite3.Error as exc:
+        logger.warning("companion: cannot clear %s: %s", companion_path(db_path), exc)
+        return 0
+    try:
+        with conn:
+            return sum(
+                max(conn.execute(f"DELETE FROM {_q(name)}").rowcount, 0)
+                for name, _column in cache_linked_tables(conn)
+            )
+    except sqlite3.Error as exc:
+        logger.warning("companion: cannot clear %s: %s", companion_path(db_path), exc)
+        return 0
+    finally:
+        conn.close()
+
+
 def copy_rows(source_db: Path, target_db: Path, codes: Iterable[str]) -> int:
     """
     Copy the rows of the caches *codes* from the companion of *source_db* to

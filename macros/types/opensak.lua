@@ -364,7 +364,7 @@
 ---@field last_log_date string? Date of the latest log, "YYYY-MM-DD".
 ---@field last_gpx_update string? When an import last touched the cache, "YYYY-MM-DDTHH:MM:SS" in UTC; finds caches the latest Pocket Query did not refresh.
 ---@field last_user_update string? When a user field (user flag, user sort, user data, lock, note or correction) last changed, "YYYY-MM-DDTHH:MM:SS" in UTC (GSAK's LastUserDate).
----@field custom table<string, any> The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }). Only while the `companion-db` feature flag is on.
+---@field custom table<string, any> The cache's custom fields, name → value: a boolean as true/false, numbers as numbers, text and dates ("YYYY-MM-DD") as strings; a field nobody set has its default. Changed with opensak.update(code, { custom = { … } }).
 ---@field [string] any
 
 ---The fields `opensak.update()` may change; `false` clears a field that is not a boolean.
@@ -407,7 +407,7 @@
 ---@field url? string|false Listing URL.
 ---@field symbol? string|false GPX waypoint symbol, e.g. "Geocache Found" (GSAK's Symbol).
 ---@field corrected? {lat: number, lon: number}|string|false Corrected coordinates; nil if the cache is not solved.
----@field custom? table<string, any> Custom fields to change, name → value (see Custom fields; `companion-db` feature flag).
+---@field custom? table<string, any> Custom fields to change, name → value (see Custom fields).
 
 ---A new cache for `opensak.insert{}`.
 ---@class opensak.CacheInsert: opensak.CacheUpdate
@@ -643,12 +643,17 @@ function opensak.profiles() end
 ---@return opensak.Cache? # The cache, or nil if it is not in the database.
 function opensak.cache(code, options) end
 
----Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without arguments: the caches of the active filter, in grid order. With filter keys (see Filter keys): the caches matching them, sorted by name; the view and the active filter stay unchanged. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
+---Iterate over caches, one table per cache (see Cache fields), in a generic `for`. Without filter keys (nothing, or only `fields`): the caches of the active filter, in grid order. With filter keys (see Filter keys): every cache of the database matching them, sorted by name. Filter keys search the whole database, they do not narrow the active filter; the view and the active filter stay unchanged. To pick some caches of the active filter, loop without filter keys and test the fields in the loop. `all = true`: every cache of the database, sorted by name, whatever the active filter shows. `database` reads another database, without switching: its caches matching the filter keys, or all of them, sorted by name. `fields` limits the fields loaded (`code` is always included), which makes loops over many caches faster. Caches are loaded in chunks, so large databases do not hit the memory limit.
 ---
 ---Since API version 2. Changed in API version 3: added `all`. Changed in API version 4: added the fields `owned`, `macro_flag`, `macro_sort`, `symbol`, `corrected_source` and `last_user_update`.
 ---
 ---```lua
 ---for c in opensak.caches() do print(c.code, c.name) end
+----- the active filter's caches with corrected coordinates:
+---for c in opensak.caches{ fields = {"corrected"} } do
+---    if c.corrected then print(c.code) end
+---end
+----- found caches in Switzerland, whatever the active filter shows:
 ---for c in opensak.caches{ found = true, country = "Switzerland",
 ---                         fields = {"difficulty", "terrain"} } do
 ---    print(c.code, c.difficulty, c.terrain)
@@ -657,7 +662,7 @@ function opensak.cache(code, options) end
 ---    print(c.code, c.corrected and c.corrected.lat)
 ---end
 ---```
----@param spec? opensak.CachesSpec Filter keys, `all`, `database` and/or `fields`; nothing = the active filter.
+---@param spec? opensak.CachesSpec Filter keys, `all`, `database` and/or `fields`; nothing, or only `fields` = the active filter.
 ---@return fun(): opensak.Cache? # Iterator for a generic `for`.
 function opensak.caches(spec) end
 
@@ -682,7 +687,7 @@ function opensak.current() end
 ---@return string[] # GC codes; empty if nothing is selected.
 function opensak.selected() end
 
----The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed.
+---The GC codes of the caches of the active filter, in grid order. Cheaper than opensak.caches() when only the codes are needed. To read fields of these caches, loop over opensak.caches{ fields = {...} } rather than calling opensak.cache() for each code: it loads only the fields asked for, many caches at a time.
 ---
 ---Since API version 2.
 ---
@@ -774,11 +779,9 @@ function opensak.columns(table, options) end
 ---@return string # The path of the macro database file.
 function opensak.macro_db() end
 
----Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. While the `companion-db` feature flag is on, the database's companion database (opensak.companion()) is attached with it, read-only, as `<schema>_companion`, if it has one, and detached with it. See Several databases in one query.
+---Attach another OpenSAK database read-only to the SQL functions, under a schema name, so one opensak.sql() or sql_write() statement can read it together with the active database and opensak.macro_db(): `SELECT … FROM caches c JOIN found.caches f ON f.gc_code = c.gc_code`. Like GSAK's SQL `ATTACH`, which stays refused. Nothing can write to an attached database: the file is opened read-only, and SQL that would change it is refused. Without `schema`, the name is made from the database name: lower case, `_` for anything but letters and digits ("Found 2020" → `found_2020`). The schema name must be letters, digits and `_`; `main`, `temp`, `macro`, `companion` and names starting with `opensak_` are reserved. The active database cannot be attached, and neither can a database twice. Attaching the same database under the same name again does nothing. SQLite allows 10 attached databases at once, opensak.macro_db() included. The database is not updated to the current schema, so one last opened by an older OpenSAK version may lack columns; `opensak.columns("<schema>.caches")` shows what is there. Each attach prints a line in the macro output. Cannot be called inside opensak.transaction(). Stays attached after opensak.switch_database(), unless the database becomes the active one. Everything is detached when the macro ends. A macro started with opensak.run_macro() sees its caller's attached databases; what it attaches or detaches is undone when it returns. The database's companion database (opensak.companion()) is attached with it, read-only, as `<schema>_companion`, if it has one, and detached with it. See Several databases in one query.
 ---
 ---Since API version 3. Changed in API version 4: also attaches the database's companion database.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
 ---
 ---```lua
 ---local found = opensak.attach("Found 2020", "found")
@@ -796,8 +799,6 @@ function opensak.attach(name, schema) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
----
 ---```lua
 ---opensak.detach("found")
 ---```
@@ -808,8 +809,6 @@ function opensak.detach(schema) end
 ---
 ---Since API version 3. Changed in API version 4: added `companion`.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.attach then`.
----
 ---```lua
 ---for _, a in ipairs(opensak.attached()) do print(a.schema, a.name) end
 ---```
@@ -819,8 +818,6 @@ function opensak.attached() end
 ---Make sure the active database has a companion database — a second SQLite file next to it, `Found.db` → `Found.companion.db3`, created if missing — attached to the SQL functions as schema `companion`. It is shared by all macros: every macro reads every table in it, and creates, changes and drops its own tables, indexes and views with opensak.sql(), sql_each() and sql_write() (`CREATE TABLE companion.<name> …`). Like opensak.macro_db() this needs no approval to change databases, but opensak.sql_write() still asks for it, as it may change caches. OpenSAK records the macro's file as the owner of every table and view it creates; the tables of other macros, those of OpenSAK (`opensak_*`) and tables without an owner are read-only. A moved or renamed macro is a new owner. A table with a `gc_code` column is cache-linked: its rows belong to caches, several per cache if needed, and follow them — they are deleted with the cache, and copied or moved with it to another database (opensak.set_companion_table() changes that). Triggers are refused. The file follows its database when it is renamed, copied, moved, deleted or backed up. Once it exists, every macro run has it attached without this call. The first call creates the file and prints its path in the macro output; it cannot do that inside opensak.transaction(), and the macro must be saved, as its tables belong to its file. See The companion database.
 ---
 ---Since API version 4.
----
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 ---
 ---```lua
 ---opensak.companion()
@@ -836,8 +833,6 @@ function opensak.companion() end
 ---
 ---Since API version 4.
 ---
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
----
 ---```lua
 ---opensak.set_companion_table{ name = "ftf_info", description = "FTF data from ftf.lua" }
 ---opensak.set_companion_table{ name = "ftf_options", linked = false }
@@ -850,8 +845,6 @@ function opensak.set_companion_table(spec) end
 ---
 ---Since API version 4.
 ---
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
----
 ---```lua
 ---for _, t in ipairs(opensak.companion_tables()) do
 ---    print(t.name, t.owner_name, t.kind, t.rows, t.mine and "(mine)" or "")
@@ -863,8 +856,6 @@ function opensak.companion_tables() end
 ---The custom fields of the active database (or of `database`), by position: user-defined fields per cache, as in GSAK, with `name`, `type` ("string", "integer", "real", "date" or "boolean"), `default`, `scope` ("local": this database; "global": every database), `origin` ("gsak" when imported from GSAK, else "opensak") and `expression` (GSAK's display expression, if any). Their values are the `custom` field of a cache. See Custom fields.
 ---
 ---Since API version 4.
----
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 ---
 ---```lua
 ---for _, f in ipairs(opensak.custom_fields()) do
@@ -879,8 +870,6 @@ function opensak.custom_fields(options) end
 ---
 ---Since API version 4.
 ---
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
----
 ---```lua
 ---opensak.define_custom_field{ name = "Parking", type = "string" }
 ---opensak.define_custom_field{ name = "Angel", type = "boolean", default = false }
@@ -893,8 +882,6 @@ function opensak.define_custom_field(field) end
 ---Delete a custom field of the active database; a global one is deleted from every database. Its values are kept until the user removes them in Tools → Custom fields, so defining it again (same name and type) does not bring them back. Needs the user's permission like opensak.update().
 ---
 ---Since API version 4.
----
----Beta: only available while the `companion-db` feature flag is on (not yet in release builds); check with `if opensak.companion then`.
 ---
 ---```lua
 ---opensak.delete_custom_field("Parking")
@@ -976,8 +963,6 @@ function opensak.centers() end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---opensak.set_center("★ Home")
 ---local c = opensak.cache("GC12345")
@@ -1029,11 +1014,9 @@ function opensak.copy_caches(target, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---local r = opensak.import_gsak("C:/Backups/GSAKBackup.zip", {
----  databases = {"AllCH", "Holidays"}, if_exists = "merge",
+---  databases = {"Found", "Holidays"}, if_exists = "merge",
 ---  locations = true })
 ---for _, db in ipairs(r.databases) do
 ---  print(db.gsak, db.target, db.action, db.created or 0, db.updated or 0)
@@ -1049,8 +1032,6 @@ function opensak.import_gsak(source, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---local r = opensak.import_gpx("Nightly PQs")
 ----- or a folder: opensak.import_gpx("%USERPROFILE%/Downloads/PQ", { database = "PQ" })
@@ -1062,7 +1043,7 @@ function opensak.import_gsak(source, options) end
 ---@return opensak.GpxImportReport # What was imported, per file.
 function opensak.import_gpx(source, options) end
 
----Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees).
+---Set corrected coordinates, either as decimal degrees or as one coordinate string in any format OpenSAK understands (DMM, DMS, decimal degrees). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 1.
 ---
@@ -1077,7 +1058,7 @@ function opensak.import_gpx(source, options) end
 ---@overload fun(code: string, coords: string): boolean
 function opensak.set_corrected(code, lat, lon) end
 
----Remove the corrected coordinates of a cache.
+---Remove the corrected coordinates of a cache. To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 1.
 ---
@@ -1088,11 +1069,9 @@ function opensak.set_corrected(code, lat, lon) end
 ---@return boolean # false if the cache is not in the database.
 function opensak.clear_corrected(code) end
 
----Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches).
+---Change fields of a cache in the active database. The keys are cache field names (see Changing caches); only the given fields change. `false` clears a field that is not a boolean. Fields OpenSAK maintains itself, such as `code`, `distance` or `log_count`, cannot be written. Locked caches can be changed too: the lock only protects from imports. `custom` changes custom fields: a table of field name → value (see Custom fields). Before a macro's first change, OpenSAK asks the user to allow that macro (see Changing caches). To change many caches, run the loop inside opensak.transaction(): much faster, and undone completely on an error.
 ---
 ---Since API version 3. Changed in API version 4: `custom` changes custom fields.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---opensak.update("GC12345", { user_flag = true, user_data = { [2] = "solved" } })
@@ -1108,8 +1087,6 @@ function opensak.update(code, fields) end
 ---Set, clear or swap the macro flag (field `macro_flag`) of many caches at once, like GSAK's MACROFLAG: the caches of the active filter, the given GC code(s), or `{ all = true }` for every cache of the active database. The macro flag is the macros' own, separate from the user flag; filter with `filter{ macro_flag = true }`. Needs the user's permission like opensak.update().
 ---
 ---Since API version 4.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---opensak.macro_flag("clear", { all = true })
@@ -1127,8 +1104,6 @@ function opensak.macro_flag(action, caches) end
 ---
 ---Since API version 3. Changed in API version 4: `custom` sets custom fields.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---opensak.insert{ code = "GC12345", name = "My bonus", type = "Unknown",
 ---                lat = 47.36872, lon = 8.54093, user_flag = true }
@@ -1140,8 +1115,6 @@ function opensak.insert(fields) end
 ---Delete caches from the active database, each with its logs, waypoints, attributes, trackables and user note, like Waypoint → Delete cache. Takes one GC code, or a list of them, e.g. opensak.codes() for the caches of the active filter. Deleted caches cannot be restored from inside OpenSAK (only from a backup); at the end of the run the macro output says how many caches were deleted. The cache list and map drop them after the macro. Locked caches are deleted too: the lock only protects from imports. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for c in opensak.caches{ archived = true, fields = {"code"} } do
@@ -1173,8 +1146,6 @@ function opensak.logs(code, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---local id = opensak.insert_log("GC12345", { type = "Write note", date = "2026-10-11",
 ---                                          finder = "me", text = "Final solved" })
@@ -1187,8 +1158,6 @@ function opensak.insert_log(code, fields) end
 ---Change fields of a log in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, l in ipairs(opensak.logs("GC12345")) do
@@ -1203,8 +1172,6 @@ function opensak.update_log(id, fields) end
 ---Delete a log from the active database. OpenSAK updates the cache's log counts and dates. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, l in ipairs(opensak.logs("GC12345")) do
@@ -1233,8 +1200,6 @@ function opensak.waypoints(code, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---opensak.insert_waypoint("GC12345", { prefix = "FN", type = "Final Location",
 ---                                     name = "Final", lat = 47.36872, lon = 8.54093 })
@@ -1247,8 +1212,6 @@ function opensak.insert_waypoint(code, fields) end
 ---Change fields of a waypoint in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, w in ipairs(opensak.waypoints("GC12345")) do
@@ -1263,8 +1226,6 @@ function opensak.update_waypoint(id, fields) end
 ---Delete a waypoint from the active database. OpenSAK updates the cache's waypoint count. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, w in ipairs(opensak.waypoints("GC12345")) do
@@ -1293,8 +1254,6 @@ function opensak.attributes(code, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---opensak.insert_attribute("GC12345", { attribute_id = 1, name = "Dogs", on = false })
 ---```
@@ -1306,8 +1265,6 @@ function opensak.insert_attribute(code, fields) end
 ---Change fields of a attribute in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, a in ipairs(opensak.attributes("GC12345")) do
@@ -1322,8 +1279,6 @@ function opensak.update_attribute(id, fields) end
 ---Delete a attribute from the active database. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, a in ipairs(opensak.attributes("GC12345")) do
@@ -1350,8 +1305,6 @@ function opensak.trackables(code, options) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---opensak.insert_trackable("GC12345", { ref = "TB1234", name = "My travel bug" })
 ---```
@@ -1363,8 +1316,6 @@ function opensak.insert_trackable(code, fields) end
 ---Change fields of a trackable in the active database; only the given fields change, and `false` clears a field that is not required or a boolean. Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---for _, t in ipairs(opensak.trackables("GC12345")) do
@@ -1380,8 +1331,6 @@ function opensak.update_trackable(id, fields) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---for _, t in ipairs(opensak.trackables("GC12345")) do
 ---    if t.ref == "TB1234" then opensak.delete_trackable(t.id) end
@@ -1394,8 +1343,6 @@ function opensak.delete_trackable(id) end
 ---Run one INSERT, UPDATE or DELETE statement (SQLite) against the active database — the power tool for bulk work, changing many rows with one statement. For a single cache or row, prefer `opensak.update()`, `insert{}`, `delete()`, `insert_<x>()`, `update_<x>()` and `delete_<x>()`, which check each field and need no knowledge of the schema (see Changing caches). Only the cache tables can be changed (`attributes`, `caches`, `logs`, `trackables`, `user_notes`, `waypoints`), and an UPDATE may not set the keys or the columns OpenSAK maintains itself (see Changing caches). Deleting a cache also deletes its logs, waypoints, attributes, trackables and user note, as opensak.delete() does. Locked caches are changed and deleted like any other (add `AND locked = 0` to leave them alone). REPLACE (`INSERT OR REPLACE`, `REPLACE INTO`, …) is refused, as it would delete those too; to update or insert, use `INSERT … ON CONFLICT (gc_code) DO UPDATE SET …`. OpenSAK recalculates distances, counts and log dates of the caches the statement touched — inside opensak.transaction() once at its end (see opensak.resync()). An INSERT only needs the real data: the columns opensak.columns() marks as `required`, e.g. `gc_code`, `name`, `cache_type`, `latitude` and `longitude` for a cache (see Changing caches); every other column gets its default. Each statement is committed on its own (or with the surrounding opensak.transaction()), or not at all on an error. BEGIN, COMMIT and the like are refused; use opensak.transaction(). Needs the user's permission like opensak.update().
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---local n = opensak.sql_write(
@@ -1421,16 +1368,14 @@ function opensak.sql_write(query, params) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---local n = opensak.transaction(function()
----    local n = 0
+---    local count = 0
 ---    for c in opensak.caches{ found = true, fields = {"code"} } do
 ---        opensak.update(c.code, { user_flag = true })
----        n = n + 1
+---        count = count + 1
 ---    end
----    return n
+---    return count
 ---end)
 ---print(n .. " caches flagged")
 ----- error() inside the function undoes everything it changed:
@@ -1447,8 +1392,6 @@ function opensak.transaction(fn) end
 ---
 ---Since API version 3.
 ---
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
----
 ---```lua
 ---if not opensak.in_transaction() then print("each change is committed on its own") end
 ---```
@@ -1458,8 +1401,6 @@ function opensak.in_transaction() end
 ---Recalculate now the columns OpenSAK maintains itself (distance and bearing, log, waypoint and trackable counts, log dates) for the caches changed so far in the open opensak.transaction(). Inside a transaction they are recalculated only once, just before the commit, which makes many writes much faster; until then opensak.cache, sql and the like still see the old values. Call resync() when a later read inside the transaction depends on them. Outside a transaction it does nothing, as every write is recalculated before its own commit.
 ---
 ---Since API version 3.
----
----Beta: only available while the `lua-macro-write` feature flag is on, as it is in beta builds; check with `if opensak.update then`. Changing caches needs the user's approval, given per macro (see Changing caches).
 ---
 ---```lua
 ---opensak.transaction(function()

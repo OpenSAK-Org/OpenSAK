@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Settings…",
     "action_found_update":          "⟳  Update finds from reference database…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Run macro (Lua)…",
     "action_find_more_macros":      "Find more macros…",
-    "macro_title":                  "Macro (Lua) — proof of concept",
+    "macro_title":                  "Macro (Lua)",
     "macro_btn_open":               "Open…",
     "macro_btn_run":                "▶  Run",
     "macro_open_title":             "Open Lua macro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Open log file",
     "action_open_previous_log_file": "Open log from last restart",
     "action_support_opensak": "♥  Support OpenSAK…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK on Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK on the GSAK forum",
+    "action_community_new_issue":  "Report a bug or request a feature",
     "log_file_not_found": "Log file not found yet: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Skipped:",
     "import_errors_header":         "Errors ({count}):",
+    "import_errors_more":           "… and {count} more (see the log file)",
     "import_failed":                "✗ Import failed:",
     "import_again":                 "Import again",
     "import_target_db_label":                    "Import into database:",
@@ -609,6 +615,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Split-screen map radius:",
     "settings_map_nearby_max_caches_label": "Split-screen map cache limit:",
     "settings_map_nearby_note":          "Controls the individual cache map shown in split screen — shows caches within this radius of the selected cache, independent of the overview map's limit above. A circle is drawn on the map at this radius; if the cache limit is reached within it, a label shows how many are hidden. Saved per database.",
+    "settings_map_tile_cache_label":    "Map tile cache:",
+    "settings_map_tile_cache_off":      "Off",
+    "settings_map_tile_cache_clear":    "Clear cache",
+    "settings_map_tile_cache_cleared":  "The map tile cache was cleared ({size} MB).",
+    "settings_map_tile_cache_note":     "Map tiles you have viewed are kept on this computer, so the map background still shows without an internet connection — for about a week after you last viewed that area online. Takes effect after a restart.",
     "map_disabled_placeholder":         "Map disabled\n\nEnable it again in Settings → Map.",
     "settings_date_format_locale":  "OS locale",
     "settings_group_language":      "Language",
@@ -817,6 +828,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Applying update…",
     "boundary_check_done":          "✓ Update applied — {count} file(s) updated.",
     "boundary_check_failed":        "Update check failed — no network connection.",
+    "boundary_apply_failed":        "The update could not be applied — not every file could be downloaded. Nothing was changed; please try again later.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "New database",
@@ -925,6 +937,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Ask whether to back up",
     "settings_backup_on_exit_always": "Always back up",
     "settings_backup_on_exit_never": "Never back up",
+    "settings_backup_on_exit_every_days": "Back up automatically every few days",
+    "settings_backup_every_days_label": "Days between automatic backups:",
     "settings_backup_keep_auto_label": "Automatic backups to keep:",
     "settings_backup_compress_label": "Compress backups (smaller, but slower)",
     "settings_backup_compress_hint": "A compressed backup is one zip file and usually takes about a third of the space, but large backups take noticeably longer. Applies to new backups; existing ones are left as they are.",
@@ -1526,6 +1540,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Set corrected coordinates",
     "map_ctx_corrected_set":        "✓ {gc_code} — corrected coordinates set: {coords}",
     "map_draw_tooltip":             "Draw a shape for the Line/Polygon filter",
+    "map_tiles_offline":            "Offline – map tiles unavailable",
     "map_clustering_tooltip":       "Clustering on/off",
     "map_draw_polygon":             "Draw polygon",
     "map_draw_line":                "Draw line",
@@ -2119,7 +2134,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribute ID: {id}",
     "kml_export_description": "Exported from OpenSAK — {count} cache(s)",
     "import_err_db": "Database error for {gc_code} in {source}: {error}",
-    "import_err_parse": "Parse error in {file}: {error}",
+    "import_err_parse": "Parse error in {file}, line {line}, {code}: {error}",
     "import_err_fatal_parse": "Fatal parse error in {file}: {error}",
     "import_err_waypoints": "Waypoints file error ({file}): {error}",
     "import_err_fatal": "Fatal error importing {file}: {error}",

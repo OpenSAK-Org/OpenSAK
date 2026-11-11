@@ -425,7 +425,7 @@ def _gsak_folder(ctx):
     import os
     gsak = Path(os.environ["APPDATA"]) / "gsak"
     helpers = _load("test_gsak_importer.py")
-    for name, codes in (("AllCH", ("GC1A", "GC1B")), ("Holidays", ("GC2A",))):
+    for name, codes in (("Found", ("GC1A", "GC1B")), ("Holidays", ("GC2A",))):
         db = gsak / "data" / name / "sqlite.db3"
         db.parent.mkdir(parents=True)
         helpers._make_gsak_db(db, caches=[{"Code": c} for c in codes],
@@ -439,7 +439,7 @@ def _gsak_folder(ctx):
 
 def _check_gsak(ctx, out):
     assert out[-1] == "Total: 3 new and 0 updated caches, 0 errors"
-    assert _codes("AllCH") == ["GC1A", "GC1B"]
+    assert _codes("Found") == ["GC1A", "GC1B"]
     assert _codes("Holidays") == ["GC2A"]
     assert ctx.host.asked_folders                # it asked for the GSAK folder
 

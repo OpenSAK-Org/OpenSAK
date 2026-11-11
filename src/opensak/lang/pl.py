@@ -94,10 +94,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Ustawienia…",
     "action_found_update":          "⟳  Zaktualizuj znalezione z bazy referencyjnej…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Uruchom makro (Lua)…",
     "action_find_more_macros":      "Znajdź więcej makr…",
-    "macro_title":                  "Makro (Lua) — weryfikacja koncepcji",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Otwórz…",
     "macro_btn_run":                "▶  Uruchom",
     "macro_open_title":             "Otwórz makro Lua",
@@ -322,6 +322,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Otwórz plik dziennika",
     "action_open_previous_log_file": "Otwórz dziennik z ostatniego uruchomienia",
     "action_support_opensak": "♥  Wesprzyj OpenSAK…",
+    "menu_community":              "Społeczność",
+    "action_community_facebook":   "OpenSAK na Facebooku",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK na forum GSAK",
+    "action_community_new_issue":  "Zgłoś błąd lub zaproponuj funkcję",
     "log_file_not_found": "Nie znaleziono pliku dziennika: {path}",
 
     # ── Keyboard Shortcuts dialog ─────────────────────────────────────────────
@@ -411,6 +416,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypointy:",
     "import_skipped":               "Pominięto:",
     "import_errors_header":         "Błędy ({count}):",
+    "import_errors_more":           "… i jeszcze {count} (zobacz plik dziennika)",
     "import_failed":                "✗ Import nieudany:",
     "import_again":                 "Importuj ponownie",
     "import_target_db_label":                    "Importuj do bazy danych:",
@@ -611,6 +617,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Promień mapy podzielonego ekranu:",
     "settings_map_nearby_max_caches_label": "Limit skrytek mapy podzielonego ekranu:",
     "settings_map_nearby_note":          "Steruje indywidualną mapą skrytek pokazywaną w podzielonym ekranie — pokazuje skrytki w tym promieniu od wybranej skrytki, niezależnie od limitu mapy przeglądowej powyżej. Na mapie rysowane jest koło o tym promieniu; jeśli limit skrytek zostanie w nim osiągnięty, etykieta pokazuje ile jest ukrytych. Zapisywane osobno dla każdej bazy danych.",
+    "settings_map_tile_cache_label":    "Pamięć podręczna kafelków mapy:",
+    "settings_map_tile_cache_off":      "Wyłączona",
+    "settings_map_tile_cache_clear":    "Wyczyść pamięć",
+    "settings_map_tile_cache_cleared":  "Pamięć podręczna kafelków mapy została wyczyszczona ({size} MB).",
+    "settings_map_tile_cache_note":     "Oglądane kafelki mapy są przechowywane na tym komputerze, dzięki czemu tło mapy jest widoczne także bez połączenia z internetem — przez około tydzień od ostatniego wyświetlenia obszaru online. Zmiana zadziała po ponownym uruchomieniu.",
     "map_disabled_placeholder":         "Mapa wyłączona\n\nWłącz ją ponownie w Ustawienia → Mapa.",
     "settings_date_format_locale":  "Ustawienia regionalne systemu",
     "settings_group_language":      "Język",
@@ -819,6 +830,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Stosowanie aktualizacji…",
     "boundary_check_done":          "✓ Zastosowano aktualizację — zaktualizowano {count} plik(ów).",
     "boundary_check_failed":        "Sprawdzanie aktualizacji nieudane — brak połączenia z siecią.",
+    "boundary_apply_failed":        "Nie udało się zastosować aktualizacji — nie wszystkie pliki udało się pobrać. Nic nie zostało zmienione; spróbuj ponownie później.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Nowa baza danych",
@@ -927,6 +939,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Pytaj, czy utworzyć kopię",
     "settings_backup_on_exit_always": "Zawsze twórz kopię",
     "settings_backup_on_exit_never": "Nigdy nie twórz kopii",
+    "settings_backup_on_exit_every_days": "Twórz kopię automatycznie co kilka dni",
+    "settings_backup_every_days_label": "Dni między kopiami automatycznymi:",
     "settings_backup_keep_auto_label": "Liczba zachowanych kopii automatycznych:",
     "settings_backup_compress_label": "Kompresuj kopie zapasowe (mniejsze, ale wolniejsze)",
     "settings_backup_compress_hint": "Skompresowana kopia zapasowa to jeden plik zip i zwykle zajmuje około jednej trzeciej miejsca, ale duże kopie trwają zauważalnie dłużej. Dotyczy nowych kopii; istniejące pozostają bez zmian.",
@@ -1528,6 +1542,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Ustaw poprawione współrzędne",
     "map_ctx_corrected_set":        "✓ {gc_code} — ustawiono poprawione współrzędne: {coords}",
     "map_draw_tooltip":             "Narysuj kształt dla filtra linia/wielokąt",
+    "map_tiles_offline":            "Offline – kafelki mapy niedostępne",
     "map_clustering_tooltip":       "Grupowanie wł./wył.",
     "map_draw_polygon":             "Rysuj wielokąt",
     "map_draw_line":                "Rysuj linię",
@@ -2121,7 +2136,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "ID atrybutu: {id}",
     "kml_export_description": "Wyeksportowano z OpenSAK — liczba skrytek: {count}",
     "import_err_db": "Błąd bazy danych dla {gc_code} w {source}: {error}",
-    "import_err_parse": "Błąd odczytu w {file}: {error}",
+    "import_err_parse": "Błąd odczytu w {file}, wiersz {line}, {code}: {error}",
     "import_err_fatal_parse": "Krytyczny błąd odczytu w {file}: {error}",
     "import_err_waypoints": "Błąd w pliku waypointów ({file}): {error}",
     "import_err_fatal": "Krytyczny błąd podczas importu {file}: {error}",

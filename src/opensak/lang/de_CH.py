@@ -93,10 +93,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Einstellungen…",
     "action_found_update":          "⟳  Funde aus Referenz-Datenbank aktualisieren",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Makro ausführen (Lua)…",
     "action_find_more_macros":      "Weitere Makros finden…",
-    "macro_title":                  "Makro (Lua) — Proof of Concept",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Öffnen…",
     "macro_btn_run":                "▶  Ausführen",
     "macro_open_title":             "Lua-Makro öffnen",
@@ -321,6 +321,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Protokolldatei öffnen",
     "action_open_previous_log_file": "Protokoll vom letzten Neustart öffnen",
     "action_support_opensak": "♥  OpenSAK unterstützen…",
+    "menu_community":              "Community",
+    "action_community_facebook":   "OpenSAK auf Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK im GSAK-Forum",
+    "action_community_new_issue":  "Fehler melden oder Funktion vorschlagen",
     "log_file_not_found": "Protokolldatei noch nicht gefunden: {path}",
 
     # ── Tastaturkürzel-Dialog ─────────────────────────────────────────────────
@@ -410,6 +415,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Wegpunkte:",
     "import_skipped":               "Übersprungen:",
     "import_errors_header":         "Fehler ({count}):",
+    "import_errors_more":           "… und {count} weitere (siehe Protokolldatei)",
     "import_failed":                "✗ Import fehlgeschlagen:",
     "import_again":                 "Import wiederholen",
     "import_target_db_label":                    "In Datenbank importieren:",
@@ -610,6 +616,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Radius für Split-Screen-Karte:",
     "settings_map_nearby_max_caches_label": "Cache-Grenze für Split-Screen-Karte:",
     "settings_map_nearby_note":          "Steuert die einzelne Cache-Karte, die im Split-Screen angezeigt wird — zeigt Caches innerhalb dieses Radius um den ausgewählten Cache, unabhängig von der obigen Grenze der Übersichtskarte. Ein Kreis wird auf der Karte mit diesem Radius gezeichnet; wird die Cache-Grenze innerhalb erreicht, zeigt eine Beschriftung, wie viele ausgeblendet sind. Wird pro Datenbank gespeichert.",
+    "settings_map_tile_cache_label":    "Kartenkachel-Cache:",
+    "settings_map_tile_cache_off":      "Aus",
+    "settings_map_tile_cache_clear":    "Cache leeren",
+    "settings_map_tile_cache_cleared":  "Der Kartenkachel-Cache wurde geleert ({size} MB).",
+    "settings_map_tile_cache_note":     "Angesehene Kartenkacheln werden auf diesem Computer gespeichert, sodass der Kartenhintergrund auch ohne Internetverbindung angezeigt wird — etwa eine Woche lang, nachdem Sie den Bereich zuletzt online angesehen haben. Wird nach einem Neustart wirksam.",
     "map_disabled_placeholder":         "Karte deaktiviert\n\nAktivieren Sie sie wieder unter Einstellungen → Karte.",
     "settings_date_format_locale":  "OS-Gebietsschema",
     "settings_group_language":      "Sprache",
@@ -820,6 +831,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Aktualisierung wird angewendet…",
     "boundary_check_done":          "✓ Aktualisierung angewendet — {count} Datei(en) aktualisiert.",
     "boundary_check_failed":        "Aktualisierungsprüfung fehlgeschlagen — keine Netzwerkverbindung.",
+    "boundary_apply_failed":        "Das Update konnte nicht angewendet werden — nicht alle Dateien konnten heruntergeladen werden. Es wurde nichts geändert; bitte später nochmals versuchen.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Neue Datenbank",
@@ -928,6 +940,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Fragen, ob gesichert werden soll",
     "settings_backup_on_exit_always": "Immer sichern",
     "settings_backup_on_exit_never": "Nie sichern",
+    "settings_backup_on_exit_every_days": "Alle paar Tage automatisch sichern",
+    "settings_backup_every_days_label": "Tage zwischen automatischen Sicherungen:",
     "settings_backup_keep_auto_label": "Automatische Sicherungen behalten:",
     "settings_backup_compress_label": "Sicherungen komprimieren (kleiner, aber langsamer)",
     "settings_backup_compress_hint": "Eine komprimierte Sicherung ist eine einzige ZIP-Datei und braucht meist etwa ein Drittel des Platzes, grosse Sicherungen dauern aber deutlich länger. Gilt für neue Sicherungen; vorhandene bleiben unverändert.",
@@ -1529,6 +1543,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Korrigierte Koordinaten setzen",
     "map_ctx_corrected_set":        "✓ {gc_code} — Korrigierte Koordinaten gesetzt: {coords}",
     "map_draw_tooltip":             "Eine Form für den Linien-/Polygonfilter zeichnen",
+    "map_tiles_offline":            "Offline – Kartenkacheln nicht verfügbar",
     "map_clustering_tooltip":       "Cluster ein/aus",
     "map_draw_polygon":             "Polygon zeichnen",
     "map_draw_line":                "Linie zeichnen",
@@ -2122,7 +2137,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Exportiert aus OpenSAK — {count} Cache(s)",
     "import_err_db": "Datenbankfehler bei {gc_code} in {source}: {error}",
-    "import_err_parse": "Fehler beim Lesen von {file}: {error}",
+    "import_err_parse": "Fehler beim Lesen von {file}, Zeile {line}, {code}: {error}",
     "import_err_fatal_parse": "Schwerer Fehler beim Lesen von {file}: {error}",
     "import_err_waypoints": "Fehler in der Wegpunktdatei ({file}): {error}",
     "import_err_fatal": "Schwerer Fehler beim Import von {file}: {error}",

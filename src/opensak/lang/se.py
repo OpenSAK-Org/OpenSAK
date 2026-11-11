@@ -92,10 +92,10 @@ STRINGS: dict[str, str] = {
     # Tools menu
     "action_settings":              "&Inställningar…",
     "action_found_update":          "⟳  Uppdatera hittade från referensdatabasen…",
-    # Lua macros (proof of concept)
+    # Lua macros
     "action_run_macro":             "Kör makro (Lua)…",
     "action_find_more_macros":      "Hitta fler makron…",
-    "macro_title":                  "Makro (Lua) — konceptbevis",
+    "macro_title":                  "Makro (Lua)",
     "macro_btn_open":               "Öppna…",
     "macro_btn_run":                "▶  Kör",
     "macro_open_title":             "Öppna Lua-makro",
@@ -320,6 +320,11 @@ STRINGS: dict[str, str] = {
     "action_open_log_file": "Öppna loggfil",
     "action_open_previous_log_file": "Öppna logg från senaste omstart",
     "action_support_opensak": "♥  Stöd OpenSAK…",
+    "menu_community":              "Gemenskap",
+    "action_community_facebook":   "OpenSAK på Facebook",
+    "action_community_discussions": "GitHub Discussions",
+    "action_community_gsak_forum": "OpenSAK på GSAK-forumet",
+    "action_community_new_issue":  "Rapportera ett fel eller föreslå en funktion",
     "log_file_not_found": "Loggfilen hittades inte än: {path}",
 
     # ── Tangentbordsgenvägar-dialog ───────────────────────────────────────────
@@ -409,6 +414,7 @@ STRINGS: dict[str, str] = {
     "import_waypoints":             "Waypoints:",
     "import_skipped":               "Överhoppade:",
     "import_errors_header":         "Fel ({count}):",
+    "import_errors_more":           "… och {count} till (se loggfilen)",
     "import_failed":                "✗ Import felade:",
     "import_again":                 "Importera igen",
     "import_target_db_label":                    "Importera till databas:",
@@ -609,6 +615,11 @@ STRINGS: dict[str, str] = {
     "settings_map_nearby_radius_label":    "Radie för delad skärm-karta:",
     "settings_map_nearby_max_caches_label": "Cachegräns för delad skärm-karta:",
     "settings_map_nearby_note":          "Styr den enskilda cachekartan som visas i delad skärm — visar cacher inom denna radie från den valda cachen, oberoende av översiktskartans gräns ovan. En cirkel ritas på kartan vid denna radie; om cachegränsen nås inom den visas en etikett med hur många som är dolda. Sparas per databas.",
+    "settings_map_tile_cache_label":    "Cache för kartplattor:",
+    "settings_map_tile_cache_off":      "Av",
+    "settings_map_tile_cache_clear":    "Rensa cache",
+    "settings_map_tile_cache_cleared":  "Cachen för kartplattor har rensats ({size} MB).",
+    "settings_map_tile_cache_note":     "Kartplattor som du har visat sparas på den här datorn, så att kartbakgrunden visas även utan internetanslutning — i ungefär en vecka efter att du senast visade området online. Gäller efter omstart.",
     "map_disabled_placeholder":         "Karta inaktiverad\n\nSlå på den igen under Inställningar → Karta.",
     "settings_date_format_locale":  "OS-språkinställning",
     "settings_group_language":      "Språk",
@@ -818,6 +829,7 @@ STRINGS: dict[str, str] = {
     "boundary_check_applying":      "Tillämpar uppdatering…",
     "boundary_check_done":          "✓ Uppdatering tillämpad — {count} fil(er) uppdaterade.",
     "boundary_check_failed":        "Uppdateringskontroll misslyckades — ingen nätverksanslutning.",
+    "boundary_apply_failed":        "Uppdateringen kunde inte tillämpas — alla filer kunde inte laddas ner. Inget har ändrats; försök igen senare.",
 
     # ── Database dialog ───────────────────────────────────────────────────────
     "db_new_title":                 "Ny databas",
@@ -926,6 +938,8 @@ STRINGS: dict[str, str] = {
     "settings_backup_on_exit_ask": "Fråga om säkerhetskopiering",
     "settings_backup_on_exit_always": "Säkerhetskopiera alltid",
     "settings_backup_on_exit_never": "Säkerhetskopiera aldrig",
+    "settings_backup_on_exit_every_days": "Säkerhetskopiera automatiskt med några dagars mellanrum",
+    "settings_backup_every_days_label": "Dagar mellan automatiska säkerhetskopior:",
     "settings_backup_keep_auto_label": "Automatiska säkerhetskopior att behålla:",
     "settings_backup_compress_label": "Komprimera säkerhetskopior (mindre, men långsammare)",
     "settings_backup_compress_hint": "En komprimerad säkerhetskopia är en enda zip-fil och tar oftast ungefär en tredjedel av utrymmet, men stora säkerhetskopior tar märkbart längre tid. Gäller nya säkerhetskopior; befintliga lämnas som de är.",
@@ -1527,6 +1541,7 @@ STRINGS: dict[str, str] = {
     "map_ctx_set_corrected":        "Ange korrigerade koordinater",
     "map_ctx_corrected_set":        "✓ {gc_code} — korrigerade koordinater angivna: {coords}",
     "map_draw_tooltip":             "Rita en form för linje-/polygonfiltret",
+    "map_tiles_offline":            "Offline – kartplattor är inte tillgängliga",
     "map_clustering_tooltip":       "Kluster på/av",
     "map_draw_polygon":             "Rita polygon",
     "map_draw_line":                "Rita linje",
@@ -2120,7 +2135,7 @@ STRINGS: dict[str, str] = {
     "filter_attr_id_tip": "Attribut-ID: {id}",
     "kml_export_description": "Exporterad från OpenSAK — {count} cache(r)",
     "import_err_db": "Databasfel för {gc_code} i {source}: {error}",
-    "import_err_parse": "Läsfel i {file}: {error}",
+    "import_err_parse": "Läsfel i {file}, rad {line}, {code}: {error}",
     "import_err_fatal_parse": "Allvarligt läsfel i {file}: {error}",
     "import_err_waypoints": "Fel i waypointfil ({file}): {error}",
     "import_err_fatal": "Allvarligt fel vid import av {file}: {error}",

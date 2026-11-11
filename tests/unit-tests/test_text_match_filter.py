@@ -154,6 +154,39 @@ def test_non_ascii_text_is_only_pre_narrowed_in_sql():
         assert NameFilter("z.*h", "regex").apply_to_query(q) is None
 
 
+# Above SQLite's default limit of 32,766 bound variables per statement.
+LONG_LIST_SIZE = 40_000
+
+
+@pytest.mark.parametrize("op,expected", [
+    ("in_list", {"GCT0002", "GCT0005"}),
+    ("not_in_list", ALL - {"GCT0002", "GCT0005"}),
+])
+def test_long_gc_code_list(op, expected):
+    # Issue #1254: in_list bound one SQL variable per item, so a list above
+    # the limit failed with "too many SQL variables".
+    codes = [f"GCX{i:05d}" for i in range(LONG_LIST_SIZE)] + ["gct0002", "GCT0005"]
+    f = GcCodeFilter(";".join(codes), op)
+    assert f.sql_exact is True
+    with get_session() as s:
+        assert f.apply_to_query(s.query(Cache)) is not None
+    assert matching_codes(f) == expected
+
+
+@pytest.mark.parametrize("op,expected", [
+    ("in_list", {"GCT0001", "GCT0002"}),
+    ("not_in_list", ALL - {"GCT0001", "GCT0002"}),
+])
+def test_long_non_ascii_list_is_left_to_python(op, expected):
+    # A non-ASCII list is pushed as one LIKE per item; a long one is left to
+    # matches() instead of exceeding the SQL variable limit.
+    names = [f"Ünknown {i}" for i in range(LONG_LIST_SIZE)] + ["zürich tour", "ZÜRICH NIGHT"]
+    f = NameFilter(";".join(names), op)
+    with get_session() as s:
+        assert f.apply_to_query(s.query(Cache)) is None
+    assert matching_codes(f) == expected
+
+
 def test_unknown_operator_rejected():
     with pytest.raises(ValueError):
         NameFilter("x", "like")
