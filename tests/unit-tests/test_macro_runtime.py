@@ -1906,3 +1906,65 @@ def test_runtime_writes_files_only_through_safe_write():
         if name in writers and not any(k.arg == "save" for k in node.keywords):
             problems.append(f"line {node.lineno}: {name}() without save=")
     assert problems == []
+
+
+# ── #775: GPX/GGZ content options in export_gpx / export_file ────────────────
+
+def test_export_gpx_content_options(tmp_path, export_cache):
+    target = tmp_path / "out" / "o.gpx"
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, children = "none", '
+                                'max_logs = 1, my_logs_always = true, user_note_log = true, '
+                                'version = "1.1"')
+    assert out == [f"{target.resolve()}\t1"]
+    text = target.read_text(encoding="utf-8")
+    assert 'version="1.1"' in text and "<metadata>" in text
+    assert "PKEXP1" not in text
+    # A number works for the version too.
+    _export_gpx(tmp_path, f'path = {str(target)!r}, version = 1.1')
+    assert 'version="1.1"' in target.read_text(encoding="utf-8")
+
+
+def test_export_gpx_children_only(tmp_path, export_cache):
+    target = tmp_path / "out" / "c.gpx"
+    _export_gpx(tmp_path, f'path = {str(target)!r}, children_only = true')
+    text = target.read_text(encoding="utf-8")
+    assert "PKEXP1" in text and "groundspeak:cache" not in text
+
+
+def test_export_gpx_max_counts_waypoints(tmp_path, export_cache):
+    # GCEXP1 and its child are two <wpt>: a limit of 1 waypoint keeps nothing.
+    target = tmp_path / "out" / "w.gpx"
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 1, max_counts = "waypoints"')
+    assert out == ["nil"] and not target.exists()
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 2, max_counts = "waypoints"')
+    assert out == [f"{target.resolve()}\t1"]
+    # Without children (pois or children = "none") one waypoint is enough.
+    out = _export_gpx(tmp_path, f'path = {str(target)!r}, max = 1, max_counts = "waypoints", '
+                                'pois = { child_waypoints = false }')
+    assert out == [f"{target.resolve()}\t1"]
+
+
+@pytest.mark.parametrize("spec, msg", [
+    ('children = "some"', "children must be one of"),
+    ('max_counts = "all"', "max_counts must be one of"),
+    ("max_logs = -1", "max_logs must be a whole number"),
+    ("max_logs = 1.5", "max_logs must be a whole number"),
+    ('children_only = "yes"', "children_only must be true or false"),
+    ('user_note_log = 1', "user_note_log must be true or false"),
+    ('version = "2.0"', "version must be one of"),
+])
+def test_export_gpx_rejects_bad_content_options(tmp_path, export_cache, spec, msg):
+    path = str(tmp_path / "out" / "x.gpx")
+    with pytest.raises(MacroError, match=msg):
+        _export_gpx(tmp_path, f"path = {path!r}, {spec}")
+
+
+def test_export_file_uses_the_settings_content(tmp_path, export_cache):
+    runtime, out = _export_runtime(tmp_path, file_name="content", children="none",
+                                   gpx_version="1.1")
+    runtime.run("""
+        opensak.filter{ codes = {"GCEXP1"} }
+        print(opensak.export_file("GPX Export"))
+    """)
+    text = (tmp_path / "out" / "content.gpx").read_text(encoding="utf-8")
+    assert 'version="1.1"' in text and "PKEXP1" not in text
