@@ -76,9 +76,9 @@ class TestTemplate:
         assert "if (true) {\n            var drawBtn" in html
         assert "} else if (false && Object.keys(markers)" in html
 
-    def test_geoman_pinned(self):
-        assert "@geoman-io/leaflet-geoman-free@2." in mw_mod.MAP_HTML
-        assert mw_mod.MAP_HTML.count("leaflet-geoman-free@") == 2  # css + js
+    def test_geoman_bundled(self):
+        # Bundled under assets/web/ (#1111), no longer from unpkg.com.
+        assert mw_mod.MAP_HTML.count("opensak://assets/leaflet-geoman/") == 2  # css + js
 
     def test_geoman_lang(self, monkeypatch):
         monkeypatch.setattr(mw_mod, "current_language", lambda: "cs")
