@@ -579,6 +579,9 @@ def _parse_wpt(wpt_el) -> Optional[dict]:
             trackables.append({
                 "ref":  tb_el.get("ref"),
                 "name": _text(tb_el, "gs:name", NS),
+                # #700: the numeric trackable id, kept in tracking_code
+                # like the GSAK database import does.
+                "tracking_code": tb_el.get("id") or None,
             })
 
     # ── GSAK extensions (issue #58, #129, #73) ────────────────────────────────
@@ -1323,7 +1326,8 @@ def _upsert_cache(
 
     # Trackables
     for tb in data.get("trackables", []):
-        session.add(Trackable(cache=cache, ref=tb["ref"], name=tb["name"]))
+        session.add(Trackable(cache=cache, ref=tb["ref"], name=tb["name"],
+                              tracking_code=tb.get("tracking_code")))
 
     # ── Issue #489/#491: Cache trackable count for fast UI display ──────────
     # Mirrors log_count above: old trackables were deleted at the start of
