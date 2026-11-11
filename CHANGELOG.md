@@ -28,6 +28,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   connection). The licences are listed in `THIRD_PARTY_NOTICES.md`.
   Contributed by nagisml.
 
+- **Selecting a cache centres the map on it and keeps your zoom (#744)**
+  — when zoomed in, selecting a cache moved the map only a few pixels,
+  because opening the cache's popup stopped the move. A cache inside a
+  cluster made the map zoom in until the cluster broke up. The map now
+  centres on the cache at the zoom you chose; a cluster of up to 25
+  caches fans out to show it. Only a larger cluster still zooms in.
+  Requested by GeePa67.
+
 ---
 
 ## [1.23.0-beta.1] — 2026-11-10

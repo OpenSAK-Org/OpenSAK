@@ -676,10 +676,17 @@ function setHomeLocation(lat, lon, label) {
     homeMarker.bindPopup('<b>' + escapeHtml(label) + '</b>');
 }
 
+// Issue #744: a cache hidden in a cluster of at most this many caches is
+// shown by fanning the cluster out (spiderfy) instead of zooming in, so the
+// map keeps the zoom level the user chose. Larger clusters still zoom in,
+// since a fan of more pins than this is unreadable.
+var SPIDERFY_MAX = 25;
+
 function panToCache(gcCode) {
     var marker = markers[gcCode];
     if (!marker) return;
     selectMarker(gcCode);
+    var latlng = marker.getLatLng();
 
     // Issue #718 (Mike, Mac ARM, beta.7): selecting a new cache in the grid
     // updates the detail text but the map sometimes doesn't pan/pop up,
@@ -694,25 +701,68 @@ function panToCache(gcCode) {
     // clicking). panRequestSeq ensures only the most recently requested
     // pan actually moves the map (a stale callback becomes a no-op instead
     // of yanking the view back to an old cache), and the setTimeout is a
-    // safety net for when zoomToShowLayer's callback never fires at all.
+    // safety net for when the plugin's callback never fires at all.
     var mySeq = ++panRequestSeq;
     var doPan = function() {
         if (mySeq !== panRequestSeq) return;  // superseded by a later selection
         try {
-            map.panTo(marker.getLatLng());
+            // Issue #744: open the popup BEFORE panning. A popup's auto-pan
+            // (which moves the map so the popup fits) starts by stopping
+            // any pan that is running, so with panTo() first the map only
+            // moved the few pixels the popup needed and the cache was not
+            // centred. panTo() last wins and keeps the current zoom.
             if (marker._icon) {
                 marker.openPopup();
             }
+            // getLatLng() now, not when selected: in a fanned-out cluster
+            // the pin sits at the end of its leg, away from its real spot.
+            map.panTo(marker.getLatLng());
         } catch (e) {
             // marker may have been invalidated during animation
         }
     };
     try {
-        clusterGroup.zoomToShowLayer(marker, doPan);
+        var cluster = clusterAtCurrentZoom(marker);
+        if (cluster && cluster.getChildCount() <= SPIDERFY_MAX) {
+            spiderfyToShow(cluster, latlng, mySeq, doPan);
+        } else {
+            clusterGroup.zoomToShowLayer(marker, doPan);
+        }
         setTimeout(doPan, 400);
     } catch (e) {
         doPan();
     }
+}
+
+// Issue #744: the cluster that hides *marker* at the current zoom, or null
+// when the marker is not in a cluster at this zoom (it is shown on its own,
+// or just outside the visible area).
+function clusterAtCurrentZoom(marker) {
+    if (marker._icon) return null;
+    var zoom = Math.round(map.getZoom());
+    var c = marker.__parent;
+    if (!c || c._zoom < zoom) return null;
+    while (c.__parent && c.__parent._zoom >= zoom) {
+        c = c.__parent;
+    }
+    return c;
+}
+
+// Issue #744: centre the cluster without changing the zoom, then fan it out
+// so the selected pin can be seen and its popup opened. moveend also fires
+// when the map is already centred there, and markercluster has added the
+// clusters for the new view by then.
+function spiderfyToShow(cluster, latlng, mySeq, done) {
+    map.once('moveend', function() {
+        if (mySeq !== panRequestSeq) return;
+        if (map.hasLayer(cluster)) {
+            clusterGroup.once('spiderfied', done);
+            cluster.spiderfy();
+        } else {
+            done();
+        }
+    });
+    map.panTo(latlng);
 }
 
 function selectMarker(gcCode) {
