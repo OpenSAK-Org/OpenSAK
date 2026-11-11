@@ -493,6 +493,24 @@ class SettingsDialog(QDialog):
         cluster_note.setWordWrap(True)
         cluster_note.setStyleSheet(hint_style())
         group_layout.addWidget(cluster_note)
+        # Issue #1087: separation circles around physical caches — the map
+        # button switches them on/off, 0 here hides them and the button.
+        separation_row = QHBoxLayout()
+        separation_row.addWidget(QLabel(tr("settings_map_separation_label")))
+        self._map_separation_radius = QDoubleSpinBox()
+        self._map_separation_radius.setRange(0.0, 10.0)
+        self._map_separation_radius.setDecimals(3)
+        self._map_separation_radius.setSingleStep(0.01)
+        self._map_separation_radius.setSpecialValueText(tr("settings_map_separation_off"))
+        self._map_separation_radius.setFixedWidth(100)
+        separation_row.addWidget(self._map_separation_radius)
+        separation_row.addStretch()
+        group_layout.addLayout(separation_row)
+
+        separation_note = QLabel(tr("settings_map_separation_note"))
+        separation_note.setWordWrap(True)
+        separation_note.setStyleSheet(hint_style())
+        group_layout.addWidget(separation_note)
 
         group_layout.addSpacing(8)
 
@@ -1829,6 +1847,14 @@ class SettingsDialog(QDialog):
         self._map_cluster_radius.setCurrentIndex(max(idx, 0))
         idx = self._map_labels.findData(s.map_labels)
         self._map_labels.setCurrentIndex(max(idx, 0))
+        # Issue #1087 — stored in km, shown in the user's unit like the
+        # nearby radius below.
+        if s.use_miles:
+            self._map_separation_radius.setSuffix(" mi")
+            self._map_separation_radius.setValue(s.map_separation_radius_km * 0.621371)
+        else:
+            self._map_separation_radius.setSuffix(" km")
+            self._map_separation_radius.setValue(s.map_separation_radius_km)
         # Issue #718 — stored value is always km; display in the user's
         # configured unit, same conversion used by filter_dialog.py's
         # DistanceFilter radius field.
@@ -1952,6 +1978,10 @@ class SettingsDialog(QDialog):
         s.map_tile_cache_mb = self._map_tile_cache.value()
         s.map_cluster_radius = self._map_cluster_radius.currentData()
         s.map_labels = self._map_labels.currentData()
+        separation_val = self._map_separation_radius.value()
+        s.map_separation_radius_km = (
+            separation_val * 1.60934 if s.use_miles else separation_val
+        )
         # Issue #718 — convert back to km for storage if the field was
         # shown in miles (unit combo already saved above via s.use_miles).
         radius_val = self._map_nearby_radius.value()
