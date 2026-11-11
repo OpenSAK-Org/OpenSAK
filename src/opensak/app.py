@@ -359,9 +359,14 @@ def main() -> None:
     # Vis velkomst-wizard ved første opstart (issue #210)
     if is_first_run():
         splash.hide()
+        from PySide6.QtWidgets import QDialog
         from opensak.gui.dialogs.welcome_wizard import WelcomeWizard
-        wizard = WelcomeWizard()
-        wizard.exec()
+        wizard = WelcomeWizard(first_run=True)
+        # Issue #1288: Cancel (or closing the window) on first run quits
+        # without saving anything; the wizard shows again next time.
+        if wizard.exec() != QDialog.DialogCode.Accepted:
+            logger.info("startup: setup wizard cancelled, quitting")
+            sys.exit(0)
         # Genindlæs sprog hvis det blev ændret i wizard
         load_language(get_language())
         splash.show()

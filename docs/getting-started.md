@@ -38,10 +38,12 @@ See [Installation](installation.md) for all options, how updating works, and how
 
 The first time you start OpenSAK, the **Welcome Wizard** walks you through a few steps:
 
-1. **Installation folder** — where OpenSAK keeps its settings and log file. The default is fine for most people.
+1. **Settings folder** — where OpenSAK keeps its settings and log file. This is not where the program itself is. The default is fine for most people.
 2. **Database folder** — where your geocache databases are stored. Choose a different folder here if you want your databases somewhere specific (e.g. a folder you back up). If the folder already holds OpenSAK databases — after a reinstall or on a new computer — the wizard lists them and offers to add them; untick any you don't want.
 3. **Backup folder** — where OpenSAK keeps its backups, by default *Documents/OpenSAK Backups*. A folder on another disk, an external drive or a synced folder is safest, because it also protects your data if your computer's disk fails.
 4. **Your Geocaching profile** — optional; you can also set this later in Settings.
+
+**Use default folders** skips the folder steps and starts OpenSAK with the standard folders; you can change them later with **Run setup wizard again** in Settings. **Cancel**, or closing the window, quits OpenSAK without saving anything, and the wizard shows again the next time you start it.
 
 After the wizard you'll see OpenSAK's three-panel layout: the cache list, the cache details and the map — all empty until you import some caches.
 

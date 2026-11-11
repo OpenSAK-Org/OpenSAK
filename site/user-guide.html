@@ -1186,7 +1186,7 @@ systemctl --user enable --now opensak-pq-import.timer</code></pre>
 
     <div class="callout note"><div class="callout-icon">ℹ️</div><div>The active filter profile is saved per database. When you switch databases, the last-used profile for that database is restored automatically.</div></div>
 
-    <p>Profile files are stored in a <code>filters</code> folder inside OpenSAK's installation folder. <strong>Help → OpenSAK File Locations…</strong> shows exactly where that is on your computer.</p>
+    <p>Profile files are stored in a <code>filters</code> folder inside OpenSAK's settings folder. <strong>Help → OpenSAK File Locations…</strong> shows exactly where that is on your computer.</p>
   </section>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -1670,13 +1670,13 @@ print(n .. " caches in the current filter are not found yet")</code></pre>
     <h3>Advanced Tab</h3>
 
     <h4>Folders</h4>
-    <p>Shows the current installation folder (read-only), the database folder and the backup folder. The database and backup folders can be changed directly here — no need to go through the setup wizard again.</p>
+    <p>Shows the current settings and log folder (read-only), the database folder and the backup folder. The database and backup folders can be changed directly here — no need to go through the setup wizard again.</p>
     <table>
       <thead><tr><th>Setting</th><th>Description</th></tr></thead>
       <tbody>
         <tr><td>Database folder</td><td>Change where new and existing databases are stored. If existing databases are found in the old location, you're asked whether to move them along (keep originals, delete originals, or leave them and only use the new folder for future databases)</td></tr>
         <tr><td>Backup folder</td><td>Where backups are stored (see <a href="#databases">Backing Up</a>). OpenSAK refuses its own data or database folder itself, and warns before using a folder inside one of them. Changing it doesn't move existing backups, and no restart is needed</td></tr>
-        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language, installation folder or backup folder</td></tr>
+        <tr><td>Run setup wizard again</td><td>Re-opens the first-run welcome wizard at any time, e.g. to change language, settings folder or backup folder</td></tr>
       </tbody>
     </table>
 

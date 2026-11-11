@@ -47,6 +47,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   type icon, in grey for a disabled cache and grey and faded for an
   archived one. Requested in the OpenSAK Facebook group.
 
+- **Welcome Wizard: a real Cancel, and clearer names (#1288)** — on
+  first start, *Skip setup* was the only way out of the wizard, but it
+  saved the default folders and the wizard never came back. It is now
+  called **Use default folders**. A new **Cancel** button (and closing the
+  window) asks, then quits OpenSAK without saving anything; the wizard
+  shows again the next time. The *Installation folder* is now called the
+  **Settings folder**, in the wizard and in Settings → Advanced: it holds
+  the settings and the log file, not the program.
+
 ### Fixed
 
 - **No long waits without a network connection (#1111)** — once a
