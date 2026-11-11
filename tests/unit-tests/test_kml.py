@@ -1,5 +1,6 @@
 # tests/unit-tests/test_kml.py — KML export for Google Maps (no GUI/DB needed).
 
+import io
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 
@@ -258,3 +259,92 @@ class TestExportKml:
         out = tmp_path / "out.kml"
         export_kml([_cache(cache_type="EarthCache")], out)
         assert "grn-diamond.png" in out.read_text(encoding="utf-8")
+
+
+# ── streaming (#1078) ───────────────────────────────────────────────────────
+
+class TestExportKmlStreaming:
+    """export_kml() writes one placemark at a time from any iterable,
+    instead of building the whole document in memory (#1078)."""
+
+    def test_generator_is_not_read_ahead_of_writing(self, tmp_path):
+        # Regression for #1078: every cache was read (and kept) before any
+        # KML was written. Now each cache's placemark is in the output
+        # before the next cache is taken from the generator.
+        buf = io.StringIO()
+
+        def save(path, write, binary):
+            assert binary is False
+            return write(buf)
+
+        def caches():
+            for i in range(3):
+                if i:
+                    assert f"GC{i - 1} " in buf.getvalue()
+                yield _cache(gc_code=f"GC{i}")
+
+        count = export_kml(caches(), tmp_path / "out.kml", save=save, total=3, count=3)
+        assert count == 3
+        root = ET.fromstring(buf.getvalue())
+        names = [p.find(f"{KML_NS}name").text for p in root.iter(f"{KML_NS}Placemark")]
+        assert [n.split()[0] for n in names] == ["GC0", "GC1", "GC2"]
+
+    def test_count_shown_in_description_and_progress_uses_total(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("opensak.export.kml.tr", lambda key, **kw: f"{key}={kw['count']}")
+        out = tmp_path / "out.kml"
+        seen = []
+        caches = (_cache(gc_code=f"GC{i}", found=i == 0) for i in range(3))
+        count = export_kml(caches, out, include_found=False, total=3, count=2,
+                           progress_cb=lambda d, t: seen.append((d, t)))
+        assert count == 2
+        assert seen == [(1, 3), (2, 3), (3, 3)]
+        desc = _parse(out).find(f"{KML_NS}Document/{KML_NS}description").text
+        assert desc == "kml_export_description=2"
+
+    def test_waypoints_folder_after_caches(self, tmp_path):
+        out = tmp_path / "out.kml"
+        caches = (
+            _cache(gc_code=f"GC{i}", waypoints=[_wpt(name=f"W{i}")]) for i in range(2)
+        )
+        export_kml(caches, out, total=2, count=2)
+        folders = list(_parse(out).iter(f"{KML_NS}Folder"))
+        assert [f.find(f"{KML_NS}name").text for f in folders] == ["Geocaches", "Waypoints"]
+        wpt_names = [p.find(f"{KML_NS}name").text
+                     for p in folders[1].iter(f"{KML_NS}Placemark")]
+        assert wpt_names == ["W0 (GC0)", "W1 (GC1)"]
+        assert "W0" not in "".join(
+            p.find(f"{KML_NS}name").text for p in folders[0].iter(f"{KML_NS}Placemark"))
+
+    def test_failure_keeps_existing_file(self, tmp_path):
+        def caches():
+            yield _cache(gc_code="GC1", waypoints=[_wpt()])
+            raise RuntimeError("halfway")
+        out = tmp_path / "out.kml"
+        out.write_bytes(b"previous export")
+        with pytest.raises(RuntimeError, match="halfway"):
+            export_kml(caches(), out, total=2, count=2)
+        assert out.read_bytes() == b"previous export"
+        assert list(tmp_path.iterdir()) == [out]
+
+    def test_xml_declaration_and_no_minidom_blank_lines(self, tmp_path):
+        out = tmp_path / "out.kml"
+        export_kml([_cache()], out)
+        body = out.read_text(encoding="utf-8")
+        assert body.startswith('<?xml version="1.0" encoding="UTF-8"?>\n<kml ')
+        assert "\n\n" not in body.replace("\r\n", "\n")
+
+    def test_write_export_file_streams_kml(self, tmp_path, monkeypatch):
+        # write_export_file() hands export_kml() the chunked reload
+        # generator, not a fully reloaded list.
+        from opensak.export.file_export import write_export_file
+        import opensak.export.kml as kml_mod
+        got = {}
+
+        def fake_export_kml(caches, output_path, **kw):
+            got["caches"], got["kw"] = caches, kw
+            return 0
+        monkeypatch.setattr(kml_mod, "export_kml", fake_export_kml)
+        caches = [_cache(gc_code="GC1"), _cache(gc_code="GC2", latitude=None)]
+        assert write_export_file(caches, tmp_path / "x.kml", "kml") == 1
+        assert not isinstance(got["caches"], list)
+        assert got["kw"]["total"] == 2 and got["kw"]["count"] == 2

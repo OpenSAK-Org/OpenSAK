@@ -8,10 +8,12 @@ Produces a two-layer KML file:
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Iterable
-from xml.dom import minidom
+from typing import IO, Iterable, Optional, Sized
+from xml.sax.saxutils import escape
 
 from ..db.models import Cache, Waypoint
 from .cache_text import NO_TEXT, ExportText
@@ -144,6 +146,56 @@ def _style_id_for_waypoint(wpt: Waypoint) -> str:
 # Main export function
 # ---------------------------------------------------------------------------
 
+_KML_HEADER = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
+    "  <Document>"
+)
+_KML_FOOTER = "\n  </Document>\n</kml>\n"
+
+
+def _text_element(tag: str, text: str) -> ET.Element:
+    elem = ET.Element(tag)
+    elem.text = text
+    return elem
+
+
+def _style_elements() -> list[ET.Element]:
+    """The <Style> elements for every cache and waypoint type."""
+    holder = ET.Element("Document")
+    _make_style(holder, "style_found", _FOUND_ICON, scale=1.2)
+    _make_style(holder, "style_default", _DEFAULT_ICON)
+    for ctype, icon in _TYPE_ICONS.items():
+        sid = "style_" + ctype.replace(" ", "_").replace("-", "_")
+        _make_style(holder, sid, icon)
+
+    _make_style(holder, "style_wpt_default", _WPT_ICON, scale=0.9)
+    for wtype, icon in _WPT_TYPE_ICONS.items():
+        sid = "style_wpt_" + wtype.replace(" ", "_").replace("-", "_")
+        _make_style(holder, sid, icon, scale=0.9)
+    return list(holder)
+
+
+def _placemark(name: str, description: str, style_id: str, lon, lat) -> ET.Element:
+    pm = ET.Element("Placemark")
+    ET.SubElement(pm, "name").text = name
+    ET.SubElement(pm, "description").text = description
+    ET.SubElement(pm, "styleUrl").text = f"#{style_id}"
+    pt = ET.SubElement(pm, "Point")
+    ET.SubElement(pt, "coordinates").text = f"{lon},{lat},0"
+    return pm
+
+
+def _folder_start(name: str, is_open: bool) -> str:
+    """The opening of a <Folder> (two levels deep) with its name and open
+    flag; its placemarks follow at level 3, then "\\n    </Folder>"."""
+    return (
+        "\n    <Folder>"
+        f"\n      <name>{escape(name)}</name>"
+        f"\n      <open>{'1' if is_open else '0'}</open>"
+    )
+
+
 def export_kml(
     caches: Iterable[Cache],
     output_path: str | Path,
@@ -154,112 +206,109 @@ def export_kml(
     use_corrected: bool = True,
     text: ExportText = NO_TEXT,
     save: Saver = save_file,
+    total: Optional[int] = None,
+    count: Optional[int] = None,
 ) -> int:
     """
     Write a KML file to *output_path* (with *save*, see Saver).
 
-    Returns the number of caches written.
+    Returns the number of caches exported: those left after *include_found*,
+    including caches without coordinates (which get no placemark).
 
     progress_cb(done, total): optional per-cache callback for GUI progress.
     use_corrected=False always places caches at their original coordinates.
     *text* replaces cache names and pop-up descriptions (Lua macros).
+
+    #1078: the file is streamed one placemark at a time, so exporting
+    100,000+ caches no longer holds them all, or the whole document, in
+    memory. *caches* may be any iterable (e.g. iter_caches_full()), read
+    only while writing: pass *total*, the number of caches in it (for
+    progress), and *count*, the number left after *include_found* (shown in
+    the document description, which comes before the caches). Without
+    *count*, *caches* is read into a list first to count them. The child
+    waypoints, which come after all caches, are buffered in a temporary
+    file. The default *save* writes to a temporary file that replaces
+    *output_path* only once complete, so a failed export keeps the
+    previous file.
     """
-    cache_list = list(caches)
-    if not include_found:
-        cache_list = [c for c in cache_list if not c.found]
+    from opensak.gps.garmin import _xml_chunk
 
-    # -----------------------------------------------------------------------
-    # Root
-    # -----------------------------------------------------------------------
-    kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
-    doc = ET.SubElement(kml, "Document")
-    ET.SubElement(doc, "name").text = "OpenSAK geocaches"
-    ET.SubElement(doc, "description").text = (
-        tr("kml_export_description", count=len(cache_list))
-    )
+    if count is None:
+        cache_list = list(caches)
+        caches = cache_list
+        if total is None:
+            total = len(cache_list)
+        count = sum(1 for c in cache_list if include_found or not c.found)
+    elif total is None and isinstance(caches, Sized):
+        total = len(caches)
 
-    # -----------------------------------------------------------------------
-    # Styles — caches
-    # -----------------------------------------------------------------------
-    _make_style(doc, "style_found", _FOUND_ICON, scale=1.2)
-    _make_style(doc, "style_default", _DEFAULT_ICON)
-    for ctype, icon in _TYPE_ICONS.items():
-        sid = "style_" + ctype.replace(" ", "_").replace("-", "_")
-        _make_style(doc, sid, icon)
+    def _write(out: IO[str]) -> int:
+        out.write(_KML_HEADER)
+        out.write("\n    " + _xml_chunk(_text_element("name", "OpenSAK geocaches"), 2))
+        out.write("\n    " + _xml_chunk(
+            _text_element("description", tr("kml_export_description", count=count)), 2))
+        for style in _style_elements():
+            out.write("\n    " + _xml_chunk(style, 2))
 
-    # Styles — waypoints
-    _make_style(doc, "style_wpt_default", _WPT_ICON, scale=0.9)
-    for wtype, icon in _WPT_TYPE_ICONS.items():
-        sid = "style_wpt_" + wtype.replace(" ", "_").replace("-", "_")
-        _make_style(doc, sid, icon, scale=0.9)
+        # -------------------------------------------------------------------
+        # Folder 1 — Geocaches. Their waypoints go to a temporary file for
+        # folder 2, which has to come after all caches.
+        # -------------------------------------------------------------------
+        out.write(_folder_start("Geocaches", True))
+        exported = 0
+        has_waypoints = False
+        with tempfile.TemporaryFile("w+", encoding="utf-8", newline="") as wpt_file:
+            for i, cache in enumerate(caches, 1):
+                if progress_cb:
+                    progress_cb(i, total or 0)
+                if not include_found and cache.found:
+                    continue
+                exported += 1
 
-    # -----------------------------------------------------------------------
-    # Folder 1 — Geocaches
-    # -----------------------------------------------------------------------
-    folder_caches = ET.SubElement(doc, "Folder")
-    ET.SubElement(folder_caches, "name").text = "Geocaches"
-    ET.SubElement(folder_caches, "open").text = "1"
+                # Use corrected coordinates if available, fall back to originals
+                note = cache.user_note
+                if use_corrected and note and note.is_corrected and note.corrected_lat is not None:
+                    lat = note.corrected_lat
+                    lon = note.corrected_lon
+                else:
+                    lat = cache.latitude
+                    lon = cache.longitude
 
-    waypoints_to_export: list[tuple] = []  # (Waypoint, gc_code)
+                if lat is None or lon is None:
+                    continue  # skip caches with no coordinates
 
-    total = len(cache_list)
-    for i, cache in enumerate(cache_list, 1):
-        if progress_cb:
-            progress_cb(i, total)
-        # Use corrected coordinates if available, fall back to originals
-        note = cache.user_note
-        if use_corrected and note and note.is_corrected and note.corrected_lat is not None:
-            lat = note.corrected_lat
-            lon = note.corrected_lon
-        else:
-            lat = cache.latitude
-            lon = cache.longitude
+                out.write("\n      " + _xml_chunk(_placemark(
+                    f"{'✓ ' if cache.found else ''}{_esc(cache.gc_code)} {text.name(cache)}",
+                    text.description(cache) or _cache_description(cache),
+                    _style_id_for_cache(cache), lon, lat,
+                ), 3))
 
-        if lat is None or lon is None:
-            continue  # skip caches with no coordinates
+                # Waypoints for folder 2: only their finished placemarks are
+                # kept, never the ORM objects.
+                if include_waypoints and getattr(cache, "waypoints", None):
+                    for wpt in cache.waypoints:
+                        has_waypoints = True
+                        if wpt.latitude is None or wpt.longitude is None:
+                            continue
+                        label = wpt.name or wpt.wp_type or "Waypoint"
+                        wpt_file.write("\n      " + _xml_chunk(_placemark(
+                            f"{_esc(label)} ({_esc(cache.gc_code)})",
+                            _waypoint_description(wpt, cache.gc_code),
+                            _style_id_for_waypoint(wpt),
+                            wpt.longitude, wpt.latitude,
+                        ), 3))
+            out.write("\n    </Folder>")
 
-        pm = ET.SubElement(folder_caches, "Placemark")
-        ET.SubElement(pm, "name").text = (
-            f"{'✓ ' if cache.found else ''}{_esc(cache.gc_code)} {text.name(cache)}"
-        )
-        ET.SubElement(pm, "description").text = (
-            text.description(cache) or _cache_description(cache)
-        )
-        ET.SubElement(pm, "styleUrl").text = f"#{_style_id_for_cache(cache)}"
+            # ---------------------------------------------------------------
+            # Folder 2 — Custom waypoints
+            # ---------------------------------------------------------------
+            if has_waypoints:
+                out.write(_folder_start("Waypoints", False))
+                wpt_file.seek(0)
+                shutil.copyfileobj(wpt_file, out)
+                out.write("\n    </Folder>")
 
-        pt = ET.SubElement(pm, "Point")
-        ET.SubElement(pt, "coordinates").text = f"{lon},{lat},0"
+        out.write(_KML_FOOTER)
+        return exported
 
-        # Collect waypoints for layer 2
-        if include_waypoints and hasattr(cache, "waypoints") and cache.waypoints:
-            for wpt in cache.waypoints:
-                waypoints_to_export.append((wpt, cache.gc_code))
-
-    # -----------------------------------------------------------------------
-    # Folder 2 — Custom waypoints
-    # -----------------------------------------------------------------------
-    if include_waypoints and waypoints_to_export:
-        folder_wpts = ET.SubElement(doc, "Folder")
-        ET.SubElement(folder_wpts, "name").text = "Waypoints"
-        ET.SubElement(folder_wpts, "open").text = "0"
-
-        for wpt, gc_code in waypoints_to_export:
-            if wpt.latitude is None or wpt.longitude is None:
-                continue
-            pm = ET.SubElement(folder_wpts, "Placemark")
-            label = wpt.name or wpt.wp_type or "Waypoint"
-            ET.SubElement(pm, "name").text = f"{_esc(label)} ({_esc(gc_code)})"
-            ET.SubElement(pm, "description").text = _waypoint_description(wpt, gc_code)
-            ET.SubElement(pm, "styleUrl").text = f"#{_style_id_for_waypoint(wpt)}"
-            pt = ET.SubElement(pm, "Point")
-            ET.SubElement(pt, "coordinates").text = f"{wpt.longitude},{wpt.latitude},0"
-
-    # -----------------------------------------------------------------------
-    # Write — pretty-printed XML
-    # -----------------------------------------------------------------------
-    raw = ET.tostring(kml, encoding="unicode")
-    pretty = minidom.parseString(raw).toprettyxml(indent="  ", encoding="utf-8")
-
-    save(Path(output_path), lambda f: f.write(pretty), True)
-
-    return len(cache_list)
+    return save(Path(output_path), _write, False)
